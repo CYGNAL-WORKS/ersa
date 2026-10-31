@@ -1,0 +1,65 @@
+{
+  "recorded_at": "2026-10-31T23:49:37.244Z",
+  "claude_code_version": "2.1.302",
+  "executable": "C:/Users/breno/AppData/Local/Microsoft/WinGet/Packages/Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe/claude.exe",
+  "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
+    "--replay-user-messages"
+  ],
+  "bidirectional": true,
+  "cwd_was_empty_tempdir": true,
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 11872,
+  "stderr": "",
+  "stdout_lines": 11,
+  "stdout_timing_ms": [
+    687,
+    3890,
+    3891,
+    3901,
+    6420,
+    6424,
+    6438,
+    9679,
+    9680,
+    11502,
+    11505
+  ],
+  "sent": [
+    {
+      "t": 6,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with exactly the single word: ready\"}]}}"
+    },
+    {
+      "t": 6425,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"What single word did you just reply with? Reply with just that word.\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Reply with exactly the single word: ready",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    },
+    {
+      "turn": 2,
+      "text": "What single word did you just reply with? Reply with just that word.",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}

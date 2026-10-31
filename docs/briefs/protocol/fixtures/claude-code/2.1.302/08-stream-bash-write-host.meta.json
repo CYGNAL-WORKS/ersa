@@ -1,0 +1,56 @@
+{
+  "recorded_at": "2026-10-31T23:50:18.832Z",
+  "claude_code_version": "2.1.302",
+  "executable": "C:/Users/breno/AppData/Local/Microsoft/WinGet/Packages/Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe/claude.exe",
+  "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
+    "--permission-prompts",
+    "host"
+  ],
+  "bidirectional": true,
+  "cwd_was_empty_tempdir": true,
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 12639,
+  "stderr": "",
+  "stdout_lines": 12,
+  "stdout_timing_ms": [
+    601,
+    4783,
+    4787,
+    4828,
+    4830,
+    4833,
+    4856,
+    9220,
+    9227,
+    12233,
+    12236,
+    12238
+  ],
+  "sent": [
+    {
+      "t": 6,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Use the Bash tool to run exactly this command: echo probe > probe.txt. Then report whether it succeeded.\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Use the Bash tool to run exactly this command: echo probe > probe.txt. Then report whether it succeeded.",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}

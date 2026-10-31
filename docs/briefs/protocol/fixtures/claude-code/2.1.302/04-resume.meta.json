@@ -1,0 +1,27 @@
+{
+  "recorded_at": "2026-10-31T23:48:38.235Z",
+  "claude_code_version": "2.1.302",
+  "executable": "C:/Users/breno/AppData/Local/Microsoft/WinGet/Packages/Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe/claude.exe",
+  "args": [
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
+    "--max-turns",
+    "1",
+    "--resume",
+    "14018460-f6a7-4b07-831c-9e7ec48b841f",
+    "What single word did you reply with a moment ago? Reply with just that word."
+  ],
+  "cwd_was_empty_tempdir": true,
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 6404,
+  "stderr": "",
+  "stdout_lines": 5
+}
