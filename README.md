@@ -2,8 +2,6 @@
 
 A desktop harness for running many agentic coding sessions at once, each in its own isolated workspace, on your machine or a remote one, by driving the vendor CLIs you already have (Claude Code, GitHub Copilot) instead of calling model APIs.
 
-Named for Ersa, the Greek goddess of dew: the work that appears overnight while nobody is watching.
-
 ## Where things are
 
 - `CLAUDE.md`: how we work. Read first.
