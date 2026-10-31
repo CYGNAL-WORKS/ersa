@@ -89,6 +89,8 @@ Principles that resolve trade-offs:
 - **Motion explains.** Every animation shows where something came from or went to. Nothing animates for decoration. Durations come from the motion tokens; nothing is hand-timed.
 - **Both themes are first-class.** Light and dark are designed together. A component is not done until it is right in both.
 - **Not "AI-looking".** No gradients, no glow, no sparkle iconography, no purple. If a choice would look at home on a model vendor's landing page, choose differently.
+- **One distinctive move.** The principles above describe most good developer tools of this era; followed alone they produce a competent clone. Ersa's signature is the instrument readout: every number in the interface (context ring, cost, counts, durations) is set in tabular mono figures with a consistent gauge vocabulary, so the rail reads like a well-made panel of dials rather than a list of chats. A second candidate, a UI typeface other than Inter, is to be evaluated in the gallery before M1 ends.
+- **Attention is an edge, never a fill.** A tile that needs the user shows a coloured edge or glyph. Filled rows are forbidden: with ten sessions, filled attention rows become a wall of colour within a week and the principle above dies first.
 
 ## Colors
 
@@ -96,9 +98,13 @@ Two token sets, `light` and `dark`, with identical names so components reference
 
 Open: the exact accent hue is a proposal. Tune in the gallery against real transcripts in both themes before building components.
 
+Attention marks use `accent` for "needs you" (permission, question) and `danger` for "failed"; both appear as an edge or glyph on the tile, never as a row fill.
+
 ## Typography
 
 One UI face and one mono face. `ui` is the default for controls and the rail; `prose` is for agent and user text in the transcript, slightly larger and looser for sustained reading; `mono` is for code, paths, and anything the user may copy. Headings are rare and small: the transcript's hierarchy comes from spacing, not type size.
+
+Every numeric readout (context, cost, counts, elapsed time) uses `mono` with tabular figures so digits align and do not jitter as values change. This is the instrument signature; do not set readouts in the UI face.
 
 ## Layout
 

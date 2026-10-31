@@ -1,6 +1,6 @@
 # 0005: Briefs are the source of truth, with stable requirement IDs
 
-- Status: accepted
+- Status: superseded by 0013
 - Date: 2026-10-31
 
 ## Context

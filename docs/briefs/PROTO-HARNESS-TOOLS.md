@@ -4,21 +4,23 @@ type: protocol
 title: Harness tools server
 status: draft
 references: [PROTO-AGENT-EVENTS]
-adrs: []
+adrs: [0012]
 ---
 
 # Harness tools server
 
 ## Intent
 
-An MCP server that Ersa exposes to every session's backend. It offers tools the agent can call to interact with Ersa itself: list sessions and their states, send a message to another session, read session metadata, and the "show me" tools for driving the interface (open a pane, highlight a control, fill a field, explain). Access is per session with a token, so one session cannot impersonate another. Interface-driving tools require the user's consent for the session and never perform irreversible actions.
+An MCP server that Ersa exposes to every session's backend. From milestone 0 it serves the permission-prompt tool that Claude Code is pointed at, so permission requests arrive as tool calls and are answered from the shelf. Later it adds: list sessions and their states, send a message to another session, read session metadata, user-defined tools the owner adds, and the interface-driving tools for show-me (focus a pane, highlight a control, explain). Each session receives a token identifying it; the token is advisory since all local sessions share the OS user. Interface-driving tools require visible per-invocation consent and can never operate permission controls. Remote hosts reach the server through a reverse tunnel on the host's SSH connection.
 
 ## Open questions
 
-- Tool list for the first milestone that needs it (M6), and whether cross-session messaging ships earlier.
-- How the Interface exposes its controls to the server: a static identifier map or a live tree.
-- Rate limits and whether tool calls appear in the calling session's transcript.
+- Transport: stdio MCP per session (one server process per session) or one HTTP server with per-session tokens.
+- How users add their own tools: a directory of tool definitions, a script protocol, or both.
+- Whether tool calls appear in the calling session's transcript.
+- Rate limits and what happens when a session floods another with messages.
 
 ## Changes
 
+- 2026-10-31: permission-prompt tool moved to milestone 0; user-defined tools added; permission controls forbidden; remote tunnel noted.
 - 2026-10-31: created as draft.

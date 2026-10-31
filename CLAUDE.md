@@ -1,19 +1,31 @@
 # Ersa
 
-Ersa is a desktop harness for running many agentic coding sessions at once. Each session runs in its own isolated workspace, on the local machine or a remote one, and is driven through a vendor CLI the user already has installed (Claude Code first, GitHub Copilot second). Ersa never holds or sends model API keys.
+Ersa is a desktop harness for running many coding-agent sessions at once, each in an isolated workspace on a local or remote host, driven through the vendor CLIs the user already has (Claude Code first, GitHub Copilot second) via their structured-event protocols. Ersa never holds a model API key and never parses terminal output.
 
 ## How we work
 
 - **Briefs are the source of truth for behaviour.** They live in `docs/briefs/`. Code and tests derive from briefs and cite them by requirement ID. Briefs never cite files, functions, or code. Read `docs/briefs/README.md` before writing or changing one.
 - **Decisions live in `docs/adr/`.** Before proposing a change of direction, read the ADR index. Record a decision when it would be costly to reverse or when a future reader could plausibly choose differently. Supersede, never edit.
-- **Words live in `docs/GLOSSARY.md`.** Use the glossary term everywhere: briefs, identifiers, UI copy. If a concept has no term, add one before using it.
-- **Plans and tickets are ephemeral.** They live in `.scratch/`, which is not committed, and die when the work merges. Any decision made while implementing is written back to a brief or ADR before the ticket closes.
-- **Roles.** Planning sessions edit briefs and ADRs. Implementing sessions build tickets and do not edit briefs; on finding a contradiction between a brief and reality, stop and report it.
-- **Requirement IDs are stable.** A requirement looks like `LAY-SHELL-R03`. Tests cite it with the literal text `verifies: LAY-SHELL-R03`. Rewording a requirement keeps its ID; changing its meaning retires the ID and issues a new one. Run `node scripts/manifest.mjs` to regenerate `docs/MANIFEST.md`.
+- **Words live in `docs/GLOSSARY.md`.** Use the glossary term everywhere: briefs, identifiers, UI copy. Add a term before using a new concept.
+- **Roles.** Planning sessions set `ERSA_ROLE=planning` and may edit briefs and ADRs. Implementing sessions build tickets, do not edit briefs or ADRs (a hook enforces this), and record anything a brief gets wrong or leaves open as a line in `docs/briefs/INBOX.md`, then continue.
+- **Plans and tickets are ephemeral.** They live in `.scratch/`, uncommitted, and die when the work merges. Commits that implement requirements end with an `Implements:` trailer listing the IDs.
+- **Requirement IDs are stable.** Flow and protocol briefs carry them, like `FLOW-NEW-SESSION-R03`. Tests cite them with `verifies: <ID>`; only citations in test files count. Run `node scripts/manifest.mjs --check` before committing; it regenerates `docs/MANIFEST.md` and the ADR index and fails on open inbox entries and structural problems.
+
+## Design
+
+Ersa must be beautiful, and every session that touches the interface is responsible for that, not a later polish pass. Before writing or changing interface code, read `docs/design/DESIGN.md`. The rules that apply to every change:
+
+- Ersa is an instrument, not a chat app. Quiet warm-neutral surfaces, one accent colour, colour only where it means something.
+- Agent output reads as a document, never as speech bubbles. Status lives in tiles with one shared anatomy.
+- Every colour, size, radius, and duration comes from a token in `DESIGN.md`. A raw value in interface code is a defect.
+- Every transition uses a motion token and explains where something came from or went to. Nothing animates for decoration.
+- Light and dark are designed together. A component is not done until it is right in both.
+- Nothing that signals "AI": no gradients, no glow, no sparkle iconography, no purple. If it would look at home on a model vendor's landing page, choose differently.
+- Hover, focus, pressed, disabled, loading, empty, and error states each get a deliberate appearance, and the rail's attention state is an edge or glyph, never a filled row.
 
 ## Stack
 
-Rust core, Tauri 2 shell, TypeScript UI. Windows first, with nothing in the core that would block macOS. The architecture is in `docs/briefs/ARCH-CORE.md`; the reasons are in the ADRs.
+Rust core running as its own process; Tauri 2 shell; TypeScript interface speaking two schema-defined protocols to the core. Windows first, with nothing in the core that would block macOS. The architecture is `docs/briefs/ARCH-CORE.md`; the reasons are in the ADRs.
 
 ## Writing for agents
 

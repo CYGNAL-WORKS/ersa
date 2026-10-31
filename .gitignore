@@ -10,3 +10,7 @@ dist/
 .DS_Store
 Thumbs.db
 *.swp
+
+# Per-checkout session role for the brief guard hook (see scripts/role.mjs)
+.claude/role.local
+.claude/settings.local.json

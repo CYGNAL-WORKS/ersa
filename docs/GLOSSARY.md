@@ -4,40 +4,56 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 
 ## Product
 
-- **Ersa**: the application. Always capitalised as a proper noun in prose, lowercase `ersa` as an identifier.
-- **Backend**: a vendor agent product that Ersa drives, such as Claude Code or GitHub Copilot. The user installs and authenticates it themselves.
-- **Adapter**: the Ersa code that drives one backend and translates its native protocol into Ersa events. One adapter per backend.
-- **Mode**: a named base-instruction profile applied to a session, such as Code or Content, that steers which tools and approaches the agent reaches for first.
-- **Pack**: a versioned bundle of agents, skills, MCP servers, and prompts that can be shared and applied to sessions. Packs are fetched from a pack source and cached locally.
+- **Ersa**: the application. Capitalised as a proper noun in prose, lowercase `ersa` as an identifier.
+- **Backend**: a vendor agent product that Ersa drives, such as Claude Code or GitHub Copilot, or a local-inference harness. The user installs and authenticates it themselves.
+- **Adapter**: the Ersa code that drives one backend through its structured-event protocol and provides the projection from that backend's raw output to Ersa events. One adapter per backend.
+- **Mode**: a named preset applied to a session at start: base instructions, allowed tools, and tool servers.
+- **Pack**: a backend-neutral, versioned description of agents, skills, tool servers, and prompts, rendered into each backend's native format when applied to a project.
 - **Pack source**: a location packs are fetched from: a directory, a shared drive, or an HTTP endpoint.
 
 ## Work
 
-- **Project**: a repository or root folder the user has added to Ersa.
-- **Workspace**: an isolated checkout belonging to a project where one or more sessions do their work. A git worktree is one kind of workspace; a Perforce workspace is another.
-- **Session**: one conversation with one agent, in one workspace, on one host. A session has a transcript and a lifecycle.
-- **Host**: a machine where sessions can run. The local machine is a host; an SSH-reachable machine or a container is another.
-- **Transport**: the mechanism the core uses to start and talk to processes on a host: local spawn, SSH, or container exec.
-- **Event**: one typed message in Ersa's agent event protocol. Adapters emit events; the UI renders them; the event log stores them.
-- **Event log**: the persisted, ordered sequence of events for a session. The transcript is rendered from it.
-- **Permission request**: an event in which the agent asks the user to approve an action before it runs.
+- **Project**: a repository or root folder the user has added to Ersa, on a particular host.
+- **Workspace**: an isolated checkout belonging to a project where one or more sessions do their work. A git worktree is one kind; a Perforce workspace is another.
+- **Session**: one conversation with one agent, in one workspace, on one host. A session has a raw log, a projection, and a lifecycle.
+- **Host**: a machine where sessions can run. The local machine is a host; an SSH-reachable machine is another. A remote host runs its own Core.
+- **Transport**: the mechanism Core uses to start and talk to processes on a host: local spawn or SSH.
+- **Raw log**: the persisted, verbatim, ordered output of a session's backend. The source of truth for everything shown about a session.
+- **Projection**: the versioned derivation of Ersa events from a raw log. Transcript, rail state, and resume are projections.
+- **Event**: one typed message in the agent event protocol, produced by projection and streamed to the Interface.
+- **Permission request**: the agent asking the user to approve an action before it runs.
+- **Question**: the agent asking the user to choose or answer something that is not a permission.
+- **Replay server**: a stand-in Core that serves recorded fixtures over the Interface protocols, used for interface development and tests.
+
+## System
+
+- **Shell**: the native window process that hosts the Interface and launches or attaches to Core.
+- **Interface**: the TypeScript application in the Shell's webview.
+- **Core**: the Rust process that owns sessions, adapters, transports, workspaces, packs, modes, the harness tools server, and persistence.
+- **Core API**: the request/response protocol between Interface and Core.
+- **Harness tools server**: the MCP server Core exposes to every session's backend: permission prompting, cross-session messaging, session metadata, user-defined tools, and interface-driving tools.
 
 ## Interface
 
-- **Shell**: the window's fixed structure: rail, transcript, composer, workbench.
 - **Rail**: the left column listing projects, their workspaces, and the sessions inside them.
-- **Transcript**: the main area rendering a session's event log as messages, cards, and tiles.
-- **Composer**: the input area at the bottom of the transcript where the user writes to the agent.
+- **Tile**: a session's entry in the rail: title, backend icon, activity state, context ring, and cost as reported by the backend.
+- **Shelf**: the panel that pulls out from a tile when the session needs the user (a permission request or a question), answerable without changing the active session.
+- **Context ring**: the circular gauge on a tile showing context consumed.
+- **Transcript**: the main area rendering the active session's projection as a document with cards.
+- **Composer**: the input area beneath the transcript where the user writes to the agent.
 - **Workbench**: the right-hand area holding panes.
-- **Pane**: a purpose-built view in the workbench, such as Files, Diff, Terminal, or Browser.
+- **Pane**: a purpose-built view in the workbench: Files, Diff, Terminal, Browser, Developer.
+- **Terminal pane**: a full hosted terminal (a real shell in a pseudo-terminal) opened in the session's workspace, for the user. Backends are never driven through it; the agent's own commands appear as cards in the transcript.
 - **Card**: a rich block rendered inline in the transcript for a single event, such as a tool call or a diff.
-- **Tile**: a compact status block, such as a permission tile or a cost tile, shown in the transcript or the rail.
-- **Show me**: a guided-help mode in which the agent drives the interface to demonstrate something to the user, with the user watching.
+- **Show me**: a guided-help mode in which the agent, with the user's visible consent, drives the interface to demonstrate something. It can never operate permission controls.
 
 ## Process
 
 - **Brief**: a source-of-truth document describing behaviour from the user's perspective. Types: product, flow, layout, component, protocol, architecture.
-- **Requirement**: one testable statement inside a brief, carrying a stable ID such as `LAY-SHELL-R03`.
+- **Requirement**: one testable statement inside a flow or protocol brief, carrying a stable ID such as `FLOW-NEW-SESSION-R03`.
 - **ADR**: an architecture decision record. One decision per file, superseded rather than edited.
-- **Manifest**: the generated index of briefs, their status, and requirement coverage.
+- **Inbox**: the committed file where implementing sessions record findings that need a planning pass.
+- **Manifest**: the generated index of briefs, their status, requirement coverage, and problems.
 - **Ticket**: an ephemeral unit of implementation work sized to one fresh agent context, derived from a brief.
+- **Planning session**: an agent session that may edit briefs and ADRs. Declares itself with the planning role.
+- **Implementing session**: an agent session that builds tickets, may not edit briefs or ADRs, and writes findings to the inbox.

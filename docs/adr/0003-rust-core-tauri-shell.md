@@ -1,6 +1,6 @@
 # 0003: Rust core with a Tauri shell and TypeScript UI
 
-- Status: accepted
+- Status: superseded by 0009
 - Date: 2026-10-31
 - Related briefs: ARCH-CORE
 
