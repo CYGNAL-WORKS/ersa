@@ -1,0 +1,64 @@
+{
+  "recorded_at": "2026-10-31T23:53:50.731Z",
+  "claude_code_version": "2.1.302",
+  "executable": "C:/Users/user/AppData/Local/Microsoft/WinGet/Packages/Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe/claude.exe",
+  "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
+    "--permission-prompt-tool",
+    "stdio"
+  ],
+  "bidirectional": true,
+  "cwd_was_empty_tempdir": true,
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 12258,
+  "stderr": "",
+  "stdout_lines": 12,
+  "stdout_timing_ms": [
+    539,
+    1558,
+    5819,
+    5832,
+    5874,
+    5877,
+    5882,
+    6607,
+    10103,
+    11875,
+    11882,
+    11884
+  ],
+  "sent": [
+    {
+      "t": 6,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 1513,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Use the Bash tool to run exactly this command: echo probe > probe.txt. Then report whether it succeeded.\"}]}}"
+    },
+    {
+      "t": 5875,
+      "line": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"1ddd13c0-dd2c-4061-a8a8-86574059182e\",\"response\":{\"behavior\":\"allow\",\"updatedInput\":{\"command\":\"echo probe > probe.txt\",\"description\":\"Write the word probe to probe.txt\"}}}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Use the Bash tool to run exactly this command: echo probe > probe.txt. Then report whether it succeeded.",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}

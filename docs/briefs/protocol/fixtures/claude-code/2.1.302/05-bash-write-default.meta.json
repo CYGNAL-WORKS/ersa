@@ -1,0 +1,25 @@
+{
+  "recorded_at": "2026-10-31T23:49:10.362Z",
+  "claude_code_version": "2.1.302",
+  "executable": "C:/Users/user/AppData/Local/Microsoft/WinGet/Packages/Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe/claude.exe",
+  "args": [
+    "-p",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
+    "--max-turns",
+    "3",
+    "Use the Bash tool to run exactly this command: echo probe > probe.txt. Then report whether it succeeded."
+  ],
+  "cwd_was_empty_tempdir": true,
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 13665,
+  "stderr": "",
+  "stdout_lines": 14
+}

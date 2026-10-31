@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "ersa": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["D:/Projects/ersa/scripts/fixtures/permission-server.mjs"],
+      "env": {
+        "ERSA_PERMISSION_LOG": "D:/Projects/ersa/docs/briefs/protocol/fixtures/claude-code/2.1.302/permission-server.log"
+      }
+    }
+  }
+}
