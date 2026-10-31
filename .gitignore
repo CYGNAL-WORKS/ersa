@@ -1,0 +1,12 @@
+# Ephemeral planning artifacts: plans and tickets live here and die after merge.
+.scratch/
+
+# Build output
+/target/
+node_modules/
+dist/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
