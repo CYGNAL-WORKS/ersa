@@ -1,25 +1,37 @@
 #!/usr/bin/env node
-// Regenerates docs/MANIFEST.md from the briefs and the tests that cite them.
+// Regenerates docs/MANIFEST.md and the ADR index table in docs/adr/README.md.
 //
-//   node scripts/manifest.mjs          write docs/MANIFEST.md
+//   node scripts/manifest.mjs          write both files
 //   node scripts/manifest.mjs --check  also exit 1 if there are problems
 //
-// The manifest is generated. Edit briefs, not the manifest.
+// Both outputs are generated. Edit briefs and ADRs, not the outputs.
+// Rules implemented here are those of ADR 0013 and docs/briefs/README.md.
 
 import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { basename, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const BRIEFS_DIR = join(ROOT, "docs", "briefs");
+const ADR_DIR = join(ROOT, "docs", "adr");
+const INBOX = join(BRIEFS_DIR, "INBOX.md");
 const OUT = join(ROOT, "docs", "MANIFEST.md");
+const ADR_README = join(ADR_DIR, "README.md");
 const CHECK = process.argv.includes("--check");
 
-const BRIEF_ID = /^(PRD|FLOW|LAY|CMP|PROTO|ARCH)-[A-Z0-9]+(?:-[A-Z0-9]+)*$/;
-const REQ_ID = /\b((?:PRD|FLOW|LAY|CMP|PROTO|ARCH)-[A-Z0-9]+(?:-[A-Z0-9]+)*-R\d{2,})\b/g;
-const SKIP_DIRS = new Set([".git", "node_modules", "target", "dist", ".scratch", "templates", "schema"]);
-// Code only: prose that mentions a requirement ID is not a test.
-const TEXT_EXT = /\.(rs|ts|tsx|js|mjs|json|toml|yaml|yml|py|sh|ps1)$/;
+const PREFIXES = "PRD|FLOW|LAY|CMP|PROTO|ARCH";
+const BRIEF_ID = new RegExp(`^(?:${PREFIXES})-[A-Z0-9]+(?:-[A-Z0-9]+)*$`);
+const REQ_ID = new RegExp(`\\b((?:${PREFIXES})-[A-Z0-9]+(?:-[A-Z0-9]+)*-R\\d{2,})\\b`, "g");
+const VERIFIES = new RegExp(`verifies:\\s*((?:${PREFIXES})-[A-Z0-9]+(?:-[A-Z0-9]+)*-R\\d{2,})`, "g");
+const SKIP_DIRS = new Set([".git", "node_modules", "target", "dist", ".scratch", "templates", "schema", ".claude"]);
+const CODE_EXT = /\.(rs|ts|tsx|js|mjs|py)$/;
+// Only citations inside test files count as verification.
+const TEST_PATH = /(^|\/)(tests?|__tests__)\/|\.(test|spec)\.[a-z]+$|_test\.rs$/;
+const TYPES_WITH_IDS = new Set(["flow", "protocol"]);
+const TYPES_BY_REVIEW = new Set(["product", "architecture"]);
+const TYPES_DEFERRED = new Set(["layout", "component"]);
+
+const rel = (p) => relative(ROOT, p).split(sep).join("/");
 
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
@@ -36,7 +48,7 @@ function parseFrontMatter(text) {
   if (!m) return null;
   const fm = {};
   for (const line of m[1].split(/\r?\n/)) {
-    const kv = line.match(/^(\w+):\s*(.*)$/);
+    const kv = line.match(/^([\w-]+):\s*(.*)$/);
     if (!kv) continue;
     let v = kv[2].trim();
     if (v.startsWith("[") && v.endsWith("]")) {
@@ -47,80 +59,163 @@ function parseFrontMatter(text) {
   return fm;
 }
 
-// Collect briefs.
-const briefs = [];
 const problems = [];
+
+// ---- Briefs ---------------------------------------------------------------
+
+const briefs = [];
 for (const file of walk(BRIEFS_DIR)) {
-  if (!file.endsWith(".md") || file.endsWith("README.md")) continue;
+  if (!file.endsWith(".md")) continue;
+  const name = basename(file);
+  if (name === "README.md" || name === "INBOX.md") continue;
   const text = readFileSync(file, "utf8");
   const fm = parseFrontMatter(text);
-  const rel = relative(ROOT, file).split(sep).join("/");
   if (!fm || !fm.id) {
-    problems.push(`${rel}: missing front matter or id`);
+    problems.push(`${rel(file)}: missing front matter or id`);
     continue;
   }
-  if (!BRIEF_ID.test(fm.id)) problems.push(`${rel}: id "${fm.id}" does not match the ID convention`);
+  if (!BRIEF_ID.test(fm.id)) problems.push(`${rel(file)}: id "${fm.id}" does not match the ID convention`);
+  if (basename(file, ".md") !== fm.id) problems.push(`${rel(file)}: file name does not match id ${fm.id}`);
+
   const active = new Set();
   const retired = new Set();
+  const seen = new Map();
   for (const line of text.split(/\r?\n/)) {
     for (const m of line.matchAll(REQ_ID)) {
       const id = m[1];
-      if (!id.startsWith(fm.id + "-R")) continue; // a reference to another brief's requirement
-      if (/~~\s*\*\*/.test(line)) retired.add(id);
-      else if (/^\s*-\s*\*\*/.test(line)) active.add(id);
+      if (!id.startsWith(fm.id + "-R")) continue;
+      const isRetired = /~~\s*\*\*/.test(line);
+      const isDefinition = /^\s*-\s*(~~)?\s*\*\*/.test(line);
+      if (!isDefinition) continue;
+      seen.set(id, (seen.get(id) ?? 0) + 1);
+      (isRetired ? retired : active).add(id);
     }
   }
+  for (const [id, n] of seen) if (n > 1) problems.push(`${fm.id}: requirement ${id} is defined ${n} times`);
+
   briefs.push({
     id: fm.id,
     type: fm.type ?? "?",
     title: fm.title ?? "",
     status: fm.status ?? "?",
+    verifiedBy: fm["verified-by"] ?? "",
     references: Array.isArray(fm.references) ? fm.references : [],
-    path: rel,
+    path: rel(file),
     active,
     retired,
   });
 }
 briefs.sort((a, b) => a.id.localeCompare(b.id));
-const briefIds = new Set(briefs.map((b) => b.id));
+const byId = new Map(briefs.map((b) => [b.id, b]));
 
-// Collect citations from everything that is not a brief.
-const cited = new Map(); // reqId -> [paths]
-for (const file of walk(ROOT)) {
-  if (!TEXT_EXT.test(file)) continue;
-  if (file.startsWith(BRIEFS_DIR)) continue;
-  if (file === OUT) continue;
-  const rel = relative(ROOT, file).split(sep).join("/");
-  const text = readFileSync(file, "utf8");
-  for (const m of text.matchAll(/verifies:\s*((?:PRD|FLOW|LAY|CMP|PROTO|ARCH)-[A-Z0-9]+(?:-[A-Z0-9]+)*-R\d{2,})/g)) {
-    if (!cited.has(m[1])) cited.set(m[1], []);
-    cited.get(m[1]).push(rel);
-  }
-}
-
-// Analyse.
-const allActive = new Set(briefs.flatMap((b) => [...b.active]));
-const allRetired = new Set(briefs.flatMap((b) => [...b.retired]));
 for (const b of briefs) {
   for (const ref of b.references) {
-    if (!briefIds.has(ref)) problems.push(`${b.id} references ${ref}, which does not exist`);
+    if (!byId.has(ref)) problems.push(`${b.id} references ${ref}, which does not exist`);
+  }
+  if (TYPES_DEFERRED.has(b.type) && b.status === "draft" && b.active.size > 0) {
+    problems.push(`${b.id}: ${b.type} briefs carry no requirement IDs while draft (ADR 0013)`);
+  }
+  if (TYPES_BY_REVIEW.has(b.type) && b.verifiedBy !== "review") {
+    problems.push(`${b.id}: ${b.type} briefs must declare verified-by: review`);
   }
 }
-const dangling = [...cited.keys()].filter((id) => !allActive.has(id) && !allRetired.has(id));
-const retiredCited = [...cited.keys()].filter((id) => allRetired.has(id));
-for (const id of dangling) problems.push(`tests cite ${id}, which no brief defines`);
-for (const id of retiredCited) problems.push(`tests cite retired requirement ${id}`);
 
-// Render.
+// Reference cycles (depth-first search over the reference graph).
+{
+  const state = new Map();
+  const stack = [];
+  const visit = (id) => {
+    if (state.get(id) === "done") return;
+    if (state.get(id) === "active") {
+      const cycle = stack.slice(stack.indexOf(id)).concat(id).join(" -> ");
+      problems.push(`reference cycle: ${cycle}`);
+      return;
+    }
+    state.set(id, "active");
+    stack.push(id);
+    for (const ref of byId.get(id)?.references ?? []) if (byId.has(ref)) visit(ref);
+    stack.pop();
+    state.set(id, "done");
+  };
+  for (const b of briefs) visit(b.id);
+}
+
+// ---- Citations from test files ---------------------------------------------
+
+const cited = new Map();
+for (const file of walk(ROOT)) {
+  if (!CODE_EXT.test(file)) continue;
+  const r = rel(file);
+  if (r.startsWith("docs/") || r.startsWith("scripts/")) continue;
+  if (!TEST_PATH.test(r)) continue;
+  const text = readFileSync(file, "utf8");
+  for (const m of text.matchAll(VERIFIES)) {
+    if (!cited.has(m[1])) cited.set(m[1], []);
+    cited.get(m[1]).push(r);
+  }
+}
+const allActive = new Set(briefs.flatMap((b) => [...b.active]));
+const allRetired = new Set(briefs.flatMap((b) => [...b.retired]));
+for (const id of cited.keys()) {
+  if (allRetired.has(id)) problems.push(`tests cite retired requirement ${id}`);
+  else if (!allActive.has(id)) problems.push(`tests cite ${id}, which no brief defines`);
+}
+
+// ---- Inbox -----------------------------------------------------------------
+
+let openInbox = 0;
+try {
+  openInbox = readFileSync(INBOX, "utf8").split(/\r?\n/).filter((l) => /^\s*-\s*\[ \]/.test(l)).length;
+} catch {
+  problems.push("docs/briefs/INBOX.md is missing");
+}
+if (openInbox > 0) problems.push(`${openInbox} open inbox entr${openInbox === 1 ? "y" : "ies"} need a planning pass`);
+
+// ---- ADR index -------------------------------------------------------------
+
+const adrs = [];
+for (const name of readdirSync(ADR_DIR)) {
+  const m = name.match(/^(\d{4})-(.+)\.md$/);
+  if (!m || m[1] === "0000") continue;
+  const text = readFileSync(join(ADR_DIR, name), "utf8");
+  const title = text.match(/^#\s+\d{4}:\s*(.+)$/m)?.[1]?.trim() ?? "(untitled)";
+  const status = text.match(/^-\s*Status:\s*(.+)$/m)?.[1]?.trim() ?? "?";
+  adrs.push({ num: m[1], file: name, title, status });
+}
+adrs.sort((a, b) => a.num.localeCompare(b.num));
+
+{
+  const readme = readFileSync(ADR_README, "utf8");
+  const start = "<!-- adr-index:start -->";
+  const end = "<!-- adr-index:end -->";
+  const i = readme.indexOf(start);
+  const j = readme.indexOf(end);
+  if (i === -1 || j === -1) {
+    problems.push("docs/adr/README.md lacks the adr-index markers");
+  } else {
+    const table = [
+      "| # | Title | Status |",
+      "|---|-------|--------|",
+      ...adrs.map((a) => `| [${a.num}](${a.file}) | ${a.title} | ${a.status} |`),
+    ].join("\n");
+    const next = readme.slice(0, i + start.length) + "\n" + table + "\n" + readme.slice(j);
+    if (next !== readme) writeFileSync(ADR_README, next);
+  }
+}
+
+// ---- Manifest --------------------------------------------------------------
+
 const lines = [];
 lines.push("# Manifest");
 lines.push("");
 lines.push("Generated by `node scripts/manifest.mjs`. Do not edit; edit the briefs.");
 lines.push("");
 lines.push("| Brief | Type | Title | Status | Reqs | Verified | References |");
-lines.push("|-------|------|-------|--------|-----:|---------:|------------|");
+lines.push("|-------|------|-------|--------|-----:|----------|------------|");
 for (const b of briefs) {
-  const verified = [...b.active].filter((id) => cited.has(id)).length;
+  let verified;
+  if (b.verifiedBy === "review") verified = "review";
+  else verified = String([...b.active].filter((id) => cited.has(id)).length);
   lines.push(
     `| [${b.id}](${b.path.replace(/^docs\//, "")}) | ${b.type} | ${b.title} | ${b.status} | ${b.active.size} | ${verified} | ${b.references.join(", ")} |`
   );
@@ -128,11 +223,16 @@ for (const b of briefs) {
 lines.push("");
 
 const unverified = briefs
-  .filter((b) => b.status === "ready" || b.status === "built")
+  .filter((b) => TYPES_WITH_IDS.has(b.type) && (b.status === "ready" || b.status === "built"))
   .flatMap((b) => [...b.active].filter((id) => !cited.has(id)));
-lines.push("## Unverified requirements in ready or built briefs");
+lines.push("## Unverified requirements in ready or built flow and protocol briefs");
 lines.push("");
 lines.push(unverified.length ? unverified.map((id) => `- ${id}`).join("\n") : "None.");
+lines.push("");
+
+lines.push("## Inbox");
+lines.push("");
+lines.push(openInbox ? `${openInbox} open entries in docs/briefs/INBOX.md.` : "Empty.");
 lines.push("");
 
 lines.push("## Problems");
@@ -141,5 +241,7 @@ lines.push(problems.length ? problems.map((p) => `- ${p}`).join("\n") : "None.")
 lines.push("");
 
 writeFileSync(OUT, lines.join("\n"));
-console.log(`wrote ${relative(ROOT, OUT)}: ${briefs.length} briefs, ${allActive.size} requirements, ${cited.size} cited, ${problems.length} problems`);
+console.log(
+  `wrote docs/MANIFEST.md and the ADR index: ${briefs.length} briefs, ${allActive.size} requirements, ${cited.size} cited, ${adrs.length} ADRs, ${openInbox} inbox, ${problems.length} problems`
+);
 if (CHECK && problems.length) process.exit(1);

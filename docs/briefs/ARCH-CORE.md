@@ -3,132 +3,147 @@ id: ARCH-CORE
 type: architecture
 title: Ersa system architecture
 status: ready
-references: [PROTO-AGENT-EVENTS, PROTO-CLAUDE-CODE-STREAM, PROTO-COPILOT-RPC, PROTO-HARNESS-TOOLS, LAY-SHELL]
-adrs: [0003, 0004, 0006, 0007, 0008]
+verified-by: review
+references: [PROTO-CORE-API, PROTO-AGENT-EVENTS, PROTO-CLAUDE-CODE-STREAM, PROTO-COPILOT-SDK, PROTO-HARNESS-TOOLS]
+adrs: [0004, 0006, 0007, 0008, 0009, 0010, 0011, 0012]
 ---
 
 # Ersa system architecture
 
 ## Context
 
-Ersa is a desktop application. It talks to vendor CLIs on the local machine and on remote hosts, to version control systems, and to pack sources. It exposes a small tool server that the agents themselves can call.
+Ersa is a desktop application made of two processes: a shell that owns the window, and a core that owns everything else. The core talks to vendor CLIs on the local machine and on remote hosts, to version control systems, and to pack sources, and it exposes a tool server that the agents themselves call.
 
 ```mermaid
 flowchart LR
   user((User))
-  subgraph ersa [Ersa]
+  subgraph shell [Shell process]
     ui[Interface]
-    core[Core]
+  end
+  subgraph core [Core process]
+    api[Core API]
+    sm[Session manager]
+    log[Raw log + projection]
+    tools[Harness tools server]
   end
   claude[Claude Code CLI]
-  copilot[Copilot CLI]
-  remote[Remote host: CLIs + VCS]
-  vcs[Local VCS: git]
+  copilot[Copilot CLI via SDK]
+  remote[Remote host: Core + CLIs + VCS]
+  vcs[VCS: git, Perforce]
   packs[Pack source]
   user --> ui
-  ui <--> core
-  core <--> claude
-  core <--> copilot
-  core <--> remote
-  core <--> vcs
-  core <--> packs
-  claude -.harness tools.-> core
-  copilot -.harness tools.-> core
+  ui <-->|PROTO-CORE-API, PROTO-AGENT-EVENTS| api
+  sm <--> claude
+  sm <--> copilot
+  api <-->|SSH tunnel| remote
+  sm <--> vcs
+  sm <--> packs
+  claude -.MCP.-> tools
+  copilot -.MCP.-> tools
 ```
 
 ## Parts
 
 ### Shell
 
-The native window and process host (Tauri 2). Owns the webview, the window lifecycle, the tray, and the bridge between Interface and Core. Owns nothing else; it has no business logic.
+The native window (Tauri 2). Owns the webview, window lifecycle, tray, and launching or attaching to the Core process. Has no business logic.
 
 ### Interface
 
-The TypeScript application in the webview. Renders the shell layout (`LAY-SHELL`), the transcript, composer, rail, and workbench panes from the event stream. Owns presentation state only: which session is active, pane sizes, theme, scroll positions. Speaks `PROTO-AGENT-EVENTS` to Core and nothing else; it never touches a process, a file, or the network directly.
+The TypeScript application in the webview. Renders the rail, transcript, composer, and workbench from Core's protocols. Owns presentation state only. Speaks `PROTO-CORE-API` for requests (projects, hosts, workspaces, sessions, settings, files, diffs) and consumes `PROTO-AGENT-EVENTS` as a per-session stream. Never touches a process, a file, or the network directly. During development it can be pointed at a replay server instead of a live Core.
 
 ### Core
 
-The Rust library that does the work. Its responsibilities, each a module with a narrow interface:
+A Rust library wrapped in a thin binary, running as its own process (ADR 0011). The same binary runs on remote hosts. Its modules:
 
-- **Session manager**: the lifecycle of every session (created, starting, running, waiting, idle, disconnected, ended). Routes commands from the Interface to the right adapter and events from adapters to the Interface and the event log.
-- **Event log**: the persisted, append-only sequence of events per session. The transcript is a projection of it; resume is a replay of it.
-- **Adapter registry**: knows which backends are installed on which hosts, their versions, and how to start them.
-- **Transport layer**: starts processes and carries their stdio on a host: local spawn, SSH exec, container exec. Adapters and the VCS layer run through it and do not know which one they got.
-- **Workspace and VCS**: creates and destroys isolated workspaces for a project through a VCS interface. Git worktrees first; Perforce later. Executes through the transport so remote hosts work the same way.
-- **Pack client**: fetches packs from a pack source, verifies and caches them, and applies them to a project by writing the configuration each backend understands.
-- **Mode engine**: resolves a session's mode into the base instructions and settings handed to the adapter at start.
-- **Harness tools server**: an MCP server exposed to every session's backend, offering cross-session messaging, session metadata, and the "show me" interface-driving tools (`PROTO-HARNESS-TOOLS`).
-- **Persistence**: one local database holding projects, workspaces, sessions, event logs, pack cache metadata, and settings.
+- **Core API**: the request/response surface the Interface uses. Schema-defined; TypeScript types are generated from it.
+- **Session manager**: the lifecycle of every session (created, starting, running, waiting on user, idle, disconnected, ended). Routes user input and permission decisions to adapters and raw backend output to the log.
+- **Raw log and projection**: every line a backend emits is stored verbatim per session (ADR 0010). Ersa events are a versioned projection derived from it, cached, and re-derived when the projection version changes. Transcript, rail state, and resume are all projections.
+- **Adapter registry**: which backends are installed on which hosts, their versions and capabilities, and how to start them.
+- **Transport layer**: starts processes and carries their stdio on a host: local spawn, or SSH. Adapters and the VCS layer run through it without knowing which one they got.
+- **Workspace and VCS**: creates and destroys isolated workspaces for a project behind a VCS interface. Git worktrees first; Perforce second. Executes through the transport so remote hosts work the same way.
+- **Pack client**: fetches packs from a pack source, verifies and caches them, and renders the neutral pack definition into each installed backend's native configuration.
+- **Mode engine**: resolves a session's mode into the base instructions, allowed tools, and tool-server list handed to the adapter at start.
+- **Harness tools server**: an MCP server exposed to every session's backend (`PROTO-HARNESS-TOOLS`). From milestone 0 it serves the permission-prompt tool Claude Code is pointed at (ADR 0012). Later it adds cross-session messaging, session metadata, user-defined tools, and the interface-driving tools.
+- **Persistence**: one local database per Core process holding projects, hosts, workspaces, sessions, raw logs, projection cache, pack cache metadata, and settings.
 
 ### Adapters
 
-One per backend, behind one interface: start a session on a transport with a configuration, send user input and permission decisions, receive a stream of Ersa events, stop. Each adapter translates between the backend's native protocol and `PROTO-AGENT-EVENTS`.
+One per backend, behind one interface: start a session on a transport with a configuration, send user input and permission decisions, receive raw output lines and a projection function, stop. Adapters emit raw lines to the log and provide the projection from raw lines to `PROTO-AGENT-EVENTS`.
 
-- **Claude Code adapter**: drives the CLI in its streaming JSON mode with the bidirectional control channel for permissions (`PROTO-CLAUDE-CODE-STREAM`). Documenting that protocol from the real CLI is part of the first milestone.
-- **Copilot adapter**: drives the Copilot CLI's JSON-RPC server mode directly (`PROTO-COPILOT-RPC`), since no Rust SDK exists.
+- **Claude Code adapter**: drives the CLI in its streaming JSON mode with every behaviour-affecting flag passed explicitly, reads capabilities from the CLI's initial message, and receives permission requests through the harness tools server (`PROTO-CLAUDE-CODE-STREAM`, ADR 0012).
+- **Copilot adapter**: uses the official Copilot Rust SDK and maps its types to Ersa events (`PROTO-COPILOT-SDK`, ADR 0009).
 
 ## Boundaries
 
-- Interface depends only on `PROTO-AGENT-EVENTS`. It never imports Core types directly; it uses TypeScript types generated from the protocol schema.
-- Core never renders. It emits events; what they look like is the Interface's concern.
-- Adapters depend on the transport interface, never on a concrete transport.
-- The VCS layer depends on the transport interface for the same reason.
-- Nothing in Core depends on Tauri. Core is a plain library testable without a window, so the Shell could be replaced.
-- Platform-specific code lives behind narrow modules with a Windows implementation and stubs or conditional compilation for others (ADR 0006).
+- The Interface depends only on `PROTO-CORE-API` and `PROTO-AGENT-EVENTS`, through generated types.
+- Core never renders. It emits events and answers requests.
+- Adapters and the VCS layer depend on the transport interface, never on a concrete transport.
+- Nothing in Core depends on Tauri.
+- Harness tools can never operate permission controls, and interface-driving tools require visible per-invocation consent.
+- Platform-specific code lives behind narrow modules (ADR 0006). Process trees are killed as a unit on Windows (job objects) so stopped sessions leave no orphans.
 
 ## Cross-cutting concerns
 
-- **Persistence**: a single SQLite database in the user's application data directory. Event logs are append-only tables keyed by session. Schema migrations run at startup.
-- **Errors**: every failure that the user could act on becomes an event in the session's log (so it appears in the transcript) and, where relevant, a rail state. Internal errors are logged with structured tracing and never swallowed.
-- **Security**: Ersa stores no model credentials. Remote connections use the user's SSH configuration and agent. The harness tools server listens only on a local, per-launch socket with a per-session token.
-- **Configuration**: user settings in the database; project-level configuration in the project's own files where the backend expects it (packs write there).
-- **Observability**: structured tracing in Core with a developer pane in the Interface that shows raw events for the active session.
+- **Persistence**: SQLite in the user's application data directory. Raw log lines are append-only. Projection cache is keyed by session and projection version. Schema migrations run at startup.
+- **Errors**: every failure the user could act on appears as an event in the session's projection and, where relevant, as a rail state. Internal errors use structured tracing and are never swallowed.
+- **Security**: no model credentials. Remote connections use the user's own SSH client and configuration. The harness tools server listens on a local per-launch socket; the per-session token identifies the caller and is advisory, since all local sessions share the OS user.
+- **Configuration**: user settings in the database; project-level configuration in the project's own files where the backend expects it (packs render there).
+- **Observability**: structured tracing in Core; a developer pane in the Interface shows the raw log for the active session.
 
 ## Implementation decisions
 
-The what; the why is in the linked ADRs or belongs in a new one.
+The what; the why is in the linked ADRs.
 
 - Rust 2024 edition, Tokio for async, serde for serialization, tracing for logs.
-- The agent event protocol's JSON Schema is the source of truth. Rust types implement it; a conformance test validates serialized events against the schema; TypeScript types are generated from the schema at build time.
-- Processes are managed through the transport interface with explicit handling of stdin, stdout, stderr, exit, and kill. No pseudo-terminals in the first milestones.
-- SQLite via a bundled driver so there is no external dependency on the host.
-- Workspace layout: a project's worktrees live under a configurable root outside the project tree, named by workspace ID.
+- Both Interface-facing protocols are defined by JSON Schema as the source of truth; Rust types implement them, conformance tests validate serialized output, TypeScript types are generated.
+- Backend processes are managed through the transport interface with explicit stdin, stdout, stderr, exit, and kill. Stdin is flushed after every line. Read loops are cancellation-safe. Backends are never run in a pseudo-terminal.
+- The terminal pane is a real hosted terminal: a pseudo-terminal (ConPTY on Windows, via a portable PTY library) running the user's shell in the workspace, rendered by a terminal emulator component in the Interface and carried over the same transport for remote hosts.
+- SSH shells out to the user's `ssh` executable with one long-lived connection per host that multiplexes everything else, because Windows OpenSSH lacks connection sharing. The harness tools server is reached from a remote host through a reverse tunnel on that connection.
+- Worktrees use short IDs under a configurable root outside the project tree, run a post-create hook (for dependency and build caches), and are removed stop-then-remove with retry.
+- SQLite via a bundled driver.
+- A replay server (a fake Core that serves recorded fixtures over the two protocols) is a first-class development tool used for interface work and tests.
 - Interface framework per ADR 0008 once accepted.
 
 ## Milestones
 
-- **M0 Foundations**: repository, briefs, protocol brief for Claude Code's streaming mode written from the real CLI with recorded fixtures, Core skeleton that starts one local Claude Code session and round-trips a prompt, Shell window rendering raw events. Done when a prompt typed into a bare window gets a streamed reply.
-- **M1 Dogfood** (the author switches to it daily): rail with projects, worktree workspaces, and sessions; transcript with formatted text, tool cards, diff cards; permission tiles with cost and context; composer; persistence and resume; light and dark themes; developer pane. Done when the author has used it exclusively for a week.
-- **M2 Workbench**: files, diff, and terminal panes; browser pane. Done when the author stops opening a separate editor to review agent changes.
-- **M3 Second backend and modes**: Copilot adapter; modes with Code and Content profiles. Done when a Copilot session and a Claude Code session run side by side with the same interface.
-- **M4 Remote**: SSH transport; remote worktrees; disconnect and reconnect states. Done when a session on a Linux VM is indistinguishable from a local one except for latency.
-- **M5 Packs**: pack format, pack sources (directory, share, HTTP), apply and update. Done when a pack edited locally is published to a source and picked up by a second machine.
-- **M6 Show me and harness tools**: cross-session messaging; interface-driving tools; guided onboarding. Done when a new user can ask "how do I add a remote host" and watch it happen.
+- **M0 Foundations**: Core binary with socket protocols; protocol brief for Claude Code's streaming mode written from the real CLI with recorded fixtures; Claude Code adapter with explicit flags; harness tools server serving the permission tool; raw log and projection v1; replay server; shell window rendering raw events; Windows process-tree kill. Done when a prompt typed into a bare window gets a streamed reply, a permission request round-trips, and the session survives the window closing.
+- **M1 Dogfood** (the author switches to it daily): rail with projects, worktree workspaces, and session tiles (title, backend, activity, context ring, cost); shelf for permissions and questions answerable from the rail; transcript with formatted text, tool cards, diff cards; composer; resume from raw log; light and dark token sets; developer pane; a minimal SSH transport tested against WSL so the adapter never grows local-only assumptions. Done when the author has used it exclusively for a week.
+- **M2 Workbench**: files, diff, terminal, and browser panes. Done when the author stops opening a separate tool to review agent changes.
+- **M3 Second backend and modes**: Copilot adapter via the SDK; modes as presets. Done when a Copilot and a Claude Code session run side by side with the same interface.
+- **M4 Remote and VCS**: remote hosts in the rail, remote worktrees, disconnect and backfill; Perforce workspace adapter. Done when a session on a Linux VM and a session in a Perforce project both behave like local git sessions.
+- **M5 Packs**: neutral pack format, renderers per backend, pack sources (directory, share, HTTP), apply and update. Done when a pack edited locally is published and picked up by a second machine.
+- **M6 Harness tools**: cross-session messaging, user-defined tools, and a minimal show-me (focus, highlight, explain). Done when one session can hand work to another and a user can ask "how do I add a host" and watch it happen.
 
 ## Requirements
 
+Verified by review at this level; testable requirements live in the protocol briefs.
+
 - **ARCH-CORE-R01**: Core builds and its tests pass without Tauri or a display.
-- **ARCH-CORE-R02**: The Interface communicates with Core exclusively through `PROTO-AGENT-EVENTS`.
-- **ARCH-CORE-R03**: Every event an adapter emits validates against the protocol schema.
+- **ARCH-CORE-R02**: The Interface communicates with Core exclusively through `PROTO-CORE-API` and `PROTO-AGENT-EVENTS`.
+- **ARCH-CORE-R03**: Every projected event validates against the agent event schema.
 - **ARCH-CORE-R04**: An adapter runs unchanged over the local and SSH transports.
 - **ARCH-CORE-R05**: Workspace creation and removal for a remote host execute on that host.
-- **ARCH-CORE-R06**: A session's transcript is reconstructible from its event log alone.
+- **ARCH-CORE-R06**: A session's transcript is reconstructible from its raw log and a projection version alone.
 - **ARCH-CORE-R07**: Core contains no Windows-only API outside platform modules.
-- **ARCH-CORE-R08**: The harness tools server accepts connections only from processes holding a valid per-session token.
-- **ARCH-CORE-R09**: Each adapter ships conformance tests against recorded fixtures and declares a minimum supported backend version.
+- **ARCH-CORE-R08**: Core runs as a process separate from the shell, and sessions continue when the shell window closes.
+- **ARCH-CORE-R09**: Each adapter ships conformance tests against recorded fixtures and declares a minimum and maximum tested backend version.
+- **ARCH-CORE-R10**: No harness tool can operate a permission control.
+- **ARCH-CORE-R11**: The Interface can run against the replay server with no live backend.
 
 ## Out of scope
 
 - Calling model APIs directly (ADR 0004).
+- Driving any backend through a pseudo-terminal or parsing its console output.
 - A plugin system for third-party adapters in the first milestones; adapters are in-tree.
-- Running Core as a separate daemon. It is a library inside the Shell process until there is a reason otherwise.
 
 ## Open questions
 
-- Whether the event log should also store the backend's raw native messages for debugging and replay, or only translated events.
-- How session resume interacts with each backend's own session persistence (Claude Code has resumable sessions; Copilot's model differs).
-- Where terminal panes get their data from without a PTY on Windows.
+- How session resume interacts with each backend's own session persistence, and whether Ersa's raw log or the backend's own session file is replayed on resume.
+- Perforce isolation model (see PRD-ERSA open questions).
+- Which local-inference harness to support first.
 
 ## Changes
 
+- 2026-10-31: revised after adversarial review: Core as its own process; two Interface protocols; raw log as truth with versioned projection; harness tools server and permission routing in M0; Copilot via official SDK; SSH transport in M1 with single multiplexed connection; replay server; backends never in a PTY, terminal pane is a real hosted terminal; Perforce in M4; worktree handling; show-me constraints.
 - 2026-10-31: created.

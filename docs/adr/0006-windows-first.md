@@ -20,4 +20,4 @@ Option 3. CI runs on Windows. The core compiles on macOS and Linux even while un
 
 ## Consequences
 
-Some Windows conveniences are forgone. Terminal panes are driven through the structured protocol rather than a PTY wherever possible, which sidesteps most of the ConPTY pain. Remote hosts are expected to be Linux, so the transport layer handles both path conventions from the start.
+Some Windows conveniences are forgone. Backends are driven through their structured protocols, never a PTY, so ConPTY is confined to the one place that needs it: the workbench's hosted terminal pane. Remote hosts are expected to be Linux, so the transport layer handles both path conventions from the start.

@@ -20,4 +20,6 @@ Option 3. One adapter per backend translates the vendor protocol into Ersa's age
 
 ## Consequences
 
+Usage is metered by whatever login the CLI holds; Ersa adds no billing relationship of its own. The adapter records the usage figures the CLI reports so any difference between this path and interactive use shows up in the first week (ADR 0012).
+
 Ersa owns the transcript renderer, permission tiles, and cost and context display. Vendor protocol changes can break adapters, so each adapter has conformance tests against recorded fixtures and a documented minimum CLI version. Ersa can never do anything a vendor CLI cannot do; features like modes are implemented through what the CLI exposes (system-prompt injection, settings, MCP configuration), never by patching the vendor.
