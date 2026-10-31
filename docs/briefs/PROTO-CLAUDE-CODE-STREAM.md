@@ -26,9 +26,10 @@ Every behaviour-affecting flag is passed explicitly (ADR 0014). The baseline com
 ```
 claude -p --input-format stream-json --output-format stream-json --verbose
        --permission-mode default --setting-sources "" --strict-mcp-config
-       --permission-prompt-tool stdio
+       --permission-prompt-tool stdio --await-initialize
 ```
 
+- `--await-initialize` makes the CLI read the host's `initialize` control request during startup instead of racing it; the Agent SDK passes it. Fixtures 09 and 11 were recorded without it and still worked, so it is belt and braces, to be verified by a fixture.
 - `--permission-mode` must be stated; the shelf flow depends on it.
 - `--setting-sources ""` and `--strict-mcp-config` isolate a session from the user's own project and user settings; modes and packs will supply what a session should see.
 - `--permission-prompt-tool stdio` makes permission prompts arrive on the control channel (fixture 11). Without it, or without `initialize`, prompts are auto-denied (fixtures 05, 08, 09).
