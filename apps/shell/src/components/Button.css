@@ -59,12 +59,12 @@
   border-color: var(--color-ink);
 }
 
-/* Focus on a filled button: a hairline ring outside its edge, in the accent. */
+/* Focus on a filled button turns its edge to ink: an accent edge would vanish into the accent fill. */
 .button[data-variant="primary"]:focus-visible,
 .button[data-variant="primary"][data-force="focus"] {
   color: var(--color-accent-ink);
-  outline: var(--line-hairline) solid var(--color-accent);
-  outline-offset: var(--line-hairline);
+  outline: none;
+  border-color: var(--color-ink);
 }
 
 /* Disabled primary looks like a disabled quiet button: nothing to act on. */
