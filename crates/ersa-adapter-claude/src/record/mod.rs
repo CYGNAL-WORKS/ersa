@@ -21,12 +21,15 @@ mod listing;
 mod projection;
 mod registry;
 
+use std::collections::VecDeque;
 use std::fs;
-use std::io::{self, Read};
+use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 pub use listing::{SessionList, SessionSummary, list_sessions, summarize_session};
-pub use projection::{RecordEvent, project_record};
+pub use projection::{RecordEvent, project_record, project_record_from};
 pub use registry::{LiveCheck, LiveSession, live_session};
 
 /// The longest encoded directory name the CLI uses whole; a longer one is cut
@@ -154,32 +157,98 @@ fn is_plain_file(path: &Path) -> bool {
 }
 
 /// The events of session `session_id`'s record ([`project_record`]), or none
-/// when it has no record ([`find_record`]). Bytes that are not UTF-8 are read
-/// with replacement characters, as Core reads a backend's lines.
+/// when it has no record ([`find_record`]). Read line by line; bytes that are
+/// not UTF-8 are read with replacement characters, as Core reads a backend's
+/// lines. Only the bytes the file holds when it is opened are read: the CLI
+/// may be appending to it.
 pub fn read_record(
     claude_home: &Path,
     cwd: &str,
     session_id: &str,
 ) -> io::Result<Vec<RecordEvent>> {
-    let Some(path) = find_record(claude_home, cwd, session_id)? else {
-        return Ok(Vec::new());
-    };
-    // Bounded as it is read, not by its size beforehand: the CLI may be
-    // appending to it, and anything else the user runs may write it.
-    let mut bytes = Vec::new();
-    fs::File::open(&path)?
-        .take(MAX_RECORD_BYTES + 1)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX_RECORD_BYTES {
+    match find_record(claude_home, cwd, session_id)? {
+        Some(path) => Ok(read_record_at(&path)?.events),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// A record's events, with the size and modified time of the file they were
+/// read from.
+#[derive(Debug, Clone)]
+struct ReadRecord {
+    len: u64,
+    modified: Option<SystemTime>,
+    events: Vec<RecordEvent>,
+}
+
+fn read_record_at(path: &Path) -> io::Result<ReadRecord> {
+    let file = fs::File::open(path)?;
+    let metadata = file.metadata()?;
+    let len = metadata.len();
+    if len > MAX_RECORD_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "the session record {} is more than the {MAX_RECORD_BYTES} bytes Ersa reads",
+                "the session record {} is {len} bytes, more than the {MAX_RECORD_BYTES} Ersa reads",
                 path.display()
             ),
         ));
     }
-    Ok(project_record(&String::from_utf8_lossy(&bytes)))
+    let mut reader = io::BufReader::new(file);
+    Ok(ReadRecord {
+        len,
+        modified: metadata.modified().ok(),
+        events: projection::project_record_from(&mut reader, len)?,
+    })
+}
+
+/// How many records' projections [`RecordCache`] keeps.
+const CACHED_RECORDS: usize = 4;
+
+/// The projections of the records read last, each kept for as long as its
+/// file's size and modified time say it has not changed, so opening a large
+/// unchanged record again costs a look at its metadata, not a read. A record
+/// that changed (the CLI appended a turn) is read again.
+#[derive(Debug, Default)]
+pub struct RecordCache {
+    /// Most recently read last.
+    entries: Mutex<VecDeque<(PathBuf, ReadRecord)>>,
+}
+
+impl RecordCache {
+    /// [`read_record`], through the cache.
+    pub fn read(
+        &self,
+        claude_home: &Path,
+        cwd: &str,
+        session_id: &str,
+    ) -> io::Result<Vec<RecordEvent>> {
+        let Some(path) = find_record(claude_home, cwd, session_id)? else {
+            return Ok(Vec::new());
+        };
+        let metadata = fs::metadata(&path)?;
+        let (len, modified) = (metadata.len(), metadata.modified().ok());
+        {
+            let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(at) = entries.iter().position(|(p, read)| {
+                *p == path && read.len == len && read.modified == modified && modified.is_some()
+            }) {
+                let entry = entries.remove(at).expect("found");
+                let events = entry.1.events.clone();
+                entries.push_back(entry);
+                return Ok(events);
+            }
+        }
+        let read = read_record_at(&path)?;
+        let events = read.events.clone();
+        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
+        entries.retain(|(p, _)| *p != path);
+        entries.push_back((path, read));
+        while entries.len() > CACHED_RECORDS {
+            entries.pop_front();
+        }
+        Ok(events)
+    }
 }
 
 /// Whether `id` has the shape of a Claude Code session id: a UUID in its
