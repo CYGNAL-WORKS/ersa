@@ -79,6 +79,7 @@ fn allow() -> PermissionDecision {
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R01
+// verifies: PROTO-CLAUDE-CODE-STREAM-R12
 #[tokio::test]
 async fn starts_the_cli_with_every_flag_explicit() {
     let transport = ready_stub();
@@ -107,8 +108,7 @@ async fn starts_the_cli_with_every_flag_explicit() {
             "--permission-mode",
             "default",
             "--setting-sources",
-            "",
-            "--strict-mcp-config",
+            "user,project,local",
             "--permission-prompt-tool",
             "stdio",
             "--await-initialize",
@@ -117,6 +117,49 @@ async fn starts_the_cli_with_every_flag_explicit() {
             "haiku",
         ]
     );
+    session.stop().await.expect("stop");
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R12
+#[test]
+fn the_session_loads_the_users_settings_and_mcp_configuration() {
+    let args = ersa_adapter_claude::invocation_args(&config());
+    let sources = args.iter().position(|a| a == "--setting-sources");
+    assert_eq!(
+        sources.and_then(|i| args.get(i + 1)).map(String::as_str),
+        Some("user,project,local")
+    );
+    assert!(!args.iter().any(|a| a == "--strict-mcp-config"), "{args:?}");
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R13
+#[tokio::test]
+async fn the_cli_runs_as_entrypoint_ersa_with_inherited_claude_variables_removed() {
+    let transport = ready_stub();
+    let session = adapter()
+        .start(
+            Arc::new(transport.clone()),
+            config(),
+            Arc::new(RecordingSink::new()),
+        )
+        .await
+        .expect("start");
+
+    let spec = &transport.spawned()[0];
+    assert_eq!(
+        spec.env.get("CLAUDE_CODE_ENTRYPOINT").map(String::as_str),
+        Some("ersa")
+    );
+    for name in [
+        "CLAUDECODE",
+        "CLAUDE_CODE_CHILD_SESSION",
+        "NODE_OPTIONS",
+        "TRACEPARENT",
+        "TRACESTATE",
+    ] {
+        assert!(spec.env_remove.iter().any(|n| n == name), "{name} kept");
+        assert!(!spec.env.contains_key(name), "{name} set");
+    }
     session.stop().await.expect("stop");
 }
 

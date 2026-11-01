@@ -158,6 +158,33 @@ async fn env_and_cwd_reach_the_process() {
 }
 
 #[tokio::test]
+async fn env_remove_hides_an_inherited_variable_and_env_still_wins() {
+    // A variable every runner has: `OS` on Windows, `HOME` elsewhere. The
+    // brackets show an empty or unset value as `[]` (or `[%OS%]` from cmd).
+    let (inherited, mut spec) = if cfg!(windows) {
+        ("OS", shell("echo [%OS%] & echo [%ERSA_TEST_VAR%]"))
+    } else {
+        ("HOME", shell("echo \"[$HOME]\"; echo \"[$ERSA_TEST_VAR]\""))
+    };
+    assert!(
+        std::env::var_os(inherited).is_some(),
+        "{inherited} unset here"
+    );
+    spec.env_remove = vec![inherited.into(), "ERSA_TEST_VAR".into()];
+    // Removing a variable does not stop `env` from setting it.
+    spec.env.insert("ERSA_TEST_VAR".into(), "set".into());
+
+    let mut process = spawn(spec).await;
+    let mut stdout = process.take_stdout().expect("stdout");
+    let removed = stdout.next_line().await.expect("read").expect("a line");
+    let set = stdout.next_line().await.expect("read").expect("a line");
+
+    let unset = if cfg!(windows) { "[%OS%]" } else { "[]" };
+    assert_eq!(removed.trim_end(), unset);
+    assert_eq!(set.trim_end(), "[set]");
+}
+
+#[tokio::test]
 async fn spawning_a_missing_program_fails() {
     let spec = ProcessSpec {
         program: "ersa-no-such-program".into(),
