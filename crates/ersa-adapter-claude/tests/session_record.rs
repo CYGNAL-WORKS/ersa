@@ -19,16 +19,16 @@ use common::{fixtures, fixtures_root};
 use ersa_adapter::{Direction, Projector};
 use ersa_adapter_claude::ClaudeProjector;
 use ersa_adapter_claude::record::{
-    RecordEvent, RecordProjector, SessionSummary, encoded_cwd, list_sessions,
+    RecordEvent, SessionList, encoded_cwd, list_sessions, project_record,
 };
 use ersa_protocol::events::*;
 use ersa_protocol::schema::validate_event;
 use serde_json::{Value, json};
 
-/// A record fixture: its `<version>/<stem>` name and its lines.
+/// A record fixture: its `<version>/<stem>` name and its text.
 struct RecordFixture {
     name: String,
-    lines: Vec<String>,
+    text: String,
 }
 
 fn record_fixtures() -> Vec<RecordFixture> {
@@ -40,23 +40,14 @@ fn record_fixtures() -> Vec<RecordFixture> {
         };
         for file in files {
             let file = file.unwrap().path();
-            let Some(stem) = file
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .strip_suffix(".jsonl")
-            else {
+            let name = file.file_name().unwrap().to_str().unwrap().to_string();
+            let Some(stem) = name.strip_suffix(".jsonl") else {
                 continue;
             };
             found.push(RecordFixture {
                 name: format!("{}/{stem}", version.file_name().unwrap().to_string_lossy()),
-                lines: fs::read_to_string(&file)
-                    .unwrap()
-                    .lines()
-                    .filter(|l| !l.trim().is_empty())
-                    .map(String::from)
-                    .collect(),
+                // Git may check text files out with CRLF line ends on Windows.
+                text: fs::read_to_string(&file).unwrap().replace("\r\n", "\n"),
             });
         }
     }
@@ -65,11 +56,16 @@ fn record_fixtures() -> Vec<RecordFixture> {
     found
 }
 
-fn project_record(lines: &[String]) -> Vec<RecordEvent> {
-    let mut projector = RecordProjector::new();
-    lines
-        .iter()
-        .flat_map(|line| projector.project(line))
+/// A record made of these entries, each ended by a newline as the CLI writes.
+fn record(entries: &[Value]) -> String {
+    entries.iter().map(|e| format!("{e}\n")).collect()
+}
+
+/// The events of a record, without their attribution.
+fn events_of(entries: &[Value]) -> Vec<Event> {
+    project_record(&record(entries))
+        .into_iter()
+        .map(|e| e.event)
         .collect()
 }
 
@@ -114,23 +110,35 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
         );
 
         let mut from_record: HashMap<String, Vec<Event>> = HashMap::new();
-        for event in project_record(&record.lines) {
+        for event in project_record(&record.text) {
             if let Some(id) = event.message_id {
                 from_record.entry(id).or_default().push(event.event);
             }
         }
+        // The kind each record entry has, by uuid.
+        let record_kinds: HashMap<String, String> = record
+            .text
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter_map(|e| Some((e["uuid"].as_str()?.into(), e["type"].as_str()?.into())))
+            .collect();
         for (uuid, events) in live {
+            // A local command's output is a synthetic `assistant` message on
+            // the stream and a `system` entry in the record, which R15 does
+            // not cover; it is still in the record.
+            let kind = record_kinds
+                .get(&uuid)
+                .unwrap_or_else(|| panic!("{}: {uuid} is not in the record", stream.name));
+            if kind == "system" {
+                continue;
+            }
             let recorded = from_record
                 .get(&uuid)
                 .unwrap_or_else(|| panic!("{}: {uuid} is not in the record", stream.name));
             assert_eq!(recorded, &events, "{}: {uuid}", stream.name);
             for event in events {
-                kinds.insert(
-                    serde_json::to_value(&event).unwrap()["type"]
-                        .as_str()
-                        .unwrap()
-                        .to_string(),
-                );
+                let kind = serde_json::to_value(&event).unwrap()["type"].clone();
+                kinds.insert(kind.as_str().unwrap().to_string());
             }
             compared += 1;
         }
@@ -154,7 +162,7 @@ fn every_record_fixture_projects_to_its_golden_file_and_validates() {
     let bless = std::env::var("ERSA_BLESS").is_ok_and(|v| v == "1");
     let mut mismatched = Vec::new();
     for record in record_fixtures() {
-        let projection = project_record(&record.lines);
+        let projection = project_record(&record.text);
         let mut rendered = String::new();
         for event in &projection {
             let payload = serde_json::to_value(&event.event).unwrap();
@@ -203,17 +211,112 @@ fn every_record_fixture_projects_to_its_golden_file_and_validates() {
     );
 }
 
+fn prompt(uuid: &str, parent: Option<&str>, text: &str) -> Value {
+    json!({"type": "user", "uuid": uuid, "parentUuid": parent, "isSidechain": false,
+        "message": {"role": "user", "content": text}})
+}
+
+fn reply(uuid: &str, parent: &str, message_id: &str, text: &str) -> Value {
+    json!({"type": "assistant", "uuid": uuid, "parentUuid": parent, "isSidechain": false,
+        "message": {"id": message_id, "model": "m", "role": "assistant",
+            "content": [{"type": "text", "text": text}]}})
+}
+
+fn texts(events: &[Event]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Event::UserMessage(m) => Some(format!("user: {}", m.text)),
+            Event::AssistantText(t) => Some(format!("assistant: {}", t.text)),
+            _ => None,
+        })
+        .collect()
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R15
 #[test]
-fn prompts_in_the_record_are_user_messages_and_other_entries_yield_nothing() {
-    let mut projector = RecordProjector::new();
-    let prompt = json!({"type": "user", "uuid": "u1", "timestamp": "2026-11-01T10:00:00.000Z",
-        "message": {"role": "user", "content": [{"type": "text", "text": "Hello"}]}});
-    let meta = json!({"type": "user", "uuid": "u2", "isMeta": true,
-        "message": {"role": "user", "content": "Caveat: added by the CLI"}});
-    let events = projector.project(&prompt.to_string());
+fn only_the_branch_that_ends_the_record_is_projected() {
+    // A prompt, a reply, a rewind to the first prompt with an edited second
+    // prompt, and a subagent's entries written into the main record.
+    let entries = [
+        prompt("u1", None, "First"),
+        reply("a1", "u1", "msg_1", "One"),
+        prompt("u2", Some("a1"), "Abandoned"),
+        reply("a2", "u2", "msg_2", "Abandoned reply"),
+        json!({"type": "user", "uuid": "s1", "parentUuid": "a1", "isSidechain": true,
+            "message": {"role": "user", "content": "Subagent task"}}),
+        json!({"type": "assistant", "uuid": "s2", "parentUuid": "s1", "isSidechain": true,
+            "message": {"id": "msg_s", "model": "m", "role": "assistant",
+                "content": [{"type": "text", "text": "Subagent reply"}]}}),
+        prompt("u3", Some("a1"), "Edited"),
+        reply("a3", "u3", "msg_3", "Edited reply"),
+        // Entries that are not messages can end the chain.
+        json!({"type": "attachment", "uuid": "t1", "parentUuid": "a3", "isSidechain": false}),
+        json!({"type": "custom-title", "customTitle": "Title", "sessionId": "s"}),
+    ];
     assert_eq!(
-        events,
-        [RecordEvent {
+        texts(&events_of(&entries)),
+        [
+            "user: First",
+            "assistant: One",
+            "user: Edited",
+            "assistant: Edited reply"
+        ]
+    );
+}
+
+#[test]
+fn a_compaction_keeps_the_history_before_it() {
+    let entries = [
+        prompt("u1", None, "Before"),
+        reply("a1", "u1", "msg_1", "Old"),
+        json!({"type": "system", "subtype": "compact_boundary", "uuid": "c1",
+            "parentUuid": null, "logicalParentUuid": "a1", "isSidechain": false}),
+        json!({"type": "user", "uuid": "u2", "parentUuid": "c1", "isSidechain": false,
+            "isCompactSummary": true, "message": {"role": "user", "content": "Summary"}}),
+        prompt("u3", Some("u2"), "After"),
+    ];
+    let events = events_of(&entries);
+    assert_eq!(
+        texts(&events),
+        [
+            "user: Before",
+            "assistant: Old",
+            "user: Summary",
+            "user: After"
+        ]
+    );
+    // The summary is the CLI's, not the person's.
+    assert!(matches!(
+        &events[2],
+        Event::UserMessage(UserMessage {
+            origin: MessageOrigin::System,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn prompts_are_user_messages_and_what_the_cli_wrote_is_system() {
+    let entries = [
+        json!({"type": "user", "uuid": "u1", "timestamp": "2026-11-01T10:00:00.000Z",
+            "message": {"role": "user", "content": [{"type": "text", "text": "Hello"}]}}),
+        json!({"type": "user", "uuid": "u2", "isMeta": true,
+            "message": {"role": "user", "content": "<local-command-caveat>Caveat</local-command-caveat>"}}),
+        json!({"type": "user", "uuid": "u3",
+            "message": {"role": "user", "content": "<command-name>/rename</command-name>"}}),
+        json!({"type": "user", "uuid": "u4",
+            "message": {"role": "user", "content": [{"type": "text", "text": "[Request interrupted by user]"}]}}),
+        json!({"type": "user", "uuid": "u5", "origin": {"kind": "task-notification"},
+            "message": {"role": "user", "content": "A task finished"}}),
+        json!({"type": "custom-title", "customTitle": "T", "sessionId": "s"}),
+        json!({"type": "file-history-snapshot", "messageId": "m", "snapshot": {}}),
+        json!({"type": "attachment", "uuid": "a", "attachment": {"type": "date"}}),
+    ];
+    let events = project_record(&record(&entries));
+    assert_eq!(
+        events[0],
+        RecordEvent {
             message_id: Some("u1".into()),
             ts: Some("2026-11-01T10:00:00.000Z".into()),
             event: Event::UserMessage(UserMessage {
@@ -221,32 +324,30 @@ fn prompts_in_the_record_are_user_messages_and_other_entries_yield_nothing() {
                 origin: MessageOrigin::Human,
                 peer: None,
             }),
-        }]
+        }
     );
-    let events = projector.project(&meta.to_string());
-    assert!(matches!(
-        &events[0].event,
-        Event::UserMessage(UserMessage {
-            origin: MessageOrigin::System,
-            ..
-        })
-    ));
-    for ignored in [
-        json!({"type": "custom-title", "customTitle": "T", "sessionId": "s"}),
-        json!({"type": "file-history-snapshot", "messageId": "m", "snapshot": {}}),
-        json!({"type": "attachment", "uuid": "a", "attachment": {"type": "date"}}),
-    ] {
-        assert_eq!(projector.project(&ignored.to_string()), [], "{ignored}");
+    // Four messages the CLI wrote, and nothing from the other entries.
+    assert_eq!(events.len(), 5);
+    for event in &events[1..] {
+        assert!(
+            matches!(
+                event.event,
+                Event::UserMessage(UserMessage {
+                    origin: MessageOrigin::System,
+                    ..
+                })
+            ),
+            "{event:?}"
+        );
     }
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R15
 #[test]
-fn an_unreadable_or_drifted_message_entry_is_an_error_and_kept() {
-    let mut projector = RecordProjector::new();
-    assert_eq!(projector.project(""), []);
-    assert_eq!(projector.project("  \t"), []);
-    let events = projector.project("{not json");
+fn an_unreadable_or_drifted_complete_entry_is_an_error_and_kept() {
+    let text = "\n  \t\n{not json\n";
+    let events = project_record(text);
+    assert_eq!(events.len(), 2, "{events:?}");
     assert!(matches!(
         events[0].event,
         Event::Error(ErrorEvent {
@@ -258,11 +359,39 @@ fn an_unreadable_or_drifted_message_entry_is_an_error_and_kept() {
 
     // An assistant entry without its message: the shape drifted.
     let drifted = json!({"type": "assistant", "uuid": "a1", "requestId": "r"});
-    let events = projector.project(&drifted.to_string());
+    let events = project_record(&record(std::slice::from_ref(&drifted)));
     assert_eq!(events.len(), 2);
     assert!(events.iter().all(|e| e.message_id.as_deref() == Some("a1")));
     assert!(matches!(events[0].event, Event::Error(_)));
     assert!(matches!(&events[1].event, Event::BackendPassthrough(p) if p.payload == drifted));
+}
+
+#[test]
+fn a_half_written_last_line_is_left_for_the_next_read() {
+    let first = prompt("u1", None, "First");
+    let whole = record(&[first.clone(), reply("a1", "u1", "msg_1", "One")]);
+    // The CLI is in the middle of writing the reply.
+    let torn = &whole[..whole.len() - 20];
+    assert_eq!(
+        project_record(torn),
+        project_record(&record(&[first])),
+        "the torn line yielded something"
+    );
+}
+
+#[test]
+fn an_oversized_line_is_an_error_without_a_copy_of_it() {
+    let huge = format!(
+        "{{\"type\":\"user\",\"x\":\"{}\"}}\n",
+        "y".repeat(17 * 1024 * 1024)
+    );
+    let events = project_record(&huge);
+    assert_eq!(events.len(), 2);
+    assert!(matches!(events[0].event, Event::Error(_)));
+    let Event::BackendPassthrough(p) = &events[1].event else {
+        panic!("{:?}", events[1]);
+    };
+    assert!(p.payload.as_str().unwrap().len() <= 4096);
 }
 
 // ---------------------------------------------------------------------------
@@ -304,6 +433,7 @@ fn home_with(records: &[(&str, Vec<String>)]) -> tempfile::TempDir {
 fn titles(home: &Path) -> Vec<(String, Option<String>)> {
     list_sessions(home, CWD)
         .unwrap()
+        .sessions
         .into_iter()
         .map(|s| (s.session_id, s.title))
         .collect()
@@ -312,8 +442,9 @@ fn titles(home: &Path) -> Vec<(String, Option<String>)> {
 fn title_of(lines: Vec<String>) -> Option<String> {
     let home = home_with(&[(SESSION_A, lines)]);
     let listed = list_sessions(home.path(), CWD).unwrap();
-    assert_eq!(listed.len(), 1);
-    listed[0].title.clone()
+    assert_eq!(listed.sessions.len(), 1);
+    assert!(listed.unreadable.is_empty());
+    listed.sessions[0].title.clone()
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R16
@@ -361,18 +492,41 @@ fn a_session_is_titled_custom_then_ai_then_last_prompt_then_first_prompt() {
         .as_deref(),
         Some("Renamed")
     );
-    // Tool results and text the CLI added are not prompts.
+    // Tool results and text the CLI wrote are not prompts.
     let tool_result = json!({"type": "user", "uuid": "t", "message": {"role": "user",
         "content": [{"type": "tool_result", "tool_use_id": "x", "content": "ok"}]}})
     .to_string();
     let meta = json!({"type": "user", "uuid": "m", "isMeta": true,
         "message": {"role": "user", "content": "Caveat"}})
     .to_string();
+    let command = user("<command-name>/rename</command-name>");
+    let interrupted = user("[Request interrupted by user]");
     assert_eq!(
-        title_of(vec![meta.clone(), first.clone(), tool_result.clone()]).as_deref(),
+        title_of(vec![
+            meta.clone(),
+            first.clone(),
+            tool_result.clone(),
+            command.clone(),
+            interrupted.clone()
+        ])
+        .as_deref(),
         Some("First prompt")
     );
-    assert_eq!(title_of(vec![meta, tool_result]), None);
+    assert_eq!(
+        title_of(vec![meta, tool_result, command, interrupted]),
+        None
+    );
+}
+
+#[test]
+fn a_title_is_one_line_of_bounded_length() {
+    assert_eq!(
+        title_of(vec![user("Fix the\n\n  build   please")]).as_deref(),
+        Some("Fix the build please")
+    );
+    let long = title_of(vec![user(&"word ".repeat(100))]).unwrap();
+    assert_eq!(long.chars().count(), 201);
+    assert!(long.ends_with('…'));
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R16
@@ -406,9 +560,7 @@ fn a_line_cut_by_a_chunk_boundary_is_not_misread() {
     // the head cuts it at its end and the tail at its start, so neither reads
     // it, and nothing inside it is taken for an entry.
     let fake = format!(
-        "
-{}
-",
+        "\n{}\n",
         entry("custom-title", "customTitle", "Not a title")
     );
     let long_prompt = format!("{}{fake}", "y".repeat(80 * 1024));
@@ -418,8 +570,8 @@ fn a_line_cut_by_a_chunk_boundary_is_not_misread() {
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R16
 #[test]
-fn the_recorded_session_lists_under_its_last_prompt() {
-    // The resume fixture's record, under its own session id.
+fn the_recorded_session_lists_under_its_custom_title() {
+    // The resume fixture's record, renamed with `/rename`, under its own id.
     let record = fixtures_root().join("2.1.316/record/01-session-resume.jsonl");
     let text = fs::read_to_string(record).unwrap();
     let id = text
@@ -431,11 +583,22 @@ fn the_recorded_session_lists_under_its_last_prompt() {
         })
         .unwrap();
     let home = home_with(&[(id.as_str(), text.lines().map(String::from).collect())]);
-    let listed = list_sessions(home.path(), CWD).unwrap();
+    let listed = list_sessions(home.path(), CWD).unwrap().sessions;
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].session_id, id);
+    assert_eq!(listed[0].title.as_deref(), Some("Probe session"));
+
+    // Without its title entry, the session lists under its last prompt.
+    let untitled: Vec<String> = text
+        .lines()
+        .filter(|l| !l.contains("\"custom-title\""))
+        .map(String::from)
+        .collect();
+    let home = home_with(&[(id.as_str(), untitled)]);
     assert_eq!(
-        listed[0].title.as_deref(),
+        list_sessions(home.path(), CWD).unwrap().sessions[0]
+            .title
+            .as_deref(),
         Some("What word did you write to probe.txt? Reply with just that word.")
     );
 }
@@ -460,10 +623,44 @@ fn listing_skips_what_is_not_a_record_and_orders_newest_first() {
         .set_modified(SystemTime::now() - Duration::from_secs(3600))
         .unwrap();
 
-    let listed: Vec<SessionSummary> = list_sessions(home.path(), CWD).unwrap();
-    let ids: Vec<&str> = listed.iter().map(|s| s.session_id.as_str()).collect();
+    let listed: SessionList = list_sessions(home.path(), CWD).unwrap();
+    let ids: Vec<&str> = listed
+        .sessions
+        .iter()
+        .map(|s| s.session_id.as_str())
+        .collect();
     assert_eq!(ids, [SESSION_B, SESSION_A]);
+    assert!(listed.unreadable.is_empty());
 
     // A directory with no records at all lists nothing.
-    assert_eq!(list_sessions(home.path(), r"C:\elsewhere").unwrap(), []);
+    assert_eq!(
+        list_sessions(home.path(), r"C:\elsewhere").unwrap(),
+        SessionList::default()
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn a_record_that_cannot_be_opened_is_reported_not_dropped() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let home = home_with(&[
+        (SESSION_A, vec![user("Readable")]),
+        (SESSION_B, vec![user("Locked")]),
+    ]);
+    let locked = home
+        .path()
+        .join("projects")
+        .join(encoded_cwd(CWD))
+        .join(format!("{SESSION_B}.jsonl"));
+    // Held open with no sharing, as another program might: opening it fails
+    // with a sharing violation.
+    let _held = fs::File::options()
+        .read(true)
+        .share_mode(0)
+        .open(&locked)
+        .unwrap();
+    let listed = list_sessions(home.path(), CWD).unwrap();
+    assert_eq!(listed.sessions.len(), 1);
+    assert_eq!(listed.sessions[0].session_id, SESSION_A);
+    assert_eq!(listed.unreadable, [locked]);
 }
