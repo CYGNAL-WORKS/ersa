@@ -64,7 +64,23 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
     if !core.config.replay {
         return None;
     }
+    // Every method is listed, so a new one cannot be added without
+    // deciding whether a replay may run it: what is not known to be
+    // read-only is refused.
     let message = match method {
+        Method::CoreHello
+        | Method::CoreStatus
+        | Method::CoreShutdown
+        | Method::HostList
+        | Method::BackendList
+        | Method::ModeList
+        | Method::ProjectList
+        | Method::WorkspaceList
+        | Method::SettingsGet
+        | Method::SessionList
+        | Method::SessionSubscribe
+        | Method::SessionUnsubscribe
+        | Method::SessionRawLog => return None,
         Method::SessionCreate
         | Method::SessionStart
         | Method::SessionStop
@@ -81,8 +97,17 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::ProjectRemove
         | Method::WorkspaceCreate
         | Method::WorkspaceRemove
-        | Method::SettingsSet => "this Core is a replay server and changes nothing",
-        _ => return None,
+        | Method::SettingsSet
+        | Method::HostAdd
+        | Method::HostRemove
+        | Method::HostProbe
+        | Method::FsList
+        | Method::FsRead
+        | Method::FsDiff
+        | Method::TerminalOpen
+        | Method::TerminalInput
+        | Method::TerminalResize
+        | Method::TerminalClose => "this Core is a replay server and changes nothing",
     };
     Some(ApiError::invalid_state(format!(
         "{}: {message}",
@@ -194,7 +219,12 @@ impl Adapter for ReplayAdapter {
             let begun = tokio::time::Instant::now();
             for (at, dir, line) in lines.iter() {
                 if pace == Pace::Realtime {
-                    let due = begun + Duration::from_millis(*at);
+                    // The recording caps its times, but a time past what the
+                    // clock can hold must still not panic this task, which
+                    // would leave the session's exit unreported.
+                    let due = begun
+                        .checked_add(Duration::from_millis(*at))
+                        .unwrap_or(begun);
                     tokio::select! {
                         () = tokio::time::sleep_until(due) => {}
                         _ = stopped.wait_for(|stop| *stop) => break,

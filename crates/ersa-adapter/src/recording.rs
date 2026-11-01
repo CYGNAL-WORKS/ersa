@@ -86,7 +86,7 @@ impl Recording {
         };
         sent.iter()
             .map(|s| match (s["t"].as_u64(), s["line"].as_str()) {
-                (Some(t), Some(line)) => Ok((t, line.to_string())),
+                (Some(t), Some(line)) => Ok((checked_time(t)?, line.to_string())),
                 _ => Err(invalid("every `sent` entry needs a `t` and a `line`")),
             })
             .collect()
@@ -108,6 +108,7 @@ impl Recording {
                 .map(|t| {
                     t.as_u64()
                         .ok_or_else(|| invalid("a stdout timing is not a number"))
+                        .and_then(checked_time)
                 })
                 .collect::<io::Result<_>>()?,
             None => vec![0; self.stdout.len()],
@@ -159,6 +160,17 @@ impl Recording {
     }
 }
 
+/// The longest a recording may run, in milliseconds: a day. A later time
+/// is a broken file, and replaying it would wait for ever.
+pub const MAX_TIME_MS: u64 = 24 * 60 * 60 * 1000;
+
+fn checked_time(t: u64) -> io::Result<u64> {
+    if t > MAX_TIME_MS {
+        return Err(invalid(&format!("a time of {t} ms is past a day")));
+    }
+    Ok(t)
+}
+
 fn invalid(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.to_string())
 }
@@ -204,6 +216,23 @@ mod tests {
                 (0, Direction::Backend, "a".to_string()),
                 (0, Direction::Backend, "b".to_string())
             ]
+        );
+    }
+
+    #[test]
+    fn a_time_past_a_day_is_an_error() {
+        let r = recording(&["a"], json!({ "stdout_timing_ms": [u64::MAX] }));
+        assert_eq!(
+            r.timed_lines().unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        let r = recording(
+            &[],
+            json!({ "sent": [{ "t": MAX_TIME_MS + 1, "line": "x" }] }),
+        );
+        assert_eq!(
+            r.timed_lines().unwrap_err().kind(),
+            io::ErrorKind::InvalidData
         );
     }
 
