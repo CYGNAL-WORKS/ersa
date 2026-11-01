@@ -37,6 +37,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 - `session.started`: `backend`, `backend_version`, `model`, `cwd`, `capabilities` (string list), `backend_session_id` (optional). Projected from the backend's first announcement (Claude Code `system/init`).
 - `session.state`: `state` one of `starting`, `running`, `waiting_user`, `idle`, `disconnected`, `ended`, `error`; `reason` (optional short string). Projected from Core's lifecycle records in the raw log and from backend lines (a pending permission request means `waiting_user`).
 - `session.ended`: `reason` one of `user_stopped`, `backend_exited`, `error`; `exit_code` (optional).
+- `session.notice`: `level` one of `info`, `warning`; `code` one of `backend_version_untested`; `message`. Something the user should know that is not an error, such as a backend newer than the newest version Ersa was tested against.
 
 ### Turn
 
@@ -129,6 +130,8 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - Whether subagent trees get their own `session_id` or stay nested under `parent_tool_use_id`.
 
 ## Changes
+
+- 2026-11-01: `session.notice` added, so PROTO-CLAUDE-CODE-STREAM-R10's warning has an event. The schema stays at `v` 1, since no projection has been persisted yet.
 
 - 2026-11-01: from M0-T2 inbox: `v` is the schema version and the cache also keys on each adapter's projection version; the raw log gains `core` lifecycle records from which `session.state` and `session.ended` project; tool data is open (R08 reworded to say so, meaning unchanged); passthrough `payload` may be a string; `question.answered` value shape stated.
 
