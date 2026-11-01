@@ -64,7 +64,7 @@ A Rust library wrapped in a thin binary, running as its own process (ADR 0011). 
 - **Session manager**: the lifecycle of every session (created, starting, running, waiting on user, idle, disconnected, ended). Routes user input and permission decisions to adapters and backend output to the projection. Emits each session's lifecycle events itself and writes Core's operational records (process started, exited, failed to start, Core restarted) to the app log.
 - **Projection**: a session's history is the backend's own session record (ADR 0017). When a session is opened, Core projects the record through the adapter into Ersa events, then appends events projected from the live stream, merged on the backend's message ids. Details only the live stream carries (text as it arrives, permission prompts, turn ends, cost, rate limits) are shown and not stored. Nothing projected is stored. The raw log, the lines exchanged with a live backend since Core opened it, is held in memory for the developer pane.
 - **Adapter registry**: which backends are installed on which hosts, their versions and capabilities, and how to start them.
-- **Transport layer**: starts processes and carries their stdio on a host: local spawn, or SSH. It sets the variables a process is given and removes inherited ones it must not see, and every transport honours both. Adapters and the VCS layer run through it without knowing which one they got.
+- **Transport layer**: starts processes and carries their stdio on a host, and reads files there: local spawn, or SSH. It sets the variables a process is given and removes inherited ones it must not see, and every transport honours both. Adapters and the VCS layer run through it without knowing which one they got, so a remote host's session record and live-session registry are read on that host, as M4's remote sessions need.
 - **Workspace and VCS**: creates and destroys isolated workspaces for a project behind a VCS interface. Git worktrees first; Perforce second. Executes through the transport so remote hosts work the same way.
 - **Pack client**: fetches packs from a pack source, verifies and caches them, and renders the neutral pack definition into each installed backend's native configuration.
 - **Mode engine**: resolves a session's mode into the base instructions, allowed tools, and tool-server list handed to the adapter at start.
@@ -149,6 +149,7 @@ Verified by review at this level; testable requirements live in the protocol bri
 
 ## Changes
 
+- 2026-11-01: from #34 inbox: the transport reads files on its host as well as running processes, so a remote session's record and live-session registry are read there. No requirement IDs changed.
 - 2026-11-01: from #33 inbox: every transport removes inherited variables as well as setting them. No requirement IDs changed.
 - 2026-11-01: aligned with ADR 0017 (supersedes ADR 0010): history is the backend's session record, projected on open and merged with the live stream; nothing projected is stored; per session Ersa stores only what finds it; Core's operational records go to the app log; the raw log is in memory for the developer pane; resume open question answered. ARCH-CORE-R06 retired, ARCH-CORE-R12 added.
 
