@@ -2061,11 +2061,24 @@
     "session.subscribe.result": {
       "type": "object",
       "additionalProperties": false,
+      "required": [
+        "view"
+      ],
       "properties": {
         "last_seq": {
           "type": "integer",
           "minimum": 0,
           "description": "Absent when the session has no events yet."
+        },
+        "view": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The identity of the view the subscription reads. When it differs from the view a client's events came from, they no longer line up, and the client starts over."
+        },
+        "first_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The first event the view still holds, when it no longer holds every event from 0; a subscription from before it starts here."
         }
       }
     },
