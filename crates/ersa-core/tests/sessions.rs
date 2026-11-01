@@ -118,7 +118,7 @@ async fn events_are_numbered_from_zero_without_gaps() {
     assert_eq!(second["turn"], 2);
 }
 
-// verifies: PROTO-CORE-API-R02
+// verifies: PROTO-CORE-API-R14
 #[tokio::test(flavor = "multi_thread")]
 async fn subscribing_from_a_seq_replays_then_continues_live() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
