@@ -26,6 +26,16 @@ pub fn default_endpoint() -> io::Result<String> {
     Ok(dir.join("ersa-core.sock").to_string_lossy().into_owned())
 }
 
+/// `ersa-core-<label>.sock` beside the default socket, in the same private
+/// directory: an endpoint of this user's that is not the default, for tests
+/// and a second Core. See [`super::check_label`] for what `label` may hold.
+pub fn labelled_endpoint(label: &str) -> io::Result<String> {
+    super::check_label(label)?;
+    let default = PathBuf::from(default_endpoint()?);
+    let path = default.with_file_name(format!("ersa-core-{label}.sock"));
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// `$XDG_DATA_HOME/ersa`, or `~/.local/share/ersa`.
 pub fn default_data_dir() -> Option<PathBuf> {
     if let Some(dir) = std::env::var_os("XDG_DATA_HOME") {

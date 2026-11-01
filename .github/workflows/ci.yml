@@ -276,12 +276,8 @@ jobs:
           cargo clippy --manifest-path apps/shell/src-tauri/Cargo.toml --all-targets --locked -- -D warnings
 
       # bash, so a failed build stops the step (PowerShell would go on).
-      # ERSA_SHELL_TEST_USER_PIPE: the runner has no Core of its own, so the
-      # launch test may use this user's pipe (apps/shell/src-tauri/tests/bridge.rs).
       - name: Shell test
         shell: bash
-        env:
-          ERSA_SHELL_TEST_USER_PIPE: "1"
         run: |
           cargo build -p ersa-cli --locked
           cargo test --manifest-path apps/shell/src-tauri/Cargo.toml --locked

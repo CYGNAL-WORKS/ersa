@@ -5,12 +5,11 @@
 //! Needs the `ersa-core` executable: `ERSA_CORE_BIN`, or the root workspace's
 //! debug build (`cargo build -p ersa-cli` at the repository root).
 //!
-//! On Windows `serve` cannot be given a private pipe name yet, so the launch
-//! test would use the user's own and could stop their Core. It runs only when
-//! `ERSA_SHELL_TEST_USER_PIPE=1` says that is fine (CI sets it).
+//! Each test's Core serves an endpoint of its own (`serve --endpoint`), so
+//! the tests never reach or stop the user's own Core.
 
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use ersa_shell::bridge::{BridgeError, CoreLink, LinkEvent, LinkOptions};
@@ -35,38 +34,27 @@ fn core_program() -> PathBuf {
     program
 }
 
-#[cfg(unix)]
-fn private_dir(path: &Path) {
-    use std::os::unix::fs::DirBuilderExt;
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(path)
-        .expect("a private directory");
-}
-
-#[cfg(not(unix))]
-fn private_dir(_path: &Path) {}
-
-/// A Core location private to this test. On Unix the socket goes in the
-/// temporary directory, through the `XDG_RUNTIME_DIR` Core reads. Windows has
-/// no such override, so the test uses the user's own pipe name and expects no
-/// Core to be running there.
+/// A Core location private to this test: an endpoint labelled with the
+/// process id and a counter, which `serve` is told to use, and a data
+/// directory in `dir`.
 fn private_location(dir: &Path) -> CoreLocation {
-    let mut env: Vec<(OsString, OsString)> = Vec::new();
-    let endpoint = if cfg!(unix) {
-        // Core serves only from a directory the user alone may enter.
-        let run = dir.join("run");
-        private_dir(&run);
-        env.push(("XDG_RUNTIME_DIR".into(), run.as_os_str().to_owned()));
-        run.join("ersa-core.sock").to_string_lossy().into_owned()
-    } else {
-        ersa_core::platform::default_endpoint().expect("the default endpoint")
-    };
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let label = format!(
+        "shell-test-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
+    let endpoint = ersa_core::platform::labelled_endpoint(&label).expect("an endpoint");
     CoreLocation {
         program: core_program(),
-        endpoint,
-        serve_args: vec!["--data-dir".into(), dir.join("data").into_os_string()],
-        env,
+        endpoint: endpoint.clone(),
+        serve_args: vec![
+            "--endpoint".into(),
+            endpoint.into(),
+            "--data-dir".into(),
+            dir.join("data").into_os_string(),
+        ],
+        env: Vec::new(),
         log_file: Some(dir.join("core.log")),
         start_timeout: Duration::from_secs(60),
     }
@@ -78,27 +66,13 @@ async fn open(location: &CoreLocation) -> (CoreLink, How, mpsc::UnboundedReceive
         .unwrap_or_else(|e| panic!("attach, launch or handshake failed: {e}"))
 }
 
-/// Whether the launch test may use this user's real pipe (Windows only).
-fn may_use_user_pipe() -> bool {
-    cfg!(unix) || std::env::var_os("ERSA_SHELL_TEST_USER_PIPE").is_some_and(|v| v == "1")
-}
-
 #[tokio::test]
 async fn launches_core_then_attaches_and_round_trips_requests() {
-    if !may_use_user_pipe() {
-        eprintln!("skipped: set ERSA_SHELL_TEST_USER_PIPE=1 to run against this user's pipe");
-        return;
-    }
     let dir = tempfile::tempdir().expect("temp dir");
     let location = private_location(dir.path());
 
     let (link, how, _events) = open(&location).await;
-    assert_eq!(
-        how,
-        How::Launched,
-        "a Core was already serving {}; stop it and run the test again",
-        location.endpoint
-    );
+    assert_eq!(how, How::Launched, "{} is this test's alone", location.endpoint);
 
     // Run the checks as their own task so that, if one fails, the Core this
     // test launched is still stopped rather than left running.
@@ -199,11 +173,6 @@ async fn a_core_that_cannot_start_is_reported_with_its_output() {
     let mut location = private_location(dir.path());
     // An argument `serve` does not take: clap prints an error and exits.
     location.serve_args = vec!["--no-such-flag".into()];
-    if cfg!(windows) {
-        // On Windows the endpoint is the user's real one; use a private name
-        // that nothing serves so a running Core cannot answer instead.
-        location.endpoint = format!(r"\\.\pipe\ersa-shell-test-{}", std::process::id());
-    }
     // An earlier run's output is in the shared log; the error must not show it.
     let log = location.log_file.clone().expect("a log file");
     std::fs::write(&log, "a line from an earlier run\n").expect("seed the log");

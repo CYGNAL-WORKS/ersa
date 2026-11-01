@@ -10,7 +10,7 @@ mod support;
 use std::path::Path;
 use std::process::Command;
 
-use ersa_core::platform::{canonicalize, default_endpoint, path_key};
+use ersa_core::platform::{canonicalize, default_endpoint, labelled_endpoint, path_key};
 
 /// The current user's SID, as Windows itself reports it.
 fn current_sid() -> String {
@@ -29,6 +29,15 @@ fn current_sid() -> String {
 fn the_endpoint_names_the_user_by_sid() {
     let endpoint = default_endpoint().expect("endpoint");
     assert_eq!(endpoint, format!(r"\\.\pipe\ersa-core-{}", current_sid()));
+}
+
+#[test]
+fn a_labelled_endpoint_is_the_users_pipe_with_the_label() {
+    let endpoint = labelled_endpoint("second").expect("endpoint");
+    assert_eq!(
+        endpoint,
+        format!(r"\\.\pipe\ersa-core-{}-second", current_sid())
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
