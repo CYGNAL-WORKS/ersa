@@ -58,8 +58,8 @@ pub enum PermissionDecision {
     #[serde(rename_all = "camelCase")]
     Allow {
         /// The tool input to run with: the original, or the user's edit of it.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        updated_input: Option<Value>,
+        /// Always sent, per the brief, so it is not optional here.
+        updated_input: Value,
         /// Suggestions the user accepted ("allow for this session").
         #[serde(default, skip_serializing_if = "Option::is_none")]
         updated_permissions: Option<Vec<PermissionUpdate>>,

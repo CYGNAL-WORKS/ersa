@@ -13,6 +13,11 @@ pub enum HostMessage {
     User(UserInput),
     ControlRequest(HostControlRequest),
     ControlResponse(HostControlResponse),
+    /// Withdraws one of the host's own in-flight control requests; the CLI
+    /// stops working on it and the host ignores any late answer.
+    ControlCancelRequest {
+        request_id: String,
+    },
 }
 
 impl HostMessage {
