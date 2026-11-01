@@ -27,18 +27,38 @@ pub const MAX_PROCESS_LINE_BYTES: usize = 64 * 1024 * 1024;
 #[derive(Debug, Clone, Copy)]
 pub struct LocalTreeTransport {
     max_line_bytes: usize,
+    /// Whether what a process leaves running is killed when Core lets go of
+    /// it, not only when it is killed.
+    kill_on_drop: bool,
 }
 
 impl LocalTreeTransport {
+    /// For backends: a session that has ended leaves nothing behind, and
+    /// neither does a Core that dies.
     pub fn new() -> Self {
         LocalTreeTransport {
             max_line_bytes: MAX_PROCESS_LINE_BYTES,
+            kill_on_drop: true,
+        }
+    }
+
+    /// For short commands (git, version checks): the tree is killed only when
+    /// the command is, on a timeout. A command that finishes may leave a
+    /// helper it means to keep, such as git's file-system monitor or a
+    /// credential cache.
+    pub fn for_commands() -> Self {
+        LocalTreeTransport {
+            kill_on_drop: false,
+            ..LocalTreeTransport::new()
         }
     }
 
     /// A transport with a different line cap, for tests.
     pub fn with_max_line_bytes(max_line_bytes: usize) -> Self {
-        LocalTreeTransport { max_line_bytes }
+        LocalTreeTransport {
+            max_line_bytes,
+            ..LocalTreeTransport::new()
+        }
     }
 }
 
@@ -69,7 +89,7 @@ impl Transport for LocalTreeTransport {
         ProcessTree::prepare(&mut command);
 
         let mut child = command.spawn()?;
-        let tree = match ProcessTree::adopt(&child) {
+        let tree = match ProcessTree::adopt(&child, self.kill_on_drop) {
             Ok(tree) => Arc::new(tree),
             Err(e) => {
                 // A child Core cannot kill as a tree is not one to keep.

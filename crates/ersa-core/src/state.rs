@@ -76,6 +76,8 @@ pub struct Core {
     /// Every session, and the adapters that start them.
     pub sessions: SessionManager,
     local_transport: Arc<dyn Transport>,
+    /// The local transport for backends, whose leftovers die with them.
+    local_session_transport: Arc<dyn Transport>,
     host_name: String,
     started: Instant,
     /// The last backend detection for the local host and when it ran. Kept
@@ -96,7 +98,8 @@ impl Core {
             config,
             sessions: SessionManager::new(store.clone(), adapters),
             store,
-            local_transport: Arc::new(LocalTreeTransport::new()),
+            local_transport: Arc::new(LocalTreeTransport::for_commands()),
+            local_session_transport: Arc::new(LocalTreeTransport::new()),
             host_name: platform::host_name(),
             started: Instant::now(),
             local_backends: Mutex::new(None),
@@ -123,6 +126,13 @@ impl Core {
     /// an SSH transport here.
     pub fn transport_for(&self, host_id: &str) -> Option<Arc<dyn Transport>> {
         (host_id == LOCAL_HOST_ID).then(|| Arc::clone(&self.local_transport))
+    }
+
+    /// The transport backends on `host_id` are started through: like
+    /// [`Core::transport_for`], except that everything a backend started is
+    /// killed when its session ends.
+    pub fn session_transport_for(&self, host_id: &str) -> Option<Arc<dyn Transport>> {
+        (host_id == LOCAL_HOST_ID).then(|| Arc::clone(&self.local_session_transport))
     }
 
     /// The backends detected on the local host, detecting again when the

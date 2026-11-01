@@ -394,11 +394,12 @@ fn wide(s: &str) -> Vec<u16> {
 /// (`ARCH-CORE`, Boundaries: stopped sessions leave no orphans).
 ///
 /// On Windows that unit is a job object. Every process the child starts
-/// joins the job too, unless it explicitly breaks away, and the job is set to
-/// kill everything in it when its last handle closes. So dropping a
-/// `ProcessTree` kills the tree, and so does Core dying: Windows closes the
-/// handle then, which keeps a crashed Core from leaving backends, and the dev
-/// servers they started, running with nobody to stop them.
+/// joins the job too, unless it explicitly breaks away. Made with
+/// `kill_on_drop`, the job kills everything in it when its last handle
+/// closes. Then dropping a `ProcessTree` kills the tree, and so does Core
+/// dying: Windows closes the handle then, which keeps a crashed Core from
+/// leaving backends, and the dev servers they started, running with nobody
+/// to stop them.
 pub struct ProcessTree {
     job: HANDLE,
 }
@@ -427,10 +428,10 @@ impl ProcessTree {
         command.env("NoDefaultCurrentDirectoryInExePath", "1");
     }
 
-    /// Puts a just-spawned, suspended `child` in a new job that dies with its
-    /// handle, then lets it run. On an error the child is still suspended,
-    /// and the caller kills it.
-    pub fn adopt(child: &tokio::process::Child) -> io::Result<ProcessTree> {
+    /// Puts a just-spawned, suspended `child` in a new job, which with
+    /// `kill_on_drop` dies with its handle, then lets it run. On an error the
+    /// child is still suspended, and the caller kills it.
+    pub fn adopt(child: &tokio::process::Child, kill_on_drop: bool) -> io::Result<ProcessTree> {
         use windows_sys::Win32::System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
             JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
@@ -451,7 +452,9 @@ impl ProcessTree {
         let tree = ProcessTree { job };
 
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if kill_on_drop {
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        }
         // SAFETY: `limits` is the structure this information class expects,
         // and the size passed is its size.
         let ok = unsafe {
@@ -493,7 +496,8 @@ impl ProcessTree {
 impl Drop for ProcessTree {
     fn drop(&mut self) {
         // SAFETY: the handle came from CreateJobObjectW and is closed exactly
-        // once, here. Closing the last handle kills what is left in the job.
+        // once, here. With kill-on-close set, closing the last handle kills
+        // what is left in the job.
         unsafe { CloseHandle(self.job) };
     }
 }
