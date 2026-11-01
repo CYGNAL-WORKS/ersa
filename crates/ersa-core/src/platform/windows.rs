@@ -244,7 +244,7 @@ fn verify_server(client: &NamedPipeClient, endpoint: &str) -> io::Result<()> {
     let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
     if process.is_null() {
         let e = io::Error::last_os_error();
-        return Err(denied(format!("cannot inspect the serving process ({e})")));
+        return Err(denied(cannot_inspect(e)));
     }
     let mut token: HANDLE = ptr::null_mut();
     // SAFETY: `process` is the handle opened above, closed right after.
@@ -253,9 +253,7 @@ fn verify_server(client: &NamedPipeClient, endpoint: &str) -> io::Result<()> {
     unsafe { CloseHandle(process) };
     if opened == 0 {
         let e = io::Error::last_os_error();
-        return Err(denied(format!(
-            "cannot read the serving process's user ({e})"
-        )));
+        return Err(denied(cannot_inspect(e)));
     }
     let server_sid = sid_of_token(token);
     // SAFETY: `token` is the handle opened above.
@@ -264,6 +262,18 @@ fn verify_server(client: &NamedPipeClient, endpoint: &str) -> io::Result<()> {
         return Err(denied("it is served by another user's process".into()));
     }
     Ok(())
+}
+
+/// Why the serving process could not be inspected. Access denied almost
+/// always means it runs elevated (as administrator) while this client does
+/// not: an elevated process's token is closed to unelevated processes, even
+/// the same user's. The check stays strict; the message says what to do.
+fn cannot_inspect(e: io::Error) -> String {
+    if e.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) {
+        "Core is running elevated; run the Shell elevated too, or restart Core normally".into()
+    } else {
+        format!("cannot read the serving process's user ({e})")
+    }
 }
 
 /// A security descriptor allocated by Windows, freed on drop.

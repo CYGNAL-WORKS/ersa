@@ -408,3 +408,154 @@ async fn interrupted_workspaces_become_error_at_startup() {
             .await;
     }
 }
+
+/// The worktree's administrative folder inside the repository
+/// (`.git/worktrees/<name>`), where git keeps its lock file.
+fn admin_dir(worktree: &Path) -> std::path::PathBuf {
+    let git_dir = git(worktree, &["rev-parse", "--absolute-git-dir"]);
+    std::path::PathBuf::from(git_dir.trim())
+}
+
+/// Sets a workspace's row state directly, as a Core that died would leave it.
+async fn set_state(core: &TestCore, id: &Value, state: &'static str) {
+    let db = core.dir.path().join("data").join("ersa.db");
+    let store = ersa_core::persistence::Store::open(&db).expect("open");
+    let id = id.as_str().unwrap().to_string();
+    store
+        .call(move |conn| {
+            conn.execute(
+                "UPDATE workspaces SET state = ?2 WHERE id = ?1",
+                [id.as_str(), state],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("update");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_killed_add_leaves_a_lock_that_only_an_error_workspace_overrides() {
+    let (core, mut client, repo) = setup().await;
+    let project = add_project(&mut client, &repo).await;
+    let workspace = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    let path = Path::new(workspace["path"].as_str().unwrap()).to_path_buf();
+    // What `git worktree add` leaves when it is killed before finishing.
+    std::fs::write(admin_dir(&path).join("locked"), "initializing").unwrap();
+
+    // On a workspace that finished, that lock is a lock like any other.
+    let error = client
+        .error(
+            "workspace.remove",
+            json!({ "id": workspace["id"], "force": true }),
+        )
+        .await;
+    assert_eq!(kind(&error), "vcs_error");
+    assert!(path.exists());
+
+    // On one that never finished (`error`), it is the add's leftover.
+    set_state(&core, &workspace["id"], "error").await;
+    client
+        .result("workspace.remove", json!({ "id": workspace["id"] }))
+        .await;
+    assert!(!path.exists(), "the half-made worktree is gone");
+    let listed = git(&repo, &["worktree", "list", "--porcelain"]);
+    assert!(
+        !listed.contains(workspace["id"].as_str().unwrap()),
+        "{listed}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn discarding_overrides_an_initializing_lock() {
+    let (_core, mut client, repo) = setup().await;
+    let project = add_project(&mut client, &repo).await;
+    let workspace = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    let path = workspace["path"].as_str().unwrap();
+    std::fs::write(admin_dir(Path::new(path)).join("locked"), "initializing").unwrap();
+
+    let repo_text = repo.display().to_string();
+    ersa_core::workspace::git_worktree_discard(&ersa_adapter::LocalTransport, &repo_text, path)
+        .await
+        .expect("discarded");
+    assert!(!Path::new(path).exists());
+}
+
+/// Makes `link` lead to `target`: a junction on Windows, a symbolic link
+/// elsewhere.
+fn link_dir(target: &Path, link: &Path) {
+    #[cfg(windows)]
+    {
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .expect("mklink runs");
+        assert!(status.status.success(), "{status:?}");
+    }
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).expect("symlink");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workspaces_root_behind_a_link_still_removes_cleanly() {
+    let (core, mut client, repo) = setup().await;
+    let real = core.dir.path().join("real");
+    std::fs::create_dir_all(&real).unwrap();
+    let link = core.dir.path().join("link");
+    link_dir(&real, &link);
+    let root = link.join("worktrees").display().to_string();
+    client
+        .result(
+            "settings.set",
+            json!({ "patch": { "workspaces": { "root": root } } }),
+        )
+        .await;
+
+    let project = add_project(&mut client, &repo).await;
+    let workspace = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    let path = Path::new(workspace["path"].as_str().unwrap()).to_path_buf();
+    let canonical_real = ersa_core::platform::canonicalize(&real).unwrap();
+    assert!(
+        path.starts_with(&canonical_real),
+        "stored through the real folder, as git reports it: {}",
+        path.display()
+    );
+
+    client
+        .result("workspace.remove", json!({ "id": workspace["id"] }))
+        .await;
+    assert!(
+        !path.exists(),
+        "removed from disk, not just from the database"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_git_does_not_list_is_refused_not_reported_removed() {
+    let (_core, mut client, repo) = setup().await;
+    let project = add_project(&mut client, &repo).await;
+    let workspace = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    let path = Path::new(workspace["path"].as_str().unwrap()).to_path_buf();
+    // git forgets the worktree; its folder stays.
+    std::fs::remove_dir_all(admin_dir(&path)).unwrap();
+
+    let error = client
+        .error("workspace.remove", json!({ "id": workspace["id"] }))
+        .await;
+    assert_eq!(kind(&error), "vcs_error");
+    assert!(error["message"].as_str().unwrap().contains("does not list"));
+    assert!(path.exists());
+    let listed = client
+        .result("workspace.list", json!({ "project_id": project["id"] }))
+        .await;
+    assert_eq!(listed, json!([workspace]), "kept, in the state it had");
+}
