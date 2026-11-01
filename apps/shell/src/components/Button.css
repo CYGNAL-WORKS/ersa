@@ -1,0 +1,38 @@
+/* A quiet button: surface and line, never a filled accent. `data-force` lets the gallery show a state without a pointer. */
+
+.button {
+  font: inherit;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs) var(--space-sm);
+  cursor: pointer;
+}
+
+/* Hover darkens the edge as well as the fill: surface-raised alone barely differs from surface. */
+.button:hover:not(:disabled),
+.button[data-force="hover"] {
+  background: var(--color-surface-raised);
+  border-color: var(--color-ink-faint);
+}
+
+.button:active:not(:disabled),
+.button[data-force="pressed"] {
+  background: var(--color-canvas);
+  border-color: var(--color-ink-muted);
+}
+
+/* Focus takes the accent, the colour of the thing you can act on: edge and label. */
+.button:focus-visible,
+.button[data-force="focus"] {
+  outline: none;
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* Disabled keeps the default fill and loses the edge's weight and the text's ink. */
+.button:disabled {
+  color: var(--color-ink-faint);
+  cursor: default;
+}
