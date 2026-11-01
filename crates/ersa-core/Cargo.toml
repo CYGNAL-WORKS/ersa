@@ -1,0 +1,17 @@
+[package]
+name = "ersa-core"
+description = "Ersa's domain: sessions, raw logs and projections, adapters, transports, workspaces, packs, modes, harness tools, and persistence."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+# Used only by tests/boundaries.rs to read the workspace's Cargo.lock.
+toml.workspace = true
+
+[lints]
+workspace = true
