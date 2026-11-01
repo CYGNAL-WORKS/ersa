@@ -9,9 +9,10 @@ You are an implementing session. The ticket text you were given is the task; thi
 
 ## 1. Orient
 
+- The ticket is a GitHub issue (ADR 0016). Read it in full, comments included: `gh issue view <n> --comments`. Check its blockers are closed (`docs/agents/issue-tracker.md`, **Count open blockers**); if one is open, stop and say so. If you were given the ticket as text instead, treat that text as the issue.
 - Read `CLAUDE.md`, then every brief and ADR the ticket names. Read the `## Changes` section of each brief: recent decisions live there.
 - Confirm you are in your own git worktree on a branch named for the ticket, never on `main`: `git status -sb`. If you are on `main` or in the shared checkout, stop and say so.
-- Find related open issues: `gh issue list --state open --search "<two or three key words>"`. Note any that the change fixes or touches; they go in the pull request.
+- Find other related open issues: `gh issue list --state open --search "<two or three key words>"`. Note any that the change also fixes or touches; they go in the pull request.
 
 ## 2. Build
 
@@ -43,6 +44,6 @@ When the ticket's scope is built and `node scripts/check.mjs --quick` passes:
    - **Requirements**: the IDs implemented and where each is verified.
    - **Review**: each confirmed finding and how it was fixed; dismissed findings with one-line reasons; follow-ups.
    - **Inbox entries** added, verbatim.
-   - **Related issues**: `Fixes #n` or `Refs #n`, if any.
+   - **Related issues**: `Fixes #<ticket>` for the ticket itself, then `Fixes #n` or `Refs #n` for any others.
    - **Checks**: what you ran locally, and anything you could not run (such as a live test).
 4. End your turn with a short report: the pull request link, the check results, and anything the orchestration session must decide. Then stop. Do not push to the branch again unless asked; if asked, `git pull` first, since the orchestration session may have pushed a planning commit.
