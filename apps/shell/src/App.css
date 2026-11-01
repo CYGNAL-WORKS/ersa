@@ -24,7 +24,7 @@
 .stage {
   display: grid;
   place-items: center;
-  color: var(--color-ink-faint);
+  color: var(--color-ink-muted);
   font-family: var(--type-prose-family);
   font-size: var(--type-prose-size);
   line-height: var(--type-prose-leading);

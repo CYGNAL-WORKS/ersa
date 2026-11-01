@@ -13,7 +13,7 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 # Keep in step with @playwright/test in package.json and the CI job's container.
-image="mcr.microsoft.com/playwright:v1.64.1-noble"
+image="mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea"
 update="${1:-}"
 
 docker run --rm \
