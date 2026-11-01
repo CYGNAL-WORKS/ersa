@@ -16,6 +16,7 @@ use super::lines::{CappedLines, LineError};
 use super::{After, ConnectionState};
 use crate::persistence::{self, Store};
 use crate::platform::{self, BoxStream, Listener};
+use crate::replay::Replay;
 use crate::state::{Core, CoreConfig};
 
 /// How many outgoing lines may queue for one client before writers wait.
@@ -59,6 +60,8 @@ pub enum ServeError {
     DataDir { path: String, source: io::Error },
     #[error("could not open the database: {0}")]
     Database(#[from] persistence::Error),
+    #[error("could not start the replay: {0}")]
+    Replay(crate::sessions::SessionError),
 }
 
 /// A bound server, ready to [`run`](Server::run).
@@ -114,6 +117,21 @@ impl Server {
             core: Arc::new(core),
             listener,
         })
+    }
+
+    /// A replay server (`replay`): Core, bound as [`Server::bind_with`]
+    /// binds it, serving one session fed from a recording. It refuses every
+    /// request that would change anything. Its data directory should be
+    /// fresh: the replay adds a project and a session to it each time.
+    pub async fn bind_replay(mut config: CoreConfig, replay: Replay) -> Result<Server, ServeError> {
+        config.replay = true;
+        // The recorded backend's adapter is registered too, so anything that
+        // looks a session's backend up by name finds its projector.
+        let server = Server::bind_with(config, vec![Arc::clone(&replay.adapter)]).await?;
+        crate::replay::start(&server.core, replay)
+            .await
+            .map_err(ServeError::Replay)?;
+        Ok(server)
     }
 
     /// The shared state, for embedding Core in-process (tests).

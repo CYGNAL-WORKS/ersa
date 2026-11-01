@@ -24,6 +24,7 @@ pub mod packs;
 pub mod persistence;
 pub mod platform;
 pub mod raw_log;
+pub mod replay;
 pub mod sessions;
 pub mod settings;
 pub mod state;

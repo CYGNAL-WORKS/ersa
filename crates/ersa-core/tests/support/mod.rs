@@ -8,6 +8,7 @@
 // Each test file compiles this module separately and uses a different part of it.
 #![allow(dead_code)]
 
+pub mod claude;
 pub mod fake;
 pub mod procs;
 
