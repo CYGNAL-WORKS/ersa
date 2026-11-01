@@ -6,9 +6,10 @@
 //! host's transport.
 
 use std::io;
+use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_adapter::{ProcessSpec, Transport};
+use ersa_adapter::{Adapter, ProcessSpec, Transport};
 use ersa_protocol::core_api::{BackendInfo, BackendState, BackendStatus};
 
 use crate::transport::{self, RunError};
@@ -70,11 +71,25 @@ impl Detected {
 /// Detects every known backend on the host behind `transport`, running
 /// `<program> --version` for each. `program_override` replaces each backend's
 /// program, which tests use to point at a binary that does not exist.
-pub async fn detect(transport: &dyn Transport, program_override: Option<&str>) -> Vec<Detected> {
+/// `adapter_for` names the adapter registered for a backend, whose
+/// environment the check runs with, so the version reported is that of the
+/// backend its sessions will run.
+pub async fn detect(
+    transport: &dyn Transport,
+    program_override: Option<&str>,
+    adapter_for: impl Fn(&str) -> Option<Arc<dyn Adapter>>,
+) -> Vec<Detected> {
     let mut found = Vec::new();
     for backend in KNOWN_BACKENDS {
-        let program = program_override.unwrap_or(backend.program);
-        let (version, state) = match version_of(transport, program).await {
+        let mut spec = ProcessSpec {
+            program: program_override.unwrap_or(backend.program).to_string(),
+            args: vec!["--version".to_string()],
+            ..ProcessSpec::default()
+        };
+        if let Some(adapter) = adapter_for(backend.name) {
+            adapter.set_environment(&mut spec);
+        }
+        let (version, state) = match version_of(transport, spec).await {
             Ok(Some(version)) => (Some(version), BackendState::Available),
             Ok(None) => (None, BackendState::Error),
             Err(RunError::Spawn(e)) if e.kind() == io::ErrorKind::NotFound => {
@@ -94,14 +109,12 @@ pub async fn detect(transport: &dyn Transport, program_override: Option<&str>) -
     found
 }
 
-/// The version `program --version` prints, or `None` when it ran but exited
-/// with an error or printed nothing usable.
-async fn version_of(transport: &dyn Transport, program: &str) -> Result<Option<String>, RunError> {
-    let spec = ProcessSpec {
-        program: program.to_string(),
-        args: vec!["--version".to_string()],
-        ..ProcessSpec::default()
-    };
+/// The version the `--version` command `spec` prints, or `None` when it ran
+/// but exited with an error or printed nothing usable.
+async fn version_of(
+    transport: &dyn Transport,
+    spec: ProcessSpec,
+) -> Result<Option<String>, RunError> {
     let output = transport::run(transport, spec, VERSION_TIMEOUT).await?;
     if !output.exit.success() {
         return Ok(None);
@@ -137,8 +150,34 @@ mod tests {
         let found = detect(
             &ersa_adapter::LocalTransport,
             Some("ersa-no-such-program-xyz"),
+            |_| None,
         )
         .await;
         assert!(found.iter().all(|d| d.state == BackendState::Missing));
+    }
+
+    // verifies: PROTO-CLAUDE-CODE-STREAM-R19
+    #[tokio::test]
+    async fn the_version_check_runs_with_the_adapters_environment() {
+        let transport = ersa_adapter::fake::FakeTransport::new(["2.1.316 (Claude Code)"]);
+        let claude: Arc<dyn Adapter> = Arc::new(ersa_adapter_claude::ClaudeAdapter::new());
+        let found = detect(&transport, None, |backend| {
+            (backend == claude.backend()).then(|| claude.clone())
+        })
+        .await;
+        assert_eq!(found[0].version.as_deref(), Some("2.1.316"));
+
+        let mut session = ProcessSpec::default();
+        claude.set_environment(&mut session);
+        let check = &transport.spawned()[0];
+        assert_eq!(check.args, ["--version"]);
+        assert_eq!(check.env, session.env);
+        assert_eq!(check.env_remove, session.env_remove);
+        assert!(
+            check
+                .env_remove
+                .iter()
+                .any(|n| n == "CLAUDE_CODE_SESSION_ID")
+        );
     }
 }

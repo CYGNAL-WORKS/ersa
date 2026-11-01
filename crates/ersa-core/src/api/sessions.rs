@@ -88,6 +88,9 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         // default, passed explicitly by the adapter.
         permission_mode: String::new(),
         model: None,
+        // The project's own configuration loads only when the user trusts
+        // it (ADR 0018).
+        project_trusted: project.trusted,
         extra: Value::Null,
     };
     Ok(core

@@ -116,12 +116,8 @@ pub fn invocation_args(config: &SessionConfig) -> Vec<String> {
         "--verbose",
         "--permission-mode",
         mode,
-        // Load the user's, project's and local settings, and (with no
-        // `--strict-mcp-config`) the user's MCP servers, as the VS Code
-        // extension does: an Ersa session is an ordinary Claude Code
-        // session (ADR 0017, PROTO-CLAUDE-CODE-STREAM-R12).
         "--setting-sources",
-        "user,project,local",
+        setting_sources(config),
         // Permission prompts arrive as `can_use_tool` control requests.
         "--permission-prompt-tool",
         "stdio",
@@ -140,6 +136,27 @@ pub fn invocation_args(config: &SessionConfig) -> Vec<String> {
     args
 }
 
+/// Which settings files the CLI loads. A trusted project's session loads the
+/// user's, the project's and the local settings, and (with no
+/// `--strict-mcp-config`) the user's and the project's MCP servers, as the VS
+/// Code extension does: an ordinary Claude Code session (ADR 0017,
+/// PROTO-CLAUDE-CODE-STREAM-R12).
+///
+/// An untrusted project's session loads the user's settings only. With
+/// `project` and `local` left out, the CLI reads none of the workspace's
+/// `.claude/settings*.json` (so none of its hooks, rules or permission mode)
+/// and starts none of its `.mcp.json` servers, even when the user's settings
+/// enable them, while the user's own settings and MCP servers still load
+/// (observed on 2.1.316; PROTO-CLAUDE-CODE-STREAM-R18, ADR 0018). Headless,
+/// the CLI never asks whether to trust a folder, so this is the only gate.
+fn setting_sources(config: &SessionConfig) -> &'static str {
+    if config.project_trusted {
+        "user,project,local"
+    } else {
+        "user"
+    }
+}
+
 /// The child's environment: Ersa names itself as the entrypoint, so the CLI
 /// lists its sessions in the terminal picker and VS Code rather than hiding
 /// them as SDK sessions (PROTO-CLAUDE-CODE-STREAM-R13, ADR 0017).
@@ -150,16 +167,31 @@ fn entrypoint_env() -> BTreeMap<String, String> {
 /// Variables that would carry whatever started Ersa into the session: a
 /// Claude Code (or Claude Desktop) parent marks its children as nested
 /// sessions, Node options change how the CLI runs, and trace context would
-/// file the session under the parent's trace. `CLAUDE_CODE_ENTRYPOINT` is
-/// removed too and then set by `entrypoint_env`: transports apply removals
-/// first, so the parent's value never reaches the child.
-const INHERITED_VARIABLES: [&str; 6] = [
+/// file the session under the parent's trace (PROTO-CLAUDE-CODE-STREAM-R13).
+/// `CLAUDE_CODE_ENTRYPOINT` is removed too and then set by `entrypoint_env`:
+/// transports apply removals first, so the parent's value never reaches the
+/// child.
+///
+/// The rest tie a process to another host's session, seen when Ersa is
+/// started from inside Claude Desktop or a VS Code terminal: the session it
+/// belongs to, the host's messaging channel and IDE connection, the SDK that
+/// started it (PROTO-CLAUDE-CODE-STREAM-R19). Variables that configure
+/// Claude Code itself (its provider, limits, configuration folder) stay, as
+/// they do in the user's terminal.
+const INHERITED_VARIABLES: [&str; 13] = [
     "CLAUDECODE",
     "CLAUDE_CODE_CHILD_SESSION",
     "CLAUDE_CODE_ENTRYPOINT",
     "NODE_OPTIONS",
     "TRACEPARENT",
     "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION",
 ];
 
 /// Which `claude` to run: `extra.claude_path` from the session config, else the
@@ -210,6 +242,12 @@ impl Adapter for ClaudeAdapter {
         crate::BACKEND
     }
 
+    fn set_environment(&self, spec: &mut ProcessSpec) {
+        spec.env_remove
+            .extend(INHERITED_VARIABLES.map(String::from));
+        spec.env.extend(entrypoint_env());
+    }
+
     async fn start(
         &self,
         transport: Arc<dyn Transport>,
@@ -223,9 +261,9 @@ impl Adapter for ClaudeAdapter {
             program: program(&config),
             args: invocation_args(&config),
             cwd: (!config.cwd.is_empty()).then(|| config.cwd.clone()),
-            env: entrypoint_env(),
-            env_remove: INHERITED_VARIABLES.map(String::from).to_vec(),
+            ..ProcessSpec::default()
         };
+        self.set_environment(&mut spec);
         spec.args.extend(resume);
         let program = spec.program.clone();
         let mut process = transport.spawn(spec).await.map_err(|e| {

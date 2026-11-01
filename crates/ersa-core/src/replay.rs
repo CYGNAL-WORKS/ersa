@@ -96,6 +96,7 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::SessionSetTitle
         | Method::SessionSetMode => "the session is a replay of a recording and cannot change",
         Method::ProjectAdd
+        | Method::ProjectSetTrust
         | Method::ProjectRemove
         | Method::WorkspaceCreate
         | Method::WorkspaceRemove
@@ -140,6 +141,8 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         path: path.clone(),
         name: title.clone(),
         vcs: Vcs::None,
+        // A recording runs no configuration, so there is nothing to trust.
+        trusted: false,
     };
     core.store
         .insert_project(project.clone(), path.clone())
@@ -169,6 +172,7 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         cwd: path,
         permission_mode: String::new(),
         model: None,
+        project_trusted: false,
         extra: Value::Null,
     };
     core.sessions
