@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { ProjectsView } from "../core/connection";
 import type { Project } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
@@ -26,8 +26,20 @@ interface ProjectListProps {
 export function ProjectList({ view, onNewSession, starting = {}, onSetTrust, trusting = {}, initialAsking, children }: ProjectListProps) {
   // The project whose trust question is showing, if any.
   const [asking, setAsking] = useState(initialAsking);
+  // Once a question closes, focus returns to the button that opened it, enabled again by then.
+  const list = useRef<HTMLElement>(null);
+  const closedFor = useRef<string>(undefined);
+  const close = (id: string) => {
+    closedFor.current = id;
+    setAsking(undefined);
+  };
+  useEffect(() => {
+    const id = closedFor.current;
+    closedFor.current = undefined;
+    if (id) list.current?.querySelector<HTMLElement>(`[data-trust-for="${CSS.escape(id)}"]`)?.focus();
+  }, [asking]);
   return (
-    <section className="projects" aria-label="Projects">
+    <section ref={list} className="projects" aria-label="Projects">
       <h2 className="projects-header">
         <span>Projects</span>
         {view.state === "ready" && <span className="readout">{view.projects.length}</span>}
@@ -69,12 +81,12 @@ export function ProjectList({ view, onNewSession, starting = {}, onSetTrust, tru
                     )}
                     {onSetTrust &&
                       (p.trusted ? (
-                        <Button onClick={() => onSetTrust(p, false)} disabled={changingTrust}>
-                          Don’t trust
+                        <Button data-trust-for={p.id} onClick={() => onSetTrust(p, false)} disabled={changingTrust}>
+                          {changingTrust ? "Saving…" : "Don’t trust"}
                         </Button>
                       ) : (
-                        <Button onClick={() => setAsking(p.id)} disabled={changingTrust || asking === p.id}>
-                          Trust…
+                        <Button data-trust-for={p.id} onClick={() => setAsking(p.id)} disabled={changingTrust || asking === p.id}>
+                          {changingTrust ? "Saving…" : "Trust…"}
                         </Button>
                       ))}
                   </div>
@@ -83,11 +95,11 @@ export function ProjectList({ view, onNewSession, starting = {}, onSetTrust, tru
                   <div className="project-question">
                     <TrustQuestion
                       name={p.name}
-                      busy={changingTrust}
                       onAnswer={(trusted) => {
-                        setAsking(undefined);
+                        close(p.id);
                         if (trusted) onSetTrust(p, true);
                       }}
+                      onDismiss={() => close(p.id)}
                     />
                   </div>
                 )}

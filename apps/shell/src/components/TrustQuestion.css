@@ -9,6 +9,26 @@
   background: var(--color-surface);
   border: var(--line-hairline) solid var(--color-accent);
   border-radius: var(--radius-md);
+  /* It unfolds from the control that asked for it, just above. */
+  animation: trust-question-in var(--motion-quick) var(--motion-ease-out);
+}
+
+/* Focus is the question as a whole; its accent edge already marks it, so no outline is added. */
+.trust-question:focus {
+  outline: none;
+}
+
+@keyframes trust-question-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--space-xs)));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trust-question {
+    animation: none;
+  }
 }
 
 .trust-question-title {
