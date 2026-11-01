@@ -117,9 +117,11 @@ The replay server answers read-only requests exactly as Core does. It never chan
 ## Open questions
 
 - Whether to allow more than one Interface attached at once (useful for a second window), and if so whether notifications fan out to all.
+- Whether Core notifies an Interface when a project or session is created, and pushes `core.status` when its counts change; until then the window rereads `session.list` on a `session.tile` for an unknown session and reads the counts at attach.
 
 ## Changes
 
+- 2026-11-01: from #14 inbox: notifications for created projects and sessions, and a pushed `core.status`, added as an open question.
 - 2026-11-01: from M0-T7 inbox: the replay server refuses every mutating request with `invalid_state`, keeps a replayed session idle after its last line until `core.shutdown`, and paces by recorded timing by default; from review of PR #27: it never serves the user's own endpoint (default label `replay`), applies Core's line limit, and refuses a recording it cannot read faithfully. No requirement IDs changed.
 
 - 2026-10-31: from #18 inbox and review: an explicit endpoint is a label beside the user's own endpoint, never a raw name or path, and nothing in the environment overrides it; on Windows a test stands two labelled endpoints in for "explicit beside default". No requirement IDs changed.

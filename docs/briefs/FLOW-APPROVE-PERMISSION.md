@@ -19,8 +19,10 @@ An agent asks to run a command, edit a file, or use a tool, or asks the user a q
 - Whether an "approve all for this session" option exists and how it is made deliberately hard to hit by accident.
 - Keyboard-only path: jump to the oldest pending shelf, answer, jump to the next.
 - What the shelf shows for a permission whose details (diff, command) are large.
+- Which of a request's `suggestions`, a deny `message`, and an `updated_input` the shelf offers. Until the shelf exists (M1), a request is answered in the transcript with Allow or Deny only, every input field shown.
 
 ## Changes
 
+- 2026-11-01: from #14 inbox: M0 answers in the transcript with Allow or Deny; which answer options the shelf offers is open.
 - 2026-10-31: reframed around the shelf; the transcript is a drill-down, not the place to answer.
 - 2026-10-31: created as draft.
