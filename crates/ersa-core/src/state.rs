@@ -3,11 +3,11 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use ersa_adapter::{LocalTransport, Transport};
-use ersa_protocol::core_api::HelloHost;
-use tokio::sync::{OnceCell, watch};
+use ersa_protocol::core_api::{BackendState, HelloHost};
+use tokio::sync::{Mutex, watch};
 
 use crate::adapters::{self, Detected};
 use crate::persistence::{LOCAL_HOST_ID, Store};
@@ -25,16 +25,39 @@ pub struct CoreConfig {
     /// Runs this program instead of each backend's own when detecting
     /// backends. For tests, which must not depend on what is installed.
     pub backend_program_override: Option<String>,
+    /// How long a new connection may take to send `core.hello` before Core
+    /// closes it.
+    pub handshake_timeout: Duration,
+    /// The longest line Core reads from a client, in bytes, terminator
+    /// excluded. A longer line is answered with a parse error and closes
+    /// the connection.
+    pub max_line_bytes: usize,
 }
 
+/// The default for [`CoreConfig::max_line_bytes`]: 16 MiB, far above any
+/// request the Interface sends, low enough that one client cannot exhaust
+/// memory.
+pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
+
+/// The default for [`CoreConfig::handshake_timeout`].
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long a backend detection that found anything other than `available`
+/// is reused, so a backend installed while Core runs shows up soon after.
+const FAILED_DETECTION_TTL: Duration = Duration::from_secs(30);
+
 impl CoreConfig {
-    /// The configuration for `data_dir` with the platform's default endpoint.
-    pub fn new(data_dir: PathBuf) -> Self {
-        CoreConfig {
+    /// The configuration for `data_dir` with the platform's default endpoint
+    /// and limits. Fails only if the endpoint cannot be named (on Windows, if
+    /// the user's SID cannot be read).
+    pub fn new(data_dir: PathBuf) -> std::io::Result<Self> {
+        Ok(CoreConfig {
             data_dir,
-            endpoint: platform::default_endpoint(),
+            endpoint: platform::default_endpoint()?,
             backend_program_override: None,
-        }
+            handshake_timeout: HANDSHAKE_TIMEOUT,
+            max_line_bytes: MAX_LINE_BYTES,
+        })
     }
 
     /// The database file.
@@ -54,9 +77,11 @@ pub struct Core {
     local_transport: Arc<dyn Transport>,
     host_name: String,
     started: Instant,
-    /// Backend detection for the local host, run on first use and kept for
-    /// the life of the process (`host.probe`, milestone M4, will refresh it).
-    local_backends: OnceCell<Vec<Detected>>,
+    /// The last backend detection for the local host and when it ran. Kept
+    /// for the life of the process when every backend was available, and for
+    /// [`FAILED_DETECTION_TTL`] otherwise. An async mutex, held while
+    /// detecting, so concurrent requests run one detection between them.
+    local_backends: Mutex<Option<(Instant, Vec<Detected>)>>,
     /// Flips to `true` once when shutdown is requested. A `watch` channel
     /// rather than a `Notify`, because a late waiter must still see it.
     shutdown: watch::Sender<bool>,
@@ -70,7 +95,7 @@ impl Core {
             local_transport: Arc::new(LocalTransport),
             host_name: platform::host_name(),
             started: Instant::now(),
-            local_backends: OnceCell::new(),
+            local_backends: Mutex::new(None),
             shutdown: watch::Sender::new(false),
         }
     }
@@ -96,17 +121,23 @@ impl Core {
         (host_id == LOCAL_HOST_ID).then(|| Arc::clone(&self.local_transport))
     }
 
-    /// The backends detected on the local host.
-    pub async fn local_backends(&self) -> &[Detected] {
-        self.local_backends
-            .get_or_init(|| async {
-                adapters::detect(
-                    self.local_transport.as_ref(),
-                    self.config.backend_program_override.as_deref(),
-                )
-                .await
-            })
-            .await
+    /// The backends detected on the local host, detecting again when the
+    /// last result has expired.
+    pub async fn local_backends(&self) -> Vec<Detected> {
+        let mut cached = self.local_backends.lock().await;
+        if let Some((at, found)) = cached.as_ref() {
+            let all_available = found.iter().all(|d| d.state == BackendState::Available);
+            if all_available || at.elapsed() < FAILED_DETECTION_TTL {
+                return found.clone();
+            }
+        }
+        let found = adapters::detect(
+            self.local_transport.as_ref(),
+            self.config.backend_program_override.as_deref(),
+        )
+        .await;
+        *cached = Some((Instant::now(), found.clone()));
+        found
     }
 
     /// Seconds since this Core started.
