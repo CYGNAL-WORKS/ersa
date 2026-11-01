@@ -46,10 +46,6 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         .project(workspace.project_id.clone())
         .await?
         .ok_or_else(|| ApiError::not_found(format!("no project {}", workspace.project_id)))?;
-    // Asked for a title the backend would not keep: say so rather than drop it.
-    if params.title.is_some() {
-        return Err(title_refused());
-    }
     if !core.sessions.has_backend(&params.backend) {
         return Err(ApiError::new(
             ersa_protocol::core_api::ErrorKind::BackendMissing,
@@ -268,14 +264,4 @@ pub(super) async fn raw_log(
             line: line.line,
         })
         .collect())
-}
-
-/// Withdrawn (PROTO-CORE-API, Sessions): nothing projected is stored, so a
-/// session is projected afresh each time it is opened (ADR 0017). Still
-/// answered, with `invalid_state`, so the API version stays.
-pub(super) async fn reproject(core: &Core, params: IdParams) -> Result<Session, ApiError> {
-    find(core, &params.id).await?;
-    Err(ApiError::invalid_state(
-        "session.reproject is withdrawn: sessions are projected afresh each time they are opened",
-    ))
 }

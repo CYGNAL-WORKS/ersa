@@ -3,7 +3,7 @@
   "$id": "https://github.com/KPandaK/ersa/protocol/schema/core-api.schema.json",
   "title": "Ersa Core API",
   "description": "The Core request/response API (PROTO-CORE-API): newline-delimited JSON-RPC 2.0 between the Interface and Core. Each method has a `<method>.params` and a `<method>.result` definition; each notification a `<method>.notification` definition. Objects are closed (additionalProperties: false) except settings and the shapes reserved for later milestones. Agent events are not copied here: session.event carries an envelope from agent-events.schema.json by reference.",
-  "x-api-version": 1,
+  "x-api-version": 2,
   "$ref": "#/$defs/message",
   "$defs": {
     "message": {
@@ -709,30 +709,6 @@
             },
             "params": {
               "$ref": "#/$defs/session.raw_log.params"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "jsonrpc",
-            "id",
-            "method",
-            "params"
-          ],
-          "properties": {
-            "jsonrpc": {
-              "const": "2.0"
-            },
-            "id": {
-              "$ref": "#/$defs/request_id"
-            },
-            "method": {
-              "const": "session.reproject"
-            },
-            "params": {
-              "$ref": "#/$defs/session.reproject.params"
             }
           }
         },
@@ -1826,9 +1802,6 @@
         },
         "mode": {
           "type": "string"
-        },
-        "title": {
-          "type": "string"
         }
       }
     },
@@ -2127,21 +2100,6 @@
       "items": {
         "$ref": "#/$defs/raw_log_entry"
       }
-    },
-    "session.reproject.params": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "id"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/id"
-        }
-      }
-    },
-    "session.reproject.result": {
-      "$ref": "#/$defs/session"
     },
     "backend.list.params": {
       "type": "object",

@@ -213,7 +213,7 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&HelloParams {
                 client: "ersa-shell".into(),
                 client_version: "0.1.0".into(),
-                api_versions: vec![1],
+                api_versions: vec![2],
             }),
         ),
         (Method::CoreStatus, to_value(&Empty {})),
@@ -255,7 +255,6 @@ fn params_examples() -> Vec<(Method, Value)> {
                 workspace_id: "w-1".into(),
                 backend: "claude-code".into(),
                 mode: None,
-                title: Some("A title".into()),
             }),
         ),
         (

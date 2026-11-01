@@ -93,6 +93,32 @@ impl Store {
         })
     }
 
+    /// Reclaims the space of a database file that is mostly free pages (as
+    /// migration 3 leaves one, having dropped the raw log). Run in the
+    /// background after startup: it can take a while on a large file, and
+    /// it is retried at the next start whenever it did not happen. A failure
+    /// is reported and changes nothing.
+    pub async fn compact_if_sparse(&self) {
+        let result = self
+            .call(|conn| {
+                let free: i64 = conn.pragma_query_value(None, "freelist_count", |r| r.get(0))?;
+                let pages: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0))?;
+                if pages == 0 || free * 4 < pages {
+                    return Ok(false);
+                }
+                conn.execute_batch("VACUUM")?;
+                Ok(true)
+            })
+            .await;
+        match result {
+            Ok(true) => tracing::info!(path = %self.path.display(), "compacted the database"),
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!(path = %self.path.display(), error = %e, "could not compact the database; it stays its size until the next start");
+            }
+        }
+    }
+
     /// Where the database file is.
     pub fn path(&self) -> &Path {
         &self.path
@@ -377,7 +403,8 @@ impl Store {
 
 /// The migration that drops data no later Core can rebuild (the raw log, and
 /// each session's stored title and creation time): a copy of the database
-/// is kept before it runs, and the file is compacted after.
+/// is kept before it runs. The space it frees is reclaimed later, by
+/// [`Store::compact_if_sparse`].
 const DESTRUCTIVE_MIGRATION: usize = 3;
 
 /// Applies every migration the database at `path` has not seen yet, each in
@@ -405,10 +432,6 @@ fn migrate(conn: &mut Connection, path: &Path) -> Result<()> {
         tx.pragma_update(None, "user_version", (index + 1) as i64)?;
         tx.commit()?;
         tracing::info!(migration = index + 1, "applied database migration");
-    }
-    if destructive {
-        // What the dropped tables held is free space in the file until then.
-        conn.execute_batch("VACUUM")?;
     }
     Ok(())
 }
@@ -681,6 +704,39 @@ mod tests {
                 "mode"
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn the_space_migration_3_frees_is_reclaimed_after_startup() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("ersa.db");
+        let conn = database_at(&path, 2);
+        conn.execute_batch(
+            "INSERT INTO hosts VALUES ('local', 'pc', 'local', '{}', 't');
+             INSERT INTO projects VALUES ('p', 'local', '/r', '/r', 'r', 'git', 't');
+             INSERT INTO workspaces VALUES ('w', 'p', '/w', 'b', 'ready', 't');
+             INSERT INTO sessions (id, workspace_id, host_id, backend, state, created_at)
+                 VALUES ('s', 'w', 'local', 'claude-code', 'ended', 't');",
+        )
+        .expect("old rows");
+        let line = "x".repeat(4096);
+        for idx in 0..500 {
+            conn.execute(
+                "INSERT INTO raw_log VALUES ('s', ?1, 't', 'backend', ?2)",
+                params![idx, line],
+            )
+            .expect("old line");
+        }
+        drop(conn);
+        let store = Store::open(&path).expect("migrates");
+        let free = |store: &Store| {
+            let conn = store.conn.lock().unwrap();
+            conn.pragma_query_value(None, "freelist_count", |r| r.get::<_, i64>(0))
+                .unwrap()
+        };
+        assert!(free(&store) > 100, "the dropped raw log is free space");
+        store.compact_if_sparse().await;
+        assert_eq!(free(&store), 0);
     }
 
     #[tokio::test]

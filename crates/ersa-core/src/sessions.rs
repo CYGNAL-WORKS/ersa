@@ -177,32 +177,50 @@ struct Handle {
     summary_read: ReadSlot<Result<Option<RecordSummary>, String>>,
 }
 
-/// One read of a session's record that may still be running.
-type ReadSlot<T> = tokio::sync::Mutex<Option<tokio::task::JoinHandle<T>>>;
+/// One read of a session's record that may still be running, and when it
+/// started.
+type ReadSlot<T> = tokio::sync::Mutex<Option<(tokio::task::JoinHandle<T>, std::time::Instant)>>;
+
+/// How long a read left running is waited on by later opens before it is
+/// given up for a fresh one: a host or disk that hung may have recovered.
+const STALE_READ: Duration = Duration::from_secs(120);
 
 /// The result of the read in `slot`, started with `start` unless an earlier
-/// one is still running, which is waited on instead. `None` when it takes
-/// longer than `timeout`; it is kept running for the next caller.
+/// one is there (still running, or finished since its caller gave up),
+/// which is waited on or taken instead. `None` when it takes longer than
+/// `timeout`; it is kept for the next caller.
 async fn read_once<T: Send + 'static>(
     slot: &ReadSlot<T>,
     timeout: Duration,
     start: impl FnOnce() -> tokio::task::JoinHandle<T>,
 ) -> Option<T> {
     let mut slot = slot.lock().await;
-    let mut task = match slot.take() {
-        Some(running) if !running.is_finished() => running,
-        _ => start(),
-    };
-    match tokio::time::timeout(timeout, &mut task).await {
-        Ok(Ok(value)) => Some(value),
-        Ok(Err(e)) => {
-            tracing::error!(error = %e, "a session record read failed");
-            None
+    // A read older than STALE_READ is given up for a fresh one: if it is
+    // still running, the host or disk that hung may have recovered; if it
+    // finished, what it read is old.
+    if let Some((old, since)) = slot.as_ref()
+        && since.elapsed() >= STALE_READ
+    {
+        old.abort();
+        *slot = None;
+    }
+    let (task, _) = slot.get_or_insert_with(|| (start(), std::time::Instant::now()));
+    // Awaited where it lies, so a caller that goes away (its connection
+    // closed) leaves the read in the slot for the next one, never a second
+    // read beside it.
+    match tokio::time::timeout(timeout, task).await {
+        Ok(result) => {
+            *slot = None;
+            match result {
+                Ok(value) => Some(value),
+                Err(e) => {
+                    tracing::error!(error = %e, "a session record read failed");
+                    None
+                }
+            }
         }
-        Err(_) => {
-            *slot = Some(task);
-            None
-        }
+        // Still running: kept for the next caller to wait on.
+        Err(_) => None,
     }
 }
 
@@ -408,11 +426,11 @@ impl Handle {
     /// Lets the view and the raw log go when Core is not running the session
     /// and nobody reads it: a session opened again is projected afresh.
     fn close_if_idle(&self) {
-        if self.live().is_some() {
-            return;
-        }
+        // Checked under the hub's lock, so a session that starts meanwhile is
+        // seen as live rather than losing its view (live is only ever taken
+        // after the hub, never before it).
         let mut hub = lock(&self.hub);
-        if !hub.subscribers.is_empty() || hub.view.is_none() {
+        if self.live().is_some() || !hub.subscribers.is_empty() || hub.view.is_none() {
             return;
         }
         hub.close();
@@ -526,6 +544,12 @@ impl SessionManager {
             tracing::warn!("reading the sessions' titles took too long; some are left to later");
         }
         Ok(())
+    }
+
+    /// Returns once every lifecycle fact written so far is on disk, for a
+    /// Core about to exit.
+    pub async fn flush_app_log(&self) {
+        self.app_log.flushed().await;
     }
 
     /// Whether an adapter for `backend` is registered.
@@ -1096,7 +1120,7 @@ fn is_rfc3339(text: &str) -> bool {
     rest == "Z"
 }
 
-// Runs one adapter call, answering after at most [`ADAPTER_CALL`]: a
+/// Runs one adapter call, answering after at most [`ADAPTER_CALL`]: a
 /// backend that stopped reading its stdin would otherwise hold the write,
 /// and with it every later request on the client's connection, until
 /// someone stopped the session from elsewhere.

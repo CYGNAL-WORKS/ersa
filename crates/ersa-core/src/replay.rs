@@ -94,8 +94,7 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::SessionDecidePermission
         | Method::SessionAnswerQuestion
         | Method::SessionSetTitle
-        | Method::SessionSetMode
-        | Method::SessionReproject => "the session is a replay of a recording and cannot change",
+        | Method::SessionSetMode => "the session is a replay of a recording and cannot change",
         Method::ProjectAdd
         | Method::ProjectRemove
         | Method::WorkspaceCreate

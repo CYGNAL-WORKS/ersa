@@ -25,7 +25,7 @@ use crate::events::{Answer, Envelope, LifecycleState, PermissionBehavior};
 /// The Core API version this build speaks. Negotiated in `core.hello`; bumped
 /// only for removals or changes of meaning, never for additions. The schema
 /// file records the same number as `x-api-version`; a test checks they agree.
-pub const API_VERSION: u32 = 1;
+pub const API_VERSION: u32 = 2;
 
 /// Every Core API version this build can speak, for the handshake.
 pub const SUPPORTED_API_VERSIONS: &[u32] = &[API_VERSION];
@@ -91,7 +91,6 @@ methods! {
     SessionSubscribe => "session.subscribe",
     SessionUnsubscribe => "session.unsubscribe",
     SessionRawLog => "session.raw_log",
-    SessionReproject => "session.reproject",
     BackendList => "backend.list",
     ModeList => "mode.list",
     SettingsGet => "settings.get",
@@ -460,8 +459,6 @@ pub struct SessionCreateParams {
     pub backend: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
 }
 
 /// `session.send` params.

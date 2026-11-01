@@ -302,7 +302,6 @@ async fn requests_that_would_change_anything_answer_invalid_state_naming_the_rep
         ),
         ("session.set_title", json!({ "id": id, "title": "t" })),
         ("session.set_mode", json!({ "id": id, "mode": "m" })),
-        ("session.reproject", json!({ "id": id })),
         ("project.add", json!({ "host_id": "local", "path": "." })),
         ("project.remove", json!({ "id": "p" })),
         ("workspace.create", json!({ "project_id": "p" })),
