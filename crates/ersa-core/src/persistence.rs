@@ -250,6 +250,8 @@ impl Store {
         .await
     }
 
+    /// Records a workspace. Fails with [`Error::Conflict`] when its project
+    /// was removed meanwhile.
     pub async fn insert_workspace(&self, workspace: Workspace) -> Result<()> {
         self.call(move |conn| {
             conn.execute(
@@ -263,7 +265,8 @@ impl Store {
                     to_sql_enum(&workspace.state),
                     now_rfc3339()
                 ],
-            )?;
+            )
+            .map_err(|e| conflict(e, "the project was removed meanwhile"))?;
             Ok(())
         })
         .await
@@ -316,9 +319,12 @@ impl Store {
         .await
     }
 
+    /// Deletes a workspace's row. Fails with [`Error::Conflict`] when a
+    /// session refers to it.
     pub async fn delete_workspace(&self, id: String) -> Result<()> {
         self.call(move |conn| {
-            conn.execute("DELETE FROM workspaces WHERE id = ?1", [id])?;
+            conn.execute("DELETE FROM workspaces WHERE id = ?1", [id])
+                .map_err(|e| conflict(e, "a session was created in the workspace meanwhile"))?;
             Ok(())
         })
         .await
@@ -594,9 +600,11 @@ mod tests {
     async fn settings_patches_merge_and_persist() {
         let (_dir, store) = temp_store();
         let patch = |v: Value| v.as_object().cloned().expect("object");
+        // Absolute on whatever platform runs the test.
+        let root = std::env::temp_dir().join("wt").display().to_string();
         store
             .patch_settings(patch(
-                json!({ "workspaces": { "root": "D:/wt" }, "theme": "dark" }),
+                json!({ "workspaces": { "root": root }, "theme": "dark" }),
             ))
             .await
             .expect("patch");
@@ -606,7 +614,7 @@ mod tests {
             ))
             .await
             .expect("patch");
-        let expected = json!({ "workspaces": { "root": "D:/wt", "hook": "x" } });
+        let expected = json!({ "workspaces": { "root": root, "hook": "x" } });
         assert_eq!(Value::Object(after), expected);
         assert_eq!(
             Value::Object(store.settings().await.expect("get")),
