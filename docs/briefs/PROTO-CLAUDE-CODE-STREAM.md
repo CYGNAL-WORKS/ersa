@@ -44,7 +44,7 @@ Every message carries `type`, most carry `session_id` and `uuid`. Observed in th
 
 ### system / init
 
-First line of every session. Fields of interest: `session_id`, `model`, `permissionMode`, `apiKeySource`, `claude_code_version`, `tools` (names), `mcp_servers` (name, status, source), `capabilities` (string list such as `interrupt_receipt_v1`, `msg_lifecycle_v1`, `sdk_mcp_manifests`), `output_style`, `agents`, `skills`, `plugins`, `cwd`, `fast_mode_state`, `view_mode`, `powershell_path`, `startup_timing`. Feature detection reads `capabilities` and `claude_code_version` here, never version strings elsewhere. On resume, `init` repeats with the same `session_id` (fixture 04); in a bidirectional session a second `init` is emitted at the start of each turn (fixture 07).
+First stdout message of every one-shot session. In a bidirectional session the `initialize` response comes first, and `init` is emitted at the start of each turn, so the first `init` arrives only after the first user message has been sent (fixtures 09, 11). Fields of interest: `session_id`, `model`, `permissionMode`, `apiKeySource`, `claude_code_version`, `tools` (names), `mcp_servers` (name, status, source), `capabilities` (string list such as `interrupt_receipt_v1`, `msg_lifecycle_v1`, `sdk_mcp_manifests`), `output_style`, `agents`, `skills`, `plugins`, `cwd`, `fast_mode_state`, `view_mode`, `powershell_path`, `startup_timing`. Feature detection reads `capabilities` here, never version strings. On resume, `init` repeats with the same `session_id` (fixture 04); in a bidirectional session a second `init` is emitted at the start of each turn (fixture 07).
 
 ### assistant
 
@@ -64,7 +64,7 @@ Only with `--include-partial-messages`. Wraps the Messages API stream events: `m
 
 ### system / status, task_summary, post_turn_summary, thinking_tokens
 
-Progress and summary lines. `post_turn_summary` carries `status_category` (`completed`, `blocked`) and `status_detail`; `thinking_tokens` carries running estimates. The rail's activity state is derived from these and from `assistant` activity.
+Progress and summary lines. `task_summary` and `post_turn_summary` are absent from the SDK 0.3.316 types; the fixtures are the reference for their shape. `post_turn_summary` carries `status_category` (`completed`, `blocked`) and `status_detail`; `thinking_tokens` carries running estimates. The rail's activity state is derived from these and from `assistant` activity.
 
 ### rate_limit_event
 
@@ -86,7 +86,7 @@ A synthetic `assistant` message with `model: "<synthetic>"`, `error: "authentica
 {"type":"control_request","request_id":"<host chosen>","request":{"subtype":"initialize","hooks":{}}}
 ```
 
-Sent before the first user message. The CLI answers with `control_response` whose `response` carries `commands`, `agents`, `models`, `account`, `output_style`, and `claude_code_version` (fixtures 09, 11). Optional request fields of interest for Ersa: `appendSystemPrompt` and `systemPrompt` (modes), `agents`, `skills`, `title`, `sdkMcpServers` with `sdkMcpServerConfigs` (in-process harness tools), `supportedDialogKinds`, `perTaskStopAffordance`.
+Sent before the first user message. The CLI answers with `control_response` whose `response` carries `commands`, `agents`, `models`, `account`, `output_style`, and `claude_code_version` (fixtures 09, 11). 2.1.302 also sends `capabilities` (a shorter list than `system/init`'s, not used for feature detection), `pid`, `current_permission_mode`, and `session_state`, none of which are in the SDK 0.3.316 types. Optional request fields of interest for Ersa: `appendSystemPrompt` and `systemPrompt` (modes), `agents`, `skills`, `title`, `sdkMcpServers` with `sdkMcpServerConfigs` (in-process harness tools), `supportedDialogKinds`, `perTaskStopAffordance`.
 
 ### can_use_tool (CLI to host)
 
@@ -109,7 +109,15 @@ The host answers:
   "response":{"behavior":"allow","updatedInput":{...},"updatedPermissions":[...]}}}
 ```
 
-or `{"behavior":"deny","message":"...","interrupt":false}`. After an allow the tool runs and its `tool_result` follows as usual (fixture 11).
+or `{"behavior":"deny","message":"...","interrupt":false}`. An allow always carries `updatedInput`: the original `input` unless the user edited it, as recorded. After an allow the tool runs and its `tool_result` follows as usual (fixture 11).
+
+### User message (host to CLI)
+
+```json
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"..."}]}}
+```
+
+`parent_tool_use_id` is omitted for the main thread. The SDK types mark it required, but every recorded stdin user message omits it and the CLI accepts that.
 
 ### Other control requests the adapter uses
 
@@ -147,7 +155,7 @@ sequenceDiagram
 
 ## Versioning
 
-Minimum tested: 2.1.302. Maximum tested: 2.1.302. The adapter reads `capabilities` from `system/init` and the `claude_code_version` from the `initialize` response. Above the maximum tested version it warns and continues.
+Minimum tested: 2.1.302. Maximum tested: 2.1.302. The adapter compares versions using `claude_code_version` from the `initialize` response, because it is the only version known before the first turn; above the maximum tested version it warns and continues. Feature detection reads `capabilities` from `system/init`, which arrives with the first turn; no feature is needed before then.
 
 ## Conformance
 
@@ -178,6 +186,8 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - Whether `--replay-user-messages` should be on by default for raw-log completeness.
 
 ## Changes
+
+- 2026-11-01: from M0-T3 inbox: `system/init` arrives with the first turn, so version comparison uses the `initialize` response and feature detection uses `system/init`; observed fields beyond the SDK types noted; stdin user-message shape added; allow always carries `updatedInput`. No requirement IDs changed.
 
 - 2026-10-31: written from fixtures 00 to 11 on 2.1.302; status ready; permissions via the stdio control channel per ADR 0014.
 - 2026-10-31: explicit flags, feature detection, and permission routing via the harness tools server per ADR 0012.
