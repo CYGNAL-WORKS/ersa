@@ -126,6 +126,10 @@ impl Server {
         core.sessions
             .recover(&last_facts, |host| core.session_transport_for(host))
             .await?;
+        // Space a migration freed goes back to the disk without holding up
+        // the first client.
+        let store = core.store.clone();
+        tokio::spawn(async move { store.compact_if_sparse().await });
         Ok(Server {
             core: Arc::new(core),
             listener,
@@ -186,6 +190,9 @@ impl Server {
         // closing never stops sessions, but `core.shutdown` does (ADR 0011).
         tracing::info!("shutting down");
         core.sessions.stop_all().await;
+        // The stopped sessions' last facts are on disk before the process
+        // ends, or the next Core would take them for sessions left running.
+        core.sessions.flush_app_log().await;
         let drain = async { while connections.join_next().await.is_some() {} };
         if tokio::time::timeout(SHUTDOWN_GRACE, drain).await.is_err() {
             connections.abort_all();

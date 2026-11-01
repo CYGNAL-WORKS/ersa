@@ -39,6 +39,10 @@ pub const PREVIOUS_FILE_NAME: &str = "app-log.1.jsonl";
 /// short line, so this holds a great many sessions' worth.
 const ROTATE_BYTES: u64 = 8 * 1024 * 1024;
 
+/// The `type` of a line carried into a rotated log for a session whose
+/// last fact could not be read: not a fact, so its ending stays unknown.
+const ENDING_UNKNOWN: &str = "ending_unknown";
+
 /// How long [`AppLog::flushed`] waits for the writer before going on: a disk
 /// that hangs must not keep a session from starting.
 const FLUSH_WAIT: Duration = Duration::from_secs(5);
@@ -176,6 +180,7 @@ impl AppLog {
             previous,
             file: Some(file),
             size,
+            rotate_at: ROTATE_BYTES,
             kept: facts
                 .iter()
                 .map(|(id, f)| (id.clone(), (f.first.clone(), f.last.clone())))
@@ -238,6 +243,9 @@ struct Writer {
     /// `None` after a rotation that could not reopen the file.
     file: Option<File>,
     size: u64,
+    /// The size past which the log is next rotated: further out after a
+    /// rotation that failed.
+    rotate_at: u64,
     /// Each session's first entry and latest readable one, carried into the
     /// new file when the log rotates.
     kept: HashMap<String, (Entry, Option<Entry>)>,
@@ -250,8 +258,9 @@ impl Writer {
             match job {
                 Job::Write(entry) => self.write(entry),
                 Job::Flush(done) => {
+                    // To the disk, not only the system's cache.
                     if let Some(file) = &mut self.file
-                        && let Err(e) = file.flush()
+                        && let Err(e) = file.flush().and_then(|()| file.sync_data())
                     {
                         tracing::error!(path = %self.path.display(), error = %e, "could not flush the app log");
                     }
@@ -267,7 +276,7 @@ impl Writer {
             .and_modify(|(_, last)| *last = Some(entry.clone()))
             .or_insert_with(|| (entry.clone(), Some(entry.clone())));
         self.append(&entry);
-        if self.size > ROTATE_BYTES {
+        if self.size > self.rotate_at {
             self.rotate();
         }
     }
@@ -292,10 +301,48 @@ impl Writer {
     /// and last facts, so what startup reads survives any number of
     /// rotations.
     fn rotate(&mut self) {
+        // The new file is written whole beside the old, then swapped in, so a
+        // crash midway leaves one or the other complete, never a session's
+        // first fact without its last.
+        let fresh = self.path.with_extension("jsonl.new");
+        let mut carried = String::new();
+        let json = |entry: &Entry| serde_json::to_string(entry).expect("app log entries serialize");
+        for (id, (first, last)) in &self.kept {
+            let mut lines = vec![json(first)];
+            match last {
+                Some(last) if last != first => lines.push(json(last)),
+                Some(_) => {}
+                // How it ended is unknown: say so, so its first fact is not
+                // taken for its last.
+                None => lines.push(
+                    serde_json::json!({ "ts": first.ts, "session_id": id, "type": ENDING_UNKNOWN })
+                        .to_string(),
+                ),
+            }
+            for line in lines {
+                carried.push_str(&line);
+                carried.push('\n');
+            }
+        }
+        if let Err(e) = fs::write(&fresh, carried) {
+            tracing::warn!(path = %fresh.display(), error = %e, "could not start a new app log; this one grows a while longer");
+            self.rotate_at = self.size + ROTATE_BYTES;
+            return;
+        }
         // Closed first: a file open elsewhere cannot be renamed on Windows.
         self.file = None;
-        if let Err(e) = fs::rename(&self.path, &self.previous) {
-            tracing::warn!(path = %self.path.display(), error = %e, "could not move the app log aside; it grows a while longer");
+        let swapped =
+            fs::rename(&self.path, &self.previous).and_then(|()| fs::rename(&fresh, &self.path));
+        match swapped {
+            Ok(()) => self.rotate_at = ROTATE_BYTES,
+            Err(e) => {
+                // Something holds a file open (an indexer, say). Not tried
+                // again until the log has grown as much once more, so a
+                // failing rename never fills the disk with carried facts.
+                tracing::warn!(path = %self.path.display(), error = %e, "could not move the app log aside; it grows a while longer");
+                let _ = fs::remove_file(&fresh);
+                self.rotate_at = self.size + ROTATE_BYTES;
+            }
         }
         match OpenOptions::new()
             .create(true)
@@ -308,19 +355,7 @@ impl Writer {
             }
             Err(e) => {
                 tracing::error!(path = %self.path.display(), error = %e, "could not reopen the app log; facts are not kept from now on");
-                return;
             }
-        }
-        let carried: Vec<Entry> = self
-            .kept
-            .values()
-            .flat_map(|(first, last)| {
-                let last = last.clone().filter(|last| last != first);
-                std::iter::once(first.clone()).chain(last)
-            })
-            .collect();
-        for entry in &carried {
-            self.append(entry);
         }
     }
 }
@@ -355,10 +390,11 @@ fn read_into(path: &Path, facts: &mut HashMap<String, Facts>) -> io::Result<()> 
                     });
             }
             Err(_) => {
-                unreadable += 1;
-                let named = serde_json::from_slice::<Value>(&line)
-                    .ok()
-                    .and_then(|v| v.get("session_id")?.as_str().map(String::from));
+                let value = serde_json::from_slice::<Value>(&line).ok();
+                if value.as_ref().and_then(|v| v.get("type")?.as_str()) != Some(ENDING_UNKNOWN) {
+                    unreadable += 1;
+                }
+                let named = value.and_then(|v| v.get("session_id")?.as_str().map(String::from));
                 if let Some(id) = named
                     && let Some(f) = facts.get_mut(&id)
                 {
@@ -558,6 +594,15 @@ mod tests {
     #[tokio::test]
     async fn rotating_while_running_keeps_every_sessions_first_and_last_facts() {
         let dir = tempfile::tempdir().unwrap();
+        // A session whose last fact this Core cannot read: its ending stays
+        // unknown across rotations, never taken for a session left running.
+        fs::write(
+            dir.path().join(FILE_NAME),
+            "{\"ts\":\"2026-01-01T00:00:00.000Z\",\"session_id\":\"s-new\",\"type\":\"process_started\",\"backend\":\"fake\"}
+             {\"ts\":\"2026-01-01T00:00:01.000Z\",\"session_id\":\"s-new\",\"type\":\"from_the_future\"}
+",
+        )
+        .unwrap();
         let (log, _) = AppLog::open(dir.path()).unwrap();
         log.write("s-old", "2026-01-01T00:00:00.000Z", &started());
         log.write(
@@ -586,5 +631,9 @@ mod tests {
             LifecycleFact::CoreRestarted
         );
         assert!(left_live(&facts).is_empty());
+        assert_eq!(facts["s-new"].last, None);
+        assert_eq!(facts["s-new"].first.ts, "2026-01-01T00:00:00.000Z");
+        // Rotated whole: no new file is left half written beside it.
+        assert!(!dir.path().join("app-log.jsonl.new").exists());
     }
 }
