@@ -21,5 +21,12 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+[dev-dependencies]
+# The live smoke test in tests/live.rs talks to the built binary over the
+# Core API.
+serde_json.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+
 [lints]
 workspace = true
