@@ -37,7 +37,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 - `session.started`: `backend`, `backend_version`, `model`, `cwd`, `capabilities` (string list), `backend_session_id` (optional). Projected from the backend's first announcement (Claude Code `system/init`).
 - `session.state`: `state` one of `starting`, `running`, `waiting_user`, `idle`, `disconnected`, `ended`, `error`; `reason` (optional short string). Emitted by Core from what it knows of the backend process, and projected from live lines (a pending permission request means `waiting_user`).
 - `session.ended`: `reason` one of `user_stopped`, `backend_exited`, `error`; `exit_code` (optional). Emitted by Core.
-- `session.notice`: `level` one of `info`, `warning`; `code` one of `backend_version_untested`; `message`. Something the user should know that is not an error, such as a backend newer than the newest version Ersa was tested against.
+- `session.notice`: `level` one of `info`, `warning`; `code` one of `backend_version_untested`, `session_open_elsewhere`, `session_open_check_failed`; `message`; `pid` (optional: with `session_open_elsewhere`, the process that has the session open). Something the user should know that is not an error, such as a backend newer than the newest version Ersa was tested against. Core's resume emits `session_open_elsewhere` when the adapter's live-session check finds another process with the session open, and `session_open_check_failed` when the check could not tell, both before it starts the backend.
 
 ### Turn
 
@@ -85,6 +85,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 ## Projection rules
 
 - A session's events have two inputs. The session record is its history; the adapter reads the entries that carry messages and titles and ignores the rest. The live stream is what a running backend emits; details only it carries (text as it arrives, permission prompts, turn ends, cost, rate limits) are shown and not stored, so the events they yield arise only from live input.
+- A record entry carrying a user's message projects to `user.message` with origin `human` unless the backend wrote it, in which case its origin is `system` and it is never a session's title. For Claude Code the CLI wrote it when the entry has `isMeta` or `isCompactSummary`, an `origin.kind` other than `human`, or text in the CLI's own markup: slash-command and local-command tags, bash input, task notifications, and the interrupted-request marker.
 - When a session is opened, Core projects its record, then appends events projected from the live stream. A message present in both, identified by the backend's message id, yields its events once.
 - Core's lifecycle facts (process started, start failed, process exited with its code and whether the user stopped it, Core restarted while the session was live, which ends it with reason `error`) reach the session only as the `session.state` and `session.ended` events Core emits; Core also writes them to the app log. They are never part of the session record.
 - The raw log holds the live lines in both directions, each tagged: `backend` (what the backend emitted) and `host` (what Ersa wrote to it). Host lines project too (a user message to `user.message`, a permission answer to `permission.decided`).
@@ -124,6 +125,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - **PROTO-AGENT-EVENTS-R11**: Projecting the same session record twice with the same adapter version shall yield identical events.
 - **PROTO-AGENT-EVENTS-R12**: When a session is opened while its backend is live, a message present in both the session record and the live stream, identified by the backend's message id, shall yield its events once.
 - **PROTO-AGENT-EVENTS-R13**: Core shall emit `session.state` and `session.ended` for the backend process's lifecycle from its own knowledge of the process, never from the session record, and shall write the same facts to the app log.
+- **PROTO-AGENT-EVENTS-R14**: Before starting the backend to resume a session, Core shall emit a `session.notice` with code `session_open_elsewhere` and the process's `pid` when the adapter reports the session open in another process, and with code `session_open_check_failed` when the adapter cannot tell.
 
 ## Out of scope
 
@@ -134,9 +136,12 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 - Whether `question.*` is projected from a backend tool call (Claude Code's AskUserQuestion arrives as a tool use plus permission request) or needs backend-specific handling in the adapter; first implementation decides and records it.
 - Whether subagent trees get their own `session_id` or stay nested under `parent_tool_use_id`.
-- How history shows a permission decision read from the session record, which keeps no permission prompt or request id, and which turn boundaries history shows without the turn ends the record omits.
+- How history shows a permission decision read from the session record, which keeps no permission prompt or request id, and which turn boundaries history shows without the turn ends the record omits. Claude Code records the decision on the tool result with `decision`, `source` (such as `config` or `user_temporary`), `reasonType`, and `grantScope`; `permission.decided` needs a request id, so no event carries it yet.
+- Whether a Claude Code record entry with a `peer` origin maps to `user.message` origin `peer_session`, and how its `peer` is filled.
 
 ## Changes
+
+- 2026-11-01: from #34 inbox: `session.notice` gains `session_open_elsewhere` (with `pid`) and `session_open_check_failed`, emitted by Core's resume from the adapter's live-session check (PROTO-AGENT-EVENTS-R14 added); who wrote a record prompt decides its origin and whether it can title a session; the permission-decision open question names the recorded fields; open question on `peer` origins.
 
 - 2026-11-01: aligned with ADR 0017 (supersedes ADR 0010): events come from the session record and the live stream, merged on the backend's message ids, and nothing projected is stored; the raw log is the live lines in both directions; Core emits lifecycle events itself and writes them to the app log; `source` names the input and message id in place of a raw-log range; projection cache removed. PROTO-AGENT-EVENTS-R11, R12 and R13 added; R01 to R10 unchanged in meaning.
 

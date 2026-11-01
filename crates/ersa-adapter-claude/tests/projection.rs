@@ -421,7 +421,7 @@ fn a_cli_newer_than_tested_gets_a_warning_notice_and_the_session_continues() {
             level: NoticeLevel::Warning,
             code: NoticeCode::BackendVersionUntested,
             message:
-                "Claude Code 2.2.0 is newer than the newest version Ersa was tested with (2.1.302)."
+                "Claude Code 2.2.0 is newer than the newest version Ersa was tested with (2.1.316)."
                     .into(),
         })
     );

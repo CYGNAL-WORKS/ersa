@@ -128,23 +128,31 @@ pub enum StreamEvent {
     Other(Value),
 }
 
-/// An increment to one content block. Only `text_delta` is recorded; the others
-/// are the standard Messages API deltas a projection will meet with tool use and
-/// visible thinking.
+/// An increment to one content block: the standard Messages API deltas. Each
+/// keeps fields it does not name, such as the `estimated_tokens` 2.1.316 adds
+/// to `thinking_delta`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Delta {
     TextDelta {
         text: String,
+        #[serde(flatten)]
+        extra: Extra,
     },
     InputJsonDelta {
         partial_json: String,
+        #[serde(flatten)]
+        extra: Extra,
     },
     ThinkingDelta {
         thinking: String,
+        #[serde(flatten)]
+        extra: Extra,
     },
     SignatureDelta {
         signature: String,
+        #[serde(flatten)]
+        extra: Extra,
     },
     #[serde(untagged)]
     Other(Value),

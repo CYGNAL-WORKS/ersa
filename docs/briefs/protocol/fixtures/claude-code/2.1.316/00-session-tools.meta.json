@@ -1,0 +1,166 @@
+{
+  "recorded_at": "2026-11-01T19:26:23.936Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "c9a334dc-a157-4f94-8b05-c36b761869fe",
+  "session_record": "record/00-session-tools.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 8274,
+  "stderr": "",
+  "stdout_lines": 64,
+  "stdout_timing_ms": [
+    697,
+    947,
+    951,
+    1894,
+    1895,
+    1895,
+    1898,
+    1898,
+    1899,
+    1900,
+    1900,
+    1913,
+    1927,
+    1928,
+    3102,
+    3102,
+    3102,
+    3198,
+    3249,
+    3397,
+    3442,
+    3492,
+    3573,
+    3588,
+    3621,
+    3627,
+    3628,
+    3628,
+    4395,
+    4399,
+    5127,
+    5127,
+    5127,
+    5127,
+    5128,
+    5129,
+    5129,
+    5136,
+    5147,
+    5147,
+    6515,
+    6515,
+    6515,
+    6623,
+    6664,
+    6713,
+    6764,
+    6813,
+    6863,
+    6968,
+    6969,
+    6986,
+    6988,
+    6988,
+    6999,
+    7008,
+    7773,
+    7774,
+    7774,
+    7774,
+    7774,
+    7776,
+    7777,
+    7780
+  ],
+  "sent": [
+    {
+      "t": 8,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 697,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with exactly one word: hello\"}]}}"
+    },
+    {
+      "t": 1913,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Use the Bash tool to run exactly this command: echo probe > probe.txt. Then reply with just: done\"}]}}"
+    },
+    {
+      "t": 3627,
+      "line": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"164daa89-534a-410c-9764-c044f4a8a494\",\"response\":{\"behavior\":\"allow\",\"updatedInput\":{\"command\":\"echo probe > probe.txt\",\"description\":\"Write probe text to a file\"}}}}"
+    },
+    {
+      "t": 5136,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Use the Read tool to read README.md, then reply with its first word only.\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Reply with exactly one word: hello",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    },
+    {
+      "turn": 2,
+      "text": "Use the Bash tool to run exactly this command: echo probe > probe.txt. Then reply with just: done",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    },
+    {
+      "turn": 3,
+      "text": "Use the Read tool to read README.md, then reply with its first word only.",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}

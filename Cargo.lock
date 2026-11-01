@@ -907,9 +907,12 @@ version = "0.1.0"
 dependencies = [
  "ersa-adapter",
  "ersa-protocol",
+ "libc",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
