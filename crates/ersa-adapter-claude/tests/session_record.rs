@@ -19,7 +19,7 @@ use common::{fixtures, fixtures_root};
 use ersa_adapter::{Direction, Projector};
 use ersa_adapter_claude::ClaudeProjector;
 use ersa_adapter_claude::record::{
-    RecordEvent, SessionList, encoded_cwd, list_sessions, project_record,
+    RecordEvent, SessionList, encoded_cwd, find_record, list_sessions, project_record, read_record,
 };
 use ersa_protocol::events::*;
 use ersa_protocol::schema::validate_event;
@@ -184,7 +184,7 @@ fn every_record_fixture_projects_to_its_golden_file_and_validates() {
                 event.event
             );
             rendered.push_str(
-                &json!({ "message_id": event.message_id, "ts": event.ts, "event": payload })
+                &json!({ "message_id": event.message_id, "ts": event.ts, "backend_version": event.backend_version, "event": payload })
                     .to_string(),
             );
             rendered.push('\n');
@@ -411,7 +411,7 @@ fn a_compaction_keeps_the_history_before_it() {
 #[test]
 fn prompts_are_user_messages_and_what_the_cli_wrote_is_system() {
     let entries = [
-        json!({"type": "user", "uuid": "u1", "timestamp": "2026-11-01T10:00:00.000Z",
+        json!({"type": "user", "uuid": "u1", "timestamp": "2026-11-01T10:00:00.000Z", "version": "2.1.316",
             "message": {"role": "user", "content": [{"type": "text", "text": "Hello"}]}}),
         json!({"type": "user", "uuid": "u2", "isMeta": true,
             "message": {"role": "user", "content": "<local-command-caveat>Caveat</local-command-caveat>"}}),
@@ -431,6 +431,7 @@ fn prompts_are_user_messages_and_what_the_cli_wrote_is_system() {
         RecordEvent {
             message_id: Some("u1".into()),
             ts: Some("2026-11-01T10:00:00.000Z".into()),
+            backend_version: Some("2.1.316".into()),
             event: Event::UserMessage(UserMessage {
                 text: "Hello".into(),
                 origin: MessageOrigin::Human,
@@ -785,4 +786,63 @@ fn a_record_that_cannot_be_opened_is_reported_not_dropped() {
     assert_eq!(listed.sessions.len(), 1);
     assert_eq!(listed.sessions[0].session_id, SESSION_A);
     assert_eq!(listed.unreadable, [locked]);
+}
+
+/// A scratch Claude home holding `record` as session `id`'s record, under
+/// the directory the CLI would use for `cwd`.
+fn record_home(cwd: &str, id: &str, record: &str) -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    let dir = home.path().join("projects").join(encoded_cwd(cwd));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join(format!("{id}.jsonl")), record).unwrap();
+    home
+}
+
+const SESSION: &str = "d34f0c1b-64ee-437e-a4e3-3487df29a506";
+
+// verifies: PROTO-AGENT-EVENTS-R11
+#[test]
+fn a_session_record_read_twice_yields_identical_events() {
+    for fixture in record_fixtures() {
+        let home = record_home("C:/work", SESSION, &fixture.text);
+        let read = || read_record(home.path(), "C:/work", SESSION).unwrap();
+        let first = read();
+        assert!(!first.is_empty(), "{}", fixture.name);
+        assert_eq!(first, read(), "{}", fixture.name);
+        assert_eq!(first, project_record(&fixture.text), "{}", fixture.name);
+    }
+}
+
+#[test]
+fn a_record_is_found_by_its_session_id_whatever_the_cwd_is_spelled() {
+    let text = record_fixtures().remove(0).text;
+    // The CLI spelled the directory `C:\work`; Core asks with `c:/work/`.
+    let home = record_home(r"C:\work", SESSION, &text);
+    let found = find_record(home.path(), "c:/work/", SESSION).unwrap();
+    assert_eq!(
+        found,
+        Some(
+            home.path()
+                .join("projects")
+                .join(encoded_cwd(r"C:\work"))
+                .join(format!("{SESSION}.jsonl"))
+        )
+    );
+    assert_eq!(
+        read_record(home.path(), "c:/work/", SESSION).unwrap(),
+        project_record(&text)
+    );
+}
+
+#[test]
+fn a_session_with_no_record_has_no_history_and_a_bad_id_is_refused() {
+    let empty = tempfile::tempdir().unwrap();
+    // No `projects` directory at all: the CLI never ran here.
+    assert_eq!(read_record(empty.path(), "C:/work", SESSION).unwrap(), []);
+    let home = record_home("C:/work", SESSION, "");
+    let other = "00000000-0000-4000-8000-000000000000";
+    assert_eq!(read_record(home.path(), "C:/work", other).unwrap(), []);
+    // An id that is not a session id never becomes a path.
+    let refused = read_record(home.path(), "C:/work", "../../secrets").unwrap_err();
+    assert_eq!(refused.kind(), std::io::ErrorKind::InvalidInput);
 }

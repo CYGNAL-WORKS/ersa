@@ -1,4 +1,6 @@
-//! Raw log lines: the persisted truth of a session (ADR 0010).
+//! Raw log lines: what crossed a live backend's stdio, held in memory for the
+//! developer pane (ADR 0017). Not a source of truth: a session's history is
+//! the backend's own session record.
 
 use serde::{Deserialize, Serialize};
 
@@ -6,7 +8,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Core creates these, not adapters: an adapter hands Core the direction and
 /// text through [`AdapterSink::record`](crate::AdapterSink::record), and Core
-/// assigns `index` and `ts` as it appends to the log. One writer stamping every
+/// assigns `index` and `ts` as it receives them. One writer stamping every
 /// line is what keeps `index` gap-free and in the order the lines happened when
 /// the read loop and a host write race each other.
 ///
@@ -15,11 +17,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawLine {
     /// Position in the session's raw log: 0, 1, 2, … with no gaps, across both
-    /// directions. Events cite these in `source.raw_from` and `source.raw_to`.
+    /// directions.
     pub index: u64,
-    /// RFC 3339 UTC time at which the raw log recorded the line. An event's `ts`
-    /// is copied from here, never taken from the clock at projection time, so
-    /// projecting the same log twice gives the same events.
+    /// RFC 3339 UTC time at which Core received the line. An event projected
+    /// from it takes its `ts` from here, never from the clock at projection
+    /// time.
     pub ts: String,
     pub dir: Direction,
     /// The line verbatim, without its line terminator.
@@ -28,9 +30,9 @@ pub struct RawLine {
 
 /// Which way a raw line went.
 ///
-/// The raw log records both directions so that everything shown about a
-/// session, including the user's messages and permission answers, can be
-/// projected from the log alone.
+/// The raw log holds both directions, since the host's lines project too: the
+/// user's messages and permission answers exist on the live stream only as
+/// the lines Ersa wrote.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
@@ -38,8 +40,4 @@ pub enum Direction {
     Backend,
     /// Ersa wrote it to the backend's stdin.
     Host,
-    /// Core recorded it about the session's lifecycle: the process started,
-    /// exited, or was stopped. Core writes and projects these itself; an
-    /// adapter never records one, and its projector is never fed one.
-    Core,
 }

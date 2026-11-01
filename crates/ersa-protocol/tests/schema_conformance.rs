@@ -202,8 +202,8 @@ fn envelope(seq: u64, event: Event) -> Envelope {
         source: Source {
             backend: "claude-code".into(),
             backend_version: "2.1.302".into(),
-            raw_from: seq,
-            raw_to: seq,
+            input: Input::Live,
+            message_id: Some("m-1".into()),
         },
         event,
     }

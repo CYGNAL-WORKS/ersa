@@ -8,7 +8,8 @@
 //! normally `~/.claude` on the session's host; callers pass it in.
 //!
 //! - [`project_record`] turns a record into Ersa events, through the
-//!   same projection of messages as the live stream.
+//!   same projection of messages as the live stream, and [`read_record`]
+//!   finds a session's record and does that to it.
 //! - [`list_sessions`] lists a directory's sessions, reading only the head and
 //!   tail of each record.
 //! - [`live_session`] says whether a running CLI has a session open.
@@ -20,9 +21,11 @@ mod listing;
 mod projection;
 mod registry;
 
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
-pub use listing::{SessionList, SessionSummary, list_sessions};
+pub use listing::{SessionList, SessionSummary, list_sessions, summarize_session};
 pub use projection::{RecordEvent, project_record};
 pub use registry::{LiveCheck, LiveSession, live_session};
 
@@ -91,6 +94,82 @@ pub fn project_dir(claude_home: &Path, cwd: &str) -> PathBuf {
 /// The session record of session `session_id`, started in `cwd`.
 pub fn record_path(claude_home: &Path, cwd: &str, session_id: &str) -> PathBuf {
     project_dir(claude_home, cwd).join(format!("{session_id}.jsonl"))
+}
+
+/// The longest record [`read_record`] reads. Records of long sessions with
+/// large tool results run to tens of megabytes; one far beyond is not
+/// something a transcript can show, and reading it whole would cost Core
+/// that much memory per open.
+pub const MAX_RECORD_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Where the CLI keeps its files on this machine, as the CLI itself decides:
+/// `CLAUDE_CONFIG_DIR` when set and not empty, else `.claude` in the user's
+/// home directory. `None` when there is no home directory either.
+///
+/// Read from Core's own environment, which the CLI inherits: the adapter
+/// does not remove `CLAUDE_CONFIG_DIR`, so the CLI writes where this reads.
+pub fn default_claude_home() -> Option<PathBuf> {
+    match std::env::var_os("CLAUDE_CONFIG_DIR") {
+        Some(dir) if !dir.is_empty() => Some(PathBuf::from(dir)),
+        _ => std::env::home_dir().map(|home| home.join(".claude")),
+    }
+}
+
+/// The file holding session `session_id`'s record: under `cwd`'s directory
+/// when it is there, else under whichever project directory has it. `cwd`
+/// may be spelled differently from the CLI's own spelling (a canonicalised
+/// path, another drive-letter case), and a session id names one session
+/// wherever it ran, so the search is what finds it then. `None` when no
+/// record exists: never written yet, or deleted by the CLI's retention.
+pub fn find_record(claude_home: &Path, cwd: &str, session_id: &str) -> io::Result<Option<PathBuf>> {
+    if !is_session_id(session_id) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{session_id:?} is not a Claude Code session id"),
+        ));
+    }
+    let expected = record_path(claude_home, cwd, session_id);
+    if expected.is_file() {
+        return Ok(Some(expected));
+    }
+    let projects = match fs::read_dir(claude_home.join("projects")) {
+        Ok(projects) => projects,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let file = format!("{session_id}.jsonl");
+    for project in projects {
+        let candidate = project?.path().join(&file);
+        if candidate.is_file() {
+            return Ok(Some(candidate));
+        }
+    }
+    Ok(None)
+}
+
+/// The events of session `session_id`'s record ([`project_record`]), or none
+/// when it has no record ([`find_record`]). Bytes that are not UTF-8 are read
+/// with replacement characters, as Core reads a backend's lines.
+pub fn read_record(
+    claude_home: &Path,
+    cwd: &str,
+    session_id: &str,
+) -> io::Result<Vec<RecordEvent>> {
+    let Some(path) = find_record(claude_home, cwd, session_id)? else {
+        return Ok(Vec::new());
+    };
+    let size = fs::metadata(&path)?.len();
+    if size > MAX_RECORD_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "the session record {} is {size} bytes, more than the {MAX_RECORD_BYTES} Ersa reads",
+                path.display()
+            ),
+        ));
+    }
+    let bytes = fs::read(&path)?;
+    Ok(project_record(&String::from_utf8_lossy(&bytes)))
 }
 
 /// Whether `id` has the shape of a Claude Code session id: a UUID in its

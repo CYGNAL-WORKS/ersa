@@ -14,11 +14,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 0,
-            "raw_to": 0
+            "input": "core"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -54,11 +53,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 1,
-            "raw_to": 1
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -78,11 +76,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 1,
-            "raw_to": 1
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -101,11 +98,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 1,
-            "raw_to": 1
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -132,11 +128,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 2,
-            "raw_to": 2
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -195,11 +190,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 3,
-            "raw_to": 3
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -234,11 +228,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 4,
-            "raw_to": 4
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -259,11 +252,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 4,
-            "raw_to": 5
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -284,11 +276,11 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 4,
-            "raw_to": 6
+            "input": "live",
+            "message_id": "aa1cdaf1-d2be-4b92-ab04-e7089321b5f1"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -319,11 +311,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 7,
-            "raw_to": 7
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -384,11 +375,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 8,
-            "raw_to": 8
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -418,11 +408,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 9,
-            "raw_to": 9
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -445,11 +434,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 10,
-            "raw_to": 10
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -479,11 +467,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 11,
-            "raw_to": 11
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -506,11 +493,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 12,
-            "raw_to": 12
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -532,11 +518,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 12,
-            "raw_to": 12
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }
@@ -555,11 +540,10 @@
           "source": {
             "backend": "claude-code",
             "backend_version": "2.1.302",
-            "raw_from": 12,
-            "raw_to": 12
+            "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 1
+          "v": 2
         },
         "session_id": "s-replay"
       }

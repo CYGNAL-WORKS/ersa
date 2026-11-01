@@ -18,11 +18,13 @@
 // `pub mod name;` tells the compiler to load the module from `src/name.rs`.
 pub mod adapters;
 pub mod api;
+pub mod app_log;
 pub mod harness_tools;
 pub mod modes;
 pub mod packs;
 pub mod persistence;
 pub mod platform;
+pub mod projection;
 pub mod raw_log;
 pub mod replay;
 pub mod sessions;

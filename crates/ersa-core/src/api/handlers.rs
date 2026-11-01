@@ -66,7 +66,7 @@ fn list(versions: &[u32]) -> String {
 }
 
 pub(super) async fn core_status(core: &Core, _: Empty) -> Result<StatusResult, ApiError> {
-    let (sessions_running, sessions_waiting) = core.store.session_counts().await?;
+    let (sessions_running, sessions_waiting) = core.sessions.counts();
     Ok(StatusResult {
         sessions_running,
         sessions_waiting,
