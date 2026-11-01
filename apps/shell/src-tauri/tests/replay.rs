@@ -41,6 +41,12 @@ struct ReplayServer(Child);
 
 impl Drop for ReplayServer {
     fn drop(&mut self) {
+        // A panicking test sent no shutdown: stop the server at once.
+        if std::thread::panicking() {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+            return;
+        }
         let deadline = std::time::Instant::now() + EXIT;
         while std::time::Instant::now() < deadline {
             if let Ok(Some(_)) = self.0.try_wait() {

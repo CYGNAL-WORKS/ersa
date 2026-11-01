@@ -147,7 +147,7 @@ function PermissionCard({
       {request.description && <p className="transcript-card-detail">{request.description}</p>}
       {/* Every field of the input: the user approves exactly what will run, never a summary of it. */}
       <dl className="transcript-fields">
-        {Object.entries(request.input as Record<string, unknown>).map(([key, value]) => (
+        {Object.entries((request.input ?? {}) as Record<string, unknown>).map(([key, value]) => (
           <div key={key} className="transcript-field">
             <dt>{key}</dt>
             <dd className="mono">{typeof value === "string" ? value : JSON.stringify(value, null, 2)}</dd>
