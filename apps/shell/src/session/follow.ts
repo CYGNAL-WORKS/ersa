@@ -20,7 +20,12 @@ export interface SessionView {
    * has no connection to Core; answers wait until it attaches again), or why
    * subscribing failed.
    */
-  stream: { state: "subscribing" } | { state: "live" } | { state: "offline" } | { state: "failed"; message: string };
+  stream:
+    | { state: "subscribing" }
+    | { state: "live" }
+    | { state: "offline" }
+    /** `gap`: an event never arrived; the stream is live again if it still does. */
+    | { state: "failed"; message: string; gap?: true };
   /** The composer's message, while it is on its way or after it was refused. */
   message?: Sending;
   /** Answers to permission requests, by request id, until the decision arrives as an event. */
@@ -122,7 +127,7 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         } else {
           // Subscribing again did not fill the gap: say so, so Retry shows,
           // rather than read "live" while events are dropped.
-          set((v) => ({ ...v, stream: { state: "failed", message: `event ${lastSeq + 1} never arrived` } }));
+          set((v) => ({ ...v, stream: { state: "failed", message: `event ${lastSeq + 1} never arrived`, gap: true } }));
         }
         return;
       }
@@ -136,7 +141,9 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
           event?.type === "permission.decided" && event.request_id in v.answers
             ? Object.fromEntries(Object.entries(v.answers).filter(([key]) => key !== event.request_id))
             : v.answers;
-        return { ...v, transcript, answers };
+        // The missing event arrived after all: the stream is live again.
+        const stream = v.stream.state === "failed" && v.stream.gap ? { state: "live" as const } : v.stream;
+        return { ...v, transcript, answers, stream };
       });
     },
 
