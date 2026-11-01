@@ -1,0 +1,35 @@
+[package]
+name = "ersa-adapter"
+description = "The boundary between Core and every adapter: the adapter, session, sink, projector, and transport traits, and the local transport."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[features]
+# A fake transport that replays scripted stdout and records stdin, for other
+# crates' tests: `ersa-adapter = { path = "../ersa-adapter", features = ["test-support"] }`
+# under `[dev-dependencies]`.
+test-support = []
+
+[dependencies]
+ersa-protocol = { path = "../ersa-protocol" }
+# Native `async fn` in traits cannot be used through `dyn Trait`, and every
+# trait here is used that way; see src/lib.rs.
+async-trait.workspace = true
+# Only for the derives on RawLine, SessionConfig, and PermissionDecision, which
+# Core persists and the Core API carries.
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+# Turns on `test-support` for this crate's own tests (see ersa-protocol's
+# Cargo.toml for how a crate depending on itself does that).
+ersa-adapter = { path = ".", features = ["test-support"] }
+# The contract test checks that projected events pass the schema.
+ersa-protocol = { path = "../ersa-protocol", features = ["schema-validation"] }
+
+[lints]
+workspace = true
