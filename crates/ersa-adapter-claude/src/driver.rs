@@ -135,10 +135,12 @@ fn entrypoint_env() -> BTreeMap<String, String> {
 /// Claude Code (or Claude Desktop) parent marks its children as nested
 /// sessions, Node options change how the CLI runs, and trace context would
 /// file the session under the parent's trace. `CLAUDE_CODE_ENTRYPOINT` is
-/// not listed because `entrypoint_env` overrides it.
-const INHERITED_VARIABLES: [&str; 5] = [
+/// removed too and then set by `entrypoint_env`: transports apply removals
+/// first, so the parent's value never reaches the child.
+const INHERITED_VARIABLES: [&str; 6] = [
     "CLAUDECODE",
     "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
     "NODE_OPTIONS",
     "TRACEPARENT",
     "TRACESTATE",
