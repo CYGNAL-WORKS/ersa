@@ -41,17 +41,22 @@ enum Command {
 /// group of arguments that a subcommand takes in with `#[command(flatten)]`.
 #[derive(Debug, Default, PartialEq, Eq, Args)]
 struct EndpointArg {
-    /// The named pipe or socket to serve on, instead of the user's default.
-    /// For tests and a second Core, so neither collides with the one the
-    /// Shell uses.
-    #[arg(long, value_name = "NAME")]
+    /// Serve on the user's endpoint with this label appended (letters,
+    /// digits, '-', '_'), instead of the user's own. For tests and a second
+    /// Core, so neither collides with the one the Shell uses.
+    #[arg(long, value_name = "LABEL")]
     endpoint: Option<String>,
 }
 
 impl EndpointArg {
-    /// The endpoint given, or `default` (the user's own) when none was.
-    fn or(self, default: String) -> String {
-        self.endpoint.unwrap_or(default)
+    /// The labelled endpoint when a label was given, else `default`. Only a
+    /// label is taken, never a raw pipe name or socket path, so an explicit
+    /// endpoint is exactly as private as the default.
+    fn or(self, default: String) -> std::io::Result<String> {
+        match self.endpoint {
+            Some(label) => ersa_core::platform::labelled_endpoint(&label),
+            None => Ok(default),
+        }
     }
 }
 
@@ -100,7 +105,13 @@ async fn serve(data_dir: Option<PathBuf>, endpoint: EndpointArg) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    config.endpoint = endpoint.or(config.endpoint);
+    config.endpoint = match endpoint.or(config.endpoint) {
+        Ok(endpoint) => endpoint,
+        Err(e) => {
+            eprintln!("ersa-core: invalid --endpoint: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
     // Every backend this build can drive. Core itself knows none of them.
     let adapters: Vec<Arc<dyn ersa_core::Adapter>> =
         vec![Arc::new(ersa_adapter_claude::ClaudeAdapter::new())];
@@ -154,11 +165,27 @@ mod tests {
 
     #[test]
     fn serve_takes_an_endpoint() {
-        let cli = Cli::try_parse_from(["ersa-core", "serve", "--endpoint", "elsewhere"])
+        let cli = Cli::try_parse_from(["ersa-core", "serve", "--endpoint", "second"])
             .expect("--endpoint is accepted");
         let Command::Serve { endpoint, .. } = cli.command;
-        assert_eq!(endpoint.or("default".into()), "elsewhere");
-        assert_eq!(EndpointArg::default().or("default".into()), "default");
+        assert_eq!(
+            endpoint.or("default".into()).unwrap(),
+            ersa_core::platform::labelled_endpoint("second").unwrap()
+        );
+        assert_eq!(
+            EndpointArg::default().or("default".into()).unwrap(),
+            "default"
+        );
+    }
+
+    #[test]
+    fn serve_refuses_a_raw_pipe_name_or_path_as_endpoint() {
+        for raw in [r"\\.\pipe\elsewhere", "/tmp/elsewhere.sock", "../up"] {
+            let endpoint = EndpointArg {
+                endpoint: Some(raw.into()),
+            };
+            assert!(endpoint.or("default".into()).is_err(), "{raw}");
+        }
     }
 
     #[test]

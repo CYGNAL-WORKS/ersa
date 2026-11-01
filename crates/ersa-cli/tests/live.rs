@@ -102,10 +102,10 @@ async fn a_prompt_with_a_permission_round_trip_through_the_core_process() {
     git(&repo, &["add", "README.md"]);
     git(&repo, &["commit", "--quiet", "-m", "initial"]);
 
-    let endpoint =
-        ersa_core::platform::labelled_endpoint(&format!("live-{}", std::process::id())).unwrap();
+    let label = format!("live-{}", std::process::id());
+    let endpoint = ersa_core::platform::labelled_endpoint(&label).unwrap();
     let mut core = tokio::process::Command::new(env!("CARGO_BIN_EXE_ersa-core"))
-        .args(["serve", "--endpoint", &endpoint, "--data-dir"])
+        .args(["serve", "--endpoint", &label, "--data-dir"])
         .arg(dir.path().join("data"))
         .stdin(Stdio::null())
         .kill_on_drop(true)
