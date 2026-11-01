@@ -161,3 +161,63 @@ fn euid() -> u32 {
     // SAFETY: `geteuid` has no preconditions and cannot fail.
     unsafe { libc::geteuid() }
 }
+
+// -- Child processes ----------------------------------------------------------
+
+/// A started process and everything it starts in turn, killed as one unit.
+///
+/// On Unix that unit is a process group: the child leads a new group, and
+/// what it starts joins the group unless it deliberately leaves (a daemon
+/// that calls `setsid` does). Dropping a `ProcessTree` kills the group.
+pub struct ProcessTree {
+    /// The group's id, which is the child's process id.
+    group: i32,
+}
+
+impl ProcessTree {
+    /// Sets up `command` before it is spawned: the child leads a new process
+    /// group, so killing the group can never reach Core itself.
+    pub fn prepare(command: &mut tokio::process::Command) {
+        command.process_group(0);
+    }
+
+    /// Remembers a just-spawned `child`'s group.
+    pub fn adopt(child: &tokio::process::Child) -> io::Result<ProcessTree> {
+        let pid = child
+            .id()
+            .ok_or_else(|| io::Error::other("the process exited before its group was known"))?;
+        let group = i32::try_from(pid).map_err(io::Error::other)?;
+        Ok(ProcessTree { group })
+    }
+
+    /// Kills every process in the group. A group that has already ended is
+    /// not an error.
+    pub fn kill(&self) -> io::Result<()> {
+        // SAFETY: `kill` has no memory-safety preconditions. A negative pid
+        // addresses the whole process group.
+        if unsafe { libc::kill(-self.group, libc::SIGKILL) } == 0 {
+            return Ok(());
+        }
+        let error = io::Error::last_os_error();
+        // ESRCH: nothing is left in the group.
+        if error.raw_os_error() == Some(libc::ESRCH) {
+            Ok(())
+        } else {
+            Err(error)
+        }
+    }
+}
+
+impl Drop for ProcessTree {
+    fn drop(&mut self) {
+        // The kernel does not reuse a group's id while any member lives, and
+        // the tree is dropped right after its leader exits, so this reaches
+        // the leader's leftovers and nothing else.
+        let _ = self.kill();
+    }
+}
+
+/// The file to start for `program`: Unix needs no help finding it.
+pub fn resolve_program(program: &str, _path: Option<&str>) -> String {
+    program.to_string()
+}

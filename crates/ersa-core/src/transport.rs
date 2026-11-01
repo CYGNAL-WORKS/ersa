@@ -2,15 +2,20 @@
 //! local spawn or over SSH. Adapters and the workspace and VCS layer run through
 //! it without knowing which transport they got.
 //!
-//! The traits and the local transport live in `ersa-adapter`, which adapters
-//! depend on too. This module adds what Core needs on top: running a short
-//! command to completion and collecting its output, for VCS commands and
-//! backend detection.
+//! The traits live in `ersa-adapter`, which adapters depend on too. This
+//! module adds what Core needs on top: [`LocalTreeTransport`], the local
+//! transport that kills process trees as a unit, and running a short command
+//! to completion and collecting its output, for VCS commands and backend
+//! detection.
+
+mod local;
 
 use std::io;
 use std::time::Duration;
 
 use ersa_adapter::{LineReader, ProcessExit, ProcessSpec, Transport};
+
+pub use local::{LocalTreeTransport, MAX_PROCESS_LINE_BYTES};
 
 /// What a finished command printed, and how it exited.
 #[derive(Debug, Clone, PartialEq, Eq)]
