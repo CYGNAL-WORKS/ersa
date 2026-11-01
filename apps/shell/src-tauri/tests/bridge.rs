@@ -8,10 +8,12 @@
 //! Each test's Core serves an endpoint of its own (`serve --endpoint`), so
 //! the tests never reach or stop the user's own Core.
 
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+mod common;
+
+use std::path::Path;
 use std::time::Duration;
 
+use common::{core_program, unique_label};
 use ersa_shell::bridge::{BridgeError, CoreLink, LinkEvent, LinkOptions};
 use ersa_shell::launch::{self, CoreLocation, How};
 use serde_json::{Value, json};
@@ -22,33 +24,11 @@ use tokio::sync::mpsc;
 const OPEN: Duration = Duration::from_secs(90);
 const CLEANUP: Duration = Duration::from_secs(30);
 
-fn core_program() -> PathBuf {
-    let program = std::env::var_os("ERSA_CORE_BIN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            // CARGO_MANIFEST_DIR is apps/shell/src-tauri.
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../target/debug")
-                .join(format!("ersa-core{}", std::env::consts::EXE_SUFFIX))
-        });
-    assert!(
-        program.exists(),
-        "no ersa-core at {}: run `cargo build -p ersa-cli` at the repository root, or set ERSA_CORE_BIN",
-        program.display()
-    );
-    program
-}
-
 /// A Core location private to this test: the user's endpoint labelled with
 /// the process id and a counter (`serve --endpoint <label>`), and a data
 /// directory in `dir`.
 fn private_location(dir: &Path) -> CoreLocation {
-    static NEXT: AtomicU32 = AtomicU32::new(0);
-    let label = format!(
-        "shell-test-{}-{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    );
+    let label = unique_label("shell-test");
     let endpoint = ersa_core::platform::labelled_endpoint(&label).expect("an endpoint");
     CoreLocation {
         program: core_program(),
@@ -62,6 +42,7 @@ fn private_location(dir: &Path) -> CoreLocation {
         env: Vec::new(),
         log_file: Some(dir.join("core.log")),
         start_timeout: Duration::from_secs(60),
+        launch: true,
     }
 }
 
@@ -230,6 +211,22 @@ async fn a_core_that_cannot_start_is_reported_with_its_output() {
     assert!(message.contains("exited"), "{message}");
     assert!(message.contains("--no-such-flag"), "{message}");
     assert!(!message.contains("earlier run"), "{message}");
+}
+
+#[tokio::test]
+async fn an_attach_only_location_never_launches_core() {
+    // What a debug build's ERSA_ATTACH uses: a labelled endpoint someone
+    // else serves. With nobody serving it, attaching fails and starts nothing.
+    let location = CoreLocation::attach_only(&unique_label("shell-attach")).expect("a location");
+    let error = launch::attach_or_launch(&location)
+        .await
+        .err()
+        .expect("nothing serves the label");
+    assert!(
+        matches!(error, launch::LaunchError::NotServing { .. }),
+        "{error}"
+    );
+    assert!(!ersa_shell::bridge::alive(&location.endpoint).await);
 }
 
 #[test]
