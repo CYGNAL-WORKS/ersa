@@ -1,5 +1,6 @@
 //! Resuming a session: the driver continues the session whose `system/init`
-//! id it is given, and checks the CLI's live-session registry first
+//! id it is given, and `live_session` reads the CLI's live-session registry,
+//! which Core consults before it resumes one
 //! (PROTO-CLAUDE-CODE-STREAM, Invocation and Live-session registry).
 
 mod common;
@@ -11,7 +12,7 @@ use std::time::Duration;
 use common::{RecordingSink, fixture};
 use ersa_adapter::fake::FakeTransport;
 use ersa_adapter::{Adapter, AdapterError, SessionConfig};
-use ersa_adapter_claude::record::{live_session, record_path};
+use ersa_adapter_claude::record::{LiveCheck, live_session, record_path};
 use ersa_adapter_claude::{ClaudeAdapter, invocation_args};
 use serde_json::{Value, json};
 
@@ -172,13 +173,15 @@ fn a_running_process_with_the_session_open_is_reported() {
     // This test process stands in for a running CLI.
     let pid = std::process::id();
     let home = registry_with(pid, SESSION_ID);
-    let live = live_session(home.path(), SESSION_ID).expect("reported");
+    let LiveCheck::Open(live) = live_session(home.path(), SESSION_ID) else {
+        panic!("not reported");
+    };
     assert_eq!(live.pid, pid);
     assert_eq!(live.entrypoint.as_deref(), Some("cli"));
     // Another session is not.
     assert_eq!(
         live_session(home.path(), "0989e382-5a8f-4fdf-9738-bf02b1f049e1"),
-        None
+        LiveCheck::NotOpen
     );
 }
 
@@ -194,18 +197,49 @@ fn a_registry_file_left_by_a_process_that_has_exited_is_not_reported() {
     let pid = child.id();
     child.wait().unwrap();
     let home = registry_with(pid, SESSION_ID);
-    assert_eq!(live_session(home.path(), SESSION_ID), None);
+    assert_eq!(live_session(home.path(), SESSION_ID), LiveCheck::NotOpen);
 }
 
 #[test]
-fn no_registry_or_a_broken_file_reports_nothing() {
+fn no_registry_means_nothing_is_open() {
     let home = tempfile::tempdir().unwrap();
-    assert_eq!(live_session(home.path(), SESSION_ID), None);
+    assert_eq!(live_session(home.path(), SESSION_ID), LiveCheck::NotOpen);
+    // Files that are not registry entries are not read.
     let sessions = home.path().join("sessions");
     fs::create_dir_all(&sessions).unwrap();
+    fs::write(sessions.join("123.abc.key"), "secret").unwrap();
+    assert_eq!(live_session(home.path(), SESSION_ID), LiveCheck::NotOpen);
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R17
+#[test]
+fn a_registry_file_of_another_shape_makes_the_answer_unknown_not_free() {
+    // A newer CLI that renamed a field, or a damaged file: either could be
+    // the one naming this session, so the check says it could not tell.
+    let pid = std::process::id();
+    let home = registry_with(pid, "0989e382-5a8f-4fdf-9738-bf02b1f049e1");
+    let sessions = home.path().join("sessions");
     fs::write(sessions.join("123.json"), "not json").unwrap();
-    fs::write(sessions.join("124.json"), r#"{"pid":"x","sessionId":7}"#).unwrap();
-    assert_eq!(live_session(home.path(), SESSION_ID), None);
+    fs::write(
+        sessions.join("124.json"),
+        json!({"pid": "124", "session": SESSION_ID}).to_string(),
+    )
+    .unwrap();
+    let LiveCheck::Unknown { unreadable } = live_session(home.path(), SESSION_ID) else {
+        panic!("a file it could not read was taken as not open");
+    };
+    assert_eq!(
+        unreadable,
+        [sessions.join("123.json"), sessions.join("124.json")]
+    );
+
+    // A readable file naming the session open still wins.
+    let home = registry_with(pid, SESSION_ID);
+    fs::write(home.path().join("sessions/123.json"), "not json").unwrap();
+    assert!(matches!(
+        live_session(home.path(), SESSION_ID),
+        LiveCheck::Open(_)
+    ));
 }
 
 #[test]

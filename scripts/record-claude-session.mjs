@@ -12,7 +12,8 @@
 //
 // Without --cwd it works in a new scratch git repository under the temp
 // directory, never a real project, and prints its path so a later run can
-// resume there with --cwd and --resume. Writes, under
+// resume there with --cwd and --resume. Never point --cwd at a real project:
+// the CLI loads the user's settings, and every tool call is allowed. Writes, under
 // docs/briefs/protocol/fixtures/claude-code/<version>/:
 //   <NN>-<name>.jsonl          the CLI's stdout
 //   <NN>-<name>.meta.json      command line, environment changes, stdin lines, timings
@@ -96,7 +97,7 @@ const option = (flag) => {
 const givenCwd = option("--cwd");
 const resume = option("--resume");
 const [name, ...messages] = argv;
-if (!name || messages.length === 0) {
+if (!name || messages.length === 0 || !/^[a-z0-9-]+$/.test(name)) {
   console.error('usage: node scripts/record-claude-session.mjs <name> [--cwd <dir>] [--resume <id>] "<message>" [...]');
   process.exit(1);
 }
@@ -219,7 +220,15 @@ const elapsed_ms = Date.now() - started;
 
 // The session record: the init line names the session and the directory the
 // CLI keyed it by.
-const init = stdoutLines.map((l) => JSON.parse(l.line)).find((m) => m.type === "system" && m.subtype === "init");
+const init = stdoutLines
+  .map((l) => {
+    try {
+      return JSON.parse(l.line);
+    } catch {
+      return null;
+    }
+  })
+  .find((m) => m?.type === "system" && m?.subtype === "init");
 let recordLines = null;
 if (init) {
   const encoded = init.cwd.replace(/[^a-zA-Z0-9]/g, "-");
@@ -258,6 +267,13 @@ writeFileSync(
   ) + "\n")
 );
 
+// The scrub matches the user name as a word; say so if it survives elsewhere.
+const written = [join(dir, stem + ".jsonl"), join(dir, stem + ".meta.json"), join(dir, "record", stem + ".jsonl")];
+for (const file of written.filter(existsSync)) {
+  if (USER_NAME.length >= 3 && readFileSync(file, "utf8").toLowerCase().includes(USER_NAME.toLowerCase())) {
+    console.error(`WARNING: ${file} still contains the user name; redact it before committing`);
+  }
+}
 console.log(`recorded ${stem} (${version}) in ${cwd}`);
 console.log(`  session ${init?.session_id ?? "?"}: exit ${exit.code ?? exit.signal}, ${stdoutLines.length} lines out, ${sent.length} in, ${elapsed_ms} ms, record ${recordLines === null ? "NOT FOUND" : "copied"}`);
 for (const t of turns) console.log(`  turn ${t.turn}: ${t.got_result ? t.subtype : "NO RESULT"}${t.is_error ? " (error)" : ""}`);

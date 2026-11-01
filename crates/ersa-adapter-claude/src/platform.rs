@@ -1,15 +1,18 @@
-//! Whether a process is still running, for the live-session registry.
+//! Platform code: whether a process is still running, for the CLI's
+//! live-session registry (ARCH-CORE-R07 keeps Windows-only code in modules
+//! named `platform`).
 //!
 //! Each platform asks its own kernel: nothing here starts a process or reads
 //! another program's output.
 
 /// Whether process `pid` is running. A process that exists but belongs to
-/// someone Ersa may not inspect still counts as running.
+/// someone Ersa may not inspect still counts as running, as does one that
+/// cannot be inspected for any reason other than not existing.
 #[cfg(windows)]
 #[allow(unsafe_code)]
 pub fn is_running(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::{
-        CloseHandle, ERROR_ACCESS_DENIED, GetLastError, WAIT_TIMEOUT,
+        CloseHandle, ERROR_INVALID_PARAMETER, GetLastError, WAIT_TIMEOUT,
     };
     use windows_sys::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, WaitForSingleObject,
@@ -28,10 +31,11 @@ pub fn is_running(pid: u32) -> bool {
         )
     };
     if process.is_null() {
-        // No such process gives ERROR_INVALID_PARAMETER. Access denied means
-        // it exists (elevated, or another user's).
+        // No such process gives ERROR_INVALID_PARAMETER. Anything else (access
+        // denied for an elevated or another user's process, say) means it may
+        // exist, and a registry check would rather warn than miss it.
         // SAFETY: reads this thread's last error, set by the call above.
-        return unsafe { GetLastError() } == ERROR_ACCESS_DENIED;
+        return unsafe { GetLastError() } != ERROR_INVALID_PARAMETER;
     }
     // A process object outlives its process while handles to it are open,
     // so opening it is not enough: it is running until it is signalled.
