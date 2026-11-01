@@ -48,8 +48,6 @@ ersa-protocol = { path = "../ersa-protocol", features = ["schema-validation"] }
 tempfile.workspace = true
 # A paused clock, so the replay's real-time pacing is tested without waiting.
 tokio = { workspace = true, features = ["test-util"] }
-# Used only by tests/boundaries.rs to read the workspace's Cargo.lock.
-toml.workspace = true
 
 [lints]
 workspace = true

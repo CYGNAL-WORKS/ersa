@@ -5,9 +5,12 @@
 //! files from the workspace rather than calling Core's code, because what they
 //! check is the shape of the build, not behaviour.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use serde_json::Value;
 
 /// The workspace root. `CARGO_MANIFEST_DIR` is set by Cargo at compile time to
 /// this crate's directory (`crates/ersa-core`), so the root is two levels up.
@@ -19,63 +22,83 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Every package any workspace crate depends on, directly or transitively,
-/// including dev and build dependencies and dependencies for every target OS.
+/// Every package a plain `cargo build` or `cargo test` at the root can compile:
+/// the workspace's default members (Core's crates) and everything they depend
+/// on, directly or transitively, including dev and build dependencies and
+/// dependencies for every target OS.
 ///
-/// Read from `Cargo.lock`, which lists every package in the build with the names
-/// of its dependencies. Workspace crates are the entries without a `source`
-/// (they come from this repository, not a registry). From those we walk the
-/// dependency lists breadth-first. A dependency entry is `"name"` or
-/// `"name version"` or `"name version (source)"`; the name is the first word.
-/// When two versions of one package exist we follow both, which can only make
-/// the set larger, so the check stays safe.
-fn all_dependencies_of_workspace() -> BTreeSet<String> {
-    let lock_path = workspace_root().join("Cargo.lock");
-    let text = fs::read_to_string(&lock_path)
-        .unwrap_or_else(|e| panic!("reading {}: {e}", lock_path.display()));
-    let lock: toml::Table = text.parse().expect("Cargo.lock is valid TOML");
+/// The Shell is a workspace member too, so `Cargo.lock` lists Tauri; what
+/// matters is whether Core's crates reach it. `cargo metadata` resolves the
+/// graph: `workspace_default_members` names where to start, and each node of
+/// `resolve` lists the package ids it depends on. Without `--filter-platform`
+/// the graph covers every platform, so the check holds for all of them.
+/// `--locked` reads the lockfile as it is and never changes it.
+fn default_members_dependency_closure() -> BTreeSet<String> {
+    // CARGO is the cargo that is building this test, so the check uses the
+    // same toolchain as the build it checks.
+    let output = Command::new(env!("CARGO"))
+        .args(["metadata", "--format-version", "1", "--locked"])
+        .current_dir(workspace_root())
+        .output()
+        .expect("cargo metadata runs");
+    assert!(
+        output.status.success(),
+        "cargo metadata failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let metadata: Value =
+        serde_json::from_slice(&output.stdout).expect("cargo metadata prints JSON");
 
-    let packages = lock["package"].as_array().expect("Cargo.lock has packages");
-    let name_of = |p: &toml::Value| p["name"].as_str().unwrap_or_default().to_string();
-    let deps_of = |name: &str| -> Vec<String> {
-        packages
-            .iter()
-            .filter(|p| name_of(p) == name)
-            .filter_map(|p| p.get("dependencies").and_then(|d| d.as_array()))
-            .flatten()
-            .filter_map(|d| d.as_str())
-            .filter_map(|d| d.split_whitespace().next())
-            .map(str::to_string)
-            .collect()
-    };
+    // Package ids are opaque strings; the names are on `packages`.
+    let name_of: BTreeMap<&str, &str> = metadata["packages"]
+        .as_array()
+        .expect("metadata has packages")
+        .iter()
+        .map(|p| (p["id"].as_str().unwrap(), p["name"].as_str().unwrap()))
+        .collect();
+    let deps_of: BTreeMap<&str, Vec<&str>> = metadata["resolve"]["nodes"]
+        .as_array()
+        .expect("metadata has a resolved graph")
+        .iter()
+        .map(|node| {
+            let deps = node["deps"]
+                .as_array()
+                .expect("every node lists its dependencies")
+                .iter()
+                .map(|d| d["pkg"].as_str().unwrap())
+                .collect();
+            (node["id"].as_str().unwrap(), deps)
+        })
+        .collect();
 
     let mut seen = BTreeSet::new();
-    let mut queue: VecDeque<String> = packages
+    let mut queue: VecDeque<&str> = metadata["workspace_default_members"]
+        .as_array()
+        .expect("metadata names the default members (cargo 1.71 or later)")
         .iter()
-        .filter(|p| p.get("source").is_none())
-        .map(name_of)
+        .map(|id| id.as_str().unwrap())
         .collect();
-    while let Some(name) = queue.pop_front() {
-        if seen.insert(name.clone()) {
-            queue.extend(deps_of(&name));
+    while let Some(id) = queue.pop_front() {
+        if seen.insert(id) {
+            queue.extend(deps_of.get(id).into_iter().flatten());
         }
     }
-    seen
+    seen.into_iter().map(|id| name_of[id].to_string()).collect()
 }
 
 // verifies: ARCH-CORE-R01
 #[test]
-fn no_workspace_crate_depends_on_tauri() {
-    let deps = all_dependencies_of_workspace();
+fn no_default_member_depends_on_tauri() {
+    let deps = default_members_dependency_closure();
     assert!(
         deps.contains("ersa-core"),
-        "the walk should start from the workspace crates; found {deps:?}"
+        "the walk should start from Core's crates; found {deps:?}"
     );
 
     let tauri: Vec<_> = deps.iter().filter(|d| d.starts_with("tauri")).collect();
     assert!(
         tauri.is_empty(),
-        "Core must build without Tauri, but the workspace depends on {tauri:?}"
+        "Core must build without Tauri, but the default members depend on {tauri:?}"
     );
 }
 
