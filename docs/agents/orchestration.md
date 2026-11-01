@@ -10,7 +10,6 @@ How the orchestration session runs the engineering loop: cut tickets, start impl
 ## Start implementing sessions
 
 - One session per unblocked ticket, each in its own git worktree, never in the integration checkout.
-- Pick the effort per ticket: low or medium for routine implementation, high only where the work needs heavy reasoning (concurrency, protocol state, security).
 - The prompt is short: "Implement issue #n with the `implement-ticket` skill", plus anything the issue cannot carry (a merged PR to build on, a decision from the owner).
 
 ## Review a pull request
