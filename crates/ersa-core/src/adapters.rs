@@ -21,19 +21,13 @@ pub struct KnownBackend {
     pub name: &'static str,
     /// The executable the host resolves.
     pub program: &'static str,
-    /// The range of versions Ersa was tested against.
-    pub min_tested_version: &'static str,
-    pub max_tested_version: &'static str,
 }
 
-/// Every backend Core knows. The tested range for Claude Code is the one in
-/// `PROTO-CLAUDE-CODE-STREAM`; it moves to the adapter crate once that crate
-/// exports it.
+/// Every backend Core knows. The range of versions each was tested with is
+/// its adapter's ([`Adapter::tested_versions`]), so there is one source.
 pub const KNOWN_BACKENDS: &[KnownBackend] = &[KnownBackend {
     name: "claude-code",
     program: "claude",
-    min_tested_version: "2.1.302",
-    max_tested_version: "2.1.302",
 }];
 
 /// How long a backend may take to print its version. Claude Code is a large
@@ -46,6 +40,9 @@ pub struct Detected {
     pub backend: KnownBackend,
     pub version: Option<String>,
     pub state: BackendState,
+    /// The oldest and newest versions its adapter was tested with; empty
+    /// when no adapter for it is registered.
+    pub tested: (String, String),
 }
 
 impl Detected {
@@ -62,8 +59,8 @@ impl Detected {
             name: self.backend.name.to_string(),
             version: self.version.clone(),
             status: self.state,
-            min_tested_version: self.backend.min_tested_version.to_string(),
-            max_tested_version: self.backend.max_tested_version.to_string(),
+            min_tested_version: self.tested.0.clone(),
+            max_tested_version: self.tested.1.clone(),
         }
     }
 }
@@ -86,9 +83,14 @@ pub async fn detect(
             args: vec!["--version".to_string()],
             ..ProcessSpec::default()
         };
-        if let Some(adapter) = adapter_for(backend.name) {
+        let adapter = adapter_for(backend.name);
+        if let Some(adapter) = &adapter {
             adapter.set_environment(&mut spec);
         }
+        let tested = adapter
+            .and_then(|a| a.tested_versions())
+            .map(|(min, max)| (min.to_string(), max.to_string()))
+            .unwrap_or_default();
         let (version, state) = match version_of(transport, spec).await {
             Ok(Some(version)) => (Some(version), BackendState::Available),
             Ok(None) => (None, BackendState::Error),
@@ -104,6 +106,7 @@ pub async fn detect(
             backend: backend.clone(),
             version,
             state,
+            tested,
         });
     }
     found
@@ -166,6 +169,18 @@ mod tests {
         })
         .await;
         assert_eq!(found[0].version.as_deref(), Some("2.1.316"));
+        // The tested range is the adapter's own.
+        let info = found[0].info();
+        assert_eq!(
+            (
+                info.min_tested_version.as_str(),
+                info.max_tested_version.as_str()
+            ),
+            (
+                ersa_adapter_claude::MIN_TESTED_VERSION,
+                ersa_adapter_claude::MAX_TESTED_VERSION
+            )
+        );
 
         let mut session = ProcessSpec::default();
         claude.set_environment(&mut session);

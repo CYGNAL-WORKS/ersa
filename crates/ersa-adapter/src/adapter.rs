@@ -39,6 +39,13 @@ pub trait Adapter: Send + Sync {
     /// environment as it is.
     fn set_environment(&self, _spec: &mut ProcessSpec) {}
 
+    /// The oldest and newest backend versions this adapter was tested with,
+    /// as `backend.list` reports them. `None`, the default, when it does not
+    /// say.
+    fn tested_versions(&self) -> Option<(&'static str, &'static str)> {
+        None
+    }
+
     /// A fresh projector for one session's live stream. Core makes one each
     /// time it starts the backend and feeds it every raw line from the first.
     fn projector(&self) -> Box<dyn Projector>;

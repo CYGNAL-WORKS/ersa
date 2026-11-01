@@ -47,6 +47,10 @@ impl Adapter for OnTransport {
         self.adapter.set_environment(spec)
     }
 
+    fn tested_versions(&self) -> Option<(&'static str, &'static str)> {
+        self.adapter.tested_versions()
+    }
+
     fn projector(&self) -> Box<dyn Projector> {
         self.adapter.projector()
     }

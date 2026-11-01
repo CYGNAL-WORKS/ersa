@@ -30,6 +30,11 @@ pub use projector::ClaudeProjector;
 /// The backend's name in `source.backend`, `session.started`, and the Core API.
 pub const BACKEND: &str = "claude-code";
 
+/// The oldest CLI version the invocation was verified on: the setting
+/// sources per trust, the entrypoint and the environment
+/// (`PROTO-CLAUDE-CODE-STREAM`, Versioning). Older fixtures still parse.
+pub const MIN_TESTED_VERSION: &str = "2.1.316";
+
 /// The newest CLI version the fixtures were recorded on. A newer CLI still
 /// runs, with a `session.notice` saying so (PROTO-CLAUDE-CODE-STREAM-R10).
 pub const MAX_TESTED_VERSION: &str = "2.1.316";
