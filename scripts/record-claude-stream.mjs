@@ -11,6 +11,9 @@
 // recorded. Writes the same .jsonl/.meta.json pair as record-claude.mjs, with the
 // lines we SENT recorded in the meta file under `sent`.
 //
+// Both files pass through redact() (scripts/redact.mjs) before they are written:
+// account email, organization and home-directory paths become placeholders.
+//
 // Set ERSA_CLAUDE to the claude executable if it is not on PATH.
 
 import { spawn, spawnSync } from "node:child_process";
@@ -18,6 +21,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { redact } from "./redact.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const CLAUDE = process.env.ERSA_CLAUDE || "claude";
@@ -150,10 +155,10 @@ const exit = await Promise.race([exited, new Promise((r) => setTimeout(() => r({
 if (exit.signal === "timeout") child.kill();
 const elapsed_ms = Date.now() - started;
 
-writeFileSync(join(dir, stem + ".jsonl"), stdoutLines.map((l) => l.line).join("\n") + "\n");
+writeFileSync(join(dir, stem + ".jsonl"), redact(stdoutLines.map((l) => l.line).join("\n") + "\n"));
 writeFileSync(
   join(dir, stem + ".meta.json"),
-  JSON.stringify(
+  redact(JSON.stringify(
     {
       recorded_at: new Date(started).toISOString(),
       claude_code_version: version,
@@ -172,7 +177,7 @@ writeFileSync(
     },
     null,
     2
-  ) + "\n"
+  ) + "\n")
 );
 
 console.log(`recorded ${stem} (${version}): exit ${exit.code ?? exit.signal}, ${stdoutLines.length} lines out, ${sent.length} lines in, ${elapsed_ms} ms`);
