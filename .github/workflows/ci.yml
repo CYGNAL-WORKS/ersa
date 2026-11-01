@@ -246,6 +246,8 @@ jobs:
     # The owner's own Windows machine, registered as a self-hosted runner:
     # faster with a warm cache, and no hosted Windows minutes. The job waits
     # while that machine is offline. Bash steps need Git Bash on its PATH.
+    # Only while the repository is private: never self-host for a public one,
+    # since a fork's pull request would run its code on that machine.
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 30
     steps:
