@@ -8,7 +8,7 @@ use std::time::Duration;
 use ersa_adapter::Adapter;
 use ersa_protocol::core_api::rpc::{ErrorObject, Incoming, Response, code, parse_incoming};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{broadcast, mpsc, watch};
+use tokio::sync::{Semaphore, mpsc, watch};
 use tokio::task::JoinSet;
 
 use super::lines::{CappedLines, LineError};
@@ -26,6 +26,15 @@ use crate::state::{Core, CoreConfig};
 /// lagging receiver: one stalled client must not stall a session for every
 /// other client.
 const OUTBOUND_QUEUE: usize = 256;
+
+/// How many session requests one connection may have running at once
+/// (see [`super::runs_detached`]). Past it, the connection reads no further
+/// requests until one finishes.
+const DETACHED_PER_CONNECTION: usize = 32;
+
+/// After Core decides to close a connection, how long it still tries to
+/// write what is queued, the response to the request in hand included.
+const KICK_GRACE: Duration = Duration::from_secs(5);
 
 /// How long shutdown waits for connections to finish writing.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
@@ -174,6 +183,7 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
     let mut kicked = kick.subscribe();
     let mut conn = ConnectionState::new(outbound, kick);
     let mut lines = CappedLines::new(read, core.config.max_line_bytes);
+    let detached = Arc::new(Semaphore::new(DETACHED_PER_CONNECTION));
     let hello_deadline = tokio::time::Instant::now() + core.config.handshake_timeout;
     let mut shutdown_after = false;
     loop {
@@ -216,6 +226,26 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
         }
 
         let (response, after) = match parse_incoming(&line) {
+            // A session request that may wait on a backend runs on its own
+            // and answers through the queue when done, so it never holds up
+            // the requests behind it: a permission decision must not wait
+            // for another session's start.
+            Incoming::Request(request) if super::runs_detached(&conn, &request) => {
+                let Ok(permit) = Arc::clone(&detached).acquire_owned().await else {
+                    break;
+                };
+                let core = Arc::clone(&core);
+                let outbound = conn.outbound.clone();
+                tokio::spawn(async move {
+                    let response = super::handle_detached(&core, request).await;
+                    let line =
+                        serde_json::to_string(&response).expect("responses always serialize");
+                    // The client may have gone; the work is done either way.
+                    let _ = outbound.send(line).await;
+                    drop(permit);
+                });
+                continue;
+            }
             Incoming::Request(request) => super::handle(&core, &mut conn, request).await,
             // The Interface sends no notifications yet; ignore any, as
             // JSON-RPC requires (a notification is never answered).
@@ -225,11 +255,16 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
             }
             Incoming::Invalid { id, error } => (Response::failure(id, error), After::Continue),
         };
-        // A client that stopped reading can leave the queue full; the
-        // kick that closes it must still get through.
+        // A client that stopped reading can leave the queue full; the kick
+        // that closes it must still get through, though the response in
+        // hand still goes out if the client takes it within the grace.
         let sent = tokio::select! {
             sent = send(&conn, &response) => sent,
-            _ = kicked.wait_for(|kicked| *kicked) => false,
+            // Wrapped so the `watch::Ref` is gone before the await below.
+            () = async { let _ = kicked.wait_for(|kicked| *kicked).await; } => {
+                let _ = tokio::time::timeout(KICK_GRACE, send(&conn, &response)).await;
+                false
+            }
         };
         // The response is queued; subscriptions it created may send now,
         // behind it. Tile notifications begin once the handshake is done.
@@ -238,9 +273,8 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
         }
         if conn.api_version.is_some() && conn.tile_task.is_none() {
             conn.tile_task = Some(AbortOnDrop(tokio::spawn(forward_tiles(
-                core.sessions.tile_updates(),
+                core.sessions.tile_feed(),
                 conn.outbound.clone(),
-                Arc::clone(&conn.kick),
             ))));
         }
         // Decided before looking at `sent`: a client that vanished right
@@ -255,11 +289,13 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
 
     // Dropping the sender ends the writer once it has written everything
     // queued, including the answer to `core.shutdown`. A connection Core
-    // closed for falling behind is not drained: its client is not reading,
-    // and the writer would wait on it forever.
+    // closed for falling behind gets a grace to take what is queued, the
+    // last response among it; its client may not be reading, and the
+    // writer must not wait on it forever.
     let kicked = *kicked.borrow();
     drop(conn);
-    if kicked {
+    let mut writer = writer;
+    if kicked && tokio::time::timeout(KICK_GRACE, &mut writer).await.is_err() {
         writer.abort();
     }
     writer.await.ok();
@@ -271,27 +307,15 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
 /// Forwards `session.tile` notifications to one connection until it closes.
 ///
 /// This task, not the session, waits for room on the connection: a client
-/// busy reading a long replay is slow, not stuck. One that falls so far
-/// behind that the broadcast drops tiles for it is closed instead, since a
-/// missed last tile would leave its rail wrong; its client re-reads
-/// `session.list`.
-async fn forward_tiles(
-    mut tiles: broadcast::Receiver<Arc<String>>,
-    outbound: mpsc::Sender<String>,
-    kick: crate::sessions::Kick,
-) {
+/// busy reading a long replay is slow, not stuck. Meanwhile its feed keeps
+/// only the newest tile per session, so nothing piles up and nothing is
+/// lost that matters.
+async fn forward_tiles(mut tiles: crate::sessions::TileFeed, outbound: mpsc::Sender<String>) {
     loop {
-        match tiles.recv().await {
-            Ok(line) => {
-                if outbound.send(line.as_ref().clone()).await.is_err() {
-                    return;
-                }
-            }
-            Err(broadcast::error::RecvError::Lagged(_)) => {
-                kick.send_replace(true);
+        for line in tiles.next().await {
+            if outbound.send(line.as_ref().clone()).await.is_err() {
                 return;
             }
-            Err(broadcast::error::RecvError::Closed) => return,
         }
     }
 }

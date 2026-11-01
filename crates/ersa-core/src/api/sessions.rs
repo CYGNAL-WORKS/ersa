@@ -85,7 +85,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         state: LifecycleState::Starting,
         created_at: persistence::now_rfc3339(),
         last_event_seq: None,
-        tile: Tile::default(),
+        tile: Tile::starting(),
     };
     let config = SessionConfig {
         cwd: workspace.path,
@@ -250,8 +250,19 @@ pub(super) async fn raw_log(
         .collect())
 }
 
-pub(super) async fn reproject(core: &Core, params: IdParams) -> Result<Session, ApiError> {
+/// Re-derives a stopped session's events. When they changed, this
+/// connection's own subscription to the session ends quietly (it is not
+/// closed, as other subscribers' connections are), so the client
+/// resubscribes after reading this answer.
+pub(super) async fn reproject(
+    core: &Core,
+    conn: &mut ConnectionState,
+    params: IdParams,
+) -> Result<Session, ApiError> {
     find(core, &params.id).await?;
-    core.sessions.reproject(&params.id).await?;
+    let changed = core.sessions.reproject(&params.id, &conn.kick).await?;
+    if changed {
+        conn.subscriptions.remove(&params.id);
+    }
     find(core, &params.id).await
 }
