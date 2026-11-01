@@ -276,7 +276,12 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                     () = async { let _ = kicked.wait_for(|kicked| *kicked).await; } => break,
                     _ = core.shutdown_requested() => break,
                 };
-                let stops = super::stop_target(&request);
+                // A replay refuses session.stop, so it must not start one early.
+                let stops = if core.config.replay {
+                    None
+                } else {
+                    super::stop_target(&request)
+                };
                 let (done, done_rx) = watch::channel(false);
                 let before = super::session_lane(&conn, &request)
                     .and_then(|session| lanes.insert(session, done_rx));
