@@ -19,18 +19,20 @@ tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 
-# Named pipes and their security descriptor, used only by src/platform/windows.rs.
+# Named pipes and their security descriptor, and job objects that kill
+# process trees, used only by src/platform/windows.rs.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Security_Authorization",
     "Win32_Storage_FileSystem",
+    "Win32_System_JobObjects",
     "Win32_System_Pipes",
     "Win32_System_Threading",
 ] }
 
-# `geteuid`, used only by src/platform/unix.rs.
+# `geteuid` and `kill`, used only by src/platform/unix.rs.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 

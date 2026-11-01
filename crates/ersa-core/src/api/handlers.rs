@@ -391,8 +391,25 @@ pub(super) async fn workspace_remove(
         )));
     }
 
-    // Stop, then remove. M0-T6: stop this workspace's sessions here, before
-    // the files go, so no backend is left running in a deleted directory.
+    // A workspace with sessions is refused, as a project with workspaces
+    // is: removal never cascades, and no backend may be left running in a
+    // deleted directory. Checked after the claim, because a session can
+    // only be created in a `ready` workspace: one created before the claim
+    // is seen here, and none can be created after it.
+    if core
+        .store
+        .sessions_in_workspace(workspace.id.clone())
+        .await?
+        > 0
+    {
+        core.store
+            .set_workspace_state(workspace.id.clone(), workspace.state)
+            .await?;
+        return Err(ApiError::invalid_state(format!(
+            "workspace {} has sessions; stop and remove them first",
+            workspace.id
+        )));
+    }
 
     let force = params.force.unwrap_or(false);
     let removed = workspace::git_worktree_remove(

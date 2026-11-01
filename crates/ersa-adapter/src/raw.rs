@@ -38,4 +38,8 @@ pub enum Direction {
     Backend,
     /// Ersa wrote it to the backend's stdin.
     Host,
+    /// Core recorded it about the session's lifecycle: the process started,
+    /// exited, or was stopped. Core writes and projects these itself; an
+    /// adapter never records one, and its projector is never fed one.
+    Core,
 }

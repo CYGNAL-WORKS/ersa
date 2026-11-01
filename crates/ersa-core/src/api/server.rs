@@ -5,9 +5,10 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
+use ersa_adapter::Adapter;
 use ersa_protocol::core_api::rpc::{ErrorObject, Incoming, Response, code, parse_incoming};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinSet;
 
 use super::lines::{CappedLines, LineError};
@@ -18,10 +19,11 @@ use crate::state::{Core, CoreConfig};
 
 /// How many outgoing lines may queue for one client before writers wait.
 ///
-/// M0-T6: responses may wait for room, but `session.event` fan-out must not.
-/// Use `try_send` for notifications and, when the queue is full, drop the
-/// slow subscriber (or close its connection); never `.await` a send on
-/// behalf of a session, or one stalled client stalls that session for every
+/// Responses and each subscription's forwarding task may wait for room; a
+/// session never does. The session manager offers events to a
+/// subscription's own queue and drops a subscriber that falls behind, and
+/// `session.tile` notifications are `try_send`, closing a connection that
+/// cannot take them: one stalled client must not stall a session for every
 /// other client.
 const OUTBOUND_QUEUE: usize = 256;
 
@@ -57,6 +59,15 @@ impl Server {
     /// The endpoint comes first: if another Core already owns it, this one
     /// must not touch the database the other is using.
     pub async fn bind(config: CoreConfig) -> Result<Server, ServeError> {
+        Server::bind_with(config, Vec::new()).await
+    }
+
+    /// [`Server::bind`], with the adapters sessions can be started with.
+    /// The `ersa-core` binary registers every backend Ersa supports.
+    pub async fn bind_with(
+        config: CoreConfig,
+        adapters: Vec<Arc<dyn Adapter>>,
+    ) -> Result<Server, ServeError> {
         let endpoint = config.endpoint.clone();
         let listener = Listener::bind(&endpoint)
             .await
@@ -71,7 +82,7 @@ impl Server {
             source,
         })?;
         let store = Store::open(&config.db_path())?;
-        let core = Core::new(config, store);
+        let core = Core::new(config, store, adapters);
         core.store
             .ensure_local_host(core.host_name().to_string())
             .await?;
@@ -82,6 +93,9 @@ impl Server {
         if stuck > 0 {
             tracing::warn!(stuck, "marked interrupted workspaces as error");
         }
+        // Sessions the previous Core left running are ended, and stale
+        // projections re-derived, before any client can see them.
+        core.sessions.recover().await?;
         Ok(Server {
             core: Arc::new(core),
             listener,
@@ -121,8 +135,10 @@ impl Server {
         // Release the endpoint first, so no new client connects to a Core
         // that is going away, and a new Core can start while this one drains.
         drop(listener);
-        // M0-T6: stop every session cleanly here, before the process exits.
+        // Stop every session cleanly before the process exits: an Interface
+        // closing never stops sessions, but `core.shutdown` does (ADR 0011).
         tracing::info!("shutting down");
+        core.sessions.stop_all().await;
         let drain = async { while connections.join_next().await.is_some() {} };
         if tokio::time::timeout(SHUTDOWN_GRACE, drain).await.is_err() {
             connections.abort_all();
@@ -154,10 +170,9 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
         write.shutdown().await.ok();
     });
 
-    let mut conn = ConnectionState {
-        api_version: None,
-        outbound,
-    };
+    let kick = Arc::new(watch::Sender::new(false));
+    let mut kicked = kick.subscribe();
+    let mut conn = ConnectionState::new(outbound, kick);
     let mut lines = CappedLines::new(read, core.config.max_line_bytes);
     let hello_deadline = tokio::time::Instant::now() + core.config.handshake_timeout;
     let mut shutdown_after = false;
@@ -168,6 +183,9 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
         let line = tokio::select! {
             line = lines.next_line() => line,
             _ = core.shutdown_requested() => break,
+            // Core closes a connection that cannot keep up with its
+            // notifications; its client reconnects and resubscribes.
+            _ = kicked.wait_for(|kicked| *kicked) => break,
             _ = tokio::time::sleep_until(hello_deadline), if waiting_for_hello => {
                 tracing::debug!("closing a connection that sent no core.hello in time");
                 break;
@@ -208,6 +226,18 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
             Incoming::Invalid { id, error } => (Response::failure(id, error), After::Continue),
         };
         let sent = send(&conn, &response).await;
+        // The response is queued; subscriptions it created may send now,
+        // behind it. Tile notifications begin once the handshake is done.
+        for subscription in conn.subscriptions.values_mut() {
+            subscription.start();
+        }
+        if conn.api_version.is_some() && conn.tile_task.is_none() {
+            conn.tile_task = Some(AbortOnDrop(tokio::spawn(forward_tiles(
+                core.sessions.tile_updates(),
+                conn.outbound.clone(),
+                Arc::clone(&conn.kick),
+            ))));
+        }
         // Decided before looking at `sent`: a client that vanished right
         // after asking for shutdown still gets Core shut down.
         if after == After::Shutdown {
@@ -224,6 +254,45 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
     writer.await.ok();
     if shutdown_after {
         core.request_shutdown();
+    }
+}
+
+/// Forwards `session.tile` notifications to one connection until it closes.
+///
+/// A tile is the latest state, so a missed one is soon replaced, but a
+/// missed last one would leave the rail wrong; a connection that falls
+/// behind is closed instead, and its client re-reads `session.list`.
+async fn forward_tiles(
+    mut tiles: broadcast::Receiver<Arc<String>>,
+    outbound: mpsc::Sender<String>,
+    kick: crate::sessions::Kick,
+) {
+    loop {
+        match tiles.recv().await {
+            Ok(line) => match outbound.try_send(line.as_ref().clone()) {
+                Ok(()) => {}
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    kick.send_replace(true);
+                    return;
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => return,
+            },
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                kick.send_replace(true);
+                return;
+            }
+            Err(broadcast::error::RecvError::Closed) => return,
+        }
+    }
+}
+
+/// A task that is aborted when this is dropped, so a connection's helper
+/// tasks end with it.
+pub(super) struct AbortOnDrop(pub(super) tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
     }
 }
 

@@ -11,6 +11,10 @@
 //!   endpoint the current user serves.
 //! - [`canonicalize`] and [`path_key`]: one spelling of a local path, and the
 //!   key under which two spellings of the same folder compare equal.
+//! - [`ProcessTree`]: a child process and everything it starts, killed as one
+//!   unit (a job object on Windows, a process group elsewhere) and started
+//!   without a console window; [`resolve_program`] finds the file to start,
+//!   Windows `.cmd` shims included.
 //!
 //! Both are tested in CI: Linux on every push, Windows on changes to Rust.
 //! `tests/platform_windows.rs` and `tests/platform_unix.rs` hold the tests
@@ -27,11 +31,13 @@ mod windows;
 
 #[cfg(unix)]
 pub use self::unix::{
-    Listener, canonicalize, connect, default_data_dir, default_endpoint, host_name, path_key,
+    Listener, ProcessTree, canonicalize, connect, default_data_dir, default_endpoint, host_name,
+    path_key, resolve_program,
 };
 #[cfg(windows)]
 pub use self::windows::{
-    Listener, canonicalize, connect, default_data_dir, default_endpoint, host_name, path_key,
+    Listener, ProcessTree, canonicalize, connect, default_data_dir, default_endpoint, host_name,
+    path_key, resolve_program,
 };
 
 /// One accepted or opened connection: a byte stream in both directions.

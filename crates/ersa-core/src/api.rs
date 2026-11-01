@@ -10,6 +10,7 @@
 mod handlers;
 mod lines;
 pub mod server;
+mod sessions;
 
 use ersa_protocol::core_api::rpc::{ErrorObject, Request, Response, code};
 use ersa_protocol::core_api::{ErrorKind, Method};
@@ -18,7 +19,12 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+use std::collections::HashMap;
+
+use ersa_adapter::AdapterError;
+
 use crate::persistence;
+use crate::sessions::{Kick, SessionError, Subscription};
 use crate::state::Core;
 use crate::workspace::VcsError;
 
@@ -86,15 +92,59 @@ impl From<VcsError> for ApiError {
     }
 }
 
+impl From<SessionError> for ApiError {
+    fn from(e: SessionError) -> Self {
+        match e {
+            SessionError::NotFound(id) => ApiError::not_found(format!("no session {id}")),
+            SessionError::InvalidState(message) => ApiError::invalid_state(message),
+            SessionError::BackendMissing(message) => {
+                ApiError::new(ErrorKind::BackendMissing, message)
+            }
+            SessionError::Store(e) => e.into(),
+            SessionError::Adapter(e) => match e {
+                AdapterError::NotRunning => ApiError::invalid_state("the session is not running"),
+                AdapterError::UnknownRequest(id) => {
+                    ApiError::not_found(format!("no pending request {id}"))
+                }
+                AdapterError::Protocol(message) => ApiError::invalid_state(message),
+                AdapterError::Io(e) => ApiError::new(ErrorKind::TransportError, e.to_string()),
+            },
+            SessionError::Internal(message) => {
+                tracing::error!(%message, "session failure");
+                ApiError::internal(message)
+            }
+        }
+    }
+}
+
 /// What one connection knows about itself.
 pub struct ConnectionState {
     /// The API version agreed in `core.hello`; `None` until then.
     pub api_version: Option<u32>,
-    /// Lines to write to this connection's client. Responses go through it,
-    /// and so will `session.event` notifications for this connection's
-    /// subscriptions (M0-T6), which is why it is a channel: notifications
-    /// are written while requests are being handled.
+    /// Lines to write to this connection's client. Responses and
+    /// notifications both go through it, which is why it is a channel:
+    /// notifications are written while requests are being handled.
     pub outbound: mpsc::Sender<String>,
+    /// Raised to close the connection: Core does so when the client cannot
+    /// keep up with its notifications.
+    pub kick: Kick,
+    /// This connection's subscriptions, by session id. Dropping one (or the
+    /// connection) ends it; the session itself carries on.
+    pub subscriptions: HashMap<String, Subscription>,
+    /// Forwards `session.tile` notifications once the handshake is done.
+    tile_task: Option<server::AbortOnDrop>,
+}
+
+impl ConnectionState {
+    pub fn new(outbound: mpsc::Sender<String>, kick: Kick) -> Self {
+        ConnectionState {
+            api_version: None,
+            outbound,
+            kick,
+            subscriptions: HashMap::new(),
+            tile_task: None,
+        }
+    }
 }
 
 /// What the connection does after answering.
@@ -177,27 +227,26 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         Method::SettingsGet => to_json(handlers::settings_get(core, parse(params)?).await),
         Method::SettingsSet => to_json(handlers::settings_set(core, parse(params)?).await),
 
-        // The session manager is the next ticket. Until it lands, these are
-        // answered like reserved methods.
-        Method::SessionList
-        | Method::SessionCreate
-        | Method::SessionStart
-        | Method::SessionStop
-        | Method::SessionResume
-        | Method::SessionRemove
-        | Method::SessionSend
-        | Method::SessionInterrupt
-        | Method::SessionDecidePermission
-        | Method::SessionAnswerQuestion
-        | Method::SessionSetTitle
-        | Method::SessionSetMode
-        | Method::SessionSubscribe
-        | Method::SessionUnsubscribe
-        | Method::SessionRawLog
-        | Method::SessionReproject => Err(ApiError::invalid_state(format!(
-            "{} is implemented in M0-T6",
-            method.name()
-        ))),
+        Method::SessionList => to_json(sessions::list(core, parse(params)?).await),
+        Method::SessionCreate => to_json(sessions::create(core, parse(params)?).await),
+        Method::SessionStart => to_json(sessions::start(core, parse(params)?).await),
+        Method::SessionStop => to_json(sessions::stop(core, parse(params)?).await),
+        Method::SessionResume => to_json(sessions::resume(core, parse(params)?).await),
+        Method::SessionRemove => to_json(sessions::remove(core, parse(params)?).await),
+        Method::SessionSend => to_json(sessions::send(core, parse(params)?).await),
+        Method::SessionInterrupt => to_json(sessions::interrupt(core, parse(params)?).await),
+        Method::SessionDecidePermission => {
+            to_json(sessions::decide_permission(core, parse(params)?).await)
+        }
+        Method::SessionAnswerQuestion => {
+            to_json(sessions::answer_question(core, parse(params)?).await)
+        }
+        Method::SessionSetTitle => to_json(sessions::set_title(core, parse(params)?).await),
+        Method::SessionSetMode => to_json(sessions::set_mode(core, parse(params)?).await),
+        Method::SessionSubscribe => to_json(sessions::subscribe(core, conn, parse(params)?)),
+        Method::SessionUnsubscribe => to_json(sessions::unsubscribe(conn, parse(params)?)),
+        Method::SessionRawLog => to_json(sessions::raw_log(core, parse(params)?).await),
+        Method::SessionReproject => to_json(sessions::reproject(core, parse(params)?).await),
 
         // Handled above by `reserved_for`; listed so that adding a method
         // without deciding how to answer it is a compile error.

@@ -387,3 +387,134 @@ fn sid_of_token(token: HANDLE) -> io::Result<String> {
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
+
+// -- Child processes ----------------------------------------------------------
+
+/// A started process and everything it starts in turn, killed as one unit
+/// (`ARCH-CORE`, Boundaries: stopped sessions leave no orphans).
+///
+/// On Windows that unit is a job object. Every process the child starts
+/// joins the job too, unless it explicitly breaks away, and the job is set to
+/// kill everything in it when its last handle closes. So dropping a
+/// `ProcessTree` kills the tree, and so does Core dying: Windows closes the
+/// handle then, which keeps a crashed Core from leaving backends, and the dev
+/// servers they started, running with nobody to stop them.
+pub struct ProcessTree {
+    job: HANDLE,
+}
+
+// SAFETY: a job handle is a kernel handle, usable from any thread; Windows
+// serialises the calls made on it.
+unsafe impl Send for ProcessTree {}
+unsafe impl Sync for ProcessTree {}
+
+impl ProcessTree {
+    /// Sets up `command` before it is spawned: no console window. Core runs
+    /// without a console of its own when the Shell starts it, and a console
+    /// program started from such a process would otherwise open a window.
+    pub fn prepare(command: &mut tokio::process::Command) {
+        use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    /// Puts a just-spawned `child` in a new job that dies with its handle.
+    ///
+    /// The child runs from the moment it was spawned, so anything it starts
+    /// before this call stays outside the job. A backend starts nothing
+    /// before it has read its first line of input, which it cannot have been
+    /// sent yet, so in practice the gap does not matter.
+    pub fn adopt(child: &tokio::process::Child) -> io::Result<ProcessTree> {
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            SetInformationJobObject,
+        };
+
+        // `None` once the child has been waited on; a child just spawned
+        // never has been.
+        let process = child
+            .raw_handle()
+            .ok_or_else(|| io::Error::other("the process exited before it could join a job"))?;
+        // SAFETY: both arguments may be null: no inherited handle, no name.
+        let job = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
+        if job.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        // Owned from here on, so every early return below closes the handle.
+        let tree = ProcessTree { job };
+
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: `limits` is the structure this information class expects,
+        // and the size passed is its size.
+        let ok = unsafe {
+            SetInformationJobObject(
+                tree.job,
+                JobObjectExtendedLimitInformation,
+                (&raw const limits).cast::<c_void>(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: `process` is the child's handle, valid while `child` lives,
+        // which outlasts this call.
+        if unsafe { AssignProcessToJobObject(tree.job, process as HANDLE) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(tree)
+    }
+
+    /// Kills every process in the tree. Killing a tree that has already
+    /// ended is not an error.
+    pub fn kill(&self) -> io::Result<()> {
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+        // SAFETY: `job` is a valid job handle until `drop`. Exit code 1 is
+        // what Windows' own task kill reports.
+        if unsafe { TerminateJobObject(self.job, 1) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
+impl Drop for ProcessTree {
+    fn drop(&mut self) {
+        // SAFETY: the handle came from CreateJobObjectW and is closed exactly
+        // once, here. Closing the last handle kills what is left in the job.
+        unsafe { CloseHandle(self.job) };
+    }
+}
+
+/// The file Windows should start for `program`.
+///
+/// Many command-line tools, Claude Code's npm install among them, are `.cmd`
+/// shims rather than `.exe` files. Rust's process spawning appends only
+/// `.exe` when it searches `PATH`, so `claude` would not be found. This
+/// searches `PATH` the way the command prompt does, trying each extension in
+/// `PATHEXT`, and returns the full path of the first match. A program given
+/// with a directory or an extension, or found nowhere, is returned as is,
+/// and spawning reports whatever is wrong with it.
+///
+/// `path` is the `PATH` the child will get, when the caller overrides it.
+pub fn resolve_program(program: &str, path: Option<&str>) -> String {
+    let as_given = Path::new(program);
+    if as_given.components().count() != 1 || as_given.extension().is_some() {
+        return program.to_string();
+    }
+    let path = match path {
+        Some(path) => path.to_string(),
+        None => std::env::var("PATH").unwrap_or_default(),
+    };
+    let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+    for dir in path.split(';').filter(|dir| !dir.is_empty()) {
+        for extension in extensions.split(';').filter(|ext| !ext.is_empty()) {
+            let candidate = Path::new(dir).join(format!("{program}{extension}"));
+            if candidate.is_file() {
+                return candidate.display().to_string();
+            }
+        }
+    }
+    program.to_string()
+}

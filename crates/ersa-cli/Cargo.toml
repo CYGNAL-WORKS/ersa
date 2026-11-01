@@ -15,6 +15,7 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
+ersa-adapter-claude = { path = "../ersa-adapter-claude" }
 ersa-core = { path = "../ersa-core" }
 tokio.workspace = true
 tracing.workspace = true
