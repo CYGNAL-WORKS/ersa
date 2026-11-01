@@ -31,13 +31,21 @@ fn workspace_root() -> PathBuf {
 /// matters is whether Core's crates reach it. `cargo metadata` resolves the
 /// graph: `workspace_default_members` names where to start, and each node of
 /// `resolve` lists the package ids it depends on. Without `--filter-platform`
-/// the graph covers every platform, so the check holds for all of them.
-/// `--locked` reads the lockfile as it is and never changes it.
+/// the graph covers every platform, so the check holds for all of them;
+/// `--all-features` adds every optional dependency, so Tauri behind a feature
+/// that is off by default is caught too. `--locked` reads the lockfile as it
+/// is and never changes it.
 fn default_members_dependency_closure() -> BTreeSet<String> {
     // CARGO is the cargo that is building this test, so the check uses the
     // same toolchain as the build it checks.
     let output = Command::new(env!("CARGO"))
-        .args(["metadata", "--format-version", "1", "--locked"])
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--all-features",
+            "--locked",
+        ])
         .current_dir(workspace_root())
         .output()
         .expect("cargo metadata runs");
