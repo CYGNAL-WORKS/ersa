@@ -87,13 +87,12 @@ async fn a_claude_session_round_trips_a_permission_through_core() {
     assert_eq!(transport.stub_failures(), Vec::<String>::new());
     // Ersa wrote exactly what the recorded session wrote.
     assert_eq!(transport.stdin_lines(), sent);
-    // And the raw log holds both directions exactly as they crossed, between
-    // Core's own records.
+    // And the raw log holds both directions exactly as they crossed, and
+    // nothing else: Core's lifecycle facts are in the app log.
     let log = client.result("session.raw_log", json!({ "id": id })).await;
     let log = log.as_array().unwrap();
     let crossed: Vec<(String, String)> = log
         .iter()
-        .filter(|e| e["dir"] != "core")
         .map(|e| {
             (
                 e["dir"].as_str().unwrap().into(),
@@ -117,6 +116,5 @@ async fn a_claude_session_round_trips_a_permission_through_core() {
     let position = |line: &String| crossed.iter().position(|(_, l)| l == line).unwrap();
     assert!(position(&sent[0]) < position(&stdout[0]));
     assert!(position(&stdout[4]) < position(&sent[2]));
-    assert_eq!(log.first().unwrap()["dir"], "core");
-    assert_eq!(log.last().unwrap()["dir"], "core");
+    assert_eq!(crossed.len(), stdout.len() + sent.len());
 }

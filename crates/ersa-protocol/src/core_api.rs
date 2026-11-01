@@ -564,14 +564,13 @@ pub struct RawLogEntry {
     pub line: String,
 }
 
-/// Which way a raw-log line went: emitted by the backend, written to it by
-/// Ersa, or recorded by Core about the session's lifecycle.
+/// Which way a raw-log line went: emitted by the backend, or written to it
+/// by Ersa. Core's lifecycle facts are in its app log, not the raw log.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RawDirection {
     Backend,
     Host,
-    Core,
 }
 
 // ---------------------------------------------------------------------------
