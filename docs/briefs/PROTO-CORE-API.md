@@ -4,7 +4,7 @@ type: protocol
 title: Core request/response API
 status: ready
 references: [PROTO-AGENT-EVENTS]
-adrs: [0011]
+adrs: [0011, 0017]
 ---
 
 # Core request/response API
@@ -58,8 +58,8 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 - `session.set_title { id, title }`, `session.set_mode { id, mode }` (takes effect on next start).
 - `session.subscribe { id, from_seq }`: Core sends every event with `seq >= from_seq` as `session.event` notifications, then continues live. Returns `{ last_seq }`, absent when the session has no events yet.
 - `session.unsubscribe { id }`.
-- `session.raw_log { id, from, to }`: raw lines for the developer pane: `[{ index, ts, dir (backend | host | core), line }]`, at most 1000 per call; the client pages on from the last index plus one.
-- `session.reproject { id }`: discards the cached projection and re-derives; used after a projection version change. Refused for a live session, whose projection is always current. Subscribers are disconnected only when the re-derived events differ, and never before the caller has its response.
+- `session.raw_log { id, from, to }`: the session's raw log for the developer pane, the lines exchanged with its backend since Core opened it (held in memory, never stored): `[{ index, ts, dir (backend | host), line }]`, at most 1000 per call; the client pages on from the last index plus one. Core's lifecycle facts are in the app log, not here.
+- `session.reproject` is withdrawn: nothing projected is stored, so a session is projected afresh each time it is opened (ADR 0017).
 
 ### Backends and modes
 
@@ -120,6 +120,8 @@ The replay server answers read-only requests exactly as Core does. It never chan
 - Whether Core notifies an Interface when a project or session is created, and pushes `core.status` when its counts change; until then the window rereads `session.list` on a `session.tile` for an unknown session and reads the counts at attach.
 
 ## Changes
+
+- 2026-11-01: aligned with ADR 0017: `session.raw_log` serves the in-memory raw log, `dir` no longer includes `core` (lifecycle facts go to the app log); `session.reproject` withdrawn. No requirement IDs changed.
 
 - 2026-11-01: from #14 inbox: notifications for created projects and sessions, and a pushed `core.status`, added as an open question.
 - 2026-11-01: from M0-T7 inbox: the replay server refuses every mutating request with `invalid_state`, keeps a replayed session idle after its last line until `core.shutdown`, and paces by recorded timing by default; from review of PR #27: it never serves the user's own endpoint (default label `replay`), applies Core's line limit, and refuses a recording it cannot read faithfully. No requirement IDs changed.

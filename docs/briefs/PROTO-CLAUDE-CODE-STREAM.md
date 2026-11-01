@@ -4,12 +4,12 @@ type: protocol
 title: Claude Code streaming JSON protocol
 status: ready
 references: [PROTO-AGENT-EVENTS, PROTO-HARNESS-TOOLS]
-adrs: [0004, 0014]
+adrs: [0004, 0014, 0017]
 ---
 
 # Claude Code streaming JSON protocol
 
-Observed on Claude Code 2.1.302 (Windows, winget install). Evidence is the fixture set in `protocol/fixtures/claude-code/2.1.302/`; each `.jsonl` is verbatim CLI output and each `.meta.json` records the exact command line, what was sent on stdin, exit code, and timings. The Claude Agent SDK's type definitions (`@anthropic-ai/claude-agent-sdk` 0.3.316, files `sdk.d.ts` and `sdk-tools.d.ts`) are the reference for field names and unions; they are proprietary and are read, not vendored.
+How the adapter drives the CLI's live stream, and how it reads the CLI's own session record, which is a session's history (ADR 0017). Stream observed on Claude Code 2.1.302 (Windows, winget install). Evidence is the fixture set in `protocol/fixtures/claude-code/2.1.302/`; each `.jsonl` is verbatim CLI output and each `.meta.json` records the exact command line, what was sent on stdin, exit code, and timings. The Claude Agent SDK's type definitions (`@anthropic-ai/claude-agent-sdk` 0.3.316, files `sdk.d.ts` and `sdk-tools.d.ts`) are the reference for field names and unions; they are proprietary and are read, not vendored.
 
 ## Parties
 
@@ -21,22 +21,25 @@ Stdio. Newline-delimited JSON in both directions. Stdout lines are messages; std
 
 ## Invocation
 
-Every behaviour-affecting flag is passed explicitly (ADR 0014). The baseline command the fixtures use:
+Every behaviour-affecting flag is passed explicitly (ADR 0014), and the session is otherwise an ordinary Claude Code session, launched the way the vendor's own IDE integration launches one (ADR 0017). The command Ersa uses:
 
 ```
 claude -p --input-format stream-json --output-format stream-json --verbose
-       --permission-mode default --setting-sources "" --strict-mcp-config
+       --include-partial-messages --permission-mode default
+       --setting-sources user,project,local
        --permission-prompt-tool stdio --await-initialize
 ```
 
+- `--setting-sources user,project,local` loads the user's, the project's and the local settings, and without `--strict-mcp-config` the user's MCP configuration loads too, so hooks, instructions and always-allow rules apply as they do in the terminal. Fixtures 00 to 11 were recorded with `--setting-sources ""` and `--strict-mcp-config`, which isolate a session; Ersa no longer passes them.
 - `--await-initialize` makes the CLI read the host's `initialize` control request during startup instead of racing it; the Agent SDK passes it. Fixtures 09 and 11 were recorded without it and still worked, so it is belt and braces, to be verified by a fixture.
 - `--permission-mode` must be stated; the shelf flow depends on it.
-- `--setting-sources ""` and `--strict-mcp-config` isolate a session from the user's own project and user settings; modes and packs will supply what a session should see.
 - `--permission-prompt-tool stdio` makes permission prompts arrive on the control channel (fixture 11). Without it, or without `initialize`, prompts are auto-denied (fixtures 05, 08, 09).
 - `--include-partial-messages` adds `stream_event` lines for token-level streaming (fixture 02). Ersa passes it, so replies stream.
-- `--replay-user-messages` echoes each stdin user message back on stdout as a `user` message (fixture 07). Ersa does not pass it: the raw log already records every line the host writes, in order.
-- `--resume <session_id>` continues a session; the CLI keeps the same `session_id` (fixture 04).
+- `--replay-user-messages` echoes each stdin user message back on stdout as a `user` message (fixture 07). Ersa does not pass it: Core emits `user.message` when it sends one, and the session record keeps the message.
+- `--resume <session_id>` continues a session; the CLI keeps the same `session_id` and appends to the same session record (fixture 04). The id is the `session_id` of the session's `system/init`, which Ersa stores with the session.
 - `--mcp-config <absolute path> --permission-prompt-tool mcp__<server>__<tool>` is the fallback permission route (fixture 10).
+
+Environment: the adapter sets `CLAUDE_CODE_ENTRYPOINT=ersa`, so Ersa's sessions appear in the CLI's own session lists (the CLI hides sessions whose entrypoint is `sdk-cli`, `sdk-ts` or `sdk-py`). It removes `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_ENTRYPOINT`, `NODE_OPTIONS`, `TRACEPARENT` and `TRACESTATE` from the environment it inherits, so nothing from whatever started Ersa reaches the session. `ersa` is not a documented entrypoint value; if a release stops honouring it, sessions hide from the CLI's lists and resume by id still works.
 
 ## Messages (stdout)
 
@@ -77,6 +80,26 @@ Ends a turn. `subtype` (`success` observed; error subtypes exist in the SDK type
 ### Authentication failure
 
 A synthetic `assistant` message with `model: "<synthetic>"`, `error: "authentication_failed"`, text "Not logged in", then a `result` with `terminal_reason: "api_error"` and zero usage (fixture 00). The adapter maps this to a session error state, not a transcript message.
+
+## Session record
+
+The CLI keeps each session at `~/.claude/projects/<encoded cwd>/<session id>.jsonl`, where the encoded cwd is the session's working directory with every character other than an ASCII letter or digit replaced by `-` (observed: `D:\Projects\ersa` becomes `D--Projects-ersa`). One JSON entry per line, appended as the session runs, including turns taken outside Ersa. It is a session's history (ADR 0017); retention is the CLI's (`cleanupPeriodDays`, 30 by default), and a deleted record is a session Ersa no longer shows.
+
+Entries the adapter reads:
+
+- `user` and `assistant` entries: their `message` is identical to the stream message with the same `uuid`, so one projection of messages serves both inputs, and `uuid` is the message id on which record and live stream are merged.
+- On a `user` entry carrying a tool result, `permissionDecision`: the permission decision for that tool call.
+- `custom-title` and `ai-title` entries: the session's title, set by the user and generated by the CLI.
+
+The record omits text deltas (`stream_event`), permission prompts, `result` (turn end, cost) and rate limits; those are live only. The adapter ignores every other entry. The wrapper around `message` (every field of an entry other than `message`) is internal to the CLI and changes between versions. It is pinned the way the stream is: session-record fixtures recorded per CLI version beside the stream fixtures, and the same warning above the newest tested version. The only supported readers (`listSessions`, `getSessionMessages`) are in the TypeScript and Python Agent SDKs, which Core cannot use.
+
+### Listing
+
+The sessions of a directory are the record files under its encoded path. To list them the adapter reads the head and the tail of each file, never the whole file. Each session's title is its latest `custom-title`, else its latest `ai-title`, else its last prompt, else its first prompt.
+
+### Live-session registry
+
+The CLI writes `~/.claude/sessions/<pid>.json` for each running process, naming the session it has open. Before resuming a session the adapter reads the registry; when a running process has that session open, Ersa says so, since resuming it too would interleave both transcripts in one record.
 
 ## Control channel
 
@@ -154,29 +177,36 @@ sequenceDiagram
 ## Errors and recovery
 
 - Authentication failure: see above. Surface as a session error with a "log in" action.
-- Process exit without `result`: treat the turn as interrupted; the raw log holds everything emitted.
-- Unknown message types: store verbatim in the raw log, project to a typed passthrough event. Never drop.
+- Process exit without `result`: treat the turn as interrupted; the session record keeps the messages already written.
+- Unknown message types: project to a typed passthrough event. Never drop.
 
 ## Versioning
 
-Minimum tested: 2.1.302. Maximum tested: 2.1.302. The adapter compares versions using `claude_code_version` from the `initialize` response, because it is the only version known before the first turn; above the maximum tested version it warns and continues. Feature detection reads `capabilities` from `system/init`, which arrives with the first turn; no feature is needed before then.
+Minimum tested: 2.1.302. Maximum tested: 2.1.302. The tested range covers the session record's wrapper as well as the stream. The adapter compares versions using `claude_code_version` from the `initialize` response, because it is the only version known before the first turn; above the maximum tested version it warns and continues. Feature detection reads `capabilities` from `system/init`, which arrives with the first turn; no feature is needed before then.
 
 ## Conformance
 
-A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<version>/` through its parser and projection without error, and produces the expected `can_use_tool` round trip against a stub CLI built from fixture 11.
+A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<version>/`, stream and session record, through its parser and projection without error, and produces the expected `can_use_tool` round trip against a stub CLI built from fixture 11.
 
 ## Requirements
 
 - **PROTO-CLAUDE-CODE-STREAM-R01**: The adapter shall start the CLI with every behaviour-affecting flag passed explicitly, never relying on a default.
 - **PROTO-CLAUDE-CODE-STREAM-R02**: The adapter shall send an `initialize` control request before the first user message and shall not send a user message until the `initialize` response has arrived.
 - **PROTO-CLAUDE-CODE-STREAM-R03**: When a `can_use_tool` control request arrives, the adapter shall emit a permission-request event carrying the tool name, display name, input, description, blocked path, and permission suggestions, and shall answer with the user's decision as a `control_response` echoing the same `request_id`.
-- **PROTO-CLAUDE-CODE-STREAM-R04**: The adapter shall parse every line of every fixture for its tested version range without error and store each line verbatim in the raw log.
+- ~~**PROTO-CLAUDE-CODE-STREAM-R04**~~: retired 2026-11-01 (ADR 0017: no line is stored), replaced by R11.
 - **PROTO-CLAUDE-CODE-STREAM-R05**: When the CLI reports `authentication_failed`, the adapter shall emit a session error event rather than a transcript message.
 - **PROTO-CLAUDE-CODE-STREAM-R06**: The adapter shall read capabilities from the `system/init` message and shall not infer behaviour from version strings.
 - **PROTO-CLAUDE-CODE-STREAM-R07**: The adapter shall flush stdin after every line written.
 - **PROTO-CLAUDE-CODE-STREAM-R08**: The adapter shall derive cost from `result.total_cost_usd`, context from `result.usage` (its last `iterations` entry when present), and rate-limit budget from `rate_limit_event`.
 - **PROTO-CLAUDE-CODE-STREAM-R09**: The adapter shall map unknown message types to a typed passthrough event and never drop a line.
 - **PROTO-CLAUDE-CODE-STREAM-R10**: When the CLI version exceeds the maximum tested version, the adapter shall emit a `session.notice` with level `warning` and code `backend_version_untested`, and continue.
+- **PROTO-CLAUDE-CODE-STREAM-R11**: The adapter shall parse every line of every stream fixture and every entry of every session-record fixture for its tested version range without error.
+- **PROTO-CLAUDE-CODE-STREAM-R12**: The adapter shall start the CLI with `--setting-sources user,project,local` and without `--strict-mcp-config`.
+- **PROTO-CLAUDE-CODE-STREAM-R13**: The adapter shall start the CLI with `CLAUDE_CODE_ENTRYPOINT` set to `ersa` and with `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `NODE_OPTIONS`, `TRACEPARENT` and `TRACESTATE` absent from its environment.
+- **PROTO-CLAUDE-CODE-STREAM-R14**: When resuming a session, the adapter shall pass `--resume` with the `session_id` from that session's `system/init`.
+- **PROTO-CLAUDE-CODE-STREAM-R15**: The adapter shall project a `user` or `assistant` entry of the session record to the same events as the stream message with the same `uuid`, apart from details only the live stream carries.
+- **PROTO-CLAUDE-CODE-STREAM-R16**: When listing a directory's sessions, the adapter shall read only the head and tail of each record file, and shall title each session by its latest `custom-title`, else its latest `ai-title`, else its last prompt, else its first prompt.
+- **PROTO-CLAUDE-CODE-STREAM-R17**: Before resuming a session, the adapter shall read the live-session registry and report when a running CLI process has that session open.
 
 ## Out of scope
 
@@ -185,10 +215,11 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 ## Open questions
 
-- Whether Ersa replays its own raw log or passes `--resume` on reconnect, and how the two agree.
 - Exact shapes of `interrupt`, `set_model`, `get_context_usage`, `get_session_cost`, and `mcp_message` responses (to be recorded).
 
 ## Changes
+
+- 2026-11-01: aligned with ADR 0017: the user's settings and MCP configuration load (`--setting-sources user,project,local`, no `--strict-mcp-config`), entrypoint `ersa`, inherited variables cleared, resume by the `system/init` id; Session record section added (entries read, wrapper pinned by fixtures, listing, live-session registry); reconnect open question answered. PROTO-CLAUDE-CODE-STREAM-R04 retired, R11 to R17 added.
 
 - 2026-11-01: from M0-T4 inbox: context comes from the last `usage.iterations` entry, since the top-level counts sum every call; R08 reworded to say where, meaning unchanged.
 

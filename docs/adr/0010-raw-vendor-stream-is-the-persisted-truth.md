@@ -1,6 +1,6 @@
 # 0010: The raw vendor stream is the persisted truth; Ersa events are a versioned projection
 
-- Status: accepted
+- Status: superseded by 0017
 - Date: 2026-10-31
 - Related briefs: ARCH-CORE, PROTO-AGENT-EVENTS
 

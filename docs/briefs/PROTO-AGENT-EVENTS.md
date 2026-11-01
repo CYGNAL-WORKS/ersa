@@ -4,28 +4,28 @@ type: protocol
 title: Agent event protocol
 status: ready
 references: []
-adrs: [0004, 0010, 0011, 0014]
+adrs: [0004, 0011, 0014, 0017]
 ---
 
 # Agent event protocol
 
-Ersa's own vocabulary for what happens in a session, independent of any backend. Every event is a projection of one or more raw log lines (ADR 0010): adapters provide the projection function, Core applies it and caches the result, and the Interface renders events. Commands in the other direction (send a message, decide a permission, interrupt) are not events; they are `PROTO-CORE-API` requests.
+Ersa's own vocabulary for what happens in a session, independent of any backend. Every event is projected from the backend's session record or its live stream (ADR 0017), or emitted by Core for the session's lifecycle: adapters provide the projection function, Core applies it each time a session is opened and stores nothing projected, and the Interface renders events. Commands in the other direction (send a message, decide a permission, interrupt) are not events; they are `PROTO-CORE-API` requests.
 
 The machine-readable form is `protocol/schema/agent-events.schema.json` at the repository root, maintained by the implementing ticket with conformance tests against the fixtures. This brief defines the vocabulary the schema must express.
 
 ## Parties
 
-Core produces events (by projecting raw lines) and streams them to subscribed Interfaces as `PROTO-CORE-API` notifications. Adapters produce the projection but never talk to the Interface.
+Core produces events (by projecting the session record and the live stream, and from its own knowledge of the backend process) and streams them to subscribed Interfaces as `PROTO-CORE-API` notifications. Adapters produce the projection but never talk to the Interface.
 
 ## Envelope
 
 Every event is an object with:
 
-- `v`: event schema version, an integer. Bumped when any event's meaning or shape changes. Each adapter also versions its own projection logic; a cached projection is discarded and re-derived when either `v` or that adapter's projection version changes.
+- `v`: event schema version, an integer. Bumped when any event's meaning or shape changes. Nothing projected is stored, so a fix to an adapter's projection applies the next time a session is opened.
 - `session_id`: Ersa's session identifier (not the backend's).
-- `seq`: a monotonically increasing integer within the session, assigned by Core, gap-free. Used for resume (`from_seq`) and ordering.
-- `ts`: ISO 8601 time the raw log recorded the last line the event came from (`raw_to`). Taken from the raw log, never from the clock at projection time, so re-projection yields the same value.
-- `source`: `{ backend, backend_version, raw_from, raw_to }`: which backend and version produced the underlying lines, and the inclusive raw-log line range they came from.
+- `seq`: a monotonically increasing integer within the session, assigned by Core, gap-free: the session record's events first, then the live stream's. Used for resubscribing (`from_seq`) and ordering.
+- `ts`: ISO 8601 time of the input the event came from: the time the session record gives the entry, or the time Core received the live line. Never the clock at projection time, so projecting the same input again yields the same value.
+- `source`: `{ backend, backend_version, input, message_id (optional) }`: which backend and version produced the event's input; `input` is `record` (the session record), `live` (the live stream) or `core` (Core's own lifecycle facts); `message_id` is the backend's id for the message the event came from, on which record and live input are merged.
 - `event`: the typed payload; `event.type` discriminates.
 
 ## Event types
@@ -35,8 +35,8 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 ### Session
 
 - `session.started`: `backend`, `backend_version`, `model`, `cwd`, `capabilities` (string list), `backend_session_id` (optional). Projected from the backend's first announcement (Claude Code `system/init`).
-- `session.state`: `state` one of `starting`, `running`, `waiting_user`, `idle`, `disconnected`, `ended`, `error`; `reason` (optional short string). Projected from Core's lifecycle records in the raw log and from backend lines (a pending permission request means `waiting_user`).
-- `session.ended`: `reason` one of `user_stopped`, `backend_exited`, `error`; `exit_code` (optional).
+- `session.state`: `state` one of `starting`, `running`, `waiting_user`, `idle`, `disconnected`, `ended`, `error`; `reason` (optional short string). Emitted by Core from what it knows of the backend process, and projected from live lines (a pending permission request means `waiting_user`).
+- `session.ended`: `reason` one of `user_stopped`, `backend_exited`, `error`; `exit_code` (optional). Emitted by Core.
 - `session.notice`: `level` one of `info`, `warning`; `code` one of `backend_version_untested`; `message`. Something the user should know that is not an error, such as a backend newer than the newest version Ersa was tested against.
 
 ### Turn
@@ -46,7 +46,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 
 ### User
 
-- `user.message`: `text`, `origin` one of `human`, `peer_session`, `system`; `peer` (optional: `{ session_id, name }`). Projected from a replayed user message, or recorded by Core when it sends one.
+- `user.message`: `text`, `origin` one of `human`, `peer_session`, `system`; `peer` (optional: `{ session_id, name }`). Projected from a user message in the session record, or emitted by Core when it sends one.
 
 ### Assistant
 
@@ -80,31 +80,34 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 
 ### Passthrough
 
-- `backend.passthrough`: `backend`, `kind` (the backend's own type and subtype joined with `/`), `payload` (the raw object, or the verbatim line as a string when it is not valid JSON). Every raw line that maps to no other event maps to exactly one of these. The Interface shows them only in the developer pane.
+- `backend.passthrough`: `backend`, `kind` (the backend's own type and subtype joined with `/`), `payload` (the raw object, or the verbatim line as a string when it is not valid JSON). Every raw log line that maps to no other event maps to exactly one of these. The Interface shows them only in the developer pane.
 
 ## Projection rules
 
-- The raw log holds lines in three directions, each tagged: `backend` (what the backend emitted), `host` (what Ersa wrote to the backend), and `core` (lifecycle records Core writes itself: process started, start failed, process exited with its code and whether the user stopped it, and Core restarted while the session was live, which ends it with reason `error`). Host lines project too (a user message to `user.message`, a permission answer to `permission.decided`), and `core` lines project to `session.state` and `session.ended`, so re-projection reproduces the whole stream.
-- Every raw line yields at least one event (possibly only `backend.passthrough`); no line is dropped.
+- A session's events have two inputs. The session record is its history; the adapter reads the entries that carry messages and titles and ignores the rest. The live stream is what a running backend emits; details only it carries (text as it arrives, permission prompts, turn ends, cost, rate limits) are shown and not stored, so the events they yield arise only from live input.
+- When a session is opened, Core projects its record, then appends events projected from the live stream. A message present in both, identified by the backend's message id, yields its events once.
+- Core's lifecycle facts (process started, start failed, process exited with its code and whether the user stopped it, Core restarted while the session was live, which ends it with reason `error`) reach the session only as the `session.state` and `session.ended` events Core emits; Core also writes them to the app log. They are never part of the session record.
+- The raw log holds the live lines in both directions, each tagged: `backend` (what the backend emitted) and `host` (what Ersa wrote to it). Host lines project too (a user message to `user.message`, a permission answer to `permission.decided`).
+- Every raw log line yields at least one event (possibly only `backend.passthrough`); no line is dropped.
 - A raw line may yield several events (a Claude Code `result` yields `turn.completed` and `usage.updated`).
 - Events never contain backend-specific field names outside `backend.passthrough.payload` and `permission.requested.suggestions[].payload`. Tool data is not backend protocol: `tool.requested.input`, `permission.requested.input`, and structured `tool.result.content` carry the tool's own arguments and output as the tool defines them.
-- Projection is a pure function of the raw log and the adapter version; re-running it over the same raw log yields the same events with the same `seq`.
+- Projection is a pure function of its input and the adapter version; running it again over the same session record and raw log yields the same events with the same `seq`.
 
 ## Sequencing
 
-Within a session: `session.started` first; `turn.started` before any `assistant.*`, `tool.*`, or `permission.*` of that turn; `permission.decided` after its `permission.requested`; `tool.result` after its `tool.requested`; `turn.completed` after everything in the turn; `session.ended` last. `usage.updated`, `session.state`, `error`, and `backend.passthrough` may appear anywhere.
+Within a session: `session.started` first; `turn.started` before any `assistant.*`, `tool.*`, or `permission.*` of that turn; `permission.decided` after its `permission.requested`; `tool.result` after its `tool.requested`; `turn.completed` after everything in the turn; `session.ended` last. `usage.updated`, `session.state`, `error`, and `backend.passthrough` may appear anywhere. These rules govern live input; events projected from a session record carry only the event types its entries yield.
 
 ## Errors and recovery
 
-A projection failure on one raw line yields an `error` event with `code: protocol`, `recoverable: true`, plus a `backend.passthrough` of the offending line, and projection continues. Projection never aborts a session.
+A projection failure on one raw line or record entry yields an `error` event with `code: protocol`, `recoverable: true`, plus a `backend.passthrough` of the offending line, and projection continues. Projection never aborts a session.
 
 ## Versioning
 
-`v` on every event. The schema file carries the same version. The cache key is the session, `v`, and the adapter's projection version. Core's own projection of `core` lines is part of the event schema's meaning, so any change to it bumps `v`. The Interface refuses to render a `v` it does not know and says that the window is older than Core and needs updating. It does not ask Core to re-project: Core projects only at its own `v`, so re-projection cannot help an Interface older than Core.
+`v` on every event. The schema file carries the same version. The lifecycle events Core emits itself are part of the event schema's meaning, so any change to them bumps `v`. The Interface refuses to render a `v` it does not know and says that the window is older than Core and needs updating, since Core projects only at its own `v`.
 
 ## Conformance
 
-The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/claude-code/*/` and the result validates against the schema; a golden file per fixture records the expected event list and is reviewed when it changes.
+The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/claude-code/*/`, live stream and session record alike, and the result validates against the schema; a golden file per fixture records the expected event list and is reviewed when it changes.
 
 ## Requirements
 
@@ -118,6 +121,9 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - **PROTO-AGENT-EVENTS-R08**: No event outside `backend.passthrough.payload` and `permission.requested.suggestions[].payload` shall contain a backend-specific field name; tool-defined data in `tool.requested.input`, `permission.requested.input`, and `tool.result.content` is not backend protocol.
 - **PROTO-AGENT-EVENTS-R09**: Every projected event shall validate against `protocol/schema/agent-events.schema.json`.
 - **PROTO-AGENT-EVENTS-R10**: A projection failure on a line shall yield a recoverable `error` event and continue with the next line.
+- **PROTO-AGENT-EVENTS-R11**: Projecting the same session record twice with the same adapter version shall yield identical events.
+- **PROTO-AGENT-EVENTS-R12**: When a session is opened while its backend is live, a message present in both the session record and the live stream, identified by the backend's message id, shall yield its events once.
+- **PROTO-AGENT-EVENTS-R13**: Core shall emit `session.state` and `session.ended` for the backend process's lifecycle from its own knowledge of the process, never from the session record, and shall write the same facts to the app log.
 
 ## Out of scope
 
@@ -128,8 +134,11 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 - Whether `question.*` is projected from a backend tool call (Claude Code's AskUserQuestion arrives as a tool use plus permission request) or needs backend-specific handling in the adapter; first implementation decides and records it.
 - Whether subagent trees get their own `session_id` or stay nested under `parent_tool_use_id`.
+- How history shows a permission decision read from the session record, which keeps no permission prompt or request id, and which turn boundaries history shows without the turn ends the record omits.
 
 ## Changes
+
+- 2026-11-01: aligned with ADR 0017 (supersedes ADR 0010): events come from the session record and the live stream, merged on the backend's message ids, and nothing projected is stored; the raw log is the live lines in both directions; Core emits lifecycle events itself and writes them to the app log; `source` names the input and message id in place of a raw-log range; projection cache removed. PROTO-AGENT-EVENTS-R11, R12 and R13 added; R01 to R10 unchanged in meaning.
 
 - 2026-11-01: from #14 inbox: an Interface that meets an unknown `v` says it needs updating rather than asking Core to re-project. No requirement IDs changed.
 - 2026-11-01: from M0-T6 inbox: `core` lifecycle records listed as built (start failed, Core restarted); a change to Core's projection of them bumps `v`.
