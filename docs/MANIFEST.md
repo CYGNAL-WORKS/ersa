@@ -25,8 +25,8 @@ None.
 
 ## Inbox
 
-1 open entries in docs/briefs/INBOX.md.
+Empty.
 
 ## Problems
 
-- 1 open inbox entry need a planning pass
+None.
