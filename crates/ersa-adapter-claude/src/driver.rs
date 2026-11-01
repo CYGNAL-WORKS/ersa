@@ -100,11 +100,12 @@ pub fn invocation_args(config: &SessionConfig) -> Vec<String> {
         "--verbose",
         "--permission-mode",
         mode,
-        // An empty list: read no user, project, or local settings files, so
-        // the user's own Claude Code configuration cannot change a session.
+        // Load the user's, project's and local settings, and (with no
+        // `--strict-mcp-config`) the user's MCP servers, as the VS Code
+        // extension does: an Ersa session is an ordinary Claude Code
+        // session (ADR 0017, PROTO-CLAUDE-CODE-STREAM-R12).
         "--setting-sources",
-        "",
-        "--strict-mcp-config",
+        "user,project,local",
         // Permission prompts arrive as `can_use_tool` control requests.
         "--permission-prompt-tool",
         "stdio",
@@ -122,6 +123,26 @@ pub fn invocation_args(config: &SessionConfig) -> Vec<String> {
     }
     args
 }
+
+/// The child's environment: Ersa names itself as the entrypoint, so the CLI
+/// lists its sessions in the terminal picker and VS Code rather than hiding
+/// them as SDK sessions (PROTO-CLAUDE-CODE-STREAM-R13, ADR 0017).
+fn entrypoint_env() -> BTreeMap<String, String> {
+    BTreeMap::from([("CLAUDE_CODE_ENTRYPOINT".into(), "ersa".into())])
+}
+
+/// Variables that would carry whatever started Ersa into the session: a
+/// Claude Code (or Claude Desktop) parent marks its children as nested
+/// sessions, Node options change how the CLI runs, and trace context would
+/// file the session under the parent's trace. `CLAUDE_CODE_ENTRYPOINT` is
+/// not listed because `entrypoint_env` overrides it.
+const INHERITED_VARIABLES: [&str; 5] = [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+];
 
 /// Which `claude` to run: `extra.claude_path` from the session config, else the
 /// `ERSA_CLAUDE` environment variable, else whatever `claude` the host finds.
@@ -159,7 +180,8 @@ impl Adapter for ClaudeAdapter {
             program: program(&config),
             args: invocation_args(&config),
             cwd: (!config.cwd.is_empty()).then(|| config.cwd.clone()),
-            env: BTreeMap::new(),
+            env: entrypoint_env(),
+            env_remove: INHERITED_VARIABLES.map(String::from).to_vec(),
         };
         let program = spec.program.clone();
         let mut process = transport.spawn(spec).await.map_err(|e| {

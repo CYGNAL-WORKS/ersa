@@ -74,6 +74,10 @@ impl Transport for LocalTreeTransport {
         let program =
             platform::resolve_program(&spec.program, spec.env.get("PATH").map(String::as_str));
         let mut command = Command::new(program);
+        // Removals first, so `env` can still set a removed name.
+        for name in &spec.env_remove {
+            command.env_remove(name);
+        }
         command
             .args(&spec.args)
             .envs(&spec.env)
