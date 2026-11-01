@@ -7,7 +7,7 @@
 //! is still running.
 
 use std::fs::{self, File};
-use std::io::Read;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -58,22 +58,41 @@ struct RegistryFile {
 
 /// Whether a running process has session `session_id` open. The check
 /// informs the user and never stops a resume. With no registry directory at
-/// all, no CLI process has run, so nothing is open.
+/// all, no CLI process has run, so nothing is open; a directory that cannot
+/// be read makes the answer unknown.
 ///
 /// A pid the system has since given to an unrelated process makes a stale
 /// file look live; the cost is a warning that was not needed.
 pub fn live_session(claude_home: &Path, session_id: &str) -> LiveCheck {
-    let Ok(entries) = fs::read_dir(claude_home.join("sessions")) else {
-        return LiveCheck::NotOpen;
+    let dir = claude_home.join("sessions");
+    let entries = match fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return LiveCheck::NotOpen,
+        Err(_) => {
+            return LiveCheck::Unknown {
+                unreadable: vec![dir],
+            };
+        }
     };
     let mut unreadable = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries {
+        let Ok(entry) = entry else {
+            unreadable.push(dir.clone());
+            continue;
+        };
         let path = entry.path();
         if path.extension().is_none_or(|ext| ext != "json") {
             continue;
         }
         let Some(file) = read_registry_file(&path) else {
-            unreadable.push(path);
+            // The file is named by its pid. When that process has gone, the
+            // file is a crashed CLI's leftover and says nothing about now.
+            let pid = path
+                .file_stem()
+                .and_then(|s| s.to_str()?.parse::<u32>().ok());
+            if pid.is_none_or(platform::is_running) {
+                unreadable.push(path);
+            }
             continue;
         };
         if file.session_id != session_id {
