@@ -43,4 +43,4 @@ jobs:
 
       - name: Sources, bans, licences
         if: ${{ !cancelled() }}
-        run: cargo deny --locked check bans licenses sources
+        run: cargo deny --workspace --locked check bans licenses sources
