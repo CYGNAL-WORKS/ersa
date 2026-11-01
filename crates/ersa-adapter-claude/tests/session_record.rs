@@ -934,3 +934,37 @@ fn a_cached_record_is_reused_while_unchanged_and_read_again_once_it_grows() {
     assert_eq!(again, project_record(&grown));
     assert_ne!(again, first);
 }
+
+#[test]
+fn an_entry_too_long_to_read_is_reported_unless_it_is_still_being_written() {
+    let first = json!({"type": "user", "uuid": "u1", "parentUuid": null,
+        "message": {"role": "user", "content": "Hello"}});
+    let long = format!(
+        "{{\"type\":\"user\",\"uuid\":\"u2\",\"message\":{{\"content\":\"{}\"}}}}",
+        "x".repeat(16 * 1024 * 1024 + 10)
+    );
+    // Whole, with its line end: reported, and the pass carries on.
+    let ended = format!("{first}\r\n{long}\r\n{first}\n");
+    let events: Vec<Event> = project_record(&ended)
+        .into_iter()
+        .map(|e| e.event)
+        .collect();
+    assert!(
+        events.iter().any(|e| matches!(e, Event::Error(_))),
+        "{:?}",
+        events.iter().map(|e| e.type_name()).collect::<Vec<_>>()
+    );
+    // The last line, still being written: left for the next read, quietly.
+    let writing = format!("{first}\n{long}");
+    let events: Vec<Event> = project_record(&writing)
+        .into_iter()
+        .map(|e| e.event)
+        .collect();
+    assert_eq!(
+        events.len(),
+        1,
+        "{:?}",
+        events.iter().map(|e| e.type_name()).collect::<Vec<_>>()
+    );
+    assert!(matches!(events[0], Event::UserMessage(_)));
+}

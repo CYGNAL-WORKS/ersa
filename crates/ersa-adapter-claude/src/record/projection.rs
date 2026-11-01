@@ -69,26 +69,36 @@ pub fn project_record_from<R: BufRead + Seek>(
     while offset < limit {
         let start = offset;
         let mut bytes = Vec::new();
-        let cap = (MAX_ENTRY_BYTES as u64 + 1).min(limit - offset);
+        // Room for the longest entry and its line end (CRLF included).
+        let cap = (MAX_ENTRY_BYTES as u64 + 2).min(limit - offset);
         let read = reader.by_ref().take(cap).read_until(b'\n', &mut bytes)?;
         if read == 0 {
             break;
         }
         offset += read as u64;
-        let terminated = bytes.last() == Some(&b'\n');
-        if !terminated && read as u64 > MAX_ENTRY_BYTES as u64 {
-            offset += skip_line(reader, limit - offset)?;
-            lines.push(Line::Failed(unreadable(
-                &String::from_utf8_lossy(&bytes),
-                format!("a record entry is longer than {MAX_ENTRY_BYTES} bytes"),
-            )));
-            continue;
+        let mut terminated = bytes.last() == Some(&b'\n');
+        if !terminated && read as u64 == cap && offset < limit {
+            // Longer than any entry read: skip the rest of it.
+            let (skipped, ended) = skip_line(reader, limit - offset)?;
+            offset += skipped;
+            terminated = ended;
         }
-        if terminated {
+        if bytes.last() == Some(&b'\n') {
             bytes.pop();
             if bytes.last() == Some(&b'\r') {
                 bytes.pop();
             }
+        }
+        if bytes.len() > MAX_ENTRY_BYTES {
+            // A last line still being written is left for the next read,
+            // however long it already is.
+            if terminated {
+                lines.push(Line::Failed(unreadable(
+                    &String::from_utf8_lossy(&bytes),
+                    format!("a record entry is longer than {MAX_ENTRY_BYTES} bytes"),
+                )));
+            }
+            continue;
         }
         let text = String::from_utf8_lossy(&bytes);
         if text.trim().is_empty() {
@@ -156,7 +166,14 @@ pub fn project_record_from<R: BufRead + Seek>(
                 // the first pass, so it parses here.
                 reader.seek(SeekFrom::Start(offset))?;
                 let mut bytes = vec![0; len];
-                reader.read_exact(&mut bytes)?;
+                // A file cut short since the first pass (rewritten by
+                // something other than the CLI) loses the entry, not the read.
+                if let Err(e) = reader.read_exact(&mut bytes) {
+                    if e.kind() == io::ErrorKind::UnexpectedEof {
+                        continue;
+                    }
+                    return Err(e);
+                }
                 if let Ok(value) = serde_json::from_str::<Value>(&String::from_utf8_lossy(&bytes)) {
                     out.extend(projector.project(value));
                 }
@@ -167,8 +184,8 @@ pub fn project_record_from<R: BufRead + Seek>(
 }
 
 /// Skips the rest of a line too long to read, up to `limit` bytes, and
-/// returns how many bytes it skipped.
-fn skip_line<R: BufRead>(reader: &mut R, limit: u64) -> io::Result<u64> {
+/// returns how many bytes it skipped and whether it reached the line's end.
+fn skip_line<R: BufRead>(reader: &mut R, limit: u64) -> io::Result<(u64, bool)> {
     let mut skipped = 0;
     while skipped < limit {
         let buffer = reader.fill_buf()?;
@@ -181,7 +198,7 @@ fn skip_line<R: BufRead>(reader: &mut R, limit: u64) -> io::Result<u64> {
             Some(end) => {
                 reader.consume(end + 1);
                 skipped += end as u64 + 1;
-                break;
+                return Ok((skipped, true));
             }
             None => {
                 let all = window.len();
@@ -190,7 +207,7 @@ fn skip_line<R: BufRead>(reader: &mut R, limit: u64) -> io::Result<u64> {
             }
         }
     }
-    Ok(skipped)
+    Ok((skipped, false))
 }
 
 /// Whether an entry belongs to the main conversation rather than to a

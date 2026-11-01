@@ -213,9 +213,52 @@ const CACHED_RECORDS: usize = 4;
 pub struct RecordCache {
     /// Most recently read last.
     entries: Mutex<VecDeque<(PathBuf, ReadRecord)>>,
+    /// Summaries of the records summarized last, by the same key: small,
+    /// so many are kept. A summary that took long to read is still there
+    /// for the next caller while the record is unchanged.
+    summaries: Mutex<VecDeque<(PathBuf, u64, SystemTime, SessionSummary)>>,
 }
 
+/// How many summaries [`RecordCache`] keeps.
+const CACHED_SUMMARIES: usize = 256;
+
 impl RecordCache {
+    /// [`summarize_session`], through the cache.
+    pub fn summarize(
+        &self,
+        claude_home: &Path,
+        cwd: &str,
+        session_id: &str,
+    ) -> io::Result<Option<SessionSummary>> {
+        let Some(path) = find_record(claude_home, cwd, session_id)? else {
+            return Ok(None);
+        };
+        let metadata = fs::metadata(&path)?;
+        let len = metadata.len();
+        let Ok(modified) = metadata.modified() else {
+            return summarize_session(claude_home, cwd, session_id);
+        };
+        {
+            let summaries = self.summaries.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some((_, _, _, summary)) = summaries
+                .iter()
+                .find(|(p, l, m, _)| *p == path && *l == len && *m == modified)
+            {
+                return Ok(Some(summary.clone()));
+            }
+        }
+        let Some(summary) = summarize_session(claude_home, cwd, session_id)? else {
+            return Ok(None);
+        };
+        let mut summaries = self.summaries.lock().unwrap_or_else(|e| e.into_inner());
+        summaries.retain(|(p, ..)| *p != path);
+        summaries.push_back((path, len, modified, summary.clone()));
+        while summaries.len() > CACHED_SUMMARIES {
+            summaries.pop_front();
+        }
+        Ok(Some(summary))
+    }
+
     /// [`read_record`], through the cache.
     pub fn read(
         &self,
