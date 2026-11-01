@@ -251,7 +251,23 @@ describe("marking hidden characters", () => {
     const out = html(flood);
     expect(out.match(/U\+200B/g)?.length).toBe(64);
     expect(out).toContain("4936 more invisible characters");
+    // Past the cap each one still shows where it was.
+    expect(out.split("\uFFFD").length - 1).toBeGreaterThanOrEqual(4936);
     expect(out).toContain("y");
+  });
+
+  it("past the cap, still shows a trick placed after a run of harmless ones", () => {
+    const trick = "\u200B".repeat(64) + "echo ok" + "\u202E" + "evil";
+    const out = html(trick);
+    expect(out).toContain("echo ok\uFFFDevil");
+    expect(out).not.toContain("\u202E");
+  });
+
+  it("marks format characters a hand-made list would miss, and leaves emoji and joined letters alone", () => {
+    expect(html("a" + String.fromCodePoint(0x1d173) + "b")).toContain("U+1D173");
+    expect(html("warning \u26A0\uFE0F")).not.toContain("U+");
+    expect(html("\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645")).not.toContain("U+");
+    expect(html("rm\u200D -rf")).toContain("U+200D");
   });
 });
 

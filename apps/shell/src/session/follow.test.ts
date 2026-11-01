@@ -175,6 +175,24 @@ describe("follow", () => {
     expect(calls.filter((c) => c.method === "session.subscribe")).toHaveLength(1);
   });
 
+  it("keeps what it shows when a subscribe answer cannot be read", async () => {
+    const { follower, last } = following({ "session.subscribe": () => Promise.resolve(null) });
+    for (const event of replay.slice(0, 10)) follower.receive(event);
+    follower.attached();
+    await settle();
+    expect(last().transcript.lastSeq).toBe(9);
+    expect(last().stream).toEqual({ state: "live" });
+  });
+
+  it("goes offline when Core is lost even after subscribing failed", async () => {
+    const { follower, last } = following({ "session.subscribe": () => Promise.reject({ kind: "unavailable", message: "busy" }) });
+    follower.attached();
+    await settle();
+    expect(last().stream.state).toBe("failed");
+    follower.detached();
+    expect(last().stream).toEqual({ state: "offline" });
+  });
+
   it("goes live on a subscribe answer it cannot read, rather than waiting for ever", async () => {
     const { follower, last } = following({ "session.subscribe": () => Promise.resolve(null) });
     follower.attached();

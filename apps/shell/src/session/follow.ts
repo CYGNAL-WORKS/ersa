@@ -81,10 +81,18 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         // Core's history is shorter than what is shown (a replay restarted
         // on the same endpoint, a reprojected session): what is shown is not
         // this session's any more. Start again from the beginning.
-        // An answer without a readable `last_seq` is taken at its word that
-        // nothing was lost; one that is not even an object reads the same.
-        const raw = (result as { last_seq?: unknown } | null)?.last_seq;
-        const last = raw === undefined ? -1 : typeof raw === "number" && Number.isInteger(raw) && raw >= 0 ? raw : from - 1;
+        // `last_seq` absent means the session has no events; an answer that
+        // cannot be read (not an object, or a `last_seq` that is no
+        // sequence number) is taken to mean nothing was lost.
+        const readable = typeof result === "object" && result !== null;
+        const raw = readable ? (result as { last_seq?: unknown }).last_seq : undefined;
+        const last = !readable
+          ? from - 1
+          : raw === undefined
+            ? -1
+            : typeof raw === "number" && Number.isInteger(raw) && raw >= 0
+              ? raw
+              : from - 1;
         if (last < from - 1) {
           set((v) => ({ ...v, transcript: emptyTranscript, answers: {} }));
           resumedAt = undefined;
@@ -130,7 +138,7 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
 
     detached() {
       ++generation; // an answer from the lost connection's subscribe no longer counts
-      set((v) => (v.stream.state === "failed" ? v : { ...v, stream: { state: "offline" } }));
+      set((v) => ({ ...v, stream: { state: "offline" } }));
     },
 
     async send(text) {

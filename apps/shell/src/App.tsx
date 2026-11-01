@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import { AddProject } from "./components/AddProject";
+import { Button } from "./components/Button";
 import { Composer } from "./components/Composer";
 import { CoreStatus } from "./components/CoreStatus";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -15,6 +16,11 @@ import { type Follower, type SessionView, type Sending, follow } from "./session
 /** The backend a new session runs. The only one until M3 (FLOW-NEW-SESSION leaves the choice open). */
 const BACKEND = "claude-code";
 
+// The same objects every render, so effects and error-boundary keys that
+// depend on a list see no change while Core's phase stays the same.
+const UNAVAILABLE = { state: "unavailable" } as const;
+const LOADING = { state: "loading" } as const;
+
 /** The projects part of the view, whatever phase Core is in. */
 function projectsOf(view: CoreView): ProjectsView {
   switch (view.phase) {
@@ -22,9 +28,9 @@ function projectsOf(view: CoreView): ProjectsView {
       return view.projects;
     case "lost":
     case "failed":
-      return { state: "unavailable" };
+      return UNAVAILABLE;
     case "connecting":
-      return { state: "loading" };
+      return LOADING;
   }
 }
 
@@ -34,9 +40,9 @@ function sessionsOf(view: CoreView): SessionsView {
       return view.sessions;
     case "lost":
     case "failed":
-      return { state: "unavailable" };
+      return UNAVAILABLE;
     case "connecting":
-      return { state: "loading" };
+      return LOADING;
   }
 }
 
@@ -102,6 +108,7 @@ export function App({ client }: { client: CoreClient }) {
   const projects = projectsOf(view);
   const projectsVersion = useVersion(projects);
   const sessionsVersion = useVersion(sessions);
+  const coreVersion = useVersion(view);
   const retrySubscribe = useCallback(() => follower.current?.attached(), []);
 
   // Stable, so the transcript's memoised blocks do not re-render for it.
@@ -153,13 +160,14 @@ export function App({ client }: { client: CoreClient }) {
             <SessionList view={sessions} activeId={activeId} onSelect={setActiveId} />
           </ErrorBoundary>
         </div>
-        <ErrorBoundary what="Core's status" resetKey={view.phase}>
+        <ErrorBoundary what="Core's status" resetKey={coreVersion} action={<Button onClick={retry}>Retry</Button>}>
           <CoreStatus view={view} onRetry={retry} />
         </ErrorBoundary>
       </nav>
       {shown ? (
         <main className="stage">
-          <ErrorBoundary what="This session" resetKey={shown.id}>
+          {/* Tries again on each new event, and keeps the composer out of it. */}
+          <ErrorBoundary what="This session" resetKey={`${shown.id}:${shown.transcript.lastSeq}`}>
             <Transcript
               key={shown.id}
               title={(activeId && titles.current[activeId]) || "Untitled session"}
@@ -167,6 +175,8 @@ export function App({ client }: { client: CoreClient }) {
               onDecide={decide}
               onRetry={retrySubscribe}
             />
+          </ErrorBoundary>
+          <ErrorBoundary what="The composer" resetKey={shown.id}>
             <Composer
               key={shown.id}
               unavailable={view.phase === "connected" ? undefined : "Core is not connected."}
