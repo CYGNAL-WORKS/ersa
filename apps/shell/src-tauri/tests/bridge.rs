@@ -17,6 +17,11 @@ use ersa_shell::launch::{self, CoreLocation, How};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
+/// Bounds on launching and opening a link, and on stopping a leftover Core.
+/// Above the location's 60 s start timeout, so that one reports first.
+const OPEN: Duration = Duration::from_secs(90);
+const CLEANUP: Duration = Duration::from_secs(30);
+
 fn core_program() -> PathBuf {
     let program = std::env::var_os("ERSA_CORE_BIN")
         .map(PathBuf::from)
@@ -71,26 +76,57 @@ async fn launches_core_then_attaches_and_round_trips_requests() {
     let dir = tempfile::tempdir().expect("temp dir");
     let location = private_location(dir.path());
 
-    let (link, how, _events) = open(&location).await;
-    assert_eq!(
-        how,
-        How::Launched,
-        "{} is this test's alone",
-        location.endpoint
-    );
-
-    // Run the checks as their own task so that, if one fails, the Core this
-    // test launched is still stopped rather than left running.
-    let checks = tokio::spawn(round_trips(link, location.clone()));
-    if let Err(failed) = checks.await {
-        if let Ok((link, _, _)) = try_open(&location).await {
-            let _ = link.request("core.shutdown", None).await;
+    // Run everything from the launch on as its own task so that, however it
+    // fails, the Core it launched is stopped afterwards. That Core is
+    // detached and outside the test's job, so nothing else would stop it.
+    let checks = tokio::spawn({
+        let location = location.clone();
+        async move {
+            let (link, how, _events) = open(&location).await;
+            assert_eq!(
+                how,
+                How::Launched,
+                "{} is this test's alone",
+                location.endpoint
+            );
+            round_trips(link, location).await;
         }
+    });
+    let outcome = checks.await;
+    stop_any_core(&location.endpoint).await;
+    if let Err(failed) = outcome {
         std::panic::resume_unwind(failed.into_panic());
     }
 }
 
+/// Stops whatever Core still serves `endpoint`, if one does, without ever
+/// launching one. Bounded, so a Core that accepts but never answers cannot
+/// hang the test run.
+async fn stop_any_core(endpoint: &str) {
+    let stop = async {
+        let Ok(stream) = ersa_core::connect(endpoint).await else {
+            return; // nobody serves it: the checks stopped their Core
+        };
+        if let Ok(link) = CoreLink::open(stream, LinkOptions::default(), |_| {}).await {
+            let _ = link.request("core.shutdown", None).await;
+        }
+    };
+    if tokio::time::timeout(CLEANUP, stop).await.is_err() {
+        eprintln!("could not stop the Core at {endpoint} within {CLEANUP:?}; it may still run");
+    }
+}
+
+/// Launches or attaches, then opens the link, within [`OPEN`] in all, so a
+/// Core that accepts but never answers fails the test instead of hanging it.
 async fn try_open(
+    location: &CoreLocation,
+) -> Result<(CoreLink, How, mpsc::UnboundedReceiver<LinkEvent>), String> {
+    tokio::time::timeout(OPEN, open_link(location))
+        .await
+        .map_err(|_| format!("no Core answered at {} within {OPEN:?}", location.endpoint))?
+}
+
+async fn open_link(
     location: &CoreLocation,
 ) -> Result<(CoreLink, How, mpsc::UnboundedReceiver<LinkEvent>), String> {
     let (stream, how) = launch::attach_or_launch(location)

@@ -102,28 +102,83 @@ impl Core {
     }
 }
 
-/// The Core playing the user's own: on Unix it serves its true default,
-/// moved into the test's private directory through `XDG_RUNTIME_DIR`. A
-/// Windows pipe name has no such override, so there it serves an endpoint
-/// labelled for this test, which stands in for the default pipe this test
-/// must not touch.
-async fn start_default(dir: &Path) -> Core {
-    if cfg!(unix) {
+/// Where this test's Cores serve. On Unix both get the test's private
+/// directory as `XDG_RUNTIME_DIR`, so their sockets go there and are removed
+/// with it even if a Core is killed. A Windows pipe name has no such
+/// override (PROTO-CORE-API: nothing in the environment overrides it).
+struct Place {
+    env: Vec<(OsString, OsString)>,
+    #[cfg(unix)]
+    run: std::path::PathBuf,
+}
+
+impl Place {
+    #[cfg(unix)]
+    fn new(dir: &Path) -> Place {
+        use std::os::unix::fs::DirBuilderExt;
         let run = dir.join("run");
-        std::fs::create_dir(&run).expect("run directory");
+        std::fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&run)
+            .expect("a private run directory");
+        Place {
+            env: vec![("XDG_RUNTIME_DIR".into(), run.clone().into_os_string())],
+            run,
+        }
+    }
+
+    #[cfg(windows)]
+    fn new(_dir: &Path) -> Place {
+        Place { env: Vec::new() }
+    }
+
+    /// The user's own endpoint, as a Core started with `env` serves it.
+    #[cfg(unix)]
+    fn default_endpoint(&self) -> String {
+        self.run
+            .join("ersa-core.sock")
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// The endpoint `serve --endpoint <label>` serves, as a Core started
+    /// with `env` names it: on Unix, beside the default socket.
+    fn labelled(&self, label: &str) -> String {
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&run, std::fs::Permissions::from_mode(0o700))
-                .expect("private run directory");
+            let endpoint = self
+                .run
+                .join(format!("ersa-core-{label}.sock"))
+                .to_string_lossy()
+                .into_owned();
+            // Same naming as the platform's, only in this test's directory.
+            let platform = ersa_core::platform::labelled_endpoint(label).expect("endpoint");
+            assert!(
+                platform.ends_with(&format!("/ersa-core-{label}.sock")),
+                "{platform}"
+            );
+            endpoint
         }
-        let endpoint = run.join("ersa-core.sock").to_string_lossy().into_owned();
-        let env = [("XDG_RUNTIME_DIR".into(), run.into_os_string())];
-        start(dir, endpoint, &[], &env).await
-    } else {
+        #[cfg(windows)]
+        {
+            ersa_core::platform::labelled_endpoint(label).expect("endpoint")
+        }
+    }
+}
+
+/// The Core playing the user's own. On Unix it serves its true default, in
+/// the test's directory. On Windows it serves a labelled endpoint standing
+/// in for the default pipe, which this test must not touch.
+async fn start_default(dir: &Path, place: &Place) -> Core {
+    #[cfg(unix)]
+    {
+        start(dir, place.default_endpoint(), &[], &place.env).await
+    }
+    #[cfg(windows)]
+    {
         let label = format!("cli-test-default-{}", std::process::id());
-        let endpoint = ersa_core::platform::labelled_endpoint(&label).expect("endpoint");
-        start(dir, endpoint, &["--endpoint", &label], &[]).await
+        let args = ["--endpoint", label.as_str()];
+        start(dir, place.labelled(&label), &args, &place.env).await
     }
 }
 
@@ -131,18 +186,13 @@ async fn start_default(dir: &Path) -> Core {
 async fn a_core_on_an_explicit_endpoint_runs_beside_the_default_one() {
     let first = tempfile::tempdir().expect("temp dir");
     let second = tempfile::tempdir().expect("temp dir");
-    let default = start_default(first.path()).await;
+    let place = Place::new(first.path());
+    let default = start_default(first.path(), &place).await;
 
     let label = format!("cli-test-{}", std::process::id());
-    let endpoint = ersa_core::platform::labelled_endpoint(&label).expect("endpoint");
+    let endpoint = place.labelled(&label);
     assert_ne!(endpoint, default.endpoint);
-    let explicit = start(
-        second.path(),
-        endpoint.clone(),
-        &["--endpoint", &label],
-        &[],
-    )
-    .await;
+    let explicit = start(second.path(), endpoint, &["--endpoint", &label], &place.env).await;
 
     // Both answer `core.hello`, each on its own endpoint.
     for core in [&default, &explicit] {

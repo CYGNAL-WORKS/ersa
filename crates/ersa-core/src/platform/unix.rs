@@ -33,8 +33,29 @@ pub fn labelled_endpoint(label: &str) -> io::Result<String> {
     super::check_label(label)?;
     let default = PathBuf::from(default_endpoint()?);
     let path = default.with_file_name(format!("ersa-core-{label}.sock"));
+    // A socket path must fit `sun_path` with its terminating NUL; a long
+    // temporary directory (macOS) plus a long label may not. Say so here
+    // rather than leave bind to fail with a vaguer error.
+    let len = path.as_os_str().len();
+    if len >= SUN_PATH {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{} is {len} bytes; a socket path must be under {SUN_PATH}: use a shorter label",
+                path.display()
+            ),
+        ));
+    }
     Ok(path.to_string_lossy().into_owned())
 }
+
+/// The size of `sockaddr_un.sun_path`: 108 bytes on Linux, 104 on macOS and
+/// the BSDs.
+const SUN_PATH: usize = if cfg!(target_os = "linux") || cfg!(target_os = "android") {
+    108
+} else {
+    104
+};
 
 /// `$XDG_DATA_HOME/ersa`, or `~/.local/share/ersa`.
 pub fn default_data_dir() -> Option<PathBuf> {
