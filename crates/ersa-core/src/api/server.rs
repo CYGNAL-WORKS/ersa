@@ -249,8 +249,14 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
     }
 
     // Dropping the sender ends the writer once it has written everything
-    // queued, including the answer to `core.shutdown`.
+    // queued, including the answer to `core.shutdown`. A connection Core
+    // closed for falling behind is not drained: its client is not reading,
+    // and the writer would wait on it forever.
+    let kicked = *kicked.borrow();
     drop(conn);
+    if kicked {
+        writer.abort();
+    }
     writer.await.ok();
     if shutdown_after {
         core.request_shutdown();
