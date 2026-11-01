@@ -38,7 +38,8 @@ const target = String(
 if (!target) process.exit(0);
 
 const guarded = /(^|\/)docs\/(briefs|adr)\//.test(target);
-const inbox = /(^|\/)docs\/briefs\/inbox\.md$/.test(target);
+// Always writable: the inbox (findings) and recorded protocol fixtures (evidence).
+const inbox = /(^|\/)docs\/briefs\/inbox\.md$/.test(target) || /(^|\/)docs\/briefs\/protocol\/fixtures\//.test(target);
 
 function role() {
   if (process.env.ERSA_ROLE) return process.env.ERSA_ROLE;
