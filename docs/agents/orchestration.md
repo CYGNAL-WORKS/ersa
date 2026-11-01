@@ -31,3 +31,7 @@ Planning commits for a pull request go onto its branch, which is checked out in 
 
 - Merge only when CI is green and the review is clean: `gh pr merge <n> --merge` (merge commits keep `Implements:` trailers). GitHub deletes the branch.
 - After the merge, `git pull` in the integration checkout and report to the owner in a few lines.
+
+## Train the harness
+
+After each merge, compare what the merge-time reviewers found with what the implementing session's own review caught. For each defect that got through, ask which part of the harness should have stopped it (a brief requirement, a skill's reviewer brief, a test convention, a check in `scripts/`, the hook) and change that part in a planning commit, so the lesson outlives the session. Prune at the same time: a rule nobody needs, a duplicated instruction, a stale note.
