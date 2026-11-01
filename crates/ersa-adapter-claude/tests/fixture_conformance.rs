@@ -243,7 +243,7 @@ fn normalise(value: &Value) -> Value {
     }
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R04
+// verifies: PROTO-CLAUDE-CODE-STREAM-R11
 #[test]
 fn every_fixture_line_parses_into_a_typed_variant() {
     let mut tally = Tally::default();
