@@ -8,7 +8,7 @@
 #![allow(unsafe_code)]
 
 use std::io;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use tokio::net::{UnixListener, UnixStream};
@@ -25,6 +25,37 @@ pub fn default_endpoint() -> io::Result<String> {
     };
     Ok(dir.join("ersa-core.sock").to_string_lossy().into_owned())
 }
+
+/// `ersa-core-<label>.sock` beside the default socket, in the same private
+/// directory: an endpoint of this user's that is not the default, for tests
+/// and a second Core. See [`super::check_label`] for what `label` may hold.
+pub fn labelled_endpoint(label: &str) -> io::Result<String> {
+    super::check_label(label)?;
+    let default = PathBuf::from(default_endpoint()?);
+    let path = default.with_file_name(format!("ersa-core-{label}.sock"));
+    // A socket path must fit `sun_path` with its terminating NUL; a long
+    // temporary directory (macOS) plus a long label may not. Say so here
+    // rather than leave bind to fail with a vaguer error.
+    let len = path.as_os_str().len();
+    if len >= SUN_PATH {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{} is {len} bytes; a socket path must be under {SUN_PATH}: use a shorter label",
+                path.display()
+            ),
+        ));
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// The size of `sockaddr_un.sun_path`: 108 bytes on Linux, 104 on macOS and
+/// the BSDs.
+const SUN_PATH: usize = if cfg!(target_os = "linux") || cfg!(target_os = "android") {
+    108
+} else {
+    104
+};
 
 /// `$XDG_DATA_HOME/ersa`, or `~/.local/share/ersa`.
 pub fn default_data_dir() -> Option<PathBuf> {
@@ -92,6 +123,14 @@ impl Listener {
                 return Err(io::Error::new(
                     io::ErrorKind::AddrInUse,
                     format!("a process running as this user already serves {endpoint}"),
+                ));
+            }
+            // Only a leftover socket is cleared: an explicit `--endpoint`
+            // naming some other file of the user's must not delete it.
+            if !meta.file_type().is_socket() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("{endpoint} exists and is not a socket"),
                 ));
             }
             std::fs::remove_file(path)?;

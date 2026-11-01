@@ -297,6 +297,16 @@ async fn a_second_core_on_the_same_endpoint_refuses_to_start() {
     core.client().await;
 }
 
+#[test]
+fn an_endpoint_label_cannot_leave_its_name() {
+    // The label lands in a pipe or file name: no separators, no `..`.
+    for label in ["", "a/b", r"a\b", "..", "a b", &"x".repeat(65)] {
+        let result = ersa_core::platform::labelled_endpoint(label);
+        assert!(result.is_err(), "{label:?} gave {result:?}");
+    }
+    assert!(ersa_core::platform::labelled_endpoint("shell-test_42").is_ok());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn several_clients_are_served_at_once() {
     let core = start().await;
