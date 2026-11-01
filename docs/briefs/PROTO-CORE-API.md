@@ -58,7 +58,7 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 - `session.set_title { id, title }`, `session.set_mode { id, mode }` (takes effect on next start).
 - `session.subscribe { id, from_seq }`: Core sends every event with `seq >= from_seq` as `session.event` notifications, then continues live. Returns `{ last_seq }`.
 - `session.unsubscribe { id }`.
-- `session.raw_log { id, from, to }`: raw lines for the developer pane: `[{ index, ts, dir (backend | host), line }]`.
+- `session.raw_log { id, from, to }`: raw lines for the developer pane: `[{ index, ts, dir (backend | host | core), line }]`.
 - `session.reproject { id }`: discards the cached projection and re-derives; used after a projection version change.
 
 ### Backends and modes
@@ -119,6 +119,7 @@ A conforming Core passes a request/response test suite driven over the socket, a
 
 ## Changes
 
+- 2026-11-01: `dir` includes `core` for Core's lifecycle records.
 - 2026-10-31: `session.raw_log` entries carry `dir`, since the raw log records host-written lines too.
 - 2026-10-31: elaborated to ready: transport, handshake, methods, notifications, errors, requirements.
 - 2026-10-31: created as draft.
