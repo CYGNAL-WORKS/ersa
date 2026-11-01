@@ -20,7 +20,7 @@ use ersa_adapter::{Direction, Projector};
 use ersa_adapter_claude::ClaudeProjector;
 use ersa_adapter_claude::record::{
     RecordCache, RecordEvent, SessionList, encoded_cwd, find_record, list_sessions, project_record,
-    read_record,
+    read_record, record_version,
 };
 use ersa_protocol::events::*;
 use ersa_protocol::schema::validate_event;
@@ -977,4 +977,26 @@ fn an_entry_too_long_to_read_is_reported_unless_it_is_still_being_written() {
         events.iter().map(|e| e.type_name()).collect::<Vec<_>>()
     );
     assert!(matches!(events[0], Event::UserMessage(_)));
+}
+
+#[test]
+fn a_records_version_changes_when_it_grows() {
+    let text = record_fixtures().remove(0).text;
+    let home = record_home("C:/work", SESSION, &text);
+    let before = record_version(home.path(), "C:/work", SESSION).unwrap();
+    assert!(before.is_some());
+    assert_eq!(
+        record_version(home.path(), "C:/work", SESSION).unwrap(),
+        before
+    );
+    let path = find_record(home.path(), "C:/work", SESSION)
+        .unwrap()
+        .unwrap();
+    fs::write(&path, format!("{text}\n")).unwrap();
+    assert_ne!(
+        record_version(home.path(), "C:/work", SESSION).unwrap(),
+        before
+    );
+    let other = "00000000-0000-4000-8000-000000000000";
+    assert_eq!(record_version(home.path(), "C:/work", other).unwrap(), None);
 }

@@ -56,6 +56,19 @@ pub trait Adapter: Send + Sync {
         Ok(Arc::default())
     }
 
+    /// A token that changes whenever session `backend_session_id`'s record
+    /// does (for a file: its size and modified time), so Core can tell
+    /// whether events it read earlier still describe it. `None` when there
+    /// is no record, or the adapter cannot tell, which is the default.
+    async fn record_version(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        _backend_session_id: &str,
+    ) -> Result<Option<String>, AdapterError> {
+        Ok(None)
+    }
+
     /// Lets go of anything kept about session `backend_session_id`'s
     /// record, which Ersa no longer shows (the session was removed).
     fn forget_record(&self, _cwd: &str, _backend_session_id: &str) {}
