@@ -6,7 +6,7 @@ How Ersa's dependency policy runs. ADR 0015 is the decision and its reasons; `de
 
 | Check | Runs | Fails when |
 |---|---|---|
-| Release age (`node scripts/deps-check.mjs age`) | every pull request | a package version the pull request adds or changes in any tracked `Cargo.lock` or `pnpm-lock.yaml` was published less than `min_age_days` (7) days ago, or does not come from crates.io or npm (a path outside the workspace, git, a tarball), and has no age exception |
+| Release age (`node scripts/deps-check.mjs age`) | every pull request | a package version the pull request adds or changes in any tracked `Cargo.lock` or `pnpm-lock.yaml` was published less than `min_age_days` (7) days ago, or does not come from crates.io or npm (a path outside the repository's Cargo workspaces, git, a tarball), and has no age exception |
 | Vulnerabilities (`node scripts/deps-check.mjs vulns`) | every pull request and push to `main`, and daily on `main` | OSV-Scanner finds a known vulnerability in any lockfile that has no vulnerability exception |
 | Sources, bans, licences (`cargo deny --locked check bans licenses sources`) | every pull request and push to `main`, and daily on `main` | a crate comes from anywhere but crates.io, a dependency uses a `*` version, or a licence is not on the allowlist in `deny.toml` |
 
