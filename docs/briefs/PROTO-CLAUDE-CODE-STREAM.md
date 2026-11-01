@@ -119,6 +119,10 @@ or `{"behavior":"deny","message":"...","interrupt":false}`. An allow always carr
 
 `parent_tool_use_id` is omitted for the main thread. The SDK types mark it required, but every recorded stdin user message omits it and the CLI accepts that.
 
+### control_cancel_request and keep_alive
+
+Either side may send `{"type":"control_cancel_request","request_id":"..."}` to withdraw one of its own in-flight control requests; the receiver stops working on it and ignores any late answer. From the CLI it typically withdraws a pending `can_use_tool` prompt (after an interrupt, say), so the adapter treats the request as no longer pending and the shelf drops it. `{"type":"keep_alive"}` is a heartbeat with no meaning beyond liveness. Both are modelled from the SDK types and not yet recorded; record a fixture when the adapter implements interrupt.
+
 ### Other control requests the adapter uses
 
 `interrupt`, `set_permission_mode`, `set_model`, `get_context_usage`, `get_session_cost`, and `mcp_message` (for `sdkMcpServers`). Shapes per the SDK types; fixtures to be recorded as each is implemented.
@@ -186,6 +190,8 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - Whether `--replay-user-messages` should be on by default for raw-log completeness.
 
 ## Changes
+
+- 2026-11-01: `control_cancel_request` and `keep_alive` described, from the SDK types. No requirement IDs changed.
 
 - 2026-11-01: `task_summary` and `post_turn_summary` are internal CLI surface; activity state no longer depends on them. No requirement IDs changed.
 
