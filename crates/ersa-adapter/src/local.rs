@@ -21,6 +21,10 @@ pub struct LocalTransport;
 impl Transport for LocalTransport {
     async fn spawn(&self, spec: ProcessSpec) -> io::Result<Box<dyn Process>> {
         let mut command = Command::new(&spec.program);
+        // Removals first, so `env` can still set a removed name.
+        for name in &spec.env_remove {
+            command.env_remove(name);
+        }
         command
             .args(&spec.args)
             .envs(&spec.env)

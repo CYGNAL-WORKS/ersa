@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use ersa_adapter::{LocalTransport, ProcessSpec};
-use ersa_core::transport::{RunError, run};
+use ersa_core::transport::{LocalTreeTransport, RunError, run};
 
 /// A command whose output has a line that is not UTF-8 between two that
 /// are. On Windows, PowerShell writes the raw bytes; elsewhere, printf.
@@ -54,4 +54,40 @@ async fn a_missing_program_is_a_spawn_error() {
     };
     let result = run(&LocalTransport, spec, Duration::from_secs(5)).await;
     assert!(matches!(result, Err(RunError::Spawn(e)) if e.kind() == std::io::ErrorKind::NotFound));
+}
+
+/// The transport sessions run on applies the spec's environment changes:
+/// removals from the inherited environment first, then the variables it sets.
+#[tokio::test]
+async fn the_session_transport_removes_inherited_variables_before_setting_its_own() {
+    // A variable every runner has: `OS` on Windows, `HOME` elsewhere. The
+    // brackets show an unset value as `[]`, or as `[%OS%]` from cmd.
+    let (inherited, program, flag, command) = if cfg!(windows) {
+        ("OS", "cmd", "/C", "echo [%OS%] & echo [%ERSA_TEST_VAR%]")
+    } else {
+        (
+            "HOME",
+            "sh",
+            "-c",
+            "echo \"[$HOME]\"; echo \"[$ERSA_TEST_VAR]\"",
+        )
+    };
+    assert!(
+        std::env::var_os(inherited).is_some(),
+        "{inherited} unset here"
+    );
+    let mut spec = ProcessSpec {
+        program: program.into(),
+        args: vec![flag.into(), command.into()],
+        env_remove: vec![inherited.into(), "ERSA_TEST_VAR".into()],
+        ..ProcessSpec::default()
+    };
+    spec.env.insert("ERSA_TEST_VAR".into(), "set".into());
+
+    let output = run(&LocalTreeTransport::new(), spec, Duration::from_secs(60))
+        .await
+        .expect("the command completes");
+    let unset = if cfg!(windows) { "[%OS%]" } else { "[]" };
+    let lines: Vec<&str> = output.stdout.iter().map(|l| l.trim_end()).collect();
+    assert_eq!(lines, [unset, "[set]"]);
 }
