@@ -50,7 +50,7 @@
   column-gap: var(--space-sm);
   align-items: baseline;
   min-width: 0;
-  padding: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
   font: inherit;
   text-align: left;
   color: var(--color-ink);
@@ -60,22 +60,33 @@
   cursor: pointer;
 }
 
-.session:hover {
+.session:hover,
+.session[data-force="hover"] {
   background: var(--color-surface-raised);
   border-color: var(--color-ink-faint);
 }
 
-.session:active {
+.session:active,
+.session[data-force="pressed"] {
   background: var(--color-canvas);
+  border-color: var(--color-ink-muted);
 }
 
-.session:focus-visible {
+/* The active session is outlined in the accent. */
+.session[aria-current] {
+  border-color: var(--color-accent);
+}
+
+/* Focus takes the accent on the edge and the title, as the button's does, so it shows on the active tile too. */
+.session:focus-visible,
+.session[data-force="focus"] {
   outline: none;
   border-color: var(--color-accent);
 }
 
-.session[aria-current] {
-  border-color: var(--color-accent);
+.session:focus-visible .session-title,
+.session[data-force="focus"] .session-title {
+  color: var(--color-accent);
 }
 
 /* Glyph beside the title; the cost at the title's end; the state beneath both. */
@@ -83,30 +94,6 @@
   grid-column: 1;
   grid-row: 1;
   align-self: center;
-  box-sizing: border-box;
-  width: var(--space-sm);
-  height: var(--space-sm);
-  border-radius: var(--radius-pill);
-  background: var(--color-ink-faint);
-}
-
-/* Working: the positive glyph. Starting: hollow, waiting on something. Failed: danger. */
-.session[data-state="running"] .session-glyph {
-  background: var(--color-positive);
-}
-
-.session[data-state="starting"] .session-glyph {
-  background: transparent;
-  border: var(--line-hairline) solid var(--color-ink-muted);
-}
-
-.session[data-state="error"] .session-glyph {
-  background: var(--color-danger);
-}
-
-.session[data-needs-you] .session-glyph {
-  border: none;
-  background: var(--color-accent);
 }
 
 .session-title {

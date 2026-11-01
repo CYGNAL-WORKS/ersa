@@ -9,19 +9,22 @@ interface ComposerProps {
   sending?: Sending;
   /** Sends the text; resolves true once Core accepted it, and the composer clears. */
   onSend: (text: string) => Promise<boolean>;
-  /** For the gallery: text already typed. */
+  /** For the gallery: text already typed, and a pointer or keyboard state shown without one. */
   initialText?: string;
+  force?: "hover" | "focus";
 }
 
 /** Where the user writes to the agent. Enter sends; Shift+Enter starts a new line. */
-export function Composer({ unavailable, sending, onSend, initialText = "" }: ComposerProps) {
+export function Composer({ unavailable, sending, onSend, initialText = "", force }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const busy = sending?.state === "sending";
   const canSend = !unavailable && !busy && text.trim() !== "";
 
   const send = async () => {
     if (!canSend) return;
-    if (await onSend(text)) setText("");
+    const sent = text;
+    // Clear only what was sent: anything typed meanwhile is the next message.
+    if (await onSend(sent)) setText((now) => (now === sent ? "" : now));
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -45,6 +48,9 @@ export function Composer({ unavailable, sending, onSend, initialText = "" }: Com
         aria-label="Message"
         placeholder="Write to the agent"
         rows={3}
+        // The composer is focused when a session opens (FLOW-NEW-SESSION), ready to write.
+        autoFocus={force === undefined}
+        data-force={force}
         value={text}
         disabled={!!unavailable}
         onChange={(event) => setText(event.target.value)}

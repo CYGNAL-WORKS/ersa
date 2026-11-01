@@ -110,7 +110,7 @@ describe("connect", () => {
     const last = seen.at(-1);
     expect(last?.phase === "connected" && last.sessions).toEqual({
       state: "ready",
-      sessions: [{ ...session, state: "waiting_user", tile: waiting }],
+      sessions: [{ ...session, tile: waiting }],
     });
 
     notify({ method: "session.tile", params: { session_id: "s2", tile: created.tile } });
@@ -136,6 +136,18 @@ describe("connect", () => {
     await settle();
     const last = seen.at(-1);
     expect(last?.phase === "connected" && last.projects).toEqual({ state: "ready", projects: [project, added] });
+  });
+
+  it("reads the session list once more, not once per tile, while a read is in flight", async () => {
+    const answers: ((sessions: Session[]) => void)[] = [];
+    const { client, notify } = fakeClient({ ...answering, "session.list": () => new Promise((r) => answers.push(r)) });
+    connect(client, () => {});
+    await settle();
+    for (const id of ["s2", "s3", "s4"]) notify({ method: "session.tile", params: { session_id: id, tile: session.tile } });
+    expect(answers).toHaveLength(1);
+    answers[0]?.([session]);
+    await settle();
+    expect(answers).toHaveLength(2);
   });
 
   it("numbers each connection, so subscriptions know to start again", async () => {

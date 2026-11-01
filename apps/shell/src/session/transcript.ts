@@ -28,8 +28,8 @@ export type Item =
       progress?: string;
       result?: { content: string; isError: boolean };
     }
-  /** A permission request, answered once `decision` is set. */
-  | { kind: "permission"; key: string; request: PermissionRequested; decision?: PermissionDecided }
+  /** A permission request, answered once `decision` is set; `unanswered` once the session ended without one. */
+  | { kind: "permission"; key: string; request: PermissionRequested; decision?: PermissionDecided; unanswered?: true }
   /** Questions are answered from the shelf (M1); until then the transcript shows them. */
   | { kind: "question"; key: string; questions: QuestionAsked["questions"]; answered: boolean }
   /** Something went wrong: an `error` event, or a tool the backend denied with nobody to ask. */
@@ -50,11 +50,14 @@ export interface Transcript {
 export const emptyTranscript: Transcript = { lastSeq: -1, items: [] };
 
 /**
- * The transcript after `envelope`. An event at or before `lastSeq` was
- * already applied (a subscription resumed with some overlap) and changes nothing.
+ * The transcript after `envelope`. Events apply only in order, each the one
+ * after `lastSeq` (sequence numbers are gap-free, PROTO-AGENT-EVENTS-R01): one
+ * at or before it was already applied (a subscription resumed with some
+ * overlap), and one beyond it is a stray from an earlier subscription that
+ * the current one will deliver again in its place. Either changes nothing.
  */
 export function apply(transcript: Transcript, envelope: Envelope): Transcript {
-  if (transcript.refused || envelope.seq <= transcript.lastSeq) return transcript;
+  if (transcript.refused || envelope.seq !== transcript.lastSeq + 1) return transcript;
   if (envelope.v !== EVENT_VERSION) {
     return {
       ...transcript,
@@ -66,8 +69,11 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
   switch (event.type) {
     case "session.state":
       return { ...next, state: event.state };
-    case "session.ended":
-      return add(next, { kind: "ended", key: `ended:${envelope.seq}`, reason: endedReason[event.reason] });
+    case "session.ended": {
+      // Nobody can answer a request once the session has ended.
+      const items = next.items.map((i) => (i.kind === "permission" && isOpen(i) ? { ...i, unanswered: true as const } : i));
+      return add({ ...next, items }, { kind: "ended", key: `ended:${envelope.seq}`, reason: endedReason[event.reason] ?? "Ended." });
+    }
     case "session.notice":
       return add(next, { kind: "notice", key: `notice:${envelope.seq}`, message: event.message });
     case "user.message":
@@ -109,24 +115,43 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
       return add(next, { kind: "problem", key: `problem:${envelope.seq}`, message: event.message });
     // Shown elsewhere (the tile carries usage), or nowhere outside the
     // developer pane (passthrough), or implied by the items around them.
+    case "turn.completed":
+      // A turn that ended other than by finishing says so; one that
+      // succeeded needs no mark, its last words are on the page.
+      return event.outcome === "success"
+        ? next
+        : add(next, { kind: "notice", key: `turn:${envelope.seq}`, message: turnOutcome[event.outcome] ?? "The turn ended early." });
     case "session.started":
     case "turn.started":
-    case "turn.completed":
     case "usage.updated":
     case "backend.passthrough":
       return next;
+    // An event type this window does not know, under a version it does:
+    // Core is newer in a way that kept `v`. Say so rather than drop it.
+    default:
+      return add(next, {
+        kind: "notice",
+        key: `unknown:${envelope.seq}`,
+        message: `An event this window does not show (${String((event as { type?: unknown }).type)}).`,
+      });
   }
 }
 
 /** Whether the request still waits for an answer. */
 export function isOpen(item: Extract<Item, { kind: "permission" }>): boolean {
-  return item.decision === undefined;
+  return item.decision === undefined && !item.unanswered;
 }
 
-const endedReason: Record<"user_stopped" | "backend_exited" | "error", string> = {
+const endedReason: Partial<Record<string, string>> = {
   user_stopped: "Stopped.",
   backend_exited: "The agent exited.",
   error: "The session ended with an error.",
+};
+
+const turnOutcome: Partial<Record<string, string>> = {
+  error: "The turn ended with an error.",
+  interrupted: "The turn was interrupted.",
+  max_turns: "The turn stopped at its turn limit.",
 };
 
 function add(transcript: Transcript, item: Item): Transcript {
@@ -157,7 +182,14 @@ function patch<K extends Item["kind"]>(
   return { ...transcript, items };
 }
 
-/** A tool's output as text: as it came, or its structured form as JSON. */
+/**
+ * A tool's output as text: as it came; the text of its blocks when it is a
+ * list of text blocks, as most tools' structured output is; else as JSON.
+ */
 function contentText(content: unknown): string {
-  return typeof content === "string" ? content : JSON.stringify(content, null, 2);
+  if (typeof content === "string") return content;
+  const isText = (b: unknown): b is { type: "text"; text: string } =>
+    typeof b === "object" && b !== null && (b as { type?: unknown }).type === "text" && typeof (b as { text?: unknown }).text === "string";
+  if (Array.isArray(content) && content.length > 0 && content.every(isText)) return content.map((b) => b.text).join("\n");
+  return JSON.stringify(content, null, 2);
 }

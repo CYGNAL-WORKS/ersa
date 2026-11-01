@@ -132,6 +132,7 @@ export function App({ client }: { client: CoreClient }) {
       {shown ? (
         <main className="stage">
           <Transcript
+            key={shown.id}
             title={active?.title ?? "Untitled session"}
             view={shown}
             onDecide={(requestId, behavior) => follower.current?.decide(requestId, behavior)}

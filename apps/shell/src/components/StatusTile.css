@@ -14,26 +14,7 @@
 }
 
 .tile-glyph {
-  width: var(--space-sm);
-  height: var(--space-sm);
-  border-radius: var(--radius-pill);
-  background: var(--color-ink-faint);
   align-self: center;
-}
-
-.tile[data-tone="positive"] .tile-glyph {
-  background: var(--color-positive);
-}
-
-.tile[data-tone="danger"] .tile-glyph {
-  background: var(--color-danger);
-}
-
-/* Waiting on something: a hollow glyph rather than a filled one. */
-.tile[data-tone="pending"] .tile-glyph {
-  box-sizing: border-box;
-  background: transparent;
-  border: var(--line-hairline) solid var(--color-ink-muted);
 }
 
 .tile-title {
