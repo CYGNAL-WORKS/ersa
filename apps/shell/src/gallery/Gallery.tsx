@@ -50,6 +50,18 @@ const coreViews: [string, CoreView][] = [
     "Attached, before status",
     { phase: "connected", link: 1, how: "attached", hello, projects: { state: "loading" }, sessions: { state: "loading" } },
   ],
+  [
+    "Attached to a label",
+    {
+      phase: "connected",
+      link: 1,
+      how: "attached",
+      label: "replay",
+      hello,
+      projects: { state: "loading" },
+      sessions: { state: "loading" },
+    },
+  ],
   ["Lost, reconnecting", { phase: "lost", reason: "Core closed the connection", hello }],
   [
     "Unavailable",
