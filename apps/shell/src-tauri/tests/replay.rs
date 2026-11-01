@@ -23,21 +23,31 @@ use tokio::sync::mpsc;
 
 /// How long the replay server may take to start serving.
 const START: Duration = Duration::from_secs(60);
-/// The stream is complete once nothing has arrived for this long. At
-/// instant pace the whole recording is fed at once, so a pause this long
-/// means the replay has reached its end and is idle (PROTO-CORE-API,
-/// Conformance: a replayed session stays open and idle after its last line).
-const QUIET: Duration = Duration::from_secs(2);
-/// A bound on the whole collection, so a replay that never goes quiet fails.
+/// After this long with nothing arriving, the test asks Core whether the
+/// replay has played out. Silence alone never ends the capture.
+const QUIET: Duration = Duration::from_millis(500);
+/// A bound on the whole collection, so a replay that never ends fails.
 const COLLECT: Duration = Duration::from_secs(60);
+/// How long the replay server may take to exit after `core.shutdown`.
+const EXIT: Duration = Duration::from_secs(15);
 
 /// The replay server process, stopped when the test ends however it ends.
-/// It is this test's own child, started without detaching, so killing it is
-/// enough; its data directory is a temporary one it made itself.
+/// A test that finishes sends `core.shutdown`, so the server removes its
+/// temporary data directory itself; this waits for that, and kills the
+/// server only if it has not exited by then (a test that panicked first).
+/// It is this test's own child, started without detaching, so killing it
+/// stops it.
 struct ReplayServer(Child);
 
 impl Drop for ReplayServer {
     fn drop(&mut self) {
+        let deadline = std::time::Instant::now() + EXIT;
+        while std::time::Instant::now() < deadline {
+            if let Ok(Some(_)) = self.0.try_wait() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
@@ -119,27 +129,48 @@ async fn received(name: &str) -> Value {
     .expect("session.subscribe");
 
     let mut notifications = Vec::new();
-    tokio::time::timeout(COLLECT, async {
-        while let Ok(Some(event)) = tokio::time::timeout(QUIET, incoming.recv()).await {
-            match event {
-                LinkEvent::Notification { method, params } if method == "session.event" => {
-                    notifications
-                        .push(json!({ "kind": "notification", "method": method, "params": params }))
+    let mut last_seq: Option<u64> = None;
+    let after = tokio::time::timeout(COLLECT, async {
+        loop {
+            match tokio::time::timeout(QUIET, incoming.recv()).await {
+                Ok(Some(LinkEvent::Notification { method, params }))
+                    if method == "session.event" =>
+                {
+                    last_seq = params["event"]["seq"].as_u64();
+                    notifications.push(
+                        json!({ "kind": "notification", "method": method, "params": params }),
+                    );
                 }
-                LinkEvent::Notification { .. } => {}
-                LinkEvent::Closed { reason } => {
+                Ok(Some(LinkEvent::Notification { .. })) => {}
+                Ok(Some(LinkEvent::Closed { reason })) => {
                     panic!("the replay closed the connection: {reason}")
+                }
+                Ok(None) => panic!("the link's event channel closed"),
+                // Quiet: the capture is complete once Core says the session
+                // is idle with no event past the last one received (a
+                // replayed session stays idle after its last line,
+                // PROTO-CORE-API, Conformance).
+                Err(_) => {
+                    let after = link
+                        .request("session.list", None)
+                        .await
+                        .expect("session.list");
+                    let session = &after[0];
+                    if session["tile"]["state"] == "idle"
+                        && session["last_event_seq"].as_u64() == last_seq
+                    {
+                        return after;
+                    }
                 }
             }
         }
     })
     .await
-    .expect("the replay goes quiet");
-
-    let after = link
-        .request("session.list", None)
+    .expect("the replay plays out");
+    // Stop the server as an Interface would, so it cleans up after itself.
+    link.request("core.shutdown", None)
         .await
-        .expect("session.list");
+        .expect("core.shutdown");
     normalise(
         json!({ "sessions": sessions, "notifications": notifications, "sessions_after": after }),
         &id,
@@ -191,11 +222,13 @@ async fn check(name: &str) {
     );
 }
 
+// verifies: ARCH-CORE-R11
 #[tokio::test]
 async fn streamed_text_capture_is_current() {
     check("02-partial-messages").await;
 }
 
+// verifies: ARCH-CORE-R11
 #[tokio::test]
 async fn permission_capture_is_current() {
     check("11-stream-permission-prompt-tool-stdio").await;

@@ -25,12 +25,14 @@
   color: var(--color-ink-faint);
 }
 
-.composer-input:hover:not(:disabled) {
+.composer-input:hover:not(:disabled),
+.composer-input[data-force="hover"] {
   border-color: var(--color-ink-faint);
 }
 
 /* Focus takes the accent on the edge, as the button's does. */
-.composer-input:focus-visible {
+.composer-input:focus-visible,
+.composer-input[data-force="focus"] {
   outline: none;
   border-color: var(--color-accent);
 }

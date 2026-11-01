@@ -12,20 +12,28 @@
   color: var(--color-ink);
   background: var(--color-surface);
   border: var(--line-hairline) solid var(--color-line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
 }
 
 .add-project-input::placeholder {
   color: var(--color-ink-faint);
 }
 
-.add-project-input:hover {
+.add-project-input:hover:not(:read-only),
+.add-project-input[data-force="hover"] {
   border-color: var(--color-ink-faint);
 }
 
-.add-project-input:focus-visible {
+.add-project-input:focus-visible,
+.add-project-input[data-force="focus"] {
   outline: none;
   border-color: var(--color-accent);
+}
+
+/* While the project is being added, the path reads as fixed, as a disabled composer does. */
+.add-project-input:read-only {
+  color: var(--color-ink-faint);
+  background: var(--color-canvas);
 }
 
 .add-project-problem {

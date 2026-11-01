@@ -46,3 +46,32 @@ body {
   border-radius: var(--radius-pill);
   background: var(--color-danger);
 }
+
+/* The state glyph every tile shares (DESIGN.md, status lives in tiles): a small dot whose tone carries the state.
+   Neutral by default; pending is hollow; needs-you is the accent with a ring, so it reads apart from positive. */
+.glyph {
+  box-sizing: border-box;
+  width: var(--space-sm);
+  height: var(--space-sm);
+  border-radius: var(--radius-pill);
+  background: var(--color-ink-faint);
+}
+
+.glyph[data-tone="positive"] {
+  background: var(--color-positive);
+}
+
+.glyph[data-tone="danger"] {
+  background: var(--color-danger);
+}
+
+.glyph[data-tone="pending"] {
+  background: transparent;
+  border: var(--line-hairline) solid var(--color-ink-muted);
+}
+
+.glyph[data-tone="attention"] {
+  background: var(--color-accent);
+  outline: var(--line-hairline) solid var(--color-accent);
+  outline-offset: var(--line-hairline);
+}

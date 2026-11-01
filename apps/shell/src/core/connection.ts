@@ -100,9 +100,9 @@ export function connect(
       if (live() && current.phase === "connected") set(change(current));
     };
 
-    // Each read of a list gets a number, so an older answer that arrives
-    // late cannot replace a newer one.
-    const reads = { projects: 0, sessions: 0 };
+    // Each read of the project list gets a number, so an older answer that
+    // arrives late cannot replace a newer one.
+    const reads = { projects: 0 };
     const listProjects = () => {
       const read = ++reads.projects;
       const latest = () => read === reads.projects;
@@ -111,12 +111,29 @@ export function connect(
         (error) => latest() && patch((view) => ({ ...view, projects: { state: "error", message: describeError(error) } })),
       );
     };
+    // One session read at a time: asking again while one is in flight
+    // reads once more after it, so a burst of tiles costs two reads, not one each.
+    let sessionRead: "idle" | "reading" | "again" = "idle";
     const listSessions = () => {
-      const read = ++reads.sessions;
-      const latest = () => read === reads.sessions;
+      if (sessionRead !== "idle") {
+        sessionRead = "again";
+        return;
+      }
+      sessionRead = "reading";
+      const done = () => {
+        const again = sessionRead === "again";
+        sessionRead = "idle";
+        if (again && live()) listSessions();
+      };
       client.call("session.list").then(
-        (sessions) => latest() && patch((view) => ({ ...view, sessions: { state: "ready", sessions } })),
-        (error) => latest() && patch((view) => ({ ...view, sessions: { state: "error", message: describeError(error) } })),
+        (sessions) => {
+          patch((view) => ({ ...view, sessions: { state: "ready", sessions } }));
+          done();
+        },
+        (error) => {
+          patch((view) => ({ ...view, sessions: { state: "error", message: describeError(error) } }));
+          done();
+        },
       );
     };
 
@@ -138,7 +155,7 @@ export function connect(
                     ...view,
                     sessions: {
                       state: "ready",
-                      sessions: view.sessions.sessions.map((s) => (s.id === session_id ? { ...s, tile, state: tile.state } : s)),
+                      sessions: view.sessions.sessions.map((s) => (s.id === session_id ? { ...s, tile } : s)),
                     },
                   }
                 : view,

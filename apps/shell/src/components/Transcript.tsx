@@ -34,7 +34,9 @@ export function Transcript({ title, view, onDecide }: TranscriptProps) {
     <section className="transcript" aria-label="Transcript">
       <header className="transcript-header">
         <h1 className="transcript-title">{title}</h1>
-        <span className="transcript-state">{stateText(transcript.state)}</span>
+        <span className="transcript-state" data-needs-you={transcript.state === "waiting_user" || undefined}>
+          {stateText(transcript.state)}
+        </span>
       </header>
       <div className="transcript-scroll" ref={scroller} onScroll={onScroll}>
         <div className="transcript-page">
@@ -103,10 +105,14 @@ function Block({ item, answers, onDecide }: { item: Item; answers: SessionView["
 
 function ToolCard({ item }: { item: Extract<Item, { kind: "tool" }> }) {
   return (
-    <div className="transcript-card" data-error={item.result?.isError || undefined}>
+    <div className="transcript-card">
       <div className="transcript-card-head">
         <span className="transcript-card-title">{item.name}</span>
-        <span className="transcript-card-status">{item.result ? (item.result.isError ? "Failed" : "Done") : (item.progress ?? "Running…")}</span>
+        {item.result?.isError ? (
+          <span className="problem transcript-card-status">Failed</span>
+        ) : (
+          <span className="transcript-card-status">{item.result ? "Done" : (item.progress ?? "Running…")}</span>
+        )}
       </div>
       <code className="transcript-input mono">{inputSummary(item.input)}</code>
       {item.result && item.result.content !== "" && <pre className="transcript-output mono">{item.result.content}</pre>}
@@ -126,20 +132,34 @@ function PermissionCard({
   const { request, decision } = item;
   const name = request.display_name ?? request.tool_name;
   const sending = answer?.state === "sending";
+  const open = isOpen(item);
   return (
-    <section className="transcript-card transcript-permission" data-open={!decision || undefined} aria-label={`Permission: ${name}`}>
+    <section className="transcript-card transcript-permission" data-open={open || undefined} aria-label={`Permission: ${name}`}>
       <div className="transcript-card-head">
-        <span className="transcript-card-title">{decision ? name : `Allow ${name}?`}</span>
+        <span className="transcript-card-title">
+          {open ? `Allow ${name}?` : name}
+          {/* The tool's own name, when the backend shows another, so the user knows what they approve. */}
+          {name !== request.tool_name && <span className="transcript-card-status mono"> {request.tool_name}</span>}
+        </span>
         {decision && <span className="transcript-card-status">{decisionText(decision.behavior, decision.decided_by)}</span>}
+        {item.unanswered && <span className="transcript-card-status">Not answered</span>}
       </div>
       {request.description && <p className="transcript-card-detail">{request.description}</p>}
-      <code className="transcript-input mono">{inputSummary(request.input)}</code>
+      {/* Every field of the input: the user approves exactly what will run, never a summary of it. */}
+      <dl className="transcript-fields">
+        {Object.entries(request.input as Record<string, unknown>).map(([key, value]) => (
+          <div key={key} className="transcript-field">
+            <dt>{key}</dt>
+            <dd className="mono">{typeof value === "string" ? value : JSON.stringify(value, null, 2)}</dd>
+          </div>
+        ))}
+      </dl>
       {request.blocked_path && (
         <p className="transcript-card-detail">
           Path: <span className="mono">{request.blocked_path}</span>
         </p>
       )}
-      {!decision && (
+      {open && (
         <div className="transcript-actions">
           <Button onClick={() => onDecide(request.request_id, "allow")} disabled={sending}>
             Allow
@@ -150,7 +170,7 @@ function PermissionCard({
           {sending && <span className="transcript-card-status">Sending…</span>}
         </div>
       )}
-      {!decision && answer?.state === "failed" && (
+      {open && answer?.state === "failed" && (
         <p className="problem" role="alert">
           {answer.message}
         </p>
@@ -159,7 +179,7 @@ function PermissionCard({
   );
 }
 
-/** A tool's arguments on one line: its command when it has one, else its arguments as JSON. */
+/** A tool card's one-line view of its arguments: its command or path when it has one, else them all as JSON. */
 function inputSummary(input: ToolInput): string {
   const fields = input as Record<string, unknown>;
   if (typeof fields.command === "string") return fields.command;

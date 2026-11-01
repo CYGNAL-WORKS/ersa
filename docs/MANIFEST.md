@@ -25,8 +25,8 @@ None.
 
 ## Inbox
 
-5 open entries in docs/briefs/INBOX.md.
+6 open entries in docs/briefs/INBOX.md.
 
 ## Problems
 
-- 5 open inbox entries need a planning pass
+- 6 open inbox entries need a planning pass
