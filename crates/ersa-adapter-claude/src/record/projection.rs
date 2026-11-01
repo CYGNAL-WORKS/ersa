@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use ersa_protocol::events::{
     BackendPassthrough, ErrorCode, ErrorEvent, Event, MessageOrigin, UserMessage,
 };
+use serde::Deserialize;
 use serde_json::Value;
 
 use crate::BACKEND;
@@ -45,6 +46,10 @@ impl RecordProjector {
     /// The events of one record line. Entries that carry no message (titles,
     /// snapshots, attachments, and whatever else the CLI keeps) yield none.
     pub fn project(&mut self, line: &str) -> Vec<RecordEvent> {
+        // The CLI ends every entry with a newline; an empty line is no entry.
+        if line.trim().is_empty() {
+            return Vec::new();
+        }
         let value: Value = match serde_json::from_str(line) {
             Ok(value) => value,
             Err(e) => {
@@ -71,9 +76,10 @@ impl RecordProjector {
             event,
         };
 
-        // `RecordEntry` keeps any entry it cannot type, so this never fails.
-        let entry = serde_json::from_value(value.clone())
-            .unwrap_or_else(|_| RecordEntry::Other(value.clone()));
+        // Read from a reference, so a large entry is not copied to be typed.
+        // `RecordEntry` keeps any entry it cannot type, so the fallback (which
+        // the arms below never look inside) only satisfies the type checker.
+        let entry = RecordEntry::deserialize(&value).unwrap_or(RecordEntry::Other(Value::Null));
         let events = match entry {
             RecordEntry::Assistant(reply) => reply_events(
                 &mut self.blocks_seen,

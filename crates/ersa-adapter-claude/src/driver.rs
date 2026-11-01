@@ -179,7 +179,8 @@ fn program(config: &SessionConfig) -> String {
 /// looks like a flag (from a file name in the record directory, say) can never
 /// reach the command line as one.
 fn resume_id(config: &SessionConfig) -> Result<Option<&str>, AdapterError> {
-    let Some(value) = config.extra.get("resume") else {
+    // Absent or `null`: a new session.
+    let Some(value) = config.extra.get("resume").filter(|v| !v.is_null()) else {
         return Ok(None);
     };
     match value.as_str() {
