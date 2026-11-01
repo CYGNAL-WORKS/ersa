@@ -166,6 +166,28 @@ fn program(config: &SessionConfig) -> String {
         .unwrap_or_else(|| "claude".into())
 }
 
+/// The arguments that continue an earlier session, after
+/// [`invocation_args`]: `--resume` with `extra.resume`, the `session_id` from
+/// that session's `system/init`, which Ersa stores with the session. The CLI
+/// keeps that id and appends to its session record
+/// (PROTO-CLAUDE-CODE-STREAM-R14). None for a new session (`extra.resume`
+/// absent or `null`).
+///
+/// The CLI's session ids are UUIDs, and anything else is an error, so a value
+/// that merely looks like a flag (from a file name in the record directory,
+/// say) can never reach the command line as one.
+pub fn resume_args(config: &SessionConfig) -> Result<Vec<String>, AdapterError> {
+    let Some(value) = config.extra.get("resume").filter(|v| !v.is_null()) else {
+        return Ok(Vec::new());
+    };
+    match value.as_str() {
+        Some(id) if crate::record::is_session_id(id) => Ok(vec!["--resume".into(), id.into()]),
+        _ => Err(AdapterError::Protocol(format!(
+            "cannot resume {value}: not a Claude Code session id"
+        ))),
+    }
+}
+
 #[async_trait]
 impl Adapter for ClaudeAdapter {
     fn backend(&self) -> &str {
@@ -178,13 +200,17 @@ impl Adapter for ClaudeAdapter {
         config: SessionConfig,
         sink: Arc<dyn AdapterSink>,
     ) -> Result<Box<dyn AdapterSession>, AdapterError> {
-        let spec = ProcessSpec {
+        // A bad resume id fails here, before anything starts.
+        let resume = resume_args(&config)?;
+
+        let mut spec = ProcessSpec {
             program: program(&config),
             args: invocation_args(&config),
             cwd: (!config.cwd.is_empty()).then(|| config.cwd.clone()),
             env: entrypoint_env(),
             env_remove: INHERITED_VARIABLES.map(String::from).to_vec(),
         };
+        spec.args.extend(resume);
         let program = spec.program.clone();
         let mut process = transport.spawn(spec).await.map_err(|e| {
             // Name what was tried: "program not found" alone does not say
