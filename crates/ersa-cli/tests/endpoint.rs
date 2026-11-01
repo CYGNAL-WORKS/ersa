@@ -121,12 +121,9 @@ async fn start_default(dir: &Path) -> Core {
         let env = [("XDG_RUNTIME_DIR".into(), run.into_os_string())];
         start(dir, endpoint, &[], &env).await
     } else {
-        let endpoint = ersa_core::platform::labelled_endpoint(&format!(
-            "cli-test-default-{}",
-            std::process::id()
-        ))
-        .expect("endpoint");
-        start(dir, endpoint.clone(), &["--endpoint", &endpoint], &[]).await
+        let label = format!("cli-test-default-{}", std::process::id());
+        let endpoint = ersa_core::platform::labelled_endpoint(&label).expect("endpoint");
+        start(dir, endpoint, &["--endpoint", &label], &[]).await
     }
 }
 
@@ -136,14 +133,13 @@ async fn a_core_on_an_explicit_endpoint_runs_beside_the_default_one() {
     let second = tempfile::tempdir().expect("temp dir");
     let default = start_default(first.path()).await;
 
-    let endpoint =
-        ersa_core::platform::labelled_endpoint(&format!("cli-test-{}", std::process::id()))
-            .expect("endpoint");
+    let label = format!("cli-test-{}", std::process::id());
+    let endpoint = ersa_core::platform::labelled_endpoint(&label).expect("endpoint");
     assert_ne!(endpoint, default.endpoint);
     let explicit = start(
         second.path(),
         endpoint.clone(),
-        &["--endpoint", &endpoint],
+        &["--endpoint", &label],
         &[],
     )
     .await;

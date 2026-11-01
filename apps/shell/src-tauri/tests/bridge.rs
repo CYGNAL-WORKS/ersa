@@ -34,8 +34,8 @@ fn core_program() -> PathBuf {
     program
 }
 
-/// A Core location private to this test: an endpoint labelled with the
-/// process id and a counter, which `serve` is told to use, and a data
+/// A Core location private to this test: the user's endpoint labelled with
+/// the process id and a counter (`serve --endpoint <label>`), and a data
 /// directory in `dir`.
 fn private_location(dir: &Path) -> CoreLocation {
     static NEXT: AtomicU32 = AtomicU32::new(0);
@@ -47,10 +47,10 @@ fn private_location(dir: &Path) -> CoreLocation {
     let endpoint = ersa_core::platform::labelled_endpoint(&label).expect("an endpoint");
     CoreLocation {
         program: core_program(),
-        endpoint: endpoint.clone(),
+        endpoint,
         serve_args: vec![
             "--endpoint".into(),
-            endpoint.into(),
+            label.into(),
             "--data-dir".into(),
             dir.join("data").into_os_string(),
         ],
