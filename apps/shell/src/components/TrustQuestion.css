@@ -13,9 +13,20 @@
   animation: trust-question-in var(--motion-quick) var(--motion-ease-out);
 }
 
-/* Focus is the question as a whole; its accent edge already marks it, so no outline is added. */
+/* Focus is the question as a whole. Its edge is already the accent, so keyboard focus turns it to ink,
+   as a primary button's does: the line's colour changes, never its width. */
 .trust-question:focus {
   outline: none;
+}
+
+.trust-question:focus-visible {
+  border-color: var(--color-ink);
+}
+
+.trust-question-path {
+  margin: 0;
+  color: var(--color-ink-muted);
+  overflow-wrap: anywhere;
 }
 
 @keyframes trust-question-in {

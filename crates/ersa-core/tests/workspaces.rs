@@ -112,16 +112,13 @@ async fn a_project_is_trusted_only_when_said_and_stays_so_across_a_restart() {
     let plain = core.dir.path().join("plain");
     std::fs::create_dir_all(&plain).unwrap();
 
-    // Adding asks: there is no answer to fall back on.
-    let error = client
-        .error(
+    // No answer is no trust.
+    let untrusted = client
+        .result(
             "project.add",
             json!({ "host_id": "local", "path": repo.display().to_string() }),
         )
         .await;
-    assert_eq!(error["code"], json!(-32602));
-
-    let untrusted = add_project(&mut client, &repo).await;
     assert_eq!(untrusted["trusted"], json!(false));
     let trusted = client
         .result(

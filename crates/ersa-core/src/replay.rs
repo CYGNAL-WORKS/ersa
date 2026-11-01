@@ -242,6 +242,10 @@ impl Adapter for Recordless {
         self.0.start(transport, config, sink).await
     }
 
+    fn set_environment(&self, spec: &mut ersa_adapter::ProcessSpec) {
+        self.0.set_environment(spec)
+    }
+
     fn projector(&self) -> Box<dyn Projector> {
         self.0.projector()
     }

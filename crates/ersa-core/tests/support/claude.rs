@@ -43,6 +43,10 @@ impl Adapter for OnTransport {
             .await
     }
 
+    fn set_environment(&self, spec: &mut ersa_adapter::ProcessSpec) {
+        self.adapter.set_environment(spec)
+    }
+
     fn projector(&self) -> Box<dyn Projector> {
         self.adapter.projector()
     }

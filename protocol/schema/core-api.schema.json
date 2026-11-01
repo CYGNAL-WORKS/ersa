@@ -1711,8 +1711,7 @@
       "additionalProperties": false,
       "required": [
         "host_id",
-        "path",
-        "trusted"
+        "path"
       ],
       "properties": {
         "host_id": {
@@ -1724,7 +1723,7 @@
         },
         "trusted": {
           "type": "boolean",
-          "description": "The user's answer when adding the project: whether its own configuration may load in its sessions."
+          "description": "The user's answer when adding the project: whether its own configuration may load in its sessions. Untrusted when absent."
         }
       }
     },

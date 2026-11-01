@@ -39,6 +39,10 @@ export function AddProject({ onAdd, adding, initialPath = "", initialAsking = fa
         if (busy || path.trim() === "") return;
         setAsking(true);
       }}
+      onKeyDown={(event) => {
+        // From the path too, not only from inside the question.
+        if (event.key === "Escape" && asking) close();
+      }}
     >
       <input
         ref={input}
@@ -63,7 +67,7 @@ export function AddProject({ onAdd, adding, initialPath = "", initialAsking = fa
       </Button>
       {asking && (
         <div className="add-project-question">
-          <TrustQuestion name={folderName(path.trim())} onAnswer={answer} onDismiss={close} />
+          <TrustQuestion name={folderName(path.trim())} path={path.trim()} onAnswer={answer} onDismiss={close} />
         </div>
       )}
       {adding?.state === "failed" && (

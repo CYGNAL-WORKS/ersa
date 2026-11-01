@@ -72,8 +72,8 @@ impl Detected {
 /// `<program> --version` for each. `program_override` replaces each backend's
 /// program, which tests use to point at a binary that does not exist.
 /// `adapter_for` names the adapter registered for a backend, whose
-/// environment the check runs with, so the version reported is that of the
-/// backend its sessions will run.
+/// environment the check runs with, so it sees the CLI configured as the
+/// backend's sessions see it.
 pub async fn detect(
     transport: &dyn Transport,
     program_override: Option<&str>,
