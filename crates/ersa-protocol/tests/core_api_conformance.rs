@@ -70,6 +70,7 @@ fn host() -> Host {
 
 fn tile() -> Tile {
     Tile {
+        state: ersa_protocol::events::LifecycleState::WaitingUser,
         context_tokens: Some(12_000),
         context_window: Some(200_000),
         cost_usd_total: Some(0.42),
@@ -350,7 +351,7 @@ fn notification_examples() -> Vec<Notification> {
             notification::SESSION_TILE,
             &SessionTileParams {
                 session_id: "s-1".into(),
-                tile: Tile::default(),
+                tile: Tile::starting(),
             },
         )
         .expect("serialize"),

@@ -84,7 +84,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 
 ## Projection rules
 
-- The raw log holds lines in three directions, each tagged: `backend` (what the backend emitted), `host` (what Ersa wrote to the backend), and `core` (lifecycle records Core writes itself: process started, process exited with its code, stopped by the user, disconnected). Host lines project too (a user message to `user.message`, a permission answer to `permission.decided`), and `core` lines project to `session.state` and `session.ended`, so re-projection reproduces the whole stream.
+- The raw log holds lines in three directions, each tagged: `backend` (what the backend emitted), `host` (what Ersa wrote to the backend), and `core` (lifecycle records Core writes itself: process started, start failed, process exited with its code and whether the user stopped it, and Core restarted while the session was live, which ends it with reason `error`). Host lines project too (a user message to `user.message`, a permission answer to `permission.decided`), and `core` lines project to `session.state` and `session.ended`, so re-projection reproduces the whole stream.
 - Every raw line yields at least one event (possibly only `backend.passthrough`); no line is dropped.
 - A raw line may yield several events (a Claude Code `result` yields `turn.completed` and `usage.updated`).
 - Events never contain backend-specific field names outside `backend.passthrough.payload` and `permission.requested.suggestions[].payload`. Tool data is not backend protocol: `tool.requested.input`, `permission.requested.input`, and structured `tool.result.content` carry the tool's own arguments and output as the tool defines them.
@@ -100,7 +100,7 @@ A projection failure on one raw line yields an `error` event with `code: protoco
 
 ## Versioning
 
-`v` on every event. The schema file carries the same version. The cache key is the session, `v`, and the adapter's projection version. The Interface refuses to render a `v` it does not know and asks Core to re-project (via `PROTO-CORE-API`).
+`v` on every event. The schema file carries the same version. The cache key is the session, `v`, and the adapter's projection version. Core's own projection of `core` lines is part of the event schema's meaning, so any change to it bumps `v`. The Interface refuses to render a `v` it does not know and asks Core to re-project (via `PROTO-CORE-API`).
 
 ## Conformance
 
@@ -130,6 +130,8 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - Whether subagent trees get their own `session_id` or stay nested under `parent_tool_use_id`.
 
 ## Changes
+
+- 2026-11-01: from M0-T6 inbox: `core` lifecycle records listed as built (start failed, Core restarted); a change to Core's projection of them bumps `v`.
 
 - 2026-11-01: `usage.updated.turns` counts Ersa turns.
 

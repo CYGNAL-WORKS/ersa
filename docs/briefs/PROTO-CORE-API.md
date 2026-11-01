@@ -17,7 +17,7 @@ One Core process per machine (the user's local machine, or a remote host reached
 
 ## Transport and framing
 
-A local stream socket: a named pipe on Windows (`\\.\pipe\ersa-core-<user SID>`, the SID because a user name comes from the environment), a Unix domain socket elsewhere (`$XDG_RUNTIME_DIR/ersa-core.sock` or equivalent). Only the current user may connect: the pipe's security descriptor grants the current user alone, and the socket lives in a directory only the user can enter. Before sending anything, a client verifies that the process serving the pipe or socket runs as the same user, and refuses to talk to it otherwise, so a squatter on the name never receives the user's requests. Lines are capped at a size Core states; an over-long or non-UTF-8 line gets a protocol error and the connection closes. A connection that sends no `core.hello` within a short deadline is closed. The endpoint is per user by default; `ersa-core serve` (and `replay`) also accept an explicit endpoint, so tests and a second Core never collide with the user's own. Newline-delimited JSON-RPC 2.0: requests carry `id`, `method`, `params`; responses carry `id` and `result` or `error`; notifications carry `method` and `params` with no `id`. Either side may send notifications. Core writes nothing unsolicited except notifications for active subscriptions.
+A local stream socket: a named pipe on Windows (`\\.\pipe\ersa-core-<user SID>`, the SID because a user name comes from the environment), a Unix domain socket elsewhere (`$XDG_RUNTIME_DIR/ersa-core.sock` or equivalent). Only the current user may connect: the pipe's security descriptor grants the current user alone, and the socket lives in a directory only the user can enter. Before sending anything, a client verifies that the process serving the pipe or socket runs as the same user, and refuses to talk to it otherwise, so a squatter on the name never receives the user's requests. Lines are capped at a size Core states; an over-long or non-UTF-8 line gets a protocol error and the connection closes. A connection that sends no `core.hello` within a short deadline is closed. The endpoint is per user by default; `ersa-core serve` (and `replay`) also accept an explicit endpoint, so tests and a second Core never collide with the user's own. Newline-delimited JSON-RPC 2.0: requests carry `id`, `method`, `params`; responses carry `id` and `result` or `error`; notifications carry `method` and `params` with no `id`. Either side may send notifications. Core writes nothing unsolicited except `session.event` for active subscriptions and, to every connection past `core.hello`, `session.tile`, `host.status` and `core.notice`; a connection that cannot keep up is closed.
 
 ## Handshake
 
@@ -44,13 +44,13 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 
 ### Workspaces
 
-- `workspace.list { project_id }`, `workspace.create { project_id, name (optional), base (optional) }`, `workspace.remove { id, force (optional) }`: `{ id, project_id, path, vcs_ref, state (ready | creating | removing | error) }`. `workspace.remove` returns the workspace as it was claimed for removal, with `state: removing`.
+- `workspace.list { project_id }`, `workspace.create { project_id, name (optional), base (optional) }`, `workspace.remove { id, force (optional) }` (refused with `invalid_state` while the workspace has sessions; it never cascades): `{ id, project_id, path, vcs_ref, state (ready | creating | removing | error) }`. `workspace.remove` returns the workspace as it was claimed for removal, with `state: removing`.
 
 ### Sessions
 
-- `session.list`: `{ id, workspace_id, host_id, backend, mode, title, state, created_at, last_event_seq (absent before the first event), tile: { context_tokens, context_window, cost_usd_total, pending: [{ kind (permission | question), request_id }] } }`. The `tile` object is what the rail renders; Core keeps it current from events.
-- `session.create { workspace_id, backend, mode (optional), title (optional) }`: creates and starts.
-- `session.start { id }`, `session.stop { id }`, `session.resume { id }`, `session.remove { id }`.
+- `session.list`: `{ id, workspace_id, host_id, backend, mode, title, state, created_at, last_event_seq (absent before the first event), tile: { state, context_tokens, context_window, cost_usd_total, pending: [{ kind (permission | question), request_id }] } }`. The `tile` object is what the rail renders; Core keeps it current from events.
+- `session.create { workspace_id, backend, mode (optional), title (optional) }`: creates and starts. `mode` is stored and shown; it takes effect from milestone M3, when modes exist.
+- `session.start { id }`, `session.stop { id }`, `session.resume { id }`, `session.remove { id }`. Restarting a stopped session is `session.resume` (milestone M1); until then `session.start` on a stopped session answers `invalid_state` naming M1. `session.remove` is refused while the session is live.
 - `session.send { id, text }`: sends a user message; returns `{ turn }`.
 - `session.interrupt { id }`.
 - `session.decide_permission { id, request_id, behavior (allow | deny), message (optional), updated_input (optional), apply_suggestions (optional array of indices) }`.
@@ -58,8 +58,8 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 - `session.set_title { id, title }`, `session.set_mode { id, mode }` (takes effect on next start).
 - `session.subscribe { id, from_seq }`: Core sends every event with `seq >= from_seq` as `session.event` notifications, then continues live. Returns `{ last_seq }`, absent when the session has no events yet.
 - `session.unsubscribe { id }`.
-- `session.raw_log { id, from, to }`: raw lines for the developer pane: `[{ index, ts, dir (backend | host | core), line }]`.
-- `session.reproject { id }`: discards the cached projection and re-derives; used after a projection version change.
+- `session.raw_log { id, from, to }`: raw lines for the developer pane: `[{ index, ts, dir (backend | host | core), line }]`, at most 1000 per call; the client pages on from the last index plus one.
+- `session.reproject { id }`: discards the cached projection and re-derives; used after a projection version change. Refused for a live session, whose projection is always current. Subscribers are disconnected only when the re-derived events differ, and never before the caller has its response.
 
 ### Backends and modes
 
@@ -103,7 +103,7 @@ A conforming Core passes a request/response test suite driven over the socket, a
 - **PROTO-CORE-API-R05**: `session.list` shall return each session's `tile` object reflecting the latest `usage.updated` and the set of pending permission and question requests.
 - **PROTO-CORE-API-R06**: Every response and notification shall validate against `protocol/schema/core-api.schema.json`.
 - **PROTO-CORE-API-R07**: When no `api_version` is shared, `core.hello` shall return an error naming the versions Core supports.
-- **PROTO-CORE-API-R08**: `session.raw_log` shall return lines exactly as the backend emitted them.
+- **PROTO-CORE-API-R08**: `session.raw_log` shall return lines exactly as the backend emitted them, without their line terminator.
 - **PROTO-CORE-API-R09**: The replay server shall accept the same requests and produce the same notifications as Core for a recorded session.
 - **PROTO-CORE-API-R10**: A reserved method shall return an error with `kind: invalid_state` and a message naming the milestone, never a protocol-level error.
 
@@ -117,6 +117,8 @@ A conforming Core passes a request/response test suite driven over the socket, a
 - Whether to allow more than one Interface attached at once (useful for a second window), and if so whether notifications fan out to all.
 
 ## Changes
+
+- 2026-11-01: from M0-T6 inbox and review: unsolicited notifications defined; tile carries `state`; `mode` until M3; start, remove and reproject rules; `raw_log` paging; R08 says the line terminator is not part of a line (meaning unchanged: a line never included it). No requirement IDs added or retired.
 
 - 2026-11-01: `serve` and `replay` accept an explicit endpoint (from M0-T8).
 

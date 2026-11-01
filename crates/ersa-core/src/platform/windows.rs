@@ -387,3 +387,218 @@ fn sid_of_token(token: HANDLE) -> io::Result<String> {
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
+
+// -- Child processes ----------------------------------------------------------
+
+/// A started process and everything it starts in turn, killed as one unit
+/// (`ARCH-CORE`, Boundaries: stopped sessions leave no orphans).
+///
+/// On Windows that unit is a job object. Every process the child starts
+/// joins the job too, unless it explicitly breaks away. Made with
+/// `kill_on_drop`, the job kills everything in it when its last handle
+/// closes. Then dropping a `ProcessTree` kills the tree, and so does Core
+/// dying: Windows closes the handle then, which keeps a crashed Core from
+/// leaving backends, and the dev servers they started, running with nobody
+/// to stop them.
+pub struct ProcessTree {
+    job: HANDLE,
+    kill_on_drop: bool,
+}
+
+// SAFETY: a job handle is a kernel handle, usable from any thread; Windows
+// serialises the calls made on it.
+unsafe impl Send for ProcessTree {}
+unsafe impl Sync for ProcessTree {}
+
+impl ProcessTree {
+    /// Sets up `command` before it is spawned:
+    ///
+    /// - Suspended, so it cannot start anything before [`ProcessTree::adopt`]
+    ///   has put it in the job and resumed it. A `.cmd` shim starts its real
+    ///   program at once, which would otherwise escape the job.
+    /// - No console window. Core runs without a console of its own when the
+    ///   Shell starts it, and a console program started from such a process
+    ///   would otherwise open a window.
+    /// - `NoDefaultCurrentDirectoryInExePath`, so the command prompt running
+    ///   a `.cmd` shim never looks for the program it calls (`node`, say) in
+    ///   the working directory, which is a workspace whose files the user may
+    ///   not have written.
+    pub fn prepare(command: &mut tokio::process::Command) {
+        use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+        command.env("NoDefaultCurrentDirectoryInExePath", "1");
+    }
+
+    /// Puts a just-spawned, suspended `child` in a new job, which with
+    /// `kill_on_drop` dies with its handle, then lets it run. On an error the
+    /// child is still suspended, and the caller kills it.
+    pub fn adopt(child: &tokio::process::Child, kill_on_drop: bool) -> io::Result<ProcessTree> {
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+            SetInformationJobObject,
+        };
+
+        // `None` once the child has been waited on; a child just spawned
+        // never has been.
+        let process = child
+            .raw_handle()
+            .ok_or_else(|| io::Error::other("the process exited before it could join a job"))?;
+        // SAFETY: both arguments may be null: no inherited handle, no name.
+        let job = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
+        if job.is_null() {
+            return Err(io::Error::last_os_error());
+        }
+        // Owned from here on, so every early return below closes the handle.
+        let tree = ProcessTree { job, kill_on_drop };
+
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        if kill_on_drop {
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        }
+        // SAFETY: `limits` is the structure this information class expects,
+        // and the size passed is its size.
+        let ok = unsafe {
+            SetInformationJobObject(
+                tree.job,
+                JobObjectExtendedLimitInformation,
+                (&raw const limits).cast::<c_void>(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: `process` is the child's handle, valid while `child` lives,
+        // which outlasts this call.
+        if unsafe { AssignProcessToJobObject(tree.job, process as HANDLE) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let pid = child
+            .id()
+            .ok_or_else(|| io::Error::other("the process exited before it could be resumed"))?;
+        resume_process(pid)?;
+        Ok(tree)
+    }
+
+    /// Called as soon as the leader has exited: kills the leftovers when the
+    /// tree was made with `kill_on_drop`, so a stopped session is gone, tree
+    /// and all, by the time its exit is reported. A job handle cannot be
+    /// reused, so there is nothing to retire.
+    pub fn leader_exited(&self) {
+        if self.kill_on_drop {
+            let _ = self.kill();
+        }
+    }
+
+    /// Nothing to retire on Windows: a job handle is never reused.
+    pub fn retire(&self) {}
+
+    /// Kills every process in the tree. Killing a tree that has already
+    /// ended is not an error.
+    pub fn kill(&self) -> io::Result<()> {
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+        // SAFETY: `job` is a valid job handle until `drop`. Exit code 1 is
+        // what Windows' own task kill reports.
+        if unsafe { TerminateJobObject(self.job, 1) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
+impl Drop for ProcessTree {
+    fn drop(&mut self) {
+        // SAFETY: the handle came from CreateJobObjectW and is closed exactly
+        // once, here. With kill-on-close set, closing the last handle kills
+        // what is left in the job.
+        unsafe { CloseHandle(self.job) };
+    }
+}
+
+/// Resumes every thread of process `pid`, which was created suspended and so
+/// has exactly one. Windows has no documented call to resume a process, and
+/// the spawned child's thread handle is not kept, so the thread is found by
+/// listing the system's threads.
+fn resume_process(pid: u32) -> io::Result<()> {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+    };
+    use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+
+    // SAFETY: no pointers; the process id is ignored for a thread snapshot.
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let mut entry = THREADENTRY32 {
+        dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+        ..THREADENTRY32::default()
+    };
+    let mut resumed = 0;
+    let mut failure = None;
+    // SAFETY: `snapshot` is a valid snapshot handle and `entry` has its
+    // `dwSize` set, as both calls require.
+    let mut more = unsafe { Thread32First(snapshot, &mut entry) } != 0;
+    while more {
+        if entry.th32OwnerProcessID == pid {
+            // SAFETY: plain values in; the handle is checked and closed.
+            let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+            if thread.is_null() {
+                failure = Some(io::Error::last_os_error());
+            } else {
+                // SAFETY: `thread` was opened with the right to resume it.
+                if unsafe { ResumeThread(thread) } == u32::MAX {
+                    failure = Some(io::Error::last_os_error());
+                } else {
+                    resumed += 1;
+                }
+                unsafe { CloseHandle(thread) };
+            }
+        }
+        // SAFETY: as for Thread32First.
+        more = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+    }
+    // SAFETY: closed once, here.
+    unsafe { CloseHandle(snapshot) };
+    match (resumed, failure) {
+        (0, Some(e)) => Err(e),
+        (0, None) => Err(io::Error::other(format!(
+            "process {pid} has no thread to resume"
+        ))),
+        _ => Ok(()),
+    }
+}
+
+/// The file Windows should start for `program`.
+///
+/// Many command-line tools, Claude Code's npm install among them, are `.cmd`
+/// shims rather than `.exe` files. Rust's process spawning appends only
+/// `.exe` when it searches `PATH`, so `claude` would not be found. This
+/// searches `PATH` the way the command prompt does, trying each extension in
+/// `PATHEXT`, and returns the full path of the first match. A program given
+/// with a directory or an extension, or found nowhere, is returned as is,
+/// and spawning reports whatever is wrong with it.
+///
+/// `path` is the `PATH` the child will get, when the caller overrides it.
+pub fn resolve_program(program: &str, path: Option<&str>) -> String {
+    let as_given = Path::new(program);
+    if as_given.components().count() != 1 || as_given.extension().is_some() {
+        return program.to_string();
+    }
+    let path = match path {
+        Some(path) => path.to_string(),
+        None => std::env::var("PATH").unwrap_or_default(),
+    };
+    let extensions = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+    for dir in path.split(';').filter(|dir| !dir.is_empty()) {
+        for extension in extensions.split(';').filter(|ext| !ext.is_empty()) {
+            let candidate = Path::new(dir).join(format!("{program}{extension}"));
+            if candidate.is_file() {
+                return candidate.display().to_string();
+            }
+        }
+    }
+    program.to_string()
+}

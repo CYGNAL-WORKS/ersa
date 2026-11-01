@@ -8,15 +8,20 @@
 // Each test file compiles this module separately and uses a different part of it.
 #![allow(dead_code)]
 
+pub mod fake;
+pub mod procs;
+
+use std::collections::VecDeque;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use ersa_core::platform::{self, BoxStream};
-use ersa_core::{CoreConfig, Server};
-use ersa_protocol::schema::validate_response;
+use ersa_core::{Adapter, CoreConfig, Server};
+use ersa_protocol::schema::{validate_notification, validate_response};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines, ReadHalf, WriteHalf};
 use tokio::task::JoinHandle;
@@ -76,10 +81,19 @@ pub async fn start_with(
     dir: tempfile::TempDir,
     configure: impl FnOnce(&mut CoreConfig),
 ) -> TestCore {
+    start_with_adapters(dir, configure, Vec::new()).await
+}
+
+/// [`start_with`], with adapters registered.
+pub async fn start_with_adapters(
+    dir: tempfile::TempDir,
+    configure: impl FnOnce(&mut CoreConfig),
+    adapters: Vec<Arc<dyn Adapter>>,
+) -> TestCore {
     let endpoint = unique_endpoint();
     let mut config = test_config(&dir.path().join("data"), &endpoint);
     configure(&mut config);
-    let server = Server::bind(config).await.expect("bind");
+    let server = Server::bind_with(config, adapters).await.expect("bind");
     let task = tokio::spawn(server.run());
     TestCore {
         dir,
@@ -105,6 +119,13 @@ pub struct Client {
     lines: Lines<BufReader<ReadHalf<BoxStream>>>,
     write: WriteHalf<BoxStream>,
     next_id: i64,
+    /// Notifications that arrived while waiting for a response.
+    notifications: VecDeque<Value>,
+    /// Responses that arrived while waiting for another one, by id: Core
+    /// may answer session requests out of order.
+    responses: std::collections::HashMap<i64, Value>,
+    /// The method of each request sent and not yet answered, by id.
+    methods: std::collections::HashMap<i64, String>,
 }
 
 impl Client {
@@ -115,6 +136,9 @@ impl Client {
             lines: BufReader::new(read).lines(),
             write,
             next_id: 1,
+            notifications: VecDeque::new(),
+            responses: std::collections::HashMap::new(),
+            methods: std::collections::HashMap::new(),
         }
     }
 
@@ -152,21 +176,112 @@ impl Client {
         }
     }
 
+    /// The next line as text, unparsed; `None` once Core has closed the
+    /// connection. For connections Core may cut off mid-line.
+    pub async fn read_raw(&mut self) -> Option<String> {
+        let line = tokio::time::timeout(READ_TIMEOUT, self.lines.next_line())
+            .await
+            .expect("Core answered in time");
+        line.ok().flatten()
+    }
+
     /// Sends a request and returns the whole response, after checking it
     /// against the schema and that it answers this request.
     pub async fn call(&mut self, method: &str, params: Value) -> Value {
+        let id = self.request(method, params).await;
+        self.response(id).await
+    }
+
+    /// Sends a request without waiting for its answer; returns its id.
+    pub async fn request(&mut self, method: &str, params: Value) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         let request = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        self.methods.insert(id, method.to_string());
         self.send_line(&request.to_string()).await;
-        let response = self.read_line().await.expect("a response");
-        assert_valid(method, &response);
-        assert_eq!(
-            response["id"],
-            json!(id),
-            "answers the request it was sent for"
-        );
+        id
+    }
+
+    /// The response to request `id`, checked against the schema. Other
+    /// responses and notifications that arrive first are kept.
+    pub async fn response(&mut self, id: i64) -> Value {
+        let response = loop {
+            if let Some(response) = self.responses.remove(&id) {
+                break response;
+            }
+            let line = self.read_line().await.expect("a response");
+            match line.get("id").and_then(Value::as_i64) {
+                Some(other) => {
+                    self.responses.insert(other, line);
+                }
+                None if line.get("id").is_some() => panic!("a response without our id: {line:#}"),
+                None => {
+                    assert_valid_notification(&line);
+                    self.notifications.push_back(line);
+                }
+            }
+        };
+        let method = self.methods.remove(&id).expect("a request we sent");
+        assert_valid(&method, &response);
         response
+    }
+
+    /// How many responses arrived ahead of the one being waited for.
+    pub fn responses_waiting(&self) -> usize {
+        self.responses.len()
+    }
+
+    /// Forgets the notifications that arrived before the last response.
+    pub fn clear_notifications(&mut self) {
+        self.notifications.clear();
+    }
+
+    /// The next notification, kept from earlier or read now; `None` once Core
+    /// has closed the connection. Checked against the schema.
+    pub async fn notification(&mut self) -> Option<Value> {
+        if let Some(notification) = self.notifications.pop_front() {
+            return Some(notification);
+        }
+        let line = self.read_line().await?;
+        assert!(line.get("id").is_none(), "a notification, not {line:#}");
+        assert_valid_notification(&line);
+        Some(line)
+    }
+
+    /// Reads notifications until one satisfies `wanted`, and returns it;
+    /// those before it are dropped.
+    pub async fn notification_where(&mut self, wanted: impl Fn(&Value) -> bool) -> Value {
+        loop {
+            let notification = self
+                .notification()
+                .await
+                .expect("the connection stays open");
+            if wanted(&notification) {
+                return notification;
+            }
+        }
+    }
+
+    /// Reads `session.event` notifications, skipping others, until one whose
+    /// event has type `event_type`, and returns every event read up to and
+    /// including it.
+    pub async fn events_until(&mut self, event_type: &str) -> Vec<Value> {
+        let mut events = Vec::new();
+        loop {
+            let notification = self
+                .notification()
+                .await
+                .expect("the connection stays open");
+            if notification["method"] != "session.event" {
+                continue;
+            }
+            let event = notification["params"]["event"].clone();
+            let done = event["event"]["type"] == event_type;
+            events.push(event);
+            if done {
+                return events;
+            }
+        }
     }
 
     /// Calls and returns `result`, failing the test on an error.
@@ -192,6 +307,17 @@ impl Client {
 pub fn assert_valid(method: &str, response: &Value) {
     if let Err(e) = validate_response(method, response) {
         panic!("{method} response does not match the schema:\n{e}\n{response:#}");
+    }
+}
+
+/// Checks a notification against the schema (PROTO-CORE-API-R06).
+pub fn assert_valid_notification(notification: &Value) {
+    if let Err(e) = validate_notification(notification) {
+        panic!(
+            "notification does not match the schema:
+{e}
+{notification:#}"
+        );
     }
 }
 
@@ -241,4 +367,21 @@ pub fn git_repo(dir: &Path) {
 /// platform's own.
 pub fn normalized(path: &Path) -> String {
     path.components().collect::<PathBuf>().display().to_string()
+}
+
+/// A git repository at `dir/repo` added as a project, with one workspace;
+/// returns the workspace's id.
+pub async fn workspace(client: &mut Client, dir: &Path) -> String {
+    let repo = dir.join("repo");
+    git_repo(&repo);
+    let project = client
+        .result(
+            "project.add",
+            json!({ "host_id": "local", "path": repo.display().to_string() }),
+        )
+        .await;
+    let workspace = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    workspace["id"].as_str().expect("workspace id").to_string()
 }
