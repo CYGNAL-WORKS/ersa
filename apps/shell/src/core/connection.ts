@@ -5,6 +5,7 @@
 // Kept free of React so the tests drive it with a fake client.
 
 import type { CoreHelloResult, CoreStatusResult, Project, Session } from "../protocol/core-api.gen";
+import { checkSessions, checkTile } from "./checks";
 import { type AnyNotification, type Attachment, type CoreClient, type CoreEvent, describeError } from "./client";
 
 export type ProjectsView =
@@ -127,11 +128,14 @@ export function connect(
       };
       client.call("session.list").then(
         (sessions) => {
-          patch((view) => ({ ...view, sessions: { state: "ready", sessions } }));
+          patch((view) => ({ ...view, sessions: { state: "ready", sessions: checkSessions(sessions) } }));
           done();
         },
+        // A failed reread keeps the list the rail already shows.
         (error) => {
-          patch((view) => ({ ...view, sessions: { state: "error", message: describeError(error) } }));
+          patch((view) =>
+            view.sessions.state === "ready" ? view : { ...view, sessions: { state: "error", message: describeError(error) } },
+          );
           done();
         },
       );
@@ -141,7 +145,8 @@ export function connect(
       if (!live()) return;
       if (event.kind === "notification") {
         if (event.method === "session.tile") {
-          const { session_id, tile } = event.params;
+          const session_id = event.params.session_id;
+          const tile = checkTile(event.params.tile);
           const known =
             current.phase === "connected" &&
             current.sessions.state === "ready" &&

@@ -2,6 +2,7 @@
 // its projected events (PROTO-AGENT-EVENTS), applied in `seq` order. Kept
 // free of React so the tests feed it the replay server's captures.
 
+import { eventProblem, hasSeq } from "../core/checks";
 import type {
   Envelope,
   PermissionDecided,
@@ -57,7 +58,9 @@ export const emptyTranscript: Transcript = { lastSeq: -1, items: [] };
  * the current one will deliver again in its place. Either changes nothing.
  */
 export function apply(transcript: Transcript, envelope: Envelope): Transcript {
-  if (transcript.refused || envelope.seq !== transcript.lastSeq + 1) return transcript;
+  // What Core sent is checked before it is read: one malformed event becomes
+  // a notice in its place, never a broken window.
+  if (transcript.refused || !hasSeq(envelope) || envelope.seq !== transcript.lastSeq + 1) return transcript;
   if (envelope.v !== EVENT_VERSION) {
     return {
       ...transcript,
@@ -66,6 +69,10 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
     };
   }
   const next = { ...transcript, lastSeq: envelope.seq };
+  const problem = eventProblem(envelope);
+  if (problem) {
+    return add(next, { kind: "notice", key: `unreadable:${envelope.seq}`, message: `An event this window could not read: ${problem}.` });
+  }
   const event = envelope.event;
   switch (event.type) {
     case "session.state":
@@ -103,7 +110,10 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
         result: { content: contentText(event.content), isError: event.is_error },
       }));
     case "permission.requested":
-      return put(next, { kind: "permission", key: `permission:${event.request_id}`, request: event });
+      // A request is shown once: a repeat must not change what the user is
+      // about to approve under their pointer, or drop a decision.
+      if (next.items.some((i) => i.key === `permission:${event.request_id}`)) return next;
+      return add(next, { kind: "permission", key: `permission:${event.request_id}`, request: event });
     case "permission.decided":
       return patch(next, `permission:${event.request_id}`, "permission", (item) => ({ ...item, decision: event }));
     case "permission.denied_unanswered":

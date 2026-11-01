@@ -1,4 +1,5 @@
-/* A quiet button: surface and line, never a filled accent. `data-force` lets the gallery show a state without a pointer. */
+/* A quiet button: surface and line. The primary variant, for the one action a moment asks for, takes the accent.
+   `data-force` lets the gallery show a state without a pointer. */
 
 .button {
   font: inherit;
@@ -35,4 +36,38 @@
 .button:disabled {
   color: var(--color-ink-faint);
   cursor: default;
+}
+
+/* Primary: the accent, with its own ink. States change the edge, never the fill. */
+.button[data-variant="primary"] {
+  color: var(--color-accent-ink);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.button[data-variant="primary"]:hover:not(:disabled),
+.button[data-variant="primary"][data-force="hover"] {
+  background: var(--color-accent);
+  border-color: var(--color-ink);
+}
+
+.button[data-variant="primary"]:active:not(:disabled),
+.button[data-variant="primary"][data-force="pressed"] {
+  background: var(--color-accent);
+  border-color: var(--color-ink-muted);
+}
+
+/* Focus on a filled button: a hairline ring outside its edge, in the accent. */
+.button[data-variant="primary"]:focus-visible,
+.button[data-variant="primary"][data-force="focus"] {
+  color: var(--color-accent-ink);
+  outline: var(--line-hairline) solid var(--color-accent);
+  outline-offset: var(--line-hairline);
+}
+
+/* Disabled primary looks like a disabled quiet button: nothing to act on. */
+.button[data-variant="primary"]:disabled {
+  color: var(--color-ink-faint);
+  background: var(--color-surface);
+  border-color: var(--color-line);
 }

@@ -14,8 +14,12 @@ export type Sending = { state: "sending" } | { state: "failed"; message: string 
 export interface SessionView {
   id: string;
   transcript: Transcript;
-  /** Whether the events are flowing: subscribing, live, or why subscribing failed. */
-  stream: { state: "subscribing" } | { state: "live" } | { state: "failed"; message: string };
+  /**
+   * Whether the events are flowing: subscribing, live, offline (the window
+   * has no connection to Core; answers wait until it attaches again), or why
+   * subscribing failed.
+   */
+  stream: { state: "subscribing" } | { state: "live" } | { state: "offline" } | { state: "failed"; message: string };
   /** The composer's message, while it is on its way or after it was refused. */
   message?: Sending;
   /** Answers to permission requests, by request id, until the decision arrives as an event. */
@@ -27,6 +31,8 @@ export interface Follower {
   receive(envelope: Envelope): void;
   /** The window has a new connection to Core: subscribe on it. */
   attached(): void;
+  /** The window lost its connection to Core. */
+  detached(): void;
   /** Sends the user's message. Resolves true once Core accepted it. */
   send(text: string): Promise<boolean>;
   decide(requestId: string, behavior: "allow" | "deny"): void;
@@ -66,9 +72,21 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
     // Every event after the last one applied; events Core sends again
     // (the subscription overlaps a notification already received) are
     // ignored by seq.
-    client.call("session.subscribe", { id, from_seq: view.transcript.lastSeq + 1 }).then(
-      () => {
-        if (mine === generation) set((v) => ({ ...v, stream: { state: "live" } }));
+    const from = view.transcript.lastSeq + 1;
+    client.call("session.subscribe", { id, from_seq: from }).then(
+      (result) => {
+        if (mine !== generation) return;
+        // Core's history is shorter than what is shown (a replay restarted
+        // on the same endpoint, a reprojected session): what is shown is not
+        // this session's any more. Start again from the beginning.
+        const last = result.last_seq ?? -1;
+        if (last < from - 1) {
+          set((v) => ({ ...v, transcript: emptyTranscript, answers: {} }));
+          resumedAt = undefined;
+          attached();
+          return;
+        }
+        set((v) => ({ ...v, stream: { state: "live" } }));
       },
       (error) => {
         if (mine === generation) set((v) => ({ ...v, stream: { state: "failed", message: describeError(error) } }));
@@ -103,6 +121,11 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
     },
 
     attached,
+
+    detached() {
+      ++generation; // an answer from the lost connection's subscribe no longer counts
+      set((v) => (v.stream.state === "failed" ? v : { ...v, stream: { state: "offline" } }));
+    },
 
     async send(text) {
       set((v) => ({ ...v, message: { state: "sending" } }));

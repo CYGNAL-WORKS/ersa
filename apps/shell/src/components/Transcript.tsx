@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { type ReactNode, memo, useLayoutEffect, useRef } from "react";
 import type { ToolInput } from "../protocol/agent-events.gen";
 import type { SessionView, Sending } from "../session/follow";
 import { stateText } from "../session/states";
@@ -6,10 +6,13 @@ import { type Item, isOpen } from "../session/transcript";
 import { Button } from "./Button";
 import "./Transcript.css";
 
+type Decide = (requestId: string, behavior: "allow" | "deny") => void;
+
 interface TranscriptProps {
   title: string;
   view: SessionView;
-  onDecide: (requestId: string, behavior: "allow" | "deny") => void;
+  /** Kept stable across renders, so streaming text does not re-render every block. */
+  onDecide: Decide;
 }
 
 /** The active session as a document: the user's and the agent's words, tool cards, and permission requests to answer. */
@@ -30,6 +33,12 @@ export function Transcript({ title, view, onDecide }: TranscriptProps) {
     if (el) atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < el.clientHeight / 8;
   };
 
+  // Tools whose request waits for the user: their cards say so rather than "Running".
+  const awaiting = new Set(
+    transcript.items.flatMap((i) => (i.kind === "permission" && isOpen(i) ? [i.request.tool_use_id] : [])),
+  );
+  const live = stream.state === "live";
+
   return (
     <section className="transcript" aria-label="Transcript">
       <header className="transcript-header">
@@ -45,11 +54,19 @@ export function Transcript({ title, view, onDecide }: TranscriptProps) {
               Not receiving this session's events: {stream.message}
             </p>
           )}
-          {transcript.items.length === 0 && stream.state !== "failed" && (
+          {stream.state === "offline" && <p className="transcript-note">Reconnecting to Core…</p>}
+          {transcript.items.length === 0 && (stream.state === "subscribing" || stream.state === "live") && (
             <p className="transcript-note">{stream.state === "subscribing" ? "Loading…" : "Nothing yet. Write to the agent below."}</p>
           )}
           {transcript.items.map((item) => (
-            <Block key={item.key} item={item} answers={answers} onDecide={onDecide} />
+            <Block
+              key={item.key}
+              item={item}
+              answer={item.kind === "permission" && isOpen(item) ? answers[item.request.request_id] : undefined}
+              waiting={item.kind === "tool" && awaiting.has(item.key.slice("tool:".length))}
+              live={live}
+              onDecide={onDecide}
+            />
           ))}
           {transcript.refused && (
             <p className="problem" role="alert">
@@ -62,7 +79,21 @@ export function Transcript({ title, view, onDecide }: TranscriptProps) {
   );
 }
 
-function Block({ item, answers, onDecide }: { item: Item; answers: SessionView["answers"]; onDecide: TranscriptProps["onDecide"] }) {
+interface BlockProps {
+  item: Item;
+  answer?: Sending;
+  /** A tool card whose permission request waits for the user. */
+  waiting: boolean;
+  /** Whether answers can reach Core now. */
+  live: boolean;
+  onDecide: Decide;
+}
+
+/**
+ * One block. Memoised: items keep their identity until their own event
+ * changes them, so a streamed delta re-renders one block, not the page.
+ */
+const Block = memo(function Block({ item, answer, waiting, live, onDecide }: BlockProps) {
   switch (item.kind) {
     case "user":
       return (
@@ -74,11 +105,16 @@ function Block({ item, answers, onDecide }: { item: Item; answers: SessionView["
     case "assistant":
       return <p className="transcript-text">{item.text}</p>;
     case "thinking":
-      return <p className="transcript-note">{item.final ? "Thought" : "Thinking…"}{item.summary ? `: ${item.summary}` : ""}</p>;
+      return (
+        <p className="transcript-note">
+          {item.final ? "Thought" : "Thinking…"}
+          {item.summary ? `: ${item.summary}` : ""}
+        </p>
+      );
     case "tool":
-      return <ToolCard item={item} />;
+      return <ToolCard item={item} waiting={waiting} />;
     case "permission":
-      return <PermissionCard item={item} answer={isOpen(item) ? answers[item.request.request_id] : undefined} onDecide={onDecide} />;
+      return <PermissionCard item={item} answer={answer} live={live} onDecide={onDecide} />;
     case "question":
       return (
         <div className="transcript-card">
@@ -101,20 +137,39 @@ function Block({ item, answers, onDecide }: { item: Item; answers: SessionView["
     case "ended":
       return <p className="transcript-ended">{item.reason}</p>;
   }
+});
+
+/** A card's state: the shared glyph and a word. */
+function Status({ tone, children }: { tone?: "positive" | "pending" | "danger" | "attention"; children: ReactNode }) {
+  return (
+    <span className="transcript-card-status transcript-status">
+      <span className="glyph" data-tone={tone} aria-hidden="true" />
+      {children}
+    </span>
+  );
 }
 
-function ToolCard({ item }: { item: Extract<Item, { kind: "tool" }> }) {
+function ToolCard({ item, waiting }: { item: Extract<Item, { kind: "tool" }>; waiting: boolean }) {
+  const status = item.result ? (
+    item.result.isError ? (
+      <Status tone="danger">Failed</Status>
+    ) : (
+      <Status tone="positive">Done</Status>
+    )
+  ) : waiting ? (
+    <Status tone="attention">Waiting for you</Status>
+  ) : (
+    <Status tone="pending">{item.progress ?? "Running…"}</Status>
+  );
   return (
     <div className="transcript-card">
       <div className="transcript-card-head">
         <span className="transcript-card-title">{item.name}</span>
-        {item.result?.isError ? (
-          <span className="problem transcript-card-status">Failed</span>
-        ) : (
-          <span className="transcript-card-status">{item.result ? "Done" : (item.progress ?? "Running…")}</span>
-        )}
+        {status}
       </div>
-      <code className="transcript-input mono">{inputSummary(item.input)}</code>
+      <code className="transcript-input mono">
+        <Revealed text={inputSummary(item.input)} />
+      </code>
       {item.result && item.result.content !== "" && <pre className="transcript-output mono">{item.result.content}</pre>}
     </div>
   );
@@ -123,51 +178,77 @@ function ToolCard({ item }: { item: Extract<Item, { kind: "tool" }> }) {
 function PermissionCard({
   item,
   answer,
+  live,
   onDecide,
 }: {
   item: Extract<Item, { kind: "permission" }>;
   answer?: Sending;
-  onDecide: TranscriptProps["onDecide"];
+  live: boolean;
+  onDecide: Decide;
 }) {
   const { request, decision } = item;
   const name = request.display_name ?? request.tool_name;
   const sending = answer?.state === "sending";
   const open = isOpen(item);
+  // The description is shown once: as the card's detail, not again as a field.
+  const fields = Object.entries(request.input as Record<string, unknown>).filter(
+    ([key, value]) => !(key === "description" && value === request.description),
+  );
   return (
     <section className="transcript-card transcript-permission" data-open={open || undefined} aria-label={`Permission: ${name}`}>
       <div className="transcript-card-head">
         <span className="transcript-card-title">
-          {open ? `Allow ${name}?` : name}
+          {open ? "Allow " : ""}
+          <Revealed text={name} />
+          {open ? "?" : ""}
           {/* The tool's own name, when the backend shows another, so the user knows what they approve. */}
-          {name !== request.tool_name && <span className="transcript-card-status mono"> {request.tool_name}</span>}
+          {name !== request.tool_name && (
+            <span className="transcript-card-status mono">
+              {" "}
+              <Revealed text={request.tool_name} />
+            </span>
+          )}
         </span>
         {decision && <span className="transcript-card-status">{decisionText(decision.behavior, decision.decided_by)}</span>}
         {item.unanswered && <span className="transcript-card-status">Not answered</span>}
       </div>
-      {request.description && <p className="transcript-card-detail">{request.description}</p>}
-      {/* Every field of the input: the user approves exactly what will run, never a summary of it. */}
+      {request.description && (
+        <p className="transcript-card-detail">
+          <Revealed text={request.description} />
+        </p>
+      )}
+      {/* Every field of the input, whole while the request is open: the user approves exactly what will run. */}
       <dl className="transcript-fields">
-        {Object.entries((request.input ?? {}) as Record<string, unknown>).map(([key, value]) => (
+        {fields.map(([key, value]) => (
           <div key={key} className="transcript-field">
-            <dt>{key}</dt>
-            <dd className="mono">{typeof value === "string" ? value : JSON.stringify(value, null, 2)}</dd>
+            <dt>
+              <Revealed text={key} />
+            </dt>
+            <dd className="mono">
+              <Revealed text={typeof value === "string" ? value : JSON.stringify(value, null, 2)} />
+            </dd>
           </div>
         ))}
       </dl>
       {request.blocked_path && (
         <p className="transcript-card-detail">
-          Path: <span className="mono">{request.blocked_path}</span>
+          Path:{" "}
+          <span className="mono">
+            <Revealed text={request.blocked_path} />
+          </span>
         </p>
       )}
       {open && (
         <div className="transcript-actions">
-          <Button onClick={() => onDecide(request.request_id, "allow")} disabled={sending}>
+          {/* Neither is focused by default, and Enter never approves. */}
+          <Button variant="primary" onClick={() => onDecide(request.request_id, "allow")} disabled={sending || !live}>
             Allow
           </Button>
-          <Button onClick={() => onDecide(request.request_id, "deny")} disabled={sending}>
+          <Button onClick={() => onDecide(request.request_id, "deny")} disabled={sending || !live}>
             Deny
           </Button>
           {sending && <span className="transcript-card-status">Sending…</span>}
+          {!sending && !live && <span className="transcript-card-status">Answer once Core is connected</span>}
         </div>
       )}
       {open && answer?.state === "failed" && (
@@ -177,6 +258,34 @@ function PermissionCard({
       )}
     </section>
   );
+}
+
+/**
+ * Characters that change what text appears to say without showing
+ * themselves: controls (other than tab and newline), bidirectional overrides
+ * and isolates, and zero-width characters. An agent could use them to make
+ * a command read as something else.
+ */
+const HIDDEN = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F؜​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
+
+/** `text` with every hidden character shown as a marked code point, so what the user reads is what the agent sent. */
+export function Revealed({ text }: { text: string }) {
+  const parts: ReactNode[] = [];
+  let last = 0;
+  for (const match of text.matchAll(HIDDEN)) {
+    const at = match.index;
+    if (at > last) parts.push(text.slice(last, at));
+    const code = (match[0].codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0");
+    parts.push(
+      <span key={at} className="transcript-hidden" title="An invisible character">
+        U+{code}
+      </span>,
+    );
+    last = at + match[0].length;
+  }
+  if (parts.length === 0) return text;
+  if (last < text.length) parts.push(text.slice(last));
+  return <>{parts}</>;
 }
 
 /** A tool card's one-line view of its arguments: its command or path when it has one, else them all as JSON. */
