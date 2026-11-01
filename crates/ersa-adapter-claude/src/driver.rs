@@ -14,7 +14,7 @@
 //! itself, writes give up when the session is killed, and `stop` kills after
 //! its grace period whatever else is going on.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -184,6 +184,7 @@ impl Adapter for ClaudeAdapter {
             kill: watch::channel(false).0,
             awaiting: Mutex::default(),
             permissions: Mutex::default(),
+            deciding: Mutex::default(),
             stderr_tail: Mutex::default(),
             next_id: AtomicU64::new(1),
         });
@@ -208,24 +209,35 @@ impl Adapter for ClaudeAdapter {
         // then, so the answer is in the raw log before anything Core sends.
         let request = HostRequest::Initialize(InitializeRequest::default());
         let handshake = async {
+            // Failing to send it is as much a failed start as a bad answer,
+            // and the CLI's stderr usually says why.
             shared
                 .write(&HostMessage::control_request(&init_id, request))
-                .await?;
-            match tokio::time::timeout(self.handshake_timeout, answer_rx).await {
-                Ok(Ok(answer)) if answer["subtype"] == "success" => Ok(()),
-                Ok(Ok(answer)) => Err(AdapterError::Protocol(format!(
+                .await
+                .map_err(|e| AdapterError::Protocol(format!("could not send initialize: {e}")))?;
+            match answer_rx.await {
+                Ok(answer) if answer["subtype"] == "success" => Ok(()),
+                Ok(answer) => Err(AdapterError::Protocol(format!(
                     "the CLI refused initialize: {}",
                     answer["error"].as_str().unwrap_or("no reason given")
                 ))),
                 // The read loop dropped the sender: the CLI exited first.
-                Ok(Err(_)) => Err(AdapterError::Protocol(
+                Err(_) => Err(AdapterError::Protocol(
                     "the CLI exited before answering initialize".into(),
                 )),
-                Err(_) => Err(AdapterError::Protocol(format!(
-                    "the CLI did not answer initialize within {:?}",
-                    self.handshake_timeout
-                ))),
             }
+        };
+        // The timeout covers the write too: a CLI that never reads its stdin
+        // would otherwise hold `start` forever.
+        let handshake = async {
+            tokio::time::timeout(self.handshake_timeout, handshake)
+                .await
+                .unwrap_or_else(|_| {
+                    Err(AdapterError::Protocol(format!(
+                        "the CLI did not answer initialize within {:?}",
+                        self.handshake_timeout
+                    )))
+                })
         };
         match handshake.await {
             Ok(()) => Ok(Box::new(session)),
@@ -273,6 +285,9 @@ struct Shared {
     /// `request` object as raw JSON, so a request whose shape has drifted can
     /// still be answered rather than left to stall the turn.
     permissions: Mutex<HashMap<String, Value>>,
+    /// Prompts whose answer is being written right now, so a second decision
+    /// for the same prompt is refused instead of written too.
+    deciding: Mutex<HashSet<String>>,
     /// The CLI's last few stderr lines, for a failed start's error.
     stderr_tail: Mutex<VecDeque<String>>,
     next_id: AtomicU64,
@@ -500,6 +515,31 @@ async fn drain_stderr(mut stderr: Box<dyn LineReader>, shared: Arc<Shared>) {
     }
 }
 
+/// A prompt reserved for one `decide_permission` call. Dropping it releases
+/// the prompt, on success and on every early return alike.
+struct Reservation<'a> {
+    deciding: &'a Mutex<HashSet<String>>,
+    request_id: String,
+}
+
+impl<'a> Reservation<'a> {
+    /// Reserves `request_id`, or `None` if another call holds it.
+    fn take(deciding: &'a Mutex<HashSet<String>>, request_id: &str) -> Option<Self> {
+        lock(deciding)
+            .insert(request_id.to_string())
+            .then(|| Reservation {
+                deciding,
+                request_id: request_id.to_string(),
+            })
+    }
+}
+
+impl Drop for Reservation<'_> {
+    fn drop(&mut self) {
+        lock(self.deciding).remove(&self.request_id);
+    }
+}
+
 /// A running CLI session.
 struct ClaudeSession {
     shared: Arc<Shared>,
@@ -584,6 +624,9 @@ impl AdapterSession for ClaudeSession {
             .get(request_id)
             .cloned()
             .ok_or_else(unknown)?;
+        // Reserve the prompt: a second decision while this one is being
+        // written is refused, as if the prompt were already answered.
+        let _reserved = Reservation::take(&self.shared.deciding, request_id).ok_or_else(unknown)?;
         let message = HostMessage::ControlResponse(HostControlResponse {
             response: HostResponse::Success {
                 request_id: request_id.to_string(),
@@ -592,6 +635,7 @@ impl AdapterSession for ClaudeSession {
         });
         self.shared.write(&message).await?;
         // Only now, so a write that failed leaves the request answerable.
+        // The reservation is released when `_reserved` drops, after this.
         lock(&self.shared.permissions).remove(request_id);
         Ok(())
     }
