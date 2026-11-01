@@ -71,6 +71,21 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
 
   update(view);
 
+  // The view (one projection of the session, as Core names it) the events
+  // shown came from; unknown until the first subscribe answers.
+  let shownView: string | undefined;
+
+  /** Drops what is shown, to apply events again from `first` on. */
+  const startOver = (first: number) => {
+    const transcript = { ...emptyTranscript, lastSeq: first - 1 };
+    const items =
+      first > 0
+        ? [{ kind: "notice" as const, key: `earlier:${first}`, message: "Earlier events of this session are no longer held." }]
+        : [];
+    set((v) => ({ ...v, transcript: { ...transcript, items }, answers: {} }));
+    resumedAt = undefined;
+  };
+
   /** Subscribes on the current connection from after the last event applied. */
   const attached = () => {
     if (stopped) return;
@@ -90,7 +105,8 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         // cannot be read (not an object, or a `last_seq` that is no
         // sequence number) is taken to mean nothing was lost.
         const readable = typeof result === "object" && result !== null;
-        const raw = readable ? (result as { last_seq?: unknown }).last_seq : undefined;
+        const fields = readable ? (result as { last_seq?: unknown; view?: unknown; first_seq?: unknown }) : {};
+        const raw = fields.last_seq;
         const last = !readable
           ? from - 1
           : raw === undefined
@@ -98,12 +114,28 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
             : typeof raw === "number" && Number.isInteger(raw) && raw >= 0
               ? raw
               : from - 1;
+        const isSeq = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0;
+        const first = isSeq(fields.first_seq) ? fields.first_seq : 0;
+        const answered = typeof fields.view === "string" && fields.view !== "" ? fields.view : undefined;
+        // Another view (the session was opened afresh, or Core restarted):
+        // what is shown came from a different projection and does not line
+        // up with this one's numbers. Start over from what this view holds.
+        if (answered !== undefined && shownView !== undefined && answered !== shownView && from > 0) {
+          shownView = answered;
+          startOver(first);
+          attached();
+          return;
+        }
+        if (answered !== undefined) shownView = answered;
         if (last < from - 1) {
           set((v) => ({ ...v, transcript: emptyTranscript, answers: {} }));
           resumedAt = undefined;
           attached();
           return;
         }
+        // The view no longer holds what came between: what is shown is
+        // complete only up to a gap, so it starts again where the view does.
+        if (first > from) startOver(first);
         set((v) => ({ ...v, stream: { state: "live" } }));
       },
       (error) => {

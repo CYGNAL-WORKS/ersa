@@ -900,6 +900,14 @@ export interface SessionSubscribeResult {
    * Absent when the session has no events yet.
    */
   last_seq?: number;
+  /**
+   * The identity of the view the subscription reads. When it differs from the view a client's events came from, they no longer line up, and the client starts over.
+   */
+  view: string;
+  /**
+   * The first event the view still holds, when it no longer holds every event from 0; a subscription from before it starts here.
+   */
+  first_seq?: number;
 }
 /**
  * No fields.
