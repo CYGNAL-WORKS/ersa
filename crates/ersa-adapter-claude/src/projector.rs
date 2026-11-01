@@ -26,15 +26,14 @@ use serde_json::Value;
 
 use crate::suggestions;
 use crate::wire::{
-    AssistantMessage, CanUseTool, CliMessage, CliRequest, CliResponse, ContentBlock, Delta,
-    InitializeResponse, MessageContent, RateLimitInfo, ResultMessage, StreamEvent,
-    StreamEventMessage, SystemInit, SystemMessage, Usage,
+    AssistantMessage, CliMessage, CliResponse, ContentBlock, Delta, InitializeResponse,
+    MessageContent, RateLimitInfo, StreamEvent, StreamEventMessage, SystemMessage,
 };
 use crate::{BACKEND, MAX_TESTED_VERSION};
 
 /// The version of this projection. Bump it whenever the events produced for
 /// some raw log would change, so Core re-projects cached sessions.
-pub const PROJECTOR_VERSION: u32 = 1;
+pub const PROJECTOR_VERSION: u32 = 2;
 
 /// Projects one Claude Code session's raw log. Make a fresh one per pass.
 #[derive(Debug, Default)]
@@ -54,9 +53,11 @@ pub struct ClaudeProjector {
     blocks_seen: HashMap<String, u64>,
     /// Text streamed so far for blocks not yet completed, by block id.
     streaming: HashMap<String, StreamedText>,
-    /// The message id from the last `message_start`, for stream events that
-    /// do not name their message.
-    stream_message: Option<String>,
+    /// The message id from the last `message_start` of each thread (keyed by
+    /// `parent_tool_use_id`, `None` for the main thread), for stream events
+    /// that do not name their message. Subagents stream interleaved with the
+    /// main thread, so one shared slot would mix them up.
+    stream_message: HashMap<Option<String>, String>,
     /// The model of the latest main-thread reply; picks the context window
     /// out of `result.modelUsage`, which lists subagent models too.
     main_model: Option<String>,
@@ -67,6 +68,9 @@ struct StreamedText {
     /// The raw line the block's streaming started on.
     first_raw: u64,
     text: String,
+    /// Whether a partial `assistant.text` went out for it, which obliges a
+    /// final one (PROTO-AGENT-EVENTS-R07).
+    shown: bool,
 }
 
 impl ClaudeProjector {
@@ -105,21 +109,28 @@ impl ClaudeProjector {
         // never fails; the fallback only satisfies the type checker.
         let message = serde_json::from_value(value.clone())
             .unwrap_or_else(|_| CliMessage::Unknown(value.clone()));
-        if let Some(kind) = misparsed(&message) {
+        let drifted = misparsed(&message);
+
+        // The lines that carry the session's structure are read from the raw
+        // JSON, so a CLI whose shape has drifted still starts the session,
+        // still ends its turns, and still gets its prompts answered.
+        let field = |pointer: &str| value.pointer(pointer).and_then(Value::as_str);
+        match (field("/type"), field("/subtype"), field("/request/subtype")) {
+            (Some("control_request"), _, Some("can_use_tool")) => {
+                return self.permission_requested(line, value);
+            }
+            (Some("result"), _, _) => return self.result(line, value, drifted),
+            (Some("system"), Some("init"), _) => return self.init(line, value, drifted),
+            _ => {}
+        }
+
+        if let Some(kind) = drifted {
             // A kind the wire models but whose fields did not fit: the CLI has
             // changed shape. Say so, and keep the line (PROTO-AGENT-EVENTS-R10).
-            return error_and_passthrough(
-                line,
-                format!(
-                    "raw line {}: a {kind} line did not have the expected shape",
-                    line.index
-                ),
-                value,
-            );
+            return vec![drift_error(line, &kind), passthrough(line, value)];
         }
 
         match message {
-            CliMessage::System(SystemMessage::Init(init)) => self.init(line, &init, value),
             CliMessage::System(SystemMessage::PermissionDenied(denied)) => {
                 let mut out = self.ensure_turn(line);
                 out.push(at(
@@ -137,7 +148,6 @@ impl ClaudeProjector {
                 self.tool_results(line, user.message.content, user.is_replay, value)
             }
             CliMessage::StreamEvent(stream) => self.stream_event(line, stream, value),
-            CliMessage::Result(result) => self.result(line, &result),
             CliMessage::RateLimitEvent(event) => vec![at(
                 line,
                 Event::UsageUpdated(UsageUpdated {
@@ -145,12 +155,6 @@ impl ClaudeProjector {
                     ..UsageUpdated::default()
                 }),
             )],
-            CliMessage::ControlRequest(request) => match request.request {
-                CliRequest::CanUseTool(ask) => {
-                    self.permission_requested(line, request.request_id, &ask, value)
-                }
-                CliRequest::Other(_) => vec![passthrough(line, value)],
-            },
             CliMessage::ControlResponse(answer) => {
                 self.control_response(line, answer.response, value)
             }
@@ -161,19 +165,18 @@ impl ClaudeProjector {
                 // The CLI withdrew a prompt it was waiting on (after an
                 // interrupt, say): the tool will not run, and nobody asked
                 // the user, so the backend decided.
-                vec![
-                    at(
-                        line,
-                        Event::PermissionDecided(PermissionDecided {
-                            request_id: cancel.request_id,
-                            behavior: PermissionBehavior::Deny,
-                            decided_by: DecidedBy::Backend,
-                            message: None,
-                            applied_suggestions: None,
-                        }),
-                    ),
-                    state(line, LifecycleState::Running),
-                ]
+                let mut out = vec![at(
+                    line,
+                    Event::PermissionDecided(PermissionDecided {
+                        request_id: cancel.request_id,
+                        behavior: PermissionBehavior::Deny,
+                        decided_by: DecidedBy::Backend,
+                        message: None,
+                        applied_suggestions: None,
+                    }),
+                )];
+                out.extend(self.running_unless_waiting(line));
+                out
             }
             // Status, summaries, thinking-token estimates, keep-alives, and
             // anything this version does not know.
@@ -181,24 +184,50 @@ impl ClaudeProjector {
         }
     }
 
-    fn init(&mut self, line: &RawLine, init: &SystemInit, value: Value) -> Vec<Projected> {
+    /// `system/init`, read from the raw JSON so a drifted one still starts the
+    /// session with whatever it carries.
+    fn init(&mut self, line: &RawLine, value: Value, drifted: Option<String>) -> Vec<Projected> {
+        let mut out = Vec::new();
+        if let Some(kind) = &drifted {
+            out.push(drift_error(line, kind));
+        }
         // The CLI repeats `init` at the start of every turn; only the first
         // announces the session (PROTO-CLAUDE-CODE-STREAM-R06).
-        if self.session_started {
-            return vec![passthrough(line, value)];
+        if !self.session_started {
+            self.session_started = true;
+            let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
+            let capabilities = value["capabilities"]
+                .as_array()
+                .map(|all| {
+                    all.iter()
+                        .filter_map(Value::as_str)
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default();
+            out.push(at(
+                line,
+                Event::SessionStarted(SessionStarted {
+                    backend: BACKEND.into(),
+                    backend_version: text("claude_code_version"),
+                    model: text("model"),
+                    cwd: text("cwd"),
+                    capabilities,
+                    backend_session_id: value["session_id"].as_str().map(String::from),
+                }),
+            ));
         }
-        self.session_started = true;
-        vec![at(
-            line,
-            Event::SessionStarted(SessionStarted {
-                backend: BACKEND.into(),
-                backend_version: init.claude_code_version.clone(),
-                model: init.model.clone(),
-                cwd: init.cwd.clone(),
-                capabilities: init.capabilities.clone(),
-                backend_session_id: Some(init.session_id.clone()),
-            }),
-        )]
+        // `init` marks the start of a turn. One is normally open already, from
+        // the host's user message; when none is, the turn began some other
+        // way: a message queued while the last turn ran, or a one-shot prompt
+        // given on the command line. Either way a user's message started it.
+        if !self.turn_open {
+            out.extend(self.open_turn(line, TurnTrigger::User));
+        }
+        if out.is_empty() || drifted.is_some() {
+            out.push(passthrough(line, value));
+        }
+        out
     }
 
     fn assistant(
@@ -361,10 +390,11 @@ impl ClaudeProjector {
             .get("api_message_id")
             .and_then(Value::as_str)
             .map(String::from)
-            .or_else(|| self.stream_message.clone());
+            .or_else(|| self.stream_message.get(&stream.parent_tool_use_id).cloned());
         match stream.event {
             StreamEvent::MessageStart { message } => {
-                self.stream_message = Some(message.id);
+                self.stream_message
+                    .insert(stream.parent_tool_use_id.clone(), message.id);
             }
             StreamEvent::ContentBlockStart {
                 index,
@@ -376,6 +406,7 @@ impl ClaudeProjector {
                         StreamedText {
                             first_raw: line.index,
                             text,
+                            shown: false,
                         },
                     );
                 }
@@ -395,8 +426,10 @@ impl ClaudeProjector {
                         .or_insert(StreamedText {
                             first_raw: line.index,
                             text: String::new(),
+                            shown: false,
                         });
                     streamed.text.push_str(&text);
+                    streamed.shown = true;
                     let event = Projected {
                         raw_from: streamed.first_raw,
                         event: Event::AssistantText(AssistantText {
@@ -415,41 +448,54 @@ impl ClaudeProjector {
         vec![passthrough(line, value)]
     }
 
-    fn result(&mut self, line: &RawLine, result: &ResultMessage) -> Vec<Projected> {
-        let mut out = self.ensure_turn(line);
+    /// `result`: the turn ends. Read from the raw JSON, so a drifted line
+    /// still closes the turn (as an error) rather than leaving it open forever.
+    fn result(&mut self, line: &RawLine, value: Value, drifted: Option<String>) -> Vec<Projected> {
+        let mut out = Vec::new();
+        if let Some(kind) = &drifted {
+            out.push(drift_error(line, kind));
+        }
+        out.extend(self.ensure_turn(line));
+        out.extend(self.finish_streams());
+
+        let is_error = value["is_error"].as_bool();
+        let outcome = match drifted {
+            // Whatever the line says, Ersa could not read it as a success.
+            Some(_) => TurnOutcome::Error,
+            None => outcome(&value),
+        };
         out.push(at(
             line,
             Event::TurnCompleted(TurnCompleted {
                 turn: self.turn,
-                outcome: outcome(result),
-                duration_ms: result.duration_ms,
-                is_error: result.is_error,
+                outcome,
+                duration_ms: value["duration_ms"].as_u64().unwrap_or(0),
+                is_error: is_error.unwrap_or(drifted.is_some()),
                 // On an error `result` repeats the error text, which the error
                 // event already carries.
-                final_text: result.result.clone().filter(|_| !result.is_error),
+                final_text: value["result"]
+                    .as_str()
+                    .filter(|_| outcome == TurnOutcome::Success && is_error == Some(false))
+                    .map(String::from),
             }),
         ));
         // PROTO-CLAUDE-CODE-STREAM-R08: cost from `total_cost_usd` (a running
         // total for the session), context from `usage`, window from
         // `modelUsage`.
+        let model_usage = value["modelUsage"].as_object();
+        let window_of = |usage: &Value| usage["contextWindow"].as_u64();
         let window = self
             .main_model
             .as_ref()
-            .and_then(|model| result.model_usage.get(model))
-            .and_then(|usage| usage.context_window)
-            .or_else(|| {
-                result
-                    .model_usage
-                    .values()
-                    .filter_map(|u| u.context_window)
-                    .max()
-            });
+            .and_then(|model| model_usage?.get(model))
+            .and_then(window_of)
+            .or_else(|| model_usage?.values().filter_map(window_of).max());
         out.push(at(
             line,
             Event::UsageUpdated(UsageUpdated {
-                context_tokens: context_tokens(&result.usage),
+                context_tokens: context_tokens(&value["usage"]),
                 context_window: window,
-                cost_usd_total: Some(result.total_cost_usd),
+                cost_usd_total: value["total_cost_usd"].as_f64(),
                 turns: Some(self.turn),
                 rate_limit: None,
             }),
@@ -459,50 +505,96 @@ impl ClaudeProjector {
         // Message ids and streams never span turns.
         self.turn_open = false;
         self.blocks_seen.clear();
-        self.streaming.clear();
-        self.stream_message = None;
+        self.stream_message.clear();
+        if drifted.is_some() {
+            out.push(passthrough(line, value));
+        }
         out
     }
 
-    fn permission_requested(
-        &mut self,
-        line: &RawLine,
-        request_id: String,
-        ask: &CanUseTool,
-        value: Value,
-    ) -> Vec<Projected> {
-        let Value::Object(input) = &ask.input else {
+    /// Final events for blocks whose stream was shown but whose complete
+    /// `assistant` line never came (an interrupt, an API error), in the order
+    /// they started, so every shown block ends (PROTO-AGENT-EVENTS-R07).
+    fn finish_streams(&mut self) -> Vec<Projected> {
+        let mut unfinished: Vec<(String, StreamedText)> = self
+            .streaming
+            .drain()
+            .filter(|(_, streamed)| streamed.shown)
+            .collect();
+        unfinished.sort_by_key(|(_, streamed)| streamed.first_raw);
+        unfinished
+            .into_iter()
+            .map(|(block_id, streamed)| Projected {
+                raw_from: streamed.first_raw,
+                event: Event::AssistantText(AssistantText {
+                    block_id,
+                    text: streamed.text,
+                    is_final: true,
+                }),
+            })
+            .collect()
+    }
+
+    /// `session.state running` after a prompt is settled, unless another
+    /// prompt is still waiting on the user.
+    fn running_unless_waiting(&self, line: &RawLine) -> Option<Projected> {
+        self.permissions
+            .is_empty()
+            .then(|| state(line, LifecycleState::Running))
+    }
+
+    /// `can_use_tool`, read from the raw JSON: a prompt the CLI waits on must
+    /// reach the shelf even if its shape has drifted, or the turn stalls.
+    fn permission_requested(&mut self, line: &RawLine, value: Value) -> Vec<Projected> {
+        let ask = &value["request"];
+        let text = |key: &str| ask[key].as_str().map(String::from);
+        let (Some(request_id), Some(tool_name), Some(input)) = (
+            value["request_id"].as_str().map(String::from),
+            text("tool_name"),
+            ask["input"].as_object().cloned(),
+        ) else {
             return error_and_passthrough(
                 line,
                 format!(
-                    "raw line {}: can_use_tool input is not an object",
+                    "raw line {}: a can_use_tool request without a request id, tool name, \
+                     or object input",
                     line.index
                 ),
                 value,
             );
         };
-        let offered = suggestions::offered(&ask.permission_suggestions);
+        let cli_suggestions = ask["permission_suggestions"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let offered = suggestions::offered(&cli_suggestions);
+        let flag = |key: &str| ask[key].as_bool().unwrap_or(false);
+        let reason = match &ask["decision_reason"] {
+            Value::Null => None,
+            Value::String(text) => Some(strip_ansi(text)),
+            other => Some(other.to_string()),
+        };
         let event = PermissionRequested {
             request_id: request_id.clone(),
-            tool_use_id: ask.tool_use_id.clone(),
-            tool_name: ask.tool_name.clone(),
-            display_name: ask.display_name.clone(),
-            description: ask.description.clone(),
-            input: input.clone(),
-            blocked_path: ask.blocked_path.clone(),
+            tool_use_id: text("tool_use_id").unwrap_or_default(),
+            tool_name,
+            display_name: text("display_name"),
+            description: text("description"),
+            input,
+            blocked_path: text("blocked_path"),
             suggestions: offered.iter().map(|(_, s)| s.clone()).collect(),
             flags: PermissionFlags {
-                default_to_no: ask.default_to_no.unwrap_or(false),
-                suppress_always_allow: ask.suppress_always_allow_rule.unwrap_or(false),
-                requires_user_interaction: ask.requires_user_interaction.unwrap_or(false),
-                classifier_approvable: ask.classifier_approvable.unwrap_or(false),
+                default_to_no: flag("default_to_no"),
+                suppress_always_allow: flag("suppress_always_allow_rule"),
+                requires_user_interaction: flag("requires_user_interaction"),
+                classifier_approvable: flag("classifier_approvable"),
             },
-            reason: ask.decision_reason.as_ref().map(|text| PermissionReason {
-                kind: ask
-                    .decision_reason_type
-                    .clone()
-                    .unwrap_or_else(|| "unspecified".into()),
-                text: strip_ansi(text),
+            reason: reason.map(|text| PermissionReason {
+                kind: ask["decision_reason_type"]
+                    .as_str()
+                    .unwrap_or("unspecified")
+                    .to_string(),
+                text,
             }),
         };
         self.permissions.insert(request_id, offered);
@@ -670,19 +762,18 @@ impl ClaudeProjector {
                     .collect()
             })
             .unwrap_or_default();
-        vec![
-            at(
-                line,
-                Event::PermissionDecided(PermissionDecided {
-                    request_id,
-                    behavior,
-                    decided_by: DecidedBy::User,
-                    message: field("message").and_then(Value::as_str).map(String::from),
-                    applied_suggestions: (!applied.is_empty()).then_some(applied),
-                }),
-            ),
-            state(line, LifecycleState::Running),
-        ]
+        let mut out = vec![at(
+            line,
+            Event::PermissionDecided(PermissionDecided {
+                request_id,
+                behavior,
+                decided_by: DecidedBy::User,
+                message: field("message").and_then(Value::as_str).map(String::from),
+                applied_suggestions: (!applied.is_empty()).then_some(applied),
+            }),
+        )];
+        out.extend(self.running_unless_waiting(line));
+        out
     }
 }
 
@@ -806,14 +897,20 @@ fn misparsed(message: &CliMessage) -> Option<String> {
                 .contains(&subtype)
                 .then(|| format!("system/{subtype}"))
         }
-        CliMessage::ControlRequest(request) => match &request.request {
-            CliRequest::Other(body) if body.get("subtype")? == "can_use_tool" => {
-                Some("control_request/can_use_tool".into())
-            }
-            _ => None,
-        },
         _ => None,
     }
+}
+
+/// The error for a line of a modelled kind whose fields did not fit its model:
+/// the CLI's shape has drifted (PROTO-AGENT-EVENTS-R10).
+fn drift_error(line: &RawLine, kind: &str) -> Projected {
+    protocol_error(
+        line,
+        format!(
+            "raw line {}: a {kind} line did not have the expected shape",
+            line.index
+        ),
+    )
 }
 
 /// The text of a message's text blocks, if it has any.
@@ -865,55 +962,46 @@ fn tool_output(content: Option<MessageContent>) -> ToolResultContent {
     }
 }
 
-/// How a turn ended. Only `success` has been recorded; the others follow the
-/// SDK's result subtypes until an interrupt or limit is recorded.
-fn outcome(result: &ResultMessage) -> TurnOutcome {
-    let reason = result.terminal_reason.as_deref().unwrap_or("");
-    if result.subtype == "error_max_turns" {
+/// How a turn ended, from a `result` line. Only `success` has been recorded;
+/// the others follow the SDK's result subtypes until an interrupt or limit is
+/// recorded.
+fn outcome(result: &Value) -> TurnOutcome {
+    let subtype = result["subtype"].as_str().unwrap_or("");
+    let reason = result["terminal_reason"].as_str().unwrap_or("");
+    if subtype == "error_max_turns" {
         TurnOutcome::MaxTurns
     } else if reason.contains("interrupt") || reason.contains("abort") {
         TurnOutcome::Interrupted
-    } else if result.is_error || result.subtype.starts_with("error") {
+    } else if result["is_error"].as_bool() != Some(false) || subtype.starts_with("error") {
         TurnOutcome::Error
     } else {
         TurnOutcome::Success
     }
 }
 
-/// The size of the context after the turn, for the context ring.
+/// The size of the context after the turn, for the context ring, from a
+/// `result` line's `usage`.
 ///
 /// `usage`'s top-level counts are summed over every API call in the turn, so
 /// they count the shared prefix once per call. The context the next request
 /// starts from is what the last call sent and received; `usage.iterations`
 /// lists the calls, so its last entry is used when present. Zero means the
 /// turn made no call (a failed login, say) and says nothing about the context.
-fn context_tokens(usage: &Usage) -> Option<u64> {
+fn context_tokens(usage: &Value) -> Option<u64> {
     const COUNTS: [&str; 4] = [
         "input_tokens",
         "cache_creation_input_tokens",
         "cache_read_input_tokens",
         "output_tokens",
     ];
-    let last_call = usage
-        .extra
-        .get("iterations")
-        .and_then(Value::as_array)
-        .and_then(|calls| calls.last());
-    let total = match last_call {
-        Some(call) => COUNTS
-            .iter()
-            .filter_map(|count| call.get(*count).and_then(Value::as_u64))
-            .sum(),
-        None => [
-            usage.input_tokens,
-            usage.cache_creation_input_tokens,
-            usage.cache_read_input_tokens,
-            usage.output_tokens,
-        ]
-        .into_iter()
-        .flatten()
-        .sum(),
-    };
+    let counted = usage["iterations"]
+        .as_array()
+        .and_then(|calls| calls.last())
+        .unwrap_or(usage);
+    let total: u64 = COUNTS
+        .iter()
+        .filter_map(|count| counted[*count].as_u64())
+        .sum();
     (total > 0).then_some(total)
 }
 
