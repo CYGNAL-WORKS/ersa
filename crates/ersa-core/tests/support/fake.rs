@@ -39,6 +39,8 @@ pub struct FakeAdapter {
     projector_version: u32,
     fail_start: bool,
     panic_start: bool,
+    /// How long the handshake takes.
+    start_delay: std::time::Duration,
     pub stats: Arc<Stats>,
 }
 
@@ -48,7 +50,16 @@ impl FakeAdapter {
             projector_version,
             fail_start: false,
             panic_start: false,
+            start_delay: std::time::Duration::ZERO,
             stats: Arc::default(),
+        }
+    }
+
+    /// An adapter whose backend takes `delay` to become ready.
+    pub fn slow_start(delay: std::time::Duration) -> Self {
+        FakeAdapter {
+            start_delay: delay,
+            ..FakeAdapter::new(1)
         }
     }
 
@@ -89,6 +100,7 @@ impl Adapter for FakeAdapter {
         if self.panic_start {
             panic!("the fake adapter has a bug");
         }
+        tokio::time::sleep(self.start_delay).await;
         if self.fail_start {
             sink.process_exited(Ok(ProcessExit { code: Some(1) }));
             return Err(AdapterError::Protocol("the fake refused to start".into()));

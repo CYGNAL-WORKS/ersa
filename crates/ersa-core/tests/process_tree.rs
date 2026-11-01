@@ -47,17 +47,16 @@ async fn killing_a_process_kills_its_grandchildren() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_process_that_exits_by_itself_takes_its_grandchildren_when_dropped() {
+async fn a_backend_that_exits_by_itself_takes_its_grandchildren_with_it() {
     let (mut process, grandchild) = spawn_with_grandchild(parent_of_a_grandchild(false)).await;
     let exit = tokio::time::timeout(Duration::from_secs(30), process.wait())
         .await
         .expect("exited in time")
         .expect("wait");
     assert!(exit.success());
-    // The parent is gone; what it started is not, until Core lets go.
-    assert!(running(grandchild));
-    drop(process);
+    // By the time the exit is reported, what it started is being killed.
     eventually_gone(grandchild).await;
+    drop(process);
 }
 
 #[tokio::test(flavor = "multi_thread")]

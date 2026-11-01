@@ -150,6 +150,10 @@ impl Process for TreeProcess {
     async fn wait(&mut self) -> io::Result<ProcessExit> {
         // Cancellation-safe, and remembers the status once the child exited.
         let status = self.child.wait().await?;
+        // Before anyone hears of the exit: what the process left running
+        // goes now (for a backend), so a stop that waits for the exit waits
+        // for the whole tree. Repeated calls repeat a harmless no-op.
+        self.tree.leader_exited();
         Ok(ProcessExit {
             code: status.code(),
         })

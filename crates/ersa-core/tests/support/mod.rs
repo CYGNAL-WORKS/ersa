@@ -121,6 +121,11 @@ pub struct Client {
     next_id: i64,
     /// Notifications that arrived while waiting for a response.
     notifications: VecDeque<Value>,
+    /// Responses that arrived while waiting for another one, by id: Core
+    /// may answer session requests out of order.
+    responses: std::collections::HashMap<i64, Value>,
+    /// The method of each request sent and not yet answered, by id.
+    methods: std::collections::HashMap<i64, String>,
 }
 
 impl Client {
@@ -132,6 +137,8 @@ impl Client {
             write,
             next_id: 1,
             notifications: VecDeque::new(),
+            responses: std::collections::HashMap::new(),
+            methods: std::collections::HashMap::new(),
         }
     }
 
@@ -181,26 +188,52 @@ impl Client {
     /// Sends a request and returns the whole response, after checking it
     /// against the schema and that it answers this request.
     pub async fn call(&mut self, method: &str, params: Value) -> Value {
+        let id = self.request(method, params).await;
+        self.response(id).await
+    }
+
+    /// Sends a request without waiting for its answer; returns its id.
+    pub async fn request(&mut self, method: &str, params: Value) -> i64 {
         let id = self.next_id;
         self.next_id += 1;
         let request = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        self.methods.insert(id, method.to_string());
         self.send_line(&request.to_string()).await;
-        // Notifications may arrive first; keep them for `notification`.
+        id
+    }
+
+    /// The response to request `id`, checked against the schema. Other
+    /// responses and notifications that arrive first are kept.
+    pub async fn response(&mut self, id: i64) -> Value {
         let response = loop {
-            let line = self.read_line().await.expect("a response");
-            if line.get("id").is_some() {
-                break line;
+            if let Some(response) = self.responses.remove(&id) {
+                break response;
             }
-            assert_valid_notification(&line);
-            self.notifications.push_back(line);
+            let line = self.read_line().await.expect("a response");
+            match line.get("id").and_then(Value::as_i64) {
+                Some(other) => {
+                    self.responses.insert(other, line);
+                }
+                None if line.get("id").is_some() => panic!("a response without our id: {line:#}"),
+                None => {
+                    assert_valid_notification(&line);
+                    self.notifications.push_back(line);
+                }
+            }
         };
-        assert_valid(method, &response);
-        assert_eq!(
-            response["id"],
-            json!(id),
-            "answers the request it was sent for"
-        );
+        let method = self.methods.remove(&id).expect("a request we sent");
+        assert_valid(&method, &response);
         response
+    }
+
+    /// How many responses arrived ahead of the one being waited for.
+    pub fn responses_waiting(&self) -> usize {
+        self.responses.len()
+    }
+
+    /// Forgets the notifications that arrived before the last response.
+    pub fn clear_notifications(&mut self) {
+        self.notifications.clear();
     }
 
     /// The next notification, kept from earlier or read now; `None` once Core

@@ -5,7 +5,7 @@
 -- as the events they summarise, so they never disagree with the cache.
 
 -- The tile object (PROTO-CORE-API, Sessions) as JSON.
-ALTER TABLE sessions ADD COLUMN tile TEXT NOT NULL DEFAULT '{"pending":[]}';
+ALTER TABLE sessions ADD COLUMN tile TEXT NOT NULL DEFAULT '{"state":"starting","pending":[]}';
 
 -- The seq of the session's last event; NULL before the first.
 ALTER TABLE sessions ADD COLUMN last_event_seq INTEGER CHECK (last_event_seq >= 0);

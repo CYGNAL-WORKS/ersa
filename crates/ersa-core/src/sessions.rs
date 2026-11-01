@@ -38,7 +38,7 @@ use ersa_adapter::{
 use ersa_protocol::core_api::rpc::Notification;
 use ersa_protocol::core_api::{Session, SessionEventParams, SessionTileParams, Tile};
 use ersa_protocol::events::{Envelope, LifecycleState};
-use tokio::sync::{broadcast, mpsc, oneshot, watch};
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::AbortHandle;
 
 use crate::persistence::{self, LogBatch, SessionProgress, Store, now_rfc3339};
@@ -49,11 +49,10 @@ use crate::raw_log::{CoreRecord, Projection};
 /// generous; a client further behind than this is disconnected.
 const SUBSCRIBER_QUEUE: usize = 4096;
 
-/// How many tile notifications may wait for connections to take them.
-const TILE_QUEUE: usize = 1024;
-
-/// The most raw lines the pipeline writes in one transaction.
+/// The most raw lines the pipeline writes in one transaction, and the most
+/// bytes of them (a batch always takes at least one line).
 const BATCH: usize = 256;
+const BATCH_BYTES: usize = 8 * 1024 * 1024;
 
 /// How many cached events a replay reads at a time.
 const REPLAY_PAGE: u64 = 500;
@@ -124,8 +123,8 @@ pub struct SessionManager {
     /// Every session in the database, by id. A std mutex: only held to look
     /// up, insert, or remove, never across an await.
     sessions: Mutex<HashMap<String, Arc<Handle>>>,
-    /// `session.tile` notifications, serialized, for every attached client.
-    tiles: broadcast::Sender<Arc<String>>,
+    /// Where `session.tile` notifications go, for every attached client.
+    tiles: Arc<TileHub>,
     /// Set by [`SessionManager::stop_all`]; no session starts after it.
     /// Read and written under the `sessions` lock.
     closing: AtomicBool,
@@ -136,8 +135,9 @@ struct Handle {
     id: String,
     backend: String,
     /// The adapter projector version its cached events are made with;
-    /// `None` when no adapter for its backend is registered.
-    projection_version: Option<u32>,
+    /// `None` when no adapter for its backend is registered, or its cache
+    /// could not be repaired. A successful re-projection sets it.
+    projection_version: Mutex<Option<u32>>,
     /// Serialises the operations that change whether the session is live:
     /// stop, remove, and re-project. Held across awaits, so an async mutex.
     op: tokio::sync::Mutex<()>,
@@ -244,7 +244,7 @@ impl Handle {
         Handle {
             id: id.to_string(),
             backend: backend.to_string(),
-            projection_version,
+            projection_version: Mutex::new(projection_version),
             op: tokio::sync::Mutex::new(()),
             hub: Mutex::new(Hub {
                 last_seq,
@@ -268,7 +268,7 @@ impl SessionManager {
                 .map(|adapter| (adapter.backend().to_string(), adapter))
                 .collect(),
             sessions: Mutex::new(HashMap::new()),
-            tiles: broadcast::channel(TILE_QUEUE).0,
+            tiles: Arc::default(),
             closing: AtomicBool::new(false),
         }
     }
@@ -287,17 +287,13 @@ impl SessionManager {
     /// bad session must not keep Core from starting for all the others.
     pub async fn recover(&self) -> persistence::Result<()> {
         for session in self.store.sessions().await? {
-            let mut version = self
-                .adapters
-                .get(&session.backend)
-                .map(|adapter| adapter.projector().version());
-            let last_seq = match self.recover_one(&session).await {
-                Ok(last_seq) => last_seq,
+            let (last_seq, version) = match self.recover_one(&session).await {
+                Ok(recovered) => recovered,
                 Err(e) => {
                     tracing::error!(session = %session.id, error = %e, "could not repair the session; leaving it as it is");
                     // Its cache may be from another version, so its events
-                    // are not served, and it is not shown as still running.
-                    version = None;
+                    // are not served until a re-projection works, and it is
+                    // not shown as still running.
                     if is_live(session.state)
                         && let Err(e) = self
                             .store
@@ -306,7 +302,7 @@ impl SessionManager {
                     {
                         tracing::error!(session = %session.id, error = %e, "could not mark the session as failed");
                     }
-                    session.last_event_seq
+                    (session.last_event_seq, None)
                 }
             };
             let handle = Handle::new(&session.id, &session.backend, version, last_seq);
@@ -316,36 +312,79 @@ impl SessionManager {
     }
 
     /// Repairs one session as [`SessionManager::recover`] describes, and
-    /// returns the seq of its last event.
-    async fn recover_one(&self, session: &Session) -> persistence::Result<Option<u64>> {
+    /// returns the seq of its last event and the projector version its cache
+    /// is now made with.
+    ///
+    /// Whether the session ended is read from its projection, not from its
+    /// row: a session whose ending was never recorded (its Core died, or its
+    /// raw log could not be written) gets `core_restarted` whatever the row
+    /// says.
+    async fn recover_one(
+        &self,
+        session: &Session,
+    ) -> persistence::Result<(Option<u64>, Option<u32>)> {
+        let restarted = || CoreRecord::CoreRestarted.to_line();
         let Some(adapter) = self.adapters.get(&session.backend) else {
-            tracing::warn!(session = %session.id, backend = %session.backend, "no adapter for the session's backend; leaving it as it is");
-            return Ok(session.last_event_seq);
+            tracing::warn!(session = %session.id, backend = %session.backend, "no adapter for the session's backend; its events stay as they are");
+            if is_live(session.state) {
+                // It cannot be running: end it in the log, which a Core with
+                // the adapter projects, and on its row.
+                self.store
+                    .append_raw_line(
+                        session.id.clone(),
+                        Direction::Core,
+                        now_rfc3339(),
+                        restarted(),
+                    )
+                    .await?;
+                self.store
+                    .set_session_state(session.id.clone(), LifecycleState::Ended)
+                    .await?;
+            }
+            return Ok((session.last_event_seq, None));
         };
-        let projection = Projection::new(&session.id, &session.backend, adapter.projector());
-        let version = projection.projector_version();
-        let append = is_live(session.state).then(|| {
-            (
-                Direction::Core,
-                now_rfc3339(),
-                CoreRecord::CoreRestarted.to_line(),
-            )
-        });
+        let version = adapter.projector().version();
+        // An unreadable cache is re-derived like a stale one.
         let current = self
             .store
             .projection_is_current(session.id.clone(), version)
             .await
-            // An unreadable cache is re-derived like a stale one.
             .unwrap_or(false);
-        if append.is_none() && current {
-            return Ok(session.last_event_seq);
+        if current
+            && self
+                .store
+                .last_event_ends_session(session.id.clone())
+                .await
+                .unwrap_or(false)
+        {
+            return Ok((session.last_event_seq, Some(version)));
         }
         tracing::info!(session = %session.id, "re-deriving the session's projection");
-        let projection = self
+        let projection = Projection::new(&session.id, &session.backend, adapter.projector());
+        let (mut projection, _) = self
             .store
-            .rebuild_projection(session.id.clone(), projection, append)
+            .rebuild_projection(session.id.clone(), projection)
             .await?;
-        Ok(projection.last_seq())
+        if !projection.ended() {
+            // Carry on from the end of the log with the record that ends it.
+            let line = RawLine {
+                index: self.store.next_raw_index(session.id.clone()).await?,
+                ts: now_rfc3339(),
+                dir: Direction::Core,
+                line: restarted(),
+            };
+            let events = projection.project(&line);
+            self.store
+                .append_session_log(Arc::new(LogBatch {
+                    session_id: session.id.clone(),
+                    lines: vec![line],
+                    events,
+                    projection_version: version,
+                    progress: SessionProgress::of(&projection),
+                }))
+                .await?;
+        }
+        Ok((projection.last_seq(), Some(version)))
     }
 
     /// Whether an adapter for `backend` is registered.
@@ -353,9 +392,10 @@ impl SessionManager {
         self.adapters.contains_key(backend)
     }
 
-    /// Receives every `session.tile` notification from now on.
-    pub fn tile_updates(&self) -> broadcast::Receiver<Arc<String>> {
-        self.tiles.subscribe()
+    /// Receives `session.tile` notifications from now on, the latest per
+    /// session.
+    pub fn tile_feed(&self) -> TileFeed {
+        self.tiles.feed()
     }
 
     fn handle(&self, id: &str) -> Result<Arc<Handle>, SessionError> {
@@ -577,7 +617,15 @@ impl SessionManager {
     }
 
     /// Discards the cached projection and re-derives it from the raw log.
-    pub async fn reproject(&self, id: &str) -> Result<(), SessionError> {
+    /// Returns whether any event changed.
+    ///
+    /// When one did, subscribers were sent events that no longer hold, so
+    /// their connections are closed and their clients resubscribe; the
+    /// caller's own connection (`caller`) is left open, and its subscription
+    /// to this session simply ends, since it asked for the change and gets
+    /// the answer. Same-version re-projection changes nothing and disturbs
+    /// nobody.
+    pub async fn reproject(&self, id: &str, caller: &Kick) -> Result<bool, SessionError> {
         let handle = self.handle(id)?;
         let _op = handle.op.lock().await;
         if handle.live().is_some() {
@@ -591,23 +639,27 @@ impl SessionManager {
             SessionError::BackendMissing(format!("no adapter for backend {}", handle.backend))
         })?;
         let projection = Projection::new(id, &handle.backend, adapter.projector());
-        let projection = self
+        let version = projection.projector_version();
+        let (projection, changed) = self
             .store
-            .rebuild_projection(id.to_string(), projection, None)
+            .rebuild_projection(id.to_string(), projection)
             .await?;
+        *lock(&handle.projection_version) = Some(version);
         {
-            // Subscribers were sent the old events; they are disconnected,
-            // so their clients resubscribe and read the new ones.
             let mut hub = lock(&handle.hub);
             hub.last_seq = projection.last_seq();
-            for subscriber in hub.subscribers.values() {
-                subscriber.overflowed.store(true, Ordering::SeqCst);
-                subscriber.kick.send_replace(true);
+            if changed {
+                for subscriber in hub.subscribers.values() {
+                    subscriber.overflowed.store(true, Ordering::SeqCst);
+                    if !Arc::ptr_eq(&subscriber.kick, caller) {
+                        subscriber.kick.send_replace(true);
+                    }
+                }
+                hub.subscribers.clear();
             }
-            hub.subscribers.clear();
         }
         send_tile(&self.tiles, id, projection.tile());
-        Ok(())
+        Ok(changed)
     }
 
     /// Subscribes a connection to a session's events from `from_seq` on
@@ -624,7 +676,7 @@ impl SessionManager {
         kick: Kick,
     ) -> Result<(Subscription, Option<u64>), SessionError> {
         let handle = self.handle(id)?;
-        let Some(projection_version) = handle.projection_version else {
+        let Some(projection_version) = *lock(&handle.projection_version) else {
             return Err(SessionError::InvalidState(format!(
                 "the events of session {id} cannot be read: Core has no adapter for backend {}, \
                  or could not repair its projection at startup",
@@ -1035,7 +1087,7 @@ struct Pipeline {
     projection: Projection,
     lines: mpsc::UnboundedReceiver<RawLine>,
     progress: watch::Sender<Progress>,
-    tiles: broadcast::Sender<Arc<String>>,
+    tiles: Arc<TileHub>,
 }
 
 async fn run_pipeline(pipeline: Pipeline) {
@@ -1051,10 +1103,14 @@ async fn run_pipeline(pipeline: Pipeline) {
     let mut last_tile = projection.tile().clone();
     // Ends once the sink is closed and every queued line has been taken.
     while let Some(first) = lines.recv().await {
+        let mut bytes = first.line.len();
         let mut batch = vec![first];
-        while batch.len() < BATCH {
+        while batch.len() < BATCH && bytes < BATCH_BYTES {
             match lines.try_recv() {
-                Ok(line) => batch.push(line),
+                Ok(line) => {
+                    bytes += line.line.len();
+                    batch.push(line);
+                }
                 Err(_) => break,
             }
         }
@@ -1151,13 +1207,72 @@ fn event_line(session_id: &str, event: &Envelope) -> String {
     notification_line("session.event", &params)
 }
 
-fn send_tile(tiles: &broadcast::Sender<Arc<String>>, session_id: &str, tile: &Tile) {
+fn send_tile(tiles: &TileHub, session_id: &str, tile: &Tile) {
     let params = SessionTileParams {
         session_id: session_id.to_string(),
         tile: tile.clone(),
     };
-    // Fails only when no client is attached, which is fine.
-    let _ = tiles.send(Arc::new(notification_line("session.tile", &params)));
+    tiles.publish(session_id, notification_line("session.tile", &params));
+}
+
+/// Hands `session.tile` notifications to every attached connection,
+/// keeping only the latest per session for each: a tile is the whole state,
+/// so a connection busy with a long replay gets the newest one when it is
+/// ready, never a backlog, and is never closed for it.
+#[derive(Default)]
+struct TileHub {
+    inboxes: Mutex<Vec<Weak<TileInbox>>>,
+}
+
+#[derive(Default)]
+struct TileInbox {
+    /// The newest tile line per session not yet taken.
+    latest: Mutex<HashMap<String, Arc<String>>>,
+    ready: Notify,
+}
+
+impl TileHub {
+    fn feed(&self) -> TileFeed {
+        let inbox = Arc::new(TileInbox::default());
+        lock(&self.inboxes).push(Arc::downgrade(&inbox));
+        TileFeed { inbox }
+    }
+
+    fn publish(&self, session_id: &str, line: String) {
+        let line = Arc::new(line);
+        let mut inboxes = lock(&self.inboxes);
+        // A connection that has gone dropped its feed; forget its inbox.
+        inboxes.retain(|inbox| {
+            let Some(inbox) = inbox.upgrade() else {
+                return false;
+            };
+            lock(&inbox.latest).insert(session_id.to_string(), Arc::clone(&line));
+            // Stores a permit when nobody waits, so a wake is never lost.
+            inbox.ready.notify_one();
+            true
+        });
+    }
+}
+
+/// One connection's view of tile changes.
+pub struct TileFeed {
+    inbox: Arc<TileInbox>,
+}
+
+impl TileFeed {
+    /// The tile lines that changed since the last call, one per session;
+    /// waits until there is at least one.
+    pub async fn next(&mut self) -> Vec<Arc<String>> {
+        loop {
+            {
+                let mut latest = lock(&self.inbox.latest);
+                if !latest.is_empty() {
+                    return latest.drain().map(|(_, line)| line).collect();
+                }
+            }
+            self.inbox.ready.notified().await;
+        }
+    }
 }
 
 fn notification_line(method: &str, params: &impl serde::Serialize) -> String {
@@ -1253,8 +1368,8 @@ async fn forward(task: Forward) {
                 }
             };
             if overflowed.load(Ordering::SeqCst) {
-                // Dropped meanwhile (re-projected, or fell behind).
-                kick.send_replace(true);
+                // Dropped meanwhile (re-projected, or fell behind); the hub
+                // closed the connection if it had to.
                 return;
             }
             let mut progressed = false;
@@ -1296,10 +1411,8 @@ async fn forward(task: Forward) {
             () = outbound.closed() => return,
         }
     }
-    if overflowed.load(Ordering::SeqCst) {
-        tracing::warn!(session = %session_id, "a client fell too far behind; disconnecting it");
-        kick.send_replace(true);
-    }
+    // Ended because the hub dropped this subscriber: when the client fell
+    // behind, the hub has already closed its connection.
 }
 
 /// A `session.event` line around an envelope stored as JSON, without

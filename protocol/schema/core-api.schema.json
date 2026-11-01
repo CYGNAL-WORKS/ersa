@@ -1435,9 +1435,14 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
+        "state",
         "pending"
       ],
       "properties": {
+        "state": {
+          "$ref": "agent-events.schema.json#/$defs/session.state/properties/state",
+          "description": "The session's lifecycle state, so the rail follows it without subscribing."
+        },
         "context_tokens": {
           "type": "integer",
           "minimum": 0
