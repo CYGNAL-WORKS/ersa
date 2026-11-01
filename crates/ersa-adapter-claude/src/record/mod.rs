@@ -25,7 +25,8 @@ use std::collections::VecDeque;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 pub use listing::{SessionList, SessionSummary, list_sessions, summarize_session};
@@ -202,27 +203,90 @@ fn read_record_at(path: &Path) -> io::Result<ReadRecord> {
     })
 }
 
-/// How many records' projections [`RecordCache`] keeps.
-const CACHED_RECORDS: usize = 4;
+/// The most bytes of projected events [`RecordCache`] keeps across all the
+/// records it holds: the same budget as one open view in Core.
+const CACHED_RECORD_BYTES: usize = 64 * 1024 * 1024;
+
+/// How many summaries [`RecordCache`] keeps; each is a few hundred bytes.
+const CACHED_SUMMARIES: usize = 256;
+
+/// One record's projection, kept while its file is unchanged.
+#[derive(Debug)]
+struct CachedRecord {
+    path: PathBuf,
+    len: u64,
+    modified: SystemTime,
+    events: Arc<Vec<RecordEvent>>,
+    /// About how much memory `events` holds.
+    bytes: usize,
+}
 
 /// The projections of the records read last, each kept for as long as its
 /// file's size and modified time say it has not changed, so opening a large
 /// unchanged record again costs a look at its metadata, not a read. A record
-/// that changed (the CLI appended a turn) is read again.
+/// that changed (the CLI appended a turn) is read again. Bounded by
+/// [`CACHED_RECORD_BYTES`] in all; results are shared, never copied.
 #[derive(Debug, Default)]
 pub struct RecordCache {
-    /// Most recently read last.
-    entries: Mutex<VecDeque<(PathBuf, ReadRecord)>>,
-    /// Summaries of the records summarized last, by the same key: small,
-    /// so many are kept. A summary that took long to read is still there
-    /// for the next caller while the record is unchanged.
+    /// Most recently used last.
+    records: Mutex<VecDeque<CachedRecord>>,
+    /// Summaries of the records summarized last, by the same key. A summary
+    /// that took long to read is still there for the next caller while the
+    /// record is unchanged.
     summaries: Mutex<VecDeque<(PathBuf, u64, SystemTime, SessionSummary)>>,
+    /// How many times a record file was read and projected.
+    reads: AtomicUsize,
 }
 
-/// How many summaries [`RecordCache`] keeps.
-const CACHED_SUMMARIES: usize = 256;
-
 impl RecordCache {
+    /// [`read_record`], through the cache.
+    pub fn read(
+        &self,
+        claude_home: &Path,
+        cwd: &str,
+        session_id: &str,
+    ) -> io::Result<Arc<Vec<RecordEvent>>> {
+        let Some(path) = find_record(claude_home, cwd, session_id)? else {
+            return Ok(Arc::default());
+        };
+        let metadata = fs::metadata(&path)?;
+        let (len, modified) = (metadata.len(), metadata.modified().ok());
+        if let Some(modified) = modified {
+            let mut records = lock(&self.records);
+            if let Some(at) = records
+                .iter()
+                .position(|r| r.path == path && r.len == len && r.modified == modified)
+            {
+                let hit = records.remove(at).expect("found");
+                let events = Arc::clone(&hit.events);
+                records.push_back(hit);
+                return Ok(events);
+            }
+        }
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        let read = read_record_at(&path)?;
+        let events = Arc::new(read.events);
+        // Keyed by what the file was when it was opened for this read.
+        if let Some(modified) = read.modified {
+            let bytes = approximate_bytes(&events);
+            let mut records = lock(&self.records);
+            records.retain(|r| r.path != path);
+            if bytes <= CACHED_RECORD_BYTES {
+                records.push_back(CachedRecord {
+                    path,
+                    len: read.len,
+                    modified,
+                    events: Arc::clone(&events),
+                    bytes,
+                });
+                while records.iter().map(|r| r.bytes).sum::<usize>() > CACHED_RECORD_BYTES {
+                    records.pop_front();
+                }
+            }
+        }
+        Ok(events)
+    }
+
     /// [`summarize_session`], through the cache.
     pub fn summarize(
         &self,
@@ -238,19 +302,16 @@ impl RecordCache {
         let Ok(modified) = metadata.modified() else {
             return summarize_session(claude_home, cwd, session_id);
         };
+        if let Some((.., summary)) = lock(&self.summaries)
+            .iter()
+            .find(|(p, l, m, _)| *p == path && *l == len && *m == modified)
         {
-            let summaries = self.summaries.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some((_, _, _, summary)) = summaries
-                .iter()
-                .find(|(p, l, m, _)| *p == path && *l == len && *m == modified)
-            {
-                return Ok(Some(summary.clone()));
-            }
+            return Ok(Some(summary.clone()));
         }
         let Some(summary) = summarize_session(claude_home, cwd, session_id)? else {
             return Ok(None);
         };
-        let mut summaries = self.summaries.lock().unwrap_or_else(|e| e.into_inner());
+        let mut summaries = lock(&self.summaries);
         summaries.retain(|(p, ..)| *p != path);
         summaries.push_back((path, len, modified, summary.clone()));
         while summaries.len() > CACHED_SUMMARIES {
@@ -259,39 +320,33 @@ impl RecordCache {
         Ok(Some(summary))
     }
 
-    /// [`read_record`], through the cache.
-    pub fn read(
-        &self,
-        claude_home: &Path,
-        cwd: &str,
-        session_id: &str,
-    ) -> io::Result<Vec<RecordEvent>> {
-        let Some(path) = find_record(claude_home, cwd, session_id)? else {
-            return Ok(Vec::new());
-        };
-        let metadata = fs::metadata(&path)?;
-        let (len, modified) = (metadata.len(), metadata.modified().ok());
-        {
-            let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(at) = entries.iter().position(|(p, read)| {
-                *p == path && read.len == len && read.modified == modified && modified.is_some()
-            }) {
-                let entry = entries.remove(at).expect("found");
-                let events = entry.1.events.clone();
-                entries.push_back(entry);
-                return Ok(events);
-            }
-        }
-        let read = read_record_at(&path)?;
-        let events = read.events.clone();
-        let mut entries = self.entries.lock().unwrap_or_else(|e| e.into_inner());
-        entries.retain(|(p, _)| *p != path);
-        entries.push_back((path, read));
-        while entries.len() > CACHED_RECORDS {
-            entries.pop_front();
-        }
-        Ok(events)
+    /// Lets go of what is kept of session `session_id`'s record.
+    pub fn forget(&self, session_id: &str) {
+        let named = |path: &Path| path.file_stem().is_some_and(|stem| stem == session_id);
+        lock(&self.records).retain(|r| !named(&r.path));
+        lock(&self.summaries).retain(|(p, ..)| !named(p));
     }
+
+    /// How many times a record file has been read and projected, rather than
+    /// taken from the cache.
+    pub fn reads(&self) -> usize {
+        self.reads.load(Ordering::SeqCst)
+    }
+}
+
+/// About how much memory `events` holds: their size as JSON, plus a little
+/// for each event's own fields.
+fn approximate_bytes(events: &[RecordEvent]) -> usize {
+    events
+        .iter()
+        .map(|e| serde_json::to_vec(&e.event).map_or(0, |json| json.len()) + 128)
+        .sum()
+}
+
+/// Locks a mutex, carrying on if a panicking thread poisoned it: what it
+/// guards is a cache, consistent between single updates.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Whether `id` has the shape of a Claude Code session id: a UUID in its

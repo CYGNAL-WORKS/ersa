@@ -87,7 +87,6 @@ impl Store {
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         migrate(&mut conn, path)?;
-        compact_if_sparse(&conn, path);
         Ok(Store {
             conn: Arc::new(Mutex::new(conn)),
             path: path.to_path_buf(),
@@ -378,8 +377,9 @@ impl Store {
 
 /// The migration that drops data no later Core can rebuild (the raw log, and
 /// each session's stored title and creation time): a copy of the database
-/// is kept before it runs. The space it frees is reclaimed by
-/// [`compact_if_sparse`].
+/// is kept before it runs. The space it frees is not reclaimed: SQLite
+/// reuses free pages as the database grows, and shrinking the file is not
+/// worth delaying Core's start.
 const DESTRUCTIVE_MIGRATION: usize = 3;
 
 /// Applies every migration the database at `path` has not seen yet, each in
@@ -409,32 +409,6 @@ fn migrate(conn: &mut Connection, path: &Path) -> Result<()> {
         tracing::info!(migration = index + 1, "applied database migration");
     }
     Ok(())
-}
-
-/// Reclaims the space of a database file that is mostly free pages, as
-/// migration 3 leaves one, having dropped the raw log. Done while Core
-/// opens its database, before it serves anything, so a compaction that
-/// takes a while never holds up a request or a session's writes; checked
-/// at every start, so one that failed is tried again. A failure is
-/// reported and changes nothing.
-fn compact_if_sparse(conn: &Connection, path: &Path) {
-    let sparse = || -> rusqlite::Result<bool> {
-        let free: i64 = conn.pragma_query_value(None, "freelist_count", |r| r.get(0))?;
-        let pages: i64 = conn.pragma_query_value(None, "page_count", |r| r.get(0))?;
-        Ok(pages > 0 && free * 4 >= pages)
-    };
-    match sparse().and_then(|sparse| {
-        if sparse {
-            conn.execute_batch("VACUUM")?;
-        }
-        Ok(sparse)
-    }) {
-        Ok(true) => tracing::info!(path = %path.display(), "compacted the database"),
-        Ok(false) => {}
-        Err(e) => {
-            tracing::warn!(path = %path.display(), error = %e, "could not compact the database; it stays its size until the next start");
-        }
-    }
 }
 
 /// Where the copy of the database at `path`, at schema `version`, is kept
@@ -705,38 +679,6 @@ mod tests {
                 "mode"
             ]
         );
-    }
-
-    #[test]
-    fn the_space_migration_3_frees_is_reclaimed_before_core_serves() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let path = dir.path().join("ersa.db");
-        let conn = database_at(&path, 2);
-        conn.execute_batch(
-            "INSERT INTO hosts VALUES ('local', 'pc', 'local', '{}', 't');
-             INSERT INTO projects VALUES ('p', 'local', '/r', '/r', 'r', 'git', 't');
-             INSERT INTO workspaces VALUES ('w', 'p', '/w', 'b', 'ready', 't');
-             INSERT INTO sessions (id, workspace_id, host_id, backend, state, created_at)
-                 VALUES ('s', 'w', 'local', 'claude-code', 'ended', 't');",
-        )
-        .expect("old rows");
-        let line = "x".repeat(4096);
-        for idx in 0..500 {
-            conn.execute(
-                "INSERT INTO raw_log VALUES ('s', ?1, 't', 'backend', ?2)",
-                params![idx, line],
-            )
-            .expect("old line");
-        }
-        drop(conn);
-        // Compacted by the time the store is open, so nothing is left to
-        // hold the store's connection while Core serves requests.
-        let store = Store::open(&path).expect("migrates");
-        let conn = store.conn.lock().unwrap();
-        let free: i64 = conn
-            .pragma_query_value(None, "freelist_count", |r| r.get(0))
-            .unwrap();
-        assert_eq!(free, 0, "the dropped raw log's space is reclaimed");
     }
 
     #[tokio::test]

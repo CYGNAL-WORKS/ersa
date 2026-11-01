@@ -45,15 +45,20 @@ pub trait Adapter: Send + Sync {
     /// backend's retention) is an empty history, not an error. Pure in the
     /// record: reading the same record twice yields the same events
     /// (PROTO-AGENT-EVENTS-R11). A backend without a record has no history,
-    /// which is the default.
+    /// which is the default. Shared rather than owned, so an adapter that
+    /// keeps what it read hands it on without copying it.
     async fn read_record(
         &self,
         _transport: Arc<dyn Transport>,
         _cwd: &str,
         _backend_session_id: &str,
-    ) -> Result<Vec<RecordEvent>, AdapterError> {
-        Ok(Vec::new())
+    ) -> Result<Arc<Vec<RecordEvent>>, AdapterError> {
+        Ok(Arc::default())
     }
+
+    /// Lets go of anything kept about session `backend_session_id`'s
+    /// record, which Ersa no longer shows (the session was removed).
+    fn forget_record(&self, _cwd: &str, _backend_session_id: &str) {}
 
     /// What the backend's session record says of the session as a whole: its
     /// title and when it began. Read without reading the whole record, since
