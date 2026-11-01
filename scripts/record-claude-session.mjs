@@ -65,7 +65,23 @@ const ERSA_ARGS = [
 // Ersa's environment changes: its own entrypoint, and nothing inherited from
 // whatever started it.
 const ENV_SET = { CLAUDE_CODE_ENTRYPOINT: "ersa" };
-const ENV_REMOVED = ["CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "NODE_OPTIONS", "TRACEPARENT", "TRACESTATE"];
+// R13 and R19: what a parent Claude Code session would otherwise hand down
+// (its session, messaging socket, IDE link).
+const ENV_REMOVED = [
+  "CLAUDECODE",
+  "CLAUDE_CODE_CHILD_SESSION",
+  "CLAUDE_CODE_ENTRYPOINT",
+  "NODE_OPTIONS",
+  "TRACEPARENT",
+  "TRACESTATE",
+  "CLAUDE_CODE_SESSION_ID",
+  "CLAUDE_CODE_HOST_SESSION_ID",
+  "CLAUDE_CODE_MESSAGING_SOCKET",
+  "CLAUDE_CODE_MESSAGING_TOKEN",
+  "CLAUDE_CODE_SSE_PORT",
+  "ENABLE_IDE_INTEGRATION",
+  "CLAUDE_AGENT_SDK_VERSION",
+];
 
 // The session record entries the adapter reads (PROTO-CLAUDE-CODE-STREAM, Session record).
 const READ_ENTRIES = new Set(["user", "assistant", "custom-title", "ai-title", "last-prompt"]);
@@ -169,8 +185,10 @@ function encodeCwd(path) {
 }
 
 const args = [...ERSA_ARGS, ...(resume ? ["--resume", resume] : [])];
-const env = { ...process.env, ...ENV_SET };
+// Removals first, then Ersa's own entrypoint.
+const env = { ...process.env };
 for (const key of ENV_REMOVED) delete env[key];
+Object.assign(env, ENV_SET);
 
 const started = Date.now();
 // On POSIX the CLI leads its own process group, so a kill reaches whatever
