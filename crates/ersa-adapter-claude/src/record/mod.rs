@@ -16,7 +16,6 @@
 //! These read local files. A remote host's record needs reading through its
 //! transport, which has no file access yet.
 
-mod alive;
 mod listing;
 mod projection;
 mod registry;
@@ -25,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 pub use listing::{SessionSummary, list_sessions};
 pub use projection::{RecordEvent, RecordProjector};
-pub use registry::{LiveSession, live_session};
+pub use registry::{LiveCheck, LiveSession, live_session};
 
 /// The longest encoded directory name the CLI uses whole; a longer one is cut
 /// and given a hash of the full path, as the Agent SDK's reader does.
@@ -78,6 +77,11 @@ fn path_hash(cwd: &str) -> String {
 }
 
 /// The directory holding the session records of working directory `cwd`.
+///
+/// `cwd` must be spelled as the CLI spelled it, which is the `cwd` its
+/// `system/init` reports: a canonicalised path (`\?\D:\...`), another
+/// drive-letter case or a trailing separator encodes to another directory,
+/// and that directory simply has no sessions.
 pub fn project_dir(claude_home: &Path, cwd: &str) -> PathBuf {
     claude_home.join("projects").join(encoded_cwd(cwd))
 }

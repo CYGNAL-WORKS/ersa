@@ -330,6 +330,11 @@ fn a_session_is_titled_custom_then_ai_then_last_prompt_then_first_prompt() {
         title_of(vec![first.clone(), last.clone()]).as_deref(),
         Some("Last prompt")
     );
+    // Without a `last-prompt` entry, the last prompt itself.
+    assert_eq!(
+        title_of(vec![first.clone(), user("Second prompt")]).as_deref(),
+        Some("Second prompt")
+    );
     assert_eq!(
         title_of(vec![first.clone(), ai.clone(), last.clone()]).as_deref(),
         Some("Generated title")
