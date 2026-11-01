@@ -342,7 +342,7 @@ async fn decisions_carry_edits_suggestions_and_denial_messages() {
             "updatedInput": { "command": "echo edited > probe.txt" },
             "updatedPermissions": [{
                 "type": "addDirectories",
-                "directories": ["C:\\Users\\breno\\AppData\\Local\\Temp\\ersa-rec-zww2Oe"],
+                "directories": ["C:/Users/user\\AppData\\Local\\Temp\\ersa-rec-zww2Oe"],
                 "destination": "session",
                 "addedLater": 1
             }]

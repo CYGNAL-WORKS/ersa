@@ -1,7 +1,7 @@
 {
   "recorded_at": "2026-10-31T23:52:17.904Z",
   "claude_code_version": "2.1.302",
-  "executable": "C:/Users/breno/AppData/Local/Microsoft/WinGet/Packages/Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe/claude.exe",
+  "executable": "C:/Users/user/AppData/Local/Microsoft/WinGet/Packages/Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe/claude.exe",
   "args": [
     "-p",
     "--input-format",

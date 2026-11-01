@@ -310,7 +310,7 @@ fn result_projects_to_one_turn_completed_and_one_usage_update() {
                 is_error: false,
                 final_text: Some(
                     "The command succeeded. It exited cleanly with no output, and `probe.txt` now \
-                     exists in `C:\\Users\\breno\\AppData\\Local\\Temp\\ersa-rec-zww2Oe` containing \
+                     exists in `C:/Users/user\\AppData\\Local\\Temp\\ersa-rec-zww2Oe` containing \
                      the word \"probe\"."
                         .into()
                 ),
@@ -324,7 +324,10 @@ fn result_projects_to_one_turn_completed_and_one_usage_update() {
                 turns: Some(1),
                 rate_limit: None,
             }),
-            &Event::SessionState(SessionState { state: LifecycleState::Idle, reason: None }),
+            &Event::SessionState(SessionState {
+                state: LifecycleState::Idle,
+                reason: None
+            }),
         ]
     );
 
@@ -514,7 +517,7 @@ fn an_answer_that_applies_suggestions_names_their_indices() {
                 "updatedInput": { "command": "echo probe > probe.txt" },
                 "updatedPermissions": [{
                     "type": "addDirectories",
-                    "directories": ["C:\\Users\\breno\\AppData\\Local\\Temp\\ersa-rec-zww2Oe"],
+                    "directories": ["C:/Users/user\\AppData\\Local\\Temp\\ersa-rec-zww2Oe"],
                     "destination": "session"
                 }]
             }
