@@ -4,25 +4,25 @@
 //   node scripts/deps-check.mjs age [--base <ref>]   release age of what changed since <ref>
 //   node scripts/deps-check.mjs vulns                 known vulnerabilities in every lockfile
 //
-// `age` compares the lockfiles on disk with those at <ref> (default origin/main)
+// Lockfiles are every Cargo.lock and pnpm-lock.yaml git tracks, at any depth.
+// `age` compares them on disk with the same paths at <ref> (default origin/main)
 // and looks up the publish time of every package version added or changed.
 // `vulns` runs OSV-Scanner (on PATH, or the path in OSV_SCANNER).
 // Both read deps-policy.toml for the threshold and the exceptions.
 //
 // Exit status: 0 pass, 1 policy failure, 2 the check could not run
-// (registry or scanner error). docs/dependencies.md explains what to do.
+// (registry, scanner, git, or lockfile error). docs/dependencies.md explains
+// what to do.
 
-import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join, posix } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const POLICY = "deps-policy.toml";
-const LOCKFILES = [
-  { path: "Cargo.lock", ecosystem: "crates.io", parse: (t) => parseCargoLock(t) },
-  { path: "pnpm-lock.yaml", ecosystem: "npm", parse: (t) => parsePnpmLock(t) },
-];
+const ECOSYSTEMS = { "Cargo.lock": "crates.io", "pnpm-lock.yaml": "npm" };
+const MAX_BUFFER = 256 * 1024 * 1024;
 const CRATES_IO_SOURCES = new Set([
   "registry+https://github.com/rust-lang/crates.io-index",
   "sparse+https://index.crates.io/",
@@ -55,11 +55,11 @@ export function parseCargoLock(text) {
     .map((p) => ({ name: p.name, version: p.version, source: p.source ?? null }));
 }
 
-// Every registry package in a pnpm-lock.yaml (v6 and later) as
-// { name, version, source }. Keys come from the top-level `packages:` map,
+// Every package in a pnpm-lock.yaml (v6 and later) as { name, version, source }. Keys come from the top-level `packages:` map,
 // such as `lodash@4.17.21`, `'@types/node@22.1.0'`, or (v6)
 // `/react-dom@18.2.0(react@18.2.0)`. Versions that are not plain semver
-// (`file:`, `link:`, tarball and git URLs) are not from the registry.
+// (`file:`, `link:`, tarball and git URLs) are not from the registry; their
+// source is the version text.
 export function parsePnpmLock(text) {
   const packages = new Map();
   let inPackages = false;
@@ -74,8 +74,8 @@ export function parsePnpmLock(text) {
     let key = m[2].replace(/^\//, "");
     const peer = key.indexOf("(");
     if (peer > 0) key = key.slice(0, peer);
-    const at = key.lastIndexOf("@");
-    if (at <= 0) continue;
+    const at = key.indexOf("@", 1);
+    if (at < 0) continue;
     const name = key.slice(0, at);
     const version = key.slice(at + 1);
     const registry = /^\d+\.\d+\.\d+([-+][0-9A-Za-z.+-]*)?$/.test(version);
@@ -97,6 +97,44 @@ export function diffPackages(base, head) {
     seen.add(k);
     return true;
   });
+}
+
+// The lockfiles among `git ls-files` output, as { path, ecosystem }.
+export function lockfilesFrom(lsFiles) {
+  return lsFiles
+    .split(/\r?\n/)
+    .filter((path) => posix.basename(path) in ECOSYSTEMS)
+    .map((path) => ({ path, ecosystem: ECOSYSTEMS[posix.basename(path)] }));
+}
+
+// The lockfile can't be judged: the check could not run, which is not a policy failure.
+export class CheckError extends Error {}
+
+// Parses one lockfile. Missing or empty text is no packages; text that yields
+// no packages is a format this script does not read, which must not pass as
+// "nothing changed".
+export function parseLockfile(ecosystem, text, label) {
+  if (!text.trim()) return [];
+  if (ecosystem === "npm") {
+    const version = text.match(/^lockfileVersion:\s*['"]?(\d+)/m);
+    if (!version || Number(version[1]) < 6) {
+      throw new CheckError(`${label}: lockfileVersion ${version?.[1] ?? "?"} is not supported; use pnpm 8 or later (lockfile v6+)`);
+    }
+  }
+  const packages = ecosystem === "npm" ? parsePnpmLock(text) : parseCargoLock(text);
+  if (!packages.length) throw new CheckError(`${label}: found no packages in a non-empty lockfile; its format is not one this script reads`);
+  return packages;
+}
+
+// Where a package version comes from, for the age check: "workspace" (one of
+// the repository's own crates, listed in `workspaceMembers` as name@version),
+// "registry" (crates.io or npm, so it has a publish time), or "unregistered"
+// (anything else: a path outside the workspace, git, a tarball, another
+// registry), which has no publish time to judge.
+export function classifyPackage(ecosystem, pkg, workspaceMembers) {
+  if (ecosystem === "npm") return pkg.source === "npm" ? "registry" : "unregistered";
+  if (pkg.source === null) return workspaceMembers.has(key(pkg)) ? "workspace" : "unregistered";
+  return CRATES_IO_SOURCES.has(pkg.source) ? "registry" : "unregistered";
 }
 
 // ---- Policy file -------------------------------------------------------------
@@ -144,7 +182,7 @@ function parseValue(v, where) {
 
 const ID_PATTERN = /^(RUSTSEC-\d{4}-\d{4}|GHSA(-[0-9a-z]{4}){3}|CVE-\d{4}-\d{4,})$/;
 const AGE_KEYS = ["ecosystem", "package", "version", "reason", "expires"];
-const VULN_KEYS = ["id", "reason", "expires"];
+const VULN_KEYS = ["id", "package", "version", "reason", "expires"];
 
 // Checks the parsed policy against ADR 0015 and returns
 // { minAgeDays, ageExceptions, vulnExceptions, problems }, where `problems` are
@@ -196,8 +234,12 @@ export function validatePolicy(doc, today) {
     if (typeof e.id !== "string" || !ID_PATTERN.test(e.id)) {
       problems.push(`${label}: set id to a RUSTSEC-, GHSA-, or CVE- advisory ID`);
     }
+    for (const k of ["package", "version"]) {
+      if (k in e && (typeof e[k] !== "string" || !e[k])) problems.push(`${label}: ${k}, when set, is the exact value in the lockfile`);
+    }
+    if ("version" in e && !("package" in e)) problems.push(`${label}: a version needs the package it belongs to`);
     const expires = checkCommon(e, label, VULN_KEYS);
-    return { id: e.id, reason: e.reason, expires };
+    return { id: e.id, package: e.package ?? null, version: e.version ?? null, reason: e.reason, expires };
   });
 
   return { minAgeDays, ageExceptions, vulnExceptions, problems };
@@ -216,10 +258,18 @@ export function ageVerdict(policy, ecosystem, name, version, published, now) {
   return { status: exception ? "allow" : "fail", ageDays, exception };
 }
 
-// The exception covering one OSV finding, matched on any of its IDs or aliases.
-export function findVulnException(exceptions, ids) {
-  const all = new Set(ids);
-  return exceptions.find((e) => all.has(e.id)) ?? null;
+// The exception covering one OSV finding: its id is any of the finding's IDs
+// or aliases, and its package and version, where set, are the finding's.
+export function findVulnException(exceptions, finding) {
+  const ids = new Set(finding.ids);
+  return (
+    exceptions.find(
+      (e) =>
+        ids.has(e.id) &&
+        (e.package === null || e.package === finding.name) &&
+        (e.version === null || e.version === finding.version),
+    ) ?? null
+  );
 }
 
 // One finding per OSV group (a group joins advisories that alias each other),
@@ -246,8 +296,11 @@ export function osvFindings(report) {
   return findings;
 }
 
-function isDate(s) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(`${s}T00:00:00Z`));
+// A real calendar date in YYYY-MM-DD form: 2026-02-30 is not one.
+export function isDate(s) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 }
 
 export function addDays(date, days) {
@@ -256,7 +309,7 @@ export function addDays(date, days) {
 
 // ---- Registries ----------------------------------------------------------------
 
-class RegistryError extends Error {}
+class RegistryError extends CheckError {}
 
 async function getJson(url) {
   let last;
@@ -276,6 +329,12 @@ async function getJson(url) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function publishDate(url, value, field) {
+  const date = new Date(value ?? NaN);
+  if (Number.isNaN(date.getTime())) throw new RegistryError(`${url}: no readable ${field} in the response`);
+  return date;
+}
+
 // crates.io asks crawlers for at most one request per second.
 let lastCratesIo = 0;
 async function cratesIoPublished(name, version) {
@@ -283,57 +342,74 @@ async function cratesIoPublished(name, version) {
   lastCratesIo = Date.now();
   const url = `https://crates.io/api/v1/crates/${encodeURIComponent(name)}/${encodeURIComponent(version)}`;
   const body = await getJson(url);
-  if (!body.version?.created_at) throw new RegistryError(`${url}: no version.created_at in the response`);
-  return new Date(body.version.created_at);
+  return publishDate(url, body.version?.created_at, "version.created_at");
 }
 
 const npmDocs = new Map();
 async function npmPublished(name, version) {
   const url = `https://registry.npmjs.org/${name.replace("/", "%2F")}`;
   if (!npmDocs.has(name)) npmDocs.set(name, getJson(url));
-  const time = (await npmDocs.get(name)).time?.[version];
-  if (!time) throw new RegistryError(`${url}: no time["${version}"] in the response`);
-  return new Date(time);
+  const body = await npmDocs.get(name);
+  return publishDate(url, body.time?.[version], `time["${version}"]`);
+}
+
+// ---- Repository ------------------------------------------------------------------
+
+function run(program, args) {
+  const result = spawnSync(program, args, { cwd: ROOT, encoding: "utf8", maxBuffer: MAX_BUFFER });
+  if (result.error || result.status !== 0) {
+    throw new CheckError(`${program} ${args.join(" ")} failed: ${result.error?.message ?? result.stderr.trim()}`);
+  }
+  return result.stdout;
+}
+
+function trackedLockfiles() {
+  const lockfiles = lockfilesFrom(run("git", ["ls-files", "--", "*Cargo.lock", "*pnpm-lock.yaml"]));
+  if (!lockfiles.length) throw new CheckError("git tracks no Cargo.lock or pnpm-lock.yaml");
+  return lockfiles;
+}
+
+function baseFile(ref, path) {
+  const exists = spawnSync("git", ["cat-file", "-e", `${ref}:${path}`], { cwd: ROOT });
+  return exists.status === 0 ? run("git", ["show", `${ref}:${path}`]) : "";
+}
+
+// The members of the Cargo workspace whose lockfile is `lockPath`, as name@version.
+const membersByLockfile = new Map();
+function workspaceMembers(lockPath) {
+  if (!membersByLockfile.has(lockPath)) {
+    const manifest = join(ROOT, dirname(lockPath), "Cargo.toml");
+    const metadata = JSON.parse(run("cargo", ["metadata", "--no-deps", "--format-version", "1", "--manifest-path", manifest]));
+    membersByLockfile.set(lockPath, new Set(metadata.packages.map(key)));
+  }
+  return membersByLockfile.get(lockPath);
 }
 
 // ---- Modes ---------------------------------------------------------------------
 
-function git(...args) {
-  return execFileSync("git", args, { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-}
-
-function baseFile(ref, path) {
-  try {
-    git("cat-file", "-e", `${ref}:${path}`);
-  } catch {
-    return "";
-  }
-  return git("show", `${ref}:${path}`);
-}
-
 async function ageMode(policy, base, now) {
-  try {
-    git("rev-parse", "--verify", "--quiet", `${base}^{commit}`);
-  } catch {
-    console.error(`Base ${base} is not a commit here. Fetch it (git fetch origin) or pass --base <ref>.`);
-    return 2;
+  if (spawnSync("git", ["rev-parse", "--verify", "--quiet", `${base}^{commit}`], { cwd: ROOT }).status !== 0) {
+    throw new CheckError(`base ${base} is not a commit here. Fetch it (git fetch origin) or pass --base <ref>.`);
   }
   const failures = [];
   const errors = [];
   let checked = 0;
-  for (const lock of LOCKFILES) {
-    const file = join(ROOT, lock.path);
-    if (!existsSync(file)) continue;
-    const changed = diffPackages(lock.parse(baseFile(base, lock.path)), lock.parse(readFileSync(file, "utf8")));
-    for (const p of changed) {
+  for (const lock of trackedLockfiles()) {
+    const before = parseLockfile(lock.ecosystem, baseFile(base, lock.path), `${lock.path} at ${base}`);
+    const after = parseLockfile(lock.ecosystem, readFileSync(join(ROOT, lock.path), "utf8"), lock.path);
+    for (const p of diffPackages(before, after)) {
       const id = `${lock.ecosystem} ${p.name}@${p.version}`;
-      if (p.source === null) continue; // a workspace crate
-      const fromRegistry = lock.ecosystem === "npm" ? p.source === "npm" : CRATES_IO_SOURCES.has(p.source);
-      if (!fromRegistry) {
-        console.log(`  skip  ${id}: not from the registry (${p.source}); cargo-deny judges sources`);
+      const members = lock.ecosystem === "crates.io" && p.source === null ? workspaceMembers(lock.path) : new Set();
+      const kind = classifyPackage(lock.ecosystem, p, members);
+      if (kind === "workspace") continue;
+      checked++;
+      if (kind === "unregistered") {
+        const from = p.source ?? "a path outside the workspace";
+        const exception = findAgeException(policy.ageExceptions, lock.ecosystem, p.name, p.version);
+        if (exception) console.log(`  allow ${id}: not from the registry (${from}); exception until ${exception.expires}: ${exception.reason}`);
+        else failures.push(`${id}: not from the registry (${from}), so its age cannot be checked`);
         continue;
       }
-      checked++;
       let published;
       try {
         published = lock.ecosystem === "npm" ? await npmPublished(p.name, p.version) : await cratesIoPublished(p.name, p.version);
@@ -351,14 +427,16 @@ async function ageMode(policy, base, now) {
   }
   console.log(`Checked ${checked} package version(s) added or changed since ${base}.`);
   if (errors.length) {
-    console.error(`\nRegistry error: could not read the publish time of ${errors.length} package version(s). This is not a policy failure: re-run the job, and if it persists check the version exists on the registry.`);
+    console.error(
+      `\nRegistry error: could not read the publish time of ${errors.length} package version(s). This is not a policy failure: re-run the job, and if it persists check the version exists on the registry.`,
+    );
     for (const e of errors) console.error(`  ${e}`);
   }
   if (failures.length) {
-    console.error(`\nPolicy failure: ${failures.length} package version(s) are younger than ${policy.minAgeDays} days.`);
+    console.error(`\nPolicy failure: ${failures.length} package version(s) are too young or have no registry publish time.`);
     for (const f of failures) console.error(`  ${f}`);
     console.error(
-      `\nWait until they are ${policy.minAgeDays} days old, pin an older version, or add an [[age_exception]] to ${POLICY} with a reason and an expiry (docs/dependencies.md).`,
+      `\nWait until they are ${policy.minAgeDays} days old, use a registry release, pin an older version, or add an [[age_exception]] to ${POLICY} with a reason and an expiry (docs/dependencies.md).`,
     );
     return 1;
   }
@@ -366,34 +444,31 @@ async function ageMode(policy, base, now) {
 }
 
 function vulnsMode(policy) {
-  const lockfiles = LOCKFILES.map((l) => l.path).filter((p) => existsSync(join(ROOT, p)));
+  const lockfiles = trackedLockfiles().map((l) => l.path);
   const scanner = process.env.OSV_SCANNER || "osv-scanner";
   const args = ["scan", "source", "--format", "json", ...lockfiles.flatMap((p) => ["--lockfile", p])];
-  const run = spawnSync(scanner, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  const scan = spawnSync(scanner, args, { cwd: ROOT, encoding: "utf8", maxBuffer: MAX_BUFFER });
   // OSV-Scanner exits 0 when clean and 1 when it found vulnerabilities; anything else is an error.
-  if (run.error || (run.status !== 0 && run.status !== 1)) {
-    console.error(`Scanner error: ${scanner} ${args.join(" ")} failed. This is not a policy failure.`);
-    console.error(run.error?.message ?? run.stderr);
-    return 2;
+  if (scan.error || (scan.status !== 0 && scan.status !== 1)) {
+    throw new CheckError(`${scanner} ${args.join(" ")} failed.\n${scan.error?.message ?? scan.stderr}`);
   }
   let report;
   try {
-    report = JSON.parse(run.stdout);
+    report = JSON.parse(scan.stdout);
   } catch {
-    console.error(`Scanner error: ${scanner} did not print JSON. This is not a policy failure.\n${run.stderr}`);
-    return 2;
+    throw new CheckError(`${scanner} did not print JSON.\n${scan.stderr}`);
   }
 
   const failures = [];
   const used = new Set();
   for (const f of osvFindings(report)) {
     const id = `${f.ecosystem} ${f.name}@${f.version}: ${f.ids.join(" / ")}${f.severity ? ` (CVSS ${f.severity})` : ""}`;
-    const exception = findVulnException(policy.vulnExceptions, f.ids);
+    const exception = findVulnException(policy.vulnExceptions, f);
     if (exception) {
       used.add(exception);
       console.log(`  allow ${id}; exception until ${exception.expires}: ${exception.reason}`);
     } else {
-      failures.push(id);
+      failures.push(`${id} in ${f.lockfile}`);
     }
   }
   console.log(`Scanned ${lockfiles.join(", ")}.`);
@@ -422,9 +497,10 @@ async function main(argv) {
   }
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
+  const text = readFileSync(join(ROOT, POLICY), "utf8");
   let policy;
   try {
-    policy = validatePolicy(parsePolicyToml(readFileSync(join(ROOT, POLICY), "utf8")), today);
+    policy = validatePolicy(parsePolicyToml(text), today);
   } catch (err) {
     console.error(`Policy failure: ${err.message}`);
     return 1;
@@ -437,6 +513,14 @@ async function main(argv) {
   return mode === "age" ? ageMode(policy, base, now) : vulnsMode(policy);
 }
 
+// Anything that stops the check from finishing exits 2, so it is never
+// mistaken for a policy failure (1).
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
-  process.exitCode = await main(process.argv.slice(2));
+  try {
+    process.exitCode = await main(process.argv.slice(2));
+  } catch (err) {
+    console.error("Could not run the check; this is not a policy failure.");
+    console.error(err instanceof CheckError ? err.message : err);
+    process.exitCode = 2;
+  }
 }

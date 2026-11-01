@@ -6,11 +6,16 @@ import { test } from "node:test";
 import {
   addDays,
   ageVerdict,
+  CheckError,
+  classifyPackage,
   diffPackages,
   findAgeException,
   findVulnException,
+  isDate,
+  lockfilesFrom,
   osvFindings,
   parseCargoLock,
+  parseLockfile,
   parsePnpmLock,
   parsePolicyToml,
   validatePolicy,
@@ -320,11 +325,146 @@ test("osvFindings reports one finding per advisory group with every ID and alias
   assert.deepEqual(osvFindings({ results: [] }), []);
 });
 
+const vulnException = (id, scope = {}) => ({ id, package: null, version: null, reason: "r", expires: TODAY, ...scope });
+
 test("findVulnException matches an advisory by its ID or any alias", () => {
   const [finding] = osvFindings(OSV_REPORT);
   for (const id of ["RUSTSEC-2021-0003", "GHSA-43w2-9j62-hq99", "CVE-2021-25900"]) {
-    const exceptions = [{ id, reason: "r", expires: TODAY }];
-    assert.equal(findVulnException(exceptions, finding.ids), exceptions[0], id);
+    const exceptions = [vulnException(id)];
+    assert.equal(findVulnException(exceptions, finding), exceptions[0], id);
   }
-  assert.equal(findVulnException([{ id: "RUSTSEC-2020-0071", reason: "r", expires: TODAY }], finding.ids), null);
+  assert.equal(findVulnException([vulnException("RUSTSEC-2020-0071")], finding), null);
+});
+
+test("findVulnException honours an exception's package and version scope", () => {
+  const [finding] = osvFindings(OSV_REPORT); // smallvec 1.6.0
+  const id = "RUSTSEC-2021-0003";
+  const match = (scope) => findVulnException([vulnException(id, scope)], finding) !== null;
+  assert.equal(match({ package: "smallvec" }), true);
+  assert.equal(match({ package: "smallvec", version: "1.6.0" }), true);
+  assert.equal(match({ package: "smallvec", version: "1.6.1" }), false);
+  assert.equal(match({ package: "other-crate" }), false);
+});
+
+test("validatePolicy reads a vulnerability exception's optional scope and rejects a version without a package", () => {
+  const p = policy(`min_age_days = 7
+[[vulnerability_exception]]
+id = "RUSTSEC-2021-0003"
+package = "smallvec"
+version = "1.6.0"
+reason = "r"
+expires = ${TODAY}
+[[vulnerability_exception]]
+id = "RUSTSEC-2021-0003"
+reason = "r"
+expires = ${TODAY}
+[[vulnerability_exception]]
+id = "RUSTSEC-2021-0003"
+version = "1.6.0"
+reason = "r"
+expires = ${TODAY}
+`);
+  assert.deepEqual(
+    p.vulnExceptions.map((e) => [e.package, e.version]),
+    [
+      ["smallvec", "1.6.0"],
+      [null, null],
+      [null, "1.6.0"],
+    ],
+  );
+  assert.deepEqual(p.problems, [
+    "deps-policy.toml: vulnerability_exception #3 (RUSTSEC-2021-0003): a version needs the package it belongs to",
+  ]);
+});
+
+test("isDate rejects impossible and malformed dates, and validatePolicy fails them", () => {
+  for (const d of ["2026-11-01", "2028-02-29", "2026-12-31"]) assert.equal(isDate(d), true, d);
+  for (const d of ["2026-02-30", "2026-02-29", "2026-13-01", "2026-04-31", "2026-11-1", "26-11-01"]) {
+    assert.equal(isDate(d), false, d);
+  }
+  const p = policy(`min_age_days = 7
+[[vulnerability_exception]]
+id = "RUSTSEC-2021-0003"
+reason = "r"
+expires = 2026-11-31
+`);
+  assert.equal(p.problems.length, 1);
+  assert.match(p.problems[0], /add expires = YYYY-MM-DD/);
+});
+
+test("lockfilesFrom finds Cargo.lock and pnpm-lock.yaml at any depth, by exact file name", () => {
+  const ls = ["Cargo.lock", "Cargo.toml", "app/pnpm-lock.yaml", "app/src-tauri/Cargo.lock", "notCargo.lock", "docs/x.md", ""].join("\n");
+  assert.deepEqual(lockfilesFrom(ls), [
+    { path: "Cargo.lock", ecosystem: "crates.io" },
+    { path: "app/pnpm-lock.yaml", ecosystem: "npm" },
+    { path: "app/src-tauri/Cargo.lock", ecosystem: "crates.io" },
+  ]);
+});
+
+test("parseLockfile reads a missing or empty lockfile as no packages", () => {
+  assert.deepEqual(parseLockfile("crates.io", "", "Cargo.lock"), []);
+  assert.deepEqual(parseLockfile("npm", "\n  \n", "pnpm-lock.yaml"), []);
+});
+
+test("parseLockfile refuses a non-empty lockfile that yields no packages, so it cannot pass as unchanged", () => {
+  assert.throws(() => parseLockfile("crates.io", "version = 4\n# nothing here\n", "Cargo.lock"), (err) => {
+    assert.ok(err instanceof CheckError);
+    assert.match(err.message, /^Cargo\.lock: found no packages in a non-empty lockfile/);
+    return true;
+  });
+  const v5 = `lockfileVersion: 5.4
+
+packages:
+
+  /lodash/4.17.21:
+    resolution: {integrity: sha512-y}
+`;
+  assert.throws(() => parseLockfile("npm", v5, "app/pnpm-lock.yaml"), (err) => {
+    assert.ok(err instanceof CheckError);
+    assert.match(err.message, /lockfileVersion 5 is not supported/);
+    return true;
+  });
+  assert.throws(() => parseLockfile("npm", "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n", "pnpm-lock.yaml"), CheckError);
+  assert.equal(parseLockfile("npm", PNPM_V9, "pnpm-lock.yaml").length, 5);
+});
+
+test("classifyPackage skips only workspace members and marks every other non-registry source", () => {
+  const members = new Set(["ersa-core@0.1.0"]);
+  const crate = (name, version, source) => classifyPackage("crates.io", { name, version, source }, members);
+  assert.equal(crate("ersa-core", "0.1.0", null), "workspace");
+  assert.equal(crate("vendored", "0.1.0", null), "unregistered"); // a path dependency outside the workspace
+  assert.equal(crate("ersa-core", "0.2.0", null), "unregistered");
+  assert.equal(crate("serde", "1.0.228", CRATES_IO), "registry");
+  assert.equal(crate("serde", "1.0.228", "sparse+https://index.crates.io/"), "registry");
+  assert.equal(crate("forked", "1.0.0", "git+https://github.com/x/forked?rev=abc#abc"), "unregistered");
+  assert.equal(crate("internal", "1.0.0", "registry+https://example.com/index"), "unregistered");
+
+  const npm = parsePnpmLock(PNPM_V9).map((p) => [`${p.name}@${p.version}`, classifyPackage("npm", p, new Set())]);
+  assert.deepEqual(npm, [
+    ["@types/node@22.1.0", "registry"],
+    ["lodash@4.17.21", "registry"],
+    ["react-dom@18.2.0", "registry"],
+    ["local-thing@file:../local-thing", "unregistered"],
+    ["typescript@5.6.0-beta", "registry"],
+  ]);
+});
+
+test("parsePnpmLock splits tarball and git keys at the first @ after the name", () => {
+  const text = `lockfileVersion: '9.0'
+
+packages:
+
+  thing@https://example.com/thing@1.0.0.tgz:
+    resolution: {tarball: https://example.com/thing@1.0.0.tgz}
+
+  '@scope/gitdep@git+https://github.com/x/gitdep.git#abc':
+    resolution: {commit: abc, repo: https://github.com/x/gitdep.git, type: git}
+`;
+  assert.deepEqual(
+    parsePnpmLock(text).map((p) => [p.name, p.source]),
+    [
+      ["thing", "https://example.com/thing@1.0.0.tgz"],
+      ["@scope/gitdep", "git+https://github.com/x/gitdep.git#abc"],
+    ],
+  );
 });
