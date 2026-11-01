@@ -1,4 +1,5 @@
-# The shell's Cargo workspace builds into its own target directory.
+# Where the Shell built before it joined the root workspace (which builds into
+# /target/). Kept ignored so an old checkout's leftover stays out of git status.
 /src-tauri/target/
 # Tauri writes the capability schemas here on every build.
 /src-tauri/gen/
