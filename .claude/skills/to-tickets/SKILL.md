@@ -49,7 +49,7 @@ Present the proposed breakdown as a numbered list. For each ticket, show:
 - **Blocked by**: which other tickets (if any) must complete first
 - **What it delivers**: the end-to-end behaviour this ticket makes work
 
-Show the owner the **full body of every issue** as it will be published, labels included, then ask:
+Show the owner the breakdown (each ticket's title, area and blockers); the owner approves the breakdown, not each issue body (owner's call, 2026-11-01). Then ask:
 
 - Does the granularity feel right? (too coarse / too fine)
 - Are the blocking edges correct: does each ticket only depend on tickets that genuinely gate it?
