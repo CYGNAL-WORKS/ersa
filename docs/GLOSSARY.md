@@ -6,7 +6,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 
 - **Ersa**: the application. Capitalised as a proper noun in prose, lowercase `ersa` as an identifier.
 - **Backend**: a vendor agent product that Ersa drives, such as Claude Code or GitHub Copilot, or a local-inference harness. The user installs and authenticates it themselves.
-- **Adapter**: the Ersa code that drives one backend through its structured-event protocol and provides the projection from that backend's raw output to Ersa events. One adapter per backend.
+- **Adapter**: the Ersa code that drives one backend through its structured-event protocol and provides the projection from that backend's live stream and session record to Ersa events. One adapter per backend.
 - **Mode**: a named preset applied to a session at start: base instructions, allowed tools, and tool servers.
 - **Pack**: a backend-neutral, versioned description of agents, skills, tool servers, and prompts, rendered into each backend's native format when applied to a project.
 - **Pack source**: a location packs are fetched from: a directory, a shared drive, or an HTTP endpoint.
@@ -15,11 +15,13 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 
 - **Project**: a repository or root folder the user has added to Ersa, on a particular host.
 - **Workspace**: an isolated checkout belonging to a project where one or more sessions do their work. A git worktree is one kind; a Perforce workspace is another.
-- **Session**: one conversation with one agent, in one workspace, on one host. A session has a raw log, a projection, and a lifecycle.
+- **Session**: one conversation with one agent, in one workspace, on one host. An ordinary backend session: its history is the backend's session record, and Ersa stores only what finds it again (host, project, workspace, backend, and the backend's session id).
+- **Session record**: the backend's own record of a session, which the backend resumes from and its own tools list. The history of a session, whether its turns were taken in Ersa or elsewhere. Retention is the backend's.
+- **Live stream**: what a running backend sends Ersa as it happens. Carries details the session record omits (text as it arrives, permission prompts, turn ends, cost, rate limits), which are shown and not stored.
 - **Host**: a machine where sessions can run. The local machine is a host; an SSH-reachable machine is another. A remote host runs its own Core.
 - **Transport**: the mechanism Core uses to start and talk to processes on a host: local spawn or SSH.
-- **Raw log**: the persisted, verbatim, ordered lines exchanged with a session's backend: what it emitted, what Ersa wrote to it, and Core's lifecycle records for the session, each tagged with its direction. The source of truth for everything shown about a session.
-- **Projection**: the versioned derivation of Ersa events from a raw log. Transcript, rail state, and resume are projections.
+- **Raw log**: the verbatim, ordered lines exchanged with a live session's backend since Core opened it, each tagged with its direction, held in memory for the developer pane and never stored. Not a source of truth.
+- **Projection**: the versioned derivation of Ersa events from a session record and the live stream, merged on the backend's message ids. Made each time a session is opened, never stored. Transcript and rail state are projections.
 - **Event**: one typed message in the agent event protocol, produced by projection and streamed to the Interface.
 - **Permission request**: the agent asking the user to approve an action before it runs.
 - **Question**: the agent asking the user to choose or answer something that is not a permission.
@@ -33,6 +35,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Interface**: the TypeScript application in the Shell's webview.
 - **Core**: the Rust process that owns sessions, adapters, transports, workspaces, packs, modes, the harness tools server, and persistence.
 - **Core API**: the request/response protocol between Interface and Core.
+- **App log**: Core's log of its own operational records (process started, exited, failed to start, Core restarted). Not part of any session.
 - **Harness tools server**: the MCP tools Core exposes to every session's backend: cross-session messaging, session metadata, user-defined tools, and interface-driving tools. Never permission prompting.
 
 ## Interface

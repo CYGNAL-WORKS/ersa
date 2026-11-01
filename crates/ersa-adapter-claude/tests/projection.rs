@@ -39,7 +39,7 @@ fn render(projection: &[(u64, ersa_adapter::Projected)]) -> String {
     text
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R04
+// verifies: PROTO-CLAUDE-CODE-STREAM-R11
 // verifies: PROTO-AGENT-EVENTS-R09
 #[test]
 fn every_fixture_projects_to_its_golden_file_and_validates() {
