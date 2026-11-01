@@ -26,7 +26,8 @@ interface ProjectListProps {
 export function ProjectList({ view, onNewSession, starting = {}, onSetTrust, trusting = {}, initialAsking, children }: ProjectListProps) {
   // The project whose trust question is showing, if any.
   const [asking, setAsking] = useState(initialAsking);
-  // Once a question closes, focus returns to the button that opened it, enabled again by then.
+  // Once a question closes, focus returns to the button that opened it. After "Trust" that button is
+  // disabled while the answer is saved, so focus waits for it, unless the user has moved focus meanwhile.
   const list = useRef<HTMLElement>(null);
   const closedFor = useRef<string>(undefined);
   const close = (id: string) => {
@@ -35,9 +36,13 @@ export function ProjectList({ view, onNewSession, starting = {}, onSetTrust, tru
   };
   useEffect(() => {
     const id = closedFor.current;
+    if (!id) return;
+    const button = list.current?.querySelector<HTMLButtonElement>(`[data-trust-for="${CSS.escape(id)}"]`);
+    if (button?.disabled) return;
     closedFor.current = undefined;
-    if (id) list.current?.querySelector<HTMLElement>(`[data-trust-for="${CSS.escape(id)}"]`)?.focus();
-  }, [asking]);
+    const lost = document.activeElement === null || document.activeElement === document.body;
+    if (lost) button?.focus();
+  }, [asking, trusting]);
   return (
     <section ref={list} className="projects" aria-label="Projects">
       <h2 className="projects-header">
