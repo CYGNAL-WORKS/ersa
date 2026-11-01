@@ -177,34 +177,27 @@ struct Handle {
     summary_read: ReadSlot<Result<Option<RecordSummary>, String>>,
 }
 
-/// One read of a session's record that may still be running, and when it
-/// started.
-type ReadSlot<T> = tokio::sync::Mutex<Option<(tokio::task::JoinHandle<T>, std::time::Instant)>>;
+/// One read of a session's record that may still be running.
+type ReadSlot<T> = tokio::sync::Mutex<Option<tokio::task::JoinHandle<T>>>;
 
-/// How long a read left running is waited on by later opens before it is
-/// given up for a fresh one: a host or disk that hung may have recovered.
-const STALE_READ: Duration = Duration::from_secs(120);
-
-/// The result of the read in `slot`, started with `start` unless an earlier
-/// one is there (still running, or finished since its caller gave up),
-/// which is waited on or taken instead. `None` when it takes longer than
-/// `timeout`; it is kept for the next caller.
+/// The result of a read of the session's record, started with `start`
+/// unless one is still running in `slot`, which is waited on instead: a
+/// read is never started beside one that has not finished (a thread stuck on
+/// a hung disk stays one thread). `None` when it takes longer than
+/// `timeout`; it is kept for the next caller. A read that finished after its
+/// caller gave up is not handed on, since the record may have changed since;
+/// a fresh read of an unchanged record costs little (the adapter keeps what
+/// it read last while the file's size and modified time stay the same).
 async fn read_once<T: Send + 'static>(
     slot: &ReadSlot<T>,
     timeout: Duration,
     start: impl FnOnce() -> tokio::task::JoinHandle<T>,
 ) -> Option<T> {
     let mut slot = slot.lock().await;
-    // A read older than STALE_READ is given up for a fresh one: if it is
-    // still running, the host or disk that hung may have recovered; if it
-    // finished, what it read is old.
-    if let Some((old, since)) = slot.as_ref()
-        && since.elapsed() >= STALE_READ
-    {
-        old.abort();
+    if slot.as_ref().is_some_and(|task| task.is_finished()) {
         *slot = None;
     }
-    let (task, _) = slot.get_or_insert_with(|| (start(), std::time::Instant::now()));
+    let task = slot.get_or_insert_with(start);
     // Awaited where it lies, so a caller that goes away (its connection
     // closed) leaves the read in the slot for the next one, never a second
     // read beside it.
@@ -778,6 +771,7 @@ impl SessionManager {
         let session = handle.describe();
         self.store.delete_session(id.to_string()).await?;
         lock(&self.sessions).remove(id);
+        self.app_log.forget(id);
         // A tile still waiting to go out would show the session again.
         self.tiles.forget(id);
         // Dropping the senders ends every subscription's forwarding task.
@@ -859,7 +853,7 @@ impl SessionManager {
     }
 
     /// Subscribes a connection to a session's events from `from_seq` on
-    /// (PROTO-CORE-API-R02), opening the session's view first when it needs
+    /// (PROTO-CORE-API-R14), opening the session's view first when it needs
     /// one (see the module's notes). `transport_for` reaches a host, to read
     /// the session record there. Returns the subscription, which stops when
     /// dropped, and what the subscribe answer says.
@@ -980,7 +974,7 @@ impl SessionManager {
                             .await
                             .unwrap_or_else(|| {
                                 Err(format!(
-                                    "it took longer than {RECORD_READ:?}, or the read failed"
+                                    "it is still being read after {RECORD_READ:?}, or the read failed"
                                 ))
                             })
                     }
@@ -1805,6 +1799,57 @@ mod tests {
             overflowed: Arc::default(),
             kick: Arc::new(watch::Sender::new(false)),
         }
+    }
+
+    #[tokio::test]
+    async fn a_read_still_running_is_waited_on_never_started_beside_it() {
+        use std::sync::atomic::AtomicUsize;
+        let slot: ReadSlot<u32> = ReadSlot::default();
+        let starts = AtomicUsize::new(0);
+        let gate = Arc::new(Notify::new());
+        let slow = || {
+            starts.fetch_add(1, Ordering::SeqCst);
+            let gate = Arc::clone(&gate);
+            tokio::spawn(async move {
+                gate.notified().await;
+                7
+            })
+        };
+        let short = Duration::from_millis(20);
+        assert_eq!(read_once(&slot, short, slow).await, None);
+        // The disk still hangs: the next open waits on the same read.
+        assert_eq!(read_once(&slot, short, slow).await, None);
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+        gate.notify_one();
+        assert_eq!(
+            read_once(&slot, Duration::from_secs(5), slow).await,
+            Some(7)
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+
+        // A read that finished after its caller gave up is not handed on:
+        // the record may have changed since. A fresh one is started.
+        let gate = Arc::new(Notify::new());
+        let late = || {
+            starts.fetch_add(1, Ordering::SeqCst);
+            let gate = Arc::clone(&gate);
+            tokio::spawn(async move {
+                gate.notified().await;
+                1
+            })
+        };
+        assert_eq!(read_once(&slot, short, late).await, None);
+        gate.notify_one();
+        tokio::time::sleep(short).await;
+        let fresh = || {
+            starts.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async { 2 })
+        };
+        assert_eq!(
+            read_once(&slot, Duration::from_secs(5), fresh).await,
+            Some(2)
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 3);
     }
 
     #[test]

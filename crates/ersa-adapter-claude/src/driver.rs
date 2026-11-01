@@ -55,6 +55,8 @@ pub struct ClaudeAdapter {
     /// Where the CLI keeps session records; `None` for wherever the CLI
     /// itself would ([`record::default_claude_home`]).
     claude_home: Option<PathBuf>,
+    /// The records read last, reused while unchanged.
+    records: Arc<record::RecordCache>,
 }
 
 impl ClaudeAdapter {
@@ -65,6 +67,7 @@ impl ClaudeAdapter {
             handshake_timeout: Duration::from_secs(60),
             stop_grace: Duration::from_secs(3),
             claude_home: None,
+            records: Arc::default(),
         }
     }
 
@@ -331,7 +334,8 @@ impl Adapter for ClaudeAdapter {
         let home = self.claude_home()?;
         let (cwd, id) = (cwd.to_string(), backend_session_id.to_string());
         // Reading a long record takes a while; off the async threads.
-        blocking(move || record::read_record(&home, &cwd, &id)).await
+        let records = Arc::clone(&self.records);
+        blocking(move || records.read(&home, &cwd, &id)).await
     }
 
     /// The record's title and first time, from its head and tail
