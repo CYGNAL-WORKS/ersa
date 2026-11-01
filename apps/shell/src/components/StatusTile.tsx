@@ -21,7 +21,7 @@ interface StatusTileProps {
 export function StatusTile({ title, tone, summary, detail, readouts, action }: StatusTileProps) {
   return (
     <section className="tile" data-tone={tone} aria-label={title}>
-      <span className="tile-glyph" aria-hidden="true" />
+      <span className="glyph tile-glyph" data-tone={tone} aria-hidden="true" />
       <div>
         <span className="tile-title">{title}</span> <span className="tile-summary">{summary}</span>
       </div>
