@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use ersa_core::{CoreConfig, ServeError, Server};
 
 /// Command-line arguments.
@@ -31,12 +31,33 @@ enum Command {
         /// application data directory.
         #[arg(long, value_name = "DIR")]
         data_dir: Option<PathBuf>,
-        /// The named pipe or socket to listen on, instead of the user's
-        /// default. For tests and development, so a second Core does not
-        /// collide with the one the Shell uses.
-        #[arg(long, value_name = "NAME")]
-        endpoint: Option<String>,
+        #[command(flatten)]
+        endpoint: EndpointArg,
     },
+}
+
+/// `--endpoint`, shared by every subcommand that serves the Core API
+/// (`PROTO-CORE-API`, Transport and framing). `#[derive(Args)]` makes it a
+/// group of arguments that a subcommand takes in with `#[command(flatten)]`.
+#[derive(Debug, Default, PartialEq, Eq, Args)]
+struct EndpointArg {
+    /// Serve on the user's endpoint with this label appended (letters,
+    /// digits, '-', '_'), instead of the user's own. For tests and a second
+    /// Core, so neither collides with the one the Shell uses.
+    #[arg(long, value_name = "LABEL")]
+    endpoint: Option<String>,
+}
+
+impl EndpointArg {
+    /// The labelled endpoint when a label was given, else `default`. Only a
+    /// label is taken, never a raw pipe name or socket path, so an explicit
+    /// endpoint is exactly as private as the default.
+    fn or(self, default: String) -> std::io::Result<String> {
+        match self.endpoint {
+            Some(label) => ersa_core::platform::labelled_endpoint(&label),
+            None => Ok(default),
+        }
+    }
 }
 
 // `#[tokio::main]` wraps `main` in a Tokio runtime, so it can be `async`.
@@ -63,7 +84,7 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn serve(data_dir: Option<PathBuf>, endpoint: Option<String>) -> ExitCode {
+async fn serve(data_dir: Option<PathBuf>, endpoint: EndpointArg) -> ExitCode {
     let Some(data_dir) = data_dir.or_else(ersa_core::platform::default_data_dir) else {
         eprintln!("ersa-core: cannot find the application data directory; pass --data-dir");
         return ExitCode::FAILURE;
@@ -84,9 +105,13 @@ async fn serve(data_dir: Option<PathBuf>, endpoint: Option<String>) -> ExitCode 
             return ExitCode::FAILURE;
         }
     };
-    if let Some(endpoint) = endpoint {
-        config.endpoint = endpoint;
-    }
+    config.endpoint = match endpoint.or(config.endpoint) {
+        Ok(endpoint) => endpoint,
+        Err(e) => {
+            eprintln!("ersa-core: invalid --endpoint: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
     // Every backend this build can drive. Core itself knows none of them.
     let adapters: Vec<Arc<dyn ersa_core::Adapter>> =
         vec![Arc::new(ersa_adapter_claude::ClaudeAdapter::new())];
@@ -133,9 +158,34 @@ mod tests {
             cli.command,
             Command::Serve {
                 data_dir: None,
-                endpoint: None
+                endpoint: EndpointArg { endpoint: None }
             }
         ));
+    }
+
+    #[test]
+    fn serve_takes_an_endpoint() {
+        let cli = Cli::try_parse_from(["ersa-core", "serve", "--endpoint", "second"])
+            .expect("--endpoint is accepted");
+        let Command::Serve { endpoint, .. } = cli.command;
+        assert_eq!(
+            endpoint.or("default".into()).unwrap(),
+            ersa_core::platform::labelled_endpoint("second").unwrap()
+        );
+        assert_eq!(
+            EndpointArg::default().or("default".into()).unwrap(),
+            "default"
+        );
+    }
+
+    #[test]
+    fn serve_refuses_a_raw_pipe_name_or_path_as_endpoint() {
+        for raw in [r"\\.\pipe\elsewhere", "/tmp/elsewhere.sock", "../up"] {
+            let endpoint = EndpointArg {
+                endpoint: Some(raw.into()),
+            };
+            assert!(endpoint.or("default".into()).is_err(), "{raw}");
+        }
     }
 
     #[test]
