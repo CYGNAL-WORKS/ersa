@@ -283,15 +283,15 @@ function PermissionCard({
 const HIDDEN =
   /\r(?!\n)|(?![\t\n\r])[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Zl}\p{Zp}\u2800]/gu;
 
+/** Letters of the scripts whose spelling uses joiners. Never Latin: there a joiner only hides a split word. */
+const JOINING = /^[\p{Script=Arabic}\p{Script=Syriac}\p{Script=Devanagari}\p{Script=Bengali}\p{Script=Gurmukhi}\p{Script=Gujarati}\p{Script=Oriya}\p{Script=Tamil}\p{Script=Telugu}\p{Script=Kannada}\p{Script=Malayalam}\p{Script=Sinhala}]$/u;
+
 /**
  * Joiners and the emoji presentation selector do real work inside emoji
  * (a warning sign drawn as emoji, family sequences) and between letters of
  * scripts that need them (Arabic, Indic); there they hide nothing and are
  * left as they are. Anywhere else, they are marked.
  */
-/** Letters of the scripts whose spelling uses joiners. Never Latin: there a joiner only hides a split word. */
-const JOINING = /^[\p{Script=Arabic}\p{Script=Syriac}\p{Script=Devanagari}\p{Script=Bengali}\p{Script=Gurmukhi}\p{Script=Gujarati}\p{Script=Oriya}\p{Script=Tamil}\p{Script=Telugu}\p{Script=Kannada}\p{Script=Malayalam}\p{Script=Sinhala}]$/u;
-
 function benign(text: string, at: number, hidden: string): boolean {
   const code = hidden.codePointAt(0);
   const prev = text.slice(Math.max(0, at - 2), at);
@@ -300,7 +300,11 @@ function benign(text: string, at: number, hidden: string): boolean {
   if (code === 0x200d && /(\p{Extended_Pictographic}|\p{Emoji_Modifier}|\uFE0F)$/u.test(prev)) {
     return /^\p{Extended_Pictographic}/u.test(after);
   }
-  if (code === 0x200c || code === 0x200d) return JOINING.test(prev.slice(-1)) && JOINING.test(after.slice(0, 1));
+  if (code === 0x200c || code === 0x200d) {
+    // The letter before, past any marks on it (harakat, vowel signs).
+    const base = text.slice(0, at).replace(/\p{M}+$/u, "").slice(-1);
+    return JOINING.test(base) && JOINING.test(after.slice(0, 1));
+  }
   return false;
 }
 

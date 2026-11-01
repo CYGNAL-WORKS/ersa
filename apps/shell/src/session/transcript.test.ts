@@ -270,7 +270,9 @@ describe("marking hidden characters", () => {
     expect(html("rm\u200D -rf")).toContain("U+200D");
     // Between Latin letters a joiner only hides a split word.
     expect(html("r\u200Cm -rf")).toContain("U+200C");
-    expect(html("\u0915\u094D\u200D\u0937")).not.toContain("U+");
+    // A Persian letter carrying a harakat, then ZWNJ: the mark does not hide the letter it sits on.
+    expect(html("\u0645\u064E\u200C\u0647")).not.toContain("U+");
+    expect(html("e\u0301\u200Cm")).toContain("U+200C");
   });
 });
 

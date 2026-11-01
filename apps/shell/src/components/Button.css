@@ -12,7 +12,8 @@
 }
 
 /* Hover darkens the edge as well as the fill: surface-raised alone barely differs from surface. */
-.button:hover:not(:disabled):not(:focus-visible),
+/* :where() adds no specificity, so :active below still wins on a press. */
+.button:hover:not(:disabled):where(:not(:focus-visible)),
 .button[data-force="hover"] {
   background: var(--color-surface-raised);
   border-color: var(--color-ink-faint);
@@ -46,7 +47,7 @@
 }
 
 /* The edge strengthens from hover to pressed, as the quiet button's does. */
-.button[data-variant="primary"]:hover:not(:disabled):not(:focus-visible),
+.button[data-variant="primary"]:hover:not(:disabled):where(:not(:focus-visible)),
 .button[data-variant="primary"][data-force="hover"] {
   background: var(--color-accent);
   border-color: var(--color-ink-muted);
