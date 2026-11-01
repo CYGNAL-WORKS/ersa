@@ -1,0 +1,27 @@
+# SHA-256 of each copied third-party file, text normalised to LF. See THIRD-PARTY.md.
+f3dd099ce99289bd213914d8ee3e2429b78309c3957ca4583f7659551b1d53c1  .claude/skills/codebase-design/DEEPENING.md
+c222ab5a82e0405672eb9062d62496139a08828e45d07fc5f18e4952c10fac1a  .claude/skills/codebase-design/DESIGN-IT-TWICE.md
+4dac49461655bc5d722777a0c98e51ebec5c5f3491b1b4117ee745c6066a8fdc  .claude/skills/codebase-design/SKILL.md
+0f9790a285465b3927892aee2f6fbe2cc16989f7d1f35f78ef44bd6538aa5e43  .claude/skills/diagnosing-bugs/SKILL.md
+35103539fc36873eea36074769ad454f9379d6fc8b2dc0e26ce987fd3bfe5503  .claude/skills/diagnosing-bugs/scripts/hitl-loop.template.sh
+7105ef41a7fdfc6bab9887801fc7899e264d0d0591c2fd96c2165cac04848a08  .claude/skills/domain-modeling/ADR-FORMAT.md
+8dc23798fe6d0d217d3d1f995638d0761831ed6692f1900937aa4f3511752d72  .claude/skills/domain-modeling/GLOSSARY-FORMAT.md
+5d5c02ee872b8aa40fb44d81c4e7964d075b5c50bc3bd34b655c7d282d5d3f8d  .claude/skills/domain-modeling/SKILL.md
+caaf8b8de1684f96e26b28f3c29189db5c89cce4b73e1c93d86164f66ef88637  .claude/skills/grill-me/SKILL.md
+7de372c13488f1ee96cc11cd8907b56b6809cc93eef776eeddd37de6b6cbe3fe  .claude/skills/grill-with-docs/SKILL.md
+a146842ed93ca43d833550fa9adf02e58cb63c83fea9d4b4522995b82242d4e2  .claude/skills/grilling/SKILL.md
+4cbb043950dad2ffd3662ff1a5a0b51ae676004b5cae10e3787e8ee7a4ee69d3  .claude/skills/handoff/SKILL.md
+c05581f786045838da5dba3a76dd2478a9250035882feb826bf48106a62a24ad  .claude/skills/implement/SKILL.md
+a7a087127665d7298a72280ef6e19c41ad8404523712a788c8dc3ab414bc2497  .claude/skills/pr/CREDITS.md
+f20f7fa94d8972f6fa861c5902caa427e0f771f93021fdd72da0ee173ae0627b  .claude/skills/pr/SKILL.md
+c54ebeff1fd9be7e749c08c2751c596f334bac1050b93716f54a1bb841229deb  .claude/skills/research/SKILL.md
+33fbc28568e3146f20fd908b12998bc0ab30aa4f4c87288199a40793efa94696  .claude/skills/retro/SKILL.md
+5fbea34e5ff5193bc51cc295fd9a728da6566b80c474e1264339d7338689712c  .claude/skills/tdd/SKILL.md
+3ceb807fdf4a47d6a93d4d9a891e5ba6d362a6247bd08adc451feebfc17361ef  .claude/skills/tdd/mocking.md
+859f9e592c188fda4fc7277dd180e4ce9c7a2e13f6efe1f6f29eccc9d28c106a  .claude/skills/tdd/tests.md
+8e1105ec81d6865497170013456407c43fd8538d50a1d5937a2b73ab9ef99146  .claude/skills/to-tickets/SKILL.md
+10493b1731ede58de1f6e6a0399884124af93503e4b0f3208a86fe1d561a4977  .claude/skills/wait-what/SKILL.md
+c768e6307c7c10728c401c213f2c4ba71c542127eeb7ad2956aabd15a0fa0059  .claude/skills/writing-for-agents/SKILL-MECHANICS.md
+551adca942227b44192edba88acd4e8db911f0121ce58ad16944ccf6a896a74a  .claude/skills/writing-for-agents/SKILL.md
+b9ae9d48de132ce3ae65ece11939aa286b50aa3c356eb6cb9eae654b71e02bdd  docs/agents/issue-tracker.md
+0203b03d2682c5078e74652ad1363220faecb9b5efbc70bf0e1af5ad40214542  docs/agents/triage-labels.md
