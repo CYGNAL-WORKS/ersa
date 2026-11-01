@@ -545,6 +545,7 @@ export interface SessionTileNotification {
  * What the rail renders for a session; Core keeps it current from events. Usage fields are absent until known.
  */
 export interface Tile {
+  state: AgentEvents.SessionState["state"];
   context_tokens?: number;
   context_window?: number;
   cost_usd_total?: number;

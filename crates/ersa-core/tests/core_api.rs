@@ -103,17 +103,12 @@ async fn reserved_methods_answer_invalid_state_naming_their_milestone() {
 
 // verifies: PROTO-CORE-API-R10
 #[tokio::test(flavor = "multi_thread")]
-async fn session_methods_answer_invalid_state_until_m0_t6() {
+async fn session_resume_answers_invalid_state_naming_m1() {
     let core = start().await;
     let mut client = core.client().await;
-    for method in Method::ALL
-        .iter()
-        .filter(|m| m.name().starts_with("session."))
-    {
-        let error = client.error(method.name(), json!({ "id": "s-1" })).await;
-        assert_eq!(kind(&error), "invalid_state", "{}", method.name());
-        assert!(error["message"].as_str().unwrap().contains("M0-T6"));
-    }
+    let error = client.error("session.resume", json!({ "id": "s-1" })).await;
+    assert_eq!(kind(&error), "invalid_state");
+    assert!(error["message"].as_str().unwrap().contains("M1"));
 }
 
 // verifies: PROTO-CORE-API-R06
