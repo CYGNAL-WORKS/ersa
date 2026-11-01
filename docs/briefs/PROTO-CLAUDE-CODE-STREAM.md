@@ -64,7 +64,7 @@ Only with `--include-partial-messages`. Wraps the Messages API stream events: `m
 
 ### system / status, task_summary, post_turn_summary, thinking_tokens
 
-Progress and summary lines. `task_summary` and `post_turn_summary` are absent from the SDK 0.3.316 types; the fixtures are the reference for their shape. `post_turn_summary` carries `status_category` (`completed`, `blocked`) and `status_detail`; `thinking_tokens` carries running estimates. The rail's activity state is derived from these and from `assistant` activity.
+Progress and summary lines. `task_summary` and `post_turn_summary` are absent from the SDK 0.3.316 types and marked internal in the CLI's own schemas, so they may change or vanish without notice; the fixtures are the reference for their shape. `post_turn_summary` carries `status_category` (`completed`, `blocked`) and `status_detail`; `thinking_tokens` carries running estimates. The rail's activity state is derived from `assistant`, `user` tool results, `control_request`, `status`, and `result`, which are supported surface; `task_summary` and `post_turn_summary` only add detail when present, and their absence changes no state.
 
 ### rate_limit_event
 
@@ -186,6 +186,8 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - Whether `--replay-user-messages` should be on by default for raw-log completeness.
 
 ## Changes
+
+- 2026-11-01: `task_summary` and `post_turn_summary` are internal CLI surface; activity state no longer depends on them. No requirement IDs changed.
 
 - 2026-11-01: from M0-T3 inbox: `system/init` arrives with the first turn, so version comparison uses the `initialize` response and feature detection uses `system/init`; observed fields beyond the SDK types noted; stdin user-message shape added; allow always carries `updatedInput`. No requirement IDs changed.
 
