@@ -128,7 +128,7 @@ impl AppLog {
     /// one; its predecessor is read too, so what happened just before a
     /// rotation is still found. A file that cannot be read is reported and
     /// passed over: what it held is lost, but the log still records from
-    /// now on. Fails only when the log cannot be opened for writing.
+    /// now on. Fails only when the log cannot be opened for appending.
     pub fn open(data_dir: &Path) -> io::Result<(AppLog, HashMap<String, Facts>)> {
         let path = data_dir.join(FILE_NAME);
         let previous = data_dir.join(PREVIOUS_FILE_NAME);
@@ -144,15 +144,20 @@ impl AppLog {
             // Another process may hold it open; it grows a while longer.
             tracing::warn!(path = %path.display(), error = %e, "could not move the app log aside");
         }
-        let mut file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(true)
-            .open(&path)?;
+        let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
         // A crash mid-write leaves a last line without its end; the next fact
         // must start a line of its own rather than join it and be lost.
-        if !ends_with_newline(&mut file)? {
-            file.write_all(b"\n")?;
+        // Should the check fail, the log still records from now on.
+        match File::open(&path).and_then(|mut read| ends_with_newline(&mut read)) {
+            Ok(true) => {}
+            Ok(false) => {
+                if let Err(e) = file.write_all(b"\n") {
+                    tracing::warn!(path = %path.display(), error = %e, "could not end the app log's torn last line");
+                }
+            }
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "could not check the app log's last line");
+            }
         }
         Ok((
             AppLog {
@@ -235,9 +240,19 @@ fn entries_in(path: &Path) -> io::Result<Vec<Entry>> {
     };
     let mut reader = BufReader::new(file);
     let mut entries = Vec::new();
-    while let Some(line) = next_line(&mut reader)? {
-        if let Ok(entry) = serde_json::from_slice::<Entry>(&line) {
-            entries.push(entry);
+    loop {
+        match next_line(&mut reader) {
+            Ok(Some(line)) => {
+                if let Ok(entry) = serde_json::from_slice::<Entry>(&line) {
+                    entries.push(entry);
+                }
+            }
+            Ok(None) => break,
+            // What was read before the error still counts.
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "could not read the rest of the app log");
+                break;
+            }
         }
     }
     Ok(entries)
