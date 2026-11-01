@@ -155,9 +155,20 @@ impl Transport for ScratchConfig {
             "CLAUDE_CONFIG_DIR".into(),
             self.0.to_string_lossy().into_owned(),
         );
-        // Whatever key the machine has would make the turn a model call.
-        spec.env_remove
-            .extend(["ANTHROPIC_API_KEY".into(), "CLAUDE_CODE_OAUTH_TOKEN".into()]);
+        // Whatever credential or provider the machine has would make the
+        // turn a model call.
+        spec.env_remove.extend(
+            [
+                "ANTHROPIC_API_KEY",
+                "ANTHROPIC_AUTH_TOKEN",
+                "ANTHROPIC_BASE_URL",
+                "CLAUDE_CODE_OAUTH_TOKEN",
+                "CLAUDE_CODE_USE_BEDROCK",
+                "CLAUDE_CODE_USE_VERTEX",
+                "CLAUDE_CODE_USE_FOUNDRY",
+            ]
+            .map(String::from),
+        );
         LocalTransport.spawn(spec).await
     }
 }

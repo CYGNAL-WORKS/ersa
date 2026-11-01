@@ -41,7 +41,21 @@ fn another_hosts_session_variables_never_reach_the_cli() {
     for name in HOST_SESSION_VARIABLES {
         command.env(name, PARENT_VALUE);
     }
-    let output = command.output().expect("the test binary runs again");
+    command
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = command.spawn().expect("the test binary runs again");
+    // A wedged inner run is killed, never left running past this test.
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    while child.try_wait().expect("wait").is_none() {
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the inner run did not finish in time");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let output = child.wait_with_output().expect("output");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
         output.status.success(),
@@ -55,8 +69,9 @@ fn another_hosts_session_variables_never_reach_the_cli() {
 #[tokio::test]
 #[ignore = "run by another_hosts_session_variables_never_reach_the_cli, with the variables set"]
 async fn inner_the_child_sees_none_of_the_parents_session_variables() {
-    // Run on its own (by `--ignored`, say), there is nothing to check.
-    if std::env::var_os(HOST_SESSION_VARIABLES[0]).is_none() {
+    // Run on its own (by `--ignored`, say, perhaps inside a Claude host that
+    // sets these variables itself), there is nothing to check.
+    if std::env::var(HOST_SESSION_VARIABLES[0]).as_deref() != Ok(PARENT_VALUE) {
         return;
     }
     for name in HOST_SESSION_VARIABLES {
