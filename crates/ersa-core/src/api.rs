@@ -292,13 +292,11 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         Method::SessionSetTitle => to_json(sessions::set_title(core, parse(params)?).await),
         Method::SessionSetMode => to_json(sessions::set_mode(core, parse(params)?).await),
         Method::SessionSubscribe => {
-            to_json(sessions::subscribe(core, &conn.peer(), parse(params)?))
+            to_json(sessions::subscribe(core, &conn.peer(), parse(params)?).await)
         }
         Method::SessionUnsubscribe => to_json(sessions::unsubscribe(&conn.peer(), parse(params)?)),
         Method::SessionRawLog => to_json(sessions::raw_log(core, parse(params)?).await),
-        Method::SessionReproject => {
-            to_json(sessions::reproject(core, &conn.kick, parse(params)?).await)
-        }
+        Method::SessionReproject => to_json(sessions::reproject(core, parse(params)?).await),
 
         // Handled above by `reserved_for`; listed so that adding a method
         // without deciding how to answer it is a compile error.
@@ -438,11 +436,11 @@ pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Resp
             Err((e, _)) => Err(e),
         },
         Some(Method::SessionReproject) => match parse(params) {
-            Ok(params) => to_json(sessions::reproject(core, &peer.kick, params).await),
+            Ok(params) => to_json(sessions::reproject(core, params).await),
             Err((e, _)) => Err(e),
         },
         Some(Method::SessionSubscribe) => match parse(params) {
-            Ok(params) => to_json(sessions::subscribe(core, peer, params)),
+            Ok(params) => to_json(sessions::subscribe(core, peer, params).await),
             Err((e, _)) => Err(e),
         },
         Some(Method::SessionUnsubscribe) => match parse(params) {

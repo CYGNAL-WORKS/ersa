@@ -33,9 +33,64 @@ pub trait Adapter: Send + Sync {
         sink: Arc<dyn AdapterSink>,
     ) -> Result<Box<dyn AdapterSession>, AdapterError>;
 
-    /// A fresh projector for one session's raw log. Core makes one per
-    /// projection pass and feeds it the log from the first line.
+    /// A fresh projector for one session's live stream. Core makes one each
+    /// time it starts the backend and feeds it every raw line from the first.
     fn projector(&self) -> Box<dyn Projector>;
+
+    /// The events of a session's history, projected from the backend's own
+    /// session record (ADR 0017): the session the backend knows as
+    /// `backend_session_id`, started in `cwd` on the transport's host.
+    ///
+    /// A record that does not exist (never written yet, or deleted by the
+    /// backend's retention) is an empty history, not an error. Pure in the
+    /// record: reading the same record twice yields the same events
+    /// (PROTO-AGENT-EVENTS-R11). A backend without a record has no history,
+    /// which is the default.
+    async fn read_record(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        _backend_session_id: &str,
+    ) -> Result<Vec<RecordEvent>, AdapterError> {
+        Ok(Vec::new())
+    }
+
+    /// What the backend's session record says of the session as a whole: its
+    /// title and when it began. Read without reading the whole record, since
+    /// Core asks for every session it lists. `None` when the session has no
+    /// record, which is also the default.
+    async fn summarize_record(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        _backend_session_id: &str,
+    ) -> Result<Option<RecordSummary>, AdapterError> {
+        Ok(None)
+    }
+}
+
+/// A session as its record presents it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecordSummary {
+    /// The session's title, as the backend's own tools show it; `None` when
+    /// the record gives none.
+    pub title: Option<String>,
+    /// When the session began, RFC 3339, as the record gives it.
+    pub created_at: Option<String>,
+}
+
+/// One event projected from an entry of a session record.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordEvent {
+    /// The backend's id for the message the entry carries, on which record
+    /// and live input are merged. `None` for an entry with no id (a line
+    /// that could not be read, say).
+    pub message_id: Option<String>,
+    /// When the backend wrote the entry, as the entry gives it.
+    pub ts: Option<String>,
+    /// The backend version that wrote the entry, as the entry gives it.
+    pub backend_version: Option<String>,
+    pub event: Event,
 }
 
 /// A running backend session, driven by Core.
@@ -69,7 +124,7 @@ pub trait AdapterSession: Send + Sync {
 /// it; the adapter never sees the raw log or the event stream.
 ///
 /// The methods are synchronous and must return quickly: Core stamps the line
-/// and queues it for storage, never blocking on I/O. That lets an adapter call
+/// and queues it for projection, never blocking on I/O. That lets an adapter call
 /// them from inside its read loop without awaiting.
 pub trait AdapterSink: Send + Sync {
     /// Records one raw line. Core assigns its `index` and `ts` and appends it to
@@ -92,17 +147,18 @@ pub trait AdapterSink: Send + Sync {
     fn process_exited(&self, exit: io::Result<ProcessExit>);
 }
 
-/// Turns one session's raw log into Ersa events (`PROTO-AGENT-EVENTS`,
-/// Projection rules).
+/// Turns one live session's raw lines into Ersa events
+/// (`PROTO-AGENT-EVENTS`, Projection rules).
 ///
 /// A projector is a pure function of the lines it is fed, in order: no clock,
 /// no I/O, no randomness, so the same log always gives the same events
 /// (PROTO-AGENT-EVENTS-R03). It may keep state between lines (`&mut self`), such
 /// as the text of a block being streamed or the turn number.
 pub trait Projector: Send {
-    /// The version of this adapter's projection logic. Core caches projections
-    /// keyed by it and re-projects when it changes, so bump it whenever the
-    /// events this projector produces for some log would change.
+    /// The version of this adapter's projection logic. Bump it whenever the
+    /// events this projector produces for some input would change. Nothing
+    /// projected is stored, so the new events apply the next time a session
+    /// is opened.
     fn version(&self) -> u32;
 
     /// The events `line` completes. Every line yields at least one, with
@@ -110,32 +166,36 @@ pub trait Projector: Send {
     /// line that cannot be projected yields a recoverable `error` plus a
     /// passthrough of the line, never a panic (PROTO-AGENT-EVENTS-R10).
     ///
-    /// Payloads only: Core wraps each in an envelope, assigning `seq`, taking
-    /// `ts` from `line`, and setting `source.raw_to` to `line.index`.
+    /// Payloads only: Core wraps each in an envelope, assigning `seq` and
+    /// taking `ts` from `line`.
     fn project(&mut self, line: &RawLine) -> Vec<Projected>;
 }
 
-/// One event a projector produced, with the first raw line it came from.
-///
-/// The envelope's `source` names an inclusive range of raw lines. The last is
-/// always the line being projected; the first is earlier when the event
-/// gathers several lines, as streamed text does. Only the projector knows that,
-/// so it says so here.
+/// One event a projector produced, with the backend's id for the message it
+/// came from.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Projected {
-    /// Index of the first raw line the event came from; at most the index of
-    /// the line being projected.
-    pub raw_from: u64,
+    /// The id the backend's session record gives the same message, when the
+    /// line carried one. Core yields an event once when the record already
+    /// had its message (PROTO-AGENT-EVENTS-R12), so set it only for events the
+    /// record also yields.
+    pub message_id: Option<String>,
     pub event: Event,
 }
 
 impl Projected {
-    /// An event that came from `line` alone, the common case.
-    pub fn from_line(line: &RawLine, event: Event) -> Self {
+    /// An event with no message in the session record behind it: a turn
+    /// boundary, a permission prompt, usage, a state change.
+    pub fn from_line(_line: &RawLine, event: Event) -> Self {
         Projected {
-            raw_from: line.index,
+            message_id: None,
             event,
         }
+    }
+
+    /// An event from the message the backend identifies as `message_id`.
+    pub fn of_message(message_id: Option<String>, event: Event) -> Self {
+        Projected { message_id, event }
     }
 }
 

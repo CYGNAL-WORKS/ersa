@@ -35,16 +35,9 @@ const MAX_ENTRY_BYTES: usize = 16 * 1024 * 1024;
 /// How much of a line that could not be read a passthrough event keeps.
 const PASSTHROUGH_PREFIX_BYTES: usize = 4 * 1024;
 
-/// One event projected from a record entry.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RecordEvent {
-    /// The entry's `uuid`: the backend's message id, on which record and live
-    /// input are merged. `None` for a line that could not be read.
-    pub message_id: Option<String>,
-    /// When the CLI wrote the entry, as the entry gives it.
-    pub ts: Option<String>,
-    pub event: Event,
-}
+/// One event projected from a record entry: `message_id` is the entry's
+/// `uuid`, `ts` its `timestamp` and `backend_version` its `version`.
+pub use ersa_adapter::RecordEvent;
 
 /// The events of a whole session record, as read from its file.
 ///
@@ -99,6 +92,7 @@ pub fn project_record(record: &str) -> Vec<RecordEvent> {
         out.push(RecordEvent {
             message_id: None,
             ts: None,
+            backend_version: None,
             event: protocol_error(problem),
         });
     }
@@ -288,13 +282,13 @@ impl RecordProjector {
     /// snapshots, attachments, and whatever else the CLI keeps) yield none.
     fn project(&mut self, value: Value) -> Vec<RecordEvent> {
         let id = uuid(&value).map(String::from);
-        let ts = value
-            .get("timestamp")
-            .and_then(Value::as_str)
-            .map(String::from);
+        let text = |key: &str| value.get(key).and_then(Value::as_str).map(String::from);
+        let ts = text("timestamp");
+        let version = text("version");
         let attribute = |event| RecordEvent {
             message_id: id.clone(),
             ts: ts.clone(),
+            backend_version: version.clone(),
             event,
         };
 
@@ -378,6 +372,7 @@ fn unreadable(line: &str, message: String) -> Vec<RecordEvent> {
     let event = |event| RecordEvent {
         message_id: None,
         ts: None,
+        backend_version: None,
         event,
     };
     vec![

@@ -8,8 +8,11 @@
 //! 2. The adapter spawns the backend through the transport and gets a
 //!    [`Process`]. It hands every line the backend writes to stdout, and every
 //!    line it writes to the backend's stdin, to the sink. Core stamps each one
-//!    into a [`RawLine`] and appends it to the session's raw log (ADR 0010).
-//! 3. Core runs the adapter's [`Projector`] over the raw log to get Ersa events.
+//!    into a [`RawLine`] and keeps it in the session's in-memory raw log.
+//! 3. Core runs the adapter's [`Projector`] over those lines to get Ersa events,
+//!    after the events of the session's history, which
+//!    [`Adapter::read_record`] projects from the backend's own session record
+//!    (ADR 0017).
 //!    A permission request is just a backend line: projection turns it into
 //!    `permission.requested`, the user decides, and Core calls
 //!    [`AdapterSession::decide_permission`]. The answer the adapter writes back
@@ -40,7 +43,7 @@ pub mod fake;
 // rather than reaching into private module paths.
 pub use adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, PermissionDecision, Projected, Projector,
-    SessionConfig,
+    RecordEvent, RecordSummary, SessionConfig,
 };
 pub use local::LocalTransport;
 pub use raw::{Direction, RawLine};

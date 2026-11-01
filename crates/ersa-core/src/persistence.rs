@@ -1,6 +1,7 @@
 //! Persistence: one local database per Core process holding projects, hosts,
-//! workspaces, sessions, raw logs, the projection cache, and settings
-//! (`ARCH-CORE`, Persistence). SQLite in the user's application data
+//! workspaces, settings, and per session only what finds and presents it
+//! (`ARCH-CORE`, Persistence). A session's history is the backend's own
+//! session record and is never copied here (ADR 0017). SQLite in the user's application data
 //! directory, with schema migrations run at startup.
 //!
 //! [`Store`] owns the connection. Its methods are `async` and run SQLite on
@@ -25,7 +26,7 @@ use crate::settings;
 
 mod sessions;
 
-pub use sessions::{LogBatch, SessionProgress};
+pub use sessions::SessionRow;
 
 /// The migrations, in order. Migration `n` (1-based) is applied when the
 /// database's `user_version` is below `n`, and then sets it to `n`. Append
@@ -33,6 +34,7 @@ pub use sessions::{LogBatch, SessionProgress};
 const MIGRATIONS: &[&str] = &[
     include_str!("persistence/0001_initial.sql"),
     include_str!("persistence/0002_session_tiles.sql"),
+    include_str!("persistence/0003_session_record.sql"),
 ];
 
 /// The id of the local host's row, which always exists.
@@ -337,24 +339,6 @@ impl Store {
         .await
     }
 
-    // -- Sessions ----------------------------------------------------------
-
-    /// How many sessions are running, and how many are waiting on the user.
-    pub async fn session_counts(&self) -> Result<(u64, u64)> {
-        self.call(|conn| {
-            Ok(conn.query_row(
-                "SELECT
-                     COUNT(*) FILTER (WHERE state IN ('starting', 'running', 'idle')),
-                     COUNT(*) FILTER (WHERE state = 'waiting_user')
-                 FROM sessions",
-                [],
-                // SQLite integers are signed 64-bit; a count is never negative.
-                |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, i64>(1)? as u64)),
-            )?)
-        })
-        .await
-    }
-
     // -- Settings ----------------------------------------------------------
 
     /// The user settings as one JSON object.
@@ -538,15 +522,7 @@ mod tests {
         let conn = Connection::open(&path).expect("open");
         let version = user_version(&conn).expect("user_version");
         assert_eq!(version, MIGRATIONS.len());
-        for table in [
-            "hosts",
-            "projects",
-            "workspaces",
-            "sessions",
-            "raw_log",
-            "projection_cache",
-            "settings",
-        ] {
+        for table in ["hosts", "projects", "workspaces", "sessions", "settings"] {
             let found: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -569,38 +545,109 @@ mod tests {
         assert!(matches!(Store::open(&path), Err(Error::TooNew { .. })));
     }
 
-    #[tokio::test]
-    async fn raw_log_lines_cannot_be_rewritten() {
-        let (_dir, store) = temp_store();
-        store.ensure_local_host("pc".into()).await.expect("host");
-        let result = store
-            .call(|conn| {
-                conn.execute_batch(
-                    "INSERT INTO projects VALUES ('p', 'local', '/r', '/r', 'r', 'git', 't');
-                     INSERT INTO workspaces VALUES ('w', 'p', '/w', 'b', 'ready', 't');
-                     INSERT INTO sessions (id, workspace_id, host_id, backend, state, created_at)
-                         VALUES ('s', 'w', 'local', 'claude-code', 'running', 't');
-                     INSERT INTO raw_log VALUES ('s', 0, 't', 'backend', 'line');",
-                )?;
-                Ok(())
-            })
-            .await;
-        assert!(result.is_ok(), "{result:?}");
-
-        let rewrites = [
-            "UPDATE raw_log SET line = 'changed'",
-            "INSERT OR REPLACE INTO raw_log VALUES ('s', 0, 't', 'backend', 'changed')",
-            "REPLACE INTO raw_log VALUES ('s', 0, 't', 'backend', 'changed')",
-        ];
-        for sql in rewrites {
-            let result = store.call(move |conn| Ok(conn.execute(sql, [])?)).await;
-            assert!(result.is_err(), "{sql} must be refused");
+    /// A database as it stood after migration `version`.
+    fn database_at(path: &Path, version: usize) -> Connection {
+        let conn = Connection::open(path).expect("open");
+        for sql in &MIGRATIONS[..version] {
+            conn.execute_batch(sql).expect("old migration");
         }
-        let line: String = store
-            .call(|conn| Ok(conn.query_row("SELECT line FROM raw_log", [], |r| r.get(0))?))
-            .await
-            .expect("read back");
-        assert_eq!(line, "line");
+        conn.pragma_update(None, "user_version", version as i64)
+            .expect("set version");
+        conn
+    }
+
+    #[test]
+    fn migration_3_keeps_each_sessions_backend_id_and_drops_its_history() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("ersa.db");
+        let conn = database_at(&path, 2);
+        let init = r#"{"type":"system","subtype":"init","session_id":"from-the-log"}"#;
+        let other = r#"{"type":"system","subtype":"init","session_id":"other"}"#;
+        conn.execute_batch(
+            "INSERT INTO hosts VALUES ('local', 'pc', 'local', '{}', 't');
+             INSERT INTO projects VALUES ('p', 'local', '/r', '/r', 'r', 'git', 't');
+             INSERT INTO workspaces VALUES ('w', 'p', '/w', 'b', 'ready', 't');
+             INSERT INTO sessions (id, workspace_id, host_id, backend, mode, title, state,
+                                   backend_session_id, created_at)
+                 VALUES ('s-row', 'w', 'local', 'claude-code', 'm', 'Kept', 'ended', 'on-the-row', 't1'),
+                        ('s-log', 'w', 'local', 'claude-code', NULL, NULL, 'ended', NULL, 't2'),
+                        ('s-none', 'w', 'local', 'claude-code', NULL, NULL, 'error', NULL, 't3');",
+        )
+        .expect("old rows");
+        let log = [
+            ("s-row", 0, "backend", other),
+            ("s-log", 0, "core", r#"{"type":"process_started"}"#),
+            ("s-log", 1, "backend", "not json"),
+            ("s-log", 2, "backend", init),
+        ];
+        for (session, idx, dir, line) in log {
+            conn.execute(
+                "INSERT INTO raw_log VALUES (?1, ?2, 't', ?3, ?4)",
+                params![session, idx, dir, line],
+            )
+            .expect("old line");
+        }
+        conn.execute(
+            "INSERT INTO projection_cache VALUES ('s-log', 1, 3, 0, '{}')",
+            [],
+        )
+        .expect("old cache");
+        drop(conn);
+
+        drop(Store::open(&path).expect("migrates"));
+        let conn = Connection::open(&path).expect("open");
+        assert_eq!(user_version(&conn).unwrap(), MIGRATIONS.len());
+        type Kept = (String, Option<String>, Option<String>);
+        let rows: Vec<Kept> = conn
+            .prepare("SELECT id, backend_session_id, mode FROM sessions ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let kept = |id: &str, backend_id: Option<&str>, mode: Option<&str>| {
+            (
+                id.to_string(),
+                backend_id.map(String::from),
+                mode.map(String::from),
+            )
+        };
+        assert_eq!(
+            rows,
+            [
+                kept("s-log", Some("from-the-log"), None),
+                kept("s-none", None, None),
+                kept("s-row", Some("on-the-row"), Some("m")),
+            ]
+        );
+        for gone in ["raw_log", "projection_cache"] {
+            let found: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE name = ?1",
+                    [gone],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(found, 0, "{gone} is gone");
+        }
+        let columns: Vec<String> = conn
+            .prepare("SELECT name FROM pragma_table_info('sessions')")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            columns,
+            [
+                "id",
+                "workspace_id",
+                "host_id",
+                "backend",
+                "backend_session_id",
+                "mode"
+            ]
+        );
     }
 
     #[tokio::test]

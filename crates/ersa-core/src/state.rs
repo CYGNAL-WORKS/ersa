@@ -10,6 +10,7 @@ use ersa_protocol::core_api::{BackendState, HelloHost};
 use tokio::sync::{Mutex, watch};
 
 use crate::adapters::{self, Detected};
+use crate::app_log::AppLog;
 use crate::persistence::{LOCAL_HOST_ID, Store};
 use crate::platform;
 use crate::sessions::SessionManager;
@@ -20,7 +21,7 @@ use crate::transport::LocalTreeTransport;
 /// endpoint.
 #[derive(Debug, Clone)]
 pub struct CoreConfig {
-    /// Where the database (and, by default, worktrees) live.
+    /// Where the database, the app log and (by default) worktrees live.
     pub data_dir: PathBuf,
     /// The named pipe or socket path to listen on.
     pub endpoint: String,
@@ -71,6 +72,11 @@ impl CoreConfig {
     pub fn db_path(&self) -> PathBuf {
         self.data_dir.join("ersa.db")
     }
+
+    /// Where Core's app log is kept: beside the database.
+    pub fn app_log_dir(&self) -> PathBuf {
+        self.data_dir.clone()
+    }
 }
 
 /// Core's shared state. Handlers receive `&Core`; the server holds it in an
@@ -101,10 +107,15 @@ pub struct Core {
 impl Core {
     /// Core's state over `store`, able to start sessions for the backends
     /// `adapters` drive.
-    pub fn new(config: CoreConfig, store: Store, adapters: Vec<Arc<dyn Adapter>>) -> Core {
+    pub fn new(
+        config: CoreConfig,
+        store: Store,
+        adapters: Vec<Arc<dyn Adapter>>,
+        app_log: Arc<AppLog>,
+    ) -> Core {
         Core {
             config,
-            sessions: SessionManager::new(store.clone(), adapters),
+            sessions: SessionManager::new(store.clone(), adapters, app_log),
             store,
             local_transport: Arc::new(LocalTreeTransport::for_commands()),
             local_session_transport: Arc::new(LocalTreeTransport::new()),
