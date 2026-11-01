@@ -6,6 +6,7 @@
 //! for something special:
 //!
 //! - `ask`: a permission request, answered with `session.decide_permission`.
+//! - `question`: a question for the user.
 //! - `burst <n>`: `n` replies at once, to flood subscribers.
 //!
 //! Anything else gets a usage line and an echoed reply.
@@ -20,8 +21,8 @@ use ersa_adapter::{
 };
 use ersa_protocol::events::{
     AssistantText, BackendPassthrough, DecidedBy, Event, LifecycleState, MessageOrigin,
-    PermissionBehavior, PermissionDecided, PermissionFlags, PermissionRequested, SessionState,
-    TurnStarted, TurnTrigger, UsageUpdated, UserMessage,
+    PermissionBehavior, PermissionDecided, PermissionFlags, PermissionRequested, Question,
+    QuestionAsked, SessionState, TurnStarted, TurnTrigger, UsageUpdated, UserMessage,
 };
 use serde_json::{Map, Value, json};
 
@@ -37,6 +38,7 @@ pub struct Stats {
 pub struct FakeAdapter {
     projector_version: u32,
     fail_start: bool,
+    panic_start: bool,
     pub stats: Arc<Stats>,
 }
 
@@ -45,7 +47,16 @@ impl FakeAdapter {
         FakeAdapter {
             projector_version,
             fail_start: false,
+            panic_start: false,
             stats: Arc::default(),
+        }
+    }
+
+    /// An adapter with a bug: it panics while starting.
+    pub fn panicking() -> Self {
+        FakeAdapter {
+            panic_start: true,
+            ..FakeAdapter::new(1)
         }
     }
 
@@ -75,6 +86,9 @@ impl Adapter for FakeAdapter {
             Direction::Host,
             json!({ "t": "hello", "cwd": config.cwd }).to_string(),
         );
+        if self.panic_start {
+            panic!("the fake adapter has a bug");
+        }
         if self.fail_start {
             sink.process_exited(Ok(ProcessExit { code: Some(1) }));
             return Err(AdapterError::Protocol("the fake refused to start".into()));
@@ -149,6 +163,8 @@ impl AdapterSession for FakeSession {
             for i in 0..count {
                 self.backend(json!({ "t": "reply", "text": format!("{i}") }));
             }
+        } else if text == "question" {
+            self.backend(json!({ "t": "question", "id": "q-1" }));
         } else if text == "ask" {
             let id = {
                 let mut inner = self.inner.lock().unwrap();
@@ -262,6 +278,15 @@ impl Projector for FakeProjector {
                     reason: None,
                 })]
             }
+            (Direction::Backend, Some("question")) => vec![Event::QuestionAsked(QuestionAsked {
+                request_id: text("id"),
+                questions: vec![Question {
+                    id: "q".into(),
+                    text: "Which one?".into(),
+                    options: None,
+                    multi_select: false,
+                }],
+            })],
             (Direction::Host, Some("decide")) => {
                 vec![Event::PermissionDecided(PermissionDecided {
                     request_id: text("id"),

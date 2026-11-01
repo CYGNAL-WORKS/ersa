@@ -68,6 +68,15 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 /// is the backstop.
 const START_WAIT: Duration = Duration::from_secs(120);
 
+/// How long one call into a ready adapter (send, decide, interrupt) may take.
+/// Each writes one line to the backend; one still waiting after this has a
+/// backend that stopped reading.
+const ADAPTER_CALL: Duration = Duration::from_secs(30);
+
+/// The most bytes of cached events a replay reads at a time (always at least
+/// one event, however large).
+const REPLAY_BYTES: usize = 8 * 1024 * 1024;
+
 /// How long `session.send` waits for its message to be projected, to report
 /// the turn it started.
 const SEND_SETTLE: Duration = Duration::from_secs(10);
@@ -76,12 +85,15 @@ const SEND_SETTLE: Duration = Duration::from_secs(10);
 /// adapter to report the half-started process's exit.
 const CANCELLED_START_GRACE: Duration = Duration::from_secs(10);
 
-/// Retry delays for a raw-log write that failed. The raw log is the truth,
-/// so lines are never dropped; the last delay repeats until the write works.
-const WRITE_RETRY: [Duration; 4] = [
+/// Delays between attempts at a raw-log write that failed, about ten
+/// seconds in all. A database that cannot take the write by then is not
+/// coming back soon; the session is stopped rather than left running with
+/// nothing recorded.
+const WRITE_RETRY: [Duration; 5] = [
     Duration::from_millis(50),
     Duration::from_millis(200),
     Duration::from_secs(1),
+    Duration::from_secs(3),
     Duration::from_secs(5),
 ];
 
@@ -114,6 +126,9 @@ pub struct SessionManager {
     sessions: Mutex<HashMap<String, Arc<Handle>>>,
     /// `session.tile` notifications, serialized, for every attached client.
     tiles: broadcast::Sender<Arc<String>>,
+    /// Set by [`SessionManager::stop_all`]; no session starts after it.
+    /// Read and written under the `sessions` lock.
+    closing: AtomicBool,
 }
 
 /// One session, live or not.
@@ -250,52 +265,72 @@ impl SessionManager {
                 .collect(),
             sessions: Mutex::new(HashMap::new()),
             tiles: broadcast::channel(TILE_QUEUE).0,
+            closing: AtomicBool::new(false),
         }
     }
 
     /// Loads every session at startup and repairs what a previous Core left.
     ///
     /// A session still marked live was running when that Core ended without
-    /// recording the backend's exit (it crashed or was killed); its process
-    /// went with it. It gets a `core_restarted` record, which ends it. A
-    /// cached projection made by another projector version, or one that
-    /// does not reach the end of the raw log, is re-derived.
+    /// recording the backend's exit (it crashed or was killed). On Windows
+    /// its process tree died with that Core's job handle; elsewhere the CLI
+    /// sees its stdin close and exits, though anything it started may
+    /// linger. It gets a `core_restarted` record, which ends it. A cached
+    /// projection made by another projector version, or one that does not
+    /// reach the end of the raw log, is re-derived.
+    ///
+    /// A session that cannot be repaired is logged and left as it is: one
+    /// bad session must not keep Core from starting for all the others.
     pub async fn recover(&self) -> persistence::Result<()> {
         for session in self.store.sessions().await? {
-            let adapter = self.adapters.get(&session.backend);
-            let mut last_seq = session.last_event_seq;
-            if let Some(adapter) = adapter {
-                let projection =
-                    Projection::new(&session.id, &session.backend, adapter.projector());
-                let version = projection.projector_version();
-                let append = is_live(session.state).then(|| {
-                    (
-                        Direction::Core,
-                        now_rfc3339(),
-                        CoreRecord::CoreRestarted.to_line(),
-                    )
-                });
-                let current = self
-                    .store
-                    .projection_is_current(session.id.clone(), version)
-                    .await?;
-                if append.is_some() || !current {
-                    tracing::info!(session = %session.id, "re-deriving the session's projection");
-                    let projection = self
-                        .store
-                        .rebuild_projection(session.id.clone(), projection, append)
-                        .await?;
-                    last_seq = projection.last_seq();
+            let version = self
+                .adapters
+                .get(&session.backend)
+                .map(|adapter| adapter.projector().version());
+            let last_seq = match self.recover_one(&session).await {
+                Ok(last_seq) => last_seq,
+                Err(e) => {
+                    tracing::error!(session = %session.id, error = %e, "could not repair the session; leaving it as it is");
+                    session.last_event_seq
                 }
-                let handle = Handle::new(&session.id, &session.backend, Some(version), last_seq);
-                lock(&self.sessions).insert(session.id.clone(), Arc::new(handle));
-            } else {
-                tracing::warn!(session = %session.id, backend = %session.backend, "no adapter for the session's backend; leaving it as it is");
-                let handle = Handle::new(&session.id, &session.backend, None, last_seq);
-                lock(&self.sessions).insert(session.id.clone(), Arc::new(handle));
-            }
+            };
+            let handle = Handle::new(&session.id, &session.backend, version, last_seq);
+            lock(&self.sessions).insert(session.id.clone(), Arc::new(handle));
         }
         Ok(())
+    }
+
+    /// Repairs one session as [`SessionManager::recover`] describes, and
+    /// returns the seq of its last event.
+    async fn recover_one(&self, session: &Session) -> persistence::Result<Option<u64>> {
+        let Some(adapter) = self.adapters.get(&session.backend) else {
+            tracing::warn!(session = %session.id, backend = %session.backend, "no adapter for the session's backend; leaving it as it is");
+            return Ok(session.last_event_seq);
+        };
+        let projection = Projection::new(&session.id, &session.backend, adapter.projector());
+        let version = projection.projector_version();
+        let append = is_live(session.state).then(|| {
+            (
+                Direction::Core,
+                now_rfc3339(),
+                CoreRecord::CoreRestarted.to_line(),
+            )
+        });
+        let current = self
+            .store
+            .projection_is_current(session.id.clone(), version)
+            .await
+            // An unreadable cache is re-derived like a stale one.
+            .unwrap_or(false);
+        if append.is_none() && current {
+            return Ok(session.last_event_seq);
+        }
+        tracing::info!(session = %session.id, "re-deriving the session's projection");
+        let projection = self
+            .store
+            .rebuild_projection(session.id.clone(), projection, append)
+            .await?;
+        Ok(projection.last_seq())
     }
 
     /// Whether an adapter for `backend` is registered.
@@ -341,6 +376,11 @@ impl SessionManager {
             .ok_or_else(|| {
                 SessionError::BackendMissing(format!("no adapter for backend {}", session.backend))
             })?;
+        let shutting_down =
+            || SessionError::InvalidState("Core is shutting down; no session can start".into());
+        if self.closing.load(Ordering::SeqCst) {
+            return Err(shutting_down());
+        }
         self.store.insert_session(session.clone()).await?;
         let projection = Projection::new(&session.id, &session.backend, adapter.projector());
         let handle = Arc::new(Handle::new(
@@ -349,16 +389,26 @@ impl SessionManager {
             Some(projection.projector_version()),
             None,
         ));
-        lock(&self.sessions).insert(session.id.clone(), Arc::clone(&handle));
-        self.launch(
-            handle,
-            adapter,
-            transport,
-            config,
-            backend_version,
-            projection,
-        );
-        Ok(session)
+        {
+            // Registered and launched under the lock `stop_all` takes, so a
+            // session either starts before shutdown and is stopped by it, or
+            // does not start at all.
+            let mut sessions = lock(&self.sessions);
+            if !self.closing.load(Ordering::SeqCst) {
+                sessions.insert(session.id.clone(), Arc::clone(&handle));
+                self.launch(
+                    handle,
+                    adapter,
+                    transport,
+                    config,
+                    backend_version,
+                    projection,
+                );
+                return Ok(session);
+            }
+        }
+        self.store.delete_session(session.id.clone()).await?;
+        Err(shutting_down())
     }
 
     /// Starts the session's tasks. The handle is live when this returns.
@@ -421,10 +471,14 @@ impl SessionManager {
     /// Stops every running session, for `core.shutdown`: all at once, then
     /// waits for them together.
     pub async fn stop_all(&self) {
-        let running: Vec<Arc<Live>> = lock(&self.sessions)
-            .values()
-            .filter_map(|handle| handle.live())
-            .collect();
+        let running: Vec<Arc<Live>> = {
+            let sessions = lock(&self.sessions);
+            self.closing.store(true, Ordering::SeqCst);
+            sessions
+                .values()
+                .filter_map(|handle| handle.live())
+                .collect()
+        };
         for live in &running {
             begin_stop(live);
         }
@@ -462,16 +516,23 @@ impl SessionManager {
     pub async fn send(&self, id: &str, text: &str) -> Result<u32, SessionError> {
         let live = self.live(id)?;
         let session = live.wait_ready().await?;
-        session
-            .send_user(text)
-            .await
-            .map_err(SessionError::Adapter)?;
+        bounded(session.send_user(text)).await?;
         // The adapter recorded the message before writing it, so the sink
         // has it. Wait for the pipeline to project it: the turn it starts
         // (or joins) is known then.
         let target = live.sink.next_index();
         let mut progress = live.progress.clone();
-        let _ = tokio::time::timeout(SEND_SETTLE, progress.wait_for(|p| p.lines >= target)).await;
+        let settled = matches!(
+            tokio::time::timeout(SEND_SETTLE, progress.wait_for(|p| p.lines >= target)).await,
+            Ok(Ok(_))
+        );
+        if !settled {
+            // Sent, but not stored in time: the turn is not known, and a
+            // made-up number would hide that the raw log is falling behind.
+            return Err(SessionError::Internal(
+                "the message was sent, but Core could not store it in time".into(),
+            ));
+        }
         let turn = progress.borrow().turn;
         Ok(turn.max(1))
     }
@@ -479,7 +540,7 @@ impl SessionManager {
     pub async fn interrupt(&self, id: &str) -> Result<(), SessionError> {
         let live = self.live(id)?;
         let session = live.wait_ready().await?;
-        session.interrupt().await.map_err(SessionError::Adapter)
+        bounded(session.interrupt()).await
     }
 
     /// Answers a pending permission request (PROTO-CORE-API-R04). The answer
@@ -492,10 +553,7 @@ impl SessionManager {
     ) -> Result<(), SessionError> {
         let live = self.live(id)?;
         let session = live.wait_ready().await?;
-        session
-            .decide_permission(request_id, decision)
-            .await
-            .map_err(SessionError::Adapter)
+        bounded(session.decide_permission(request_id, decision)).await
     }
 
     /// Discards the cached projection and re-derives it from the raw log.
@@ -517,7 +575,16 @@ impl SessionManager {
             .store
             .rebuild_projection(id.to_string(), projection, None)
             .await?;
-        lock(&handle.hub).last_seq = projection.last_seq();
+        {
+            // Subscribers were sent the old events; they are disconnected,
+            // so their clients resubscribe and read the new ones.
+            let mut hub = lock(&handle.hub);
+            hub.last_seq = projection.last_seq();
+            for subscriber in hub.subscribers.values() {
+                subscriber.overflowed.store(true, Ordering::SeqCst);
+            }
+            hub.subscribers.clear();
+        }
         send_tile(&self.tiles, id, projection.tile());
         Ok(())
     }
@@ -581,6 +648,22 @@ impl SessionManager {
             go: Some(go_tx),
         };
         Ok((subscription, last_seq))
+    }
+}
+
+/// Runs one adapter call, giving up after [`ADAPTER_CALL`]: a backend that
+/// stopped reading its stdin would otherwise hold the write, and with it
+/// every later request on the client's connection, until someone stopped
+/// the session from elsewhere.
+async fn bounded(
+    call: impl std::future::Future<Output = Result<(), AdapterError>>,
+) -> Result<(), SessionError> {
+    match tokio::time::timeout(ADAPTER_CALL, call).await {
+        Ok(result) => result.map_err(SessionError::Adapter),
+        Err(_) => Err(SessionError::Adapter(AdapterError::Io(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("the backend did not take the line within {ADAPTER_CALL:?}"),
+        )))),
     }
 }
 
@@ -823,12 +906,22 @@ async fn run_session(task: SessionTask) {
 
     let mut cancel = live.cancel.subscribe();
     let as_sink: Arc<dyn AdapterSink> = sink.clone();
+    // The start runs in a task of its own, so an adapter that panics fails
+    // the start instead of leaving the session live forever.
+    let mut start = tokio::spawn(async move { adapter.start(transport, config, as_sink).await });
     let outcome = tokio::select! {
-        result = adapter.start(transport, config, as_sink) => Some(result),
+        result = &mut start => Some(result.unwrap_or_else(|e| {
+            Err(AdapterError::Protocol(format!("the adapter failed while starting: {e}")))
+        })),
         // A stop during the start drops the start: an adapter's half-made
         // session kills its process when dropped.
-        () = raised(&mut cancel) => None,
+        () = raised(&mut cancel) => {
+            start.abort();
+            None
+        }
     };
+    let mut pipeline = pipeline;
+    let mut pipeline_done = false;
     match outcome {
         Some(Ok(session)) => {
             let session: Arc<dyn AdapterSession> = Arc::from(session);
@@ -838,9 +931,23 @@ async fn run_session(task: SessionTask) {
             if *cancel.borrow() {
                 begin_stop(&live);
             }
-            // Until the process exits, by itself or because of a stop.
+            // Until the process exits, by itself or because of a stop. A
+            // pipeline that gave up can no longer record anything, so the
+            // backend is stopped rather than left running unrecorded.
             let mut ended = sink.ended.subscribe();
-            let _ = ended.wait_for(|ended| *ended).await;
+            let pipeline_result = tokio::select! {
+                _ = ended.wait_for(|ended| *ended) => None,
+                result = &mut pipeline => Some(result),
+            };
+            if let Some(result) = pipeline_result {
+                pipeline_done = true;
+                if let Err(e) = result {
+                    tracing::error!(session = %handle.id, error = %e, "the session's pipeline failed");
+                }
+                tracing::error!(session = %handle.id, "the raw log cannot be written; stopping the backend");
+                begin_stop(&live);
+                let _ = tokio::time::timeout(STOP_TIMEOUT, ended.wait_for(|ended| *ended)).await;
+            }
         }
         Some(Err(e)) => {
             tracing::warn!(session = %handle.id, error = %e, "the backend did not start");
@@ -864,7 +971,7 @@ async fn run_session(task: SessionTask) {
     // request in flight goes when that request ends.
     started.send_replace(Started::Gone);
     sink.close();
-    if let Err(e) = pipeline.await {
+    if !pipeline_done && let Err(e) = pipeline.await {
         tracing::error!(session = %handle.id, error = %e, "the session's pipeline failed");
     }
     *lock(&handle.live) = None;
@@ -911,14 +1018,18 @@ async fn run_pipeline(pipeline: Pipeline) {
         }
         let next_line = batch.last().map_or(0, |line| line.index + 1);
         let events: Vec<Envelope> = batch.iter().flat_map(|l| projection.project(l)).collect();
-        let write = LogBatch {
+        let write = Arc::new(LogBatch {
             session_id: handle.id.clone(),
             lines: batch,
             events,
             projection_version,
             progress: SessionProgress::of(&projection),
-        };
-        let write = store_with_retry(&store, write).await;
+        });
+        if !store_with_retry(&store, &write).await {
+            // Nothing after this can be stored in order either. Ending here
+            // tells the session task, which stops the backend.
+            return;
+        }
 
         publish(&handle, &write.events);
         if projection.tile() != &last_tile {
@@ -932,18 +1043,23 @@ async fn run_pipeline(pipeline: Pipeline) {
     }
 }
 
-/// Writes `batch`, retrying until it is stored, and returns it.
-async fn store_with_retry(store: &Store, batch: LogBatch) -> LogBatch {
-    let mut attempt = 0;
+/// Writes `batch`, retrying a few times. `false` when it could not be
+/// stored.
+async fn store_with_retry(store: &Store, batch: &Arc<LogBatch>) -> bool {
+    let mut delays = WRITE_RETRY.iter();
     loop {
-        match store.append_session_log(batch.clone()).await {
-            Ok(()) => return batch,
-            Err(e) => {
-                let delay = WRITE_RETRY[attempt.min(WRITE_RETRY.len() - 1)];
-                tracing::error!(session = %batch.session_id, error = %e, ?delay, "could not store raw log lines; retrying");
-                tokio::time::sleep(delay).await;
-                attempt += 1;
-            }
+        match store.append_session_log(Arc::clone(batch)).await {
+            Ok(()) => return true,
+            Err(e) => match delays.next() {
+                Some(delay) => {
+                    tracing::error!(session = %batch.session_id, error = %e, ?delay, "could not store raw log lines; retrying");
+                    tokio::time::sleep(*delay).await;
+                }
+                None => {
+                    tracing::error!(session = %batch.session_id, error = %e, "could not store raw log lines; giving up");
+                    return false;
+                }
+            },
         }
     }
 }
@@ -1075,7 +1191,13 @@ async fn forward(task: Forward) {
         while next <= last {
             let to = last.min(next.saturating_add(REPLAY_PAGE - 1));
             let page = match store
-                .cached_events(session_id.clone(), projection_version, next, to)
+                .cached_events(
+                    session_id.clone(),
+                    projection_version,
+                    next,
+                    to,
+                    REPLAY_BYTES,
+                )
                 .await
             {
                 Ok(page) => page,
@@ -1087,17 +1209,32 @@ async fn forward(task: Forward) {
                     return;
                 }
             };
-            if page.is_empty() {
-                // The session was removed or re-projected meanwhile.
-                break;
+            if overflowed.load(Ordering::SeqCst) {
+                // Dropped meanwhile (re-projected, or fell behind).
+                kick.send_replace(true);
+                return;
             }
-            for envelope in page {
-                let line = cached_event_line(&session_id, &envelope);
+            let mut progressed = false;
+            for (seq, envelope) in &page {
+                if *seq != next {
+                    break;
+                }
+                let line = cached_event_line(&session_id, envelope);
                 if outbound.send(line).await.is_err() {
                     return;
                 }
+                next += 1;
+                progressed = true;
             }
-            next = to.saturating_add(1);
+            if !progressed {
+                // The next event is not in the cache: the session was
+                // removed or re-projected meanwhile. Skipping ahead would
+                // leave a gap the client never hears about; closing the
+                // connection tells it to resubscribe.
+                tracing::warn!(session = %session_id, next, "the cache changed during a replay; disconnecting");
+                kick.send_replace(true);
+                return;
+            }
         }
     }
 

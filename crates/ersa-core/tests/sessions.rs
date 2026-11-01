@@ -95,6 +95,12 @@ async fn events_are_numbered_from_zero_without_gaps() {
     );
     assert_eq!(events[0]["event"]["state"], "starting");
     assert_eq!(events[2]["event"]["state"], "running");
+    // `ts` is when the raw log recorded the event's last line.
+    let log = client.result("session.raw_log", json!({ "id": id })).await;
+    for event in &events {
+        let raw_to = event["source"]["raw_to"].as_u64().unwrap() as usize;
+        assert_eq!(event["ts"], log[raw_to]["ts"], "{event:#}");
+    }
 
     let second = client
         .result("session.send", json!({ "id": id, "text": "again" }))
@@ -265,6 +271,28 @@ async fn a_permission_decision_reaches_the_backend_and_the_tile_follows() {
         )
         .await;
     assert_eq!(kind(&again), "not_found");
+}
+
+// verifies: PROTO-CORE-API-R05
+#[tokio::test(flavor = "multi_thread")]
+async fn a_question_waiting_on_the_user_is_in_the_tile() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "question" }))
+        .await;
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(
+        row["tile"]["pending"],
+        json!([{ "kind": "question", "request_id": "q-1" }])
+    );
+    // A backend that has gone is waiting on nobody.
+    client.result("session.stop", json!({ "id": id })).await;
+    assert_eq!(
+        session_row(&mut client, &id).await["tile"]["pending"],
+        json!([])
+    );
 }
 
 // verifies: PROTO-CORE-API-R08
@@ -445,6 +473,39 @@ async fn a_backend_that_fails_to_start_ends_the_session_with_an_error() {
         .error("session.send", json!({ "id": id, "text": "hello" }))
         .await;
     assert_eq!(kind(&error), "invalid_state");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_adapter_that_panics_while_starting_fails_the_session_cleanly() {
+    let (core, _) = start_fake(FakeAdapter::panicking()).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    let events = client.events_until("session.ended").await;
+    assert_eq!(events.last().unwrap()["event"]["reason"], "error");
+    // Not live any more: it can be removed.
+    client.result("session.remove", json!({ "id": id })).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn re_projecting_disconnects_subscribers_so_they_read_the_new_events() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client.result("session.stop", json!({ "id": id })).await;
+    let mut watcher = core.client().await;
+    watcher
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    watcher.events_until("session.ended").await;
+
+    client
+        .result("session.reproject", json!({ "id": id }))
+        .await;
+    // The watcher's connection closes, after whatever it was sent.
+    while watcher.read_raw().await.is_some() {}
 }
 
 /// Every event of a session, by subscribing from 0 until `session.ended`.

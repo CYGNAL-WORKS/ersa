@@ -130,12 +130,7 @@ impl Projection {
                 .into_iter()
                 .map(|event| (line.index, event))
                 .collect(),
-            Direction::Backend | Direction::Host => self
-                .projector
-                .project(line)
-                .into_iter()
-                .map(|p| (p.raw_from, p.event))
-                .collect(),
+            Direction::Backend | Direction::Host => self.adapter_line(line),
         };
         let mut out = Vec::with_capacity(projected.len());
         for (raw_from, event) in projected {
@@ -159,6 +154,48 @@ impl Projection {
             self.next_seq += 1;
         }
         out
+    }
+
+    /// What the adapter's projector makes of a backend or host line. A
+    /// projector that panics on a line it was not built for must not take
+    /// the session down with it: the line becomes a recoverable `error` and
+    /// a passthrough (PROTO-AGENT-EVENTS, Errors and recovery), and
+    /// projection carries on with the next line.
+    fn adapter_line(&mut self, line: &RawLine) -> Vec<(u64, Event)> {
+        // `AssertUnwindSafe`: after a panic the projector may hold half an
+        // update, which can only make later events less accurate, never
+        // unsafe.
+        let projector = &mut self.projector;
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| projector.project(line))) {
+            Ok(projected) => projected
+                .into_iter()
+                .map(|p| (p.raw_from, p.event))
+                .collect(),
+            Err(_) => {
+                tracing::error!(index = line.index, "the projector panicked on a raw line");
+                let payload = serde_json::from_str(&line.line)
+                    .unwrap_or_else(|_| Value::String(line.line.clone()));
+                vec![
+                    (
+                        line.index,
+                        Event::Error(ErrorEvent {
+                            code: ErrorCode::Protocol,
+                            message: format!("raw line {} could not be projected", line.index),
+                            recoverable: true,
+                            action: None,
+                        }),
+                    ),
+                    (
+                        line.index,
+                        Event::BackendPassthrough(BackendPassthrough {
+                            backend: self.backend.clone(),
+                            kind: "unprojectable".into(),
+                            payload,
+                        }),
+                    ),
+                ]
+            }
+        }
     }
 
     /// Keeps the tile, state, turn, and backend facts in step with `event`.

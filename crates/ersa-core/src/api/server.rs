@@ -19,11 +19,11 @@ use crate::state::{Core, CoreConfig};
 
 /// How many outgoing lines may queue for one client before writers wait.
 ///
-/// Responses and each subscription's forwarding task may wait for room; a
-/// session never does. The session manager offers events to a
-/// subscription's own queue and drops a subscriber that falls behind, and
-/// `session.tile` notifications are `try_send`, closing a connection that
-/// cannot take them: one stalled client must not stall a session for every
+/// Responses, each subscription's forwarding task, and the tile forwarder
+/// may wait for room; a session never does. The session manager offers
+/// events to a subscription's own queue and drops a subscriber that falls
+/// behind, and tiles reach a connection through a broadcast that drops a
+/// lagging receiver: one stalled client must not stall a session for every
 /// other client.
 const OUTBOUND_QUEUE: usize = 256;
 
@@ -265,9 +265,11 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
 
 /// Forwards `session.tile` notifications to one connection until it closes.
 ///
-/// A tile is the latest state, so a missed one is soon replaced, but a
-/// missed last one would leave the rail wrong; a connection that falls
-/// behind is closed instead, and its client re-reads `session.list`.
+/// This task, not the session, waits for room on the connection: a client
+/// busy reading a long replay is slow, not stuck. One that falls so far
+/// behind that the broadcast drops tiles for it is closed instead, since a
+/// missed last tile would leave its rail wrong; its client re-reads
+/// `session.list`.
 async fn forward_tiles(
     mut tiles: broadcast::Receiver<Arc<String>>,
     outbound: mpsc::Sender<String>,
@@ -275,14 +277,11 @@ async fn forward_tiles(
 ) {
     loop {
         match tiles.recv().await {
-            Ok(line) => match outbound.try_send(line.as_ref().clone()) {
-                Ok(()) => {}
-                Err(mpsc::error::TrySendError::Full(_)) => {
-                    kick.send_replace(true);
+            Ok(line) => {
+                if outbound.send(line.as_ref().clone()).await.is_err() {
                     return;
                 }
-                Err(mpsc::error::TrySendError::Closed(_)) => return,
-            },
+            }
             Err(broadcast::error::RecvError::Lagged(_)) => {
                 kick.send_replace(true);
                 return;
