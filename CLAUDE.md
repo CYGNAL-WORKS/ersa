@@ -8,7 +8,7 @@ Ersa is a desktop harness for running many coding-agent sessions at once, each i
 - **Decisions live in `docs/adr/`.** Before proposing a change of direction, read the ADR index. Record a decision when it would be costly to reverse or when a future reader could plausibly choose differently. Supersede, never edit.
 - **Words live in `docs/GLOSSARY.md`.** Use the glossary term everywhere: briefs, identifiers, UI copy. Add a term before using a new concept.
 - **Roles.** Planning sessions set `ERSA_ROLE=planning` and may edit briefs and ADRs. Implementing sessions build tickets, do not edit briefs or ADRs (a hook enforces this), and record anything a brief gets wrong or leaves open as a line in `docs/briefs/INBOX.md`, then continue.
-- **Plans and tickets are ephemeral.** They live in `.scratch/`, uncommitted, and die when the work merges. Commits that implement requirements end with an `Implements:` trailer listing the IDs.
+- **Tickets are GitHub issues** (ADR 0016), cut from briefs with the `to-tickets` skill and built with the `implement-ticket` skill; tracker conventions are in `docs/agents/issue-tracker.md`, labels in `docs/agents/triage-labels.md`. A pull request that completes a ticket says `Fixes #n`. Working plans live in `.scratch/`, uncommitted. Commits that implement requirements end with an `Implements:` trailer listing the IDs.
 - **Requirement IDs are stable.** Flow and protocol briefs carry them, like `FLOW-NEW-SESSION-R03`. Tests cite them with `verifies: <ID>`; only citations in test files count. Run `node scripts/manifest.mjs --check` before committing; it regenerates `docs/MANIFEST.md` and the ADR index and fails on open inbox entries and structural problems.
 
 ## Design
