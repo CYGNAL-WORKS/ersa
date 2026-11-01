@@ -11,7 +11,7 @@ adrs: []
 
 ## Intent
 
-From the rail, the user adds a project (a local folder or a folder on a known host), chooses or creates a workspace for it, picks a backend and a mode, and starts a session. The new session appears in the rail under its workspace and becomes active, with the composer focused. Creating a workspace creates an isolated checkout (a git worktree for git projects) on the project's host.
+From the rail, the user adds a project (a local folder or a folder on a known host) and says whether they trust it, since only a trusted project's own configuration runs in its sessions (ADR 0018), chooses or creates a workspace for it, picks a backend and a mode, and starts a session. The new session appears in the rail under its workspace and becomes active, with the composer focused. Creating a workspace creates an isolated checkout (a git worktree for git projects) on the project's host.
 
 ## Built in M0
 
@@ -27,5 +27,6 @@ The least that reaches a session: a project is added by typing its folder path; 
 
 ## Changes
 
+- 2026-11-01: the user says whether they trust a project when adding it (ADR 0018).
 - 2026-11-01: from #14 inbox: what M0 built; workspace reuse and the reopened window's session added as open questions.
 - 2026-10-31: created as draft.

@@ -33,6 +33,9 @@ pub struct ProcessSpec {
     /// Variables added to (or overriding) the environment the process inherits.
     /// A `BTreeMap` so the order is stable in logs and test assertions.
     pub env: BTreeMap<String, String>,
+    /// Variables removed from the inherited environment. Removal happens
+    /// before `env` is applied, so a name in both ends up set.
+    pub env_remove: Vec<String>,
 }
 
 /// A started process.
