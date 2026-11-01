@@ -33,7 +33,7 @@ use crate::{BACKEND, MAX_TESTED_VERSION};
 
 /// The version of this projection. Bump it whenever the events produced for
 /// some raw log would change, so Core re-projects cached sessions.
-pub const PROJECTOR_VERSION: u32 = 2;
+pub const PROJECTOR_VERSION: u32 = 3;
 
 /// Projects one Claude Code session's raw log. Make a fresh one per pass.
 #[derive(Debug, Default)]
@@ -45,9 +45,8 @@ pub struct ClaudeProjector {
     turn_open: bool,
     /// `request_id`s of the host's `initialize` requests not yet answered.
     initialize_ids: HashSet<String>,
-    /// Pending `can_use_tool` requests, by `request_id`, with the suggestions
-    /// their `permission.requested` offered (to map an answer back to indices).
-    permissions: HashMap<String, Vec<(usize, PermissionSuggestion)>>,
+    /// Pending `can_use_tool` requests, by `request_id`.
+    permissions: HashMap<String, PendingPrompt>,
     /// How many content blocks the `assistant` lines of each message id have
     /// carried so far, which gives the next block's index in its message.
     blocks_seen: HashMap<String, u64>,
@@ -61,6 +60,16 @@ pub struct ClaudeProjector {
     /// The model of the latest main-thread reply; picks the context window
     /// out of `result.modelUsage`, which lists subagent models too.
     main_model: Option<String>,
+}
+
+/// A `can_use_tool` request the CLI is waiting on.
+#[derive(Debug)]
+struct PendingPrompt {
+    /// The raw line it arrived on, to settle leftovers in arrival order.
+    raw: u64,
+    /// The suggestions its `permission.requested` offered, to map an answer's
+    /// `updatedPermissions` back to indices.
+    offered: Vec<(usize, PermissionSuggestion)>,
 }
 
 #[derive(Debug)]
@@ -457,6 +466,7 @@ impl ClaudeProjector {
         }
         out.extend(self.ensure_turn(line));
         out.extend(self.finish_streams());
+        out.extend(self.settle_prompts(line));
 
         let is_error = value["is_error"].as_bool();
         let outcome = match drifted {
@@ -535,11 +545,34 @@ impl ClaudeProjector {
             .collect()
     }
 
+    /// Prompts still pending when a turn ends without the CLI withdrawing
+    /// them: the turn is over, so they are moot. Each is decided `deny` by the
+    /// backend, in the order they arrived, so the shelf drops it and a late
+    /// answer is not mistaken for a pending one.
+    fn settle_prompts(&mut self, line: &RawLine) -> Vec<Projected> {
+        let mut leftover: Vec<(String, PendingPrompt)> = self.permissions.drain().collect();
+        leftover.sort_by_key(|(_, prompt)| prompt.raw);
+        leftover
+            .into_iter()
+            .map(|(request_id, _)| {
+                at(
+                    line,
+                    Event::PermissionDecided(PermissionDecided {
+                        request_id,
+                        behavior: PermissionBehavior::Deny,
+                        decided_by: DecidedBy::Backend,
+                        message: None,
+                        applied_suggestions: None,
+                    }),
+                )
+            })
+            .collect()
+    }
+
     /// `session.state running` after a prompt is settled, unless another
-    /// prompt is still waiting on the user.
+    /// prompt is still waiting on the user, or the turn has already ended.
     fn running_unless_waiting(&self, line: &RawLine) -> Option<Projected> {
-        self.permissions
-            .is_empty()
+        (self.turn_open && self.permissions.is_empty())
             .then(|| state(line, LifecycleState::Running))
     }
 
@@ -548,21 +581,33 @@ impl ClaudeProjector {
     fn permission_requested(&mut self, line: &RawLine, value: Value) -> Vec<Projected> {
         let ask = &value["request"];
         let text = |key: &str| ask[key].as_str().map(String::from);
-        let (Some(request_id), Some(tool_name), Some(input)) = (
-            value["request_id"].as_str().map(String::from),
-            text("tool_name"),
-            ask["input"].as_object().cloned(),
-        ) else {
+        // Without an id nothing can answer it; the driver cannot either.
+        let Some(request_id) = value["request_id"].as_str().map(String::from) else {
             return error_and_passthrough(
                 line,
                 format!(
-                    "raw line {}: a can_use_tool request without a request id, tool name, \
-                     or object input",
+                    "raw line {}: a can_use_tool request without a request id",
                     line.index
                 ),
                 value,
             );
         };
+        // The CLI is waiting on this prompt, so it reaches the shelf even
+        // without a tool name or an object input: the user can still answer
+        // it, and the error and passthrough say what was missing.
+        let tool_name = text("tool_name");
+        let input = ask["input"].as_object().cloned();
+        let defect = (tool_name.is_none() || input.is_none()).then(|| {
+            protocol_error(
+                line,
+                format!(
+                    "raw line {}: can_use_tool {request_id} has no tool name or no object input",
+                    line.index
+                ),
+            )
+        });
+        let tool_name = tool_name.unwrap_or_else(|| "unknown".into());
+        let input = input.unwrap_or_default();
         let cli_suggestions = ask["permission_suggestions"]
             .as_array()
             .cloned()
@@ -597,11 +642,21 @@ impl ClaudeProjector {
                 text,
             }),
         };
-        self.permissions.insert(request_id, offered);
+        self.permissions.insert(
+            request_id,
+            PendingPrompt {
+                raw: line.index,
+                offered,
+            },
+        );
 
-        let mut out = self.ensure_turn(line);
+        let mut out: Vec<Projected> = defect.iter().cloned().collect();
+        out.extend(self.ensure_turn(line));
         out.push(at(line, Event::PermissionRequested(event)));
         out.push(state(line, LifecycleState::WaitingUser));
+        if defect.is_some() {
+            out.push(passthrough(line, value));
+        }
         out
     }
 
@@ -738,7 +793,7 @@ impl ClaudeProjector {
         let request_id = value
             .pointer("/response/request_id")
             .and_then(Value::as_str);
-        let Some((request_id, offered)) =
+        let Some((request_id, PendingPrompt { offered, .. })) =
             request_id.and_then(|id| Some((id.to_string(), self.permissions.remove(id)?)))
         else {
             // An answer to something other than a pending permission request.

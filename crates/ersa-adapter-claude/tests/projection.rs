@@ -804,3 +804,69 @@ fn a_message_queued_during_a_turn_gets_a_turn_of_its_own() {
         ]
     );
 }
+
+// verifies: PROTO-AGENT-EVENTS-R04
+#[test]
+fn a_can_use_tool_missing_its_tool_name_and_input_still_reaches_the_shelf() {
+    let defective = json!({
+        "type": "control_request",
+        "request_id": "r-10",
+        "request": { "subtype": "can_use_tool", "input": "not an object" }
+    })
+    .to_string();
+    let events = events(&log(&[(Host, USER_MESSAGE), (Backend, &defective)]));
+    assert_eq!(
+        summary(&events)[3..],
+        [
+            "error Protocol",
+            "permission.requested r-10",
+            "session.state WaitingUser",
+            "passthrough control_request/can_use_tool",
+        ]
+    );
+    let Event::PermissionRequested(request) = &events[4] else {
+        panic!("expected the request");
+    };
+    assert_eq!(request.tool_name, "unknown");
+    assert!(request.input.is_empty());
+}
+
+#[test]
+fn prompts_left_pending_when_a_turn_ends_are_settled_by_the_backend() {
+    let out = fixture("11-stream-permission-prompt-tool-stdio").stdout;
+    let (ask, result) = (&out[4], &out[10]);
+    let late_answer = json!({
+        "type": "control_response",
+        "response": {
+            "subtype": "success",
+            "request_id": "1ddd13c0-dd2c-4061-a8a8-86574059182e",
+            "response": { "behavior": "deny", "message": "too late" }
+        }
+    })
+    .to_string();
+    let events = events(&log(&[
+        (Host, USER_MESSAGE),
+        (Backend, ask),
+        // The turn ends with the prompt unanswered and never withdrawn.
+        (Backend, result),
+        (Host, &late_answer),
+    ]));
+    assert_eq!(
+        summary(&events)[3..],
+        [
+            "permission.requested 1ddd13c0-dd2c-4061-a8a8-86574059182e",
+            "session.state WaitingUser",
+            "permission.decided 1ddd13c0-dd2c-4061-a8a8-86574059182e",
+            "turn.completed 1 Success",
+            "usage.updated",
+            "session.state Idle",
+            // The late answer settles nothing and does not undo `idle`.
+            "passthrough control_response/success",
+        ]
+    );
+    assert!(matches!(
+        &events[5],
+        Event::PermissionDecided(d)
+            if d.behavior == PermissionBehavior::Deny && d.decided_by == DecidedBy::Backend
+    ));
+}
