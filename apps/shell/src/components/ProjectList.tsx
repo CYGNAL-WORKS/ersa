@@ -121,7 +121,9 @@ export function ProjectList({
                     />
                   </div>
                 )}
-                {notes[p.id] && <p className="project-note">{notes[p.id]}</p>}
+                {notes[p.id] && <p className="project-note" role="status">
+                    {notes[p.id]}
+                  </p>}
                 {start?.state === "failed" && (
                   <p className="problem project-problem" role="alert">
                     {start.message}

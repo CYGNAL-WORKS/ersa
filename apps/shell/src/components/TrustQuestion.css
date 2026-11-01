@@ -13,16 +13,6 @@
   animation: trust-question-in var(--motion-quick) var(--motion-ease-out);
 }
 
-/* Focus is the question as a whole. Its accent edge says it needs the user and stays; focus raises the
-   card instead, as DESIGN.md has surface-raised for a focused card. */
-.trust-question:focus {
-  outline: none;
-}
-
-.trust-question:focus-visible {
-  background: var(--color-surface-raised);
-}
-
 .trust-question-path {
   margin: 0;
   color: var(--color-ink-muted);
