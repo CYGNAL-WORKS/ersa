@@ -1,0 +1,31 @@
+/* The document's defaults. Every value is a token from tokens.gen.css. */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--type-ui-family);
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+}
+
+/* Every number the interface shows: mono, tabular figures (DESIGN.md, the instrument readout). */
+.readout {
+  font-family: var(--type-mono-family);
+  font-size: var(--type-mono-size);
+  line-height: var(--type-mono-leading);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Paths and anything else the user may copy. */
+.mono {
+  font-family: var(--type-mono-family);
+  font-size: var(--type-mono-size);
+  line-height: var(--type-mono-leading);
+}

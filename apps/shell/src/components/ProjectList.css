@@ -1,0 +1,82 @@
+.projects {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-height: 0;
+}
+
+.projects-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  font-weight: var(--type-heading-weight);
+}
+
+.projects-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.project {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: var(--space-sm);
+  padding: var(--space-xs) 0;
+  min-width: 0;
+}
+
+.project-name,
+.project-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-vcs {
+  color: var(--color-ink-faint);
+  font-size: var(--type-ui-small-size);
+}
+
+.project-path {
+  grid-column: 1 / -1;
+  color: var(--color-ink-muted);
+}
+
+.projects-note {
+  margin: 0;
+  color: var(--color-ink-faint);
+}
+
+.projects-note-hint {
+  display: block;
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+/* The error glyph matches the status tile's: a small danger dot, never a filled row. */
+.projects-error {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-sm);
+  align-items: baseline;
+  margin: 0;
+  color: var(--color-ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.projects-error::before {
+  content: "";
+  align-self: center;
+  width: var(--space-sm);
+  height: var(--space-sm);
+  border-radius: var(--radius-pill);
+  background: var(--color-danger);
+}

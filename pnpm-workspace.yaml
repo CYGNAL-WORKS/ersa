@@ -1,0 +1,8 @@
+# The pnpm workspace for Ersa's TypeScript: the Interface in apps/shell.
+packages:
+  - apps/*
+
+# ADR 0015: a package version must be at least 7 days old (in minutes) before
+# pnpm resolves it, the same threshold as deps-policy.toml's min_age_days.
+# CI's release-age check is the gate; this keeps local installs inside it.
+minimumReleaseAge: 10080
