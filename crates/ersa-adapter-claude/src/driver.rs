@@ -242,6 +242,10 @@ impl Adapter for ClaudeAdapter {
         crate::BACKEND
     }
 
+    fn tested_versions(&self) -> Option<(&'static str, &'static str)> {
+        Some((crate::MIN_TESTED_VERSION, crate::MAX_TESTED_VERSION))
+    }
+
     fn set_environment(&self, spec: &mut ProcessSpec) {
         spec.env_remove
             .extend(INHERITED_VARIABLES.map(String::from));

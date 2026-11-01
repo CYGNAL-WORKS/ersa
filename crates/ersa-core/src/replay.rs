@@ -246,6 +246,10 @@ impl Adapter for Recordless {
         self.0.set_environment(spec)
     }
 
+    fn tested_versions(&self) -> Option<(&'static str, &'static str)> {
+        self.0.tested_versions()
+    }
+
     fn projector(&self) -> Box<dyn Projector> {
         self.0.projector()
     }

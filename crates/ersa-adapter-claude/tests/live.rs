@@ -180,14 +180,27 @@ fn marking_hook(mark: &str) -> Value {
     ]}]}})
 }
 
+/// What a session loaded: the marks its hooks left, the MCP servers
+/// `system/init` named, and which of the workspace's own skill, agent and
+/// command it offered.
+#[derive(Debug)]
+struct Loaded {
+    marks: Vec<String>,
+    servers: Vec<String>,
+    workspace_extras: Vec<String>,
+}
+
+/// The workspace's skill, agent and command, by the names `system/init`
+/// would list them under.
+const WORKSPACE_EXTRAS: [&str; 3] = ["ws-skill", "ws-agent", "ws-command"];
+
 /// Starts a session in `repo`, sends one message (the turn fails at once,
-/// logged in nowhere), and returns the marks the hooks left and the MCP
-/// servers `system/init` named.
+/// logged in nowhere), and returns what it loaded.
 async fn workspace_configuration_loaded(
     config_dir: &std::path::Path,
     repo: &std::path::Path,
     trusted: bool,
-) -> (Vec<String>, Vec<String>) {
+) -> Loaded {
     for mark in ["mark-user.txt", "mark-project.txt", "mark-local.txt"] {
         let _ = fs::remove_file(repo.join(mark));
     }
@@ -227,13 +240,29 @@ async fn workspace_configuration_loaded(
         .filter(|mark| repo.join(mark).is_file())
         .map(String::from)
         .collect();
-    (marks, servers)
+    // Skills and commands are offered as slash commands, agents by name.
+    let offered: Vec<&str> = ["skills", "agents", "slash_commands"]
+        .into_iter()
+        .flat_map(|key| init[key].as_array().into_iter().flatten())
+        .filter_map(Value::as_str)
+        .collect();
+    let workspace_extras = WORKSPACE_EXTRAS
+        .into_iter()
+        .filter(|name| offered.contains(name))
+        .map(String::from)
+        .collect();
+    Loaded {
+        marks,
+        servers,
+        workspace_extras,
+    }
 }
 
-/// Against a scratch repository whose settings run hooks and whose
-/// `.mcp.json` names a server, with user settings that enable every project
-/// server: an untrusted project's session runs only the user's own hook and
-/// server, a trusted one's runs the workspace's too.
+/// Against a scratch repository whose settings run hooks, whose `.mcp.json`
+/// names a server and which has a skill, an agent and a command of its own,
+/// with user settings that enable every project server: an untrusted
+/// project's session loads only the user's own hook and server and none of
+/// the workspace's, a trusted one's loads the workspace's too.
 // verifies: PROTO-CLAUDE-CODE-STREAM-R12
 // verifies: PROTO-CLAUDE-CODE-STREAM-R18
 #[tokio::test]
@@ -270,22 +299,53 @@ async fn only_a_trusted_projects_workspace_configuration_loads_in_the_real_cli()
     )
     .unwrap();
 
-    let (marks, servers_seen) = workspace_configuration_loaded(&config_dir, &repo, false).await;
-    assert_eq!(marks, ["mark-user.txt"], "untrusted: only the user's hook");
+    let described =
+        |name: &str| format!("---\nname: {name}\ndescription: the workspace's own\n---\nhello\n");
+    fs::create_dir_all(repo.join(".claude/skills/ws-skill")).unwrap();
+    fs::write(
+        repo.join(".claude/skills/ws-skill/SKILL.md"),
+        described("ws-skill"),
+    )
+    .unwrap();
+    fs::create_dir_all(repo.join(".claude/agents")).unwrap();
+    fs::write(
+        repo.join(".claude/agents/ws-agent.md"),
+        described("ws-agent"),
+    )
+    .unwrap();
+    fs::create_dir_all(repo.join(".claude/commands")).unwrap();
+    fs::write(repo.join(".claude/commands/ws-command.md"), "hello\n").unwrap();
+
+    let untrusted = workspace_configuration_loaded(&config_dir, &repo, false).await;
     assert_eq!(
-        servers_seen,
+        untrusted.marks,
+        ["mark-user.txt"],
+        "untrusted: only the user's hook"
+    );
+    assert_eq!(
+        untrusted.servers,
         ["user-server"],
         "untrusted: only the user's server"
     );
+    assert!(
+        untrusted.workspace_extras.is_empty(),
+        "untrusted: no workspace skill, agent or command: {:?}",
+        untrusted.workspace_extras
+    );
 
-    let (marks, mut servers_seen) = workspace_configuration_loaded(&config_dir, &repo, true).await;
+    let mut trusted = workspace_configuration_loaded(&config_dir, &repo, true).await;
     assert_eq!(
-        marks,
+        trusted.marks,
         ["mark-user.txt", "mark-project.txt", "mark-local.txt"],
         "trusted: every hook"
     );
-    servers_seen.sort();
-    assert_eq!(servers_seen, ["user-server", "workspace-server"]);
+    trusted.servers.sort();
+    assert_eq!(trusted.servers, ["user-server", "workspace-server"]);
+    // The check above means something only if the CLI does offer them.
+    assert_eq!(
+        trusted.workspace_extras, WORKSPACE_EXTRAS,
+        "trusted: {trusted:?}"
+    );
 
     let _ = fs::remove_dir_all(&dir);
 }
