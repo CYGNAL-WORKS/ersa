@@ -53,16 +53,20 @@ jobs:
         with:
           tool: cargo-deny@0.20.2,osv-scanner@2.7.0
 
+      # --all: every workspace member, the Shell included. Formatting needs
+      # no build, so Tauri is not compiled.
       - name: Format
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
       # --locked everywhere: CI builds exactly Cargo.lock and never resolves
-      # new versions on its own.
+      # new versions on its own. Plain clippy and test build the workspace's
+      # default members, Core's crates, so this job needs none of Tauri's
+      # system libraries; the shell job builds the Shell.
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test --workspace --locked
+        run: cargo test --locked
 
       - name: Script tests
         run: node --test scripts/deps-check.test.mjs
@@ -70,7 +74,8 @@ jobs:
       - name: Manifest
         run: node scripts/manifest.mjs --check
 
-      # ADR 0015. Release age judges only what a pull request adds or changes,
+      # ADR 0015. These read the one Cargo.lock, which covers the Shell too.
+      # Release age judges only what a pull request adds or changes,
       # so it has nothing to do on a push. dependencies.yml also runs the
       # vulnerability and cargo-deny checks daily on main.
       - name: Release age
@@ -143,9 +148,10 @@ jobs:
             apps/shell/test-results
           if-no-files-found: ignore
 
-  # The Shell's Rust side (apps/shell/src-tauri), its own Cargo workspace so
-  # Tauri stays out of Core's (ARCH-CORE-R01). Its bridge tests launch a real
-  # ersa-core, built from the root workspace first.
+  # The Shell's Rust side (apps/shell/src-tauri): a workspace member, but not a
+  # default one, so Tauri stays out of Core's build (ARCH-CORE-R01) and this
+  # job names it with `-p`. Its bridge tests launch a real ersa-core, built
+  # first. Format and dependency checks cover it in the linux job.
   shell:
     name: Shell build, lint, test (Linux)
     runs-on: ubuntu-latest
@@ -162,14 +168,6 @@ jobs:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: |
-            . -> target
-            apps/shell/src-tauri -> target
-
-      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
-        with:
-          tool: cargo-deny@0.20.2
 
       # The webview and windowing libraries Tauri links against on Linux.
       - name: Tauri system libraries
@@ -182,22 +180,14 @@ jobs:
       - name: Placeholder Interface build
         run: mkdir -p apps/shell/dist && echo '<!doctype html>' > apps/shell/dist/index.html
 
-      - name: Format
-        run: cargo fmt --manifest-path apps/shell/src-tauri/Cargo.toml --check
-
       - name: Clippy
-        run: cargo clippy --manifest-path apps/shell/src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+        run: cargo clippy -p ersa-shell --all-targets --locked -- -D warnings
 
       - name: Build Core
         run: cargo build -p ersa-cli --locked
 
       - name: Test
-        run: cargo test --manifest-path apps/shell/src-tauri/Cargo.toml --locked
-
-      # Licences are not checked here yet: Tauri depends on MPL-2.0 crates,
-      # which deny.toml does not allow (see docs/briefs/INBOX.md).
-      - name: Sources, bans
-        run: cargo deny --manifest-path apps/shell/src-tauri/Cargo.toml --locked check bans licenses sources
+        run: cargo test -p ersa-shell --locked
 
   # Decides whether a pull request, or a push to main, touches anything the
   # Windows build or tests read. A skipped `windows` job still reports a
@@ -262,27 +252,23 @@ jobs:
           components: clippy
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          workspaces: |
-            . -> target
-            apps/shell/src-tauri -> target
 
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test --workspace --locked
+        run: cargo test --locked
 
       # The Shell, as in the Linux shell job; WebView2 ships with Windows.
       - name: Shell clippy
         shell: bash
         run: |
           mkdir -p apps/shell/dist && echo '<!doctype html>' > apps/shell/dist/index.html
-          cargo clippy --manifest-path apps/shell/src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+          cargo clippy -p ersa-shell --all-targets --locked -- -D warnings
 
       # bash, so a failed build stops the step (PowerShell would go on).
       - name: Shell test
         shell: bash
         run: |
           cargo build -p ersa-cli --locked
-          cargo test --manifest-path apps/shell/src-tauri/Cargo.toml --locked
+          cargo test -p ersa-shell --locked
