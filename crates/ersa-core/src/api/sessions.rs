@@ -209,6 +209,8 @@ pub(super) fn subscribe(
     let (subscription, last_seq) =
         core.sessions
             .subscribe(&params.id, params.from_seq, outbound, peer.kick.clone())?;
+    // A replay starts playing once someone is watching it.
+    crate::replay::subscribed(core);
     // Only now is the old subscription, if any, dropped: a resubscribe that
     // fails leaves the client the stream it had. It is dropped outside the
     // lock.

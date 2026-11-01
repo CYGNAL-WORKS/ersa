@@ -249,6 +249,10 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         ));
     }
 
+    if let Some(refused) = crate::replay::refusal(core, method) {
+        return Err((refused, After::Continue));
+    }
+
     let params = request.params;
     // Each arm parses its params, runs its handler, and serializes the result.
     // `?` returns early with an error that keeps the connection open.
@@ -381,6 +385,12 @@ pub fn session_lane(conn: &ConnectionState, request: &Request) -> Option<String>
 /// `peer`.
 pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Response {
     let id = request.id.clone();
+    // A replay server refuses here too: these requests skip `dispatch`.
+    if let Some(method) = Method::from_name(&request.method)
+        && let Some(ApiError(error)) = crate::replay::refusal(core, method)
+    {
+        return Response::failure(Some(id), error);
+    }
     let params = request.params;
     let result = match Method::from_name(&request.method) {
         Some(Method::SessionCreate) => match parse(params) {

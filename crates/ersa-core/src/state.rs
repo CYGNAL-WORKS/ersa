@@ -34,6 +34,10 @@ pub struct CoreConfig {
     /// excluded. A longer line is answered with a parse error and closes
     /// the connection.
     pub max_line_bytes: usize,
+    /// Whether this Core is a replay server, which refuses every request
+    /// that would change anything (see `replay`). Set by
+    /// `Server::bind_replay`.
+    pub replay: bool,
 }
 
 /// The default for [`CoreConfig::max_line_bytes`]: 16 MiB, far above any
@@ -59,6 +63,7 @@ impl CoreConfig {
             backend_program_override: None,
             handshake_timeout: HANDSHAKE_TIMEOUT,
             max_line_bytes: MAX_LINE_BYTES,
+            replay: false,
         })
     }
 
@@ -88,6 +93,9 @@ pub struct Core {
     /// Flips to `true` once when shutdown is requested. A `watch` channel
     /// rather than a `Notify`, because a late waiter must still see it.
     shutdown: watch::Sender<bool>,
+    /// For a replay server: rises once a client first subscribes, which is
+    /// when the replay starts playing (see `replay`).
+    replay_audience: watch::Sender<bool>,
 }
 
 impl Core {
@@ -104,6 +112,7 @@ impl Core {
             started: Instant::now(),
             local_backends: Mutex::new(None),
             shutdown: watch::Sender::new(false),
+            replay_audience: watch::Sender::new(false),
         }
     }
 
@@ -157,6 +166,16 @@ impl Core {
     /// Seconds since this Core started.
     pub fn uptime_s(&self) -> u64 {
         self.started.elapsed().as_secs()
+    }
+
+    /// Whether a client has subscribed to the replayed session yet, for the
+    /// replay's adapter.
+    pub(crate) fn replay_audience(&self) -> watch::Receiver<bool> {
+        self.replay_audience.subscribe()
+    }
+
+    pub(crate) fn replay_audience_sender(&self) -> &watch::Sender<bool> {
+        &self.replay_audience
     }
 
     /// Asks the server to stop.

@@ -17,6 +17,8 @@ path = "src/main.rs"
 clap.workspace = true
 ersa-adapter-claude = { path = "../ersa-adapter-claude" }
 ersa-core = { path = "../ersa-core" }
+# The replay server's private, throwaway data directory.
+tempfile.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
@@ -25,7 +27,6 @@ tracing-subscriber.workspace = true
 # The live smoke test in tests/live.rs talks to the built binary over the
 # Core API.
 serde_json.workspace = true
-tempfile.workspace = true
 tokio.workspace = true
 
 [lints]
