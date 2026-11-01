@@ -56,6 +56,9 @@ struct Script {
     stderr: Vec<String>,
     exit_code: Option<i32>,
     hold_open: bool,
+    stdout_outlives_process: bool,
+    /// Writes after this many stdin lines hang until the process is killed.
+    wedge_stdin_after: Option<usize>,
 }
 
 /// One step of a scripted stdout.
@@ -102,6 +105,8 @@ impl FakeTransport {
                 stderr: Vec::new(),
                 exit_code: Some(0),
                 hold_open: false,
+                stdout_outlives_process: false,
+                wedge_stdin_after: None,
             },
             record: Arc::default(),
             stdin_count: Arc::new(watch::channel(0).0),
@@ -163,6 +168,22 @@ impl FakeTransport {
         self
     }
 
+    /// Stdout never ends, even after the process exits or is killed: what
+    /// happens on Windows when a grandchild the backend started (a dev server,
+    /// say) inherited the stdout handle. `wait` still reports the exit.
+    pub fn stdout_outlives_process(mut self) -> Self {
+        self.script.stdout_outlives_process = true;
+        self
+    }
+
+    /// After `lines` stdin lines, further writes hang, as writes to a backend
+    /// that stopped reading do once the pipe fills, until the process is
+    /// killed; then they fail with `BrokenPipe`.
+    pub fn wedge_stdin_after(mut self, lines: usize) -> Self {
+        self.script.wedge_stdin_after = Some(lines);
+        self
+    }
+
     /// Every spec passed to `spawn`, in order.
     pub fn spawned(&self) -> Vec<ProcessSpec> {
         self.lock().spawned.clone()
@@ -203,21 +224,45 @@ impl Transport for FakeTransport {
             record: self.record.clone(),
             stdin_count: self.stdin_count.clone(),
             ended: ended.clone(),
+            ended_rx: ended_rx.clone(),
             killed: killed.clone(),
+            wedge_after: self.script.wedge_stdin_after,
+            written: 0,
+        };
+        // A stdout that outlives the process ends on a flag nothing ever
+        // raises; the reader keeps its sender so the channel stays open.
+        let (never_tx, never_rx) = watch::channel(false);
+        let (stdout_ended, keep_open) = if self.script.stdout_outlives_process {
+            (never_rx, Some(never_tx))
+        } else {
+            (ended_rx.clone(), None)
+        };
+        // A process that is not held open counts as ended from the start, yet
+        // its stub may still wait for stdin; only a held-open one is ended by
+        // a kill or a closed stdin.
+        let (stub_ended, stub_keep_open) = if self.script.hold_open {
+            (ended_rx.clone(), None)
+        } else {
+            let (tx, rx) = watch::channel(false);
+            (rx, Some(tx))
         };
         let stdout = FakeReader {
             steps: self.script.stdout.clone().into(),
-            ended: ended_rx.clone(),
+            ended: stdout_ended,
+            _keep_open: keep_open,
             stdin: Some(StdinFeed {
                 record: self.record.clone(),
                 count: self.stdin_count.subscribe(),
                 consumed: 0,
+                process_ended: stub_ended,
+                _keep_open: stub_keep_open,
             }),
         };
         let stderr = FakeReader {
             steps: self.script.stderr.iter().cloned().map(Step::Line).collect(),
             // Stderr never holds open; it ends after its scripted lines.
             ended: watch::channel(true).1,
+            _keep_open: None,
             stdin: None,
         };
         Ok(Box::new(FakeProcess {
@@ -291,7 +336,11 @@ struct FakeWriter {
     record: Arc<Mutex<Record>>,
     stdin_count: Arc<watch::Sender<usize>>,
     ended: Arc<watch::Sender<bool>>,
+    ended_rx: watch::Receiver<bool>,
     killed: Arc<AtomicBool>,
+    wedge_after: Option<usize>,
+    /// Lines this writer has written.
+    written: usize,
 }
 
 #[async_trait]
@@ -307,6 +356,12 @@ impl LineWriter for FakeWriter {
         if self.killed.load(Ordering::SeqCst) {
             return Err(io::ErrorKind::BrokenPipe.into());
         }
+        if self.wedge_after.is_some_and(|n| self.written >= n) {
+            // A full pipe: nothing moves until the process dies.
+            wait_until_ended(&mut self.ended_rx).await;
+            return Err(io::ErrorKind::BrokenPipe.into());
+        }
+        self.written += 1;
         let count = {
             let mut record = lock(&self.record);
             record.stdin.push(line.to_string());
@@ -328,6 +383,8 @@ impl Drop for FakeWriter {
 struct FakeReader {
     steps: VecDeque<Step>,
     ended: watch::Receiver<bool>,
+    /// Keeps `ended`'s channel open for a stdout that outlives its process.
+    _keep_open: Option<watch::Sender<bool>>,
     /// How a paused stdout sees stdin; `None` for stderr, which never pauses.
     stdin: Option<StdinFeed>,
 }
@@ -338,6 +395,22 @@ struct StdinFeed {
     count: watch::Receiver<usize>,
     /// How many stdin lines earlier `AwaitStdin` steps have consumed.
     consumed: usize,
+    /// A stub waiting for stdin gives up once its process has ended.
+    process_ended: watch::Receiver<bool>,
+    _keep_open: Option<watch::Sender<bool>>,
+}
+
+impl StdinFeed {
+    /// Waits for stdin line number `wanted` (1-based). False if the process
+    /// ended first, or the transport is gone, so no line can arrive.
+    async fn line_arrived(&mut self, wanted: usize) -> bool {
+        tokio::select! {
+            // A line that is already there wins over the process ending.
+            biased;
+            arrived = self.count.wait_for(|n| *n >= wanted) => arrived.is_ok(),
+            _ = self.process_ended.wait_for(|ended| *ended) => false,
+        }
+    }
 }
 
 #[async_trait]
@@ -358,8 +431,7 @@ impl LineReader for FakeReader {
                         .as_mut()
                         .expect("only a stdout script waits for stdin");
                     let wanted = feed.consumed + 1;
-                    if feed.count.wait_for(|n| *n >= wanted).await.is_err() {
-                        // The transport is gone, so no line can ever arrive.
+                    if !feed.line_arrived(wanted).await {
                         self.steps.clear();
                         continue;
                     }

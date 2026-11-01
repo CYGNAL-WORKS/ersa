@@ -1,30 +1,49 @@
 //! Starting and driving one Claude Code CLI process per session.
 //!
 //! One task owns the process: it reads stdout line by line, hands each line to
-//! the sink, routes control responses to whoever is waiting for them, and
-//! finally reports the exit. The session methods write to stdin from whatever
-//! task Core calls them on, through one lock, recording each line before it is
-//! written (PROTO-CLAUDE-CODE-STREAM-R07; the transport flushes every line).
+//! the sink, routes control responses to whoever is waiting for them, watches
+//! for the process to exit, and finally reports the exit. The session methods
+//! write to stdin from whatever task Core calls them on, through one lock,
+//! recording each line before it is written (PROTO-CLAUDE-CODE-STREAM-R07; the
+//! transport flushes every line).
+//!
+//! Nothing here may wait forever on the CLI. A CLI can stop reading stdin (a
+//! write then blocks once the pipe fills), and on Windows a process the agent
+//! started can inherit the stdout handle and keep it open after the CLI has
+//! gone (stdout then never ends). So the exit is detected from the process
+//! itself, writes give up when the session is killed, and `stop` kills after
+//! its grace period whatever else is going on.
 
-use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::io;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, Direction, LineReader, LineWriter,
-    PermissionDecision, Process, ProcessSpec, Projector, SessionConfig, Transport, async_trait,
+    PermissionDecision, Process, ProcessExit, ProcessSpec, Projector, SessionConfig, Transport,
+    async_trait,
 };
 use ersa_protocol::events::PermissionBehavior;
-use serde_json::Value;
+use serde_json::{Value, json};
 use tokio::sync::{oneshot, watch};
 
 use crate::projector::ClaudeProjector;
 use crate::suggestions;
-use crate::wire::{
-    self, CanUseTool, CliMessage, CliRequest, CliResponse, HostControlResponse, HostMessage,
-    HostRequest, HostResponse, InitializeRequest,
-};
+use crate::wire::{HostControlResponse, HostMessage, HostRequest, HostResponse, InitializeRequest};
+
+/// After the process has exited, how long stdout may stay quiet before the
+/// read loop stops waiting for the rest of it. Lines the CLI wrote before
+/// exiting arrive at once; silence this long means someone else holds the pipe.
+const DRAIN_IDLE: Duration = Duration::from_millis(500);
+
+/// And the longest the read loop drains stdout after the exit, however busy it
+/// stays: whatever still writes to it is not the CLI.
+const DRAIN_MAX: Duration = Duration::from_secs(5);
+
+/// How many trailing stderr lines a failed start quotes.
+const STDERR_TAIL: usize = 5;
 
 /// The Claude Code adapter (backend `claude-code`).
 #[derive(Debug, Clone)]
@@ -106,13 +125,21 @@ pub fn invocation_args(config: &SessionConfig) -> Vec<String> {
 
 /// Which `claude` to run: `extra.claude_path` from the session config, else the
 /// `ERSA_CLAUDE` environment variable, else whatever `claude` the host finds.
+/// An empty value at either step counts as unset.
 fn program(config: &SessionConfig) -> String {
-    let configured = config.extra.get("claude_path").and_then(Value::as_str);
-    let from_env = std::env::var("ERSA_CLAUDE").ok();
-    configured
-        .map(String::from)
-        .or(from_env)
+    let configured = config
+        .extra
+        .get("claude_path")
+        .and_then(Value::as_str)
         .filter(|path| !path.is_empty())
+        .map(String::from);
+    let from_env = || {
+        std::env::var("ERSA_CLAUDE")
+            .ok()
+            .filter(|path| !path.is_empty())
+    };
+    configured
+        .or_else(from_env)
         .unwrap_or_else(|| "claude".into())
 }
 
@@ -134,26 +161,38 @@ impl Adapter for ClaudeAdapter {
             cwd: (!config.cwd.is_empty()).then(|| config.cwd.clone()),
             env: BTreeMap::new(),
         };
-        let mut process = transport.spawn(spec).await?;
+        let program = spec.program.clone();
+        let mut process = transport.spawn(spec).await.map_err(|e| {
+            // Name what was tried: "program not found" alone does not say
+            // which program, or where to set another.
+            AdapterError::Io(io::Error::new(
+                e.kind(),
+                format!(
+                    "could not start Claude Code as `{program}` ({e}); \
+                     set ERSA_CLAUDE or the session's claude_path to the CLI"
+                ),
+            ))
+        })?;
         let stdin = process.take_stdin().ok_or(AdapterError::NotRunning)?;
         let stdout = process.take_stdout().ok_or(AdapterError::NotRunning)?;
-        if let Some(stderr) = process.take_stderr() {
-            tokio::spawn(drain_stderr(stderr, sink.clone()));
-        }
 
         let (exited_tx, exited_rx) = watch::channel(false);
-        let (kill_tx, kill_rx) = watch::channel(false);
         let shared = Arc::new(Shared {
             sink,
             stdin: tokio::sync::Mutex::new(Some(stdin)),
+            stopping: AtomicBool::new(false),
+            kill: watch::channel(false).0,
             awaiting: Mutex::default(),
             permissions: Mutex::default(),
+            stderr_tail: Mutex::default(),
             next_id: AtomicU64::new(1),
         });
+        let stderr = process
+            .take_stderr()
+            .map(|stderr| tokio::spawn(drain_stderr(stderr, shared.clone())));
         let session = ClaudeSession {
             shared: shared.clone(),
             exited: exited_rx,
-            kill: kill_tx,
             stop_grace: self.stop_grace,
         };
 
@@ -162,13 +201,7 @@ impl Adapter for ClaudeAdapter {
         let init_id = shared.request_id("init");
         let (answer_tx, answer_rx) = oneshot::channel();
         lock(&shared.awaiting).insert(init_id.clone(), answer_tx);
-        tokio::spawn(read_loop(
-            shared.clone(),
-            stdout,
-            process,
-            kill_rx,
-            exited_tx,
-        ));
+        tokio::spawn(read_loop(shared.clone(), stdout, process, exited_tx));
 
         // The handshake (PROTO-CLAUDE-CODE-STREAM-R02): no user message goes
         // out until the CLI has answered `initialize`, and `start` returns only
@@ -179,15 +212,12 @@ impl Adapter for ClaudeAdapter {
                 .write(&HostMessage::control_request(&init_id, request))
                 .await?;
             match tokio::time::timeout(self.handshake_timeout, answer_rx).await {
-                Ok(Ok(CliResponse::Success(_))) => Ok(()),
-                Ok(Ok(CliResponse::Error(e))) => Err(AdapterError::Protocol(format!(
+                Ok(Ok(answer)) if answer["subtype"] == "success" => Ok(()),
+                Ok(Ok(answer)) => Err(AdapterError::Protocol(format!(
                     "the CLI refused initialize: {}",
-                    e.error
+                    answer["error"].as_str().unwrap_or("no reason given")
                 ))),
-                Ok(Ok(CliResponse::Other(other))) => Err(AdapterError::Protocol(format!(
-                    "unexpected answer to initialize: {other}"
-                ))),
-                // The read loop dropped the sender: stdout ended first.
+                // The read loop dropped the sender: the CLI exited first.
                 Ok(Err(_)) => Err(AdapterError::Protocol(
                     "the CLI exited before answering initialize".into(),
                 )),
@@ -199,10 +229,14 @@ impl Adapter for ClaudeAdapter {
         };
         match handshake.await {
             Ok(()) => Ok(Box::new(session)),
-            Err(e) => {
+            Err(error) => {
                 // A half-started CLI is of no use; end it before reporting.
                 session.kill_and_wait().await;
-                Err(e)
+                // What the CLI said on its way out is usually the real reason.
+                if let Some(stderr) = stderr {
+                    let _ = tokio::time::timeout(DRAIN_IDLE, stderr).await;
+                }
+                Err(with_stderr(error, &shared.stderr_tail()))
             }
         }
     }
@@ -212,15 +246,35 @@ impl Adapter for ClaudeAdapter {
     }
 }
 
+/// Adds the CLI's last stderr lines to a protocol error's message.
+fn with_stderr(error: AdapterError, tail: &[String]) -> AdapterError {
+    match error {
+        AdapterError::Protocol(message) if !tail.is_empty() => {
+            AdapterError::Protocol(format!("{message}; its stderr ended: {}", tail.join(" | ")))
+        }
+        other => other,
+    }
+}
+
 /// What the read loop and the session methods share.
 struct Shared {
     sink: Arc<dyn AdapterSink>,
     /// `None` once stdin is closed, by `stop` or because the process exited.
     stdin: tokio::sync::Mutex<Option<Box<dyn LineWriter>>>,
-    /// Host control requests waiting for the CLI's answer, by `request_id`.
-    awaiting: Mutex<HashMap<String, oneshot::Sender<CliResponse>>>,
-    /// `can_use_tool` requests the CLI is waiting on, by `request_id`.
-    permissions: Mutex<HashMap<String, CanUseTool>>,
+    /// Set by `stop`: no new line may be written.
+    stopping: AtomicBool,
+    /// Raised to kill the process. The read loop kills it; a write in progress
+    /// or waiting for the stdin lock gives up.
+    kill: watch::Sender<bool>,
+    /// Host control requests waiting for the CLI's answer (the `response`
+    /// object of its `control_response`), by `request_id`.
+    awaiting: Mutex<HashMap<String, oneshot::Sender<Value>>>,
+    /// `can_use_tool` requests the CLI is waiting on, by `request_id`: the
+    /// `request` object as raw JSON, so a request whose shape has drifted can
+    /// still be answered rather than left to stall the turn.
+    permissions: Mutex<HashMap<String, Value>>,
+    /// The CLI's last few stderr lines, for a failed start's error.
+    stderr_tail: Mutex<VecDeque<String>>,
     next_id: AtomicU64,
 }
 
@@ -231,65 +285,85 @@ impl Shared {
         format!("ersa-{what}-{n}")
     }
 
+    fn stderr_tail(&self) -> Vec<String> {
+        lock(&self.stderr_tail).iter().cloned().collect()
+    }
+
     /// Records `message` as a host line, then writes it.
     ///
     /// The stdin lock is held across both, so lines are recorded in the order
-    /// they are written even when several tasks write at once.
+    /// they are written even when several tasks write at once. Waiting for the
+    /// lock and the write itself both give up when the session is killed, so a
+    /// CLI that stopped reading cannot hold a caller forever.
     async fn write(&self, message: &HostMessage) -> Result<(), AdapterError> {
         let line = message
             .to_line()
             .map_err(|e| AdapterError::Protocol(format!("could not serialize a host line: {e}")))?;
-        let mut stdin = self.stdin.lock().await;
+        if self.stopping.load(Ordering::SeqCst) {
+            return Err(AdapterError::NotRunning);
+        }
+        let mut kill = self.kill.subscribe();
+        let mut stdin = tokio::select! {
+            stdin = self.stdin.lock() => stdin,
+            () = raised(&mut kill) => return Err(AdapterError::NotRunning),
+        };
         let writer = stdin.as_mut().ok_or(AdapterError::NotRunning)?;
         self.sink.record(Direction::Host, line.clone());
-        writer.write_line(&line).await?;
-        Ok(())
+        tokio::select! {
+            written = writer.write_line(&line) => Ok(written?),
+            () = raised(&mut kill) => Err(AdapterError::NotRunning),
+        }
     }
 
     /// Handles one stdout line: records it, and keeps the driver's view of
     /// pending requests in step with it.
     async fn on_backend_line(&self, line: String) {
-        // A line that does not parse is still recorded; the projector reports it.
-        let message = CliMessage::from_line(&line).ok();
+        // Read as raw JSON: the driver needs a handful of fields, and reading
+        // them directly keeps working when the CLI's shapes drift. A line that
+        // is not JSON is still recorded; the projector reports it.
+        let message: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
+        let field = |pointer: &str| message.pointer(pointer).and_then(Value::as_str);
 
         // Pending permission requests change before the line is recorded, so a
         // decision Core makes as soon as it sees the line finds the request.
         let mut unsupported = None;
-        match &message {
-            Some(CliMessage::ControlRequest(request)) => match &request.request {
-                CliRequest::CanUseTool(ask) => {
-                    lock(&self.permissions).insert(request.request_id.clone(), (**ask).clone());
+        match (field("/type"), field("/request_id")) {
+            (Some("control_request"), Some(id)) => match field("/request/subtype") {
+                Some("can_use_tool") => {
+                    lock(&self.permissions).insert(id.to_string(), message["request"].clone());
                 }
-                CliRequest::Other(body) => {
-                    let subtype = body.get("subtype").and_then(Value::as_str).unwrap_or("");
-                    unsupported = Some((request.request_id.clone(), subtype.to_string()));
+                subtype => {
+                    unsupported = Some((id.to_string(), subtype.unwrap_or("").to_string()));
                 }
             },
             // The CLI withdrew a prompt (after an interrupt, say); a late
             // decision for it is refused rather than written.
-            Some(CliMessage::ControlCancelRequest(cancel)) => {
-                lock(&self.permissions).remove(&cancel.request_id);
+            (Some("control_cancel_request"), Some(id)) => {
+                lock(&self.permissions).remove(id);
             }
             _ => {}
         }
+        let answered = match field("/type") {
+            Some("control_response") => field("/response/request_id").map(String::from),
+            _ => None,
+        };
 
         self.sink.record(Direction::Backend, line);
 
         // Answers are delivered after recording, so whoever waits on one (the
         // handshake in `start`) resumes with the answer already in the log.
-        if let Some(CliMessage::ControlResponse(answer)) = message {
-            let waiting =
-                response_id(&answer.response).and_then(|id| lock(&self.awaiting).remove(&id));
-            if let Some(waiting) = waiting {
-                // The waiter may have given up (timed out); nothing to do then.
-                let _ = waiting.send(answer.response);
-            }
+        if let Some(id) = answered
+            && let Some(waiting) = lock(&self.awaiting).remove(&id)
+        {
+            // The waiter may have given up (timed out); nothing to do then.
+            let _ = waiting.send(message["response"].clone());
         }
 
         // The CLI waits for an answer to every control request it sends, and
         // an unanswered one stalls the turn. Ersa only declares what it
         // handles, so this should not happen; if it does, say no rather than
-        // leave the CLI hanging.
+        // leave the CLI hanging. The write gives up if the session is killed,
+        // so a wedged CLI cannot stall this loop.
         if let Some((request_id, subtype)) = unsupported {
             let refusal = HostMessage::ControlResponse(HostControlResponse {
                 response: HostResponse::Error {
@@ -303,15 +377,13 @@ impl Shared {
     }
 }
 
-/// The `request_id` a control response answers.
-fn response_id(response: &CliResponse) -> Option<String> {
-    match response {
-        CliResponse::Success(s) => Some(s.request_id.clone()),
-        CliResponse::Error(e) => Some(e.request_id.clone()),
-        CliResponse::Other(v) => v
-            .get("request_id")
-            .and_then(Value::as_str)
-            .map(String::from),
+/// Returns once the flag is raised. Wraps `wait_for` so `select!` sees a
+/// future of `()`: its borrow of the flag's value never outlives the poll,
+/// which keeps the futures that use it `Send`.
+async fn raised(flag: &mut watch::Receiver<bool>) {
+    // Fails only if the sender is gone, in which case nothing can raise it.
+    if flag.wait_for(|raised| *raised).await.is_err() {
+        std::future::pending::<()>().await;
     }
 }
 
@@ -321,37 +393,46 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// The task that owns the process: reads stdout until it ends, then reports
-/// the exit, exactly once and after the last record.
+/// The task that owns the process. It reads stdout until the process exits
+/// (or stdout ends), then reports the exit, exactly once and after the last
+/// record.
 async fn read_loop(
     shared: Arc<Shared>,
     mut stdout: Box<dyn LineReader>,
     mut process: Box<dyn Process>,
-    mut kill: watch::Receiver<bool>,
     exited: watch::Sender<bool>,
 ) {
     // What woke the loop. `select!` only picks; the work happens after it,
-    // once the losing branch's future (which holds a lock on the kill flag
-    // while polled) is gone, so nothing un-`Send` lives across an await.
+    // once the other branches' futures are gone.
     enum Next {
-        Line(std::io::Result<Option<String>>),
+        Line(io::Result<Option<String>>),
+        Exited(io::Result<ProcessExit>),
         Kill,
     }
 
+    let mut kill = shared.kill.subscribe();
     let mut killed = false;
+    let mut exit = None;
     loop {
         let next = tokio::select! {
             line = stdout.next_line() => Next::Line(line),
-            _ = kill.wait_for(|kill| *kill), if !killed => Next::Kill,
+            // Exit is watched directly, not inferred from stdout ending: a
+            // process the agent started may hold stdout open after the CLI
+            // has gone.
+            status = process.wait() => Next::Exited(status),
+            () = raised(&mut kill), if !killed => Next::Kill,
         };
         match next {
             Next::Line(Ok(Some(line))) => shared.on_backend_line(line).await,
-            // End of stdout, or a broken pipe: either way nothing more will be
-            // read, and the exit status says what happened.
+            // The transport decodes lossily, so an error here is the pipe
+            // itself failing; nothing more will come from it.
             Next::Line(Ok(None) | Err(_)) => break,
-            // `stop` ran out of patience, or the session was dropped. Keep
-            // reading afterwards: lines the CLI wrote before it died are still
-            // in the pipe, and every line belongs in the log.
+            Next::Exited(status) => {
+                exit = Some(status);
+                break;
+            }
+            // `stop` ran out of patience, the start failed, or the session was
+            // dropped. The exit follows and is handled above.
             Next::Kill => {
                 let _ = process.kill().await;
                 killed = true;
@@ -359,25 +440,44 @@ async fn read_loop(
         }
     }
 
-    // Stdout can end before the process does; a kill request still applies.
-    let exit = if killed {
-        process.wait().await
-    } else {
-        let killed_while_waiting = tokio::select! {
-            exit = process.wait() => Err(exit),
-            _ = kill.wait_for(|kill| *kill) => Ok(()),
-        };
-        match killed_while_waiting {
-            Err(exit) => exit,
-            Ok(()) => {
-                let _ = process.kill().await;
-                process.wait().await
+    let exit = match exit {
+        Some(status) => {
+            // The CLI is gone, but lines it wrote just before exiting may still
+            // be in the pipe, and every line belongs in the log. Read until the
+            // pipe ends or goes quiet; whoever keeps it open is not the CLI.
+            let deadline = tokio::time::Instant::now() + DRAIN_MAX;
+            while let Ok(Ok(Some(line))) = tokio::time::timeout_at(
+                deadline.min(tokio::time::Instant::now() + DRAIN_IDLE),
+                stdout.next_line(),
+            )
+            .await
+            {
+                shared.on_backend_line(line).await;
+            }
+            status
+        }
+        // Stdout ended first; wait for the exit, killing if asked to.
+        None => {
+            let killed_while_waiting = tokio::select! {
+                status = process.wait() => Err(status),
+                () = raised(&mut kill), if !killed => Ok(()),
+            };
+            match killed_while_waiting {
+                Err(status) => status,
+                Ok(()) => {
+                    let _ = process.kill().await;
+                    process.wait().await
+                }
             }
         }
     };
 
-    // Close stdin under its lock: any write still in progress finishes (and is
-    // recorded) first, and none can be recorded after the exit is reported.
+    // No line can be written now: refuse new writes, and make any write still
+    // in progress give up (raising the kill flag after an exit is harmless).
+    // Then close stdin under its lock, so no host line can be recorded after
+    // the exit is reported.
+    shared.stopping.store(true, Ordering::SeqCst);
+    shared.kill.send_replace(true);
     shared.stdin.lock().await.take();
     // No answer can come now: dropping the senders tells anyone still waiting
     // (the handshake) at once, and no prompt is pending any more.
@@ -387,9 +487,16 @@ async fn read_loop(
     let _ = exited.send(true);
 }
 
-async fn drain_stderr(mut stderr: Box<dyn LineReader>, sink: Arc<dyn AdapterSink>) {
+async fn drain_stderr(mut stderr: Box<dyn LineReader>, shared: Arc<Shared>) {
     while let Ok(Some(line)) = stderr.next_line().await {
-        sink.stderr_line(line);
+        {
+            let mut tail = lock(&shared.stderr_tail);
+            if tail.len() == STDERR_TAIL {
+                tail.pop_front();
+            }
+            tail.push_back(line.clone());
+        }
+        shared.sink.stderr_line(line);
     }
 }
 
@@ -398,54 +505,57 @@ struct ClaudeSession {
     shared: Arc<Shared>,
     /// Flips to true once the read loop has reported the exit.
     exited: watch::Receiver<bool>,
-    /// Asks the read loop to kill the process.
-    kill: watch::Sender<bool>,
     stop_grace: Duration,
 }
 
 impl ClaudeSession {
     async fn kill_and_wait(&self) {
-        self.kill.send_replace(true);
+        self.shared.stopping.store(true, Ordering::SeqCst);
+        self.shared.kill.send_replace(true);
         let mut exited = self.exited.clone();
         // Fails only if the read loop is gone, which also means it has ended.
         let _ = exited.wait_for(|exited| *exited).await;
     }
 
-    /// The answer to a `can_use_tool` request, from the user's decision.
-    fn answer(
-        request: &CanUseTool,
-        decision: PermissionDecision,
-    ) -> Result<wire::PermissionDecision, AdapterError> {
+    /// The answer to a `can_use_tool` request (its raw `request` object), from
+    /// the user's decision, as the `response` of the host's `control_response`.
+    fn answer(request: &Value, decision: PermissionDecision) -> Result<Value, AdapterError> {
         match decision.behavior {
             PermissionBehavior::Allow => {
                 // The user picked suggestions by their index in the event;
-                // turn those back into the CLI's own objects.
-                let offered = suggestions::offered(&request.permission_suggestions);
+                // turn those back into the CLI's own objects, verbatim.
+                let cli_suggestions = request["permission_suggestions"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                let offered = suggestions::offered(&cli_suggestions);
                 let mut chosen = Vec::new();
                 for index in &decision.apply_suggestions {
-                    let (cli_index, _) = offered.get(*index as usize).ok_or_else(|| {
+                    let (_, suggestion) = offered.get(*index as usize).ok_or_else(|| {
                         AdapterError::Protocol(format!(
                             "suggestion {index} is not one of the {} offered",
                             offered.len()
                         ))
                     })?;
-                    chosen.push(request.permission_suggestions[*cli_index].clone());
+                    chosen.push(suggestion.payload.clone());
                 }
-                Ok(wire::PermissionDecision::Allow {
-                    // Always sent: the user's edit, or the input as requested.
-                    updated_input: decision
-                        .updated_input
-                        .map(Value::Object)
-                        .unwrap_or_else(|| request.input.clone()),
-                    updated_permissions: (!chosen.is_empty()).then_some(chosen),
-                })
+                // Always sent: the user's edit, or the input as requested.
+                let input = decision
+                    .updated_input
+                    .map(Value::Object)
+                    .unwrap_or_else(|| request["input"].clone());
+                let mut answer = json!({ "behavior": "allow", "updatedInput": input });
+                if !chosen.is_empty() {
+                    answer["updatedPermissions"] = Value::Array(chosen);
+                }
+                Ok(answer)
             }
-            PermissionBehavior::Deny => Ok(wire::PermissionDecision::Deny {
-                message: decision
+            PermissionBehavior::Deny => Ok(json!({
+                "behavior": "deny",
+                "message": decision
                     .message
                     .unwrap_or_else(|| "The user denied this tool call.".into()),
-                interrupt: None,
-            }),
+            })),
         }
     }
 }
@@ -454,7 +564,7 @@ impl ClaudeSession {
 /// it running with nobody to answer it.
 impl Drop for ClaudeSession {
     fn drop(&mut self) {
-        self.kill.send_replace(true);
+        self.shared.kill.send_replace(true);
     }
 }
 
@@ -474,16 +584,16 @@ impl AdapterSession for ClaudeSession {
             .get(request_id)
             .cloned()
             .ok_or_else(unknown)?;
-        // Build the answer before taking the request off the pending list, so
-        // a decision that cannot be built leaves the request answerable.
-        let answer = Self::answer(&request, decision)?;
-        if lock(&self.shared.permissions).remove(request_id).is_none() {
-            // Withdrawn by the CLI, or answered by another call, meanwhile.
-            return Err(unknown());
-        }
-        let message = HostMessage::permission_decision(request_id, &answer)
-            .map_err(|e| AdapterError::Protocol(format!("could not serialize a decision: {e}")))?;
-        self.shared.write(&message).await
+        let message = HostMessage::ControlResponse(HostControlResponse {
+            response: HostResponse::Success {
+                request_id: request_id.to_string(),
+                response: Self::answer(&request, decision)?,
+            },
+        });
+        self.shared.write(&message).await?;
+        // Only now, so a write that failed leaves the request answerable.
+        lock(&self.shared.permissions).remove(request_id);
+        Ok(())
     }
 
     async fn interrupt(&self) -> Result<(), AdapterError> {
@@ -499,12 +609,19 @@ impl AdapterSession for ClaudeSession {
     }
 
     async fn stop(&self) -> Result<(), AdapterError> {
-        // Closing stdin is how the CLI is told there is no more input: it
-        // finishes and exits 0 (fixtures 07 to 11).
-        self.shared.stdin.lock().await.take();
+        // No new lines from here on.
+        self.shared.stopping.store(true, Ordering::SeqCst);
         let mut exited = self.exited.clone();
-        let graceful = tokio::time::timeout(self.stop_grace, exited.wait_for(|exited| *exited));
+        let graceful = tokio::time::timeout(self.stop_grace, async {
+            // Closing stdin is how the CLI is told there is no more input: it
+            // finishes and exits 0 (fixtures 07 to 11). The lock is taken
+            // inside the grace period: a write stuck on a CLI that stopped
+            // reading holds it, and must not hold up the stop.
+            self.shared.stdin.lock().await.take();
+            let _ = exited.wait_for(|exited| *exited).await;
+        });
         if graceful.await.is_err() {
+            // Kill whatever the state of stdin; the stuck write gives up.
             self.kill_and_wait().await;
         }
         Ok(())

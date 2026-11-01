@@ -4,7 +4,7 @@ use std::io;
 use std::process::Stdio;
 
 use async_trait::async_trait;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader, Lines};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 
 use crate::transport::{LineReader, LineWriter, Process, ProcessExit, ProcessSpec, Transport};
@@ -115,17 +115,21 @@ impl LineWriter for LocalWriter {
 /// Reads lines from any byte stream; used for both stdout and stderr.
 ///
 /// `Box<dyn AsyncRead + Send + Unpin>` lets one type wrap either pipe. `Unpin`
-/// (safe to move after being polled) is what `Lines::next_line` asks of the
-/// reader so it can poll it through a plain `&mut`.
+/// (safe to move after being polled) is what `read_until` asks of the reader
+/// so it can poll it through a plain `&mut`.
 struct LocalReader {
-    lines: Lines<BufReader<Box<dyn AsyncRead + Send + Unpin>>>,
+    reader: BufReader<Box<dyn AsyncRead + Send + Unpin>>,
+    /// The line being read. It lives here rather than in `next_line` so the
+    /// bytes a cancelled call already read are kept for the next call.
+    line: Vec<u8>,
 }
 
 impl LocalReader {
     fn new(stream: impl AsyncRead + Send + Unpin + 'static) -> Self {
         let stream: Box<dyn AsyncRead + Send + Unpin> = Box::new(stream);
         LocalReader {
-            lines: BufReader::new(stream).lines(),
+            reader: BufReader::new(stream),
+            line: Vec::new(),
         }
     }
 }
@@ -133,9 +137,23 @@ impl LocalReader {
 #[async_trait]
 impl LineReader for LocalReader {
     async fn next_line(&mut self) -> io::Result<Option<String>> {
-        // `Lines::next_line` keeps a partly read line in its own buffer when
-        // its future is dropped, which is what makes this cancellation-safe.
-        // It strips `\n` and `\r\n`.
-        self.lines.next_line().await
+        // `read_until` appends to `self.line` as it reads, so a dropped call
+        // loses nothing and the next one carries on: this is what makes the
+        // method cancellation-safe.
+        let read = self.reader.read_until(b'\n', &mut self.line).await?;
+        if read == 0 && self.line.is_empty() {
+            return Ok(None);
+        }
+        let mut bytes = std::mem::take(&mut self.line);
+        // Strip `\n` and `\r\n`.
+        if bytes.last() == Some(&b'\n') {
+            bytes.pop();
+            if bytes.last() == Some(&b'\r') {
+                bytes.pop();
+            }
+        }
+        // Bytes that are not UTF-8 become U+FFFD instead of an error, so one
+        // bad line from a backend cannot end the loop reading it.
+        Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
     }
 }
