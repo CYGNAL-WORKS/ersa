@@ -160,6 +160,18 @@ async fn a_resume_id_that_is_not_a_session_id_fails_start_without_spawning() {
     assert!(transport.spawned().is_empty());
 }
 
+/// The pid of a process that has certainly exited: started and waited for.
+fn exited_pid() -> u32 {
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--list")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    child.wait().unwrap();
+    pid
+}
+
 /// A scratch `~/.claude` holding a registry file for `pid`.
 fn registry_with(pid: u32, session_id: &str) -> tempfile::TempDir {
     let home = tempfile::tempdir().unwrap();
@@ -203,15 +215,7 @@ fn a_running_process_with_the_session_open_is_reported() {
 // verifies: PROTO-CLAUDE-CODE-STREAM-R17
 #[test]
 fn a_registry_file_left_by_a_process_that_has_exited_is_not_reported() {
-    // A process that has certainly exited: started and waited for here.
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-        .arg("--list")
-        .stdout(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
-    let pid = child.id();
-    child.wait().unwrap();
-    let home = registry_with(pid, SESSION_ID);
+    let home = registry_with(exited_pid(), SESSION_ID);
     assert_eq!(live_session(home.path(), SESSION_ID), LiveCheck::NotOpen);
 }
 
@@ -231,22 +235,30 @@ fn no_registry_means_nothing_is_open() {
 fn a_registry_file_of_another_shape_makes_the_answer_unknown_not_free() {
     // A newer CLI that renamed a field, or a damaged file: either could be
     // the one naming this session, so the check says it could not tell.
+    // Named by running pids, so they could be about a live process.
     let pid = std::process::id();
     let home = registry_with(pid, "0989e382-5a8f-4fdf-9738-bf02b1f049e1");
     let sessions = home.path().join("sessions");
-    fs::write(sessions.join("123.json"), "not json").unwrap();
+    let damaged = sessions.join(format!("{pid}.json"));
+    fs::write(&damaged, "not json").unwrap();
+    let renamed = sessions.join("other.json");
     fs::write(
-        sessions.join("124.json"),
-        json!({"pid": "124", "session": SESSION_ID}).to_string(),
+        &renamed,
+        json!({"pid": "x", "session": SESSION_ID}).to_string(),
     )
     .unwrap();
     let LiveCheck::Unknown { unreadable } = live_session(home.path(), SESSION_ID) else {
         panic!("a file it could not read was taken as not open");
     };
-    assert_eq!(
-        unreadable,
-        [sessions.join("123.json"), sessions.join("124.json")]
-    );
+    let mut expected = vec![damaged.clone(), renamed.clone()];
+    expected.sort();
+    assert_eq!(unreadable, expected);
+
+    // One named by a process that has exited is a leftover, and ignored.
+    fs::remove_file(&renamed).unwrap();
+    fs::remove_file(&damaged).unwrap();
+    fs::write(sessions.join(format!("{}.json", exited_pid())), "not json").unwrap();
+    assert_eq!(live_session(home.path(), SESSION_ID), LiveCheck::NotOpen);
 
     // A readable file naming the session open still wins.
     let home = registry_with(pid, SESSION_ID);
