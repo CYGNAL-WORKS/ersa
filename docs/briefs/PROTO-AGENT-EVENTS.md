@@ -72,7 +72,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 
 ### Usage
 
-- `usage.updated`: `context_tokens` (optional), `context_window` (optional), `cost_usd_total` (optional), `turns` (optional), `rate_limit` (optional: `{ status, resets_at (optional), detail (optional) }`). Any field absent means "no new information"; the Interface keeps the last known value per field. Projected from result usage, rate-limit events, and thinking-token estimates.
+- `usage.updated`: `context_tokens` (optional), `context_window` (optional), `cost_usd_total` (optional), `turns` (optional: the number of Ersa turns started in the session, not the backend's API round trips), `rate_limit` (optional: `{ status, resets_at (optional), detail (optional) }`). Any field absent means "no new information"; the Interface keeps the last known value per field. Projected from result usage, rate-limit events, and thinking-token estimates.
 
 ### Error
 
@@ -130,6 +130,8 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - Whether subagent trees get their own `session_id` or stay nested under `parent_tool_use_id`.
 
 ## Changes
+
+- 2026-11-01: `usage.updated.turns` counts Ersa turns.
 
 - 2026-11-01: `session.notice` added, so PROTO-CLAUDE-CODE-STREAM-R10's warning has an event. The schema stays at `v` 1, since no projection has been persisted yet.
 
