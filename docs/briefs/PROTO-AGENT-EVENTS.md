@@ -24,7 +24,7 @@ Every event is an object with:
 - `v`: projection version, an integer. Bumped when any event's meaning or shape changes. A cached projection with an older `v` is discarded and re-derived.
 - `session_id`: Ersa's session identifier (not the backend's).
 - `seq`: a monotonically increasing integer within the session, assigned by Core, gap-free. Used for resume (`from_seq`) and ordering.
-- `ts`: ISO 8601 time the event was projected (not when the backend emitted it; the raw log keeps that).
+- `ts`: ISO 8601 time the raw log recorded the last line the event came from (`raw_to`). Taken from the raw log, never from the clock at projection time, so re-projection yields the same value.
 - `source`: `{ backend, backend_version, raw_from, raw_to }`: which backend and version produced the underlying lines, and the inclusive raw-log line range they came from.
 - `event`: the typed payload; `event.type` discriminates.
 
@@ -83,6 +83,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 
 ## Projection rules
 
+- The raw log holds lines in both directions: what the backend emitted and what the host wrote to it, each tagged with its direction. Host lines project too: a user message to `user.message`, a permission answer to `permission.decided`.
 - Every raw line yields at least one event (possibly only `backend.passthrough`); no line is dropped.
 - A raw line may yield several events (a Claude Code `result` yields `turn.completed` and `usage.updated`).
 - Events never contain backend-specific field names outside `backend.passthrough.payload` and `permission.requested.suggestions[].payload`.
@@ -129,6 +130,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 ## Changes
 
+- 2026-10-31: `ts` comes from the raw log, not the projection clock, so PROTO-AGENT-EVENTS-R03 is satisfiable; host-written lines are in the raw log and project to `user.message` and `permission.decided`. No requirement IDs changed.
 - 2026-10-31: elaborated to ready: envelope, event vocabulary, projection rules, requirements.
 - 2026-10-31: reframed as a projection of the raw log; commands moved to PROTO-CORE-API.
 - 2026-10-31: created as draft.
