@@ -144,13 +144,17 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
         }
     }
     assert!(compared > 0, "no stream fixture has a record");
-    // Every kind of message content the record carries was compared.
-    for kind in [
-        "assistant.text",
-        "assistant.thinking",
-        "tool.requested",
-        "tool.result",
-    ] {
+    // Every kind of message content the record carries was compared. The
+    // model thinks only sometimes, so a thinking block is compared when a
+    // recording has one.
+    let mut expected = vec!["assistant.text", "tool.requested", "tool.result"];
+    if records
+        .iter()
+        .any(|r| r.text.contains(r#""type":"thinking""#))
+    {
+        expected.push("assistant.thinking");
+    }
+    for kind in expected {
         assert!(kinds.contains(kind), "no {kind} was compared");
     }
 }
