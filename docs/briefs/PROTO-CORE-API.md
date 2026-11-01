@@ -94,6 +94,8 @@ JSON-RPC error objects with `code` (standard JSON-RPC codes for protocol-level f
 
 A conforming Core passes a request/response test suite driven over the socket, and the replay server passes the same suite with fixtures substituted for live backends. Generated TypeScript types compile against the schema.
 
+The replay server answers read-only requests exactly as Core does. It never changes anything outside its own data: every request that would change a session, a project, a workspace or a setting answers `invalid_state` saying the session is a replay, so a replay cannot create worktrees in the user's repositories or alter their settings. A replayed session stays open and idle after its last recorded line until `core.shutdown`. Pacing defaults to the recorded timing; an instant pace is for tests.
+
 ## Requirements
 
 - **PROTO-CORE-API-R01**: The first request on a connection shall be `core.hello`, and Core shall reject any other method before it with `invalid_state`.
@@ -117,6 +119,8 @@ A conforming Core passes a request/response test suite driven over the socket, a
 - Whether to allow more than one Interface attached at once (useful for a second window), and if so whether notifications fan out to all.
 
 ## Changes
+
+- 2026-11-01: from M0-T7 inbox: the replay server refuses every mutating request with `invalid_state`, keeps a replayed session idle after its last line until `core.shutdown`, and paces by recorded timing by default. No requirement IDs changed.
 
 - 2026-10-31: from #18 inbox and review: an explicit endpoint is a label beside the user's own endpoint, never a raw name or path, and nothing in the environment overrides it; on Windows a test stands two labelled endpoints in for "explicit beside default". No requirement IDs changed.
 

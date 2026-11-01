@@ -8,6 +8,5 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-10-31 PROTO-CORE-API: the brief says only that the replay server accepts Core's requests; M0-T7 also refuses `project.add/remove`, `workspace.create/remove` and `settings.set` with `invalid_state` (a replay must not create worktrees in the user's repositories), keeps the replayed session open and idle after its last line until `core.shutdown`, and defaults `--pace` to `realtime`. Confirm or state otherwise.
 
 ## Resolved recently (optional, trimmed in planning passes)
