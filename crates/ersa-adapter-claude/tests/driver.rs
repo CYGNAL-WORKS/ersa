@@ -686,3 +686,85 @@ async fn a_prompt_whose_shape_drifted_can_still_be_answered() {
     );
     session.stop().await.expect("stop");
 }
+
+#[tokio::test]
+async fn one_prompt_is_answered_once_even_by_concurrent_decisions() {
+    let out = fixture("11-stream-permission-prompt-tool-stdio").stdout;
+    // `initialize` fits; the first answer's write then hangs, holding the
+    // prompt reserved while a second decision arrives.
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(expect("initialize", is_initialize))
+        .then_stdout([out[0].clone(), out[4].clone()])
+        .hold_open()
+        .wedge_stdin_after(1);
+    let sink = Arc::new(RecordingSink::new());
+    let session: Arc<dyn ersa_adapter::AdapterSession> = Arc::from(
+        adapter()
+            .start(Arc::new(transport.clone()), config(), sink.clone())
+            .await
+            .expect("start"),
+    );
+    sink.wait_for_line(WAIT, |l| is_kind(l, "control_request/can_use_tool"))
+        .await;
+
+    // A decision that cannot be built releases the prompt again.
+    let bad = PermissionDecision {
+        apply_suggestions: vec![9],
+        ..allow()
+    };
+    assert!(matches!(
+        session.decide_permission(PERMISSION_ID, bad).await,
+        Err(AdapterError::Protocol(_))
+    ));
+
+    let first = tokio::spawn({
+        let session = session.clone();
+        async move { session.decide_permission(PERMISSION_ID, allow()).await }
+    });
+    // The first answer is recorded, then stuck writing.
+    sink.wait_for_line(WAIT, |l| {
+        l.dir == Direction::Host && l.line.contains(PERMISSION_ID)
+    })
+    .await;
+    assert!(matches!(
+        session.decide_permission(PERMISSION_ID, allow()).await,
+        Err(AdapterError::UnknownRequest(_))
+    ));
+
+    promptly("stop", session.stop()).await.expect("stop");
+    assert!(
+        promptly("the first decision", first)
+            .await
+            .unwrap()
+            .is_err()
+    );
+    let answers = sink
+        .lines()
+        .iter()
+        .filter(|l| l.dir == Direction::Host && l.line.contains(PERMISSION_ID))
+        .count();
+    assert_eq!(answers, 1, "only one answer was ever recorded");
+}
+
+#[tokio::test]
+async fn a_cli_that_never_reads_initialize_fails_start_with_its_stderr() {
+    // Stdin is wedged from the first line, so `initialize` is never sent.
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .with_stderr(["fatal: cannot read input"])
+        .hold_open()
+        .wedge_stdin_after(0);
+    let sink = Arc::new(RecordingSink::new());
+    let result = promptly(
+        "the failed start",
+        ClaudeAdapter::new()
+            .with_handshake_timeout(Duration::from_millis(100))
+            .start(Arc::new(transport), config(), sink.clone()),
+    )
+    .await;
+    let Err(AdapterError::Protocol(message)) = result else {
+        panic!("expected a protocol error");
+    };
+    assert!(message.contains("initialize"), "{message}");
+    assert!(message.contains("fatal: cannot read input"), "{message}");
+    assert_eq!(sink.exit_codes(), [None], "killed");
+}
