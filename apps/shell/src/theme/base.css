@@ -50,6 +50,8 @@ body {
 /* The state glyph every tile shares (DESIGN.md, status lives in tiles): a small dot whose tone carries the state.
    Neutral by default; pending is hollow; needs-you is the accent with a ring, so it reads apart from positive. */
 .glyph {
+  display: inline-block;
+  flex: none;
   box-sizing: border-box;
   width: var(--space-sm);
   height: var(--space-sm);

@@ -54,7 +54,8 @@ export function describeError(error: unknown): string {
     const bridge = error as BridgeError;
     // Core's messages start with the method they answer ("session.send: …"),
     // which means nothing to the user.
-    if (bridge.kind === "rpc") return (bridge.error.data?.detail ?? bridge.error.message).replace(/^[a-z_]+\.[a-z_]+: /, "");
+    // Only Core's own message is trimmed; a detail may quote anything, file names included.
+    if (bridge.kind === "rpc") return bridge.error.data?.detail ?? bridge.error.message.replace(/^[a-z_]+\.[a-z_]+: /, "");
     if (bridge.kind === "unavailable") return bridge.message;
   }
   if (error instanceof globalThis.Error) return error.message;

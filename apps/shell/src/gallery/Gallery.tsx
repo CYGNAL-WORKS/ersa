@@ -8,6 +8,7 @@ import { AddProject } from "../components/AddProject";
 import { Button } from "../components/Button";
 import { Composer } from "../components/Composer";
 import { CoreStatus } from "../components/CoreStatus";
+import { ErrorBoundary } from "../components/ErrorBoundary";
 import { ProjectList } from "../components/ProjectList";
 import { SessionList } from "../components/SessionList";
 import { Transcript } from "../components/Transcript";
@@ -143,7 +144,7 @@ const hiding: Event[] = [
     request_id: "r2",
     tool_use_id: "t2",
     tool_name: "Bash",
-    input: { command: "echo safe ‮; rm -rf ~ #​" },
+    input: { command: "echo safe \u202E; rm -rf ~ #\u200B" },
     suggestions: [],
     flags,
   },
@@ -163,6 +164,8 @@ const answered: Event[] = [
 const streaming: Event[] = [
   { type: "session.state", state: "running" },
   { type: "user.message", origin: "human", text: "Say ready." },
+  { type: "tool.requested", tool_use_id: "t0", name: "Read", input: { file_path: "docs/design/DESIGN.md" } },
+  { type: "tool.progress", tool_use_id: "t0", detail: "Reading DESIGN.md" },
   { type: "assistant.text", block_id: "m1/0", text: "Ready, and reading the", final: false },
 ];
 const failing: Event[] = [
@@ -197,6 +200,11 @@ const transcriptStates: [string, SessionView][] = [
   ["Failed", sessionView(failing)],
   ["Not receiving events", sessionView([], { stream: { state: "failed", message: "Core closed the connection" } })],
 ];
+
+/** Throws while rendering, as a component given data it cannot read would. */
+function Unreadable(): never {
+  throw new Error("Cannot read properties of undefined (reading 'toFixed')");
+}
 
 interface Entry {
   name: string;
@@ -277,8 +285,20 @@ const entries: Entry[] = [
     wide: true,
     states: transcriptStates.map(([label, view]) => [
       label,
-      <Transcript title="Fix the flaky reconnect test" view={view} onDecide={() => {}} />,
+      <Transcript title="Fix the flaky reconnect test" view={view} onDecide={() => {}} onRetry={() => {}} />,
     ]),
+  },
+  {
+    name: "ErrorBoundary",
+    wide: true,
+    states: [
+      [
+        "A session that cannot be shown",
+        <ErrorBoundary what="This session">
+          <Unreadable />
+        </ErrorBoundary>,
+      ],
+    ],
   },
   {
     name: "Composer",

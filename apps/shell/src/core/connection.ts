@@ -5,7 +5,7 @@
 // Kept free of React so the tests drive it with a fake client.
 
 import type { CoreHelloResult, CoreStatusResult, Project, Session } from "../protocol/core-api.gen";
-import { checkSessions, checkTile } from "./checks";
+import { checkSessions, checkTile, helloReadable } from "./checks";
 import { type AnyNotification, type Attachment, type CoreClient, type CoreEvent, describeError } from "./client";
 
 export type ProjectsView =
@@ -182,6 +182,10 @@ export function connect(
     client.attach(onEvent).then(
       ({ how, label, hello }) => {
         if (!live()) return;
+        if (!helloReadable(hello)) {
+          set({ phase: "failed", message: "Core's handshake could not be read; this window may be older than Core." });
+          return;
+        }
         if (lostEarly !== null) {
           lose(lostEarly, hello, retry);
           return;
