@@ -22,7 +22,7 @@ A brief references other briefs by ID in its front matter and in prose. Two rule
 ## Identity
 
 - Brief IDs are the type prefix plus a short uppercase slug: `LAY-SHELL`, `FLOW-NEW-SESSION`.
-- The file is `docs/briefs/<ID>.md`. Protocol schemas and fixtures live in `docs/briefs/protocol/schema/`.
+- The file is `docs/briefs/<ID>.md`. Recorded protocol fixtures live in `docs/briefs/protocol/fixtures/` (writable by implementing sessions, since they are evidence). JSON Schemas that implement a protocol brief live at the repository root under `protocol/schema/` and are maintained by implementing tickets with conformance tests; the brief defines the vocabulary, the schema is its machine-readable form.
 - Requirement IDs are the brief ID plus `-R` and a two-digit-or-more number: `FLOW-NEW-SESSION-R03`. Allocated in order, never reused. The manifest reports duplicates.
 
 ## Front matter
