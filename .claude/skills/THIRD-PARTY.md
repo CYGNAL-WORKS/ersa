@@ -2,11 +2,11 @@
 
 The skills listed here are copied from [mattpocock/skills](https://github.com/mattpocock/skills) at commit `4ae2317ddb22b046e26455e4f9c9b3aaaf62212d` (2026-10-31), under the MIT licence reproduced below. They were read in full before being committed. Update them deliberately: fetch a newer commit, read the diff, re-apply the adaptations, and change the commit above.
 
-Copied: `codebase-design`, `diagnosing-bugs`, `domain-modeling`, `grill-me`, `grill-with-docs`, `grilling`, `handoff`, `research`, `retro`, `tdd`, `to-tickets`, `wait-what`, `writing-for-agents`; and, as `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`, two reference files from `setup-matt-pocock-skills`. The per-agent `agents/openai.yaml` files were left out.
+Copied: `code-review`, `codebase-design`, `diagnosing-bugs`, `domain-modeling`, `grill-me`, `grill-with-docs`, `grilling`, `handoff`, `implement`, `pr` (with its `CREDITS.md`), `research`, `retro`, `tdd`, `to-tickets`, `wait-what`, `writing-for-agents`; and, as `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`, two reference files from `setup-matt-pocock-skills`. The per-agent `agents/openai.yaml` files were left out.
 
-Changes from the originals: an "Ersa adaptation" note under the front matter of `codebase-design`, `diagnosing-bugs`, `domain-modeling`, `tdd` and `to-tickets`; `domain-modeling/ADR-FORMAT.md` and `GLOSSARY-FORMAT.md` replaced by pointers to Ersa's own formats; `wait-what` points at `docs/GLOSSARY.md`; the two `docs/agents/` files gained an Ersa header line.
+Changes from the originals: an "Ersa adaptation" note under the front matter of `code-review`, `codebase-design`, `diagnosing-bugs`, `domain-modeling`, `implement`, `pr`, `tdd` and `to-tickets`; `domain-modeling/ADR-FORMAT.md` and `GLOSSARY-FORMAT.md` replaced by pointers to Ersa's own formats; `wait-what` points at `docs/GLOSSARY.md`; the two `docs/agents/` files gained an Ersa header line.
 
-Not copied, on purpose: `setup-matt-pocock-skills` (its job is done by the `docs/agents/` files and a pointer in `CLAUDE.md`), `to-spec` (Ersa's specs are briefs), `implement` and `code-review` (covered by `implement-ticket`), `implement-spec`, `wayfinder` and `triage` (to revisit when the tracker carries more than tickets), and the rest.
+Not copied, on purpose: `setup-matt-pocock-skills` (its job is done by the `docs/agents/` files and a pointer in `CLAUDE.md`), `to-spec` (Ersa's specs are briefs), `implement-spec`, `wayfinder` and `triage` (to revisit when the tracker carries more than tickets), and the rest.
 
 ---
 
