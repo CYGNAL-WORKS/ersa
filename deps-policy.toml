@@ -1,0 +1,36 @@
+# Ersa's dependency policy: the release-age threshold and every exception to
+# the dependency checks. ADR 0015 is the decision; docs/dependencies.md says how
+# the checks run. `scripts/deps-check.mjs` reads this file.
+#
+# Every exception needs a `reason` (why it is safe to accept, and what ends it)
+# and an `expires` date (YYYY-MM-DD, no quotes) at most 90 days after the day
+# the check runs. An exception that has expired fails the check: renew it with a
+# new reason, or remove it and fix the dependency.
+
+# A package version a pull request adds or changes must have been published at
+# least this many days before the check runs.
+min_age_days = 7
+
+# Age exceptions let one exact package version in before it is `min_age_days`
+# old, for example a release that fixes a vulnerability, or a package that is
+# not from the registry (its version is the lockfile's text, such as
+# "file:../thing") and so has no publish date. Copy this block:
+#
+# [[age_exception]]
+# ecosystem = "crates.io"            # "crates.io" or "npm"
+# package = "example-crate"          # the name as it appears in the lockfile
+# version = "1.4.2"                  # the exact version, no ranges
+# reason = "Fixes the advisory against 1.4.1; we cannot wait out the week."
+# expires = 2026-12-01
+
+# Vulnerability exceptions tolerate one advisory for now, for example when no
+# fixed version exists yet. `id` may be the advisory's RUSTSEC, GHSA, or CVE ID;
+# any of its aliases matches. Set `package`, and `version` if you can, so the
+# exception cannot silence the same advisory on another package. Copy this block:
+#
+# [[vulnerability_exception]]
+# id = "RUSTSEC-2024-0001"
+# package = "example-crate"          # optional: only this package
+# version = "1.4.1"                  # optional, needs package: only this version
+# reason = "No fixed release yet; Ersa never calls the affected function."
+# expires = 2026-12-01
