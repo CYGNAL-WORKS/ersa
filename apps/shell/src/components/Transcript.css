@@ -1,0 +1,185 @@
+/* The transcript reads as a document (DESIGN.md): prose on the canvas, no bubbles, no avatars.
+   Cards carry tool calls and permission requests. */
+
+.transcript {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+}
+
+.transcript-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: var(--line-hairline) solid var(--color-line);
+}
+
+.transcript-title {
+  margin: 0;
+  font-size: var(--type-heading-size);
+  line-height: var(--type-heading-leading);
+  font-weight: var(--type-heading-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transcript-state {
+  color: var(--color-ink-muted);
+}
+
+/* Needs the user: the accent, as on the session's tile. */
+.transcript-state[data-needs-you] {
+  color: var(--color-accent);
+}
+
+.transcript-scroll {
+  min-height: 0;
+  overflow: auto;
+}
+
+/* A reading column: three rail widths (DESIGN.md has no measure token yet; see the inbox). */
+.transcript-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  max-width: calc(var(--size-rail) * 3);
+  margin: 0 auto;
+  padding: var(--space-xl) var(--space-lg);
+}
+
+.transcript-text {
+  margin: 0;
+  font-family: var(--type-prose-family);
+  font-size: var(--type-prose-size);
+  line-height: var(--type-prose-leading);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The user's words: as plain as the agent's, set apart by a rule and a quiet label. */
+.transcript-user {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding-left: var(--space-md);
+  border-left: var(--line-hairline) solid var(--color-line);
+}
+
+.transcript-who,
+.transcript-note,
+.transcript-ended {
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.transcript-ended {
+  padding-top: var(--space-sm);
+  border-top: var(--line-hairline) solid var(--color-line);
+}
+
+.transcript-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+/* An open request needs the user: its edge takes the accent (a line's colour, never its width or a fill). */
+.transcript-permission[data-open] {
+  border-color: var(--color-accent);
+}
+
+.transcript-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.transcript-card-title {
+  font-weight: var(--type-heading-weight);
+}
+
+.transcript-card-status,
+.transcript-card-detail {
+  margin: 0;
+  color: var(--color-ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.transcript-input {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* A permission request's input, field by field. While the request is open every value is shown whole:
+   nothing the user approves may sit below a scrollbar. Once decided, a long value scrolls. */
+.transcript-fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-md);
+  row-gap: var(--space-xs);
+  margin: 0;
+}
+
+.transcript-field {
+  display: contents;
+}
+
+.transcript-field dt {
+  color: var(--color-ink-muted);
+}
+
+.transcript-field dd {
+  margin: 0;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.transcript-permission:not([data-open]) .transcript-field dd {
+  max-height: var(--size-rail);
+  overflow: auto;
+}
+
+/* A character that would otherwise be invisible, shown as its code point in ink, set apart by a caution edge. */
+.transcript-hidden {
+  padding: 0 var(--space-xs);
+  color: var(--color-ink);
+  border: var(--line-hairline) solid var(--color-caution);
+  border-radius: var(--radius-sm);
+}
+
+/* A card's state: the shared glyph, then a word. */
+.transcript-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.transcript-output {
+  margin: 0;
+  max-height: var(--size-rail);
+  overflow: auto;
+  padding: var(--space-sm);
+  color: var(--color-ink-muted);
+  background: var(--color-canvas);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.transcript-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}

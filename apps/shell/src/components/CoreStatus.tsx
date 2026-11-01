@@ -14,7 +14,7 @@ export function CoreStatus({ view, onRetry }: CoreStatusProps) {
     case "connecting":
       return <StatusTile title="Core" tone="pending" summary="Connecting…" />;
     case "connected": {
-      const { hello, status, how } = view;
+      const { hello, status, how, label } = view;
       const readouts = [
         { label: "Version", value: hello.core_version },
         { label: "API", value: hello.api_version },
@@ -29,7 +29,13 @@ export function CoreStatus({ view, onRetry }: CoreStatusProps) {
         <StatusTile
           title="Core"
           tone="positive"
-          summary={`${how === "launched" ? "Started" : "Attached"} on ${hello.host.name}`}
+          summary={
+            // Name a labelled endpoint, so a window attached to a replay or
+            // a second Core never passes for the user's own.
+            label === undefined
+              ? `${how === "launched" ? "Started" : "Attached"} on ${hello.host.name}`
+              : `Attached to ${label} on ${hello.host.name}`
+          }
           readouts={readouts}
         />
       );

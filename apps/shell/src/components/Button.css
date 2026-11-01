@@ -1,4 +1,5 @@
-/* A quiet button: surface and line, never a filled accent. `data-force` lets the gallery show a state without a pointer. */
+/* A quiet button: surface and line. The primary variant, for the one action a moment asks for, takes the accent.
+   `data-force` lets the gallery show a state without a pointer. */
 
 .button {
   font: inherit;
@@ -11,7 +12,8 @@
 }
 
 /* Hover darkens the edge as well as the fill: surface-raised alone barely differs from surface. */
-.button:hover:not(:disabled),
+/* :where() adds no specificity, so :active below still wins on a press. */
+.button:hover:not(:disabled):where(:not(:focus-visible)),
 .button[data-force="hover"] {
   background: var(--color-surface-raised);
   border-color: var(--color-ink-faint);
@@ -35,4 +37,39 @@
 .button:disabled {
   color: var(--color-ink-faint);
   cursor: default;
+}
+
+/* Primary: the accent, with its own ink. States change the edge, never the fill. */
+.button[data-variant="primary"] {
+  color: var(--color-accent-ink);
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+/* The edge strengthens from hover to pressed, as the quiet button's does. */
+.button[data-variant="primary"]:hover:not(:disabled):where(:not(:focus-visible)),
+.button[data-variant="primary"][data-force="hover"] {
+  background: var(--color-accent);
+  border-color: var(--color-ink-muted);
+}
+
+.button[data-variant="primary"]:active:not(:disabled),
+.button[data-variant="primary"][data-force="pressed"] {
+  background: var(--color-accent);
+  border-color: var(--color-ink);
+}
+
+/* Focus on a filled button turns its edge to ink: an accent edge would vanish into the accent fill. */
+.button[data-variant="primary"]:focus-visible,
+.button[data-variant="primary"][data-force="focus"] {
+  color: var(--color-accent-ink);
+  outline: none;
+  border-color: var(--color-ink);
+}
+
+/* Disabled primary looks like a disabled quiet button: nothing to act on. */
+.button[data-variant="primary"]:disabled {
+  color: var(--color-ink-faint);
+  background: var(--color-surface);
+  border-color: var(--color-line);
 }

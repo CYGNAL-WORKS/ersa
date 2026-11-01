@@ -1,0 +1,124 @@
+/* Session tiles in the rail. The active tile is outlined in the accent; a tile that needs the user
+   shows the accent glyph (DESIGN.md: attention is an edge or glyph, never a filled row). */
+
+.sessions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-height: 0;
+}
+
+.sessions-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  font-weight: var(--type-heading-weight);
+}
+
+.sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Each tile is a grid item, so it stretches to the rail's width. */
+.sessions-list > li {
+  display: grid;
+}
+
+.sessions-note {
+  margin: 0;
+  color: var(--color-ink-muted);
+}
+
+.sessions-note-hint {
+  display: block;
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.session {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  column-gap: var(--space-sm);
+  align-items: baseline;
+  min-width: 0;
+  padding: var(--space-sm) var(--space-md);
+  font: inherit;
+  text-align: left;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.session:hover,
+.session[data-force="hover"] {
+  background: var(--color-surface-raised);
+  border-color: var(--color-ink-faint);
+}
+
+.session:active,
+.session[data-force="pressed"] {
+  background: var(--color-canvas);
+  border-color: var(--color-ink-faint);
+}
+
+/* The active session is outlined in the accent. */
+.session[aria-current] {
+  border-color: var(--color-accent);
+}
+
+/* Focus turns the edge to ink and the title to the accent; ink, because the active tile's edge is already
+   the accent and a change to it would show nothing there. */
+.session:focus-visible,
+.session[data-force="focus"] {
+  outline: none;
+  border-color: var(--color-ink);
+}
+
+.session:focus-visible .session-title,
+.session[data-force="focus"] .session-title {
+  color: var(--color-accent);
+}
+
+/* Glyph beside the title; the cost at the title's end; the state beneath both. */
+.session-glyph {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
+}
+
+.session-title {
+  grid-column: 2;
+  grid-row: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-cost {
+  grid-column: 3;
+  grid-row: 1;
+  color: var(--color-ink-muted);
+}
+
+.session-state {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.session[data-needs-you] .session-state {
+  color: var(--color-accent);
+}

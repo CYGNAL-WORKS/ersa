@@ -12,6 +12,11 @@ import type {
 /** How the Shell reached Core: found it running, or started it. */
 export interface Attachment {
   how: "attached" | "launched";
+  /**
+   * The endpoint's label when the Shell attached to one other than the
+   * user's own (a debug build told to by `ERSA_ATTACH`, such as a replay server).
+   */
+  label?: string;
   /** Core's answer to `core.hello` on this connection. */
   hello: CoreHelloResult;
 }
@@ -47,7 +52,10 @@ export interface CoreClient {
 export function describeError(error: unknown): string {
   if (typeof error === "object" && error !== null && "kind" in error) {
     const bridge = error as BridgeError;
-    if (bridge.kind === "rpc") return bridge.error.data?.detail ?? bridge.error.message;
+    // Core's messages start with the method they answer ("session.send: …"),
+    // which means nothing to the user.
+    // Only Core's own message is trimmed; a detail may quote anything, file names included.
+    if (bridge.kind === "rpc") return bridge.error.data?.detail ?? bridge.error.message.replace(/^[a-z_]+\.[a-z_]+: /, "");
     if (bridge.kind === "unavailable") return bridge.message;
   }
   if (error instanceof globalThis.Error) return error.message;

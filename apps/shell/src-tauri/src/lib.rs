@@ -6,7 +6,9 @@
 //!   two commands:
 //!   - `core_attach { events }` attaches (launching Core if needed),
 //!     completes the handshake, and returns `{ how: "attached" | "launched",
-//!     hello }`, where `hello` is Core's `core.hello` result. Attaching again
+//!     hello, label? }`, where `hello` is Core's `core.hello` result and
+//!     `label` names the endpoint when it is not the user's own (see
+//!     [`run`]). Attaching again
 //!     while connected returns the same handshake. `events` is a channel the
 //!     Interface creates before calling; from then on it receives, in order,
 //!     `{ kind: "notification", method, params }` for each notification Core
@@ -36,6 +38,9 @@ type Sink = Arc<std::sync::Mutex<Option<Channel<Value>>>>;
 struct Shell {
     /// Where Core is, or why we could not work that out.
     location: Result<CoreLocation, String>,
+    /// The endpoint's label when the window attaches to a labelled endpoint
+    /// instead of the user's own; told to the Interface so it can say so.
+    label: Option<String>,
     /// The open connection, if any. An async mutex because attaching holds it
     /// across the launch, so two attaches never launch two Cores.
     link: Mutex<Option<Arc<CoreLink>>>,
@@ -51,8 +56,15 @@ async fn core_attach(
     // on is lost or delivered to an Interface that no longer listens.
     *shell.sink.lock().expect("sink lock") = Some(events);
     let mut link = shell.link.lock().await;
+    let reply = |how: &str, hello: &Value| {
+        let mut reply = json!({ "how": how, "hello": hello });
+        if let Some(label) = &shell.label {
+            reply["label"] = json!(label);
+        }
+        reply
+    };
     if let Some(open) = link.as_ref().filter(|l| !l.is_closed()) {
-        return Ok(json!({ "how": "attached", "hello": open.hello() }));
+        return Ok(reply("attached", open.hello()));
     }
     let location = shell.location.as_ref().map_err(BridgeError::unavailable)?;
     let (stream, how) = launch::attach_or_launch(location)
@@ -76,7 +88,7 @@ async fn core_attach(
         }
     })
     .await?;
-    let reply = json!({ "how": how.as_str(), "hello": opened.hello() });
+    let reply = reply(how.as_str(), opened.hello());
     *link = Some(Arc::new(opened));
     Ok(reply)
 }
@@ -133,10 +145,30 @@ fn open_in_browser(url: &Url) {
         .spawn();
 }
 
+/// The endpoint label a debug build attaches to instead of the user's own
+/// Core, from `ERSA_ATTACH`: for developing the Interface against a replay
+/// server (`ersa-core replay` serves the label `replay`) or a second Core.
+/// The window never launches Core there. A release build ignores it, so
+/// nothing in the environment can point the installed app at another Core.
+fn attach_label() -> Option<String> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    std::env::var("ERSA_ATTACH")
+        .ok()
+        .filter(|label| !label.is_empty())
+}
+
 /// Opens the window. Called by `main`.
 pub fn run() {
+    let label = attach_label();
+    let location = match &label {
+        Some(label) => CoreLocation::attach_only(label),
+        None => CoreLocation::default_for_user(),
+    };
     let shell = Shell {
-        location: CoreLocation::default_for_user().map_err(|e| format!("cannot locate Core: {e}")),
+        location: location.map_err(|e| format!("cannot locate Core: {e}")),
+        label,
         link: Mutex::new(None),
         sink: Arc::new(std::sync::Mutex::new(None)),
     };
