@@ -121,6 +121,13 @@ pub fn invocation_args(config: &SessionConfig) -> Vec<String> {
         args.push("--model".into());
         args.push(model.clone());
     }
+    // Continue an earlier session: the CLI keeps its id and appends to its
+    // session record (PROTO-CLAUDE-CODE-STREAM-R14). `start` refuses an id
+    // that is not one; here it is left out rather than passed.
+    if let Ok(Some(id)) = resume_id(config) {
+        args.push("--resume".into());
+        args.push(id.into());
+    }
     args
 }
 
@@ -166,6 +173,23 @@ fn program(config: &SessionConfig) -> String {
         .unwrap_or_else(|| "claude".into())
 }
 
+/// The session to resume: `extra.resume`, the `session_id` from that
+/// session's `system/init`, which Ersa stores with the session. The CLI's
+/// session ids are UUIDs; anything else is refused, so a value that merely
+/// looks like a flag (from a file name in the record directory, say) can never
+/// reach the command line as one.
+fn resume_id(config: &SessionConfig) -> Result<Option<&str>, AdapterError> {
+    let Some(value) = config.extra.get("resume") else {
+        return Ok(None);
+    };
+    match value.as_str() {
+        Some(id) if crate::record::is_session_id(id) => Ok(Some(id)),
+        _ => Err(AdapterError::Protocol(format!(
+            "cannot resume {value}: not a Claude Code session id"
+        ))),
+    }
+}
+
 #[async_trait]
 impl Adapter for ClaudeAdapter {
     fn backend(&self) -> &str {
@@ -178,6 +202,9 @@ impl Adapter for ClaudeAdapter {
         config: SessionConfig,
         sink: Arc<dyn AdapterSink>,
     ) -> Result<Box<dyn AdapterSession>, AdapterError> {
+        // A bad resume id fails here, before anything starts.
+        resume_id(&config)?;
+
         let spec = ProcessSpec {
             program: program(&config),
             args: invocation_args(&config),
