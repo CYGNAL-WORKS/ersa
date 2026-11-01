@@ -1,0 +1,20 @@
+[package]
+name = "ersa-cli"
+description = "The ersa-core binary: the Core process that the Shell launches or attaches to."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+# The crate is called `ersa-cli`, but the executable it builds is `ersa-core`,
+# the name ADR 0011 gives the Core process.
+[[bin]]
+name = "ersa-core"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+
+[lints]
+workspace = true
