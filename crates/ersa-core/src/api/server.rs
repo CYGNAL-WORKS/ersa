@@ -1,6 +1,7 @@
 //! The Core API server: listens on the platform endpoint and serves each
 //! connection in its own task, speaking newline-delimited JSON-RPC 2.0.
 
+use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
@@ -157,8 +158,14 @@ impl Server {
 }
 
 /// Serves one client until it disconnects, the handshake fails or times out,
-/// it sends an unreadable line, or Core shuts down. Requests are answered one
-/// at a time, in order.
+/// it sends an unreadable line, or Core shuts down.
+///
+/// Requests are read in order. Most are answered in line, one at a time.
+/// Session requests that may wait on a backend run detached, each in a task
+/// of its own, and answer when done, possibly out of order (responses carry
+/// their request's id). Requests about the same session still run in the
+/// order they were sent: each waits for the one before it in its session's
+/// lane. Requests about different sessions overlap.
 async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
     let (read, mut write) = tokio::io::split(stream);
 
@@ -184,6 +191,9 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
     let mut conn = ConnectionState::new(outbound, kick);
     let mut lines = CappedLines::new(read, core.config.max_line_bytes);
     let detached = Arc::new(Semaphore::new(DETACHED_PER_CONNECTION));
+    // Per session: a flag that rises when the latest request about it has
+    // been answered. The next request about that session waits for it.
+    let mut lanes: HashMap<String, watch::Receiver<bool>> = HashMap::new();
     let hello_deadline = tokio::time::Instant::now() + core.config.handshake_timeout;
     let mut shutdown_after = false;
     loop {
@@ -231,22 +241,54 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
             // the requests behind it: a permission decision must not wait
             // for another session's start.
             Incoming::Request(request) if super::runs_detached(&conn, &request) => {
-                let Ok(permit) = Arc::clone(&detached).acquire_owned().await else {
-                    break;
+                // A full set of running requests stops reading, which is the
+                // back-pressure; a kick or shutdown still ends the wait.
+                let permit = tokio::select! {
+                    permit = Arc::clone(&detached).acquire_owned() => match permit {
+                        Ok(permit) => permit,
+                        Err(_) => break,
+                    },
+                    () = async { let _ = kicked.wait_for(|kicked| *kicked).await; } => break,
+                    _ = core.shutdown_requested() => break,
                 };
+                let (done, done_rx) = watch::channel(false);
+                let before = super::session_lane(&conn, &request)
+                    .and_then(|session| lanes.insert(session, done_rx));
+                lanes.retain(|_, answered| !*answered.borrow());
+                // Weak, so a request still running does not keep a closed
+                // connection's writer alive; its answer then goes nowhere.
+                let outbound = conn.outbound.downgrade();
                 let core = Arc::clone(&core);
-                let outbound = conn.outbound.clone();
                 tokio::spawn(async move {
-                    let response = super::handle_detached(&core, request).await;
+                    if let Some(mut before) = before {
+                        // `Err` means the earlier task is gone: done too.
+                        let _ = before.wait_for(|answered| *answered).await;
+                    }
+                    let response = run_detached(core, request).await;
                     let line =
                         serde_json::to_string(&response).expect("responses always serialize");
-                    // The client may have gone; the work is done either way.
-                    let _ = outbound.send(line).await;
+                    if let Some(outbound) = outbound.upgrade() {
+                        let _ = outbound.send(line).await;
+                    }
+                    done.send_replace(true);
                     drop(permit);
                 });
                 continue;
             }
-            Incoming::Request(request) => super::handle(&core, &mut conn, request).await,
+            Incoming::Request(request) => {
+                // An in-line request about a session waits for the detached
+                // ones about it sent before it.
+                let before = super::session_lane(&conn, &request)
+                    .and_then(|session| lanes.get(&session).cloned());
+                if let Some(mut before) = before {
+                    tokio::select! {
+                        _ = before.wait_for(|answered| *answered) => {}
+                        () = async { let _ = kicked.wait_for(|kicked| *kicked).await; } => break,
+                        _ = core.shutdown_requested() => break,
+                    }
+                }
+                super::handle(&core, &mut conn, request).await
+            }
             // The Interface sends no notifications yet; ignore any, as
             // JSON-RPC requires (a notification is never answered).
             Incoming::Notification { method, .. } => {
@@ -295,12 +337,34 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
     let kicked = *kicked.borrow();
     drop(conn);
     let mut writer = writer;
-    if kicked && tokio::time::timeout(KICK_GRACE, &mut writer).await.is_err() {
-        writer.abort();
+    if kicked {
+        // A `JoinHandle` that has completed must not be awaited again, so
+        // it is awaited a second time only after an abort.
+        if tokio::time::timeout(KICK_GRACE, &mut writer).await.is_err() {
+            writer.abort();
+            writer.await.ok();
+        }
+    } else {
+        writer.await.ok();
     }
-    writer.await.ok();
     if shutdown_after {
         core.request_shutdown();
+    }
+}
+
+/// Runs a detached request in a task of its own, so a handler that panics
+/// still gets its request an answer (an internal error) rather than leaving
+/// the client waiting on an id forever.
+async fn run_detached(core: Arc<Core>, request: ersa_protocol::core_api::rpc::Request) -> Response {
+    let id = request.id.clone();
+    let method = request.method.clone();
+    match tokio::spawn(async move { super::handle_detached(&core, request).await }).await {
+        Ok(response) => response,
+        Err(e) => {
+            tracing::error!(%method, error = %e, "a request handler failed");
+            let error = super::ApiError::internal(format!("{method} failed inside Core")).0;
+            Response::failure(Some(id), error)
+        }
     }
 }
 
