@@ -23,6 +23,9 @@ const scriptTests = existsSync(join(ROOT, "scripts"))
 
 const checks = [
   { name: "rustfmt", cmd: "cargo", args: ["fmt", "--all", "--check"] },
+  // The Shell's Rust crate is outside the workspace, so `--all` misses it; CI
+  // formats it, and catching that here costs nothing (no Tauri build needed).
+  { name: "rustfmt (shell)", cmd: "cargo", args: ["fmt", "--manifest-path", "apps/shell/src-tauri/Cargo.toml", "--check"] },
   { name: "clippy", cmd: "cargo", args: ["clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"] },
   ...(QUICK ? [] : [{ name: "tests", cmd: "cargo", args: ["test", "--workspace", "--locked"] }]),
   ...(scriptTests.length ? [{ name: "script tests", cmd: "node", args: ["--test", ...scriptTests] }] : []),
