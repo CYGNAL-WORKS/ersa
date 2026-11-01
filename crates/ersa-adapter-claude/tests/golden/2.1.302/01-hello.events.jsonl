@@ -1,0 +1,9 @@
+{"raw_from":0,"raw_to":0,"event":{"type":"session.started","backend":"claude-code","backend_version":"2.1.302","model":"claude-fable-5-1","cwd":"C:\\Users\\user\\AppData\\Local\\Temp\\ersa-rec-dAP8Yw","capabilities":["interrupt_receipt_v1","interrupt_cancel_queued_v1","interrupt_send_now_v1","msg_lifecycle_v1","request_marker_lists_v1","sdk_mcp_tools_list_changed","sdk_mcp_manifests","mcp_read_resource_v1","mcp_tool_ui_meta_v1","ui_surface_v1","mcp_call_result_not_for_model_v1"],"backend_session_id":"14018460-f6a7-4b07-831c-9e7ec48b841f"}}
+{"raw_from":1,"raw_to":1,"event":{"type":"turn.started","turn":1,"trigger":"system"}}
+{"raw_from":1,"raw_to":1,"event":{"type":"session.state","state":"running"}}
+{"raw_from":1,"raw_to":1,"event":{"type":"assistant.text","block_id":"msg_011CgbD19nwzJE3cJb6L649H/0","text":"ready","final":true}}
+{"raw_from":2,"raw_to":2,"event":{"type":"usage.updated","rate_limit":{"status":"allowed","resets_at":"2026-11-04T20:00:00Z","detail":"seven_day"}}}
+{"raw_from":3,"raw_to":3,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"system/post_turn_summary","payload":{"needs_action":"","session_id":"14018460-f6a7-4b07-831c-9e7ec48b841f","status_category":"completed","status_detail":"replied with the requested word: ready","subtype":"post_turn_summary","summarizes_uuid":"221b03f2-f799-412d-9c3a-1a1d3bf97922","type":"system","uuid":"bc10897d-8cd3-4d89-8548-6e154065005f"}}}
+{"raw_from":4,"raw_to":4,"event":{"type":"turn.completed","turn":1,"outcome":"success","duration_ms":4349,"is_error":false,"final_text":"ready"}}
+{"raw_from":4,"raw_to":4,"event":{"type":"usage.updated","context_tokens":38499,"context_window":1000000,"cost_usd_total":0.19349850000000002,"turns":1}}
+{"raw_from":4,"raw_to":4,"event":{"type":"session.state","state":"idle"}}
