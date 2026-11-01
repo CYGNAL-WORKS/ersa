@@ -673,14 +673,23 @@ async fn the_tile_carries_the_state_and_follows_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn re_projecting_is_withdrawn() {
+async fn re_projecting_is_gone_and_a_title_is_not_ersas_to_give() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
     client.result("session.stop", json!({ "id": id })).await;
+    // Nothing is stored to re-project: the method is gone from the API.
     let error = client.error("session.reproject", json!({ "id": id })).await;
-    assert_eq!(kind(&error), "invalid_state");
-    assert!(error["message"].as_str().unwrap().contains("withdrawn"));
+    assert_eq!(error["code"], -32601, "{error:#}");
+    // session.create takes no title; the backend's record gives one.
+    let workspace_id = session_row(&mut client, &id).await["workspace_id"].clone();
+    let error = client
+        .error(
+            "session.create",
+            json!({ "workspace_id": workspace_id, "backend": fake::BACKEND, "title": "mine" }),
+        )
+        .await;
+    assert_eq!(error["code"], -32602, "{error:#}");
 }
 
 // verifies: ARCH-CORE-R12
@@ -898,15 +907,6 @@ async fn a_sessions_title_and_start_come_from_its_record_and_its_mode_from_ersa(
     let (core, _) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
-    // A title is not Ersa's to set, at creation either.
-    let workspace_id = session_row(&mut client, &id).await["workspace_id"].clone();
-    let error = client
-        .error(
-            "session.create",
-            json!({ "workspace_id": workspace_id, "backend": fake::BACKEND, "title": "mine" }),
-        )
-        .await;
-    assert_eq!(kind(&error), "invalid_state");
     client
         .result("session.set_mode", json!({ "id": id, "mode": "review" }))
         .await;
