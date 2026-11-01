@@ -90,6 +90,17 @@ const REPLAY_PAGE: usize = 500;
 /// the turn it started.
 const SEND_SETTLE: Duration = Duration::from_secs(10);
 
+/// How long reading a session's record may take before the session opens
+/// with an error saying so. Records are local files, normally read in well
+/// under a second; a file system that hangs (a network drive, a synced
+/// folder) must not hold the session's other operations for ever.
+const RECORD_READ: Duration = Duration::from_secs(30);
+
+/// How long reading a record's title and creation time may take, and how
+/// long startup waits for all of them together.
+const SUMMARY_READ: Duration = Duration::from_secs(5);
+const STARTUP_SUMMARIES: Duration = Duration::from_secs(10);
+
 /// After a stop interrupts a start, how long the session task waits for the
 /// adapter to report the half-started process's exit.
 const CANCELLED_START_GRACE: Duration = Duration::from_secs(10);
@@ -350,6 +361,7 @@ impl SessionManager {
         facts: &HashMap<String, Facts>,
         transport_for: impl Fn(&str) -> Option<Arc<dyn Transport>>,
     ) -> persistence::Result<()> {
+        let mut summaries = tokio::task::JoinSet::new();
         for row in self.store.sessions().await? {
             let known = facts.get(&row.id);
             let started = known.map_or(UNKNOWN_TIME.to_string(), |f| f.first_ts.clone());
@@ -365,9 +377,25 @@ impl SessionManager {
                 None => {}
             }
             if let Some(adapter) = self.adapters.get(&handle.backend) {
-                read_presented(&handle, adapter.as_ref(), &transport_for).await;
+                let row = lock(&handle.row).clone();
+                if let (Some(backend_id), Some(transport)) =
+                    (row.backend_session_id, transport_for(&row.host_id))
+                {
+                    let (handle, adapter) = (Arc::clone(&handle), Arc::clone(adapter));
+                    summaries.spawn(async move {
+                        apply_summary(&handle, adapter.as_ref(), transport, &row.cwd, &backend_id)
+                            .await;
+                    });
+                }
             }
             lock(&self.sessions).insert(handle.id.clone(), handle);
+        }
+        // Read side by side, and not waited on past a bound: a file system
+        // that hangs leaves those titles to the next time a session opens,
+        // rather than keeping Core from serving at all.
+        let all = async { while summaries.join_next().await.is_some() {} };
+        if tokio::time::timeout(STARTUP_SUMMARIES, all).await.is_err() {
+            tracing::warn!("reading the sessions' titles took too long; some are left to later");
         }
         Ok(())
     }
@@ -507,7 +535,7 @@ impl SessionManager {
         backend_version: String,
     ) {
         let (fed_tx, fed_rx) = mpsc::unbounded_channel();
-        let sink = Arc::new(CoreSink::new(&handle.id, fed_tx));
+        let sink = Arc::new(CoreSink::new(&handle.id, Arc::clone(&self.app_log), fed_tx));
         let (started_tx, started_rx) = watch::channel(Started::Pending);
         let (progress_tx, progress_rx) = watch::channel(Progress::default());
         let (finished_tx, finished_rx) = watch::channel(false);
@@ -522,7 +550,6 @@ impl SessionManager {
 
         let pipeline = tokio::spawn(run_pipeline(Pipeline {
             store: self.store.clone(),
-            app_log: Arc::clone(&self.app_log),
             handle: Arc::clone(&handle),
             fed: fed_rx,
             progress: progress_tx,
@@ -770,10 +797,13 @@ impl SessionManager {
             None => Vec::new(),
             Some(backend_id) => {
                 let read = match transport_for(&row.host_id) {
-                    Some(transport) => adapter
-                        .read_record(transport, &row.cwd, backend_id)
-                        .await
-                        .map_err(|e| e.to_string()),
+                    Some(transport) => {
+                        let read = adapter.read_record(transport, &row.cwd, backend_id);
+                        match tokio::time::timeout(RECORD_READ, read).await {
+                            Ok(read) => read.map_err(|e| e.to_string()),
+                            Err(_) => Err(format!("it took longer than {RECORD_READ:?}")),
+                        }
+                    }
                     None => Err(format!("host {} cannot be reached", row.host_id)),
                 };
                 // A record that cannot be read is something the user should
@@ -827,20 +857,71 @@ async fn apply_summary(
     cwd: &str,
     backend_id: &str,
 ) {
-    match adapter.summarize_record(transport, cwd, backend_id).await {
-        Ok(Some(summary)) => {
+    let read = adapter.summarize_record(transport, cwd, backend_id);
+    match tokio::time::timeout(SUMMARY_READ, read).await {
+        Ok(Ok(Some(summary))) => {
             let mut presented = lock(&handle.presented);
             if summary.title.is_some() {
                 presented.title = summary.title;
             }
-            if let Some(created_at) = summary.created_at {
-                presented.created_at = created_at;
+            // The record's wrapper is the backend's and changes between
+            // versions: a time that is not RFC 3339 is not used.
+            match summary.created_at {
+                Some(at) if is_rfc3339(&at) => presented.created_at = at,
+                Some(at) => {
+                    tracing::warn!(session = %handle.id, created_at = %at, "the session record's first time is not RFC 3339; not used");
+                }
+                None => {}
             }
         }
-        Ok(None) => {}
-        Err(e) => {
+        Ok(Ok(None)) => {}
+        Ok(Err(e)) => {
             tracing::warn!(session = %handle.id, error = %e, "could not read the session record's title");
         }
+        Err(_) => {
+            tracing::warn!(session = %handle.id, "reading the session record's title took too long");
+        }
+    }
+}
+
+/// Whether `text` has the shape of an RFC 3339 time:
+/// `YYYY-MM-DDTHH:MM:SS`, an optional fraction, then `Z` or an offset.
+fn is_rfc3339(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let digits = |range: std::ops::Range<usize>| {
+        bytes
+            .get(range)
+            .is_some_and(|d| d.iter().all(u8::is_ascii_digit))
+    };
+    let at = |i: usize, c: u8| bytes.get(i) == Some(&c);
+    if !(digits(0..4)
+        && at(4, b'-')
+        && digits(5..7)
+        && at(7, b'-')
+        && digits(8..10)
+        && (at(10, b'T') || at(10, b't'))
+        && digits(11..13)
+        && at(13, b':')
+        && digits(14..16)
+        && at(16, b':')
+        && digits(17..19))
+    {
+        return false;
+    }
+    let mut rest = &text[19..];
+    if let Some(fraction) = rest.strip_prefix('.') {
+        let end = fraction
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(fraction.len());
+        if end == 0 {
+            return false;
+        }
+        rest = &fraction[end..];
+    }
+    match rest.as_bytes() {
+        [b'Z' | b'z'] => true,
+        [b'+' | b'-', h1, h2, b':', m1, m2] => [h1, h2, m1, m2].iter().all(|d| d.is_ascii_digit()),
+        _ => false,
     }
 }
 
@@ -918,6 +999,9 @@ enum Fed {
 /// Core's side of `AdapterSink` for one live session.
 struct CoreSink {
     session_id: String,
+    /// Where each lifecycle fact is written as the sink takes it in, before
+    /// anything it describes can happen.
+    app_log: Arc<AppLog>,
     inner: Mutex<SinkInner>,
     /// Set by `session.stop`: the exit that follows is the user's doing.
     stop_requested: AtomicBool,
@@ -947,9 +1031,10 @@ struct StartFailure {
 }
 
 impl CoreSink {
-    fn new(session_id: &str, fed: mpsc::UnboundedSender<Fed>) -> Self {
+    fn new(session_id: &str, app_log: Arc<AppLog>, fed: mpsc::UnboundedSender<Fed>) -> Self {
         CoreSink {
             session_id: session_id.to_string(),
+            app_log,
             inner: Mutex::new(SinkInner {
                 next_index: 0,
                 fed: Some(fed),
@@ -984,18 +1069,18 @@ impl CoreSink {
         Self::queue(inner, Fed::Line(raw));
     }
 
-    fn push_fact(inner: &mut SinkInner, fact: LifecycleFact) {
-        Self::queue(
-            inner,
-            Fed::Fact {
-                fact,
-                ts: now_rfc3339(),
-            },
-        );
+    /// Writes a fact to the app log, then queues it. Written here rather
+    /// than by the pipeline, so `process_started` is on disk before the
+    /// process starts, and a crash just after still leaves the fact that
+    /// startup repairs from.
+    fn push_fact(&self, inner: &mut SinkInner, fact: LifecycleFact) {
+        let ts = now_rfc3339();
+        self.app_log.write(&self.session_id, &ts, &fact);
+        Self::queue(inner, Fed::Fact { fact, ts });
     }
 
     fn record_fact(&self, fact: LifecycleFact) {
-        Self::push_fact(&mut lock(&self.inner), fact);
+        self.push_fact(&mut lock(&self.inner), fact);
     }
 
     /// The index the next line will get.
@@ -1039,7 +1124,7 @@ impl CoreSink {
         if inner.ended {
             return;
         }
-        Self::push_fact(&mut inner, fact);
+        self.push_fact(&mut inner, fact);
         inner.ended = true;
         drop(inner);
         self.ended.send_replace(true);
@@ -1077,7 +1162,7 @@ impl AdapterSink for CoreSink {
         }
         if inner.start_done {
             let fact = self.exit_fact(exit);
-            Self::push_fact(&mut inner, fact);
+            self.push_fact(&mut inner, fact);
             inner.ended = true;
             drop(inner);
             self.ended.send_replace(true);
@@ -1213,7 +1298,6 @@ async fn raised(flag: &mut watch::Receiver<bool>) {
 
 struct Pipeline {
     store: Store,
-    app_log: Arc<AppLog>,
     handle: Arc<Handle>,
     fed: mpsc::UnboundedReceiver<Fed>,
     progress: watch::Sender<Progress>,
@@ -1223,7 +1307,6 @@ struct Pipeline {
 async fn run_pipeline(pipeline: Pipeline) {
     let Pipeline {
         store,
-        app_log,
         handle,
         mut fed,
         progress,
@@ -1240,13 +1323,12 @@ async fn run_pipeline(pipeline: Pipeline) {
                 Err(_) => break,
             }
         }
-        // Facts reach the app log before the events they yield reach anyone.
+        // How the backend ended, to show again when the session is reopened.
         for item in &batch {
-            if let Fed::Fact { fact, ts } = item {
-                app_log.write(&handle.id, ts, fact);
-                if fact.ends() {
-                    *lock(&handle.ending) = Some((fact.clone(), ts.clone()));
-                }
+            if let Fed::Fact { fact, ts } = item
+                && fact.ends()
+            {
+                *lock(&handle.ending) = Some((fact.clone(), ts.clone()));
             }
         }
         let (tile, turn, announced) = {
@@ -1514,4 +1596,29 @@ async fn forward(task: Forward) {
 /// value behind these locks stays consistent between single updates.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_rfc3339;
+
+    #[test]
+    fn only_rfc3339_times_are_taken_from_a_record() {
+        for good in [
+            "2026-11-01T20:56:51.893Z",
+            "2026-11-01T20:56:51Z",
+            "2026-11-01T20:56:51+02:00",
+        ] {
+            assert!(is_rfc3339(good), "{good}");
+        }
+        for bad in [
+            "",
+            "yesterday",
+            "2026-11-01",
+            "2026-11-01T20:56:51",
+            "2026-11-01T20:56:51.Z",
+        ] {
+            assert!(!is_rfc3339(bad), "{bad}");
+        }
+    }
 }

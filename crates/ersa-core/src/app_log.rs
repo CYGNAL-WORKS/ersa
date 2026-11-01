@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -126,13 +126,17 @@ impl AppLog {
     ///
     /// A log past [`ROTATE_BYTES`] is read, then moved aside for an empty
     /// one; its predecessor is read too, so what happened just before a
-    /// rotation is still found.
+    /// rotation is still found. A file that cannot be read is reported and
+    /// passed over: what it held is lost, but the log still records from
+    /// now on. Fails only when the log cannot be opened for writing.
     pub fn open(data_dir: &Path) -> io::Result<(AppLog, HashMap<String, Facts>)> {
         let path = data_dir.join(FILE_NAME);
         let previous = data_dir.join(PREVIOUS_FILE_NAME);
         let mut last = HashMap::new();
         for file in [&previous, &path] {
-            read_into(file, &mut last)?;
+            if let Err(e) = read_into(file, &mut last) {
+                tracing::error!(path = %file.display(), error = %e, "could not read the app log; sessions it would have repaired are not");
+            }
         }
         if fs::metadata(&path).is_ok_and(|m| m.len() > ROTATE_BYTES)
             && let Err(e) = fs::rename(&path, &previous)
@@ -140,7 +144,16 @@ impl AppLog {
             // Another process may hold it open; it grows a while longer.
             tracing::warn!(path = %path.display(), error = %e, "could not move the app log aside");
         }
-        let file = OpenOptions::new().create(true).append(true).open(&path)?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .append(true)
+            .open(&path)?;
+        // A crash mid-write leaves a last line without its end; the next fact
+        // must start a line of its own rather than join it and be lost.
+        if !ends_with_newline(&mut file)? {
+            file.write_all(b"\n")?;
+        }
         Ok((
             AppLog {
                 path,
@@ -163,7 +176,9 @@ impl AppLog {
         &self.path
     }
 
-    /// Appends one fact about session `session_id`, learnt at `ts`.
+    /// Appends one fact about session `session_id`, learnt at `ts`. Written
+    /// before this returns, so a fact is on disk before what it describes
+    /// happens (a process started) and survives a crash right after.
     pub fn write(&self, session_id: &str, ts: &str, fact: &LifecycleFact) {
         let entry = Entry {
             ts: ts.to_string(),
@@ -184,20 +199,23 @@ impl AppLog {
     }
 }
 
+/// Whether `file` is empty or its last byte ends a line.
+fn ends_with_newline(file: &mut File) -> io::Result<bool> {
+    let len = file.metadata()?.len();
+    if len == 0 {
+        return Ok(true);
+    }
+    file.seek(SeekFrom::Start(len - 1))?;
+    let mut last = [0u8];
+    file.read_exact(&mut last)?;
+    Ok(last[0] == b'\n')
+}
+
 /// Reads one app log file, keeping each session's first time and last entry.
 /// A missing file is an empty log; a line that is not a fact (a newer Core's,
-/// or one cut short by a crash) is skipped.
+/// one cut short by a crash, or one far too long to be a fact) is skipped.
 fn read_into(path: &Path, last: &mut HashMap<String, Facts>) -> io::Result<()> {
-    let file = match File::open(path) {
-        Ok(file) => file,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e),
-    };
-    for line in BufReader::new(file).split(b'\n') {
-        let line = line?;
-        let Ok(entry) = serde_json::from_slice::<Entry>(&line) else {
-            continue;
-        };
+    for entry in entries_in(path)? {
         last.entry(entry.session_id.clone())
             .and_modify(|facts: &mut Facts| facts.last = entry.clone())
             .or_insert_with(|| Facts {
@@ -208,22 +226,72 @@ fn read_into(path: &Path, last: &mut HashMap<String, Facts>) -> io::Result<()> {
     Ok(())
 }
 
-// Every entry of the app log in `data_dir`, oldest first, for tests and
-/// diagnostics.
-pub fn read_entries(data_dir: &Path) -> io::Result<Vec<Entry>> {
+/// The entries of one app log file, in order; none for a missing file.
+fn entries_in(path: &Path) -> io::Result<Vec<Entry>> {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut reader = BufReader::new(file);
     let mut entries = Vec::new();
-    for name in [PREVIOUS_FILE_NAME, FILE_NAME] {
-        let file = match File::open(data_dir.join(name)) {
-            Ok(file) => file,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(e),
-        };
-        for line in BufReader::new(file).lines() {
-            if let Ok(entry) = serde_json::from_str::<Entry>(&line?) {
-                entries.push(entry);
+    while let Some(line) = next_line(&mut reader)? {
+        if let Ok(entry) = serde_json::from_slice::<Entry>(&line) {
+            entries.push(entry);
+        }
+    }
+    Ok(entries)
+}
+
+/// The longest app log line read. Core writes short facts; a longer line is
+/// not one of them, and is skipped rather than read into memory whole.
+const MAX_LINE_BYTES: u64 = 64 * 1024;
+
+/// The next line of `reader` without its terminator, or an empty one for a
+/// line longer than [`MAX_LINE_BYTES`], whose rest is skipped. `None` at the
+/// end.
+fn next_line(reader: &mut impl BufRead) -> io::Result<Option<Vec<u8>>> {
+    let mut line = Vec::new();
+    let read = reader
+        .by_ref()
+        .take(MAX_LINE_BYTES)
+        .read_until(b'\n', &mut line)?;
+    if read == 0 {
+        return Ok(None);
+    }
+    if line.last() == Some(&b'\n') {
+        line.pop();
+        return Ok(Some(line));
+    }
+    if (read as u64) < MAX_LINE_BYTES {
+        // The last line, with no end.
+        return Ok(Some(line));
+    }
+    // Too long: skip to its end.
+    loop {
+        let buffer = reader.fill_buf()?;
+        if buffer.is_empty() {
+            break;
+        }
+        match buffer.iter().position(|b| *b == b'\n') {
+            Some(end) => {
+                reader.consume(end + 1);
+                break;
+            }
+            None => {
+                let all = buffer.len();
+                reader.consume(all);
             }
         }
     }
+    Ok(Some(Vec::new()))
+}
+
+/// Every entry of the app log in `data_dir`, oldest first, for tests and
+/// diagnostics.
+pub fn read_entries(data_dir: &Path) -> io::Result<Vec<Entry>> {
+    let mut entries = entries_in(&data_dir.join(PREVIOUS_FILE_NAME))?;
+    entries.extend(entries_in(&data_dir.join(FILE_NAME))?);
     Ok(entries)
 }
 
@@ -268,15 +336,28 @@ mod tests {
             .append(true)
             .open(dir.path().join(FILE_NAME))
             .unwrap();
-        file.write_all(b"{\"ts\":\"2026").unwrap();
+        // So is one far too long to be a fact.
+        file.write_all(b"\n").unwrap();
+        file.write_all(&vec![b'x'; MAX_LINE_BYTES as usize * 2])
+            .unwrap();
+        file.write_all(b"\n{\"ts\":\"2026").unwrap();
         drop(file);
 
         let entries = read_entries(dir.path()).unwrap();
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[2].fact, exited);
-        let (_, live) = AppLog::open(dir.path()).unwrap();
+        let (log, live) = AppLog::open(dir.path()).unwrap();
         assert_eq!(left_live(&live), ["s-2"]);
         assert_eq!(live["s-1"].last.fact, exited);
+        // The next fact does not join the cut line, so it is kept.
+        log.write(
+            "s-2",
+            "2026-11-01T00:00:03.000Z",
+            &LifecycleFact::CoreRestarted,
+        );
+        drop(log);
+        let (_, live) = AppLog::open(dir.path()).unwrap();
+        assert!(left_live(&live).is_empty());
         assert_eq!(live["s-1"].first_ts, "2026-11-01T00:00:00.000Z");
     }
 

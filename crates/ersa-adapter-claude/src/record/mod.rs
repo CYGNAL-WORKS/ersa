@@ -22,7 +22,7 @@ mod projection;
 mod registry;
 
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 pub use listing::{SessionList, SessionSummary, list_sessions, summarize_session};
@@ -98,9 +98,9 @@ pub fn record_path(claude_home: &Path, cwd: &str, session_id: &str) -> PathBuf {
 
 /// The longest record [`read_record`] reads. Records of long sessions with
 /// large tool results run to tens of megabytes; one far beyond is not
-/// something a transcript can show, and reading it whole would cost Core
-/// that much memory per open.
-pub const MAX_RECORD_BYTES: u64 = 512 * 1024 * 1024;
+/// something a transcript can show, and projecting it costs Core several
+/// times its size in memory while it is opened.
+pub const MAX_RECORD_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Where the CLI keeps its files on this machine, as the CLI itself decides:
 /// `CLAUDE_CONFIG_DIR` when set and not empty, else `.claude` in the user's
@@ -129,7 +129,7 @@ pub fn find_record(claude_home: &Path, cwd: &str, session_id: &str) -> io::Resul
         ));
     }
     let expected = record_path(claude_home, cwd, session_id);
-    if expected.is_file() {
+    if is_plain_file(&expected) {
         return Ok(Some(expected));
     }
     let projects = match fs::read_dir(claude_home.join("projects")) {
@@ -140,11 +140,17 @@ pub fn find_record(claude_home: &Path, cwd: &str, session_id: &str) -> io::Resul
     let file = format!("{session_id}.jsonl");
     for project in projects {
         let candidate = project?.path().join(&file);
-        if candidate.is_file() {
+        if is_plain_file(&candidate) {
             return Ok(Some(candidate));
         }
     }
     Ok(None)
+}
+
+/// Whether `path` is a file itself, not a link to one: the CLI writes its
+/// records as plain files, and listing skips links too.
+fn is_plain_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_file())
 }
 
 /// The events of session `session_id`'s record ([`project_record`]), or none
@@ -158,17 +164,21 @@ pub fn read_record(
     let Some(path) = find_record(claude_home, cwd, session_id)? else {
         return Ok(Vec::new());
     };
-    let size = fs::metadata(&path)?.len();
-    if size > MAX_RECORD_BYTES {
+    // Bounded as it is read, not by its size beforehand: the CLI may be
+    // appending to it, and anything else the user runs may write it.
+    let mut bytes = Vec::new();
+    fs::File::open(&path)?
+        .take(MAX_RECORD_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_RECORD_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "the session record {} is {size} bytes, more than the {MAX_RECORD_BYTES} Ersa reads",
+                "the session record {} is more than the {MAX_RECORD_BYTES} bytes Ersa reads",
                 path.display()
             ),
         ));
     }
-    let bytes = fs::read(&path)?;
     Ok(project_record(&String::from_utf8_lossy(&bytes)))
 }
 

@@ -306,6 +306,7 @@ async fn a_question_waiting_on_the_user_is_in_the_tile() {
 }
 
 // verifies: PROTO-CORE-API-R08
+// verifies: PROTO-AGENT-EVENTS-R13
 #[tokio::test(flavor = "multi_thread")]
 async fn the_raw_log_holds_every_line_exactly_as_it_crossed() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
