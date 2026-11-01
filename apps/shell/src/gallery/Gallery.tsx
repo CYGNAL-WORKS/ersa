@@ -4,11 +4,18 @@
 // A component built for the window gets an entry here in the same change.
 
 import type { ReactNode } from "react";
+import { AddProject } from "../components/AddProject";
 import { Button } from "../components/Button";
+import { Composer } from "../components/Composer";
 import { CoreStatus } from "../components/CoreStatus";
 import { ProjectList } from "../components/ProjectList";
+import { SessionList } from "../components/SessionList";
+import { Transcript } from "../components/Transcript";
 import type { CoreView } from "../core/connection";
-import type { CoreHelloResult, Project } from "../protocol/core-api.gen";
+import type { Envelope, Event } from "../protocol/agent-events.gen";
+import type { CoreHelloResult, Project, Session } from "../protocol/core-api.gen";
+import type { SessionView } from "../session/follow";
+import { apply, emptyTranscript } from "../session/transcript";
 import "./Gallery.css";
 
 const hello: CoreHelloResult = {
@@ -31,13 +38,18 @@ const coreViews: [string, CoreView][] = [
     "Started",
     {
       phase: "connected",
+      link: 1,
       how: "launched",
       hello,
       status: { sessions_running: 3, sessions_waiting: 1, uptime_s: 42, db_path: "" },
       projects: { state: "loading" },
+      sessions: { state: "loading" },
     },
   ],
-  ["Attached, before status", { phase: "connected", how: "attached", hello, projects: { state: "loading" } }],
+  [
+    "Attached, before status",
+    { phase: "connected", link: 1, how: "attached", hello, projects: { state: "loading" }, sessions: { state: "loading" } },
+  ],
   ["Lost, reconnecting", { phase: "lost", reason: "Core closed the connection", hello }],
   [
     "Unavailable",
@@ -49,9 +61,122 @@ const coreViews: [string, CoreView][] = [
   ],
 ];
 
+const session = (id: string, title: string, created_at: string, tile: Session["tile"]): Session => ({
+  id,
+  workspace_id: "w1",
+  host_id: "local",
+  backend: "claude-code",
+  title,
+  state: tile.state,
+  created_at,
+  tile,
+});
+
+const sessions: Session[] = [
+  session("s1", "Fix the flaky reconnect test", "2026-11-01T09:00:00Z", {
+    state: "waiting_user",
+    pending: [{ kind: "permission", request_id: "r1" }],
+    cost_usd_total: 0.82,
+  }),
+  session("s2", "Tidy the gallery", "2026-11-01T08:00:00Z", { state: "running", pending: [], cost_usd_total: 0.19 }),
+  session("s3", "Explain the raw log", "2026-11-01T07:00:00Z", { state: "idle", pending: [], cost_usd_total: 12.4 }),
+  session("s4", "Start-up", "2026-11-01T10:00:00Z", { state: "starting", pending: [] }),
+  session("s5", "A session whose backend exited with an error", "2026-11-01T06:00:00Z", { state: "error", pending: [] }),
+];
+
+/** A transcript built the way the window builds one: by applying events. */
+function transcriptOf(events: Event[]) {
+  return events
+    .map(
+      (event, seq): Envelope => ({
+        v: 1,
+        session_id: "s1",
+        seq,
+        ts: "2026-11-01T09:00:00Z",
+        source: { backend: "claude-code", backend_version: "2.1.302", raw_from: seq, raw_to: seq },
+        event,
+      }),
+    )
+    .reduce(apply, emptyTranscript);
+}
+
+const command = { command: "echo probe > probe.txt", description: "Write the word probe to probe.txt" };
+const flags = { default_to_no: false, suppress_always_allow: false, requires_user_interaction: false, classifier_approvable: false };
+const asked: Event[] = [
+  { type: "session.state", state: "running" },
+  {
+    type: "user.message",
+    origin: "human",
+    text: "Use the Bash tool to run exactly this command: echo probe > probe.txt. Then report whether it succeeded.",
+  },
+  { type: "assistant.text", block_id: "m1/0", text: "Running the requested command now.", final: true },
+  { type: "tool.requested", tool_use_id: "t1", name: "Bash", input: command },
+  {
+    type: "permission.requested",
+    request_id: "r1",
+    tool_use_id: "t1",
+    tool_name: "Bash",
+    description: "Write the word probe to probe.txt",
+    input: command,
+    blocked_path: "C:\\Users\\me\\AppData\\Local\\Temp\\probe.txt",
+    suggestions: [],
+    flags,
+  },
+  { type: "session.state", state: "waiting_user" },
+];
+const answered: Event[] = [
+  ...asked,
+  { type: "permission.decided", request_id: "r1", behavior: "allow", decided_by: "user" },
+  { type: "tool.result", tool_use_id: "t1", content: "(Bash completed with no output)", is_error: false },
+  {
+    type: "assistant.text",
+    block_id: "m2/0",
+    text: "The command succeeded. It exited cleanly with no output, and probe.txt now exists.",
+    final: true,
+  },
+  { type: "session.state", state: "idle" },
+];
+const streaming: Event[] = [
+  { type: "session.state", state: "running" },
+  { type: "user.message", origin: "human", text: "Say ready." },
+  { type: "assistant.text", block_id: "m1/0", text: "Ready, and reading the", final: false },
+];
+const failing: Event[] = [
+  { type: "user.message", origin: "human", text: "Run the tests." },
+  { type: "tool.requested", tool_use_id: "t1", name: "Bash", input: { command: "cargo test" } },
+  { type: "tool.result", tool_use_id: "t1", content: "error: could not compile `ersa-core`", is_error: true },
+  { type: "error", code: "backend_exited", message: "Claude Code exited unexpectedly (exit code 1).", recoverable: false },
+  { type: "session.ended", reason: "error", exit_code: 1 },
+  { type: "session.state", state: "ended" },
+];
+
+const sessionView = (events: Event[], more: Partial<SessionView> = {}): SessionView => ({
+  id: "s1",
+  transcript: transcriptOf(events),
+  stream: { state: "live" },
+  answers: {},
+  ...more,
+});
+
+const refusal = (method: string) => `${method}: the session is a replay of a recording and cannot change`;
+
+const transcriptStates: [string, SessionView][] = [
+  ["Loading", sessionView([], { stream: { state: "subscribing" } })],
+  ["Empty", sessionView([])],
+  ["Streaming", sessionView(streaming)],
+  ["Permission open", sessionView(asked)],
+  ["Permission sending", sessionView(asked, { answers: { r1: { state: "sending" } } })],
+  ["Permission refused", sessionView(asked, { answers: { r1: { state: "failed", message: refusal("session.decide_permission") } } })],
+  ["Answered", sessionView(answered)],
+  ["Failed", sessionView(failing)],
+  ["Not receiving events", sessionView([], { stream: { state: "failed", message: "Core closed the connection" } })],
+];
+
 interface Entry {
   name: string;
   states: [string, ReactNode][];
+  /** Shown one state per row, at the stage's width, rather than in rail-width columns. */
+  wide?: boolean;
 }
 
 const entries: Entry[] = [
@@ -67,6 +192,70 @@ const entries: Entry[] = [
       ["Projects", <ProjectList view={{ state: "ready", projects }} />],
       ["Error", <ProjectList view={{ state: "error", message: "Core could not read its database." }} />],
       ["Core unavailable", <ProjectList view={{ state: "unavailable" }} />],
+      [
+        "Starting a session",
+        <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} starting={{ p1: { state: "sending" } }} />,
+      ],
+      [
+        "Session refused",
+        <ProjectList
+          view={{ state: "ready", projects }}
+          onNewSession={() => {}}
+          starting={{ p1: { state: "failed", message: "workspace.create: this Core is a replay server and changes nothing" } }}
+        />,
+      ],
+    ],
+  },
+  {
+    name: "AddProject",
+    states: [
+      ["Empty", <AddProject onAdd={async () => false} />],
+      ["Typed", <AddProject onAdd={async () => false} initialPath="D:\Projects\ersa" />],
+      ["Adding", <AddProject onAdd={async () => false} initialPath="D:\Projects\ersa" adding={{ state: "sending" }} />],
+      [
+        "Refused",
+        <AddProject
+          onAdd={async () => false}
+          initialPath="D:\Projects\nowhere"
+          adding={{ state: "failed", message: "D:\\Projects\\nowhere does not exist" }}
+        />,
+      ],
+    ],
+  },
+  {
+    name: "SessionList",
+    states: [
+      ["Loading", <SessionList view={{ state: "loading" }} onSelect={() => {}} />],
+      ["Empty", <SessionList view={{ state: "ready", sessions: [] }} onSelect={() => {}} />],
+      ["Sessions", <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} />],
+      ["Error", <SessionList view={{ state: "error", message: "Core could not read its database." }} onSelect={() => {}} />],
+      ["Core unavailable", <SessionList view={{ state: "unavailable" }} onSelect={() => {}} />],
+    ],
+  },
+  {
+    name: "Transcript",
+    wide: true,
+    states: transcriptStates.map(([label, view]) => [
+      label,
+      <Transcript title="Fix the flaky reconnect test" view={view} onDecide={() => {}} />,
+    ]),
+  },
+  {
+    name: "Composer",
+    wide: true,
+    states: [
+      ["Empty", <Composer onSend={async () => false} />],
+      ["Typed", <Composer onSend={async () => false} initialText="Run the tests again, then summarise what failed." />],
+      ["Sending", <Composer onSend={async () => false} initialText="Run the tests again." sending={{ state: "sending" }} />],
+      [
+        "Refused",
+        <Composer
+          onSend={async () => false}
+          initialText="Run the tests again."
+          sending={{ state: "failed", message: refusal("session.send") }}
+        />,
+      ],
+      ["Core not connected", <Composer onSend={async () => false} unavailable="Core is not connected." />],
     ],
   },
   {
@@ -92,7 +281,7 @@ export function Gallery() {
                 <h2 className="gallery-name">{entry.name}</h2>
                 <span className="gallery-theme-name">{theme}</span>
               </div>
-              <div className="gallery-states">
+              <div className={entry.wide ? "gallery-states gallery-states-wide" : "gallery-states"}>
                 {entry.states.map(([label, node]) => (
                   <figure key={label} className="gallery-state">
                     <figcaption className="gallery-label">{label}</figcaption>

@@ -26,3 +26,23 @@ body {
   font-size: var(--type-mono-size);
   line-height: var(--type-mono-leading);
 }
+
+/* A problem stated inline: muted text after the status tile's danger glyph, never a filled row. */
+.problem {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-sm);
+  align-items: baseline;
+  margin: 0;
+  color: var(--color-ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.problem::before {
+  content: "";
+  align-self: center;
+  width: var(--space-sm);
+  height: var(--space-sm);
+  border-radius: var(--radius-pill);
+  background: var(--color-danger);
+}
