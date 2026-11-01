@@ -176,7 +176,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R07**: The adapter shall flush stdin after every line written.
 - **PROTO-CLAUDE-CODE-STREAM-R08**: The adapter shall derive cost from `result.total_cost_usd`, context from `result.usage`, and rate-limit budget from `rate_limit_event`.
 - **PROTO-CLAUDE-CODE-STREAM-R09**: The adapter shall map unknown message types to a typed passthrough event and never drop a line.
-- **PROTO-CLAUDE-CODE-STREAM-R10**: When the CLI version exceeds the maximum tested version, the adapter shall emit a warning event and continue.
+- **PROTO-CLAUDE-CODE-STREAM-R10**: When the CLI version exceeds the maximum tested version, the adapter shall emit a `session.notice` with level `warning` and code `backend_version_untested`, and continue.
 
 ## Out of scope
 
@@ -190,6 +190,8 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - Whether `--replay-user-messages` should be on by default for raw-log completeness.
 
 ## Changes
+
+- 2026-11-01: R10 names the event it emits (`session.notice`); meaning unchanged.
 
 - 2026-11-01: `control_cancel_request` and `keep_alive` described, from the SDK types. No requirement IDs changed.
 
