@@ -10,6 +10,7 @@ export function ProjectList({ view }: { view: ProjectsView }) {
         {view.state === "ready" && <span className="readout">{view.projects.length}</span>}
       </h2>
       {view.state === "loading" && <p className="projects-note">Loading…</p>}
+      {view.state === "unavailable" && <p className="projects-note">Projects appear once Core is connected.</p>}
       {view.state === "error" && (
         <p className="projects-error" role="alert">
           {view.message}

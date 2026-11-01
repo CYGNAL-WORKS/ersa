@@ -117,6 +117,13 @@ pub async fn attach_or_launch(location: &CoreLocation) -> Result<(BoxStream, How
         }
     }
 
+    // Where this run's output starts in the shared, append-only log, so a
+    // failure shows its own output and not an earlier run's.
+    let log_start = location
+        .log_file
+        .as_deref()
+        .and_then(|path| std::fs::metadata(path).ok())
+        .map_or(0, |meta| meta.len());
     let mut child = spawn(location)?;
     let deadline = tokio::time::Instant::now() + location.start_timeout;
     loop {
@@ -140,11 +147,15 @@ pub async fn attach_or_launch(location: &CoreLocation) -> Result<(BoxStream, How
             let log = location
                 .log_file
                 .as_deref()
-                .map(log_tail)
+                .map(|path| log_tail(path, log_start))
                 .unwrap_or_default();
             return Err(LaunchError::Exited { status, log });
         }
         if tokio::time::Instant::now() >= deadline {
+            // A Core that hangs before serving would otherwise linger, and
+            // each retry would add another.
+            let _ = child.kill();
+            let _ = child.wait();
             return Err(LaunchError::Timeout {
                 endpoint: location.endpoint.clone(),
                 timeout: location.start_timeout,
@@ -197,12 +208,24 @@ fn open_log(path: &Path) -> io::Result<File> {
     OpenOptions::new().create(true).append(true).open(path)
 }
 
-/// The last lines of the log, prefixed for appending to an error message.
-fn log_tail(path: &Path) -> String {
+/// The last lines the log gained after byte `start`, prefixed for appending
+/// to an error message. Reads at most the last 16 KiB of that.
+fn log_tail(path: &Path, start: u64) -> String {
+    use std::io::{Read, Seek, SeekFrom};
     const LINES: usize = 10;
-    let Ok(text) = std::fs::read_to_string(path) else {
+    const MAX_BYTES: u64 = 16 * 1024;
+    let Ok(mut file) = File::open(path) else {
         return String::new();
     };
+    let end = file.metadata().map_or(start, |meta| meta.len());
+    let from = start.max(end.saturating_sub(MAX_BYTES));
+    let mut bytes = Vec::new();
+    if file.seek(SeekFrom::Start(from)).is_err() || file.read_to_end(&mut bytes).is_err() {
+        return String::new();
+    }
+    // Core writes UTF-8; anything else is shown with replacement characters
+    // rather than dropped.
+    let text = String::from_utf8_lossy(&bytes);
     let lines: Vec<&str> = text.lines().collect();
     let tail = lines[lines.len().saturating_sub(LINES)..].join("\n");
     if tail.is_empty() {

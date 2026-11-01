@@ -96,7 +96,8 @@ jobs:
     timeout-minutes: 20
     container:
       # Keep in step with @playwright/test in apps/shell/package.json.
-      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      # Pinned by digest, as actions are by SHA (ADR 0015).
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
     defaults:
       run:
         working-directory: apps/shell
@@ -269,7 +270,9 @@ jobs:
           mkdir -p apps/shell/dist && echo '<!doctype html>' > apps/shell/dist/index.html
           cargo clippy --manifest-path apps/shell/src-tauri/Cargo.toml --all-targets --locked -- -D warnings
 
+      # bash, so a failed build stops the step (PowerShell would go on).
       - name: Shell test
+        shell: bash
         run: |
           cargo build -p ersa-cli --locked
           cargo test --manifest-path apps/shell/src-tauri/Cargo.toml --locked

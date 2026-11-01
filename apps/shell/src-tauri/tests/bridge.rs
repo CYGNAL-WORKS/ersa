@@ -172,6 +172,10 @@ async fn a_core_that_cannot_start_is_reported_with_its_output() {
         // that nothing serves so a running Core cannot answer instead.
         location.endpoint = format!(r"\\.\pipe\ersa-shell-test-{}", std::process::id());
     }
+    // An earlier run's output is in the shared log; the error must not show it.
+    let log = location.log_file.clone().expect("a log file");
+    std::fs::write(&log, "a line from an earlier run
+").expect("seed the log");
     let error = launch::attach_or_launch(&location)
         .await
         .err()
@@ -179,6 +183,7 @@ async fn a_core_that_cannot_start_is_reported_with_its_output() {
     let message = error.to_string();
     assert!(message.contains("exited"), "{message}");
     assert!(message.contains("--no-such-flag"), "{message}");
+    assert!(!message.contains("earlier run"), "{message}");
 }
 
 #[test]

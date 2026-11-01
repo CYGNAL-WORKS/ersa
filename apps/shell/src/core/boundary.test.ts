@@ -1,0 +1,48 @@
+// The Interface reaches Core only through the Shell's bridge, which carries
+// Core API requests and notifications and nothing else. This holds that as a
+// check: no Tauri API but the bridge's own two calls, and only in the one
+// module that wraps them; no network or process access anywhere.
+
+import { readFileSync, readdirSync } from "node:fs";
+import { join, relative } from "node:path";
+import { describe, expect, it } from "vitest";
+
+const SRC = join(import.meta.dirname, "..");
+const BRIDGE = join("core", "tauri.ts");
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return sourceFiles(path);
+    return /\.tsx?$/.test(entry.name) && !entry.name.includes(".test.") ? [path] : [];
+  });
+}
+
+const files = sourceFiles(SRC).map((path) => ({ path: relative(SRC, path), text: readFileSync(path, "utf8") }));
+
+describe("the Interface's boundary", () => {
+  // verifies: ARCH-CORE-R02
+  it("uses Tauri only for the bridge's invoke and listen, in one module", () => {
+    const found: string[] = [];
+    for (const { path, text } of files) {
+      for (const [, module] of text.matchAll(/from\s+["'](@tauri-apps\/[^"']+)["']/g)) {
+        const allowed = path === BRIDGE && (module === "@tauri-apps/api/core" || module === "@tauri-apps/api/event");
+        if (!allowed) found.push(`${path}: ${module}`);
+      }
+    }
+    expect(found).toEqual([]);
+    const bridge = files.find((f) => f.path === BRIDGE)?.text ?? "";
+    expect([...bridge.matchAll(/invoke(?:<[^>]*>)?\(\s*"([^"]+)"/g)].map((m) => m[1]).sort()).toEqual([
+      "core_attach",
+      "core_request",
+    ]);
+  });
+
+  // verifies: ARCH-CORE-R02
+  it("opens no network connection of its own", () => {
+    const found = files
+      .filter(({ text }) => /\b(fetch|WebSocket|XMLHttpRequest|EventSource)\s*\(/.test(text) || /new\s+(WebSocket|EventSource)\b/.test(text))
+      .map((f) => f.path);
+    expect(found).toEqual([]);
+  });
+});

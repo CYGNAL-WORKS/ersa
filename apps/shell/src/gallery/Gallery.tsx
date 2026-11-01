@@ -65,7 +65,8 @@ const entries: Entry[] = [
       ["Loading", <ProjectList view={{ state: "loading" }} />],
       ["Empty", <ProjectList view={{ state: "ready", projects: [] }} />],
       ["Projects", <ProjectList view={{ state: "ready", projects }} />],
-      ["Error", <ProjectList view={{ state: "error", message: "Not connected to Core." }} />],
+      ["Error", <ProjectList view={{ state: "error", message: "Core could not read its database." }} />],
+      ["Core unavailable", <ProjectList view={{ state: "unavailable" }} />],
     ],
   },
   {

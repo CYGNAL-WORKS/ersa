@@ -8,7 +8,9 @@ import { type Attachment, type CoreClient, describeError } from "./client";
 export type ProjectsView =
   | { state: "loading" }
   | { state: "ready"; projects: Project[] }
-  | { state: "error"; message: string };
+  | { state: "error"; message: string }
+  /** Core is not connected; its status tile already says why. */
+  | { state: "unavailable" };
 
 export type CoreView =
   | { phase: "connecting" }
@@ -44,12 +46,20 @@ export function connect(client: CoreClient, update: (view: CoreView) => void): (
   };
 
   set(current);
+  // A loss can arrive before attach() resolves: the Shell reports it as soon
+  // as the link drops, which may be during the handshake's reply.
+  let lostEarly: string | null = null;
   const unlisten = client.onConnectionLost((reason) => {
     if (current.phase === "connected") set({ phase: "lost", reason, hello: current.hello });
+    else if (current.phase === "connecting") lostEarly = reason;
   });
 
   client.attach().then(
     ({ how, hello }) => {
+      if (lostEarly !== null) {
+        set({ phase: "lost", reason: lostEarly, hello });
+        return;
+      }
       set({ phase: "connected", how, hello, projects: { state: "loading" } });
       client.call("core.status").then(
         (status) => patch((view) => ({ ...view, status })),
