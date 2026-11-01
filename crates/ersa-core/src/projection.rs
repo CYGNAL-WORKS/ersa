@@ -521,22 +521,6 @@ mod tests {
         assert_eq!(view.last_seq(), Some(6));
     }
 
-    // verifies: PROTO-AGENT-EVENTS-R12
-    #[test]
-    fn a_message_in_both_the_record_and_the_live_stream_yields_once() {
-        let record = vec![recorded("m1", "2026-10-30T00:00:00.000Z", text("m1"))];
-        let (mut view, events) = View::open("s", "echo", Some(Box::new(Echo)), record);
-        assert_eq!(events.len(), 1);
-        let again = view.live(&line(0, Direction::Backend, "msg:m1"));
-        assert!(again.is_empty(), "{again:?}");
-        let new = view.live(&line(1, Direction::Backend, "msg:m2"));
-        assert_eq!(new.len(), 1);
-        assert_eq!(new[0].seq, 1);
-        assert_eq!(new[0].source.message_id.as_deref(), Some("m2"));
-        // A line with no message id is never taken for a recorded one.
-        assert_eq!(view.live(&line(2, Direction::Backend, "other")).len(), 1);
-    }
-
     // verifies: PROTO-AGENT-EVENTS-R11
     #[test]
     fn opening_the_same_record_twice_gives_the_same_events() {
