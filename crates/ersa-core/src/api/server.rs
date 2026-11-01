@@ -5,17 +5,24 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_protocol::core_api::rpc::{Incoming, Response, parse_incoming};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use ersa_protocol::core_api::rpc::{ErrorObject, Incoming, Response, code, parse_incoming};
+use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
+use super::lines::{CappedLines, LineError};
 use super::{After, ConnectionState};
 use crate::persistence::{self, Store};
 use crate::platform::{self, BoxStream, Listener};
 use crate::state::{Core, CoreConfig};
 
 /// How many outgoing lines may queue for one client before writers wait.
+///
+/// M0-T6: responses may wait for room, but `session.event` fan-out must not.
+/// Use `try_send` for notifications and, when the queue is full, drop the
+/// slow subscriber (or close its connection); never `.await` a send on
+/// behalf of a session, or one stalled client stalls that session for every
+/// other client.
 const OUTBOUND_QUEUE: usize = 256;
 
 /// How long shutdown waits for connections to finish writing.
@@ -26,6 +33,10 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 pub enum ServeError {
     #[error("another Ersa Core is already serving on {endpoint}")]
     AlreadyRunning { endpoint: String },
+    /// The endpoint's name is held by a process that does not run as this
+    /// user. Starting anyway would hand that process this user's clients.
+    #[error("{endpoint} is held by a process running as another user: {source}")]
+    NameTaken { endpoint: String, source: io::Error },
     #[error("could not listen on {endpoint}: {source}")]
     Listen { endpoint: String, source: io::Error },
     #[error("could not create the data directory {path}: {source}")]
@@ -46,18 +57,14 @@ impl Server {
     /// The endpoint comes first: if another Core already owns it, this one
     /// must not touch the database the other is using.
     pub async fn bind(config: CoreConfig) -> Result<Server, ServeError> {
-        let listener = Listener::bind(&config.endpoint).map_err(|source| {
-            if source.kind() == io::ErrorKind::AddrInUse {
-                ServeError::AlreadyRunning {
-                    endpoint: config.endpoint.clone(),
-                }
-            } else {
-                ServeError::Listen {
-                    endpoint: config.endpoint.clone(),
-                    source,
-                }
-            }
-        })?;
+        let endpoint = config.endpoint.clone();
+        let listener = Listener::bind(&endpoint)
+            .await
+            .map_err(|source| match source.kind() {
+                io::ErrorKind::AddrInUse => ServeError::AlreadyRunning { endpoint },
+                io::ErrorKind::PermissionDenied => ServeError::NameTaken { endpoint, source },
+                _ => ServeError::Listen { endpoint, source },
+            })?;
 
         std::fs::create_dir_all(&config.data_dir).map_err(|source| ServeError::DataDir {
             path: config.data_dir.display().to_string(),
@@ -68,6 +75,13 @@ impl Server {
         core.store
             .ensure_local_host(core.host_name().to_string())
             .await?;
+        // A previous Core that stopped mid-create or mid-remove left rows
+        // that no operation will ever finish. Mark them `error`, which
+        // `workspace.remove` accepts, so the user can clear them.
+        let stuck = core.store.reconcile_workspaces().await?;
+        if stuck > 0 {
+            tracing::warn!(stuck, "marked interrupted workspaces as error");
+        }
         Ok(Server {
             core: Arc::new(core),
             listener,
@@ -81,14 +95,15 @@ impl Server {
 
     /// Accepts connections until `core.shutdown` is requested, then waits
     /// briefly for open connections to finish.
-    pub async fn run(mut self) -> io::Result<()> {
-        tracing::info!(endpoint = %self.core.config.endpoint, "serving");
+    pub async fn run(self) -> io::Result<()> {
+        let Server { core, mut listener } = self;
+        tracing::info!(endpoint = %core.config.endpoint, "serving");
         let mut connections = JoinSet::new();
         loop {
             tokio::select! {
-                accepted = self.listener.accept() => match accepted {
+                accepted = listener.accept() => match accepted {
                     Ok(stream) => {
-                        connections.spawn(serve_connection(Arc::clone(&self.core), stream));
+                        connections.spawn(serve_connection(Arc::clone(&core), stream));
                     }
                     // One failed accept (a client that vanished mid-connect)
                     // must not stop the server. The pause keeps a failure
@@ -98,11 +113,14 @@ impl Server {
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
                 },
-                _ = self.core.shutdown_requested() => break,
+                _ = core.shutdown_requested() => break,
                 // Reap finished connection tasks so the set does not grow.
                 Some(_) = connections.join_next(), if !connections.is_empty() => {}
             }
         }
+        // Release the endpoint first, so no new client connects to a Core
+        // that is going away, and a new Core can start while this one drains.
+        drop(listener);
         // M0-T6: stop every session cleanly here, before the process exits.
         tracing::info!("shutting down");
         let drain = async { while connections.join_next().await.is_some() {} };
@@ -113,8 +131,9 @@ impl Server {
     }
 }
 
-/// Serves one client until it disconnects, the handshake fails, or Core
-/// shuts down. Requests are answered one at a time, in order.
+/// Serves one client until it disconnects, the handshake fails or times out,
+/// it sends an unreadable line, or Core shuts down. Requests are answered one
+/// at a time, in order.
 async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
     let (read, mut write) = tokio::io::split(stream);
 
@@ -139,17 +158,37 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
         api_version: None,
         outbound,
     };
-    let mut lines = BufReader::new(read).lines();
+    let mut lines = CappedLines::new(read, core.config.max_line_bytes);
+    let hello_deadline = tokio::time::Instant::now() + core.config.handshake_timeout;
     let mut shutdown_after = false;
     loop {
+        // Before the handshake, a deadline also ends the wait: a client that
+        // connects and says nothing must not hold a connection forever.
+        let waiting_for_hello = conn.api_version.is_none();
         let line = tokio::select! {
             line = lines.next_line() => line,
             _ = core.shutdown_requested() => break,
+            _ = tokio::time::sleep_until(hello_deadline), if waiting_for_hello => {
+                tracing::debug!("closing a connection that sent no core.hello in time");
+                break;
+            }
         };
         let line = match line {
             Ok(Some(line)) => line,
             Ok(None) => break,
-            Err(e) => {
+            // An over-long or non-UTF-8 line: there is no request to answer,
+            // so the error has a null id, and the stream cannot be trusted
+            // past it, so the connection closes.
+            Err(LineError::TooLong) => {
+                let message = format!("line longer than {} bytes", core.config.max_line_bytes);
+                reject_stream(&conn, message).await;
+                break;
+            }
+            Err(LineError::NotUtf8) => {
+                reject_stream(&conn, "line is not UTF-8".into()).await;
+                break;
+            }
+            Err(LineError::Io(e)) => {
                 tracing::debug!(error = %e, "reading from client failed");
                 break;
             }
@@ -168,16 +207,14 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
             }
             Incoming::Invalid { id, error } => (Response::failure(id, error), After::Continue),
         };
-        if !send(&conn, &response).await {
-            break;
+        let sent = send(&conn, &response).await;
+        // Decided before looking at `sent`: a client that vanished right
+        // after asking for shutdown still gets Core shut down.
+        if after == After::Shutdown {
+            shutdown_after = true;
         }
-        match after {
-            After::Continue => {}
-            After::Close => break,
-            After::Shutdown => {
-                shutdown_after = true;
-                break;
-            }
+        if !sent || after != After::Continue {
+            break;
         }
     }
 
@@ -188,6 +225,12 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
     if shutdown_after {
         core.request_shutdown();
     }
+}
+
+/// Answers an unreadable line with a parse error.
+async fn reject_stream(conn: &ConnectionState, message: String) {
+    let error = ErrorObject::protocol(code::PARSE_ERROR, message);
+    send(conn, &Response::failure(None, error)).await;
 }
 
 /// Queues `response` for writing. `false` when the writer has stopped.

@@ -18,10 +18,13 @@ CREATE TABLE projects (
     id          TEXT PRIMARY KEY,
     host_id     TEXT NOT NULL REFERENCES hosts (id),
     path        TEXT NOT NULL,
+    -- The path as its host compares paths (case-folded on Windows), so two
+    -- spellings of one folder cannot both be added.
+    path_key    TEXT NOT NULL,
     name        TEXT NOT NULL,
     vcs         TEXT NOT NULL CHECK (vcs IN ('git', 'perforce', 'none')),
     created_at  TEXT NOT NULL,
-    UNIQUE (host_id, path)
+    UNIQUE (host_id, path_key)
 );
 
 CREATE TABLE workspaces (
@@ -65,6 +68,16 @@ CREATE TABLE raw_log (
 -- removing a session can remove its log.
 CREATE TRIGGER raw_log_is_append_only
 BEFORE UPDATE ON raw_log
+BEGIN
+    SELECT RAISE(ABORT, 'raw_log is append-only');
+END;
+
+-- `INSERT OR REPLACE` would rewrite a line without an UPDATE (it deletes the
+-- old row and inserts a new one), so an insert at an index already taken is
+-- refused before the conflict is resolved.
+CREATE TRIGGER raw_log_is_never_rewritten
+BEFORE INSERT ON raw_log
+WHEN EXISTS (SELECT 1 FROM raw_log WHERE session_id = NEW.session_id AND idx = NEW.idx)
 BEGIN
     SELECT RAISE(ABORT, 'raw_log is append-only');
 END;
