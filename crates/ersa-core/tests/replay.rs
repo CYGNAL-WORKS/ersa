@@ -139,6 +139,26 @@ fn changes(tiles: &[Value]) -> Vec<&Value> {
     changes
 }
 
+/// Waits until the replay has recorded every line of the recording: lines
+/// follow the end of the turn, so `turn.completed` alone does not say so.
+async fn played_through(client: &mut Client, id: &Value) {
+    let lines = recording().lines().len();
+    for _ in 0..600 {
+        let log = client.result("session.raw_log", json!({ "id": id })).await;
+        let crossed = log
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["dir"] != "core")
+            .count();
+        if crossed == lines {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("the replay did not play its {lines} lines within 30 s");
+}
+
 // verifies: PROTO-CORE-API-R09
 #[tokio::test(flavor = "multi_thread")]
 async fn the_replay_server_sends_the_notifications_core_sends_for_the_same_session() {
@@ -221,7 +241,7 @@ async fn read_only_requests_are_answered_as_core_answers_them() {
     client
         .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
         .await;
-    client.events_until("turn.completed").await;
+    played_through(&mut client, &id).await;
     let log = client.result("session.raw_log", json!({ "id": id })).await;
     let crossed: Vec<(String, String)> = log
         .as_array()
@@ -268,7 +288,7 @@ async fn requests_that_would_change_anything_answer_invalid_state_naming_the_rep
     client
         .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
         .await;
-    client.events_until("turn.completed").await;
+    played_through(&mut client, &id).await;
     let session = the_session(&mut client).await;
     let workspace_id = session["workspace_id"].clone();
 

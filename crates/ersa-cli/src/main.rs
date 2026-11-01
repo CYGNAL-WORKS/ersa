@@ -238,6 +238,18 @@ async fn replay(fixture: PathBuf, pace: PaceArg, endpoint: EndpointArg) -> ExitC
     let code = match Server::bind_replay(config, replay).await {
         Ok(server) => {
             tracing::info!("replaying {}", fixture.display());
+            // Ctrl+C is how a replay is usually stopped: shut down as
+            // core.shutdown does, so the data directory is removed below.
+            // Held weakly: a strong hold would keep the database open, and
+            // the directory with it, after the server has stopped.
+            let core = Arc::downgrade(&server.core());
+            tokio::spawn(async move {
+                if tokio::signal::ctrl_c().await.is_ok()
+                    && let Some(core) = core.upgrade()
+                {
+                    core.request_shutdown();
+                }
+            });
             match server.run().await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
