@@ -22,8 +22,9 @@
 // directory, never a real project. Afterwards it deletes that repository and
 // the session record and registry file the run left in the real ~/.claude,
 // unless --keep is given: then it prints the repository's path, so a later run
-// can resume there with --cwd and --resume (and that run cleans up). Never
-// point --cwd at a real project. Writes, under
+// can resume there with --cwd and --resume (and that run cleans up). It
+// deletes nothing for a --cwd that is not one of its scratch directories.
+// Never point --cwd at a real project. Writes, under
 // docs/briefs/protocol/fixtures/claude-code/<version>/:
 //   <NN>-<name>.jsonl          the CLI's stdout
 //   <NN>-<name>.meta.json      command line, environment changes, stdin lines, timings
@@ -172,7 +173,29 @@ const env = { ...process.env, ...ENV_SET };
 for (const key of ENV_REMOVED) delete env[key];
 
 const started = Date.now();
-const child = spawn(CLAUDE, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+// On POSIX the CLI leads its own process group, so a kill reaches whatever
+// it started too (tool shells, MCP servers).
+const detached = process.platform !== "win32";
+const child = spawn(CLAUDE, args, { cwd, env, detached, stdio: ["pipe", "pipe", "pipe"] });
+let childExited = false;
+child.on("exit", () => (childExited = true));
+
+function killTree() {
+  if (childExited) return;
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"]);
+  } else {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  }
+}
+// However this script ends (an exception included), the CLI does not outlive it.
+process.on("exit", killTree);
+// A CLI that exits early closes its stdin; a write then fails here, not as a crash.
+child.stdin.on("error", () => {});
 
 const stdoutLines = [];
 const sent = [];
@@ -251,15 +274,17 @@ if (initialized) {
 }
 child.stdin.end();
 let exit = await Promise.race([exited, new Promise((r) => setTimeout(() => r(null), 30_000))]);
+let killed = false;
 if (exit === null) {
   // Kill the whole tree (the CLI may be a shim with children), then wait for
   // the exit, so nothing is still writing the record when it is read.
-  if (process.platform === "win32") {
-    spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"]);
-  } else {
-    child.kill("SIGKILL");
+  killTree();
+  killed = true;
+  const gone = await Promise.race([exited, new Promise((r) => setTimeout(() => r(null), 10_000))]);
+  if (gone === null) {
+    console.error(`could not stop the CLI (pid ${child.pid}); its record is not copied`);
+    process.exit(1);
   }
-  await exited;
   exit = { code: null, signal: "timeout" };
 }
 const elapsed_ms = Date.now() - started;
@@ -277,7 +302,9 @@ const init = stdoutLines
   .find((m) => m?.type === "system" && m?.subtype === "init");
 let recordLines = null;
 let recordPath = null;
-if (init) {
+// The id names a file this script reads and deletes, so it must be one.
+const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+if (init && typeof init.cwd === "string" && SESSION_ID_RE.test(init.session_id ?? "")) {
   recordPath = join(homedir(), ".claude", "projects", encodeCwd(init.cwd), `${init.session_id}.jsonl`);
   if (existsSync(recordPath)) recordLines = readFileSync(recordPath, "utf8");
 }
@@ -321,23 +348,31 @@ for (const file of written.filter(existsSync)) {
   }
 }
 // Leave nothing behind in the real ~/.claude or the temp directory, unless a
-// resume run follows.
-if (!keep) {
-  if (recordPath) {
-    rmSync(recordPath, { force: true });
-    // The CLI keeps per-session folders (tool results, subagents) beside it.
-    rmSync(recordPath.replace(/\.jsonl$/, ""), { recursive: true, force: true });
-    // The CLI also makes empty folders there (`memory/`); the directory goes
-    // only when no file is left in it, someone else's session included.
-    const projectDir = dirname(recordPath);
-    const holdsFiles = (d) =>
-      readdirSync(d, { withFileTypes: true }).some((e) => !e.isDirectory() || holdsFiles(join(d, e.name)));
-    if (existsSync(projectDir) && !holdsFiles(projectDir)) rmSync(projectDir, { recursive: true });
+// resume run follows. Only a scratch directory's sessions are deleted: their
+// project folder in ~/.claude holds the recorder's runs and nothing else.
+if (!keep && isScratch) {
+  // And only the folder named after this scratch directory, whatever the CLI said.
+  const projectDir = recordPath && dirname(recordPath);
+  if (projectDir && basename(projectDir).endsWith(encodeCwd(basename(cwd)))) {
+    rmSync(projectDir, { recursive: true, force: true });
   }
-  if (isScratch) rmSync(cwd, { recursive: true, force: true });
+  rmSync(cwd, { recursive: true, force: true });
 }
-// A killed CLI cannot remove its registry file.
-rmSync(join(homedir(), ".claude", "sessions", `${child.pid}.json`), { force: true });
+// A killed CLI cannot remove its registry file; one that exited removed its
+// own. The file is named by the CLI's pid, which is not the spawned pid when
+// a shim started it, so it is found by the session it names.
+if (killed && recordPath) {
+  const registry = join(homedir(), ".claude", "sessions");
+  for (const name of existsSync(registry) ? readdirSync(registry) : []) {
+    if (!name.endsWith(".json")) continue;
+    try {
+      const file = JSON.parse(readFileSync(join(registry, name), "utf8"));
+      if (file?.sessionId === init.session_id) rmSync(join(registry, name), { force: true });
+    } catch {
+      // Not ours to judge.
+    }
+  }
+}
 
 console.log(`recorded ${stem} (${version}) in ${cwd}${keep ? " (kept)" : " (cleaned up)"}`);
 console.log(`  session ${init?.session_id ?? "?"}: exit ${exit.code ?? exit.signal}, ${stdoutLines.length} lines out, ${sent.length} in, ${elapsed_ms} ms, record ${recordLines === null ? "NOT FOUND" : "copied"}`);

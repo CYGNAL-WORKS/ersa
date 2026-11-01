@@ -159,9 +159,10 @@ async fn a_resume_id_that_is_not_a_session_id_fails_start_without_spawning() {
     assert!(transport.spawned().is_empty());
 }
 
-/// A pid no process can have: above Linux's highest (2^22), and not a
-/// multiple of four, which every Windows pid is. A pid from a child that has
-/// exited could be reused by the time it is checked.
+/// A pid no process can have: far above Linux's highest (2^22), and Windows,
+/// which ignores a pid's low two bits, reads it as 0x3FFF_FFFC, far beyond any
+/// pid it hands out. A pid from a child that has exited could be reused by the
+/// time it is checked.
 const DEAD_PID: u32 = 0x3FFF_FFFF;
 
 /// A scratch `~/.claude` holding a registry file for `pid`.
