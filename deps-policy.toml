@@ -12,7 +12,9 @@
 min_age_days = 7
 
 # Age exceptions let one exact package version in before it is `min_age_days`
-# old, for example a release that fixes a vulnerability. Copy this block:
+# old, for example a release that fixes a vulnerability, or a package that is
+# not from the registry (its version is the lockfile's text, such as
+# "file:../thing") and so has no publish date. Copy this block:
 #
 # [[age_exception]]
 # ecosystem = "crates.io"            # "crates.io" or "npm"
@@ -23,9 +25,12 @@ min_age_days = 7
 
 # Vulnerability exceptions tolerate one advisory for now, for example when no
 # fixed version exists yet. `id` may be the advisory's RUSTSEC, GHSA, or CVE ID;
-# any of its aliases matches. Copy this block:
+# any of its aliases matches. Set `package`, and `version` if you can, so the
+# exception cannot silence the same advisory on another package. Copy this block:
 #
 # [[vulnerability_exception]]
 # id = "RUSTSEC-2024-0001"
+# package = "example-crate"          # optional: only this package
+# version = "1.4.1"                  # optional, needs package: only this version
 # reason = "No fixed release yet; Ersa never calls the affected function."
 # expires = 2026-12-01
