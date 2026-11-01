@@ -35,6 +35,18 @@ fn core_program() -> PathBuf {
     program
 }
 
+#[cfg(unix)]
+fn private_dir(path: &Path) {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(path)
+        .expect("a private directory");
+}
+
+#[cfg(not(unix))]
+fn private_dir(_path: &Path) {}
+
 /// A Core location private to this test. On Unix the socket goes in the
 /// temporary directory, through the `XDG_RUNTIME_DIR` Core reads. Windows has
 /// no such override, so the test uses the user's own pipe name and expects no
@@ -42,8 +54,11 @@ fn core_program() -> PathBuf {
 fn private_location(dir: &Path) -> CoreLocation {
     let mut env: Vec<(OsString, OsString)> = Vec::new();
     let endpoint = if cfg!(unix) {
-        env.push(("XDG_RUNTIME_DIR".into(), dir.as_os_str().to_owned()));
-        dir.join("ersa-core.sock").to_string_lossy().into_owned()
+        // Core serves only from a directory the user alone may enter.
+        let run = dir.join("run");
+        private_dir(&run);
+        env.push(("XDG_RUNTIME_DIR".into(), run.as_os_str().to_owned()));
+        run.join("ersa-core.sock").to_string_lossy().into_owned()
     } else {
         ersa_core::platform::default_endpoint().expect("the default endpoint")
     };
