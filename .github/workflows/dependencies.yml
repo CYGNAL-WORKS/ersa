@@ -49,4 +49,4 @@ jobs:
       # deny.toml rules on Tauri's MPL-2.0 crates (docs/briefs/INBOX.md).
       - name: Shell sources, bans
         if: ${{ !cancelled() }}
-        run: cargo deny --manifest-path apps/shell/src-tauri/Cargo.toml --locked check bans sources
+        run: cargo deny --manifest-path apps/shell/src-tauri/Cargo.toml --locked check bans licenses sources
