@@ -3,6 +3,7 @@ import "./App.css";
 import { AddProject } from "./components/AddProject";
 import { Composer } from "./components/Composer";
 import { CoreStatus } from "./components/CoreStatus";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProjectList } from "./components/ProjectList";
 import { SessionList, newestFirst } from "./components/SessionList";
 import { Transcript } from "./components/Transcript";
@@ -82,11 +83,16 @@ export function App({ client }: { client: CoreClient }) {
     };
   }, [client, activeId]);
 
-  // Subscribe on each new connection, from where the transcript left off.
+  // Subscribe on each new connection, from where the transcript left off;
+  // without one, the session is offline and answers wait.
   const link = view.phase === "connected" ? view.link : undefined;
   useEffect(() => {
     if (link !== undefined) follower.current?.attached();
+    else follower.current?.detached();
   }, [link, activeId]);
+
+  // Stable, so the transcript's memoised blocks do not re-render for it.
+  const decide = useCallback((requestId: string, behavior: "allow" | "deny") => follower.current?.decide(requestId, behavior), []);
 
   const newSession = async (project: Project) => {
     setStarting((s) => ({ ...s, [project.id]: { state: "sending" } }));
@@ -125,21 +131,25 @@ export function App({ client }: { client: CoreClient }) {
     <div className="app">
       <nav className="rail" aria-label="Rail">
         <div className="rail-lists">
-          <ProjectList view={projectsOf(view)} onNewSession={newSession} starting={starting}>
-            {view.phase === "connected" && <AddProject onAdd={addProject} adding={adding} />}
-          </ProjectList>
-          <SessionList view={sessions} activeId={activeId} onSelect={setActiveId} />
+          <ErrorBoundary what="The rail's lists">
+            <ProjectList view={projectsOf(view)} onNewSession={newSession} starting={starting}>
+              {view.phase === "connected" && <AddProject onAdd={addProject} adding={adding} />}
+            </ProjectList>
+            <SessionList view={sessions} activeId={activeId} onSelect={setActiveId} />
+          </ErrorBoundary>
         </div>
         <CoreStatus view={view} onRetry={retry} />
       </nav>
       {shown ? (
         <main className="stage">
-          <Transcript
-            key={shown.id}
-            title={(activeId && titles.current[activeId]) || "Untitled session"}
-            view={shown}
-            onDecide={(requestId, behavior) => follower.current?.decide(requestId, behavior)}
-          />
+          <ErrorBoundary what="This session" resetKey={shown.id}>
+            <Transcript
+              key={shown.id}
+              title={(activeId && titles.current[activeId]) || "Untitled session"}
+              view={shown}
+              onDecide={decide}
+            />
+          </ErrorBoundary>
           <Composer
             key={shown.id}
             unavailable={view.phase === "connected" ? undefined : "Core is not connected."}

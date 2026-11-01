@@ -136,6 +136,18 @@ const asked: Event[] = [
   },
   { type: "session.state", state: "waiting_user" },
 ];
+// An agent hiding what a command does: a right-to-left override and a zero-width space, shown as code points.
+const hiding: Event[] = [
+  {
+    type: "permission.requested",
+    request_id: "r2",
+    tool_use_id: "t2",
+    tool_name: "Bash",
+    input: { command: "echo safe ‮; rm -rf ~ #​" },
+    suggestions: [],
+    flags,
+  },
+];
 const answered: Event[] = [
   ...asked,
   { type: "permission.decided", request_id: "r1", behavior: "allow", decided_by: "user" },
@@ -179,6 +191,8 @@ const transcriptStates: [string, SessionView][] = [
   ["Permission open", sessionView(asked)],
   ["Permission sending", sessionView(asked, { answers: { r1: { state: "sending" } } })],
   ["Permission refused", sessionView(asked, { answers: { r1: { state: "failed", message: refusal("session.decide_permission") } } })],
+  ["Permission while Core is away", sessionView(asked, { stream: { state: "offline" } })],
+  ["Hidden characters", sessionView(hiding)],
   ["Answered", sessionView(answered)],
   ["Failed", sessionView(failing)],
   ["Not receiving events", sessionView([], { stream: { state: "failed", message: "Core closed the connection" } })],
@@ -270,20 +284,21 @@ const entries: Entry[] = [
     name: "Composer",
     wide: true,
     states: [
-      ["Empty", <Composer onSend={async () => false} />],
-      ["Hover", <Composer onSend={async () => false} force="hover" />],
-      ["Focus", <Composer onSend={async () => false} force="focus" />],
-      ["Typed", <Composer onSend={async () => false} initialText="Run the tests again, then summarise what failed." />],
-      ["Sending", <Composer onSend={async () => false} initialText="Run the tests again." sending={{ state: "sending" }} />],
+      ["Empty", <Composer autoFocus={false} onSend={async () => false} />],
+      ["Hover", <Composer autoFocus={false} onSend={async () => false} force="hover" />],
+      ["Focus", <Composer autoFocus={false} onSend={async () => false} force="focus" />],
+      ["Typed", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again, then summarise what failed." />],
+      ["Sending", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." sending={{ state: "sending" }} />],
       [
         "Refused",
         <Composer
+          autoFocus={false}
           onSend={async () => false}
           initialText="Run the tests again."
           sending={{ state: "failed", message: refusal("session.send") }}
         />,
       ],
-      ["Core not connected", <Composer onSend={async () => false} unavailable="Core is not connected." />],
+      ["Core not connected", <Composer autoFocus={false} onSend={async () => false} unavailable="Core is not connected." />],
     ],
   },
   {
@@ -294,6 +309,11 @@ const entries: Entry[] = [
       ["Focus", <Button force="focus">Reconnect</Button>],
       ["Pressed", <Button force="pressed">Reconnect</Button>],
       ["Disabled", <Button disabled>Reconnect</Button>],
+      ["Primary", <Button variant="primary">Allow</Button>],
+      ["Primary hover", <Button variant="primary" force="hover">Allow</Button>],
+      ["Primary focus", <Button variant="primary" force="focus">Allow</Button>],
+      ["Primary pressed", <Button variant="primary" force="pressed">Allow</Button>],
+      ["Primary disabled", <Button variant="primary" disabled>Allow</Button>],
     ],
   },
 ];

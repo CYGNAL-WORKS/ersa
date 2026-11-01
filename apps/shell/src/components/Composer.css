@@ -25,7 +25,7 @@
   color: var(--color-ink-faint);
 }
 
-.composer-input:hover:not(:disabled),
+.composer-input:hover:not(:disabled):not(:focus-visible),
 .composer-input[data-force="hover"] {
   border-color: var(--color-ink-faint);
 }
