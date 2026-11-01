@@ -172,8 +172,7 @@ async fn received(name: &str) -> Value {
                         .await
                         .expect("session.raw_log");
                     let fed = raw.as_array().expect("raw log entries").len();
-                    if fed == recorded && after[0]["last_event_seq"].as_u64() == last_seq
-                    {
+                    if fed == recorded && after[0]["last_event_seq"].as_u64() == last_seq {
                         return after;
                     }
                 }
