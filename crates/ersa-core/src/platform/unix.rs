@@ -212,7 +212,9 @@ impl Drop for ProcessTree {
     fn drop(&mut self) {
         // The kernel does not reuse a group's id while any member lives, and
         // the tree is dropped right after its leader exits, so this reaches
-        // the leader's leftovers and nothing else.
+        // the leader's leftovers. Once every member has gone, the id is free
+        // again; a new group taking it in the moment between would be hit,
+        // which no portable call rules out (pidfd groups are Linux-only).
         let _ = self.kill();
     }
 }
