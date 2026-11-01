@@ -5,7 +5,7 @@ The Shell (Tauri 2, `src-tauri/`) and the Interface (React 19 and TypeScript, `s
 Run the window during development, from the repository root:
 
 1. `cargo build -p ersa-cli`, so the Shell finds `target/debug/ersa-core` (or set `ERSA_CORE_BIN`).
-2. `pnpm install`, then in `apps/shell`: `pnpm tauri dev`.
+2. `corepack enable pnpm` (corepack 0.36 or later; it fetches the pnpm `package.json` pins), `pnpm install`, then in `apps/shell`: `pnpm tauri dev`.
 
 In `apps/shell`:
 
@@ -13,4 +13,4 @@ In `apps/shell`:
 - `pnpm typecheck`, `pnpm test` (unit tests, including the check that interface code uses only tokens).
 - `pnpm dev`, then open `/gallery.html`: every component in every state, light and dark. Add a component there in the change that builds it.
 - `pnpm test:screenshots` photographs the gallery. Baselines are Linux renders from the Playwright container; `pnpm test:screenshots:update` (Docker) rewrites them, or take them from the `screenshots` artifact of a failed CI run.
-- The Shell's Rust side is its own Cargo workspace: `cargo test --manifest-path src-tauri/Cargo.toml` (needs `ersa-core` built, as above).
+- The Shell's Rust side is its own Cargo workspace: `cargo test --manifest-path src-tauri/Cargo.toml` (needs `ersa-core` built, as above). On Windows the launch test uses your own Core pipe, so it runs only with `ERSA_SHELL_TEST_USER_PIPE=1` and no Core of yours running.

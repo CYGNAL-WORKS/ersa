@@ -1,9 +1,6 @@
 /* The document's defaults. Every value is a token from tokens.gen.css. */
 
-html,
-body,
-#root {
-  height: 100%;
+body {
   margin: 0;
 }
 
