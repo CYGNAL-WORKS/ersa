@@ -11,7 +11,7 @@ const hello: CoreHelloResult = {
   capabilities: [],
 };
 
-const project: Project = { id: "p1", host_id: "local", path: "D:/code/ersa", name: "ersa", vcs: "git" };
+const project: Project = { id: "p1", host_id: "local", path: "D:/code/ersa", name: "ersa", vcs: "git", trusted: false };
 
 const session: Session = {
   id: "s1",
