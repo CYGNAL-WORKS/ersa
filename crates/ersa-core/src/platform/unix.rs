@@ -203,10 +203,13 @@ impl ProcessTree {
 
     /// Called as soon as the leader has been reaped: kills the leftovers
     /// when the tree was made with `kill_on_drop`, then retires the group's
-    /// id. The kernel keeps the id reserved while any member lives, so the
-    /// kill can only reach this group; once it is retired nothing signals
-    /// it, so a reused id is never hit. (If Core itself dies, nothing is
-    /// signalled at all: the leftovers outlive it on Unix.)
+    /// id, which is never signalled again. While any member lives the
+    /// kernel keeps the id reserved, so the kill reaches only this group.
+    /// When none is left the id is free from the moment the leader was
+    /// reaped, and another group taking it in the microseconds before this
+    /// signal would be hit; nothing portable closes that gap (pidfd groups
+    /// are Linux-only). If Core itself dies, nothing is signalled at all:
+    /// the leftovers outlive it on Unix.
     pub fn leader_exited(&self) {
         // Once retired, never again: the id may belong to someone else.
         if self.spent.swap(true, std::sync::atomic::Ordering::SeqCst) {
