@@ -220,6 +220,12 @@ impl ProcessTree {
         }
     }
 
+    /// Retires the group's id without signalling it: for a leader that was
+    /// just killed and reaped, whose group was signalled already.
+    pub fn retire(&self) {
+        self.spent.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
     /// Kills every process in the group. A group that has already ended is
     /// not an error.
     pub fn kill(&self) -> io::Result<()> {
