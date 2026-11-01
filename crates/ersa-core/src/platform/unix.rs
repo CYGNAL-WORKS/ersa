@@ -8,7 +8,7 @@
 #![allow(unsafe_code)]
 
 use std::io;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use tokio::net::{UnixListener, UnixStream};
@@ -102,6 +102,14 @@ impl Listener {
                 return Err(io::Error::new(
                     io::ErrorKind::AddrInUse,
                     format!("a process running as this user already serves {endpoint}"),
+                ));
+            }
+            // Only a leftover socket is cleared: an explicit `--endpoint`
+            // naming some other file of the user's must not delete it.
+            if !meta.file_type().is_socket() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!("{endpoint} exists and is not a socket"),
                 ));
             }
             std::fs::remove_file(path)?;
