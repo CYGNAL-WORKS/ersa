@@ -1,8 +1,8 @@
 //! Unix: a Unix domain socket in a directory only the current user can enter,
 //! and clients that talk only to a socket the current user serves.
 //!
-//! Compiles but is untested: CI runs on Windows only (ADR 0006). Kept so that
-//! nothing outside the platform module assumes Windows.
+//! Tested in CI on Linux. Windows remains the first platform (ADR 0006);
+//! this is what keeps Core's socket suite running everywhere else.
 
 // `geteuid` is a libc call, and every libc call is `unsafe` in Rust.
 #![allow(unsafe_code)]
