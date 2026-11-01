@@ -1,0 +1,2365 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/KPandaK/ersa/protocol/schema/core-api.schema.json",
+  "title": "Ersa Core API",
+  "description": "The Core request/response API (PROTO-CORE-API): newline-delimited JSON-RPC 2.0 between the Interface and Core. Each method has a `<method>.params` and a `<method>.result` definition; each notification a `<method>.notification` definition. Objects are closed (additionalProperties: false) except settings and the shapes reserved for later milestones. Agent events are not copied here: session.event carries an envelope from agent-events.schema.json by reference.",
+  "x-api-version": 1,
+  "$ref": "#/$defs/message",
+  "$defs": {
+    "message": {
+      "description": "Any line on the socket.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/request"
+        },
+        {
+          "$ref": "#/$defs/response"
+        },
+        {
+          "$ref": "#/$defs/notification"
+        }
+      ]
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "An identifier Core issues."
+    },
+    "request_id": {
+      "description": "The JSON-RPC id; Core echoes it.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        }
+      ]
+    },
+    "request": {
+      "description": "A request from the Interface.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "core.hello"
+            },
+            "params": {
+              "$ref": "#/$defs/core.hello.params"
+            }
+          },
+          "description": "The handshake; must be the first request on a connection (PROTO-CORE-API-R01)."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "core.status"
+            },
+            "params": {
+              "$ref": "#/$defs/core.status.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "core.shutdown"
+            },
+            "params": {
+              "$ref": "#/$defs/core.shutdown.params"
+            }
+          },
+          "description": "Stops all sessions cleanly; Core exits after answering."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "host.list"
+            },
+            "params": {
+              "$ref": "#/$defs/host.list.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "host.add"
+            },
+            "params": {
+              "$ref": "#/$defs/host.add.params"
+            }
+          },
+          "description": "Reserved: remote hosts are milestone M4."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "host.remove"
+            },
+            "params": {
+              "$ref": "#/$defs/host.remove.params"
+            }
+          },
+          "description": "Reserved: remote hosts are milestone M4."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "host.probe"
+            },
+            "params": {
+              "$ref": "#/$defs/host.probe.params"
+            }
+          },
+          "description": "Reserved: milestone M4."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "project.list"
+            },
+            "params": {
+              "$ref": "#/$defs/project.list.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "project.add"
+            },
+            "params": {
+              "$ref": "#/$defs/project.add.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "project.remove"
+            },
+            "params": {
+              "$ref": "#/$defs/project.remove.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "workspace.list"
+            },
+            "params": {
+              "$ref": "#/$defs/workspace.list.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "workspace.create"
+            },
+            "params": {
+              "$ref": "#/$defs/workspace.create.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "workspace.remove"
+            },
+            "params": {
+              "$ref": "#/$defs/workspace.remove.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.list"
+            },
+            "params": {
+              "$ref": "#/$defs/session.list.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.create"
+            },
+            "params": {
+              "$ref": "#/$defs/session.create.params"
+            }
+          },
+          "description": "Creates and starts a session."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.start"
+            },
+            "params": {
+              "$ref": "#/$defs/session.start.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.stop"
+            },
+            "params": {
+              "$ref": "#/$defs/session.stop.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.resume"
+            },
+            "params": {
+              "$ref": "#/$defs/session.resume.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.remove"
+            },
+            "params": {
+              "$ref": "#/$defs/session.remove.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.send"
+            },
+            "params": {
+              "$ref": "#/$defs/session.send.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.interrupt"
+            },
+            "params": {
+              "$ref": "#/$defs/session.interrupt.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.decide_permission"
+            },
+            "params": {
+              "$ref": "#/$defs/session.decide_permission.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.answer_question"
+            },
+            "params": {
+              "$ref": "#/$defs/session.answer_question.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.set_title"
+            },
+            "params": {
+              "$ref": "#/$defs/session.set_title.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.set_mode"
+            },
+            "params": {
+              "$ref": "#/$defs/session.set_mode.params"
+            }
+          },
+          "description": "Takes effect on the next start."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.subscribe"
+            },
+            "params": {
+              "$ref": "#/$defs/session.subscribe.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.unsubscribe"
+            },
+            "params": {
+              "$ref": "#/$defs/session.unsubscribe.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.raw_log"
+            },
+            "params": {
+              "$ref": "#/$defs/session.raw_log.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "session.reproject"
+            },
+            "params": {
+              "$ref": "#/$defs/session.reproject.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "backend.list"
+            },
+            "params": {
+              "$ref": "#/$defs/backend.list.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "mode.list"
+            },
+            "params": {
+              "$ref": "#/$defs/mode.list.params"
+            }
+          },
+          "description": "Reserved: modes are milestone M3."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "settings.get"
+            },
+            "params": {
+              "$ref": "#/$defs/settings.get.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "settings.set"
+            },
+            "params": {
+              "$ref": "#/$defs/settings.set.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "fs.list"
+            },
+            "params": {
+              "$ref": "#/$defs/fs.list.params"
+            }
+          },
+          "description": "Reserved: milestone M2."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "fs.read"
+            },
+            "params": {
+              "$ref": "#/$defs/fs.read.params"
+            }
+          },
+          "description": "Reserved: milestone M2."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "fs.diff"
+            },
+            "params": {
+              "$ref": "#/$defs/fs.diff.params"
+            }
+          },
+          "description": "Reserved: milestone M2."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "terminal.open"
+            },
+            "params": {
+              "$ref": "#/$defs/terminal.open.params"
+            }
+          },
+          "description": "Reserved: milestone M2."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "terminal.input"
+            },
+            "params": {
+              "$ref": "#/$defs/terminal.input.params"
+            }
+          },
+          "description": "Reserved: milestone M2."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "terminal.resize"
+            },
+            "params": {
+              "$ref": "#/$defs/terminal.resize.params"
+            }
+          },
+          "description": "Reserved: milestone M2."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "terminal.close"
+            },
+            "params": {
+              "$ref": "#/$defs/terminal.close.params"
+            }
+          },
+          "description": "Reserved: milestone M2."
+        }
+      ]
+    },
+    "response": {
+      "description": "Core's answer to one request. Validate `result` against the `<method>.result` definition of the request's method.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "result": {}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "error"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "description": "null when the request's id could not be read.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/request_id"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "error": {
+              "$ref": "#/$defs/error"
+            }
+          }
+        }
+      ]
+    },
+    "notification": {
+      "description": "A notification from Core.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "session.event"
+            },
+            "params": {
+              "$ref": "#/$defs/session.event.notification"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "session.tile"
+            },
+            "params": {
+              "$ref": "#/$defs/session.tile.notification"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "host.status"
+            },
+            "params": {
+              "$ref": "#/$defs/host.status.notification"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "core.notice"
+            },
+            "params": {
+              "$ref": "#/$defs/core.notice.notification"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
+              "const": "terminal.output"
+            },
+            "params": {
+              "$ref": "#/$defs/terminal.output.notification"
+            }
+          }
+        }
+      ]
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "integer",
+          "description": "-32000 for application errors; the standard JSON-RPC codes (-32700, -32600, -32601, -32602, -32603) for protocol-level failures."
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "$ref": "#/$defs/error_data"
+        }
+      },
+      "if": {
+        "properties": {
+          "code": {
+            "const": -32000
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "data"
+        ]
+      }
+    },
+    "error_data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "not_found",
+            "invalid_state",
+            "backend_missing",
+            "backend_not_logged_in",
+            "vcs_error",
+            "transport_error",
+            "permission",
+            "internal"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "status",
+        "backends"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "local",
+            "ssh"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/host_status"
+        },
+        "backends": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/backend_status"
+          }
+        }
+      }
+    },
+    "host_status": {
+      "enum": [
+        "connected",
+        "disconnected",
+        "unknown"
+      ]
+    },
+    "backend_status": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "status"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The backend's name, such as claude-code."
+        },
+        "version": {
+          "type": "string",
+          "description": "Absent when the backend is not installed or its version could not be read."
+        },
+        "status": {
+          "enum": [
+            "available",
+            "missing",
+            "error"
+          ]
+        }
+      }
+    },
+    "backend_info": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "status",
+        "min_tested_version",
+        "max_tested_version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string",
+          "description": "Absent when the backend is not installed or its version could not be read."
+        },
+        "status": {
+          "enum": [
+            "available",
+            "missing",
+            "error"
+          ]
+        },
+        "min_tested_version": {
+          "type": "string"
+        },
+        "max_tested_version": {
+          "type": "string"
+        }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "host_id",
+        "path",
+        "name",
+        "vcs"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "host_id": {
+          "$ref": "#/$defs/id"
+        },
+        "path": {
+          "type": "string",
+          "description": "The project's root, as a path on its host."
+        },
+        "name": {
+          "type": "string"
+        },
+        "vcs": {
+          "enum": [
+            "git",
+            "perforce",
+            "none"
+          ]
+        }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "project_id",
+        "path",
+        "vcs_ref",
+        "state"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "project_id": {
+          "$ref": "#/$defs/id"
+        },
+        "path": {
+          "type": "string",
+          "description": "The workspace's root, as a path on the project's host."
+        },
+        "vcs_ref": {
+          "type": "string",
+          "description": "The branch (git) the workspace has checked out."
+        },
+        "state": {
+          "enum": [
+            "ready",
+            "creating",
+            "removing",
+            "error"
+          ]
+        }
+      }
+    },
+    "session": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "workspace_id",
+        "host_id",
+        "backend",
+        "state",
+        "created_at",
+        "tile"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "workspace_id": {
+          "$ref": "#/$defs/id"
+        },
+        "host_id": {
+          "$ref": "#/$defs/id"
+        },
+        "backend": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "agent-events.schema.json#/$defs/session.state/properties/state"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "last_event_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Absent when the session has no events yet."
+        },
+        "tile": {
+          "$ref": "#/$defs/tile"
+        }
+      }
+    },
+    "tile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pending"
+      ],
+      "properties": {
+        "context_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "context_window": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cost_usd_total": {
+          "type": "number",
+          "minimum": 0
+        },
+        "pending": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "request_id"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "permission",
+                  "question"
+                ]
+              },
+              "request_id": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "description": "What the rail renders for a session; Core keeps it current from events. Usage fields are absent until known."
+    },
+    "raw_log_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "index",
+        "ts",
+        "dir",
+        "line"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ts": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "dir": {
+          "enum": [
+            "backend",
+            "host",
+            "core"
+          ]
+        },
+        "line": {
+          "type": "string",
+          "description": "The line verbatim, without its terminator."
+        }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "description": "User settings, an open JSON object. Known keys: workspaces.root (string), the directory new worktrees go under."
+    },
+    "core.hello.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "client",
+        "client_version",
+        "api_versions"
+      ],
+      "properties": {
+        "client": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What is attaching, such as the Shell or a test client."
+        },
+        "client_version": {
+          "type": "string"
+        },
+        "api_versions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "description": "Every Core API version the client speaks."
+        }
+      }
+    },
+    "core.hello.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "core_version",
+        "api_version",
+        "event_projection_version",
+        "host",
+        "capabilities"
+      ],
+      "properties": {
+        "core_version": {
+          "type": "string"
+        },
+        "api_version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The highest version both sides speak."
+        },
+        "event_projection_version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The agent event schema version (`v`) this Core produces."
+        },
+        "host": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "name",
+            "platform"
+          ],
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/id"
+            },
+            "name": {
+              "type": "string"
+            },
+            "platform": {
+              "type": "string",
+              "description": "The operating system Core runs on: windows, macos, or linux."
+            }
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "core.status.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "description": "No fields."
+    },
+    "core.status.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sessions_running",
+        "sessions_waiting",
+        "uptime_s",
+        "db_path"
+      ],
+      "properties": {
+        "sessions_running": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sessions_waiting": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "uptime_s": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "db_path": {
+          "type": "string"
+        }
+      }
+    },
+    "core.shutdown.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "description": "No fields."
+    },
+    "core.shutdown.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "description": "No fields."
+    },
+    "host.list.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "description": "No fields."
+    },
+    "host.list.result": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/host"
+      }
+    },
+    "host.add.params": {
+      "type": "object",
+      "description": "Reserved for milestone M4; the shape is decided then."
+    },
+    "host.add.result": {
+      "$ref": "#/$defs/host"
+    },
+    "host.remove.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "host.remove.result": {
+      "$ref": "#/$defs/host"
+    },
+    "host.probe.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "host.probe.result": {
+      "$ref": "#/$defs/host"
+    },
+    "project.list.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "description": "No fields."
+    },
+    "project.list.result": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/project"
+      }
+    },
+    "project.add.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host_id",
+        "path"
+      ],
+      "properties": {
+        "host_id": {
+          "$ref": "#/$defs/id"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "project.add.result": {
+      "$ref": "#/$defs/project"
+    },
+    "project.remove.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "project.remove.result": {
+      "$ref": "#/$defs/project"
+    },
+    "workspace.list.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project_id"
+      ],
+      "properties": {
+        "project_id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "workspace.list.result": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/workspace"
+      }
+    },
+    "workspace.create.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project_id"
+      ],
+      "properties": {
+        "project_id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Branch name for a git worktree; Core picks one when absent."
+        },
+        "base": {
+          "type": "string",
+          "minLength": 1,
+          "description": "What the workspace starts from (a git commit-ish); the project's current HEAD when absent."
+        }
+      }
+    },
+    "workspace.create.result": {
+      "$ref": "#/$defs/workspace"
+    },
+    "workspace.remove.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Remove even with uncommitted changes."
+        }
+      }
+    },
+    "workspace.remove.result": {
+      "$ref": "#/$defs/workspace"
+    },
+    "session.list.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "description": "No fields."
+    },
+    "session.list.result": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/session"
+      }
+    },
+    "session.create.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_id",
+        "backend"
+      ],
+      "properties": {
+        "workspace_id": {
+          "$ref": "#/$defs/id"
+        },
+        "backend": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "session.create.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.start.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "session.start.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.stop.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "session.stop.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.resume.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "session.resume.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.remove.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "session.remove.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.send.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "text": {
+          "type": "string"
+        }
+      }
+    },
+    "session.send.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "turn"
+      ],
+      "properties": {
+        "turn": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "session.interrupt.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "session.interrupt.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.decide_permission.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "request_id",
+        "behavior"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "behavior": {
+          "enum": [
+            "allow",
+            "deny"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "updated_input": {
+          "type": "object",
+          "description": "Replacement tool input; the tool's own arguments."
+        },
+        "apply_suggestions": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": "Indices into the request's suggestions."
+        }
+      }
+    },
+    "session.decide_permission.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.answer_question.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "request_id",
+        "answers"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "answers": {
+          "$ref": "agent-events.schema.json#/$defs/question.answered/properties/answers"
+        }
+      }
+    },
+    "session.answer_question.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.set_title.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "session.set_title.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.set_mode.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "mode"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "mode": {
+          "type": "string"
+        }
+      }
+    },
+    "session.set_mode.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.subscribe.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "from_seq"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "from_seq": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "session.subscribe.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "last_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Absent when the session has no events yet."
+        }
+      }
+    },
+    "session.unsubscribe.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "session.unsubscribe.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "description": "No fields."
+    },
+    "session.raw_log.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "from": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "First raw-log index, inclusive; 0 when absent."
+        },
+        "to": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Last raw-log index, inclusive; the end of the log when absent."
+        }
+      }
+    },
+    "session.raw_log.result": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/raw_log_entry"
+      }
+    },
+    "session.reproject.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "session.reproject.result": {
+      "$ref": "#/$defs/session"
+    },
+    "backend.list.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host_id"
+      ],
+      "properties": {
+        "host_id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "backend.list.result": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/backend_info"
+      }
+    },
+    "mode.list.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "description": "No fields."
+    },
+    "mode.list.result": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "description"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "settings.get.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "description": "No fields."
+    },
+    "settings.get.result": {
+      "$ref": "#/$defs/settings"
+    },
+    "settings.set.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "patch"
+      ],
+      "properties": {
+        "patch": {
+          "type": "object",
+          "description": "A JSON merge patch (RFC 7386): objects merge, null deletes a key."
+        }
+      }
+    },
+    "settings.set.result": {
+      "$ref": "#/$defs/settings"
+    },
+    "fs.list.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_id",
+        "path"
+      ],
+      "properties": {
+        "workspace_id": {
+          "$ref": "#/$defs/id"
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "fs.list.result": {
+      "description": "Reserved for milestone M2; the shape is decided then."
+    },
+    "fs.read.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_id",
+        "path"
+      ],
+      "properties": {
+        "workspace_id": {
+          "$ref": "#/$defs/id"
+        },
+        "path": {
+          "type": "string"
+        },
+        "range": {
+          "description": "Reserved for milestone M2; the shape is decided then."
+        }
+      }
+    },
+    "fs.read.result": {
+      "description": "Reserved for milestone M2; the shape is decided then."
+    },
+    "fs.diff.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_id"
+      ],
+      "properties": {
+        "workspace_id": {
+          "$ref": "#/$defs/id"
+        },
+        "base": {
+          "type": "string"
+        }
+      }
+    },
+    "fs.diff.result": {
+      "description": "Reserved for milestone M2; the shape is decided then."
+    },
+    "terminal.open.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace_id"
+      ],
+      "properties": {
+        "workspace_id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "terminal.open.result": {
+      "description": "Reserved for milestone M2; the shape is decided then."
+    },
+    "terminal.input.params": {
+      "type": "object",
+      "description": "Reserved for milestone M2; the shape is decided then."
+    },
+    "terminal.input.result": {
+      "description": "Reserved for milestone M2; the shape is decided then."
+    },
+    "terminal.resize.params": {
+      "type": "object",
+      "description": "Reserved for milestone M2; the shape is decided then."
+    },
+    "terminal.resize.result": {
+      "description": "Reserved for milestone M2; the shape is decided then."
+    },
+    "terminal.close.params": {
+      "type": "object",
+      "description": "Reserved for milestone M2; the shape is decided then."
+    },
+    "terminal.close.result": {
+      "description": "Reserved for milestone M2; the shape is decided then."
+    },
+    "session.event.notification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "session_id",
+        "event"
+      ],
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/id"
+        },
+        "event": {
+          "$ref": "agent-events.schema.json#/$defs/envelope"
+        }
+      }
+    },
+    "session.tile.notification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "session_id",
+        "tile"
+      ],
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/id"
+        },
+        "tile": {
+          "$ref": "#/$defs/tile"
+        }
+      }
+    },
+    "host.status.notification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host_id",
+        "status"
+      ],
+      "properties": {
+        "host_id": {
+          "$ref": "#/$defs/id"
+        },
+        "status": {
+          "$ref": "#/$defs/host_status"
+        }
+      }
+    },
+    "core.notice.notification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "message"
+      ],
+      "properties": {
+        "level": {
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "terminal.output.notification": {
+      "type": "object",
+      "description": "Reserved for milestone M2; the shape is decided then."
+    }
+  }
+}
