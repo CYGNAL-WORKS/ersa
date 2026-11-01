@@ -291,7 +291,7 @@ async fn shutdown_answers_then_stops_core() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_second_core_on_the_same_endpoint_refuses_to_start() {
     let core = start().await;
-    let other_dir = tempfile::tempdir().expect("temp dir");
+    let other_dir = support::tempdir();
     let second = Server::bind(test_config(other_dir.path(), &core.endpoint)).await;
     match second {
         Err(ServeError::AlreadyRunning { endpoint }) => assert_eq!(endpoint, core.endpoint),
