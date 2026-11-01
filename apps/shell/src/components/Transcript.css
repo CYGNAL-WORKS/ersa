@@ -29,6 +29,11 @@
   color: var(--color-ink-muted);
 }
 
+/* Needs the user: the accent, as on the session's tile. */
+.transcript-state[data-needs-you] {
+  color: var(--color-accent);
+}
+
 .transcript-scroll {
   min-height: 0;
   overflow: auto;
@@ -59,7 +64,7 @@
   flex-direction: column;
   gap: var(--space-xs);
   padding-left: var(--space-md);
-  border-left: var(--line-hairline) solid var(--color-ink-faint);
+  border-left: var(--line-hairline) solid var(--color-line);
 }
 
 .transcript-who,
@@ -110,14 +115,36 @@
   overflow-wrap: anywhere;
 }
 
-.transcript-card[data-error] .transcript-card-status {
-  color: var(--color-danger);
-}
-
 .transcript-input {
   display: block;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+/* A permission request's input, field by field; a long value scrolls rather than hides. */
+.transcript-fields {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-md);
+  row-gap: var(--space-xs);
+  margin: 0;
+}
+
+.transcript-field {
+  display: contents;
+}
+
+.transcript-field dt {
+  color: var(--color-ink-muted);
+}
+
+.transcript-field dd {
+  margin: 0;
+  min-width: 0;
+  max-height: var(--size-rail);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .transcript-output {

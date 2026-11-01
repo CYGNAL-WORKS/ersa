@@ -223,6 +223,8 @@ const entries: Entry[] = [
     states: [
       ["Empty", <AddProject onAdd={async () => false} />],
       ["Typed", <AddProject onAdd={async () => false} initialPath="D:\Projects\ersa" />],
+      ["Hover", <AddProject onAdd={async () => false} force="hover" />],
+      ["Focus", <AddProject onAdd={async () => false} initialPath="D:\Projects\ersa" force="focus" />],
       ["Adding", <AddProject onAdd={async () => false} initialPath="D:\Projects\ersa" adding={{ state: "sending" }} />],
       [
         "Refused",
@@ -240,6 +242,18 @@ const entries: Entry[] = [
       ["Loading", <SessionList view={{ state: "loading" }} onSelect={() => {}} />],
       ["Empty", <SessionList view={{ state: "ready", sessions: [] }} onSelect={() => {}} />],
       ["Sessions", <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} />],
+      [
+        "Hover",
+        <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} force={{ id: "s3", state: "hover" }} />,
+      ],
+      [
+        "Focus on the active tile",
+        <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} force={{ id: "s2", state: "focus" }} />,
+      ],
+      [
+        "Pressed",
+        <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} force={{ id: "s3", state: "pressed" }} />,
+      ],
       ["Error", <SessionList view={{ state: "error", message: "Core could not read its database." }} onSelect={() => {}} />],
       ["Core unavailable", <SessionList view={{ state: "unavailable" }} onSelect={() => {}} />],
     ],
@@ -257,6 +271,8 @@ const entries: Entry[] = [
     wide: true,
     states: [
       ["Empty", <Composer onSend={async () => false} />],
+      ["Hover", <Composer onSend={async () => false} force="hover" />],
+      ["Focus", <Composer onSend={async () => false} force="focus" />],
       ["Typed", <Composer onSend={async () => false} initialText="Run the tests again, then summarise what failed." />],
       ["Sending", <Composer onSend={async () => false} initialText="Run the tests again." sending={{ state: "sending" }} />],
       [

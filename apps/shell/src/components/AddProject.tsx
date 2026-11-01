@@ -7,12 +7,13 @@ interface AddProjectProps {
   /** Adds the folder at `path` as a project; resolves true once Core added it. */
   onAdd: (path: string) => Promise<boolean>;
   adding?: Sending;
-  /** For the gallery: a path already typed. */
+  /** For the gallery: a path already typed, and a pointer or keyboard state shown without one. */
   initialPath?: string;
+  force?: "hover" | "focus";
 }
 
 /** Adds a project by its folder's path on this machine. */
-export function AddProject({ onAdd, adding, initialPath = "" }: AddProjectProps) {
+export function AddProject({ onAdd, adding, initialPath = "", force }: AddProjectProps) {
   const [path, setPath] = useState(initialPath);
   const busy = adding?.state === "sending";
   return (
@@ -30,6 +31,8 @@ export function AddProject({ onAdd, adding, initialPath = "" }: AddProjectProps)
         aria-label="Project folder"
         placeholder="Folder path"
         value={path}
+        readOnly={busy}
+        data-force={force}
         onChange={(event) => setPath(event.target.value)}
       />
       <Button type="submit" disabled={busy || path.trim() === ""}>
