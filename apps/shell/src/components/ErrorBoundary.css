@@ -1,5 +1,9 @@
 /* A part of the window that could not be shown: its message sits where the part would, with pane padding. */
 .error-boundary {
+  display: flex;
+  flex-direction: column;
+  align-items: start;
+  gap: var(--space-sm);
   padding: var(--space-lg);
   align-self: start;
 }

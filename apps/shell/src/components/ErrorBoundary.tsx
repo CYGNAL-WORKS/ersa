@@ -6,6 +6,8 @@ interface ErrorBoundaryProps {
   what: string;
   /** A change of key (another session chosen) tries again. */
   resetKey?: string;
+  /** Shown with the message, so a way forward survives the part that failed. */
+  action?: ReactNode;
   children: ReactNode;
 }
 
@@ -28,9 +30,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, { error?: Error
   render() {
     if (this.state.error) {
       return (
-        <p className="problem error-boundary" role="alert">
-          {this.props.what} could not be shown: {this.state.error.message}
-        </p>
+        <div className="error-boundary">
+          <p className="problem" role="alert">
+            {this.props.what} could not be shown: {this.state.error.message}
+          </p>
+          {this.props.action}
+        </div>
       );
     }
     return this.props.children;
