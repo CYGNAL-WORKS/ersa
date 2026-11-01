@@ -1,0 +1,136 @@
+/* Session tiles in the rail. The active tile is outlined in the accent; a tile that needs the user
+   shows the accent glyph (DESIGN.md: attention is an edge or glyph, never a filled row). */
+
+.sessions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-height: 0;
+}
+
+.sessions-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  font-weight: var(--type-heading-weight);
+}
+
+.sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Each tile is a grid item, so it stretches to the rail's width. */
+.sessions-list > li {
+  display: grid;
+}
+
+.sessions-note {
+  margin: 0;
+  color: var(--color-ink-muted);
+}
+
+.sessions-note-hint {
+  display: block;
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.session {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  column-gap: var(--space-sm);
+  align-items: baseline;
+  min-width: 0;
+  padding: var(--space-sm);
+  font: inherit;
+  text-align: left;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.session:hover {
+  background: var(--color-surface-raised);
+  border-color: var(--color-ink-faint);
+}
+
+.session:active {
+  background: var(--color-canvas);
+}
+
+.session:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.session[aria-current] {
+  border-color: var(--color-accent);
+}
+
+/* Glyph beside the title; the cost at the title's end; the state beneath both. */
+.session-glyph {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: center;
+  box-sizing: border-box;
+  width: var(--space-sm);
+  height: var(--space-sm);
+  border-radius: var(--radius-pill);
+  background: var(--color-ink-faint);
+}
+
+/* Working: the positive glyph. Starting: hollow, waiting on something. Failed: danger. */
+.session[data-state="running"] .session-glyph {
+  background: var(--color-positive);
+}
+
+.session[data-state="starting"] .session-glyph {
+  background: transparent;
+  border: var(--line-hairline) solid var(--color-ink-muted);
+}
+
+.session[data-state="error"] .session-glyph {
+  background: var(--color-danger);
+}
+
+.session[data-needs-you] .session-glyph {
+  border: none;
+  background: var(--color-accent);
+}
+
+.session-title {
+  grid-column: 2;
+  grid-row: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-cost {
+  grid-column: 3;
+  grid-row: 1;
+  color: var(--color-ink-muted);
+}
+
+.session-state {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.session[data-needs-you] .session-state {
+  color: var(--color-accent);
+}

@@ -45,6 +45,17 @@
   align-items: start;
 }
 
+/* Stage components (transcript, composer): one state per row, as wide as the column allows. */
+.gallery-states-wide {
+  grid-template-columns: 1fr;
+}
+
+/* They sit on the canvas, as the stage does. */
+.gallery-states-wide .gallery-specimen {
+  padding: 0;
+  background: var(--color-canvas);
+}
+
 .gallery-state {
   display: flex;
   flex-direction: column;

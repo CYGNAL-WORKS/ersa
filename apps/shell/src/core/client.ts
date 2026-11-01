@@ -12,6 +12,11 @@ import type {
 /** How the Shell reached Core: found it running, or started it. */
 export interface Attachment {
   how: "attached" | "launched";
+  /**
+   * The endpoint's label when the Shell attached to one other than the
+   * user's own (a debug build told to by `ERSA_ATTACH`, such as a replay server).
+   */
+  label?: string;
   /** Core's answer to `core.hello` on this connection. */
   hello: CoreHelloResult;
 }
