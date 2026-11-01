@@ -40,7 +40,7 @@ When the ticket's scope is built, everything is committed, and `node scripts/che
 
 ## 4. Check, push, open the pull request
 
-1. `git fetch origin && git rebase origin/main`, then `node scripts/check.mjs`. Everything passes; the manifest may warn only about inbox entries you added.
+1. `git fetch origin && git rebase origin/main`, then `node scripts/check.mjs`. If the app refuses the rebase because `main` changed protected files (under `.claude/`), skip it, push as is, and say so in your report; the orchestration session brings `main` in. Everything passes; the manifest may warn only about inbox entries you added.
 2. `git push -u origin HEAD` (force-with-lease only for your own rebased branch).
 3. `gh pr create` against `main`, titled with the issue's title. Body: the `pr` skill's **Summary**, **Evidence** and **Merge Danger**, then **Requirements** (each ID and the test that verifies it), **Test seams**, **Review** (confirmed findings and their fixes, dismissed ones with reasons, follow-ups), **Inbox entries** added (verbatim), and `Fixes #<n>`.
 4. End your turn with the pull request link, the check results, and anything the orchestration session must decide. Then stop. If asked to change the branch later, `git pull` first: the orchestration session may have pushed a planning commit to it.
