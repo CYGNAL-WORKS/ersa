@@ -32,6 +32,14 @@ pub enum CliMessage {
     RateLimitEvent(RateLimitEvent),
     ControlRequest(CliControlRequest),
     ControlResponse(CliControlResponse),
+    ControlCancelRequest(ControlCancelRequest),
+    /// A liveness heartbeat, sent for example while a slow control request is
+    /// in progress. It carries no payload and is to be ignored. Unrecorded;
+    /// modelled from the SDK types.
+    KeepAlive {
+        #[serde(flatten)]
+        extra: Extra,
+    },
     #[serde(untagged)]
     Unknown(Value),
 }
@@ -454,6 +462,18 @@ pub struct CanUseTool {
     pub requires_user_interaction: Option<bool>,
     #[serde(default)]
     pub agent_id: Option<String>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+/// The sender withdraws one of its own in-flight control requests and ignores
+/// any answer that still arrives. Either side may send it. From the CLI it
+/// typically withdraws a pending `can_use_tool` prompt, for example after an
+/// interrupt, so the shelf should drop that prompt. Unrecorded; modelled from
+/// the SDK types.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ControlCancelRequest {
+    pub request_id: String,
     #[serde(flatten)]
     pub extra: Extra,
 }
