@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use ersa_core::{CoreConfig, ServeError, Server};
@@ -78,7 +79,10 @@ async fn serve(data_dir: Option<PathBuf>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let server = match Server::bind(config).await {
+    // Every backend this build can drive. Core itself knows none of them.
+    let adapters: Vec<Arc<dyn ersa_core::Adapter>> =
+        vec![Arc::new(ersa_adapter_claude::ClaudeAdapter::new())];
+    let server = match Server::bind_with(config, adapters).await {
         Ok(server) => server,
         Err(e @ ServeError::AlreadyRunning { .. }) => {
             eprintln!("ersa-core: {e}. Attach to it instead, or stop it first.");
