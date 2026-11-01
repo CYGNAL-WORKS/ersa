@@ -218,7 +218,10 @@ impl Client {
     /// those before it are dropped.
     pub async fn notification_where(&mut self, wanted: impl Fn(&Value) -> bool) -> Value {
         loop {
-            let notification = self.notification().await.expect("the connection stays open");
+            let notification = self
+                .notification()
+                .await
+                .expect("the connection stays open");
             if wanted(&notification) {
                 return notification;
             }
@@ -231,7 +234,10 @@ impl Client {
     pub async fn events_until(&mut self, event_type: &str) -> Vec<Value> {
         let mut events = Vec::new();
         loop {
-            let notification = self.notification().await.expect("the connection stays open");
+            let notification = self
+                .notification()
+                .await
+                .expect("the connection stays open");
             if notification["method"] != "session.event" {
                 continue;
             }
@@ -273,9 +279,11 @@ pub fn assert_valid(method: &str, response: &Value) {
 /// Checks a notification against the schema (PROTO-CORE-API-R06).
 pub fn assert_valid_notification(notification: &Value) {
     if let Err(e) = validate_notification(notification) {
-        panic!("notification does not match the schema:
+        panic!(
+            "notification does not match the schema:
 {e}
-{notification:#}");
+{notification:#}"
+        );
     }
 }
 

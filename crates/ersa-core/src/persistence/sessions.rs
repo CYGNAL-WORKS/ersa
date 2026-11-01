@@ -53,24 +53,25 @@ impl Store {
     /// Fails with [`Error::Conflict`] otherwise.
     pub async fn insert_session(&self, session: Session) -> Result<()> {
         self.call(move |conn| {
-            let inserted = conn.execute(
-                "INSERT INTO sessions
+            let inserted = conn
+                .execute(
+                    "INSERT INTO sessions
                      (id, workspace_id, host_id, backend, mode, title, state, created_at, tile)
                  SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
                  WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ?2 AND state = 'ready')",
-                params![
-                    session.id,
-                    session.workspace_id,
-                    session.host_id,
-                    session.backend,
-                    session.mode,
-                    session.title,
-                    to_sql_enum(&session.state),
-                    session.created_at,
-                    serde_json::to_string(&session.tile)?,
-                ],
-            )
-            .map_err(|e| conflict(e, "the workspace changed meanwhile"))?;
+                    params![
+                        session.id,
+                        session.workspace_id,
+                        session.host_id,
+                        session.backend,
+                        session.mode,
+                        session.title,
+                        to_sql_enum(&session.state),
+                        session.created_at,
+                        serde_json::to_string(&session.tile)?,
+                    ],
+                )
+                .map_err(|e| conflict(e, "the workspace changed meanwhile"))?;
             if inserted == 0 {
                 return Err(Error::Conflict(format!(
                     "workspace {} is not ready",

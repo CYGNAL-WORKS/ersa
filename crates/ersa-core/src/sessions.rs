@@ -32,8 +32,8 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, Direction, PermissionDecision,
-    ProcessExit, RawLine, SessionConfig, Transport,
+    Adapter, AdapterError, AdapterSession, AdapterSink, Direction, PermissionDecision, ProcessExit,
+    RawLine, SessionConfig, Transport,
 };
 use ersa_protocol::core_api::rpc::Notification;
 use ersa_protocol::core_api::{Session, SessionEventParams, SessionTileParams, Tile};
@@ -216,7 +216,12 @@ fn not_running() -> SessionError {
 }
 
 impl Handle {
-    fn new(id: &str, backend: &str, projection_version: Option<u32>, last_seq: Option<u64>) -> Self {
+    fn new(
+        id: &str,
+        backend: &str,
+        projection_version: Option<u32>,
+        last_seq: Option<u64>,
+    ) -> Self {
         Handle {
             id: id.to_string(),
             backend: backend.to_string(),
@@ -345,7 +350,14 @@ impl SessionManager {
             None,
         ));
         lock(&self.sessions).insert(session.id.clone(), Arc::clone(&handle));
-        self.launch(handle, adapter, transport, config, backend_version, projection);
+        self.launch(
+            handle,
+            adapter,
+            transport,
+            config,
+            backend_version,
+            projection,
+        );
         Ok(session)
     }
 
@@ -450,7 +462,10 @@ impl SessionManager {
     pub async fn send(&self, id: &str, text: &str) -> Result<u32, SessionError> {
         let live = self.live(id)?;
         let session = live.wait_ready().await?;
-        session.send_user(text).await.map_err(SessionError::Adapter)?;
+        session
+            .send_user(text)
+            .await
+            .map_err(SessionError::Adapter)?;
         // The adapter recorded the message before writing it, so the sink
         // has it. Wait for the pipeline to project it: the turn it starts
         // (or joins) is known then.
@@ -836,11 +851,8 @@ async fn run_session(task: SessionTask) {
         }
         None => {
             let mut exit_seen = sink.exit_seen.subscribe();
-            let _ = tokio::time::timeout(
-                CANCELLED_START_GRACE,
-                exit_seen.wait_for(|seen| *seen),
-            )
-            .await;
+            let _ =
+                tokio::time::timeout(CANCELLED_START_GRACE, exit_seen.wait_for(|seen| *seen)).await;
             sink.start_finished(Err(StartFailure {
                 message: "stopped before the backend was ready".into(),
                 stopped_by_user: true,

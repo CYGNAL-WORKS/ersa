@@ -16,7 +16,10 @@ use support::{Client, TestCore, kind, start_with_adapters, tempdir, workspace};
 async fn start_fake(adapter: FakeAdapter) -> (TestCore, Arc<Stats>) {
     let stats = Arc::clone(&adapter.stats);
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
-    (start_with_adapters(tempdir(), |_| {}, adapters).await, stats)
+    (
+        start_with_adapters(tempdir(), |_| {}, adapters).await,
+        stats,
+    )
 }
 
 /// A new session of the fake backend in a new workspace; returns its id.
@@ -135,7 +138,10 @@ async fn subscribing_from_a_seq_replays_then_continues_live() {
 
     // Subscribing again replaces the subscription rather than doubling it.
     second
-        .result("session.subscribe", json!({ "id": id, "from_seq": last + 1 }))
+        .result(
+            "session.subscribe",
+            json!({ "id": id, "from_seq": last + 1 }),
+        )
         .await;
     first
         .result("session.send", json!({ "id": id, "text": "three" }))
@@ -246,7 +252,10 @@ async fn a_permission_decision_reaches_the_backend_and_the_tile_follows() {
         })
         .await;
     assert_eq!(cleared["params"]["tile"]["context_tokens"], 20);
-    assert_eq!(session_row(&mut client, &id).await["tile"]["pending"], json!([]));
+    assert_eq!(
+        session_row(&mut client, &id).await["tile"]["pending"],
+        json!([])
+    );
 
     // The request is answered; a second answer is refused.
     let again = client
@@ -265,7 +274,10 @@ async fn the_raw_log_holds_every_line_exactly_as_it_crossed() {
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
     client
-        .result("session.send", json!({ "id": id, "text": "hello \"there\"" }))
+        .result(
+            "session.send",
+            json!({ "id": id, "text": "hello \"there\"" }),
+        )
         .await;
     client.result("session.stop", json!({ "id": id })).await;
 
@@ -406,7 +418,9 @@ async fn a_running_session_cannot_be_removed_and_titles_and_modes_change() {
         )
         .await;
     assert_eq!(kind(&error), "backend_missing");
-    let error = client.error("session.stop", json!({ "id": "s-missing" })).await;
+    let error = client
+        .error("session.stop", json!({ "id": "s-missing" }))
+        .await;
     assert_eq!(kind(&error), "not_found");
 }
 
@@ -486,7 +500,9 @@ async fn a_new_projector_version_rederives_the_same_events_from_the_raw_log() {
     assert_eq!(after, before);
 
     // And on request.
-    client.result("session.reproject", json!({ "id": id })).await;
+    client
+        .result("session.reproject", json!({ "id": id }))
+        .await;
     assert_eq!(all_events(&mut client, &id).await, before);
     let row = session_row(&mut client, &id).await;
     assert_eq!(row["last_event_seq"], *seqs(&before).last().unwrap());

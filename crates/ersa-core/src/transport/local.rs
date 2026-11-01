@@ -51,7 +51,8 @@ impl Default for LocalTreeTransport {
 #[ersa_adapter::async_trait]
 impl Transport for LocalTreeTransport {
     async fn spawn(&self, spec: ProcessSpec) -> io::Result<Box<dyn Process>> {
-        let program = platform::resolve_program(&spec.program, spec.env.get("PATH").map(String::as_str));
+        let program =
+            platform::resolve_program(&spec.program, spec.env.get("PATH").map(String::as_str));
         let mut command = Command::new(program);
         command
             .args(&spec.args)
@@ -225,7 +226,10 @@ impl LineReader for CappedReader {
             if self.line.len() + chunk.len() > self.max {
                 self.overflowed = true;
                 self.line = Vec::new();
-                tracing::error!(max = self.max, "a process wrote an over-long line; killing it");
+                tracing::error!(
+                    max = self.max,
+                    "a process wrote an over-long line; killing it"
+                );
                 if let Some(tree) = self.tree.upgrade() {
                     tree.kill().ok();
                 }
