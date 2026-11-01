@@ -80,7 +80,10 @@ async fn spawn_with_grandchild(spec: ProcessSpec) -> (Box<dyn Process>, u32) {
         .expect("the parent printed in time")
         .expect("read")
         .expect("a line");
-    let pid: u32 = line.trim().parse().unwrap_or_else(|_| panic!("a pid, not {line:?}"));
+    let pid: u32 = line
+        .trim()
+        .parse()
+        .unwrap_or_else(|_| panic!("a pid, not {line:?}"));
     assert!(running(pid), "the grandchild started");
     (process, pid)
 }
@@ -138,10 +141,17 @@ async fn an_endless_line_is_refused_and_its_writer_killed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_cmd_shim_on_the_path_is_found() {
     let dir = tempfile::tempdir().expect("temp dir");
-    std::fs::write(dir.path().join("ersa-shim-test.cmd"), "@echo shim says %1\r\n").unwrap();
+    std::fs::write(
+        dir.path().join("ersa-shim-test.cmd"),
+        "@echo shim says %1\r\n",
+    )
+    .unwrap();
     let path = dir.path().display().to_string();
     let found = ersa_core::platform::resolve_program("ersa-shim-test", Some(&path));
-    assert!(found.to_lowercase().ends_with("ersa-shim-test.cmd"), "{found}");
+    assert!(
+        found.to_lowercase().ends_with("ersa-shim-test.cmd"),
+        "{found}"
+    );
 
     let spec = ProcessSpec {
         program: "ersa-shim-test".into(),

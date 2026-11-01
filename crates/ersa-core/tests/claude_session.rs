@@ -65,9 +65,10 @@ fn fixture() -> (Vec<String>, Vec<String>) {
         .filter(|l| !l.trim().is_empty())
         .map(String::from)
         .collect();
-    let meta: Value =
-        serde_json::from_str(&std::fs::read_to_string(dir.join(format!("{FIXTURE}.meta.json"))).unwrap())
-            .unwrap();
+    let meta: Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join(format!("{FIXTURE}.meta.json"))).unwrap(),
+    )
+    .unwrap();
     let sent = meta["sent"]
         .as_array()
         .unwrap()
@@ -92,7 +93,11 @@ fn stub(stdout: &[String]) -> FakeTransport {
                 "user" => v["type"] == "user",
                 _ => v["type"] == "control_response",
             };
-            if ok { Ok(()) } else { Err(format!("expected {kind}, got {line}")) }
+            if ok {
+                Ok(())
+            } else {
+                Err(format!("expected {kind}, got {line}"))
+            }
         }
     };
     FakeTransport::new(Vec::<String>::new())
@@ -186,7 +191,12 @@ async fn a_claude_session_round_trips_a_permission_through_core() {
     let crossed: Vec<(String, String)> = log
         .iter()
         .filter(|e| e["dir"] != "core")
-        .map(|e| (e["dir"].as_str().unwrap().into(), e["line"].as_str().unwrap().into()))
+        .map(|e| {
+            (
+                e["dir"].as_str().unwrap().into(),
+                e["line"].as_str().unwrap().into(),
+            )
+        })
         .collect();
     let backend: Vec<&String> = crossed
         .iter()

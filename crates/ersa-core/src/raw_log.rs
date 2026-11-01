@@ -192,7 +192,9 @@ impl Projection {
                 self.add_pending(PendingKind::Permission, &asked.request_id);
             }
             Event::PermissionDecided(decided) => remove(&decided.request_id),
-            Event::QuestionAsked(asked) => self.add_pending(PendingKind::Question, &asked.request_id),
+            Event::QuestionAsked(asked) => {
+                self.add_pending(PendingKind::Question, &asked.request_id)
+            }
             Event::QuestionAnswered(answered) => remove(&answered.request_id),
             // A backend that has gone is waiting on nobody.
             Event::SessionEnded(_) => self.tile.pending.clear(),
@@ -222,7 +224,10 @@ impl Projection {
                 return vec![
                     Event::Error(ErrorEvent {
                         code: ErrorCode::Protocol,
-                        message: format!("unreadable lifecycle record at raw line {}: {e}", line.index),
+                        message: format!(
+                            "unreadable lifecycle record at raw line {}: {e}",
+                            line.index
+                        ),
                         recoverable: true,
                         action: None,
                     }),
@@ -265,7 +270,12 @@ impl Projection {
                     action: None,
                 })];
                 if !self.ended {
-                    out.extend(self.end(LifecycleState::Error, EndReason::Error, code, Some(message)));
+                    out.extend(self.end(
+                        LifecycleState::Error,
+                        EndReason::Error,
+                        code,
+                        Some(message),
+                    ));
                 }
                 out
             }
@@ -487,7 +497,8 @@ mod tests {
     #[test]
     fn an_unreadable_core_record_is_reported_and_kept() {
         let mut projection = Projection::new("s", "echo", Box::new(Echo));
-        let events = projection.project(&line(0, Direction::Core, "{\"type\":\"from_the_future\"}"));
+        let events =
+            projection.project(&line(0, Direction::Core, "{\"type\":\"from_the_future\"}"));
         assert_eq!(types(&events), ["error", "backend.passthrough"]);
     }
 

@@ -79,7 +79,12 @@ fn git(dir: &Path, args: &[&str]) {
     let status = std::process::Command::new("git")
         .arg("-C")
         .arg(dir)
-        .args(["-c", "user.name=Ersa", "-c", "user.email=tests@ersa.invalid"])
+        .args([
+            "-c",
+            "user.name=Ersa",
+            "-c",
+            "user.email=tests@ersa.invalid",
+        ])
         .args(args)
         .status()
         .expect("git runs");
