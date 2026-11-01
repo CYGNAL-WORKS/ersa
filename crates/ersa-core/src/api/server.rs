@@ -139,8 +139,10 @@ impl Server {
     pub async fn bind_replay(mut config: CoreConfig, replay: Replay) -> Result<Server, ServeError> {
         config.replay = true;
         // The recorded backend's adapter is registered too, so anything that
-        // looks a session's backend up by name finds its projector.
-        let server = Server::bind_with(config, vec![Arc::clone(&replay.adapter)]).await?;
+        // looks a session's backend up by name finds its projector, but
+        // without its session records: a replay reads no file of the user's.
+        let recordless = crate::replay::Recordless::new(Arc::clone(&replay.adapter));
+        let server = Server::bind_with(config, vec![Arc::new(recordless)]).await?;
         crate::replay::start(&server.core, replay)
             .await
             .map_err(ServeError::Replay)?;
