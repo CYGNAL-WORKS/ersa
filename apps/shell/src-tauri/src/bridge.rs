@@ -17,18 +17,34 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
+use tokio::task::AbortHandle;
 
-/// How long a request may wait for Core's answer. Core answers everything the
-/// Interface sends today well within this; a Core that does not is wedged,
-/// and the Interface should hear so rather than wait forever.
+/// How long most requests may wait for Core's answer.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long requests that run git, start a backend or probe a host may
+/// wait: those can legitimately take minutes on a large repository.
+pub const LONG_REQUEST_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+/// How long the liveness probe may take to connect and complete a handshake.
+pub const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The Core API versions this Shell's Interface speaks.
 pub const API_VERSIONS: &[u32] = &[1];
 
 /// The longest line we read from Core: the same cap Core puts on the lines it reads.
 const MAX_LINE_BYTES: usize = ersa_core::state::MAX_LINE_BYTES;
+
+/// How long `method` may wait for its answer.
+pub fn timeout_for(method: &str) -> Duration {
+    match method {
+        "workspace.create" | "workspace.remove" | "session.create" | "session.start"
+        | "session.resume" | "session.stop" | "session.remove" | "host.probe" | "core.shutdown" => {
+            LONG_REQUEST_TIMEOUT
+        }
+        _ => REQUEST_TIMEOUT,
+    }
+}
 
 /// Why a request got no result. Sent to the Interface as
 /// `{ "kind": "rpc", "error": <JSON-RPC error object> }` or
@@ -61,6 +77,19 @@ pub enum LinkEvent {
     Closed { reason: String },
 }
 
+/// How a link decides that Core is wedged, and its timeouts.
+#[derive(Debug, Clone, Default)]
+pub struct LinkOptions {
+    /// When a request times out, the link opens a second connection here and
+    /// completes a handshake. Core answers each connection on its own task, so
+    /// a slow request on this one does not delay the probe; a Core that
+    /// cannot answer the probe either is wedged, and the link closes. `None`
+    /// never probes: a timeout fails only its own request.
+    pub probe_endpoint: Option<String>,
+    /// Replaces every method's timeout. For tests.
+    pub timeout: Option<Duration>,
+}
+
 type Pending = Mutex<HashMap<i64, oneshot::Sender<Result<Value, ErrorObject>>>>;
 
 type OnEvent = Box<dyn Fn(LinkEvent) + Send + Sync>;
@@ -71,7 +100,10 @@ struct Shared {
     next_id: AtomicI64,
     closed: AtomicBool,
     on_event: OnEvent,
-    request_timeout: Duration,
+    options: LinkOptions,
+    /// The reader and writer, stopped when the link closes so a link that
+    /// was given up delivers nothing more.
+    tasks: Mutex<Vec<AbortHandle>>,
 }
 
 /// One open, handshaken connection to Core. Dropping it closes the
@@ -79,7 +111,6 @@ struct Shared {
 pub struct CoreLink {
     shared: Arc<Shared>,
     hello: Value,
-    tasks: [JoinHandle<()>; 2],
 }
 
 impl CoreLink {
@@ -88,16 +119,7 @@ impl CoreLink {
     /// closes for any reason but the link being dropped; it must not block.
     pub async fn open(
         stream: BoxStream,
-        on_event: impl Fn(LinkEvent) + Send + Sync + 'static,
-    ) -> Result<CoreLink, BridgeError> {
-        Self::open_with_timeout(stream, REQUEST_TIMEOUT, on_event).await
-    }
-
-    /// [`CoreLink::open`] with another request timeout, so tests need not
-    /// wait the real one out.
-    pub async fn open_with_timeout(
-        stream: BoxStream,
-        request_timeout: Duration,
+        options: LinkOptions,
         on_event: impl Fn(LinkEvent) + Send + Sync + 'static,
     ) -> Result<CoreLink, BridgeError> {
         let (read, mut write) = tokio::io::split(stream);
@@ -109,7 +131,8 @@ impl CoreLink {
             next_id: AtomicI64::new(1),
             closed: AtomicBool::new(false),
             on_event: Box::new(on_event),
-            request_timeout,
+            options,
+            tasks: Mutex::new(Vec::new()),
         });
 
         let writer_shared = Arc::clone(&shared);
@@ -135,11 +158,15 @@ impl CoreLink {
             };
             close(&reader_shared, Some(reason));
         });
+        shared
+            .tasks
+            .lock()
+            .expect("tasks lock")
+            .extend([writer.abort_handle(), reader.abort_handle()]);
 
         let mut link = CoreLink {
             shared,
             hello: Value::Null,
-            tasks: [writer, reader],
         };
         let params = json!({
             "client": "ersa-shell",
@@ -186,9 +213,14 @@ impl CoreLink {
                 line.len()
             )));
         }
+        let timeout = self
+            .shared
+            .options
+            .timeout
+            .unwrap_or_else(|| timeout_for(method));
         // The timeout covers queueing the line as well as the answer: a Core
         // that stops reading fills the queue, and the send would wait forever.
-        let answer = tokio::time::timeout(self.shared.request_timeout, async {
+        let answer = tokio::time::timeout(timeout, async {
             if self.shared.outbound.send(line).await.is_err() {
                 return None;
             }
@@ -204,13 +236,17 @@ impl CoreLink {
                 Err(BridgeError::unavailable("the connection to Core closed"))
             }
             Err(_) => {
-                // Core is wedged: it holds the connection open and answers
-                // nothing. Give the link up so the next attach connects anew.
-                let message = format!(
-                    "Core did not answer {method} within {:?}",
-                    self.shared.request_timeout
-                );
-                close(&self.shared, Some(message.clone()));
+                // Only this request fails, unless the probe finds Core wedged.
+                self.forget(id);
+                let message = format!("Core did not answer {method} within {timeout:?}");
+                if let Some(endpoint) = &self.shared.options.probe_endpoint
+                    && !Box::pin(alive(endpoint)).await
+                {
+                    close(
+                        &self.shared,
+                        Some(format!("{message}, and does not answer a new connection")),
+                    );
+                }
                 Err(BridgeError::unavailable(message))
             }
         }
@@ -227,18 +263,33 @@ impl CoreLink {
 
 impl Drop for CoreLink {
     fn drop(&mut self) {
-        for task in &self.tasks {
-            task.abort();
-        }
         close(&self.shared, None);
     }
 }
 
-/// Marks the link closed and fails every request still waiting. The first
-/// close with a reason tells `on_event`; a drop (no reason) tells nobody,
-/// since the Shell itself let go.
+/// Whether the Core at `endpoint` completes a handshake on a new connection
+/// within [`PROBE_TIMEOUT`].
+pub async fn alive(endpoint: &str) -> bool {
+    let probe = async {
+        let stream = ersa_core::connect(endpoint).await.ok()?;
+        CoreLink::open(stream, LinkOptions::default(), |_| {})
+            .await
+            .ok()
+    };
+    matches!(
+        tokio::time::timeout(PROBE_TIMEOUT, probe).await,
+        Ok(Some(_))
+    )
+}
+
+/// Marks the link closed, stops its reader and writer, and fails every
+/// request still waiting. The first close with a reason tells `on_event`; a
+/// drop (no reason) tells nobody, since the Shell itself let go.
 fn close(shared: &Shared, reason: Option<String>) {
     let was_closed = shared.closed.swap(true, Ordering::SeqCst);
+    for task in shared.tasks.lock().expect("tasks lock").drain(..) {
+        task.abort();
+    }
     // Dropping the senders wakes each waiter with "connection closed".
     shared.pending.lock().expect("pending lock").clear();
     if let (false, Some(reason)) = (was_closed, reason) {
@@ -256,8 +307,11 @@ async fn write_line(
 
 /// Routes one line from Core: a response to its waiting request, a
 /// notification to `on_event`. Anything else is not something Core sends and
-/// is dropped.
+/// is dropped, as is everything once the link has closed.
 fn dispatch(shared: &Shared, line: &str) {
+    if shared.closed.load(Ordering::SeqCst) {
+        return;
+    }
     let Ok(Value::Object(mut message)) = serde_json::from_str::<Value>(line) else {
         return;
     };
@@ -373,7 +427,8 @@ mod tests {
 }
 
 /// The link against a fake Core on an in-memory pipe, for what a real Core
-/// will not do on demand: stop answering, or send a notification.
+/// will not do on demand: answer slowly, stop answering, or send a
+/// notification.
 #[cfg(test)]
 mod link_tests {
     use super::*;
@@ -381,36 +436,100 @@ mod link_tests {
 
     const SHORT: Duration = Duration::from_millis(300);
 
+    /// An endpoint nothing serves, for a probe that must fail.
+    fn nobody() -> String {
+        if cfg!(windows) {
+            format!(r"\\.\pipe\ersa-shell-test-nobody-{}", std::process::id())
+        } else {
+            std::env::temp_dir()
+                .join(format!(
+                    "ersa-shell-test-nobody-{}.sock",
+                    std::process::id()
+                ))
+                .to_string_lossy()
+                .into_owned()
+        }
+    }
+
     /// Opens a link to a fake Core that answers `core.hello` and nothing
     /// else, and returns the Core's end with the events the link reported.
-    async fn open_fake() -> (
+    async fn open_fake(
+        options: LinkOptions,
+    ) -> (
         CoreLink,
         BufReader<DuplexStream>,
         mpsc::UnboundedReceiver<LinkEvent>,
     ) {
         let (shell_end, core_end) = tokio::io::duplex(1024);
         let (events, received) = mpsc::unbounded_channel();
-        let open = CoreLink::open_with_timeout(Box::new(shell_end), SHORT, move |e| {
+        let open = CoreLink::open(Box::new(shell_end), options, move |e| {
             let _ = events.send(e);
         });
         let mut core = BufReader::new(core_end);
         let answer = async {
             let mut hello = String::new();
             core.read_line(&mut hello).await.expect("hello arrives");
-            let id = serde_json::from_str::<Value>(&hello).expect("json")["id"].clone();
-            let reply = json!({ "jsonrpc": "2.0", "id": id, "result": { "api_version": 1 } });
-            core.get_mut()
-                .write_all(format!("{reply}\n").as_bytes())
-                .await
-                .expect("reply");
+            reply_to(&mut core, &hello, json!({ "api_version": 1 })).await;
         };
         let (link, ()) = tokio::join!(open, answer);
         (link.expect("handshake"), core, received)
     }
 
+    async fn reply_to(core: &mut BufReader<DuplexStream>, request: &str, result: Value) {
+        let id = serde_json::from_str::<Value>(request).expect("json")["id"].clone();
+        let reply = json!({ "jsonrpc": "2.0", "id": id, "result": result });
+        core.get_mut()
+            .write_all(format!("{reply}\n").as_bytes())
+            .await
+            .expect("reply");
+    }
+
+    fn short() -> LinkOptions {
+        LinkOptions {
+            probe_endpoint: None,
+            timeout: Some(SHORT),
+        }
+    }
+
+    #[test]
+    fn long_methods_get_long_timeouts() {
+        assert_eq!(timeout_for("workspace.create"), LONG_REQUEST_TIMEOUT);
+        assert_eq!(timeout_for("session.create"), LONG_REQUEST_TIMEOUT);
+        assert_eq!(timeout_for("host.probe"), LONG_REQUEST_TIMEOUT);
+        assert_eq!(timeout_for("project.list"), REQUEST_TIMEOUT);
+    }
+
     #[tokio::test]
-    async fn a_core_that_stops_answering_closes_the_link() {
-        let (link, _core, mut events) = open_fake().await;
+    async fn a_slow_request_fails_alone() {
+        let (link, mut core, _events) = open_fake(short()).await;
+        let slow = link.request("core.status", None).await;
+        assert!(
+            matches!(slow, Err(BridgeError::Unavailable { .. })),
+            "{slow:?}"
+        );
+        assert!(!link.is_closed(), "one slow request must not drop the link");
+
+        // Core gets to it late, then answers the next request on time; the
+        // late answer goes nowhere and the next one reaches its caller.
+        let mut first = String::new();
+        core.read_line(&mut first).await.expect("first request");
+        reply_to(&mut core, &first, json!("late")).await;
+        let next = async {
+            let mut second = String::new();
+            core.read_line(&mut second).await.expect("second request");
+            reply_to(&mut core, &second, json!([])).await;
+        };
+        let (answer, ()) = tokio::join!(link.request("project.list", None), next);
+        assert_eq!(answer, Ok(json!([])));
+    }
+
+    #[tokio::test]
+    async fn a_core_that_fails_the_probe_closes_the_link() {
+        let options = LinkOptions {
+            probe_endpoint: Some(nobody()),
+            ..short()
+        };
+        let (link, _core, mut events) = open_fake(options).await;
         let result = link.request("core.status", None).await;
         assert!(
             matches!(result, Err(BridgeError::Unavailable { .. })),
@@ -424,8 +543,30 @@ mod link_tests {
     }
 
     #[tokio::test]
+    async fn a_closed_link_delivers_nothing_more() {
+        let options = LinkOptions {
+            probe_endpoint: Some(nobody()),
+            ..short()
+        };
+        let (link, mut core, mut events) = open_fake(options).await;
+        let _ = link.request("core.status", None).await;
+        assert!(matches!(
+            events.recv().await,
+            Some(LinkEvent::Closed { .. })
+        ));
+        // The old connection's Core end may still write; nothing reaches the sink.
+        let notice = json!({ "jsonrpc": "2.0", "method": "core.notice", "params": {} });
+        let _ = core
+            .get_mut()
+            .write_all(format!("{notice}\n").as_bytes())
+            .await;
+        tokio::time::sleep(SHORT).await;
+        assert!(events.try_recv().is_err());
+    }
+
+    #[tokio::test]
     async fn a_request_past_the_line_cap_is_refused_alone() {
-        let (link, _core, _events) = open_fake().await;
+        let (link, _core, _events) = open_fake(short()).await;
         let huge = "x".repeat(MAX_LINE_BYTES);
         let result = link
             .request("settings.set", Some(json!({ "patch": { "k": huge } })))
@@ -439,7 +580,7 @@ mod link_tests {
 
     #[tokio::test]
     async fn notifications_reach_the_event_callback() {
-        let (_link, mut core, mut events) = open_fake().await;
+        let (_link, mut core, mut events) = open_fake(short()).await;
         let notice = json!({ "jsonrpc": "2.0", "method": "core.notice", "params": { "level": "info", "message": "hi" } });
         core.get_mut()
             .write_all(format!("{notice}\n").as_bytes())
