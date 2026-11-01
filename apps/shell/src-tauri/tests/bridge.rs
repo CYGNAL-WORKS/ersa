@@ -72,7 +72,12 @@ async fn launches_core_then_attaches_and_round_trips_requests() {
     let location = private_location(dir.path());
 
     let (link, how, _events) = open(&location).await;
-    assert_eq!(how, How::Launched, "{} is this test's alone", location.endpoint);
+    assert_eq!(
+        how,
+        How::Launched,
+        "{} is this test's alone",
+        location.endpoint
+    );
 
     // Run the checks as their own task so that, if one fails, the Core this
     // test launched is still stopped rather than left running.
