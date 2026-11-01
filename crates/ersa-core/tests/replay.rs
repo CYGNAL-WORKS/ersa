@@ -1,47 +1,22 @@
 //! The replay server: Core serving a recorded session over the real socket,
-//! with no backend behind it (ARCH-CORE, Implementation decisions).
+//! with no backend behind it (ARCH-CORE, Implementation decisions;
+//! PROTO-CORE-API, Conformance).
 
 mod support;
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_adapter::recording::Recording;
 use ersa_adapter::{Adapter, Direction};
 use ersa_adapter_claude::ClaudeAdapter;
-use ersa_core::Server;
-use ersa_core::replay::{Pace, Replay};
+use ersa_core::replay::Pace;
 use serde_json::{Value, json};
-use support::claude::{FIXTURE, OnTransport, fixture, fixture_dir, parse, stub};
-use support::{
-    Client, TestCore, kind, start_with_adapters, tempdir, test_config, unique_endpoint, workspace,
-};
+use support::claude::{FIXTURE, OnTransport, fixture, parse, recording, start_replay_with, stub};
+use support::suite::{self, Target};
+use support::{Client, TestCore, kind, start_with_adapters, tempdir, workspace};
 
-fn recording() -> Recording {
-    Recording::load(&fixture_dir().join(format!("{FIXTURE}.jsonl"))).expect("fixture loads")
-}
-
-/// A replay server for fixture 11, in a temporary data directory.
 async fn start_replay(pace: Pace) -> TestCore {
-    let dir = tempdir();
-    let endpoint = unique_endpoint();
-    let config = test_config(&dir.path().join("data"), &endpoint);
-    let replay = Replay {
-        adapter: Arc::new(ClaudeAdapter::new()),
-        recording: recording(),
-        title: FIXTURE.to_string(),
-        // What detection finds in these tests' Cores, which have no backend
-        // installed; the live Core below starts its session with it too.
-        backend_version: String::new(),
-        pace,
-    };
-    let server = Server::bind_replay(config, replay).await.expect("bind");
-    let task = tokio::spawn(server.run());
-    TestCore {
-        dir,
-        endpoint,
-        task,
-    }
+    start_replay_with(|_| {}, pace).await
 }
 
 /// The one session a replay server serves.
@@ -61,10 +36,55 @@ fn comparable(mut envelope: Value) -> Value {
     envelope
 }
 
+/// What a client saw of one session: its events and its `session.tile`
+/// notifications, in the order they arrived.
+#[derive(Default)]
+struct Watched {
+    events: Vec<Value>,
+    tiles: Vec<Value>,
+}
+
+impl Watched {
+    fn note(&mut self, notification: Value) {
+        match notification["method"].as_str() {
+            Some("session.event") => self.events.push(notification["params"]["event"].clone()),
+            Some("session.tile") => self.tiles.push(notification["params"]["tile"].clone()),
+            _ => {}
+        }
+    }
+
+    /// Reads notifications until an event of type `event_type`.
+    async fn until(&mut self, client: &mut Client, event_type: &str) {
+        while self
+            .events
+            .last()
+            .is_none_or(|e| e["event"]["type"] != event_type)
+        {
+            let notification = client
+                .notification()
+                .await
+                .expect("the connection stays open");
+            self.note(notification);
+        }
+    }
+
+    /// Reads notifications until a tile equal to the one `session.list`
+    /// reports arrives: every change is announced, so the stream ends there.
+    async fn until_settled(&mut self, client: &mut Client) {
+        let settled = the_session(client).await["tile"].clone();
+        while self.tiles.last() != Some(&settled) {
+            let notification = client
+                .notification()
+                .await
+                .expect("the connection stays open");
+            self.note(notification);
+        }
+    }
+}
+
 /// Fixture 11 driven through a live Core: the real Claude adapter against a
-/// stub CLI, the prompt and the decision sent over the API. The events up
-/// to the end of the turn, and the session's tile then.
-async fn live_core_events() -> (Vec<Value>, Value) {
+/// stub CLI, the prompt and the decision sent over the API.
+async fn live_core_turn() -> Watched {
     let (stdout, sent) = fixture();
     let adapter = OnTransport {
         adapter: ClaudeAdapter::new().with_stop_grace(Duration::from_secs(1)),
@@ -91,24 +111,38 @@ async fn live_core_events() -> (Vec<Value>, Value) {
     client
         .result("session.send", json!({ "id": id, "text": prompt }))
         .await;
-    let mut events = client.events_until("permission.requested").await;
-    let request_id = events.last().unwrap()["event"]["request_id"].clone();
+    let mut watched = Watched::default();
+    watched.until(&mut client, "permission.requested").await;
+    let request_id = watched.events.last().unwrap()["event"]["request_id"].clone();
     client
         .result(
             "session.decide_permission",
             json!({ "id": id, "request_id": request_id, "behavior": "allow" }),
         )
         .await;
-    events.extend(client.events_until("turn.completed").await);
-    let tile = the_session(&mut client).await["tile"].clone();
+    watched.until(&mut client, "turn.completed").await;
+    watched.until_settled(&mut client).await;
     client.result("session.stop", json!({ "id": id })).await;
-    (events, tile)
+    watched
+}
+
+/// Drops repeats of the tile just before: tiles are coalesced to the newest
+/// per session, so how many repeats a client sees depends on timing, not
+/// on the session.
+fn changes(tiles: &[Value]) -> Vec<&Value> {
+    let mut changes: Vec<&Value> = Vec::new();
+    for tile in tiles {
+        if changes.last() != Some(&tile) {
+            changes.push(tile);
+        }
+    }
+    changes
 }
 
 // verifies: PROTO-CORE-API-R09
 #[tokio::test(flavor = "multi_thread")]
 async fn the_replay_server_sends_the_notifications_core_sends_for_the_same_session() {
-    let (live, live_tile) = live_core_events().await;
+    let live = live_core_turn().await;
 
     let replay = start_replay(Pace::Instant).await;
     let mut client = replay.client().await;
@@ -119,28 +153,44 @@ async fn the_replay_server_sends_the_notifications_core_sends_for_the_same_sessi
     client
         .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
         .await;
-    let replayed = client.events_until("turn.completed").await;
-    for event in &replayed {
+    let mut replayed = Watched::default();
+    replayed.until(&mut client, "turn.completed").await;
+    replayed.until_settled(&mut client).await;
+    for event in &replayed.events {
         assert_eq!(event["session_id"], id);
     }
 
-    let live: Vec<Value> = live.into_iter().map(comparable).collect();
-    let replayed: Vec<Value> = replayed.into_iter().map(comparable).collect();
-    assert_eq!(replayed, live);
-    // And the rail shows the same tile.
-    assert_eq!(the_session(&mut client).await["tile"], live_tile);
+    // Up to the end of the turn: what follows it arrives while waiting for
+    // the tile to settle, as much of it as the timing allows.
+    let through_turn = |events: Vec<Value>| -> Vec<Value> {
+        let end = events
+            .iter()
+            .position(|e| e["event"]["type"] == "turn.completed")
+            .expect("the turn completed");
+        events.into_iter().take(end + 1).map(comparable).collect()
+    };
+    let live_events = through_turn(live.events);
+    let replayed_events = through_turn(replayed.events);
+    assert_eq!(replayed_events, live_events);
+    // The tiles the rail is sent: every one the replay sends is one the live
+    // Core sent, in the same order, ending on the same tile.
+    let live_tiles = changes(&live.tiles);
+    let replayed_tiles = changes(&replayed.tiles);
+    let mut rest = live_tiles.iter();
+    for tile in &replayed_tiles {
+        assert!(
+            rest.any(|live| live == tile),
+            "{tile:#} is not among the live tiles in order: {live_tiles:#?}"
+        );
+    }
+    assert_eq!(replayed_tiles.last(), live_tiles.last());
 }
 
 // verifies: PROTO-CORE-API-R09
 #[tokio::test(flavor = "multi_thread")]
 async fn read_only_requests_are_answered_as_core_answers_them() {
     let replay = start_replay(Pace::Instant).await;
-    let mut client = Client::connect(&replay.endpoint).await;
-    // The handshake comes first, as on Core (PROTO-CORE-API-R01).
-    let error = client.error("session.list", json!({})).await;
-    assert_eq!(kind(&error), "invalid_state");
-    let hello = client.hello().await;
-    assert_eq!(hello["api_version"], 1);
+    let mut client = replay.client().await;
 
     let session = the_session(&mut client).await;
     let id = session["id"].clone();
@@ -158,11 +208,12 @@ async fn read_only_requests_are_answered_as_core_answers_them() {
         .await;
     assert_eq!(workspaces[0]["id"], session["workspace_id"]);
     assert_eq!(client.result("settings.get", json!({})).await, json!({}));
-    // Reserved methods answer as on Core (PROTO-CORE-API-R10).
-    let error = client.error("mode.list", json!({})).await;
+
+    // Nothing is played until a client subscribes.
+    let log = client.result("session.raw_log", json!({ "id": id })).await;
     assert!(
-        error["message"].as_str().unwrap().contains("M3"),
-        "{error:#}"
+        log.as_array().unwrap().iter().all(|e| e["dir"] == "core"),
+        "{log:#}"
     );
 
     // Once the whole recording is in, the raw log holds it line for line,
@@ -185,16 +236,15 @@ async fn read_only_requests_are_answered_as_core_answers_them() {
         })
         .collect();
     let recorded: Vec<(String, String)> = recording()
-        .timed_lines()
-        .unwrap()
-        .into_iter()
-        .map(|(_, dir, line)| {
-            let dir = match dir {
+        .lines()
+        .iter()
+        .map(|l| {
+            let dir = match l.dir {
                 Direction::Backend => "backend",
                 Direction::Host => "host",
                 Direction::Core => "core",
             };
-            (dir.to_string(), line)
+            (dir.to_string(), l.line.clone())
         })
         .collect();
     assert_eq!(crossed, recorded);
@@ -265,4 +315,73 @@ async fn requests_that_would_change_anything_answer_invalid_state_naming_the_rep
     let after = the_session(&mut client).await;
     assert_eq!(after["title"], session["title"]);
     assert_eq!(after["state"], session["state"]);
+}
+
+// The shared request/response suite Core passes (`core_api.rs`,
+// `connection_limits.rs`), run on the replay server.
+
+// verifies: PROTO-CORE-API-R09
+#[tokio::test(flavor = "multi_thread")]
+async fn suite_every_method_before_hello_is_refused_with_invalid_state() {
+    suite::every_method_before_hello_is_refused_with_invalid_state(Target::Replay).await;
+}
+
+// verifies: PROTO-CORE-API-R09
+#[tokio::test(flavor = "multi_thread")]
+async fn suite_hello_reports_versions_and_the_local_host() {
+    suite::hello_reports_versions_and_the_local_host(Target::Replay).await;
+}
+
+// verifies: PROTO-CORE-API-R09
+#[tokio::test(flavor = "multi_thread")]
+async fn suite_hello_without_a_shared_version_names_the_supported_ones_and_closes() {
+    suite::hello_without_a_shared_version_names_the_supported_ones_and_closes(Target::Replay).await;
+}
+
+// verifies: PROTO-CORE-API-R09
+#[tokio::test(flavor = "multi_thread")]
+async fn suite_reserved_methods_answer_invalid_state_naming_their_milestone() {
+    suite::reserved_methods_answer_invalid_state_naming_their_milestone(Target::Replay).await;
+}
+
+// verifies: PROTO-CORE-API-R09
+#[tokio::test(flavor = "multi_thread")]
+async fn suite_protocol_errors_use_the_standard_codes() {
+    suite::protocol_errors_use_the_standard_codes(Target::Replay).await;
+}
+
+// verifies: PROTO-CORE-API-R09
+#[tokio::test(flavor = "multi_thread")]
+async fn suite_an_unknown_session_is_not_found() {
+    suite::an_unknown_session_is_not_found(Target::Replay).await;
+}
+
+// verifies: PROTO-CORE-API-R09
+#[tokio::test(flavor = "multi_thread")]
+async fn suite_client_notifications_get_no_answer() {
+    suite::client_notifications_get_no_answer(Target::Replay).await;
+}
+
+// verifies: PROTO-CORE-API-R09
+#[tokio::test(flavor = "multi_thread")]
+async fn suite_pipelined_requests_are_answered_in_order() {
+    suite::pipelined_requests_are_answered_in_order(Target::Replay).await;
+}
+
+// verifies: PROTO-CORE-API-R09
+#[tokio::test(flavor = "multi_thread")]
+async fn suite_a_line_over_the_cap_gets_a_parse_error_and_closes() {
+    suite::a_line_over_the_cap_gets_a_parse_error_and_closes(Target::Replay).await;
+}
+
+// verifies: PROTO-CORE-API-R09
+#[tokio::test(flavor = "multi_thread")]
+async fn suite_a_line_that_is_not_utf8_gets_a_parse_error_and_closes() {
+    suite::a_line_that_is_not_utf8_gets_a_parse_error_and_closes(Target::Replay).await;
+}
+
+// verifies: PROTO-CORE-API-R09
+#[tokio::test(flavor = "multi_thread")]
+async fn suite_a_connection_without_hello_is_closed_after_the_deadline() {
+    suite::a_connection_without_hello_is_closed_after_the_deadline(Target::Replay).await;
 }

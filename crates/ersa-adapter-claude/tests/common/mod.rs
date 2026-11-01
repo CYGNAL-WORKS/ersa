@@ -21,7 +21,6 @@ pub struct Fixture {
     /// `<version>/<file stem>`, such as `2.1.302/01-hello`.
     pub name: String,
     pub stdout: Vec<String>,
-    pub meta: Value,
     recording: Recording,
 }
 
@@ -58,8 +57,7 @@ pub fn fixtures() -> Vec<Fixture> {
             let recording = Recording::load(&file).unwrap_or_else(|e| panic!("{name}: {e}"));
             found.push(Fixture {
                 name,
-                stdout: recording.stdout.clone(),
-                meta: recording.meta.clone(),
+                stdout: recording.stdout(),
                 recording,
             });
         }
@@ -83,11 +81,9 @@ impl Fixture {
     }
 
     /// The session's raw log as Core would have recorded it (see
-    /// [`Recording::timed_lines`] for the order).
+    /// [`Recording::lines`] for the order).
     pub fn raw_log(&self) -> Vec<RawLine> {
-        self.recording
-            .raw_log()
-            .unwrap_or_else(|e| panic!("{}: {e}", self.name))
+        self.recording.raw_log()
     }
 }
 
