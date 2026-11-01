@@ -28,11 +28,6 @@ use crate::state::{Core, CoreConfig};
 /// other client.
 const OUTBOUND_QUEUE: usize = 256;
 
-/// How many detached requests (see [`super::runs_detached`]) one connection
-/// may have running at once; more wait their turn without holding up
-/// reading.
-const DETACHED_PER_CONNECTION: usize = 32;
-
 /// How many detached requests one connection may have in flight, running or
 /// waiting on their session's lane. Past it the connection reads no further
 /// requests until one finishes: the bound on what one client can queue.
@@ -174,8 +169,8 @@ impl Server {
 /// its own, and answer when done, possibly out of order (responses carry
 /// their request's id). Detached requests about the same session still run
 /// in the order they were sent: each waits for the one before it in its
-/// session's lane. Requests about different sessions overlap, and the
-/// in-line ones never wait for the detached ones. A `session.stop` whose
+/// session's lane. Requests about different sessions overlap; the in-line
+/// ones name no session and never wait for the detached ones. A `session.stop` whose
 /// lane does not drain within a grace starts stopping anyway, ending the
 /// requests stuck ahead of it; its answer still keeps its place.
 async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
@@ -202,7 +197,6 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
     let mut kicked = kick.subscribe();
     let mut conn = ConnectionState::new(outbound, kick);
     let mut lines = CappedLines::new(read, core.config.max_line_bytes);
-    let running = Arc::new(Semaphore::new(DETACHED_PER_CONNECTION));
     let queued = Arc::new(Semaphore::new(QUEUED_PER_CONNECTION));
     // Per session: a flag that rises when the latest request about it has
     // been answered. The next request about that session waits for it.
@@ -271,10 +265,9 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                 lanes.retain(|_, answered| !*answered.borrow());
                 // Weak, so a request still running does not keep a closed
                 // connection's writer alive; its answer then goes nowhere.
-                let outbound = conn.outbound.downgrade();
+                let peer = conn.peer();
                 let core = Arc::clone(&core);
-                let kick = Arc::clone(&conn.kick);
-                let running = Arc::clone(&running);
+                let lane = super::session_lane(&conn, &request);
                 tokio::spawn(async move {
                     if let Some(mut before) = before {
                         // `Err` from `wait_for` means the earlier task is
@@ -302,16 +295,14 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                             waited.await;
                         }
                     }
-                    // Only a request whose turn has come counts as running.
-                    let Ok(_running) = running.acquire_owned().await else {
-                        return;
-                    };
-                    let response = run_detached(core, request, kick).await;
+                    let method = request.method.clone();
+                    let response = run_detached(core, request, peer.clone()).await;
                     let line =
                         serde_json::to_string(&response).expect("responses always serialize");
-                    if let Some(outbound) = outbound.upgrade() {
+                    if let Some(outbound) = peer.outbound.upgrade() {
                         let _ = outbound.send(line).await;
                     }
+                    peer.after_answer(&method, lane.as_deref());
                     done.send_replace(true);
                     drop(in_flight);
                 });
@@ -339,11 +330,7 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                 false
             }
         };
-        // The response is queued; subscriptions it created may send now,
-        // behind it. Tile notifications begin once the handshake is done.
-        for subscription in conn.subscriptions.values_mut() {
-            subscription.start();
-        }
+        // Tile notifications begin once the handshake is done.
         if conn.api_version.is_some() && conn.tile_task.is_none() {
             conn.tile_task = Some(AbortOnDrop(tokio::spawn(forward_tiles(
                 core.sessions.tile_feed(),
@@ -361,21 +348,15 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
     }
 
     // Dropping the sender ends the writer once it has written everything
-    // queued, including the answer to `core.shutdown`. A connection Core
-    // closed for falling behind gets a grace to take what is queued, the
-    // last response among it; its client may not be reading, and the
-    // writer must not wait on it forever.
-    let kicked = *kicked.borrow();
+    // queued, including the answer to `core.shutdown`. It gets a grace to
+    // do so, no more: a client that was kicked, or half-closed and stopped
+    // reading, must not hold the writer forever. A `JoinHandle` that has
+    // completed must not be awaited again, so it is awaited a second time
+    // only after an abort.
     drop(conn);
     let mut writer = writer;
-    if kicked {
-        // A `JoinHandle` that has completed must not be awaited again, so
-        // it is awaited a second time only after an abort.
-        if tokio::time::timeout(KICK_GRACE, &mut writer).await.is_err() {
-            writer.abort();
-            writer.await.ok();
-        }
-    } else {
+    if tokio::time::timeout(KICK_GRACE, &mut writer).await.is_err() {
+        writer.abort();
         writer.await.ok();
     }
     if shutdown_after {
@@ -389,11 +370,11 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
 async fn run_detached(
     core: Arc<Core>,
     request: ersa_protocol::core_api::rpc::Request,
-    kick: crate::sessions::Kick,
+    peer: super::Peer,
 ) -> Response {
     let id = request.id.clone();
     let method = request.method.clone();
-    match tokio::spawn(async move { super::handle_detached(&core, request, &kick).await }).await {
+    match tokio::spawn(async move { super::handle_detached(&core, request, &peer).await }).await {
         Ok(response) => response,
         Err(e) => {
             tracing::error!(%method, error = %e, "a request handler failed");

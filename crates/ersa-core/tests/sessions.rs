@@ -612,17 +612,18 @@ async fn a_stop_overtakes_requests_stuck_on_a_hung_start() {
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
     // Queued on the session: a message that waits for the start, then a
-    // stop. A subscribe in between is answered at once, in line.
+    // stop. Meanwhile the connection keeps reading: a request that names no
+    // session is answered at once.
     let send = client
         .request("session.send", json!({ "id": id, "text": "hello" }))
         .await;
-    let subscribed = tokio::time::timeout(
+    let listed = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        client.call("session.subscribe", json!({ "id": id, "from_seq": 0 })),
+        client.call("session.list", json!({})),
     )
     .await
-    .expect("an in-line request is not held behind a detached one");
-    assert!(subscribed.get("result").is_some());
+    .expect("the connection is not held behind a session's lane");
+    assert!(listed.get("result").is_some());
     let stop = client.request("session.stop", json!({ "id": id })).await;
 
     let started = std::time::Instant::now();

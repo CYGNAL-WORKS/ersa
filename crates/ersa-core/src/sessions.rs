@@ -125,6 +125,10 @@ pub struct SessionManager {
     sessions: Mutex<HashMap<String, Arc<Handle>>>,
     /// Where `session.tile` notifications go, for every attached client.
     tiles: Arc<TileHub>,
+    /// Re-derivations of a whole raw log, one at a time across Core: each
+    /// holds the database for its whole log, and live sessions' pipelines
+    /// must get a turn between them.
+    rebuilds: tokio::sync::Semaphore,
     /// Set by [`SessionManager::stop_all`]; no session starts after it.
     /// Read and written under the `sessions` lock.
     closing: AtomicBool,
@@ -269,6 +273,7 @@ impl SessionManager {
                 .collect(),
             sessions: Mutex::new(HashMap::new()),
             tiles: Arc::default(),
+            rebuilds: tokio::sync::Semaphore::new(1),
             closing: AtomicBool::new(false),
         }
     }
@@ -634,6 +639,18 @@ impl SessionManager {
     pub async fn reproject(&self, id: &str, caller: &Kick) -> Result<bool, SessionError> {
         let handle = self.handle(id)?;
         let _op = handle.op.lock().await;
+        // Removed while this waited for the lock: nothing to re-derive.
+        if !lock(&self.sessions)
+            .get(id)
+            .is_some_and(|current| Arc::ptr_eq(current, &handle))
+        {
+            return Err(SessionError::NotFound(id.to_string()));
+        }
+        let _rebuild = self
+            .rebuilds
+            .acquire()
+            .await
+            .map_err(|_| SessionError::Internal("Core is shutting down".into()))?;
         if handle.live().is_some() {
             // A live session is always projected by this build's projector,
             // so there is nothing to re-derive until it stops.

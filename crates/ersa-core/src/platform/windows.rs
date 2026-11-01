@@ -491,6 +491,9 @@ impl ProcessTree {
         }
     }
 
+    /// Nothing to retire on Windows: a job handle is never reused.
+    pub fn retire(&self) {}
+
     /// Kills every process in the tree. Killing a tree that has already
     /// ended is not an error.
     pub fn kill(&self) -> io::Result<()> {

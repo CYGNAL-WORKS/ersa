@@ -11,7 +11,7 @@ use ersa_protocol::core_api::{
 use ersa_protocol::events::LifecycleState;
 use serde_json::Value;
 
-use super::{ApiError, ConnectionState};
+use super::{ApiError, Peer};
 use crate::persistence::{self, LOCAL_HOST_ID};
 use crate::sessions::Kick;
 use crate::state::Core;
@@ -199,23 +199,35 @@ pub(super) async fn set_mode(core: &Core, params: SetModeParams) -> Result<Sessi
 /// to the same session replaces the first.
 pub(super) fn subscribe(
     core: &Core,
-    conn: &mut ConnectionState,
+    peer: &Peer,
     params: SubscribeParams,
 ) -> Result<SubscribeResult, ApiError> {
-    let (subscription, last_seq) = core.sessions.subscribe(
-        &params.id,
-        params.from_seq,
-        conn.outbound.clone(),
-        conn.kick.clone(),
-    )?;
+    let outbound = peer
+        .outbound
+        .upgrade()
+        .ok_or_else(|| ApiError::invalid_state("the connection is closing"))?;
+    let (subscription, last_seq) =
+        core.sessions
+            .subscribe(&params.id, params.from_seq, outbound, peer.kick.clone())?;
     // Only now is the old subscription, if any, dropped: a resubscribe that
-    // fails leaves the client the stream it had.
-    conn.subscriptions.insert(params.id, subscription);
+    // fails leaves the client the stream it had. It is dropped outside the
+    // lock.
+    let old = peer
+        .subscriptions
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(params.id, subscription);
+    drop(old);
     Ok(SubscribeResult { last_seq })
 }
 
-pub(super) fn unsubscribe(conn: &mut ConnectionState, params: IdParams) -> Result<Empty, ApiError> {
-    conn.subscriptions.remove(&params.id);
+pub(super) fn unsubscribe(peer: &Peer, params: IdParams) -> Result<Empty, ApiError> {
+    let old = peer
+        .subscriptions
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&params.id);
+    drop(old);
     Ok(Empty {})
 }
 
