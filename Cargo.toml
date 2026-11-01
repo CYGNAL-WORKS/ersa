@@ -1,9 +1,15 @@
-# The Cargo workspace for Ersa's Rust code. Every crate lives under `crates/`.
-# A workspace shares one `Cargo.lock` and one `target/` directory, so all crates
-# build against the same dependency versions.
+# The Cargo workspace for Ersa's Rust code: Core's crates under `crates/`, and
+# the Shell (apps/shell/src-tauri). A workspace shares one `Cargo.lock` and one
+# `target/` directory, so all crates build against the same dependency versions
+# and Dependabot keeps every one of them in step.
 
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "apps/shell/src-tauri"]
+# What a plain `cargo build`, `cargo test` or `cargo clippy` at the root builds:
+# Core's crates only, so Tauri is never compiled unless asked for with
+# `-p ersa-shell` or `--workspace` (ARCH-CORE-R01). Core must build without
+# Tauri or a display; crates/ersa-core/tests/boundaries.rs checks that.
+default-members = ["crates/*"]
 # Resolver 2 picks dependency features per target and per build kind
 # (normal, build script, dev), so a dev-only feature never leaks into release builds.
 resolver = "2"
@@ -36,7 +42,6 @@ thiserror = "2"
 # The current UTC time, for timestamps on database rows and raw log lines.
 time = "0.3"
 tokio = { version = "1", features = ["full"] }
-toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Random identifiers for projects and workspaces.

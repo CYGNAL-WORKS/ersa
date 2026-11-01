@@ -387,9 +387,9 @@ function workspaceMembers(lockPath) {
 }
 
 // The members of every Cargo workspace whose lockfile git tracks, as
-// name@version: the repository's own crates. A crate in one workspace that
-// another depends on by path (the Shell on Core's crates) is still the
-// repository's own code, with no registry publish time to judge.
+// name@version: the repository's own crates (Core's and the Shell's, all in
+// the root workspace). They come from this repository, not a registry, so
+// they have no publish time to judge.
 function repositoryCrates() {
   const all = new Set();
   for (const lock of trackedLockfiles()) {

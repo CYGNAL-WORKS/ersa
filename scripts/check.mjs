@@ -22,12 +22,13 @@ const scriptTests = existsSync(join(ROOT, "scripts"))
   : [];
 
 const checks = [
+  // `--all` formats every workspace member, the Shell included; formatting
+  // needs no build, so Tauri is not compiled.
   { name: "rustfmt", cmd: "cargo", args: ["fmt", "--all", "--check"] },
-  // The Shell's Rust crate is outside the workspace, so `--all` misses it; CI
-  // formats it, and catching that here costs nothing (no Tauri build needed).
-  { name: "rustfmt (shell)", cmd: "cargo", args: ["fmt", "--manifest-path", "apps/shell/src-tauri/Cargo.toml", "--check"] },
-  { name: "clippy", cmd: "cargo", args: ["clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"] },
-  ...(QUICK ? [] : [{ name: "tests", cmd: "cargo", args: ["test", "--workspace", "--locked"] }]),
+  // Clippy and tests build the default members, Core's crates, as CI's linux
+  // job does. CI's shell job builds the Shell (`-p ersa-shell`).
+  { name: "clippy", cmd: "cargo", args: ["clippy", "--all-targets", "--locked", "--", "-D", "warnings"] },
+  ...(QUICK ? [] : [{ name: "tests", cmd: "cargo", args: ["test", "--locked"] }]),
   ...(scriptTests.length ? [{ name: "script tests", cmd: "node", args: ["--test", ...scriptTests] }] : []),
   // The interface's TypeScript types and design tokens are generated from the
   // protocol schemas and DESIGN.md; a schema change in a Rust ticket makes them
