@@ -362,9 +362,9 @@ export interface ProjectAddParams {
   host_id: Id;
   path: string;
   /**
-   * The user's answer when adding the project: whether its own configuration may load in its sessions.
+   * The user's answer when adding the project: whether its own configuration may load in its sessions. Untrusted when absent.
    */
-  trusted: boolean;
+  trusted?: boolean;
 }
 export interface ProjectSetTrustParams {
   id: Id;
