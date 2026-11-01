@@ -408,9 +408,12 @@ pub struct Session {
 }
 
 /// What the rail renders for a session. Usage fields are absent until known.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Tile {
+    /// The session's lifecycle state, so the rail follows it from
+    /// `session.tile` notifications without subscribing to events.
+    pub state: LifecycleState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -418,6 +421,20 @@ pub struct Tile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd_total: Option<f64>,
     pub pending: Vec<PendingRequest>,
+}
+
+impl Tile {
+    /// The tile of a session that has just been created: starting, with
+    /// nothing known and nothing pending.
+    pub fn starting() -> Self {
+        Tile {
+            state: LifecycleState::Starting,
+            context_tokens: None,
+            context_window: None,
+            cost_usd_total: None,
+            pending: Vec::new(),
+        }
+    }
 }
 
 /// A permission request or question waiting on the user.

@@ -402,6 +402,7 @@ fn wide(s: &str) -> Vec<u16> {
 /// to stop them.
 pub struct ProcessTree {
     job: HANDLE,
+    kill_on_drop: bool,
 }
 
 // SAFETY: a job handle is a kernel handle, usable from any thread; Windows
@@ -449,7 +450,7 @@ impl ProcessTree {
             return Err(io::Error::last_os_error());
         }
         // Owned from here on, so every early return below closes the handle.
-        let tree = ProcessTree { job };
+        let tree = ProcessTree { job, kill_on_drop };
 
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         if kill_on_drop {
@@ -478,6 +479,16 @@ impl ProcessTree {
             .ok_or_else(|| io::Error::other("the process exited before it could be resumed"))?;
         resume_process(pid)?;
         Ok(tree)
+    }
+
+    /// Called as soon as the leader has exited: kills the leftovers when the
+    /// tree was made with `kill_on_drop`, so a stopped session is gone, tree
+    /// and all, by the time its exit is reported. A job handle cannot be
+    /// reused, so there is nothing to retire.
+    pub fn leader_exited(&self) {
+        if self.kill_on_drop {
+            let _ = self.kill();
+        }
     }
 
     /// Kills every process in the tree. Killing a tree that has already

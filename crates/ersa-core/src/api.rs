@@ -246,7 +246,7 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         Method::SessionSubscribe => to_json(sessions::subscribe(core, conn, parse(params)?)),
         Method::SessionUnsubscribe => to_json(sessions::unsubscribe(conn, parse(params)?)),
         Method::SessionRawLog => to_json(sessions::raw_log(core, parse(params)?).await),
-        Method::SessionReproject => to_json(sessions::reproject(core, parse(params)?).await),
+        Method::SessionReproject => to_json(sessions::reproject(core, conn, parse(params)?).await),
 
         // Handled above by `reserved_for`; listed so that adding a method
         // without deciding how to answer it is a compile error.
@@ -265,6 +265,62 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
     result
         .map(|value| (value, After::Continue))
         .map_err(|e| (e, After::Continue))
+}
+
+/// Whether `request` is a session request that may wait on a backend (a
+/// start, a write to its stdin, a stop), which the server runs on its own
+/// rather than in line with the connection's other requests. Only after the
+/// handshake; never one that changes the connection itself.
+pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
+    conn.api_version.is_some()
+        && matches!(
+            Method::from_name(&request.method),
+            Some(
+                Method::SessionCreate
+                    | Method::SessionStop
+                    | Method::SessionRemove
+                    | Method::SessionSend
+                    | Method::SessionInterrupt
+                    | Method::SessionDecidePermission
+            )
+        )
+}
+
+/// Answers a request [`runs_detached`] chose.
+pub async fn handle_detached(core: &Core, request: Request) -> Response {
+    let id = request.id.clone();
+    let params = request.params;
+    let result = match Method::from_name(&request.method) {
+        Some(Method::SessionCreate) => match parse(params) {
+            Ok(params) => to_json(sessions::create(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionStop) => match parse(params) {
+            Ok(params) => to_json(sessions::stop(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionRemove) => match parse(params) {
+            Ok(params) => to_json(sessions::remove(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionSend) => match parse(params) {
+            Ok(params) => to_json(sessions::send(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionInterrupt) => match parse(params) {
+            Ok(params) => to_json(sessions::interrupt(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionDecidePermission) => match parse(params) {
+            Ok(params) => to_json(sessions::decide_permission(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        _ => unreachable!("runs_detached chose a session method"),
+    };
+    match result {
+        Ok(value) => Response::success(id, value),
+        Err(ApiError(error)) => Response::failure(Some(id), error),
+    }
 }
 
 /// Parses a method's params. Absent params count as `{}`, so methods without
