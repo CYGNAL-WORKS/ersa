@@ -1,8 +1,8 @@
 # Runs the same checks a session runs locally before committing.
 # Linux carries every check because its minutes cost half of Windows'. Windows
-# first still holds for the product (CLAUDE.md, Stack): pull requests that touch
-# Rust also build and test on Windows, which compiles the `cfg(windows)` code
-# Linux cannot.
+# first still holds for the product (CLAUDE.md, Stack): changes to anything Rust
+# builds or tests from also run on Windows, which compiles the `cfg(windows)`
+# code Linux cannot.
 # Actions are pinned by commit SHA (ADR 0015); Dependabot proposes updates.
 name: CI
 
@@ -26,11 +26,13 @@ jobs:
   linux:
     name: Build, lint, test, dependencies (Linux)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           # The release-age check reads the lockfiles at the base branch.
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -73,7 +75,9 @@ jobs:
       # vulnerability and cargo-deny checks daily on main.
       - name: Release age
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-        run: node scripts/deps-check.mjs age --base "origin/${{ github.base_ref }}"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node scripts/deps-check.mjs age --base "origin/$BASE_REF"
 
       - name: Vulnerabilities
         if: ${{ !cancelled() }}
@@ -83,24 +87,41 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo deny --locked check bans licenses sources
 
-  # Decides whether a pull request touches anything the Windows build depends
-  # on. A skipped `windows` job still reports a status, so it can be required.
+  # Decides whether a pull request, or a push to main, touches anything the
+  # Windows build or tests read. A skipped `windows` job still reports a
+  # status, so it can be required.
   changes:
     name: Rust changes
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       rust: ${{ steps.diff.outputs.rust }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          # The pull request's merge commit and its first parent, the base.
-          fetch-depth: 2
+          # A push to main can carry several commits; diff from the one before.
+          fetch-depth: 0
+          persist-credentials: false
 
       - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
         run: |
-          if git diff --name-only HEAD^1 HEAD \
-              | grep -qE '^(crates/|Cargo\.toml$|Cargo\.lock$|rust-toolchain|\.github/workflows/ci\.yml$)'; then
+          # A pull request's checkout is its merge commit, whose first parent
+          # is the base. --no-renames lists both sides of a rename, so a file
+          # moved out of crates/ still counts.
+          if [ "$EVENT" = pull_request ]; then
+            from=HEAD^1
+          else
+            from=$BEFORE
+          fi
+          if ! changed=$(git diff --no-renames --name-only "$from" HEAD); then
+            echo "Cannot diff from '$from'; running Windows to be safe."
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if grep -qE '^(crates/|protocol/|docs/briefs/protocol/fixtures/|\.cargo/|Cargo\.toml$|Cargo\.lock$|rust-toolchain|\.?clippy\.toml$|\.?rustfmt\.toml$|deny\.toml$|\.gitattributes$|\.github/workflows/ci\.yml$)' <<< "$changed"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
@@ -111,8 +132,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
