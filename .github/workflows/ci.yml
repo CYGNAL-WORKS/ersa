@@ -87,6 +87,118 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo deny --locked check bans licenses sources
 
+  # The Interface (apps/shell): generated files current, types, unit tests, and
+  # the gallery's screenshot tests. Runs in the Playwright container so the
+  # screenshots match the baselines pixel for pixel (apps/shell/playwright.config.ts).
+  interface:
+    name: Interface (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      # Keep in step with @playwright/test in apps/shell/package.json.
+      # Pinned by digest, as actions are by SHA (ADR 0015).
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+    defaults:
+      run:
+        working-directory: apps/shell
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      # Corepack runs the pnpm that apps/shell/package.json's packageManager
+      # names, after checking it against the sha512 there. The corepack Node
+      # ships cannot run pnpm 12, so a pinned newer one comes first.
+      - name: Install pnpm
+        run: |
+          npm install --global corepack@0.36.0
+          corepack enable pnpm
+          corepack install
+
+      # --frozen-lockfile: install exactly pnpm-lock.yaml, never resolve.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Generated types and tokens are current
+        run: pnpm gen:check
+
+      - name: Type-check
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Screenshot tests
+        run: pnpm test:screenshots
+
+      # On a screenshot failure, the rendered images: the new baselines when
+      # none existed, and the actual and diff images otherwise.
+      - name: Upload screenshots
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screenshots
+          path: |
+            apps/shell/e2e/__screenshots__
+            apps/shell/test-results
+          if-no-files-found: ignore
+
+  # The Shell's Rust side (apps/shell/src-tauri), its own Cargo workspace so
+  # Tauri stays out of Core's (ARCH-CORE-R01). Its bridge tests launch a real
+  # ersa-core, built from the root workspace first.
+  shell:
+    name: Shell build, lint, test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            . -> target
+            apps/shell/src-tauri -> target
+
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-deny@0.20.2
+
+      # The webview and windowing libraries Tauri links against on Linux.
+      - name: Tauri system libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
+
+      # The Shell embeds the Interface's build output (apps/shell/dist) at
+      # compile time; these checks need a page there, not the real build.
+      - name: Placeholder Interface build
+        run: mkdir -p apps/shell/dist && echo '<!doctype html>' > apps/shell/dist/index.html
+
+      - name: Format
+        run: cargo fmt --manifest-path apps/shell/src-tauri/Cargo.toml --check
+
+      - name: Clippy
+        run: cargo clippy --manifest-path apps/shell/src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+
+      - name: Build Core
+        run: cargo build -p ersa-cli --locked
+
+      - name: Test
+        run: cargo test --manifest-path apps/shell/src-tauri/Cargo.toml --locked
+
+      # Licences are not checked here yet: Tauri depends on MPL-2.0 crates,
+      # which deny.toml does not allow (see docs/briefs/INBOX.md).
+      - name: Sources, bans
+        run: cargo deny --manifest-path apps/shell/src-tauri/Cargo.toml --locked check bans sources
+
   # Decides whether a pull request, or a push to main, touches anything the
   # Windows build or tests read. A skipped `windows` job still reports a
   # status, so it can be required.
@@ -121,7 +233,7 @@ jobs:
             echo "rust=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if grep -qE '^(crates/|protocol/|docs/briefs/protocol/fixtures/|\.cargo/|Cargo\.toml$|Cargo\.lock$|rust-toolchain|\.?clippy\.toml$|\.?rustfmt\.toml$|deny\.toml$|\.gitattributes$|\.github/workflows/ci\.yml$)' <<< "$changed"; then
+          if grep -qE '^(crates/|protocol/|docs/briefs/protocol/fixtures/|\.cargo/|Cargo\.toml$|Cargo\.lock$|rust-toolchain|\.?clippy\.toml$|\.?rustfmt\.toml$|deny\.toml$|\.gitattributes$|\.github/workflows/ci\.yml$|apps/shell/src-tauri/)' <<< "$changed"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
@@ -145,9 +257,31 @@ jobs:
           components: clippy
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: |
+            . -> target
+            apps/shell/src-tauri -> target
 
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Test
         run: cargo test --workspace --locked
+
+      # The Shell, as in the Linux shell job; WebView2 ships with Windows.
+      - name: Shell clippy
+        shell: bash
+        run: |
+          mkdir -p apps/shell/dist && echo '<!doctype html>' > apps/shell/dist/index.html
+          cargo clippy --manifest-path apps/shell/src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+
+      # bash, so a failed build stops the step (PowerShell would go on).
+      # ERSA_SHELL_TEST_USER_PIPE: the runner has no Core of its own, so the
+      # launch test may use this user's pipe (apps/shell/src-tauri/tests/bridge.rs).
+      - name: Shell test
+        shell: bash
+        env:
+          ERSA_SHELL_TEST_USER_PIPE: "1"
+        run: |
+          cargo build -p ersa-cli --locked
+          cargo test --manifest-path apps/shell/src-tauri/Cargo.toml --locked

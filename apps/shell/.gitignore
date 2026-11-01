@@ -1,0 +1,7 @@
+# The shell's Cargo workspace builds into its own target directory.
+/src-tauri/target/
+# Tauri writes the capability schemas here on every build.
+/src-tauri/gen/
+# Playwright's run output; the baselines in e2e/ are committed.
+/test-results/
+/playwright-report/

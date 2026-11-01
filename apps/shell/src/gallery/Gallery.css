@@ -1,0 +1,66 @@
+.gallery {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+/* Each theme column paints its own canvas, so dark sits on dark. */
+.gallery-theme {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxl);
+  padding: var(--space-xl);
+  background: var(--color-canvas);
+  color: var(--color-ink);
+}
+
+.gallery-entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  background: var(--color-canvas);
+}
+
+.gallery-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.gallery-name {
+  margin: 0;
+  font-size: var(--type-heading-size);
+  line-height: var(--type-heading-leading);
+  font-weight: var(--type-heading-weight);
+}
+
+.gallery-theme-name {
+  color: var(--color-ink-muted);
+}
+
+.gallery-states {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-xxl) * 7), 1fr));
+  gap: var(--space-lg);
+  align-items: start;
+}
+
+.gallery-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+}
+
+.gallery-label {
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+}
+
+/* Components that live in the rail are shown on the rail's surface. */
+.gallery-specimen {
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
