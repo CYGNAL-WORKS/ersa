@@ -124,6 +124,7 @@ describe("applying events", () => {
     const unknown = { ...envelope(0, { type: "user.message", text: "hi", origin: "human" }), v: 2 } as unknown as Envelope;
     const refused = play([unknown, envelope(1, { type: "user.message", text: "later", origin: "human" })]);
     expect(refused.items).toEqual([]);
+    expect(refused.refused).toMatch(/older than Core and needs updating/);
     expect(refused.refused).toMatch(/version 2/);
   });
 });

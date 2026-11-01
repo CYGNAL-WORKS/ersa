@@ -61,7 +61,8 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
   if (envelope.v !== EVENT_VERSION) {
     return {
       ...transcript,
-      refused: `This session's events use schema version ${envelope.v}; this window renders version ${EVENT_VERSION}.`,
+      // PROTO-AGENT-EVENTS, Versioning: re-projection cannot help a window older than Core.
+      refused: `This window is older than Core and needs updating: this session's events use schema version ${envelope.v}, and the window shows version ${EVENT_VERSION}.`,
     };
   }
   const next = { ...transcript, lastSeq: envelope.seq };
