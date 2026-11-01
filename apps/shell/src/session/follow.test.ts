@@ -62,7 +62,7 @@ describe("follow", () => {
     follower.receive(replay[6] as (typeof replay)[number]);
     await settle();
     expect(last().stream).toEqual({ state: "live" });
-    // A stray from the old subscription, beyond the same gap, while live again: no second resubscribe.
+    // Another event beyond the same gap, while live again: no second resubscribe.
     follower.receive(replay[7] as (typeof replay)[number]);
     await settle();
     expect(calls.filter((c) => c.method === "session.subscribe").map((c) => c.params)).toEqual([
@@ -173,6 +173,35 @@ describe("follow", () => {
     await settle();
     await settle();
     expect(calls.filter((c) => c.method === "session.subscribe")).toHaveLength(1);
+  });
+
+  it("starts again when Core lists no events for a session that shows some", async () => {
+    const answers: unknown[] = [{ last_seq: 21 }, {}, {}];
+    const { follower, calls, last } = following({ "session.subscribe": () => Promise.resolve(answers.shift()) });
+    follower.attached();
+    await settle();
+    for (const event of replay.slice(0, 10)) follower.receive(event);
+    follower.attached();
+    await settle();
+    expect(calls.filter((c) => c.method === "session.subscribe").map((c) => c.params)).toEqual([
+      { id: "s-replay", from_seq: 0 },
+      { id: "s-replay", from_seq: 10 },
+      { id: "s-replay", from_seq: 0 },
+    ]);
+    expect(last().transcript.lastSeq).toBe(-1);
+  });
+
+  it("says the stream failed when subscribing again does not fill a gap", async () => {
+    const { follower, calls, last } = following();
+    follower.attached();
+    await settle();
+    for (const event of replay.slice(0, 5)) follower.receive(event);
+    follower.receive(replay[6] as (typeof replay)[number]);
+    await settle();
+    // The backlog came without event 5; a later event arrives beyond the same gap.
+    follower.receive(replay[8] as (typeof replay)[number]);
+    expect(last().stream).toEqual({ state: "failed", message: "event 5 never arrived" });
+    expect(calls.filter((c) => c.method === "session.subscribe")).toHaveLength(2);
   });
 
   it("keeps what it shows when a subscribe answer cannot be read", async () => {

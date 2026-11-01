@@ -115,9 +115,15 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
       // the way (Core's sequence is gap-free): subscribe again from the gap.
       // While subscribing, a stray from an earlier subscription is expected
       // and the backlog fills in behind it.
-      if (envelope.seq > lastSeq + 1 && view.stream.state === "live" && resumedAt !== lastSeq) {
-        resumedAt = lastSeq;
-        attached();
+      if (envelope.seq > lastSeq + 1 && view.stream.state === "live") {
+        if (resumedAt !== lastSeq) {
+          resumedAt = lastSeq;
+          attached();
+        } else {
+          // Subscribing again did not fill the gap: say so, so Retry shows,
+          // rather than read "live" while events are dropped.
+          set((v) => ({ ...v, stream: { state: "failed", message: `event ${lastSeq + 1} never arrived` } }));
+        }
         return;
       }
       set((v) => {
