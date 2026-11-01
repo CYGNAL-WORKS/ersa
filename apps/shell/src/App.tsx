@@ -12,7 +12,7 @@ function projectsOf(view: CoreView): ProjectsView {
       return view.projects;
     case "lost":
     case "failed":
-      return { state: "error", message: "Not connected to Core." };
+      return { state: "unavailable" };
     case "connecting":
       return { state: "loading" };
   }

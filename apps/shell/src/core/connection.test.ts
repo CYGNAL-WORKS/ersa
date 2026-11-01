@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CoreHelloResult, Project } from "../protocol/core-api.gen";
-import type { BridgeError, CoreClient, Method } from "./client";
+import type { Attachment, BridgeError, CoreClient, Method } from "./client";
 import { type CoreView, connect } from "./connection";
 
 const hello: CoreHelloResult = {
@@ -14,7 +14,10 @@ const hello: CoreHelloResult = {
 const project: Project = { id: "p1", host_id: "local", path: "D:/code/ersa", name: "ersa", vcs: "git" };
 
 /** A client whose answers the test sets per method, and whose connection the test can drop. */
-function fakeClient(answers: Partial<Record<Method, () => Promise<unknown>>>, attach = () => Promise.resolve({ how: "launched" as const, hello })) {
+function fakeClient(
+  answers: Partial<Record<Method, () => Promise<unknown>>>,
+  attach: () => Promise<Attachment> = () => Promise.resolve({ how: "launched", hello }),
+) {
   const lost: ((reason: string) => void)[] = [];
   const client: CoreClient = {
     attach,
@@ -71,6 +74,17 @@ describe("connect", () => {
     const seen = await views(client);
     const last = seen.at(-1);
     expect(last?.phase === "connected" && last.projects).toEqual({ state: "error", message: "disk full" });
+  });
+
+  it("keeps a loss that arrives before attaching finishes", async () => {
+    let finish: () => void = () => {};
+    const { client, drop } = fakeClient({}, () => new Promise((r) => (finish = () => r({ how: "attached", hello }))));
+    const seen: CoreView[] = [];
+    connect(client, (v) => seen.push(v));
+    drop("Core closed the connection");
+    finish();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(seen.at(-1)).toEqual({ phase: "lost", reason: "Core closed the connection", hello });
   });
 
   it("marks the connection lost, and late answers do not undo that", async () => {
