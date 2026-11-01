@@ -57,7 +57,7 @@ fn a_message_in_both_the_record_and_the_live_stream_yields_its_events_once() {
         backend_version: Some("1.0".into()),
         event: text("m1"),
     }];
-    let (mut view, opened) = View::open("s-1", "test", Some(Box::new(Messages)), record);
+    let (mut view, opened) = View::open("s-1", "test", Some(Box::new(Messages)), &record);
     assert_eq!(opened.len(), 1);
     assert_eq!(opened[0].source.input, Input::Record);
 

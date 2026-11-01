@@ -172,7 +172,7 @@ struct Handle {
     /// up waiting; the next open waits on it rather than start another, so
     /// a file system that hangs gathers one stuck read per session, not one
     /// per attempt.
-    record_read: ReadSlot<Result<Vec<RecordEvent>, String>>,
+    record_read: ReadSlot<Result<Arc<Vec<RecordEvent>>, String>>,
     /// The same for reading the record's title and creation time.
     summary_read: ReadSlot<Result<Option<RecordSummary>, String>>,
 }
@@ -184,10 +184,14 @@ type ReadSlot<T> = tokio::sync::Mutex<Option<tokio::task::JoinHandle<T>>>;
 /// unless one is still running in `slot`, which is waited on instead: a
 /// read is never started beside one that has not finished (a thread stuck on
 /// a hung disk stays one thread). `None` when it takes longer than
-/// `timeout`; it is kept for the next caller. A read that finished after its
-/// caller gave up is not handed on, since the record may have changed since;
-/// a fresh read of an unchanged record costs little (the adapter keeps what
-/// it read last while the file's size and modified time stay the same).
+/// `timeout`; it is kept for the next caller.
+///
+/// What a read returns is what the record held when that read began. A
+/// caller that joined a read already running reads again once it finishes,
+/// since the record may have grown meanwhile; for an unchanged record that
+/// costs a look at its size and modified time (the adapter keeps what it
+/// read last). For the same reason a read that finished after its caller
+/// gave up is not handed on.
 async fn read_once<T: Send + 'static>(
     slot: &ReadSlot<T>,
     timeout: Duration,
@@ -197,10 +201,29 @@ async fn read_once<T: Send + 'static>(
     if slot.as_ref().is_some_and(|task| task.is_finished()) {
         *slot = None;
     }
-    let task = slot.get_or_insert_with(start);
-    // Awaited where it lies, so a caller that goes away (its connection
-    // closed) leaves the read in the slot for the next one, never a second
-    // read beside it.
+    let mut start = Some(start);
+    if slot.is_none() {
+        *slot = start.take().map(|start| start());
+    }
+    let first = wait(&mut slot, timeout).await?;
+    match start {
+        // Joined a read already running: the record may have grown since
+        // that read began.
+        Some(start) => {
+            *slot = Some(start());
+            wait(&mut slot, timeout).await
+        }
+        // Started here: what it read is current.
+        None => Some(first),
+    }
+}
+
+/// Waits up to `timeout` for the read in `slot`, awaited where it lies, so a
+/// caller that goes away (its connection closed) leaves it for the next one,
+/// never a second read beside it. `None` (the read kept) when it is still
+/// running, or (the read gone) when it failed.
+async fn wait<T>(slot: &mut Option<tokio::task::JoinHandle<T>>, timeout: Duration) -> Option<T> {
+    let task = slot.as_mut()?;
     match tokio::time::timeout(timeout, task).await {
         Ok(result) => {
             *slot = None;
@@ -443,7 +466,7 @@ impl Handle {
             // Not opened yet in this Core: as its ending left it, which a
             // view would end with too (an exit with an error is `error`).
             None => {
-                let (mut view, _) = View::open(&self.id, &self.backend, None, Vec::new());
+                let (mut view, _) = View::open(&self.id, &self.backend, None, &[]);
                 if let Some((fact, ts)) = &ending {
                     view.lifecycle(fact, ts);
                 }
@@ -645,12 +668,8 @@ impl SessionManager {
         lock(&handle.presented).title = title;
         // A new session has no record yet: the backend has not been told
         // anything, so its events are the live stream's from the start.
-        let (view, events) = View::open(
-            &handle.id,
-            &handle.backend,
-            Some(adapter.projector()),
-            Vec::new(),
-        );
+        let (view, events) =
+            View::open(&handle.id, &handle.backend, Some(adapter.projector()), &[]);
         lock(&handle.hub).install(&handle.id, view, &events);
         {
             // Registered and launched under the lock `stop_all` takes, so a
@@ -776,6 +795,13 @@ impl SessionManager {
         self.store.delete_session(id.to_string()).await?;
         lock(&self.sessions).remove(id);
         self.app_log.forget(id);
+        // What the adapter kept of its record goes too.
+        let row = lock(&handle.row).clone();
+        if let (Some(backend_id), Some(adapter)) =
+            (&row.backend_session_id, self.adapters.get(&row.backend))
+        {
+            adapter.forget_record(&row.cwd, backend_id);
+        }
         // A tile still waiting to go out would show the session again.
         self.tiles.forget(id);
         // Dropping the senders ends every subscription's forwarding task.
@@ -960,7 +986,7 @@ impl SessionManager {
         };
         let record = match &row.backend_session_id {
             // The backend never announced the session, so it has no record.
-            None => Vec::new(),
+            None => Arc::default(),
             Some(backend_id) => {
                 let read = match transport_for(&row.host_id) {
                     Some(transport) => {
@@ -988,7 +1014,7 @@ impl SessionManager {
                 // see, in the session, rather than a refused subscription.
                 read.unwrap_or_else(|e| {
                     tracing::warn!(session = %row.id, error = %e, "could not read the session record");
-                    vec![RecordEvent {
+                    Arc::new(vec![RecordEvent {
                         message_id: None,
                         ts: Some(now_rfc3339()),
                         backend_version: None,
@@ -998,7 +1024,7 @@ impl SessionManager {
                             recoverable: true,
                             action: None,
                         }),
-                    }]
+                    }])
                 })
             }
         };
@@ -1008,7 +1034,7 @@ impl SessionManager {
         {
             apply_summary(handle, adapter, transport, row.cwd.clone(), backend_id).await;
         }
-        let (mut view, mut events) = View::open(&row.id, &row.backend, None, record);
+        let (mut view, mut events) = View::open(&row.id, &row.backend, None, &record);
         if let Some((fact, ts)) = lock(&handle.ending).clone() {
             events.extend(view.lifecycle(&fact, &ts));
         }
@@ -1825,11 +1851,17 @@ mod tests {
         assert_eq!(read_once(&slot, short, slow).await, None);
         assert_eq!(starts.load(Ordering::SeqCst), 1);
         gate.notify_one();
+        // Joining it, this open reads again once it finishes: the record may
+        // have grown meanwhile.
+        let current = || {
+            starts.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async { 9 })
+        };
         assert_eq!(
-            read_once(&slot, Duration::from_secs(5), slow).await,
-            Some(7)
+            read_once(&slot, Duration::from_secs(5), current).await,
+            Some(9)
         );
-        assert_eq!(starts.load(Ordering::SeqCst), 1);
+        assert_eq!(starts.load(Ordering::SeqCst), 2);
 
         // A read that finished after its caller gave up is not handed on:
         // the record may have changed since. A fresh one is started.
@@ -1853,7 +1885,7 @@ mod tests {
             read_once(&slot, Duration::from_secs(5), fresh).await,
             Some(2)
         );
-        assert_eq!(starts.load(Ordering::SeqCst), 3);
+        assert_eq!(starts.load(Ordering::SeqCst), 4);
     }
 
     #[test]

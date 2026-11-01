@@ -330,12 +330,16 @@ impl Adapter for ClaudeAdapter {
         _transport: Arc<dyn Transport>,
         cwd: &str,
         backend_session_id: &str,
-    ) -> Result<Vec<RecordEvent>, AdapterError> {
+    ) -> Result<Arc<Vec<RecordEvent>>, AdapterError> {
         let home = self.claude_home()?;
         let (cwd, id) = (cwd.to_string(), backend_session_id.to_string());
         // Reading a long record takes a while; off the async threads.
         let records = Arc::clone(&self.records);
         blocking(move || records.read(&home, &cwd, &id)).await
+    }
+
+    fn forget_record(&self, _cwd: &str, backend_session_id: &str) {
+        self.records.forget(backend_session_id);
     }
 
     /// The record's title and first time, from its head and tail

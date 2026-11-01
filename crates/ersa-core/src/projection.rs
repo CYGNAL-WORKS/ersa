@@ -69,7 +69,7 @@ impl View {
         session_id: &str,
         backend: &str,
         projector: Option<Box<dyn Projector>>,
-        record: Vec<RecordEvent>,
+        record: &[RecordEvent],
     ) -> (View, Vec<Envelope>) {
         let state = if projector.is_some() {
             LifecycleState::Starting
@@ -98,14 +98,14 @@ impl View {
             if let Some(id) = &event.message_id {
                 view.record_ids.insert(id.clone());
             }
-            let ts = event.ts.unwrap_or_else(|| view.last_ts.clone());
+            let ts = event.ts.clone().unwrap_or_else(|| view.last_ts.clone());
             let source = Source {
                 backend: view.backend.clone(),
-                backend_version: event.backend_version.unwrap_or_default(),
+                backend_version: event.backend_version.clone().unwrap_or_default(),
                 input: Input::Record,
-                message_id: event.message_id,
+                message_id: event.message_id.clone(),
             };
-            out.push(view.wrap(ts, source, event.event));
+            out.push(view.wrap(ts, source, event.event.clone()));
         }
         (view, out)
     }
@@ -468,7 +468,7 @@ mod tests {
     }
 
     fn live_view() -> View {
-        View::open("s-1", "echo", Some(Box::new(Echo)), Vec::new()).0
+        View::open("s-1", "echo", Some(Box::new(Echo)), &[]).0
     }
 
     // verifies: PROTO-AGENT-EVENTS-R01
@@ -486,7 +486,7 @@ mod tests {
             ),
             recorded("a1", "2026-10-30T00:00:01.000Z", text("a1")),
         ];
-        let (mut view, mut events) = View::open("s-1", "echo", Some(Box::new(Echo)), record);
+        let (mut view, mut events) = View::open("s-1", "echo", Some(Box::new(Echo)), &record);
         let started = LifecycleFact::ProcessStarted {
             backend: "echo".into(),
             backend_version: "1.0".into(),
@@ -541,8 +541,8 @@ mod tests {
                 },
             ]
         };
-        let (_, first) = View::open("s", "echo", None, record());
-        let (_, second) = View::open("s", "echo", None, record());
+        let (_, first) = View::open("s", "echo", None, &record());
+        let (_, second) = View::open("s", "echo", None, &record());
         assert_eq!(first, second);
         // The entry without a time takes the one before it.
         assert_eq!(first[1].ts, "2026-10-30T00:00:01.000Z");
@@ -584,7 +584,7 @@ mod tests {
 
         // A record never yields lifecycle events, and a view of a session no
         // Core is running starts out ended without any.
-        let (view, events) = View::open("s", "echo", None, Vec::new());
+        let (view, events) = View::open("s", "echo", None, &[]);
         assert!(events.is_empty());
         assert_eq!(view.state(), LifecycleState::Ended);
         assert_eq!(view.tile().state, LifecycleState::Ended);
