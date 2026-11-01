@@ -7,13 +7,18 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { EMAIL_RE, HOME_RE, MUNGED_HOME_RE, PLACEHOLDER_EMAIL, PLACEHOLDER_HOME, PLACEHOLDER_ORG, redact } from "./redact.mjs";
+import { EMAIL_RE, HOME_RE, MUNGED_HOME_RE, PLACEHOLDER_EMAIL, PLACEHOLDER_HOME, PLACEHOLDER_ORG, PLACEHOLDER_UUID, redact } from "./redact.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 
 test("redacts the account email and organization", () => {
   const line = '{"account":{"email":"jo.doe@mail.com","organization":"jo.doe@mail.com\'s Organization"}}';
   assert.equal(redact(line), `{"account":{"email":"${PLACEHOLDER_EMAIL}","organization":"${PLACEHOLDER_ORG}"}}`);
+});
+
+test("redacts the organization id", () => {
+  const line = '{"type":"credential_org","organizationUuid":"1b2c3d4e-0000-4000-8000-123456789abc"}';
+  assert.equal(redact(line), `{"type":"credential_org","organizationUuid":"${PLACEHOLDER_UUID}"}`);
 });
 
 test("redacts the home directory in every spelling", () => {
