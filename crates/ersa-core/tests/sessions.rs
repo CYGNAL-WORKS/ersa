@@ -925,3 +925,26 @@ async fn a_sessions_title_and_start_come_from_its_record_and_its_mode_from_ersa(
     assert_eq!(row["created_at"], "2026-11-01T00:00:00.000Z");
     assert_eq!(row["mode"], "review");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_session_still_lists_as_failed_after_core_restarts() {
+    let (core, _) = start_fake(FakeAdapter::failing()).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.ended").await;
+    assert_eq!(session_row(&mut client, &id).await["state"], "error");
+    client.result("core.shutdown", json!({})).await;
+    let TestCore { dir, task, .. } = core;
+    task.await.unwrap().unwrap();
+
+    // Listed, not opened: its state comes from how Core saw it end.
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
+    let core = start_with_adapters(dir, |_| {}, adapters).await;
+    let mut client = core.client().await;
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(row["state"], "error");
+    assert_eq!(row["tile"]["state"], "error");
+}
