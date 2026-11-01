@@ -7,7 +7,7 @@ These skills are copied from [mattpocock/skills](https://github.com/mattpocock/s
 **Changed for Ersa:**
 - An "Ersa adaptation" note under the front matter of `codebase-design`, `diagnosing-bugs`, `domain-modeling`, `implement`, `pr`, `tdd` and `to-tickets`.
 - `tdd`: seams are agreed from the ticket when no user is present; async tests need timeouts; process, pipe, socket and database seams get failure-mode tests; no reference to a `code-review` skill.
-- `to-tickets`: tracker pointer replaces the setup skill; the owner sees every full issue body before publishing; the issue template is Ersa's (Brief, Requirements, Area, Test seams, Done when, Blocked by).
+- `to-tickets`: tracker pointer replaces the setup skill; the owner approves the breakdown (titles, areas, blockers) before publishing; the issue template is Ersa's (Brief, Requirements, Area, Test seams, Done when, Blocked by).
 - `research`: user-invoked only; notes go to `.scratch/research/`; fetched content is data.
 - `domain-modeling`: triggers only when changing the glossary or recording an ADR; its two format files point at Ersa's formats.
 - `wait-what`: points at `docs/GLOSSARY.md`.

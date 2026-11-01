@@ -5,7 +5,7 @@ How the orchestration session runs the engineering loop: cut tickets, start impl
 ## Cut tickets
 
 1. Work from a `ready` brief. Use `to-tickets`: slice into issues sized to one fresh context, each with Brief, Requirements, Area, Test seams, Done when, and blocking links. Two tickets that run in parallel touch different areas; shared contracts go first as their own ticket.
-2. Show the owner every issue body before publishing; publish with the `ready-for-agent` label once approved.
+2. Show the owner the breakdown (titles, areas, blockers) for approval, then publish every issue with the `ready-for-agent` label. The owner does not approve individual issue bodies.
 
 ## Start implementing sessions
 
