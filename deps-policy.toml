@@ -34,3 +34,19 @@ min_age_days = 7
 # version = "1.4.1"                  # optional, needs package: only this version
 # reason = "No fixed release yet; Ersa never calls the affected function."
 # expires = 2026-12-01
+
+# The Shell (apps/shell/src-tauri) on Linux: Tauri 2 draws its window with
+# gtk-rs 0.18, which pins both of these. Neither has a fix Tauri 2 can take.
+[[vulnerability_exception]]
+id = "RUSTSEC-2024-0429"
+package = "glib"
+version = "0.18.5"
+reason = "Unsound VariantStrIter in glib 0.18, Linux only, reached through Tauri 2's gtk 0.18; Ersa never iterates GLib variants. Ends when Tauri moves to gtk-rs 0.20+."
+expires = 2027-01-29
+
+[[vulnerability_exception]]
+id = "RUSTSEC-2024-0370"
+package = "proc-macro-error"
+version = "1.0.4"
+reason = "Unmaintained, not vulnerable: a build-time proc macro of glib-macros 0.18 (Linux only, through Tauri 2's gtk). Ends with the glib exception above."
+expires = 2027-01-29

@@ -1,0 +1,55 @@
+# The Shell: Ersa's native window (Tauri 2). It launches or attaches to the
+# Core process and bridges the Interface's requests to it (ARCH-CORE, Shell).
+#
+# Its own Cargo workspace, not a member of the root one: the root workspace is
+# Core's, and Core must build without Tauri (ARCH-CORE-R01), which
+# crates/ersa-core/tests/boundaries.rs checks against the root Cargo.lock.
+# This crate may depend on Core's crates by path; they never depend on it.
+
+[package]
+name = "ersa-shell"
+description = "The Ersa window: launches or attaches to Core and bridges the Interface to it."
+version = "0.1.0"
+edition = "2024"
+license = "UNLICENSED"
+publish = false
+repository = "https://github.com/KPandaK/ersa"
+# The executable is `ersa`, the application the user runs.
+default-run = "ersa"
+
+[workspace]
+
+[lib]
+# A library as well as the executable, so tests/ can drive the bridge without
+# a window. `rlib` is Rust's ordinary library format.
+name = "ersa_shell"
+crate-type = ["rlib"]
+
+[[bin]]
+name = "ersa"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# The verified pipe client (`connect`), the line reader with a length cap, and
+# the platform's default endpoint and data directory.
+ersa-core = { path = "../../../crates/ersa-core" }
+# The JSON-RPC framing and error types of the Core API.
+ersa-protocol = { path = "../../../crates/ersa-protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+# The same lints as the root workspace (Cargo.toml there).
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }

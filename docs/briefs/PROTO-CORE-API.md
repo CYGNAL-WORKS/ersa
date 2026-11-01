@@ -17,7 +17,7 @@ One Core process per machine (the user's local machine, or a remote host reached
 
 ## Transport and framing
 
-A local stream socket: a named pipe on Windows (`\\.\pipe\ersa-core-<user SID>`, the SID because a user name comes from the environment), a Unix domain socket elsewhere (`$XDG_RUNTIME_DIR/ersa-core.sock` or equivalent). Only the current user may connect: the pipe's security descriptor grants the current user alone, and the socket lives in a directory only the user can enter. Before sending anything, a client verifies that the process serving the pipe or socket runs as the same user, and refuses to talk to it otherwise, so a squatter on the name never receives the user's requests. Lines are capped at a size Core states; an over-long or non-UTF-8 line gets a protocol error and the connection closes. A connection that sends no `core.hello` within a short deadline is closed. Newline-delimited JSON-RPC 2.0: requests carry `id`, `method`, `params`; responses carry `id` and `result` or `error`; notifications carry `method` and `params` with no `id`. Either side may send notifications. Core writes nothing unsolicited except notifications for active subscriptions.
+A local stream socket: a named pipe on Windows (`\\.\pipe\ersa-core-<user SID>`, the SID because a user name comes from the environment), a Unix domain socket elsewhere (`$XDG_RUNTIME_DIR/ersa-core.sock` or equivalent). Only the current user may connect: the pipe's security descriptor grants the current user alone, and the socket lives in a directory only the user can enter. Before sending anything, a client verifies that the process serving the pipe or socket runs as the same user, and refuses to talk to it otherwise, so a squatter on the name never receives the user's requests. Lines are capped at a size Core states; an over-long or non-UTF-8 line gets a protocol error and the connection closes. A connection that sends no `core.hello` within a short deadline is closed. The endpoint is per user by default; `ersa-core serve` (and `replay`) also accept an explicit endpoint, so tests and a second Core never collide with the user's own. Newline-delimited JSON-RPC 2.0: requests carry `id`, `method`, `params`; responses carry `id` and `result` or `error`; notifications carry `method` and `params` with no `id`. Either side may send notifications. Core writes nothing unsolicited except notifications for active subscriptions.
 
 ## Handshake
 
@@ -117,6 +117,8 @@ A conforming Core passes a request/response test suite driven over the socket, a
 - Whether to allow more than one Interface attached at once (useful for a second window), and if so whether notifications fan out to all.
 
 ## Changes
+
+- 2026-11-01: `serve` and `replay` accept an explicit endpoint (from M0-T8).
 
 - 2026-11-01: the pipe name uses the user's SID; clients verify the server runs as the same user; line cap and handshake deadline; the security-descriptor open question closed.
 

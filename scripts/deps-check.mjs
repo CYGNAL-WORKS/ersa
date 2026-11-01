@@ -127,9 +127,10 @@ export function parseLockfile(ecosystem, text, label) {
 }
 
 // Where a package version comes from, for the age check: "workspace" (one of
-// the repository's own crates, listed in `workspaceMembers` as name@version),
+// the repository's own crates, a member of any of its Cargo workspaces, listed
+// in `workspaceMembers` as name@version),
 // "registry" (crates.io or npm, so it has a publish time), or "unregistered"
-// (anything else: a path outside the workspace, git, a tarball, another
+// (anything else: a path outside the repository's workspaces, git, a tarball, another
 // registry), which has no publish time to judge.
 export function classifyPackage(ecosystem, pkg, workspaceMembers) {
   if (ecosystem === "npm") return pkg.source === "npm" ? "registry" : "unregistered";
@@ -385,6 +386,18 @@ function workspaceMembers(lockPath) {
   return membersByLockfile.get(lockPath);
 }
 
+// The members of every Cargo workspace whose lockfile git tracks, as
+// name@version: the repository's own crates. A crate in one workspace that
+// another depends on by path (the Shell on Core's crates) is still the
+// repository's own code, with no registry publish time to judge.
+function repositoryCrates() {
+  const all = new Set();
+  for (const lock of trackedLockfiles()) {
+    if (lock.ecosystem === "crates.io") for (const member of workspaceMembers(lock.path)) all.add(member);
+  }
+  return all;
+}
+
 // ---- Modes ---------------------------------------------------------------------
 
 async function ageMode(policy, base, now) {
@@ -399,12 +412,12 @@ async function ageMode(policy, base, now) {
     const after = parseLockfile(lock.ecosystem, readFileSync(join(ROOT, lock.path), "utf8"), lock.path);
     for (const p of diffPackages(before, after)) {
       const id = `${lock.ecosystem} ${p.name}@${p.version}`;
-      const members = lock.ecosystem === "crates.io" && p.source === null ? workspaceMembers(lock.path) : new Set();
+      const members = lock.ecosystem === "crates.io" && p.source === null ? repositoryCrates() : new Set();
       const kind = classifyPackage(lock.ecosystem, p, members);
       if (kind === "workspace") continue;
       checked++;
       if (kind === "unregistered") {
-        const from = p.source ?? "a path outside the workspace";
+        const from = p.source ?? "a path outside the repository's workspaces";
         const exception = findAgeException(policy.ageExceptions, lock.ecosystem, p.name, p.version);
         if (exception) console.log(`  allow ${id}: not from the registry (${from}); exception until ${exception.expires}: ${exception.reason}`);
         else failures.push(`${id}: not from the registry (${from}), so its age cannot be checked`);
