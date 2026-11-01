@@ -302,7 +302,11 @@ async fn requests_that_would_change_anything_answer_invalid_state_naming_the_rep
         ),
         ("session.set_title", json!({ "id": id, "title": "t" })),
         ("session.set_mode", json!({ "id": id, "mode": "m" })),
-        ("project.add", json!({ "host_id": "local", "path": "." })),
+        (
+            "project.add",
+            json!({ "host_id": "local", "path": ".", "trusted": false }),
+        ),
+        ("project.set_trust", json!({ "id": "p", "trusted": true })),
         ("project.remove", json!({ "id": "p" })),
         ("workspace.create", json!({ "project_id": "p" })),
         ("workspace.remove", json!({ "id": workspace_id })),
