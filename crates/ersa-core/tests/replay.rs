@@ -8,10 +8,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ersa_adapter::{Adapter, Direction};
-use ersa_adapter_claude::ClaudeAdapter;
 use ersa_core::replay::Pace;
 use serde_json::{Value, json};
-use support::claude::{FIXTURE, OnTransport, fixture, parse, recording, start_replay_with, stub};
+use support::claude::{
+    FIXTURE, OnTransport, fixture, isolated_claude, parse, recording, start_replay_with, stub,
+};
 use support::suite::{self, Target};
 use support::{Client, TestCore, kind, start_with_adapters, tempdir, workspace};
 
@@ -87,7 +88,7 @@ impl Watched {
 async fn live_core_turn() -> Watched {
     let (stdout, sent) = fixture();
     let adapter = OnTransport {
-        adapter: ClaudeAdapter::new().with_stop_grace(Duration::from_secs(1)),
+        adapter: isolated_claude().with_stop_grace(Duration::from_secs(1)),
         transport: Arc::new(stub(&stdout)),
     };
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];

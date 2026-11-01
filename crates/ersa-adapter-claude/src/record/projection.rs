@@ -48,6 +48,11 @@ pub use ersa_adapter::RecordEvent;
 /// yields an error and a passthrough of its start (PROTO-AGENT-EVENTS-R10),
 /// and the pass carries on. Pure: the same record always yields the same
 /// events.
+///
+/// Read in two passes over the text, one entry at a time: the first keeps
+/// only what the conversation's chain needs of each entry, the second reads
+/// each entry on the chain again to project it. A record of many megabytes
+/// is never held as JSON all at once.
 pub fn project_record(record: &str) -> Vec<RecordEvent> {
     let (complete, unterminated) = match record.rfind('\n') {
         Some(end) => (&record[..end], &record[end + 1..]),
@@ -67,20 +72,26 @@ pub fn project_record(record: &str) -> Vec<RecordEvent> {
             continue;
         }
         lines.push(match serde_json::from_str::<Value>(line) {
-            Ok(value) => Line::Entry(value),
+            Ok(value) => Line::Entry {
+                text: line,
+                chain: chain_fields(&value),
+            },
             Err(e) => Line::Failed(unreadable(line, format!("a record entry is not JSON: {e}"))),
         });
     }
     if unterminated.len() <= MAX_ENTRY_BYTES
         && let Ok(value) = serde_json::from_str::<Value>(unterminated)
     {
-        lines.push(Line::Entry(value));
+        lines.push(Line::Entry {
+            text: unterminated,
+            chain: chain_fields(&value),
+        });
     }
 
     let entries: Vec<&Value> = lines
         .iter()
         .filter_map(|line| match line {
-            Line::Entry(value) => Some(value),
+            Line::Entry { chain, .. } => Some(chain),
             Line::Failed(_) => None,
         })
         .collect();
@@ -100,19 +111,28 @@ pub fn project_record(record: &str) -> Vec<RecordEvent> {
     for line in lines {
         match line {
             Line::Failed(events) => out.extend(events),
-            Line::Entry(value) => {
+            Line::Entry {
+                text,
+                chain: fields,
+            } => {
                 // An entry on another branch, or a subagent's, is not part of
                 // the conversation (PROTO-CLAUDE-CODE-STREAM-R20). Entries
                 // without an id (titles) are let through; they yield nothing.
-                let off_branch = match (&chain, uuid(&value)) {
+                let off_branch = match (&chain, uuid(&fields)) {
                     (Some(chain), Some(id)) => !chain.contains(id),
                     // In file order, still only the main thread's entries.
-                    (None, _) => !is_main_thread(&value),
+                    (None, _) => !is_main_thread(&fields),
                     (Some(_), None) => false,
                 };
                 // An entry written twice (a resume can repeat one) counts once.
-                let repeated = uuid(&value).is_some_and(|id| !projected_ids.insert(id.to_string()));
-                if !off_branch && !repeated {
+                let repeated =
+                    uuid(&fields).is_some_and(|id| !projected_ids.insert(id.to_string()));
+                // Read whole again only now, one entry at a time. It parsed in
+                // the first pass, so it parses here.
+                if !off_branch
+                    && !repeated
+                    && let Ok(value) = serde_json::from_str::<Value>(text)
+                {
                     out.extend(projector.project(value));
                 }
             }
@@ -129,10 +149,35 @@ fn is_main_thread(value: &Value) -> bool {
         && value.get("type").and_then(Value::as_str) != Some("progress")
 }
 
-enum Line {
-    Entry(Value),
+enum Line<'a> {
+    Entry {
+        /// The entry's text, read again to project it.
+        text: &'a str,
+        /// Only the fields the conversation's chain reads.
+        chain: Value,
+    },
     /// The events already reported for a line that could not be read.
     Failed(Vec<RecordEvent>),
+}
+
+/// The fields of an entry the conversation's chain and the main-thread test
+/// read; everything else (the message, often the bulk of the line) is left
+/// in the text until the entry is projected.
+fn chain_fields(value: &Value) -> Value {
+    let mut kept = serde_json::Map::new();
+    for key in [
+        "uuid",
+        "parentUuid",
+        "logicalParentUuid",
+        "isSidechain",
+        "teamName",
+        "type",
+    ] {
+        if let Some(field) = value.get(key) {
+            kept.insert(key.to_string(), field.clone());
+        }
+    }
+    Value::Object(kept)
 }
 
 fn uuid(value: &Value) -> Option<&str> {

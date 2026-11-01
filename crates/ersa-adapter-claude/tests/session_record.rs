@@ -846,3 +846,66 @@ fn a_session_with_no_record_has_no_history_and_a_bad_id_is_refused() {
     let refused = read_record(home.path(), "C:/work", "../../secrets").unwrap_err();
     assert_eq!(refused.kind(), std::io::ErrorKind::InvalidInput);
 }
+
+/// The merge key against the real CLI: every message event the projector
+/// tags on a recorded stream carries a `uuid` the session record of the same
+/// run gives a message with the same events, so Core can match them
+/// (PROTO-AGENT-EVENTS-R12). The record may hold more: a resumed session's
+/// record keeps the earlier run's messages too.
+// verifies: PROTO-AGENT-EVENTS-R12
+#[test]
+fn live_message_ids_are_the_record_uuids_of_the_same_messages() {
+    let records = record_fixtures();
+    let mut matched = 0;
+    for stream in fixtures() {
+        let Some(record) = records.iter().find(|r| r.name == stream.name) else {
+            continue;
+        };
+        let mut projector = ClaudeProjector::new();
+        let live: BTreeSet<String> = stream
+            .raw_log()
+            .iter()
+            .flat_map(|line| projector.project(line))
+            .filter(|p| {
+                matches!(
+                    p.event,
+                    Event::AssistantText(AssistantText { is_final: true, .. })
+                        | Event::ToolRequested(_)
+                        | Event::ToolResult(_)
+                )
+            })
+            .filter_map(|p| p.message_id)
+            .collect();
+        let recorded: BTreeSet<String> = project_record(&record.text)
+            .into_iter()
+            .filter(|e| {
+                matches!(
+                    e.event,
+                    Event::AssistantText(_) | Event::ToolRequested(_) | Event::ToolResult(_)
+                )
+            })
+            .filter_map(|e| e.message_id)
+            .collect();
+        // Entries the fixture trimmed (a local command's output) keep their
+        // uuid but nothing to project.
+        let elided: BTreeSet<String> = record
+            .text
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|e| e["ersa_elided"] == true)
+            .filter_map(|e| e["uuid"].as_str().map(String::from))
+            .collect();
+        assert!(
+            !live.is_empty(),
+            "{}: no message ids on the stream",
+            stream.name
+        );
+        let unmatched: Vec<&String> = live
+            .iter()
+            .filter(|id| !recorded.contains(*id) && !elided.contains(*id))
+            .collect();
+        assert!(unmatched.is_empty(), "{}: {unmatched:?}", stream.name);
+        matched += 1;
+    }
+    assert!(matched > 0, "no stream fixture has a record beside it");
+}
