@@ -5,8 +5,11 @@
 //
 // Runs the CLI in print mode with stream-json output, every behaviour-affecting
 // flag passed explicitly, in an empty scratch directory, and writes:
-//   docs/briefs/protocol/fixtures/claude-code/<version>/<NN>-<name>.jsonl   raw stdout, verbatim
+//   docs/briefs/protocol/fixtures/claude-code/<version>/<NN>-<name>.jsonl   raw stdout, redacted
 //   docs/briefs/protocol/fixtures/claude-code/<version>/<NN>-<name>.meta.json  command line, exit code, stderr, timings
+//
+// Both files pass through redact() (scripts/redact.mjs) before they are written:
+// account email, organization and home-directory paths become placeholders.
 //
 // Set ERSA_CLAUDE to the claude executable if it is not on PATH.
 // Fixtures are the evidence behind PROTO-CLAUDE-CODE-STREAM; never hand-edit them.
@@ -16,6 +19,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { redact } from "./redact.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const CLAUDE = process.env.ERSA_CLAUDE || "claude";
@@ -58,10 +63,10 @@ const started = Date.now();
 const res = spawnSync(CLAUDE, args, { cwd, encoding: "utf8", input: "", maxBuffer: 64 * 1024 * 1024, timeout: 180_000 });
 const elapsed_ms = Date.now() - started;
 
-writeFileSync(join(dir, stem + ".jsonl"), res.stdout ?? "");
+writeFileSync(join(dir, stem + ".jsonl"), redact(res.stdout ?? ""));
 writeFileSync(
   join(dir, stem + ".meta.json"),
-  JSON.stringify(
+  redact(JSON.stringify(
     {
       recorded_at: new Date(started).toISOString(),
       claude_code_version: version,
@@ -76,7 +81,7 @@ writeFileSync(
     },
     null,
     2
-  ) + "\n"
+  ) + "\n")
 );
 
 console.log(`recorded ${stem} (${version}): exit ${res.status}, ${(res.stdout ?? "").split(/\r?\n/).filter(Boolean).length} lines, ${elapsed_ms} ms`);
