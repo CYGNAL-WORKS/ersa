@@ -85,7 +85,7 @@ One per backend, behind one interface: start a session on a transport with a con
 
 ## Cross-cutting concerns
 
-- **Persistence**: SQLite in the user's application data directory. Raw log lines are append-only. Projection cache is keyed by session, event schema version, and the adapter's projection version. Schema migrations run at startup.
+- **Persistence**: SQLite in the user's application data directory. Raw log lines are append-only. One line from a backend is capped at 64 MiB; a process that writes past it is killed with its tree and the session ends with a `backend_exited` error. Bytes that are not valid UTF-8 are stored with replacement characters. Projection cache is keyed by session, event schema version, and the adapter's projection version. Schema migrations run at startup.
 - **Errors**: every failure the user could act on appears as an event in the session's projection and, where relevant, as a rail state. Internal errors use structured tracing and are never swallowed.
 - **Security**: no model credentials. Remote connections use the user's own SSH client and configuration. The harness tools server listens on a local per-launch socket; the per-session token identifies the caller and is advisory, since all local sessions share the OS user.
 - **Configuration**: user settings in the database; project-level configuration in the project's own files where the backend expects it (packs render there).
@@ -144,6 +144,8 @@ Verified by review at this level; testable requirements live in the protocol bri
 - Which local-inference harness to support first.
 
 ## Changes
+
+- 2026-11-01: backend line cap and non-UTF-8 handling stated (from M0-T6). No requirement IDs changed.
 
 - 2026-11-01: raw log includes Core lifecycle records; projection cache key spelled out. No requirement IDs changed.
 
