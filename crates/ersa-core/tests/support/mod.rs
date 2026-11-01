@@ -39,16 +39,16 @@ pub struct TestCore {
     pub task: JoinHandle<io::Result<()>>,
 }
 
-/// A unique endpoint per test: the platform default plus the process id and
-/// a counter, so parallel tests and a real Core never collide.
+/// A unique endpoint per test, labelled with the process id and a counter,
+/// so parallel tests and a real Core never collide.
 pub fn unique_endpoint() -> String {
     static NEXT: AtomicU32 = AtomicU32::new(0);
-    format!(
-        "{}-test-{}-{}",
-        platform::default_endpoint().expect("endpoint"),
+    platform::labelled_endpoint(&format!(
+        "test-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
-    )
+    ))
+    .expect("endpoint")
 }
 
 pub fn test_config(data_dir: &Path, endpoint: &str) -> CoreConfig {

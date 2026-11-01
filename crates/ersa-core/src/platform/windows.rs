@@ -56,6 +56,14 @@ pub fn default_endpoint() -> io::Result<String> {
     Ok(format!(r"\\.\pipe\ersa-core-{}", current_user_sid()?))
 }
 
+/// `\\.\pipe\ersa-core-<user SID>-<label>`: an endpoint of this user's that
+/// is not the default, for tests and a second Core. See
+/// [`super::check_label`] for what `label` may hold.
+pub fn labelled_endpoint(label: &str) -> io::Result<String> {
+    super::check_label(label)?;
+    Ok(format!("{}-{label}", default_endpoint()?))
+}
+
 /// `%LOCALAPPDATA%\Ersa`. Local rather than roaming app data, because the
 /// database holds paths and raw logs specific to this machine.
 pub fn default_data_dir() -> Option<PathBuf> {

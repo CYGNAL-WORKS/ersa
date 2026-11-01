@@ -9,7 +9,7 @@ mod support;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 
-use ersa_core::platform::{Listener, default_endpoint, path_key};
+use ersa_core::platform::{Listener, default_endpoint, labelled_endpoint, path_key};
 
 fn mode(path: &Path) -> u32 {
     std::fs::metadata(path).expect("metadata").mode() & 0o777
@@ -32,6 +32,15 @@ fn the_endpoint_is_in_the_runtime_dir_or_a_per_user_dir() {
             assert!(dir.starts_with("ersa-core-"), "{endpoint}");
         }
     }
+}
+
+#[test]
+fn a_labelled_endpoint_is_beside_the_default_socket() {
+    let default = default_endpoint().expect("endpoint");
+    let endpoint = labelled_endpoint("second").expect("endpoint");
+    let path = Path::new(&endpoint);
+    assert_eq!(path.parent(), Path::new(&default).parent());
+    assert_eq!(path.file_name().unwrap(), "ersa-core-second.sock");
 }
 
 #[tokio::test(flavor = "multi_thread")]

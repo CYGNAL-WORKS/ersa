@@ -8,5 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-10-31 PROTO-CORE-API: a Windows pipe name has no per-process override (Unix has `XDG_RUNTIME_DIR`), so the test of a Core on an explicit endpoint beside one on the default stands in a second labelled endpoint for the default on Windows, rather than touch the user's own pipe; say whether that suffices or whether Core should honour an endpoint override from the environment.
 
 ## Resolved recently (optional, trimmed in planning passes)
