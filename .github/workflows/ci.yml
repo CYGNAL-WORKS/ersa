@@ -243,7 +243,10 @@ jobs:
     name: Build, lint, test (Windows)
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    runs-on: windows-latest
+    # The owner's own Windows machine, registered as a self-hosted runner:
+    # faster with a warm cache, and no hosted Windows minutes. The job waits
+    # while that machine is offline. Bash steps need Git Bash on its PATH.
+    runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
