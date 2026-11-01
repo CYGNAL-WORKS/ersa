@@ -67,6 +67,7 @@ export function App({ client }: { client: CoreClient }) {
 
   const [starting, setStarting] = useState<Record<string, Sending>>({});
   const [trusting, setTrusting] = useState<Record<string, Sending>>({});
+  const [trustNotes, setTrustNotes] = useState<Record<string, string>>({});
   const [adding, setAdding] = useState<Sending>();
 
   useEffect(() => {
@@ -144,10 +145,21 @@ export function App({ client }: { client: CoreClient }) {
 
   const setTrust = async (project: Project, trusted: boolean) => {
     setTrusting((s) => ({ ...s, [project.id]: { state: "sending" } }));
+    setTrustNotes(({ [project.id]: _, ...rest }) => rest);
     try {
       await client.call("project.set_trust", { id: project.id, trusted });
       setTrusting(({ [project.id]: _, ...rest }) => rest);
       connection.current?.reload("projects");
+      // Trust is read when a session starts, so withdrawing it leaves running sessions as they are; say so.
+      if (!trusted && sessions.state === "ready") {
+        // Best effort: trust is already withdrawn, so a failed lookup only leaves the note out.
+        const listed = await client.call("workspace.list", { project_id: project.id }).catch(() => []);
+        const workspaces = new Set(listed.map((w) => w.id));
+        const running = sessions.sessions.some((s) => workspaces.has(s.workspace_id) && s.state !== "ended" && s.state !== "error");
+        if (running) {
+          setTrustNotes((n) => ({ ...n, [project.id]: "Running sessions keep their current settings until they are stopped." }));
+        }
+      }
     } catch (error) {
       setTrusting((s) => ({ ...s, [project.id]: { state: "failed", message: describeError(error) } }));
     }
@@ -164,7 +176,7 @@ export function App({ client }: { client: CoreClient }) {
       <nav className="rail" aria-label="Rail">
         <div className="rail-lists">
           <ErrorBoundary what="The projects" resetKey={projectsVersion}>
-            <ProjectList view={projects} onNewSession={newSession} starting={starting} onSetTrust={setTrust} trusting={trusting}>
+            <ProjectList view={projects} onNewSession={newSession} starting={starting} onSetTrust={setTrust} trusting={trusting} notes={trustNotes}>
               {view.phase === "connected" && <AddProject onAdd={addProject} adding={adding} />}
             </ProjectList>
           </ErrorBoundary>
