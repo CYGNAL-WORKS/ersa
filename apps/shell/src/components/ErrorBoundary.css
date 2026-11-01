@@ -1,0 +1,5 @@
+/* A part of the window that could not be shown: its message sits where the part would, with pane padding. */
+.error-boundary {
+  padding: var(--space-lg);
+  align-self: start;
+}

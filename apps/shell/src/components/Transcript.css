@@ -151,10 +151,10 @@
   overflow: auto;
 }
 
-/* A character that would otherwise be invisible, shown as its code point and set apart in caution. */
+/* A character that would otherwise be invisible, shown as its code point in ink, set apart by a caution edge. */
 .transcript-hidden {
   padding: 0 var(--space-xs);
-  color: var(--color-caution);
+  color: var(--color-ink);
   border: var(--line-hairline) solid var(--color-caution);
   border-radius: var(--radius-sm);
 }

@@ -63,6 +63,18 @@ export function eventProblem(envelope: unknown): string | undefined {
   return bad ? `${event.type} has an unreadable ${bad[0]}` : undefined;
 }
 
+/** Whether Core's handshake has what the window reads from it: its version and the host's id and name. */
+export function helloReadable(value: unknown): boolean {
+  return (
+    isObject(value) &&
+    isString(value.core_version) &&
+    isNumber(value.api_version) &&
+    isObject(value.host) &&
+    isString(value.host.id) &&
+    isString(value.host.name)
+  );
+}
+
 /** A tile as the rail can show it: fields of the wrong kind are dropped, as if Core had not sent them. */
 export function checkTile(value: unknown): Tile {
   const tile = isObject(value) ? value : {};

@@ -45,16 +45,17 @@
   border-color: var(--color-accent);
 }
 
+/* The edge strengthens from hover to pressed, as the quiet button's does. */
 .button[data-variant="primary"]:hover:not(:disabled),
 .button[data-variant="primary"][data-force="hover"] {
   background: var(--color-accent);
-  border-color: var(--color-ink);
+  border-color: var(--color-ink-muted);
 }
 
 .button[data-variant="primary"]:active:not(:disabled),
 .button[data-variant="primary"][data-force="pressed"] {
   background: var(--color-accent);
-  border-color: var(--color-ink-muted);
+  border-color: var(--color-ink);
 }
 
 /* Focus on a filled button: a hairline ring outside its edge, in the accent. */

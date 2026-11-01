@@ -40,6 +40,13 @@ function sessionsOf(view: CoreView): SessionsView {
   }
 }
 
+/** A number that changes whenever `value` is a new object: a key that resets an error boundary on new data. */
+function useVersion(value: unknown): string {
+  const seen = useRef({ value, version: 0 });
+  if (seen.current.value !== value) seen.current = { value, version: seen.current.version + 1 };
+  return String(seen.current.version);
+}
+
 export function App({ client }: { client: CoreClient }) {
   const [view, setView] = useState<CoreView>({ phase: "connecting" });
   // Bumped to attach again; the effect below reconnects on each change.
@@ -91,6 +98,12 @@ export function App({ client }: { client: CoreClient }) {
     else follower.current?.detached();
   }, [link, activeId]);
 
+  // Each list's error boundary tries again whenever the list changes.
+  const projects = projectsOf(view);
+  const projectsVersion = useVersion(projects);
+  const sessionsVersion = useVersion(sessions);
+  const retrySubscribe = useCallback(() => follower.current?.attached(), []);
+
   // Stable, so the transcript's memoised blocks do not re-render for it.
   const decide = useCallback((requestId: string, behavior: "allow" | "deny") => follower.current?.decide(requestId, behavior), []);
 
@@ -131,14 +144,18 @@ export function App({ client }: { client: CoreClient }) {
     <div className="app">
       <nav className="rail" aria-label="Rail">
         <div className="rail-lists">
-          <ErrorBoundary what="The rail's lists">
-            <ProjectList view={projectsOf(view)} onNewSession={newSession} starting={starting}>
+          <ErrorBoundary what="The projects" resetKey={projectsVersion}>
+            <ProjectList view={projects} onNewSession={newSession} starting={starting}>
               {view.phase === "connected" && <AddProject onAdd={addProject} adding={adding} />}
             </ProjectList>
+          </ErrorBoundary>
+          <ErrorBoundary what="The sessions" resetKey={sessionsVersion}>
             <SessionList view={sessions} activeId={activeId} onSelect={setActiveId} />
           </ErrorBoundary>
         </div>
-        <CoreStatus view={view} onRetry={retry} />
+        <ErrorBoundary what="Core's status" resetKey={view.phase}>
+          <CoreStatus view={view} onRetry={retry} />
+        </ErrorBoundary>
       </nav>
       {shown ? (
         <main className="stage">
@@ -148,14 +165,15 @@ export function App({ client }: { client: CoreClient }) {
               title={(activeId && titles.current[activeId]) || "Untitled session"}
               view={shown}
               onDecide={decide}
+              onRetry={retrySubscribe}
+            />
+            <Composer
+              key={shown.id}
+              unavailable={view.phase === "connected" ? undefined : "Core is not connected."}
+              sending={shown.message}
+              onSend={(text) => follower.current?.send(text) ?? Promise.resolve(false)}
             />
           </ErrorBoundary>
-          <Composer
-            key={shown.id}
-            unavailable={view.phase === "connected" ? undefined : "Core is not connected."}
-            sending={shown.message}
-            onSend={(text) => follower.current?.send(text) ?? Promise.resolve(false)}
-          />
         </main>
       ) : (
         <main className="stage stage-empty">No session open. Start one from a project in the rail.</main>

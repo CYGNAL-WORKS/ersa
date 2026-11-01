@@ -36,9 +36,17 @@
   background: var(--color-canvas);
 }
 
-/* The button keeps its width when its label becomes "Adding…", so nothing beside it moves. */
-.add-project .button {
-  min-width: calc(var(--space-xxl) * 2);
+.add-project-label {
+  display: inline-grid;
+}
+
+.add-project-label > span {
+  grid-area: 1 / 1;
+  text-align: center;
+}
+
+.add-project-label > span:not([data-shown]) {
+  visibility: hidden;
 }
 
 .add-project-problem {

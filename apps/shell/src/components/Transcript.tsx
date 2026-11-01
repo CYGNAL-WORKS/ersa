@@ -13,10 +13,12 @@ interface TranscriptProps {
   view: SessionView;
   /** Kept stable across renders, so streaming text does not re-render every block. */
   onDecide: Decide;
+  /** Subscribes again after subscribing failed. */
+  onRetry?: () => void;
 }
 
 /** The active session as a document: the user's and the agent's words, tool cards, and permission requests to answer. */
-export function Transcript({ title, view, onDecide }: TranscriptProps) {
+export function Transcript({ title, view, onDecide, onRetry }: TranscriptProps) {
   const { transcript, stream, answers } = view;
   const scroller = useRef<HTMLDivElement>(null);
   // Whether the reader is at the end; new content keeps them there, and
@@ -37,7 +39,9 @@ export function Transcript({ title, view, onDecide }: TranscriptProps) {
   const awaiting = new Set(
     transcript.items.flatMap((i) => (i.kind === "permission" && isOpen(i) ? [i.request.tool_use_id] : [])),
   );
-  const live = stream.state === "live";
+  // Answers go to Core whenever the window is connected, whether or not the
+  // event subscription is up: a failed subscribe must not strand a request.
+  const live = stream.state !== "offline";
 
   return (
     <section className="transcript" aria-label="Transcript">
@@ -50,9 +54,12 @@ export function Transcript({ title, view, onDecide }: TranscriptProps) {
       <div className="transcript-scroll" ref={scroller} onScroll={onScroll}>
         <div className="transcript-page">
           {stream.state === "failed" && (
-            <p className="problem" role="alert">
-              Not receiving this session's events: {stream.message}
-            </p>
+            <div className="transcript-actions">
+              <p className="problem" role="alert">
+                Not receiving this session's events: {stream.message}
+              </p>
+              {onRetry && <Button onClick={onRetry}>Retry</Button>}
+            </div>
           )}
           {stream.state === "offline" && <p className="transcript-note">Reconnecting to Core…</p>}
           {transcript.items.length === 0 && (stream.state === "subscribing" || stream.state === "live") && (
@@ -121,7 +128,7 @@ const Block = memo(function Block({ item, answer, waiting, live, onDecide }: Blo
           <span className="transcript-card-title">{item.answered ? "Question, answered" : "Question"}</span>
           {item.questions.map((q) => (
             <p key={q.id} className="transcript-card-detail">
-              {q.text}
+              <Revealed text={q.text} />
             </p>
           ))}
         </div>
@@ -159,12 +166,14 @@ function ToolCard({ item, waiting }: { item: Extract<Item, { kind: "tool" }>; wa
   ) : waiting ? (
     <Status tone="attention">Waiting for you</Status>
   ) : (
-    <Status tone="pending">{item.progress ?? "Running…"}</Status>
+    <Status tone="pending">{item.progress === undefined ? "Running…" : <Revealed text={item.progress} />}</Status>
   );
   return (
     <div className="transcript-card">
       <div className="transcript-card-head">
-        <span className="transcript-card-title">{item.name}</span>
+        <span className="transcript-card-title">
+          <Revealed text={item.name} />
+        </span>
         {status}
       </div>
       <code className="transcript-input mono">
@@ -209,8 +218,10 @@ function PermissionCard({
             </span>
           )}
         </span>
-        {decision && <span className="transcript-card-status">{decisionText(decision.behavior, decision.decided_by)}</span>}
-        {item.unanswered && <span className="transcript-card-status">Not answered</span>}
+        {decision && (
+          <Status tone={decision.behavior === "allow" ? "positive" : undefined}>{decisionText(decision.behavior, decision.decided_by)}</Status>
+        )}
+        {item.unanswered && <Status>Not answered</Status>}
       </div>
       {request.description && (
         <p className="transcript-card-detail">
@@ -247,8 +258,8 @@ function PermissionCard({
           <Button onClick={() => onDecide(request.request_id, "deny")} disabled={sending || !live}>
             Deny
           </Button>
-          {sending && <span className="transcript-card-status">Sending…</span>}
-          {!sending && !live && <span className="transcript-card-status">Answer once Core is connected</span>}
+          {sending && <Status tone="pending">Sending…</Status>}
+          {!sending && !live && <Status tone="attention">Answer once Core is connected</Status>}
         </div>
       )}
       {open && answer?.state === "failed" && (
@@ -262,18 +273,38 @@ function PermissionCard({
 
 /**
  * Characters that change what text appears to say without showing
- * themselves: controls (other than tab and newline), bidirectional overrides
- * and isolates, and zero-width characters. An agent could use them to make
- * a command read as something else.
+ * themselves: controls (other than tab, newline, and a carriage return
+ * before a newline), bidirectional marks, overrides and isolates, line and
+ * paragraph separators, zero-width, blank and filler characters, variation
+ * selectors, and the tag characters used to smuggle text past a reader. An
+ * agent could use them to make a command read as something else.
  */
-const HIDDEN = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F؜​-‏‪-‮⁠-⁤⁦-⁩﻿]/g;
+const HIDDEN =
+  /\r(?!\n)|[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u2028-\u202E\u2060-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
+
+/** Past this many, hidden characters are counted rather than each marked, so a flood of them cannot stall the window. */
+const MARKED = 64;
 
 /** `text` with every hidden character shown as a marked code point, so what the user reads is what the agent sent. */
 export function Revealed({ text }: { text: string }) {
   const parts: ReactNode[] = [];
   let last = 0;
+  let marked = 0;
   for (const match of text.matchAll(HIDDEN)) {
     const at = match.index;
+    if (marked === MARKED) {
+      // The rest without its hidden characters, and how many there were.
+      const rest = text.slice(last);
+      const more = [...rest.matchAll(HIDDEN)].length;
+      parts.push(
+        rest.replace(HIDDEN, ""),
+        <span key="more" className="transcript-hidden" title="Invisible characters">
+          {more} more invisible characters
+        </span>,
+      );
+      return <>{parts}</>;
+    }
+    marked++;
     if (at > last) parts.push(text.slice(last, at));
     const code = (match[0].codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0");
     parts.push(

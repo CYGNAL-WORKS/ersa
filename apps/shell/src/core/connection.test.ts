@@ -186,6 +186,12 @@ describe("connect", () => {
     expect(last?.phase === "connected" && last.sessions).toEqual({ state: "ready", sessions: [session] });
   });
 
+  it("fails, rather than breaking the window, on a handshake it cannot read", async () => {
+    const { client } = fakeClient(answering, [() => Promise.resolve({ how: "attached", hello: { core_version: "9" } as unknown as CoreHelloResult })]);
+    const seen = await views(client);
+    expect(seen.at(-1)).toMatchObject({ phase: "failed" });
+  });
+
   it("numbers each connection, so subscriptions know to start again", async () => {
     vi.useFakeTimers();
     const { client, drop } = fakeClient(answering);

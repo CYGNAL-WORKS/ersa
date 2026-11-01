@@ -155,6 +155,33 @@ describe("follow", () => {
     expect(last().stream).toEqual({ state: "live" });
   });
 
+  it("survives an envelope without an event: a notice in its place, and the next event applies", () => {
+    const { follower, last } = following();
+    const broken = { v: 1, session_id: "s-replay", seq: 0 } as unknown as (typeof replay)[number];
+    follower.receive(broken);
+    follower.receive(null as unknown as (typeof replay)[number]);
+    follower.receive({ ...(replay[1] as (typeof replay)[number]) });
+    expect(last().transcript.lastSeq).toBe(1);
+    expect(last().transcript.items[0]).toMatchObject({ kind: "notice" });
+  });
+
+  it("stops subscribing once stopped, even when Core's history is shorter", async () => {
+    const { follower, calls } = following({ "session.subscribe": () => Promise.resolve({ last_seq: 3 }), "session.unsubscribe": () => Promise.resolve({}) });
+    for (const event of replay.slice(0, 10)) follower.receive(event);
+    follower.attached();
+    follower.stop();
+    await settle();
+    await settle();
+    expect(calls.filter((c) => c.method === "session.subscribe")).toHaveLength(1);
+  });
+
+  it("goes live on a subscribe answer it cannot read, rather than waiting for ever", async () => {
+    const { follower, last } = following({ "session.subscribe": () => Promise.resolve(null) });
+    follower.attached();
+    await settle();
+    expect(last().stream).toEqual({ state: "live" });
+  });
+
   it("unsubscribes when stopped, and reports nothing after", () => {
     const { follower, calls, seen } = following({ "session.unsubscribe": () => Promise.resolve({}) });
     const before = seen.length;

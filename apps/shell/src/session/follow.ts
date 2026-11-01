@@ -5,6 +5,7 @@
 // or an answer appears once Core records it, never before.
 
 import type { Envelope } from "../protocol/agent-events.gen";
+import { hasSeq } from "../core/checks";
 import { type CoreClient, describeError } from "../core/client";
 import { type Transcript, apply, emptyTranscript } from "./transcript";
 
@@ -67,6 +68,7 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
 
   /** Subscribes on the current connection from after the last event applied. */
   const attached = () => {
+    if (stopped) return;
     const mine = ++generation;
     set((v) => ({ ...v, stream: { state: "subscribing" } }));
     // Every event after the last one applied; events Core sends again
@@ -75,11 +77,14 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
     const from = view.transcript.lastSeq + 1;
     client.call("session.subscribe", { id, from_seq: from }).then(
       (result) => {
-        if (mine !== generation) return;
+        if (stopped || mine !== generation) return;
         // Core's history is shorter than what is shown (a replay restarted
         // on the same endpoint, a reprojected session): what is shown is not
         // this session's any more. Start again from the beginning.
-        const last = result.last_seq ?? -1;
+        // An answer without a readable `last_seq` is taken at its word that
+        // nothing was lost; one that is not even an object reads the same.
+        const raw = (result as { last_seq?: unknown } | null)?.last_seq;
+        const last = raw === undefined ? -1 : typeof raw === "number" && Number.isInteger(raw) && raw >= 0 ? raw : from - 1;
         if (last < from - 1) {
           set((v) => ({ ...v, transcript: emptyTranscript, answers: {} }));
           resumedAt = undefined;
@@ -96,7 +101,7 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
 
   return {
     receive(envelope) {
-      if (envelope.session_id !== id) return;
+      if (!hasSeq(envelope) || (envelope as { session_id?: unknown }).session_id !== id) return;
       const { lastSeq } = view.transcript;
       // An event beyond the next on a live subscription means one was lost on
       // the way (Core's sequence is gap-free): subscribe again from the gap.
@@ -111,9 +116,10 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         const transcript = apply(v.transcript, envelope);
         if (transcript === v.transcript) return v;
         // A decision that arrived settles the answer that was on its way.
-        const event = envelope.event;
+        // `apply` has checked the event; one it could not read has no type here.
+        const event = (envelope as { event?: unknown }).event as Envelope["event"] | undefined;
         const answers =
-          event.type === "permission.decided" && event.request_id in v.answers
+          event?.type === "permission.decided" && event.request_id in v.answers
             ? Object.fromEntries(Object.entries(v.answers).filter(([key]) => key !== event.request_id))
             : v.answers;
         return { ...v, transcript, answers };
