@@ -40,27 +40,34 @@ pub fn unique_endpoint() -> String {
     static NEXT: AtomicU32 = AtomicU32::new(0);
     format!(
         "{}-test-{}-{}",
-        platform::default_endpoint(),
+        platform::default_endpoint().expect("endpoint"),
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     )
 }
 
 pub fn test_config(data_dir: &Path, endpoint: &str) -> CoreConfig {
-    CoreConfig {
-        data_dir: data_dir.to_path_buf(),
-        endpoint: endpoint.to_string(),
-        backend_program_override: Some(NO_SUCH_BACKEND.to_string()),
-    }
+    let mut config = CoreConfig::new(data_dir.to_path_buf()).expect("config");
+    config.endpoint = endpoint.to_string();
+    config.backend_program_override = Some(NO_SUCH_BACKEND.to_string());
+    config
 }
 
 /// Starts a Core in a temporary data directory.
 pub async fn start() -> TestCore {
-    let dir = tempfile::tempdir().expect("temp dir");
+    start_with(tempfile::tempdir().expect("temp dir"), |_| {}).await
+}
+
+/// Starts a Core whose data directory is `dir/data`, with `configure`
+/// applied to its configuration.
+pub async fn start_with(
+    dir: tempfile::TempDir,
+    configure: impl FnOnce(&mut CoreConfig),
+) -> TestCore {
     let endpoint = unique_endpoint();
-    let server = Server::bind(test_config(&dir.path().join("data"), &endpoint))
-        .await
-        .expect("bind");
+    let mut config = test_config(&dir.path().join("data"), &endpoint);
+    configure(&mut config);
+    let server = Server::bind(config).await.expect("bind");
     let task = tokio::spawn(server.run());
     TestCore {
         dir,
@@ -109,11 +116,15 @@ impl Client {
 
     /// Sends one line as is.
     pub async fn send_line(&mut self, line: &str) {
-        self.write
-            .write_all(format!("{line}\n").as_bytes())
-            .await
-            .expect("write");
-        self.write.flush().await.expect("flush");
+        self.send_bytes(format!("{line}\n").as_bytes()).await;
+    }
+
+    /// Sends raw bytes, which need not be a line or even text.
+    pub async fn send_bytes(&mut self, bytes: &[u8]) {
+        // Core may close the connection partway through a large write.
+        if self.write.write_all(bytes).await.is_ok() {
+            self.write.flush().await.ok();
+        }
     }
 
     /// The next line from Core, or `None` once Core has closed the connection.
