@@ -17,9 +17,8 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-// Raw values a token should supply. A hairline border is the one exception:
-// DESIGN.md has no token for line width (an inbox entry proposes one), so
-// `1px` passes in a `border*` declaration and nowhere else.
+// Raw values a token should supply, with no exceptions: line widths and
+// layout widths have tokens too.
 const RAW = [
   { what: "a hex colour", pattern: /#[0-9a-f]{3,8}\b/gi },
   { what: "a colour function", pattern: /\b(rgba?|hsla?|oklch|lab|lch|color-mix)\(/gi },
@@ -35,13 +34,7 @@ const RAW = [
 // the font files, not the interface.
 const FONT_FILES = join("theme", "fonts.css");
 
-/** The CSS property a line declares, if it declares one. */
-const propertyOf = (line: string) => line.match(/^\s*([a-z-]+)\s*:/)?.[1] ?? "";
-
-const allowed = (match: string, line: string) => match === "1px" && propertyOf(line).startsWith("border");
-
-const flagged = (line: string) =>
-  RAW.flatMap(({ pattern }) => [...line.matchAll(pattern)].map((m) => m[0])).filter((m) => !allowed(m, line));
+const flagged = (line: string) => RAW.flatMap(({ pattern }) => [...line.matchAll(pattern)].map((m) => m[0]));
 
 describe("interface source", () => {
   it("uses tokens for every colour, size, radius, weight and duration", () => {
@@ -59,9 +52,9 @@ describe("interface source", () => {
 });
 
 describe("the raw-value check", () => {
-  it("allows a hairline only on borders", () => {
-    expect(flagged("  border: 1px solid var(--color-line);")).toEqual([]);
-    expect(flagged("  border-right: 1px solid var(--color-line);")).toEqual([]);
+  it("has no hairline exception", () => {
+    expect(flagged("  border: 1px solid var(--color-line);")).toEqual(["1px"]);
+    expect(flagged("  border: var(--line-hairline) solid var(--color-line);")).toEqual([]);
     expect(flagged("  outline-offset: 1px;")).toEqual(["1px"]);
     expect(flagged("  box-shadow: 0 0 0 1px var(--color-line);")).toEqual(["1px"]);
   });

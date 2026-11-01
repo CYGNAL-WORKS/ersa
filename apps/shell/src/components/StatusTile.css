@@ -8,7 +8,7 @@
   row-gap: var(--space-xs);
   align-items: baseline;
   background: var(--color-surface);
-  border: 1px solid var(--color-line);
+  border: var(--line-hairline) solid var(--color-line);
   border-radius: var(--radius-md);
   padding: var(--space-md);
 }
@@ -33,7 +33,7 @@
 .tile[data-tone="pending"] .tile-glyph {
   box-sizing: border-box;
   background: transparent;
-  border: 1px solid var(--color-ink-muted);
+  border: var(--line-hairline) solid var(--color-ink-muted);
 }
 
 .tile-title {
