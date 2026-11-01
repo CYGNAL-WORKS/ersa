@@ -13,6 +13,7 @@ use serde_json::Value;
 
 use super::{ApiError, ConnectionState};
 use crate::persistence::{self, LOCAL_HOST_ID};
+use crate::sessions::Kick;
 use crate::state::Core;
 
 /// The most raw lines one `session.raw_log` call returns, and the most bytes
@@ -250,19 +251,16 @@ pub(super) async fn raw_log(
         .collect())
 }
 
-/// Re-derives a stopped session's events. When they changed, this
-/// connection's own subscription to the session ends quietly (it is not
-/// closed, as other subscribers' connections are), so the client
-/// resubscribes after reading this answer.
+/// Re-derives a stopped session's events. When they changed, the caller's
+/// own subscription to the session ends quietly (its connection, `kick`'s,
+/// is not closed, as other subscribers' are), so the client resubscribes
+/// after reading this answer.
 pub(super) async fn reproject(
     core: &Core,
-    conn: &mut ConnectionState,
+    kick: &Kick,
     params: IdParams,
 ) -> Result<Session, ApiError> {
     find(core, &params.id).await?;
-    let changed = core.sessions.reproject(&params.id, &conn.kick).await?;
-    if changed {
-        conn.subscriptions.remove(&params.id);
-    }
+    core.sessions.reproject(&params.id, kick).await?;
     find(core, &params.id).await
 }

@@ -246,7 +246,9 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         Method::SessionSubscribe => to_json(sessions::subscribe(core, conn, parse(params)?)),
         Method::SessionUnsubscribe => to_json(sessions::unsubscribe(conn, parse(params)?)),
         Method::SessionRawLog => to_json(sessions::raw_log(core, parse(params)?).await),
-        Method::SessionReproject => to_json(sessions::reproject(core, conn, parse(params)?).await),
+        Method::SessionReproject => {
+            to_json(sessions::reproject(core, &conn.kick, parse(params)?).await)
+        }
 
         // Handled above by `reserved_for`; listed so that adding a method
         // without deciding how to answer it is a compile error.
@@ -267,23 +269,49 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         .map_err(|e| (e, After::Continue))
 }
 
-/// Whether `request` is a session request that may wait on a backend (a
-/// start, a write to its stdin, a stop), which the server runs on its own
-/// rather than in line with the connection's other requests. Only after the
-/// handshake; never one that changes the connection itself.
+/// Whether `request` runs detached: a session request that acts on a
+/// session (and so may wait on its backend, or must keep its place behind
+/// one that does), which the server runs on its own rather than in line
+/// with the connection's other requests. Only after the handshake.
+///
+/// The ones that stay in line act on the connection itself (subscribe,
+/// unsubscribe) or only read (list, raw log); they never wait on a backend
+/// and never wait for the detached ones, so the connection keeps reading.
 pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
     conn.api_version.is_some()
         && matches!(
             Method::from_name(&request.method),
             Some(
                 Method::SessionCreate
+                    | Method::SessionStart
                     | Method::SessionStop
+                    | Method::SessionResume
                     | Method::SessionRemove
                     | Method::SessionSend
                     | Method::SessionInterrupt
                     | Method::SessionDecidePermission
+                    | Method::SessionAnswerQuestion
+                    | Method::SessionSetTitle
+                    | Method::SessionSetMode
+                    | Method::SessionReproject
             )
         )
+}
+
+/// When `request` is a `session.stop`, the session it stops. A stop is what
+/// ends a start that hangs or a backend that stopped reading, so it must
+/// not wait indefinitely behind requests stuck on either; the server starts
+/// it early when its lane does not drain.
+pub fn stop_target(request: &Request) -> Option<String> {
+    if request.method != Method::SessionStop.name() {
+        return None;
+    }
+    request
+        .params
+        .as_ref()?
+        .get("id")?
+        .as_str()
+        .map(String::from)
 }
 
 /// The session a request is about, when it names one: requests about the
@@ -302,8 +330,9 @@ pub fn session_lane(conn: &ConnectionState, request: &Request) -> Option<String>
         .map(String::from)
 }
 
-/// Answers a request [`runs_detached`] chose.
-pub async fn handle_detached(core: &Core, request: Request) -> Response {
+/// Answers a request [`runs_detached`] chose. `kick` is the requesting
+/// connection's, which a re-projection must not close.
+pub async fn handle_detached(core: &Core, request: Request, kick: &Kick) -> Response {
     let id = request.id.clone();
     let params = request.params;
     let result = match Method::from_name(&request.method) {
@@ -329,6 +358,30 @@ pub async fn handle_detached(core: &Core, request: Request) -> Response {
         },
         Some(Method::SessionDecidePermission) => match parse(params) {
             Ok(params) => to_json(sessions::decide_permission(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionStart) => match parse(params) {
+            Ok(params) => to_json(sessions::start(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionResume) => match parse(params) {
+            Ok(params) => to_json(sessions::resume(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionAnswerQuestion) => match parse(params) {
+            Ok(params) => to_json(sessions::answer_question(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionSetTitle) => match parse(params) {
+            Ok(params) => to_json(sessions::set_title(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionSetMode) => match parse(params) {
+            Ok(params) => to_json(sessions::set_mode(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionReproject) => match parse(params) {
+            Ok(params) => to_json(sessions::reproject(core, kick, params).await),
             Err((e, _)) => Err(e),
         },
         _ => unreachable!("runs_detached chose a session method"),

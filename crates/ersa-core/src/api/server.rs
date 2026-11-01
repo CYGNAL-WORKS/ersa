@@ -28,10 +28,19 @@ use crate::state::{Core, CoreConfig};
 /// other client.
 const OUTBOUND_QUEUE: usize = 256;
 
-/// How many session requests one connection may have running at once
-/// (see [`super::runs_detached`]). Past it, the connection reads no further
-/// requests until one finishes.
+/// How many detached requests (see [`super::runs_detached`]) one connection
+/// may have running at once; more wait their turn without holding up
+/// reading.
 const DETACHED_PER_CONNECTION: usize = 32;
+
+/// How many detached requests one connection may have in flight, running or
+/// waiting on their session's lane. Past it the connection reads no further
+/// requests until one finishes: the bound on what one client can queue.
+const QUEUED_PER_CONNECTION: usize = 1024;
+
+/// How long a `session.stop` waits for the requests queued before it on its
+/// session before it starts stopping anyway.
+const STOP_OVERTAKE: Duration = Duration::from_secs(5);
 
 /// After Core decides to close a connection, how long it still tries to
 /// write what is queued, the response to the request in hand included.
@@ -161,11 +170,14 @@ impl Server {
 /// it sends an unreadable line, or Core shuts down.
 ///
 /// Requests are read in order. Most are answered in line, one at a time.
-/// Session requests that may wait on a backend run detached, each in a task
-/// of its own, and answer when done, possibly out of order (responses carry
-/// their request's id). Requests about the same session still run in the
-/// order they were sent: each waits for the one before it in its session's
-/// lane. Requests about different sessions overlap.
+/// Session requests that act on a session run detached, each in a task of
+/// its own, and answer when done, possibly out of order (responses carry
+/// their request's id). Detached requests about the same session still run
+/// in the order they were sent: each waits for the one before it in its
+/// session's lane. Requests about different sessions overlap, and the
+/// in-line ones never wait for the detached ones. A `session.stop` whose
+/// lane does not drain within a grace starts stopping anyway, ending the
+/// requests stuck ahead of it; its answer still keeps its place.
 async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
     let (read, mut write) = tokio::io::split(stream);
 
@@ -190,7 +202,8 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
     let mut kicked = kick.subscribe();
     let mut conn = ConnectionState::new(outbound, kick);
     let mut lines = CappedLines::new(read, core.config.max_line_bytes);
-    let detached = Arc::new(Semaphore::new(DETACHED_PER_CONNECTION));
+    let running = Arc::new(Semaphore::new(DETACHED_PER_CONNECTION));
+    let queued = Arc::new(Semaphore::new(QUEUED_PER_CONNECTION));
     // Per session: a flag that rises when the latest request about it has
     // been answered. The next request about that session waits for it.
     let mut lanes: HashMap<String, watch::Receiver<bool>> = HashMap::new();
@@ -241,16 +254,17 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
             // the requests behind it: a permission decision must not wait
             // for another session's start.
             Incoming::Request(request) if super::runs_detached(&conn, &request) => {
-                // A full set of running requests stops reading, which is the
-                // back-pressure; a kick or shutdown still ends the wait.
-                let permit = tokio::select! {
-                    permit = Arc::clone(&detached).acquire_owned() => match permit {
+                // A client with too much in flight stops being read, which is
+                // the back-pressure; a kick or shutdown still ends the wait.
+                let in_flight = tokio::select! {
+                    permit = Arc::clone(&queued).acquire_owned() => match permit {
                         Ok(permit) => permit,
                         Err(_) => break,
                     },
                     () = async { let _ = kicked.wait_for(|kicked| *kicked).await; } => break,
                     _ = core.shutdown_requested() => break,
                 };
+                let stops = super::stop_target(&request);
                 let (done, done_rx) = watch::channel(false);
                 let before = super::session_lane(&conn, &request)
                     .and_then(|session| lanes.insert(session, done_rx));
@@ -259,36 +273,53 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                 // connection's writer alive; its answer then goes nowhere.
                 let outbound = conn.outbound.downgrade();
                 let core = Arc::clone(&core);
+                let kick = Arc::clone(&conn.kick);
+                let running = Arc::clone(&running);
                 tokio::spawn(async move {
                     if let Some(mut before) = before {
-                        // `Err` means the earlier task is gone: done too.
-                        let _ = before.wait_for(|answered| *answered).await;
+                        // `Err` from `wait_for` means the earlier task is
+                        // gone: done too. A stop keeps its place behind the
+                        // requests sent before it while they move, but not
+                        // behind ones stuck on a start that hangs or a
+                        // backend that stopped reading: after a grace it
+                        // starts stopping, which ends them, and its answer
+                        // still comes after theirs.
+                        let waited = async {
+                            let _ = before.wait_for(|answered| *answered).await;
+                        };
+                        tokio::pin!(waited);
+                        let mut finished = false;
+                        if let Some(session) = &stops {
+                            // A completed future must not be polled again.
+                            finished = tokio::time::timeout(STOP_OVERTAKE, &mut waited)
+                                .await
+                                .is_ok();
+                            if !finished {
+                                core.sessions.request_stop(session);
+                            }
+                        }
+                        if !finished {
+                            waited.await;
+                        }
                     }
-                    let response = run_detached(core, request).await;
+                    // Only a request whose turn has come counts as running.
+                    let Ok(_running) = running.acquire_owned().await else {
+                        return;
+                    };
+                    let response = run_detached(core, request, kick).await;
                     let line =
                         serde_json::to_string(&response).expect("responses always serialize");
                     if let Some(outbound) = outbound.upgrade() {
                         let _ = outbound.send(line).await;
                     }
                     done.send_replace(true);
-                    drop(permit);
+                    drop(in_flight);
                 });
                 continue;
             }
-            Incoming::Request(request) => {
-                // An in-line request about a session waits for the detached
-                // ones about it sent before it.
-                let before = super::session_lane(&conn, &request)
-                    .and_then(|session| lanes.get(&session).cloned());
-                if let Some(mut before) = before {
-                    tokio::select! {
-                        _ = before.wait_for(|answered| *answered) => {}
-                        () = async { let _ = kicked.wait_for(|kicked| *kicked).await; } => break,
-                        _ = core.shutdown_requested() => break,
-                    }
-                }
-                super::handle(&core, &mut conn, request).await
-            }
+            // In line: these never wait on a backend or on the detached
+            // requests, so reading carries on behind them.
+            Incoming::Request(request) => super::handle(&core, &mut conn, request).await,
             // The Interface sends no notifications yet; ignore any, as
             // JSON-RPC requires (a notification is never answered).
             Incoming::Notification { method, .. } => {
@@ -355,10 +386,14 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
 /// Runs a detached request in a task of its own, so a handler that panics
 /// still gets its request an answer (an internal error) rather than leaving
 /// the client waiting on an id forever.
-async fn run_detached(core: Arc<Core>, request: ersa_protocol::core_api::rpc::Request) -> Response {
+async fn run_detached(
+    core: Arc<Core>,
+    request: ersa_protocol::core_api::rpc::Request,
+    kick: crate::sessions::Kick,
+) -> Response {
     let id = request.id.clone();
     let method = request.method.clone();
-    match tokio::spawn(async move { super::handle_detached(&core, request).await }).await {
+    match tokio::spawn(async move { super::handle_detached(&core, request, &kick).await }).await {
         Ok(response) => response,
         Err(e) => {
             tracing::error!(%method, error = %e, "a request handler failed");

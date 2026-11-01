@@ -330,15 +330,7 @@ impl SessionManager {
                 // It cannot be running: end it in the log, which a Core with
                 // the adapter projects, and on its row.
                 self.store
-                    .append_raw_line(
-                        session.id.clone(),
-                        Direction::Core,
-                        now_rfc3339(),
-                        restarted(),
-                    )
-                    .await?;
-                self.store
-                    .set_session_state(session.id.clone(), LifecycleState::Ended)
+                    .end_unprojected(session.id.clone(), now_rfc3339(), restarted())
                     .await?;
             }
             return Ok((session.last_event_seq, None));
@@ -513,6 +505,17 @@ impl SessionManager {
         }));
     }
 
+    /// Starts stopping a session without waiting, if it is live: what
+    /// `session.stop` does the moment it is read, ahead of the requests
+    /// queued before it.
+    pub fn request_stop(&self, id: &str) {
+        if let Ok(handle) = self.handle(id)
+            && let Some(live) = handle.live()
+        {
+            begin_stop(&live);
+        }
+    }
+
     /// Stops a session and waits until its backend has ended and every line
     /// is stored. Stopping a session that is not running does nothing.
     pub async fn stop(&self, id: &str) -> Result<(), SessionError> {
@@ -564,6 +567,8 @@ impl SessionManager {
             .ok_or_else(|| SessionError::NotFound(id.to_string()))?;
         self.store.delete_session(id.to_string()).await?;
         lock(&self.sessions).remove(id);
+        // A tile still waiting to go out would show the session again.
+        self.tiles.forget(id);
         // Dropping the senders ends every subscription's forwarding task.
         // The connections stay open: the client that removed the session
         // may be one of them, and the session is gone from `session.list`.
@@ -1247,6 +1252,13 @@ impl TileHub {
         let inbox = Arc::new(TileInbox::default());
         lock(&self.inboxes).push(Arc::downgrade(&inbox));
         TileFeed { inbox }
+    }
+
+    /// Drops any tile for `session_id` not yet taken, for a removed session.
+    fn forget(&self, session_id: &str) {
+        for inbox in lock(&self.inboxes).iter().filter_map(Weak::upgrade) {
+            lock(&inbox.latest).remove(session_id);
+        }
     }
 
     fn publish(&self, session_id: &str, line: String) {
