@@ -22,6 +22,7 @@
 //! ```
 
 use std::collections::VecDeque;
+use std::fmt;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -34,26 +35,60 @@ use crate::transport::{LineReader, LineWriter, Process, ProcessExit, ProcessSpec
 /// A transport whose processes replay scripted stdout and stderr lines and
 /// record what is written to their stdin.
 ///
+/// The stdout script can also pause until the code under test writes a stdin
+/// line ([`FakeTransport::wait_for_stdin`]), which turns it into a stub backend
+/// that answers each request in turn.
+///
 /// Clones share one record, so a test can keep a clone while handing another
 /// to the code under test, then inspect what it spawned and wrote.
 #[derive(Debug, Clone)]
 pub struct FakeTransport {
     script: Script,
     record: Arc<Mutex<Record>>,
+    /// How many stdin lines have been written so far, so a paused stdout can
+    /// wait for the next one without polling.
+    stdin_count: Arc<watch::Sender<usize>>,
 }
 
 #[derive(Debug, Clone)]
 struct Script {
-    stdout: Vec<String>,
+    stdout: Vec<Step>,
     stderr: Vec<String>,
     exit_code: Option<i32>,
     hold_open: bool,
+    stdout_outlives_process: bool,
+    /// Writes after this many stdin lines hang until the process is killed.
+    wedge_stdin_after: Option<usize>,
+}
+
+/// One step of a scripted stdout.
+#[derive(Debug, Clone)]
+enum Step {
+    Line(String),
+    /// Wait for the next stdin line no earlier step has consumed, and check it.
+    AwaitStdin(StdinCheck),
+}
+
+/// The check a paused stdout applies to the stdin line it waited for. `Err`
+/// says what was wrong with the line.
+#[derive(Clone)]
+struct StdinCheck(Arc<CheckFn>);
+
+/// Shared between clones of the script, and callable from the reader's task.
+type CheckFn = dyn Fn(&str) -> Result<(), String> + Send + Sync;
+
+// Closures have no `Debug`, so `derive(Debug)` cannot look inside this one.
+impl fmt::Debug for StdinCheck {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("StdinCheck(..)")
+    }
 }
 
 #[derive(Debug, Default)]
 struct Record {
     spawned: Vec<ProcessSpec>,
     stdin: Vec<String>,
+    failures: Vec<String>,
 }
 
 impl FakeTransport {
@@ -66,13 +101,46 @@ impl FakeTransport {
     {
         FakeTransport {
             script: Script {
-                stdout: stdout.into_iter().map(Into::into).collect(),
+                stdout: stdout.into_iter().map(|l| Step::Line(l.into())).collect(),
                 stderr: Vec::new(),
                 exit_code: Some(0),
                 hold_open: false,
+                stdout_outlives_process: false,
+                wedge_stdin_after: None,
             },
             record: Arc::default(),
+            stdin_count: Arc::new(watch::channel(0).0),
         }
+    }
+
+    /// After the stdout lines so far, waits for the next stdin line and passes
+    /// it to `check`, then carries on with the rest of the script. Each wait
+    /// consumes one stdin line, in the order they were written.
+    ///
+    /// When `check` returns `Err`, the message is kept for
+    /// [`FakeTransport::stub_failures`] and the script stops there, as a real
+    /// backend that received a line it did not expect would stop answering.
+    pub fn wait_for_stdin<F>(mut self, check: F) -> Self
+    where
+        F: Fn(&str) -> Result<(), String> + Send + Sync + 'static,
+    {
+        self.script
+            .stdout
+            .push(Step::AwaitStdin(StdinCheck(Arc::new(check))));
+        self
+    }
+
+    /// Appends more stdout lines to the script, typically after
+    /// [`FakeTransport::wait_for_stdin`].
+    pub fn then_stdout<I, S>(mut self, stdout: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.script
+            .stdout
+            .extend(stdout.into_iter().map(|l| Step::Line(l.into())));
+        self
     }
 
     /// Also writes these lines to stderr.
@@ -100,6 +168,22 @@ impl FakeTransport {
         self
     }
 
+    /// Stdout never ends, even after the process exits or is killed: what
+    /// happens on Windows when a grandchild the backend started (a dev server,
+    /// say) inherited the stdout handle. `wait` still reports the exit.
+    pub fn stdout_outlives_process(mut self) -> Self {
+        self.script.stdout_outlives_process = true;
+        self
+    }
+
+    /// After `lines` stdin lines, further writes hang, as writes to a backend
+    /// that stopped reading do once the pipe fills, until the process is
+    /// killed; then they fail with `BrokenPipe`.
+    pub fn wedge_stdin_after(mut self, lines: usize) -> Self {
+        self.script.wedge_stdin_after = Some(lines);
+        self
+    }
+
     /// Every spec passed to `spawn`, in order.
     pub fn spawned(&self) -> Vec<ProcessSpec> {
         self.lock().spawned.clone()
@@ -110,11 +194,20 @@ impl FakeTransport {
         self.lock().stdin.clone()
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Record> {
-        // A poisoned lock means another test thread panicked while holding it;
-        // the record itself is still usable.
-        self.record.lock().unwrap_or_else(|e| e.into_inner())
+    /// What every failed [`FakeTransport::wait_for_stdin`] check said, in order.
+    pub fn stub_failures(&self) -> Vec<String> {
+        self.lock().failures.clone()
     }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Record> {
+        lock(&self.record)
+    }
+}
+
+fn lock(record: &Mutex<Record>) -> std::sync::MutexGuard<'_, Record> {
+    // A poisoned lock means another test thread panicked while holding it;
+    // the record itself is still usable.
+    record.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[async_trait]
@@ -129,8 +222,48 @@ impl Transport for FakeTransport {
         let killed = Arc::new(AtomicBool::new(false));
         let stdin = FakeWriter {
             record: self.record.clone(),
+            stdin_count: self.stdin_count.clone(),
             ended: ended.clone(),
+            ended_rx: ended_rx.clone(),
             killed: killed.clone(),
+            wedge_after: self.script.wedge_stdin_after,
+            written: 0,
+        };
+        // A stdout that outlives the process ends on a flag nothing ever
+        // raises; the reader keeps its sender so the channel stays open.
+        let (never_tx, never_rx) = watch::channel(false);
+        let (stdout_ended, keep_open) = if self.script.stdout_outlives_process {
+            (never_rx, Some(never_tx))
+        } else {
+            (ended_rx.clone(), None)
+        };
+        // A process that is not held open counts as ended from the start, yet
+        // its stub may still wait for stdin; only a held-open one is ended by
+        // a kill or a closed stdin.
+        let (stub_ended, stub_keep_open) = if self.script.hold_open {
+            (ended_rx.clone(), None)
+        } else {
+            let (tx, rx) = watch::channel(false);
+            (rx, Some(tx))
+        };
+        let stdout = FakeReader {
+            steps: self.script.stdout.clone().into(),
+            ended: stdout_ended,
+            _keep_open: keep_open,
+            stdin: Some(StdinFeed {
+                record: self.record.clone(),
+                count: self.stdin_count.subscribe(),
+                consumed: 0,
+                process_ended: stub_ended,
+                _keep_open: stub_keep_open,
+            }),
+        };
+        let stderr = FakeReader {
+            steps: self.script.stderr.iter().cloned().map(Step::Line).collect(),
+            // Stderr never holds open; it ends after its scripted lines.
+            ended: watch::channel(true).1,
+            _keep_open: None,
+            stdin: None,
         };
         Ok(Box::new(FakeProcess {
             exit: ProcessExit {
@@ -138,15 +271,8 @@ impl Transport for FakeTransport {
             },
             ended,
             stdin: Some(Box::new(stdin)),
-            stdout: Some(Box::new(FakeReader {
-                lines: self.script.stdout.clone().into(),
-                ended: ended_rx.clone(),
-            })),
-            stderr: Some(Box::new(FakeReader {
-                lines: self.script.stderr.clone().into(),
-                // Stderr never holds open; it ends after its scripted lines.
-                ended: watch::channel(true).1,
-            })),
+            stdout: Some(Box::new(stdout)),
+            stderr: Some(Box::new(stderr)),
             ended_rx,
             killed,
         }))
@@ -208,8 +334,13 @@ async fn wait_until_ended(ended: &mut watch::Receiver<bool>) {
 
 struct FakeWriter {
     record: Arc<Mutex<Record>>,
+    stdin_count: Arc<watch::Sender<usize>>,
     ended: Arc<watch::Sender<bool>>,
+    ended_rx: watch::Receiver<bool>,
     killed: Arc<AtomicBool>,
+    wedge_after: Option<usize>,
+    /// Lines this writer has written.
+    written: usize,
 }
 
 #[async_trait]
@@ -225,8 +356,19 @@ impl LineWriter for FakeWriter {
         if self.killed.load(Ordering::SeqCst) {
             return Err(io::ErrorKind::BrokenPipe.into());
         }
-        let mut record = self.record.lock().unwrap_or_else(|e| e.into_inner());
-        record.stdin.push(line.to_string());
+        if self.wedge_after.is_some_and(|n| self.written >= n) {
+            // A full pipe: nothing moves until the process dies.
+            wait_until_ended(&mut self.ended_rx).await;
+            return Err(io::ErrorKind::BrokenPipe.into());
+        }
+        self.written += 1;
+        let count = {
+            let mut record = lock(&self.record);
+            record.stdin.push(line.to_string());
+            record.stdin.len()
+        };
+        // Wakes a stdout paused in `wait_for_stdin`.
+        self.stdin_count.send_replace(count);
         Ok(())
     }
 }
@@ -239,19 +381,73 @@ impl Drop for FakeWriter {
 }
 
 struct FakeReader {
-    lines: VecDeque<String>,
+    steps: VecDeque<Step>,
     ended: watch::Receiver<bool>,
+    /// Keeps `ended`'s channel open for a stdout that outlives its process.
+    _keep_open: Option<watch::Sender<bool>>,
+    /// How a paused stdout sees stdin; `None` for stderr, which never pauses.
+    stdin: Option<StdinFeed>,
+}
+
+/// A stdout's view of what has been written to stdin.
+struct StdinFeed {
+    record: Arc<Mutex<Record>>,
+    count: watch::Receiver<usize>,
+    /// How many stdin lines earlier `AwaitStdin` steps have consumed.
+    consumed: usize,
+    /// A stub waiting for stdin gives up once its process has ended.
+    process_ended: watch::Receiver<bool>,
+    _keep_open: Option<watch::Sender<bool>>,
+}
+
+impl StdinFeed {
+    /// Waits for stdin line number `wanted` (1-based). False if the process
+    /// ended first, or the transport is gone, so no line can arrive.
+    async fn line_arrived(&mut self, wanted: usize) -> bool {
+        tokio::select! {
+            // A line that is already there wins over the process ending.
+            biased;
+            arrived = self.count.wait_for(|n| *n >= wanted) => arrived.is_ok(),
+            _ = self.process_ended.wait_for(|ended| *ended) => false,
+        }
+    }
 }
 
 #[async_trait]
 impl LineReader for FakeReader {
     async fn next_line(&mut self) -> io::Result<Option<String>> {
-        // Taking a line happens in one step with no await before it, so a
-        // dropped call can never lose one.
-        if let Some(line) = self.lines.pop_front() {
-            return Ok(Some(line));
+        loop {
+            match self.steps.pop_front() {
+                // Taking a line happens in one step with no await before it,
+                // so a dropped call can never lose one.
+                Some(Step::Line(line)) => return Ok(Some(line)),
+                Some(Step::AwaitStdin(check)) => {
+                    // Put the step back while waiting: if this future is
+                    // dropped mid-wait, the next call starts the wait again
+                    // and nothing has been consumed.
+                    self.steps.push_front(Step::AwaitStdin(check.clone()));
+                    let feed = self
+                        .stdin
+                        .as_mut()
+                        .expect("only a stdout script waits for stdin");
+                    let wanted = feed.consumed + 1;
+                    if !feed.line_arrived(wanted).await {
+                        self.steps.clear();
+                        continue;
+                    }
+                    self.steps.pop_front();
+                    let line = lock(&feed.record).stdin[feed.consumed].clone();
+                    feed.consumed = wanted;
+                    if let Err(failure) = (check.0)(&line) {
+                        lock(&feed.record).failures.push(failure);
+                        self.steps.clear();
+                    }
+                }
+                None => {
+                    wait_until_ended(&mut self.ended).await;
+                    return Ok(None);
+                }
+            }
         }
-        wait_until_ended(&mut self.ended).await;
-        Ok(None)
     }
 }
