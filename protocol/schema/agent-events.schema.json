@@ -47,6 +47,7 @@
         { "$ref": "#/$defs/session.started" },
         { "$ref": "#/$defs/session.state" },
         { "$ref": "#/$defs/session.ended" },
+        { "$ref": "#/$defs/session.notice" },
         { "$ref": "#/$defs/turn.started" },
         { "$ref": "#/$defs/turn.completed" },
         { "$ref": "#/$defs/user.message" },
@@ -100,6 +101,18 @@
         "type": { "const": "session.ended" },
         "reason": { "enum": ["user_stopped", "backend_exited", "error"] },
         "exit_code": { "type": "integer" }
+      }
+    },
+    "session.notice": {
+      "description": "Something the user should know that is not an error, such as a backend newer than the newest version Ersa was tested against.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "level", "code", "message"],
+      "properties": {
+        "type": { "const": "session.notice" },
+        "level": { "enum": ["info", "warning"] },
+        "code": { "enum": ["backend_version_untested"] },
+        "message": { "type": "string" }
       }
     },
 

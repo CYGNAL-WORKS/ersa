@@ -169,3 +169,35 @@ async fn spawning_a_missing_program_fails() {
         Some(std::io::ErrorKind::NotFound)
     );
 }
+
+#[tokio::test]
+async fn a_line_that_is_not_utf8_is_decoded_lossily_and_reading_continues() {
+    // Writes `a`, the byte 0xFF, `b`, a newline, then `next` and a newline.
+    let spec = if cfg!(windows) {
+        ProcessSpec {
+            program: "powershell".into(),
+            args: vec![
+                "-NoProfile".into(),
+                "-Command".into(),
+                "$b = [byte[]](0x61,0xFF,0x62,0x0A,0x6E,0x65,0x78,0x74,0x0A); \
+                 [Console]::OpenStandardOutput().Write($b, 0, $b.Length)"
+                    .into(),
+            ],
+            ..ProcessSpec::default()
+        }
+    } else {
+        shell(r"printf 'a\377b\nnext\n'")
+    };
+    let mut process = spawn(spec).await;
+    let mut stdout = process.take_stdout().expect("stdout");
+
+    assert_eq!(
+        stdout.next_line().await.expect("read").as_deref(),
+        Some("a\u{FFFD}b")
+    );
+    assert_eq!(
+        stdout.next_line().await.expect("read").as_deref(),
+        Some("next")
+    );
+    assert_eq!(stdout.next_line().await.expect("read"), None);
+}
