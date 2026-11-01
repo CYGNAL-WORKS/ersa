@@ -61,22 +61,12 @@
   line-height: var(--type-ui-small-leading);
 }
 
-/* The error glyph matches the status tile's: a small danger dot, never a filled row. */
-.projects-error {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  column-gap: var(--space-sm);
-  align-items: baseline;
-  margin: 0;
-  color: var(--color-ink-muted);
-  overflow-wrap: anywhere;
+.project-action,
+.project-problem {
+  grid-column: 1 / -1;
+  margin-top: var(--space-xs);
 }
 
-.projects-error::before {
-  content: "";
-  align-self: center;
-  width: var(--space-sm);
-  height: var(--space-sm);
-  border-radius: var(--radius-pill);
-  background: var(--color-danger);
+.project-action {
+  justify-self: start;
 }

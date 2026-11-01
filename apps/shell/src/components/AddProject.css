@@ -1,0 +1,33 @@
+.add-project {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.add-project-input {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-xs) var(--space-sm);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-sm);
+}
+
+.add-project-input::placeholder {
+  color: var(--color-ink-faint);
+}
+
+.add-project-input:hover {
+  border-color: var(--color-ink-faint);
+}
+
+.add-project-input:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.add-project-problem {
+  grid-column: 1 / -1;
+}

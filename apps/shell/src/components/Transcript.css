@@ -1,0 +1,139 @@
+/* The transcript reads as a document (DESIGN.md): prose on the canvas, no bubbles, no avatars.
+   Cards carry tool calls and permission requests. */
+
+.transcript {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+}
+
+.transcript-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg);
+  border-bottom: var(--line-hairline) solid var(--color-line);
+}
+
+.transcript-title {
+  margin: 0;
+  font-size: var(--type-heading-size);
+  line-height: var(--type-heading-leading);
+  font-weight: var(--type-heading-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transcript-state {
+  color: var(--color-ink-muted);
+}
+
+.transcript-scroll {
+  min-height: 0;
+  overflow: auto;
+}
+
+/* A reading column: three rail widths (DESIGN.md has no measure token yet; see the inbox). */
+.transcript-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  max-width: calc(var(--size-rail) * 3);
+  margin: 0 auto;
+  padding: var(--space-xl) var(--space-lg);
+}
+
+.transcript-text {
+  margin: 0;
+  font-family: var(--type-prose-family);
+  font-size: var(--type-prose-size);
+  line-height: var(--type-prose-leading);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The user's words: as plain as the agent's, set apart by a rule and a quiet label. */
+.transcript-user {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding-left: var(--space-md);
+  border-left: var(--line-hairline) solid var(--color-ink-faint);
+}
+
+.transcript-who,
+.transcript-note,
+.transcript-ended {
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.transcript-ended {
+  padding-top: var(--space-sm);
+  border-top: var(--line-hairline) solid var(--color-line);
+}
+
+.transcript-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+  padding: var(--space-md);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+/* An open request needs the user: its edge takes the accent (a line's colour, never its width or a fill). */
+.transcript-permission[data-open] {
+  border-color: var(--color-accent);
+}
+
+.transcript-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.transcript-card-title {
+  font-weight: var(--type-heading-weight);
+}
+
+.transcript-card-status,
+.transcript-card-detail {
+  margin: 0;
+  color: var(--color-ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.transcript-card[data-error] .transcript-card-status {
+  color: var(--color-danger);
+}
+
+.transcript-input {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.transcript-output {
+  margin: 0;
+  max-height: var(--size-rail);
+  overflow: auto;
+  padding: var(--space-sm);
+  color: var(--color-ink-muted);
+  background: var(--color-canvas);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.transcript-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}

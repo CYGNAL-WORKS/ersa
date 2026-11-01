@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CoreHelloResult, Project } from "../protocol/core-api.gen";
-import type { Attachment, BridgeError, CoreClient, CoreEvent, Method } from "./client";
+import type { CoreHelloResult, Project, Session } from "../protocol/core-api.gen";
+import type { AnyNotification, Attachment, BridgeError, CoreClient, CoreEvent, Method } from "./client";
 import { type CoreView, connect } from "./connection";
 
 const hello: CoreHelloResult = {
@@ -12,6 +12,16 @@ const hello: CoreHelloResult = {
 };
 
 const project: Project = { id: "p1", host_id: "local", path: "D:/code/ersa", name: "ersa", vcs: "git" };
+
+const session: Session = {
+  id: "s1",
+  workspace_id: "w1",
+  host_id: "local",
+  backend: "claude-code",
+  state: "running",
+  created_at: "2026-11-01T00:00:00Z",
+  tile: { state: "running", pending: [] },
+};
 
 const status = { sessions_running: 2, sessions_waiting: 1, uptime_s: 5, db_path: "x" };
 
@@ -36,6 +46,7 @@ function fakeClient(answers: Partial<Record<Method, () => Promise<unknown>>>, at
   return {
     client,
     drop: (reason: string) => onEvent({ kind: "lost", reason }),
+    notify: (notification: AnyNotification) => onEvent({ kind: "notification", ...notification }),
     attachCount: () => attached,
   };
 }
@@ -53,6 +64,7 @@ async function views(client: CoreClient): Promise<CoreView[]> {
 const answering = {
   "core.status": () => Promise.resolve(status),
   "project.list": () => Promise.resolve([project]),
+  "session.list": () => Promise.resolve([session]),
 };
 
 afterEach(() => {
@@ -60,17 +72,82 @@ afterEach(() => {
 });
 
 describe("connect", () => {
-  it("attaches, then shows Core's status and the project list", async () => {
+  it("attaches, then shows Core's status, the project list and the session list", async () => {
     const { client } = fakeClient(answering);
     const seen = await views(client);
     expect(seen[0]).toEqual({ phase: "connecting" });
     expect(seen.at(-1)).toEqual({
       phase: "connected",
+      link: 1,
       how: "launched",
       hello,
       status,
       projects: { state: "ready", projects: [project] },
+      sessions: { state: "ready", sessions: [session] },
     });
+  });
+
+  it("says which endpoint it attached to when it is not the user's own", async () => {
+    const { client } = fakeClient(answering, [() => Promise.resolve({ how: "attached", label: "replay", hello })]);
+    const seen = await views(client);
+    expect(seen.at(-1)).toMatchObject({ phase: "connected", label: "replay" });
+  });
+
+  it("keeps each session's tile current, and reads the list again for a session it lacks", async () => {
+    let listed = 0;
+    const created: Session = { ...session, id: "s2", state: "starting", tile: { state: "starting", pending: [] } };
+    const { client, notify } = fakeClient({
+      ...answering,
+      "session.list": () => Promise.resolve(listed++ === 0 ? [session] : [session, created]),
+    });
+    const seen: CoreView[] = [];
+    const forwarded: AnyNotification[] = [];
+    connect(client, (v) => seen.push(v), undefined, (n) => forwarded.push(n));
+    await settle();
+
+    const waiting = { state: "waiting_user" as const, pending: [{ kind: "permission" as const, request_id: "r1" }] };
+    notify({ method: "session.tile", params: { session_id: "s1", tile: waiting } });
+    const last = seen.at(-1);
+    expect(last?.phase === "connected" && last.sessions).toEqual({
+      state: "ready",
+      sessions: [{ ...session, state: "waiting_user", tile: waiting }],
+    });
+
+    notify({ method: "session.tile", params: { session_id: "s2", tile: created.tile } });
+    await settle();
+    const after = seen.at(-1);
+    expect(after?.phase === "connected" && after.sessions.state === "ready" && after.sessions.sessions.map((s) => s.id)).toEqual([
+      "s1",
+      "s2",
+    ]);
+    expect(forwarded.map((n) => n.method)).toEqual(["session.tile", "session.tile"]);
+  });
+
+  it("reads a list again when asked, keeping only the newest answer", async () => {
+    const answers: ((projects: Project[]) => void)[] = [];
+    const { client } = fakeClient({ ...answering, "project.list": () => new Promise((r) => answers.push(r)) });
+    const seen: CoreView[] = [];
+    const connection = connect(client, (v) => seen.push(v));
+    await settle();
+    connection.reload("projects");
+    const added = { ...project, id: "p2", name: "added" };
+    answers[1]?.([project, added]);
+    answers[0]?.([project]);
+    await settle();
+    const last = seen.at(-1);
+    expect(last?.phase === "connected" && last.projects).toEqual({ state: "ready", projects: [project, added] });
+  });
+
+  it("numbers each connection, so subscriptions know to start again", async () => {
+    vi.useFakeTimers();
+    const { client, drop } = fakeClient(answering);
+    const seen: CoreView[] = [];
+    connect(client, (v) => seen.push(v), [100]);
+    await vi.runOnlyPendingTimersAsync();
+    expect(seen.at(-1)).toMatchObject({ phase: "connected", link: 1 });
+    drop("gone");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(seen.at(-1)).toMatchObject({ phase: "connected", link: 2 });
   });
 
   it("reports a Core that cannot be reached, and waits for the user", async () => {
@@ -151,10 +228,10 @@ describe("connect", () => {
   it("stops retrying when stopped", async () => {
     vi.useFakeTimers();
     const { client, drop, attachCount } = fakeClient(answering);
-    const stop = connect(client, () => {}, [100]);
+    const connection = connect(client, () => {}, [100]);
     await vi.runOnlyPendingTimersAsync();
     drop("gone");
-    stop();
+    connection.stop();
     await vi.advanceTimersByTimeAsync(1_000);
     expect(attachCount()).toBe(1);
   });

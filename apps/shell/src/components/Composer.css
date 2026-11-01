@@ -1,0 +1,57 @@
+/* The composer: an input on the pane's surface, meeting the transcript at a line. */
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md) var(--space-lg) var(--space-lg);
+  border-top: var(--line-hairline) solid var(--color-line);
+}
+
+.composer-input {
+  box-sizing: border-box;
+  resize: none;
+  padding: var(--space-sm) var(--space-md);
+  font-family: var(--type-prose-family);
+  font-size: var(--type-prose-size);
+  line-height: var(--type-prose-leading);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.composer-input::placeholder {
+  color: var(--color-ink-faint);
+}
+
+.composer-input:hover:not(:disabled) {
+  border-color: var(--color-ink-faint);
+}
+
+/* Focus takes the accent on the edge, as the button's does. */
+.composer-input:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.composer-input:disabled {
+  color: var(--color-ink-faint);
+  background: var(--color-canvas);
+}
+
+.composer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.composer-hint,
+.composer-foot .problem {
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  overflow-wrap: anywhere;
+}

@@ -1,4 +1,4 @@
-/* The window: the rail on the left, the transcript's place in the centre (LAY-SHELL). */
+/* The window: the rail on the left, the transcript with the composer beneath it in the centre (LAY-SHELL). */
 
 /* The window's whole viewport, edge to edge. */
 .app {
@@ -19,11 +19,21 @@
   border-right: var(--line-hairline) solid var(--color-line);
 }
 
-.rail-projects {
+.rail-lists {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xl);
   flex: 1;
 }
 
 .stage {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.stage-empty {
   display: grid;
   place-items: center;
   color: var(--color-ink-muted);
