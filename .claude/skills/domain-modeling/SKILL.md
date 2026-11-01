@@ -1,6 +1,6 @@
 ---
 name: domain-modeling
-description: Build and sharpen a project's domain model. Use when discussing codebase terminology, writing or editing a GLOSSARY.md, or recording or editing an ADR.
+description: Build and sharpen a project's domain model in a planning session. Use when changing the glossary or recording an ADR.
 ---
 
 > **Ersa adaptation.** The glossary is `docs/GLOSSARY.md`: one `- **Term**: definition` line under topic headings, used everywhere (briefs, identifiers, UI copy). ADRs follow `docs/adr/0000-template.md` and the rules in `docs/adr/README.md` (supersede, never edit; status line required). Only planning sessions edit `docs/adr/`, `docs/briefs/` and the glossary (a hook enforces it for briefs and ADRs); an implementing session records a proposed term or decision as a line in `docs/briefs/INBOX.md` instead. Where this skill describes other paths or formats, these rules win.
