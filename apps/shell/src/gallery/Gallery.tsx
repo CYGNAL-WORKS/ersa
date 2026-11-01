@@ -282,6 +282,10 @@ const entries: Entry[] = [
       ["Hover", <AddProject onAdd={async () => false} force="hover" />],
       ["Focus", <AddProject onAdd={async () => false} initialPath="D:\Projects\ersa" force="focus" />],
       ["Asking to trust", <AddProject onAdd={async () => false} initialPath="D:\Clones\stranger" initialAsking />],
+      [
+        "Asking, from the keyboard",
+        <AddProject onAdd={async () => false} initialPath="D:\Clones\stranger" initialAsking forceCancelFocus />,
+      ],
       ["Adding", <AddProject onAdd={async () => false} initialPath="D:\Projects\ersa" adding={{ state: "sending" }} />],
       [
         "Refused",

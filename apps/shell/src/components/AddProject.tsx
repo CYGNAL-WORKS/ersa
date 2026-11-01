@@ -12,10 +12,11 @@ interface AddProjectProps {
   initialPath?: string;
   initialAsking?: boolean;
   force?: "hover" | "focus";
+  forceCancelFocus?: boolean;
 }
 
 /** Adds a project by its folder's path on this machine, once the user has said whether they trust it. */
-export function AddProject({ onAdd, adding, initialPath = "", initialAsking = false, force }: AddProjectProps) {
+export function AddProject({ onAdd, adding, initialPath = "", initialAsking = false, force, forceCancelFocus }: AddProjectProps) {
   const [path, setPath] = useState(initialPath);
   // Whether the trust question is showing; the project is added only once it is answered.
   const [asking, setAsking] = useState(initialAsking);
@@ -39,13 +40,13 @@ export function AddProject({ onAdd, adding, initialPath = "", initialAsking = fa
         if (busy || path.trim() === "") return;
         setAsking(true);
       }}
-      onKeyDown={(event) => {
-        // From the path too, not only from inside the question.
-        if (event.key === "Escape" && asking) close();
-      }}
     >
       <input
         ref={input}
+        onKeyDown={(event) => {
+          // From the path too; inside the question, the question handles it.
+          if (event.key === "Escape" && asking) close();
+        }}
         className="add-project-input mono"
         aria-label="Project folder"
         placeholder="Folder path"
@@ -74,6 +75,7 @@ export function AddProject({ onAdd, adding, initialPath = "", initialAsking = fa
             onAnswer={answer}
             onDismiss={close}
             takeFocus={!initialAsking}
+            forceCancelFocus={forceCancelFocus}
           />
         </div>
       )}
