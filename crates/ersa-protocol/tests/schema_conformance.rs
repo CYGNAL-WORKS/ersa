@@ -39,6 +39,13 @@ fn examples() -> Vec<Event> {
             reason: EndReason::BackendExited,
             exit_code: Some(1),
         }),
+        Event::SessionNotice(SessionNotice {
+            level: NoticeLevel::Warning,
+            code: NoticeCode::BackendVersionUntested,
+            message:
+                "Claude Code 2.2.0 is newer than the newest version Ersa was tested with (2.1.302)."
+                    .into(),
+        }),
         Event::TurnStarted(TurnStarted {
             turn: 1,
             trigger: TurnTrigger::User,

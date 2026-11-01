@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::content::{ApiMessage, Extra, MessageContent, StreamEvent, Usage};
@@ -302,14 +302,20 @@ pub struct StreamEventMessage {
 /// A `result` line: the end of a turn.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResultMessage {
+    // Fields nothing depends on are defaulted, so a newer CLI dropping one
+    // does not make the whole line untypable.
+    #[serde(default)]
     pub session_id: String,
+    #[serde(default)]
     pub uuid: String,
     /// `success` or one of the SDK's `error_*` subtypes. Kept as a string so a
     /// new subtype still parses; `is_error` is the field to branch on.
     pub subtype: String,
     pub is_error: bool,
+    #[serde(default)]
     pub num_turns: u64,
     pub duration_ms: u64,
+    #[serde(default)]
     pub duration_api_ms: u64,
     /// The cost tile's source.
     pub total_cost_usd: f64,
@@ -443,11 +449,13 @@ pub struct CanUseTool {
     pub title: Option<String>,
     #[serde(default)]
     pub blocked_path: Option<String>,
-    #[serde(default)]
+    /// `null` reads as none.
+    #[serde(default, deserialize_with = "null_as_default")]
     pub permission_suggestions: Vec<PermissionUpdate>,
-    /// Why approval is needed, for the consent line. May contain ANSI escapes.
+    /// Why approval is needed, for the consent line. Usually a string, which
+    /// may contain ANSI escapes; kept as raw JSON so another shape still parses.
     #[serde(default)]
-    pub decision_reason: Option<String>,
+    pub decision_reason: Option<Value>,
     #[serde(default)]
     pub decision_reason_type: Option<String>,
     #[serde(default)]
@@ -464,6 +472,16 @@ pub struct CanUseTool {
     pub agent_id: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+/// Reads `null` as the type's default (an empty list, say), for fields the
+/// CLI sometimes sends as `null` rather than leaving out.
+fn null_as_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 /// The sender withdraws one of its own in-flight control requests and ignores
