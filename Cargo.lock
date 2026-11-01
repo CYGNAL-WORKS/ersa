@@ -272,6 +272,8 @@ dependencies = [
  "clap",
  "ersa-adapter-claude",
  "ersa-core",
+ "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -282,6 +284,7 @@ name = "ersa-core"
 version = "0.1.0"
 dependencies = [
  "ersa-adapter",
+ "ersa-adapter-claude",
  "ersa-protocol",
  "libc",
  "rusqlite",

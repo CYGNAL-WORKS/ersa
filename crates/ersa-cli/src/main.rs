@@ -31,6 +31,11 @@ enum Command {
         /// application data directory.
         #[arg(long, value_name = "DIR")]
         data_dir: Option<PathBuf>,
+        /// The named pipe or socket to listen on, instead of the user's
+        /// default. For tests and development, so a second Core does not
+        /// collide with the one the Shell uses.
+        #[arg(long, value_name = "NAME")]
+        endpoint: Option<String>,
     },
 }
 
@@ -54,11 +59,11 @@ async fn main() -> ExitCode {
         .init();
 
     match cli.command {
-        Command::Serve { data_dir } => serve(data_dir).await,
+        Command::Serve { data_dir, endpoint } => serve(data_dir, endpoint).await,
     }
 }
 
-async fn serve(data_dir: Option<PathBuf>) -> ExitCode {
+async fn serve(data_dir: Option<PathBuf>, endpoint: Option<String>) -> ExitCode {
     let Some(data_dir) = data_dir.or_else(ersa_core::platform::default_data_dir) else {
         eprintln!("ersa-core: cannot find the application data directory; pass --data-dir");
         return ExitCode::FAILURE;
@@ -72,13 +77,16 @@ async fn serve(data_dir: Option<PathBuf>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let config = match CoreConfig::new(data_dir) {
+    let mut config = match CoreConfig::new(data_dir) {
         Ok(config) => config,
         Err(e) => {
             eprintln!("ersa-core: cannot name the endpoint to listen on: {e}");
             return ExitCode::FAILURE;
         }
     };
+    if let Some(endpoint) = endpoint {
+        config.endpoint = endpoint;
+    }
     // Every backend this build can drive. Core itself knows none of them.
     let adapters: Vec<Arc<dyn ersa_core::Adapter>> =
         vec![Arc::new(ersa_adapter_claude::ClaudeAdapter::new())];
@@ -121,14 +129,20 @@ mod tests {
     #[test]
     fn serve_parses() {
         let cli = Cli::try_parse_from(["ersa-core", "serve"]).expect("serve is a valid command");
-        assert!(matches!(cli.command, Command::Serve { data_dir: None }));
+        assert!(matches!(
+            cli.command,
+            Command::Serve {
+                data_dir: None,
+                endpoint: None
+            }
+        ));
     }
 
     #[test]
     fn serve_takes_a_data_dir() {
         let cli = Cli::try_parse_from(["ersa-core", "serve", "--data-dir", "D:/tmp/ersa"])
             .expect("--data-dir is accepted");
-        let Command::Serve { data_dir } = cli.command;
+        let Command::Serve { data_dir, .. } = cli.command;
         assert_eq!(data_dir, Some(PathBuf::from("D:/tmp/ersa")));
     }
 }

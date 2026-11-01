@@ -8,15 +8,19 @@
 // Each test file compiles this module separately and uses a different part of it.
 #![allow(dead_code)]
 
+pub mod fake;
+
+use std::collections::VecDeque;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use ersa_core::platform::{self, BoxStream};
-use ersa_core::{CoreConfig, Server};
-use ersa_protocol::schema::validate_response;
+use ersa_core::{Adapter, CoreConfig, Server};
+use ersa_protocol::schema::{validate_notification, validate_response};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines, ReadHalf, WriteHalf};
 use tokio::task::JoinHandle;
@@ -76,10 +80,19 @@ pub async fn start_with(
     dir: tempfile::TempDir,
     configure: impl FnOnce(&mut CoreConfig),
 ) -> TestCore {
+    start_with_adapters(dir, configure, Vec::new()).await
+}
+
+/// [`start_with`], with adapters registered.
+pub async fn start_with_adapters(
+    dir: tempfile::TempDir,
+    configure: impl FnOnce(&mut CoreConfig),
+    adapters: Vec<Arc<dyn Adapter>>,
+) -> TestCore {
     let endpoint = unique_endpoint();
     let mut config = test_config(&dir.path().join("data"), &endpoint);
     configure(&mut config);
-    let server = Server::bind(config).await.expect("bind");
+    let server = Server::bind_with(config, adapters).await.expect("bind");
     let task = tokio::spawn(server.run());
     TestCore {
         dir,
@@ -105,6 +118,8 @@ pub struct Client {
     lines: Lines<BufReader<ReadHalf<BoxStream>>>,
     write: WriteHalf<BoxStream>,
     next_id: i64,
+    /// Notifications that arrived while waiting for a response.
+    notifications: VecDeque<Value>,
 }
 
 impl Client {
@@ -115,6 +130,7 @@ impl Client {
             lines: BufReader::new(read).lines(),
             write,
             next_id: 1,
+            notifications: VecDeque::new(),
         }
     }
 
@@ -152,6 +168,15 @@ impl Client {
         }
     }
 
+    /// The next line as text, unparsed; `None` once Core has closed the
+    /// connection. For connections Core may cut off mid-line.
+    pub async fn read_raw(&mut self) -> Option<String> {
+        let line = tokio::time::timeout(READ_TIMEOUT, self.lines.next_line())
+            .await
+            .expect("Core answered in time");
+        line.ok().flatten()
+    }
+
     /// Sends a request and returns the whole response, after checking it
     /// against the schema and that it answers this request.
     pub async fn call(&mut self, method: &str, params: Value) -> Value {
@@ -159,7 +184,15 @@ impl Client {
         self.next_id += 1;
         let request = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
         self.send_line(&request.to_string()).await;
-        let response = self.read_line().await.expect("a response");
+        // Notifications may arrive first; keep them for `notification`.
+        let response = loop {
+            let line = self.read_line().await.expect("a response");
+            if line.get("id").is_some() {
+                break line;
+            }
+            assert_valid_notification(&line);
+            self.notifications.push_back(line);
+        };
         assert_valid(method, &response);
         assert_eq!(
             response["id"],
@@ -167,6 +200,48 @@ impl Client {
             "answers the request it was sent for"
         );
         response
+    }
+
+    /// The next notification, kept from earlier or read now; `None` once Core
+    /// has closed the connection. Checked against the schema.
+    pub async fn notification(&mut self) -> Option<Value> {
+        if let Some(notification) = self.notifications.pop_front() {
+            return Some(notification);
+        }
+        let line = self.read_line().await?;
+        assert!(line.get("id").is_none(), "a notification, not {line:#}");
+        assert_valid_notification(&line);
+        Some(line)
+    }
+
+    /// Reads notifications until one satisfies `wanted`, and returns it;
+    /// those before it are dropped.
+    pub async fn notification_where(&mut self, wanted: impl Fn(&Value) -> bool) -> Value {
+        loop {
+            let notification = self.notification().await.expect("the connection stays open");
+            if wanted(&notification) {
+                return notification;
+            }
+        }
+    }
+
+    /// Reads `session.event` notifications, skipping others, until one whose
+    /// event has type `event_type`, and returns every event read up to and
+    /// including it.
+    pub async fn events_until(&mut self, event_type: &str) -> Vec<Value> {
+        let mut events = Vec::new();
+        loop {
+            let notification = self.notification().await.expect("the connection stays open");
+            if notification["method"] != "session.event" {
+                continue;
+            }
+            let event = notification["params"]["event"].clone();
+            let done = event["event"]["type"] == event_type;
+            events.push(event);
+            if done {
+                return events;
+            }
+        }
     }
 
     /// Calls and returns `result`, failing the test on an error.
@@ -192,6 +267,15 @@ impl Client {
 pub fn assert_valid(method: &str, response: &Value) {
     if let Err(e) = validate_response(method, response) {
         panic!("{method} response does not match the schema:\n{e}\n{response:#}");
+    }
+}
+
+/// Checks a notification against the schema (PROTO-CORE-API-R06).
+pub fn assert_valid_notification(notification: &Value) {
+    if let Err(e) = validate_notification(notification) {
+        panic!("notification does not match the schema:
+{e}
+{notification:#}");
     }
 }
 
@@ -241,4 +325,21 @@ pub fn git_repo(dir: &Path) {
 /// platform's own.
 pub fn normalized(path: &Path) -> String {
     path.components().collect::<PathBuf>().display().to_string()
+}
+
+/// A git repository at `dir/repo` added as a project, with one workspace;
+/// returns the workspace's id.
+pub async fn workspace(client: &mut Client, dir: &Path) -> String {
+    let repo = dir.join("repo");
+    git_repo(&repo);
+    let project = client
+        .result(
+            "project.add",
+            json!({ "host_id": "local", "path": repo.display().to_string() }),
+        )
+        .await;
+    let workspace = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    workspace["id"].as_str().expect("workspace id").to_string()
 }
