@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
+use ersa_adapter::recording::Recording;
 use ersa_adapter::{AdapterSink, Direction, ProcessExit, Projected, Projector, RawLine};
 use ersa_adapter_claude::ClaudeProjector;
 use serde_json::Value;
@@ -21,6 +22,7 @@ pub struct Fixture {
     pub name: String,
     pub stdout: Vec<String>,
     pub meta: Value,
+    recording: Recording,
 }
 
 /// `docs/briefs/protocol/fixtures/claude-code`; the crate sits two levels
@@ -52,16 +54,13 @@ pub fn fixtures() -> Vec<Fixture> {
             else {
                 continue;
             };
-            let text = fs::read_to_string(&file).unwrap();
-            let meta = fs::read_to_string(version.join(format!("{stem}.meta.json"))).unwrap();
+            let name = format!("{version_name}/{stem}");
+            let recording = Recording::load(&file).unwrap_or_else(|e| panic!("{name}: {e}"));
             found.push(Fixture {
-                name: format!("{version_name}/{stem}"),
-                stdout: text
-                    .lines()
-                    .filter(|l| !l.trim().is_empty())
-                    .map(String::from)
-                    .collect(),
-                meta: serde_json::from_str(&meta).unwrap(),
+                name,
+                stdout: recording.stdout.clone(),
+                meta: recording.meta.clone(),
+                recording,
             });
         }
     }
@@ -80,71 +79,15 @@ pub fn fixture(name: &str) -> Fixture {
 impl Fixture {
     /// The lines written to stdin, in order.
     pub fn sent(&self) -> Vec<String> {
-        self.sent_with_times().into_iter().map(|(_, l)| l).collect()
+        self.recording.sent()
     }
 
-    fn sent_with_times(&self) -> Vec<(u64, String)> {
-        self.meta["sent"]
-            .as_array()
-            .map(|sent| {
-                sent.iter()
-                    .map(|s| {
-                        (
-                            s["t"].as_u64().expect("sent t"),
-                            s["line"].as_str().expect("sent line").to_string(),
-                        )
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    /// The session's raw log as Core would have recorded it: stdout and stdin
-    /// lines interleaved by the times the recording noted. A stdout line and a
-    /// stdin line at the same millisecond go stdout first, since the host
-    /// writes in reaction to what it read. One-shot fixtures have no timings
-    /// and no stdin lines; their log is the stdout lines in order.
+    /// The session's raw log as Core would have recorded it (see
+    /// [`Recording::timed_lines`] for the order).
     pub fn raw_log(&self) -> Vec<RawLine> {
-        let stdout_times: Vec<u64> = match self.meta["stdout_timing_ms"].as_array() {
-            Some(times) => times.iter().map(|t| t.as_u64().unwrap()).collect(),
-            None => vec![0; self.stdout.len()],
-        };
-        assert_eq!(
-            stdout_times.len(),
-            self.stdout.len(),
-            "{}: timings",
-            self.name
-        );
-        let sent = self.sent_with_times();
-
-        let mut entries = Vec::new();
-        let (mut out, mut sent_iter) = (0, sent.into_iter().peekable());
-        while out < self.stdout.len() || sent_iter.peek().is_some() {
-            let take_stdout = match sent_iter.peek() {
-                Some((t, _)) => out < self.stdout.len() && stdout_times[out] <= *t,
-                None => true,
-            };
-            if take_stdout {
-                entries.push((Direction::Backend, self.stdout[out].clone()));
-                out += 1;
-            } else {
-                let (_, line) = sent_iter.next().unwrap();
-                entries.push((Direction::Host, line));
-            }
-        }
-        let ts = self.meta["recorded_at"]
-            .as_str()
-            .unwrap_or("2026-10-31T00:00:00Z");
-        entries
-            .into_iter()
-            .enumerate()
-            .map(|(index, (dir, line))| RawLine {
-                index: index as u64,
-                ts: ts.to_string(),
-                dir,
-                line,
-            })
-            .collect()
+        self.recording
+            .raw_log()
+            .unwrap_or_else(|e| panic!("{}: {e}", self.name))
     }
 }
 
