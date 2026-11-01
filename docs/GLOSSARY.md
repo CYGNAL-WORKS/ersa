@@ -28,6 +28,8 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 ## System
 
 - **Shell**: the native window process that hosts the Interface and launches or attaches to Core.
+- **Tray icon**: the Shell's icon in the system tray. Closing the window hides it there; the icon reopens the window and carries Quit.
+- **Quit**: stopping Ersa entirely: the Shell asks Core to stop every session and exit, then exits itself. Closing the window is not quitting.
 - **Interface**: the TypeScript application in the Shell's webview.
 - **Core**: the Rust process that owns sessions, adapters, transports, workspaces, packs, modes, the harness tools server, and persistence.
 - **Core API**: the request/response protocol between Interface and Core.
