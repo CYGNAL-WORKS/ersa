@@ -1,0 +1,3 @@
+# ersa-adapter
+
+The boundary between Core and every adapter. Core and each `ersa-adapter-*` crate depend on it; it depends on `ersa-protocol` and an async runtime, never on Core or on a backend. It holds the traits an adapter implements (`Adapter`, `AdapterSession`, `Projector`), the trait Core implements to receive raw lines (`AdapterSink`), the transport traits adapters start processes through (`Transport`, `Process`), the local transport, and, behind the `test-support` feature, a fake transport for tests. Contracts only: no projection logic and nothing specific to one backend. Like Core, it must never depend on Tauri, and code that only works on one operating system belongs behind a `platform` module.

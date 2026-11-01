@@ -3,12 +3,23 @@
 //!
 //! JSON Schema is the source of truth for both protocols (see `ARCH-CORE`,
 //! Implementation decisions). The Rust types here implement those schemas and
-//! conformance tests will check their serialized form against them. Until the
-//! schemas exist, this crate holds only the protocol version and a placeholder.
+//! conformance tests check their serialized form against them.
+//!
+//! - [`events`]: the agent event stream (`PROTO-AGENT-EVENTS`), implementing
+//!   `protocol/schema/agent-events.schema.json`.
+//! - `schema` (with the `schema-validation` feature): checks serialized events
+//!   against that schema, for tests in this and other crates.
+//! - The Core API types are still a placeholder below; the Core API ticket owns them.
 //!
 //! This crate must stay free of Core's internals and of any runtime: the
 //! Interface's generated TypeScript types and a replay server both depend on
 //! exactly what is here, so it is plain data with serde derives and nothing else.
+
+pub mod events;
+
+// `#[cfg(feature = "...")]` compiles the module only when the feature is on.
+#[cfg(feature = "schema-validation")]
+pub mod schema;
 
 use serde::{Deserialize, Serialize};
 

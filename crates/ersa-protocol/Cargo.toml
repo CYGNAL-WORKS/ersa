@@ -7,11 +7,23 @@ license.workspace = true
 publish.workspace = true
 repository.workspace = true
 
+[features]
+# Validates serialized events against protocol/schema/agent-events.schema.json.
+# For tests only; see src/schema.rs for why it is a feature.
+schema-validation = ["dep:jsonschema"]
+
 [dependencies]
 serde.workspace = true
+# `serde_json::Value` is part of the event types: tool inputs and passthrough
+# payloads are open JSON.
+serde_json.workspace = true
+jsonschema = { workspace = true, optional = true }
 
 [dev-dependencies]
-serde_json.workspace = true
+# A crate cannot turn on its own features for its tests directly. Depending on
+# itself with the feature enabled does it: Cargo merges this with the crate
+# being tested, so the conformance tests in tests/ can use `schema`.
+ersa-protocol = { path = ".", features = ["schema-validation"] }
 
 [lints]
 workspace = true
