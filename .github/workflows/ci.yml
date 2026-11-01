@@ -1,5 +1,8 @@
 # Runs the same checks a session runs locally before committing.
-# Windows first: Ersa ships on Windows before anything else (CLAUDE.md, Stack).
+# Linux carries every check because its minutes cost half of Windows'. Windows
+# first still holds for the product (CLAUDE.md, Stack): pull requests that touch
+# Rust also build and test on Windows, which compiles the `cfg(windows)` code
+# Linux cannot.
 # Actions are pinned by commit SHA (ADR 0015); Dependabot proposes updates.
 name: CI
 
@@ -20,11 +23,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    name: Build, lint, test (Windows)
-    runs-on: windows-latest
+  linux:
+    name: Build, lint, test, dependencies (Linux)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          # The release-age check reads the lockfiles at the base branch.
+          fetch-depth: 0
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
@@ -40,16 +46,21 @@ jobs:
         with:
           node-version: 22
 
+      # Prebuilt binaries at exact versions, verified against checksums.
+      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
+        with:
+          tool: cargo-deny@0.20.2,osv-scanner@2.7.0
+
       - name: Format
         run: cargo fmt --check
 
       # --locked everywhere: CI builds exactly Cargo.lock and never resolves
       # new versions on its own.
       - name: Clippy
-        run: cargo clippy --locked --all-targets -- -D warnings
+        run: cargo clippy --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test --locked --workspace
+        run: cargo test --workspace --locked
 
       - name: Script tests
         run: node --test scripts/deps-check.test.mjs
@@ -57,35 +68,11 @@ jobs:
       - name: Manifest
         run: node scripts/manifest.mjs --check
 
-  # ADR 0015 on pull requests: release age of what the pull request adds or
-  # changes, known vulnerabilities in every lockfile, and cargo-deny's sources,
-  # bans, and licences. Linux, because the lockfiles are platform-independent
-  # and the tools start faster there. dependencies.yml runs the last two daily.
-  dependencies:
-    name: Dependency policy
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-        with:
-          # The age check reads the lockfiles at the base branch.
-          fetch-depth: 0
-
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        with:
-          node-version: 22
-
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-
-      # Prebuilt binaries at exact versions, verified against checksums.
-      - uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
-        with:
-          tool: cargo-deny@0.20.2,osv-scanner@2.7.0
-
+      # ADR 0015. Release age judges only what a pull request adds or changes,
+      # so it has nothing to do on a push. dependencies.yml also runs the
+      # vulnerability and cargo-deny checks daily on main.
       - name: Release age
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: node scripts/deps-check.mjs age --base "origin/${{ github.base_ref }}"
 
       - name: Vulnerabilities
@@ -95,3 +82,48 @@ jobs:
       - name: Sources, bans, licences
         if: ${{ !cancelled() }}
         run: cargo deny --locked check bans licenses sources
+
+  # Decides whether a pull request touches anything the Windows build depends
+  # on. A skipped `windows` job still reports a status, so it can be required.
+  changes:
+    name: Rust changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.diff.outputs.rust }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          # The pull request's merge commit and its first parent, the base.
+          fetch-depth: 2
+
+      - id: diff
+        run: |
+          if git diff --name-only HEAD^1 HEAD \
+              | grep -qE '^(crates/|Cargo\.toml$|Cargo\.lock$|rust-toolchain|\.github/workflows/ci\.yml$)'; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  windows:
+    name: Build, lint, test (Windows)
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace --locked
