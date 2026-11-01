@@ -537,6 +537,14 @@ pub struct SubscribeResult {
     /// Absent when the session has no events yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_seq: Option<u64>,
+    /// The identity of the view the subscription reads. A view is one
+    /// projection of the session; when it changes, events a client holds
+    /// from another view no longer line up, and it starts over.
+    pub view: String,
+    /// The first event the view still holds, when it no longer holds every
+    /// event from 0: a subscription from before it starts here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_seq: Option<u64>,
 }
 
 /// `session.raw_log` params. Both bounds are inclusive raw-log indices.

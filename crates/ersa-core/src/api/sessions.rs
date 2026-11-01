@@ -205,7 +205,7 @@ pub(super) async fn subscribe(
         .outbound
         .upgrade()
         .ok_or_else(|| ApiError::invalid_state("the connection is closing"))?;
-    let (subscription, last_seq) = core
+    let (subscription, subscribed) = core
         .sessions
         .subscribe(
             &params.id,
@@ -226,7 +226,11 @@ pub(super) async fn subscribe(
         .unwrap_or_else(|e| e.into_inner())
         .insert(params.id, subscription);
     drop(old);
-    Ok(SubscribeResult { last_seq })
+    Ok(SubscribeResult {
+        last_seq: subscribed.last_seq,
+        view: subscribed.view,
+        first_seq: subscribed.first_seq,
+    })
 }
 
 pub(super) fn unsubscribe(peer: &Peer, params: IdParams) -> Result<Empty, ApiError> {

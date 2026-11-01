@@ -37,7 +37,7 @@
 //! until it is stopped, its backend exits, or Core shuts down
 //! (PROTO-CORE-API-R03, ARCH-CORE-R08).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
@@ -45,7 +45,7 @@ use std::time::Duration;
 
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, Direction, PermissionDecision, ProcessExit,
-    RawLine, RecordEvent, SessionConfig, Transport,
+    RawLine, RecordEvent, RecordSummary, SessionConfig, Transport,
 };
 use ersa_protocol::core_api::rpc::Notification;
 use ersa_protocol::core_api::{Session, SessionEventParams, SessionTileParams, Tile};
@@ -85,6 +85,12 @@ const ADAPTER_CALL: Duration = Duration::from_secs(30);
 /// How many events a replay sends before it looks again for whether the
 /// subscription is still wanted.
 const REPLAY_PAGE: usize = 500;
+
+/// The most bytes of event lines one open view holds. A long live session
+/// with streaming replies emits a great many events; a client that asks for
+/// ones older than these starts from the oldest held, as `first_seq` in the
+/// subscribe answer says.
+const MAX_VIEW_BYTES: usize = 64 * 1024 * 1024;
 
 /// How long `session.send` waits for its message to be projected, to report
 /// the turn it started.
@@ -162,15 +168,61 @@ struct Handle {
     /// Core learnt it: shown again at the end of a view opened afresh, since
     /// it is Core's knowledge and never in the record.
     ending: Mutex<Option<(LifecycleFact, String)>>,
+    /// A read of the session's record still running after its caller gave
+    /// up waiting; the next open waits on it rather than start another, so
+    /// a file system that hangs gathers one stuck read per session, not one
+    /// per attempt.
+    record_read: ReadSlot<Result<Vec<RecordEvent>, String>>,
+    /// The same for reading the record's title and creation time.
+    summary_read: ReadSlot<Result<Option<RecordSummary>, String>>,
+}
+
+/// One read of a session's record that may still be running.
+type ReadSlot<T> = tokio::sync::Mutex<Option<tokio::task::JoinHandle<T>>>;
+
+/// The result of the read in `slot`, started with `start` unless an earlier
+/// one is still running, which is waited on instead. `None` when it takes
+/// longer than `timeout`; it is kept running for the next caller.
+async fn read_once<T: Send + 'static>(
+    slot: &ReadSlot<T>,
+    timeout: Duration,
+    start: impl FnOnce() -> tokio::task::JoinHandle<T>,
+) -> Option<T> {
+    let mut slot = slot.lock().await;
+    let mut task = match slot.take() {
+        Some(running) if !running.is_finished() => running,
+        _ => start(),
+    };
+    match tokio::time::timeout(timeout, &mut task).await {
+        Ok(Ok(value)) => Some(value),
+        Ok(Err(e)) => {
+            tracing::error!(error = %e, "a session record read failed");
+            None
+        }
+        Err(_) => {
+            *slot = Some(task);
+            None
+        }
+    }
 }
 
 /// The session's open view, and who receives its events.
 #[derive(Default)]
 struct Hub {
-    /// `None` until the session is first opened in this Core.
+    /// `None` until the session is opened in this Core, and again once
+    /// nobody reads a session Core is not running.
     view: Option<View>,
-    /// Every event of the view, as notification lines: `events[seq]`.
-    events: Vec<Arc<Published>>,
+    /// The open view's identity, which `session.subscribe` answers with: a
+    /// client that sees it change knows the events it holds belong to
+    /// another view, and starts over.
+    view_id: String,
+    /// The view's events still held, as notification lines:
+    /// `events[seq - first_seq]`. Only the latest [`MAX_VIEW_BYTES`] are held.
+    events: VecDeque<Arc<Published>>,
+    /// The `seq` of the first event held.
+    first_seq: u64,
+    /// Bytes of notification lines held.
+    held_bytes: usize,
     subscribers: HashMap<u64, Subscriber>,
     next_subscriber: u64,
 }
@@ -190,9 +242,62 @@ struct Presented {
 const UNKNOWN_TIME: &str = "1970-01-01T00:00:00.000Z";
 
 impl Hub {
+    /// The `seq` of the last event handed to subscribers; `None` before the
+    /// first.
     fn last_seq(&self) -> Option<u64> {
-        self.view.as_ref().and_then(View::last_seq)
+        (self.first_seq + self.events.len() as u64).checked_sub(1)
     }
+
+    /// Holds a published event, letting the oldest go past
+    /// [`MAX_VIEW_BYTES`] (the latest is always held).
+    fn hold(&mut self, event: Arc<Published>) {
+        self.hold_within(event, MAX_VIEW_BYTES);
+    }
+
+    fn hold_within(&mut self, event: Arc<Published>, max_bytes: usize) {
+        self.held_bytes += event.line.len();
+        self.events.push_back(event);
+        while self.held_bytes > max_bytes && self.events.len() > 1 {
+            if let Some(old) = self.events.pop_front() {
+                self.held_bytes -= old.line.len();
+                self.first_seq += 1;
+            }
+        }
+    }
+
+    /// Makes `view`, whose events so far are `events`, the open view, under a
+    /// new identity.
+    fn install(&mut self, session_id: &str, view: View, events: &[Envelope]) {
+        self.view = Some(view);
+        self.view_id = persistence::new_id("v");
+        self.events.clear();
+        self.first_seq = 0;
+        self.held_bytes = 0;
+        for event in events {
+            self.hold(Arc::new(published(session_id, event)));
+        }
+    }
+
+    /// Lets the view and its events go.
+    fn close(&mut self) {
+        self.view = None;
+        self.view_id.clear();
+        self.events = VecDeque::new();
+        self.first_seq = 0;
+        self.held_bytes = 0;
+    }
+}
+
+/// What `session.subscribe` answers with.
+#[derive(Debug, Clone)]
+pub struct Subscribed {
+    /// The seq of the last event so far; `None` before the first.
+    pub last_seq: Option<u64>,
+    /// The identity of the view the subscription reads.
+    pub view: String,
+    /// The first event the view still holds, when it no longer holds them
+    /// all from 0.
+    pub first_seq: Option<u64>,
 }
 
 struct Subscriber {
@@ -291,11 +396,28 @@ impl Handle {
             live: Mutex::new(None),
             raw: Mutex::default(),
             ending: Mutex::new(None),
+            record_read: tokio::sync::Mutex::new(None),
+            summary_read: tokio::sync::Mutex::new(None),
         }
     }
 
     fn live(&self) -> Option<Arc<Live>> {
         lock(&self.live).clone()
+    }
+
+    /// Lets the view and the raw log go when Core is not running the session
+    /// and nobody reads it: a session opened again is projected afresh.
+    fn close_if_idle(&self) {
+        if self.live().is_some() {
+            return;
+        }
+        let mut hub = lock(&self.hub);
+        if !hub.subscribers.is_empty() || hub.view.is_none() {
+            return;
+        }
+        hub.close();
+        drop(hub);
+        *lock(&self.raw) = RawLog::default();
     }
 
     /// The session as `session.list` reports it. A session no view has
@@ -367,17 +489,21 @@ impl SessionManager {
         let mut summaries = tokio::task::JoinSet::new();
         for row in self.store.sessions().await? {
             let known = facts.get(&row.id);
-            let started = known.map_or(UNKNOWN_TIME.to_string(), |f| f.first_ts.clone());
+            let started = known.map_or(UNKNOWN_TIME.to_string(), |f| f.first.ts.clone());
             let handle = Arc::new(Handle::new(row, started));
             match known.map(|f| &f.last) {
-                Some(last) if !last.fact.ends() => {
+                Some(Some(last)) if !last.fact.ends() => {
                     let ts = now_rfc3339();
                     let fact = LifecycleFact::CoreRestarted;
                     self.app_log.write(&handle.id, &ts, &fact);
                     *lock(&handle.ending) = Some((fact, ts));
                 }
-                Some(last) => *lock(&handle.ending) = Some((last.fact.clone(), last.ts.clone())),
-                None => {}
+                Some(Some(last)) => {
+                    *lock(&handle.ending) = Some((last.fact.clone(), last.ts.clone()));
+                }
+                // Its last fact could not be read: how it ended is unknown,
+                // and nothing is made up for it.
+                Some(None) | None => {}
             }
             if let Some(adapter) = self.adapters.get(&handle.backend) {
                 let row = lock(&handle.row).clone();
@@ -386,8 +512,7 @@ impl SessionManager {
                 {
                     let (handle, adapter) = (Arc::clone(&handle), Arc::clone(adapter));
                     summaries.spawn(async move {
-                        apply_summary(&handle, adapter.as_ref(), transport, &row.cwd, &backend_id)
-                            .await;
+                        apply_summary(&handle, adapter, transport, row.cwd, backend_id).await;
                     });
                 }
             }
@@ -505,7 +630,7 @@ impl SessionManager {
             Some(adapter.projector()),
             Vec::new(),
         );
-        install_view(&handle, view, events);
+        lock(&handle.hub).install(&handle.id, view, &events);
         {
             // Registered and launched under the lock `stop_all` takes, so a
             // session either starts before shutdown and is stopped by it, or
@@ -713,7 +838,10 @@ impl SessionManager {
     /// (PROTO-CORE-API-R02), opening the session's view first when it needs
     /// one (see the module's notes). `transport_for` reaches a host, to read
     /// the session record there. Returns the subscription, which stops when
-    /// dropped, and the seq of the last event so far.
+    /// dropped, and what the subscribe answer says.
+    ///
+    /// A request from before the first event the view holds starts there
+    /// instead, and the answer says so (`first_seq`).
     ///
     /// Nothing is sent until [`Subscription::start`], so the caller can put
     /// its response on the connection first.
@@ -724,47 +852,61 @@ impl SessionManager {
         transport_for: impl Fn(&str) -> Option<Arc<dyn Transport>>,
         outbound: mpsc::Sender<String>,
         kick: Kick,
-    ) -> Result<(Subscription, Option<u64>), SessionError> {
+    ) -> Result<(Subscription, Subscribed), SessionError> {
         let handle = self.handle(id)?;
-        let wants_view =
-            |hub: &Hub| hub.view.is_none() || (from_seq == 0 && hub.subscribers.is_empty());
-        if handle.live().is_none() && wants_view(&lock(&handle.hub)) {
-            let _op = handle.op.lock().await;
-            if handle.live().is_none() && wants_view(&lock(&handle.hub)) {
-                let (view, events) = self.open_view(&handle, &transport_for).await?;
-                // Checked again: a client may have subscribed to the view
-                // that was open while the record was read, and must keep it.
-                if install_view_if(&handle, view, events, wants_view) {
-                    send_tile(&self.tiles, &handle.id, &handle.describe().tile);
-                }
-            }
-        }
-
+        // A session Core is not running gets a fresh view when it has none,
+        // or when a client starts from the beginning with nobody else
+        // reading (so turns taken elsewhere show). A live view is never
+        // replaced.
+        let wants_view = |hub: &Hub, live: bool| {
+            !live && (hub.view.is_none() || (from_seq == 0 && hub.subscribers.is_empty()))
+        };
         let (events_tx, events_rx) = mpsc::channel(SUBSCRIBER_QUEUE);
         let overflowed = Arc::new(AtomicBool::new(false));
-        // Registered and the backlog taken under one lock, the lock the
-        // pipeline publishes under: every event up to `last_seq` is in the
-        // backlog, and every later one will arrive on the queue. That split
-        // is what makes the stream gap-free and duplicate-free.
-        let (subscriber, last_seq, backlog) = {
-            let mut hub = lock(&handle.hub);
-            let subscriber = hub.next_subscriber;
-            hub.next_subscriber += 1;
-            hub.subscribers.insert(
-                subscriber,
-                Subscriber {
-                    events: events_tx,
-                    overflowed: Arc::clone(&overflowed),
-                    kick: Arc::clone(&kick),
-                },
-            );
-            let from = usize::try_from(from_seq).unwrap_or(usize::MAX);
-            let backlog: Vec<Arc<Published>> = hub.events.get(from..).unwrap_or_default().to_vec();
-            (subscriber, hub.last_seq(), backlog)
+        let subscriber = Subscriber {
+            events: events_tx,
+            overflowed: Arc::clone(&overflowed),
+            kick: Arc::clone(&kick),
         };
+        let mut opened: Option<(View, Vec<Envelope>)> = None;
+        let mut installed = false;
+        let mut subscriber = Some(subscriber);
+        let (subscriber, subscribed, backlog) = loop {
+            {
+                let mut hub = lock(&handle.hub);
+                let live = handle.live().is_some();
+                // A view just opened goes in only if it is still wanted: a
+                // client that subscribed to the open one meanwhile keeps it.
+                if let Some((view, events)) = opened.take()
+                    && wants_view(&hub, live)
+                {
+                    hub.install(&handle.id, view, &events);
+                    installed = true;
+                }
+                // Registered and the backlog taken under one lock, the lock
+                // the pipeline publishes under: every event up to `last_seq`
+                // is in the backlog, and every later one will arrive on the
+                // queue. That split is what makes the stream gap-free and
+                // duplicate-free.
+                if hub.view.is_some() && (installed || !wants_view(&hub, live)) {
+                    let subscriber = subscriber.take().expect("registered once");
+                    break register(&mut hub, subscriber, from_seq);
+                }
+            }
+            // Opened outside the hub's lock, one opening at a time.
+            let _op = handle.op.lock().await;
+            if handle.live().is_some() || !wants_view(&lock(&handle.hub), false) {
+                continue;
+            }
+            opened = Some(self.open_view(&handle, &transport_for).await?);
+        };
+        if installed {
+            send_tile(&self.tiles, &handle.id, &handle.describe().tile);
+        }
+        let first_seq = subscribed.first_seq.unwrap_or(0).max(from_seq);
         let (go_tx, go_rx) = oneshot::channel();
         let task = tokio::spawn(forward(Forward {
-            from_seq,
+            from_seq: first_seq,
             backlog,
             live: events_rx,
             outbound,
@@ -777,18 +919,18 @@ impl SessionManager {
             task: task.abort_handle(),
             go: Some(go_tx),
         };
-        Ok((subscription, last_seq))
+        Ok((subscription, subscribed))
     }
 
     /// A fresh view of a session this Core is not running: the events of its
     /// record, then how Core last saw its backend end, if it did.
     async fn open_view(
         &self,
-        handle: &Handle,
+        handle: &Arc<Handle>,
         transport_for: &impl Fn(&str) -> Option<Arc<dyn Transport>>,
     ) -> Result<(View, Vec<Envelope>), SessionError> {
         let row = lock(&handle.row).clone();
-        let Some(adapter) = self.adapters.get(&row.backend) else {
+        let Some(adapter) = self.adapters.get(&row.backend).cloned() else {
             return Err(SessionError::InvalidState(format!(
                 "the events of session {} cannot be read: Core has no adapter for backend {}",
                 row.id, row.backend
@@ -800,11 +942,23 @@ impl SessionManager {
             Some(backend_id) => {
                 let read = match transport_for(&row.host_id) {
                     Some(transport) => {
-                        let read = adapter.read_record(transport, &row.cwd, backend_id);
-                        match tokio::time::timeout(RECORD_READ, read).await {
-                            Ok(read) => read.map_err(|e| e.to_string()),
-                            Err(_) => Err(format!("it took longer than {RECORD_READ:?}")),
-                        }
+                        let (adapter, cwd, id) =
+                            (Arc::clone(&adapter), row.cwd.clone(), backend_id.clone());
+                        let start = move || {
+                            tokio::spawn(async move {
+                                adapter
+                                    .read_record(transport, &cwd, &id)
+                                    .await
+                                    .map_err(|e| e.to_string())
+                            })
+                        };
+                        read_once(&handle.record_read, RECORD_READ, start)
+                            .await
+                            .unwrap_or_else(|| {
+                                Err(format!(
+                                    "it took longer than {RECORD_READ:?}, or the read failed"
+                                ))
+                            })
                     }
                     None => Err(format!("host {} cannot be reached", row.host_id)),
                 };
@@ -827,7 +981,11 @@ impl SessionManager {
             }
         };
         // Turns taken elsewhere may have changed its title too.
-        read_presented(handle, adapter.as_ref(), transport_for).await;
+        if let (Some(backend_id), Some(transport)) =
+            (row.backend_session_id.clone(), transport_for(&row.host_id))
+        {
+            apply_summary(handle, adapter, transport, row.cwd.clone(), backend_id).await;
+        }
         let (mut view, mut events) = View::open(&row.id, &row.backend, None, record);
         if let Some((fact, ts)) = lock(&handle.ending).clone() {
             events.extend(view.lifecycle(&fact, &ts));
@@ -836,32 +994,46 @@ impl SessionManager {
     }
 }
 
-/// Reads the session's title and creation time from its record, keeping
-/// what was known when the record has none or cannot be read.
-async fn read_presented(
-    handle: &Handle,
-    adapter: &dyn Adapter,
-    transport_for: &impl Fn(&str) -> Option<Arc<dyn Transport>>,
-) {
-    let row = lock(&handle.row).clone();
-    let (Some(backend_id), Some(transport)) =
-        (&row.backend_session_id, transport_for(&row.host_id))
-    else {
-        return;
+/// Registers `subscriber` on the hub's open view and takes its backlog from
+/// `from_seq` (or the first event held, if later).
+fn register(
+    hub: &mut Hub,
+    subscriber: Subscriber,
+    from_seq: u64,
+) -> (u64, Subscribed, Vec<Arc<Published>>) {
+    let id = hub.next_subscriber;
+    hub.next_subscriber += 1;
+    hub.subscribers.insert(id, subscriber);
+    let skip = usize::try_from(from_seq.saturating_sub(hub.first_seq)).unwrap_or(usize::MAX);
+    let backlog = hub.events.iter().skip(skip).cloned().collect();
+    let subscribed = Subscribed {
+        last_seq: hub.last_seq(),
+        view: hub.view_id.clone(),
+        first_seq: (hub.first_seq > 0).then_some(hub.first_seq),
     };
-    apply_summary(handle, adapter, transport, &row.cwd, backend_id).await;
+    (id, subscribed, backlog)
 }
 
+/// Reads the session's title and creation time from its record, keeping
+/// what was known when the record has none or cannot be read. One read at
+/// a time per session ([`read_once`]).
 async fn apply_summary(
     handle: &Handle,
-    adapter: &dyn Adapter,
+    adapter: Arc<dyn Adapter>,
     transport: Arc<dyn Transport>,
-    cwd: &str,
-    backend_id: &str,
+    cwd: String,
+    backend_id: String,
 ) {
-    let read = adapter.summarize_record(transport, cwd, backend_id);
-    match tokio::time::timeout(SUMMARY_READ, read).await {
-        Ok(Ok(Some(summary))) => {
+    let start = move || {
+        tokio::spawn(async move {
+            adapter
+                .summarize_record(transport, &cwd, &backend_id)
+                .await
+                .map_err(|e| e.to_string())
+        })
+    };
+    match read_once(&handle.summary_read, SUMMARY_READ, start).await {
+        Some(Ok(Some(summary))) => {
             let mut presented = lock(&handle.presented);
             if summary.title.is_some() {
                 presented.title = summary.title;
@@ -876,11 +1048,11 @@ async fn apply_summary(
                 None => {}
             }
         }
-        Ok(Ok(None)) => {}
-        Ok(Err(e)) => {
+        Some(Ok(None)) => {}
+        Some(Err(e)) => {
             tracing::warn!(session = %handle.id, error = %e, "could not read the session record's title");
         }
-        Err(_) => {
+        None => {
             tracing::warn!(session = %handle.id, "reading the session record's title took too long");
         }
     }
@@ -924,36 +1096,7 @@ fn is_rfc3339(text: &str) -> bool {
     rest == "Z"
 }
 
-/// Makes `view`, whose events so far are `events`, the session's open view.
-/// Subscribers of the view it replaces had none: a view is replaced only
-/// while nobody reads it.
-fn install_view(handle: &Handle, view: View, events: Vec<Envelope>) {
-    install_view_if(handle, view, events, |_| true);
-}
-
-/// [`install_view`] when `wanted` still says so, checked under the lock
-/// that installs it: a client that subscribed to the open view meanwhile
-/// keeps it. Returns whether it was installed.
-fn install_view_if(
-    handle: &Handle,
-    view: View,
-    events: Vec<Envelope>,
-    wanted: impl Fn(&Hub) -> bool,
-) -> bool {
-    let published = events
-        .iter()
-        .map(|event| Arc::new(published(&handle.id, event)))
-        .collect();
-    let mut hub = lock(&handle.hub);
-    if !wanted(&hub) {
-        return false;
-    }
-    hub.view = Some(view);
-    hub.events = published;
-    true
-}
-
-/// Runs one adapter call, answering after at most [`ADAPTER_CALL`]: a
+// Runs one adapter call, answering after at most [`ADAPTER_CALL`]: a
 /// backend that stopped reading its stdin would otherwise hold the write,
 /// and with it every later request on the client's connection, until
 /// someone stopped the session from elsewhere.
@@ -1220,6 +1363,9 @@ async fn run_session(task: SessionTask) {
         backend: handle.backend.clone(),
         backend_version,
     });
+    // On disk before the process exists, so a crash just after starting it
+    // still leaves the fact startup repairs from.
+    sink.app_log.flushed().await;
 
     let mut cancel = live.cancel.subscribe();
     let as_sink: Arc<dyn AdapterSink> = sink.clone();
@@ -1293,13 +1439,18 @@ async fn run_session(task: SessionTask) {
     if let Some(view) = lock(&handle.hub).view.as_mut() {
         view.finish_live();
     }
-    // The record now holds the session's turns, and with them its title.
-    let row = lock(&handle.row).clone();
-    if let Some(backend_id) = &row.backend_session_id {
-        apply_summary(&handle, adapter.as_ref(), transport, &row.cwd, backend_id).await;
-    }
     *lock(&handle.live) = None;
+    // Nobody reading it: nothing more will be added, so it goes.
+    handle.close_if_idle();
     finished.send_replace(true);
+    // The record now holds the session's turns, and with them its title.
+    // Read after the stop has its answer, never on its way.
+    let row = lock(&handle.row).clone();
+    if let Some(backend_id) = row.backend_session_id {
+        tokio::spawn(async move {
+            apply_summary(&handle, adapter, transport, row.cwd, backend_id).await;
+        });
+    }
 }
 
 /// Returns once the flag is raised; never if its sender is gone.
@@ -1346,7 +1497,7 @@ async fn run_pipeline(pipeline: Pipeline) {
                 *lock(&handle.ending) = Some((fact.clone(), ts.clone()));
             }
         }
-        let (tile, turn, announced) = {
+        let (events, tile, turn, announced) = {
             let mut hub = lock(&handle.hub);
             let Some(view) = hub.view.as_mut() else {
                 // Never: a live session's view is open from its start.
@@ -1366,12 +1517,13 @@ async fn run_pipeline(pipeline: Pipeline) {
             }
             let announced = view.backend_session_id().map(String::from);
             let (tile, turn) = (view.tile().clone(), view.turn());
-            publish(&mut hub, &handle.id, &events);
-            (tile, turn, announced)
+            (events, tile, turn, announced)
         };
 
         // The backend's own id finds the session's record later; it is the
-        // one thing about the session's history Ersa keeps.
+        // one thing about the session's history Ersa keeps. Stored before
+        // anyone hears of the session's events, so a crash after a client
+        // saw them cannot leave a session whose record is lost.
         if let Some(backend_id) = announced {
             let known = lock(&handle.row).backend_session_id.clone();
             if known.as_deref() != Some(backend_id.as_str()) {
@@ -1386,6 +1538,7 @@ async fn run_pipeline(pipeline: Pipeline) {
                 }
             }
         }
+        publish(&mut lock(&handle.hub), &handle.id, &events);
         if tile != last_tile {
             send_tile(&tiles, &handle.id, &tile);
             last_tile = tile;
@@ -1408,7 +1561,9 @@ fn publish(hub: &mut Hub, session_id: &str, events: &[Envelope]) {
         .iter()
         .map(|event| Arc::new(published(session_id, event)))
         .collect();
-    hub.events.extend(published.iter().cloned());
+    for event in &published {
+        hub.hold(Arc::clone(event));
+    }
     hub.subscribers.retain(|_, subscriber| {
         for event in &published {
             match subscriber.events.try_send(Arc::clone(event)) {
@@ -1541,6 +1696,9 @@ impl Drop for Subscription {
         self.task.abort();
         if let Some(handle) = self.handle.upgrade() {
             lock(&handle.hub).subscribers.remove(&self.subscriber);
+            // The last reader of a session Core is not running: its view
+            // goes, and is projected afresh when it is opened again.
+            handle.close_if_idle();
         }
     }
 }
@@ -1615,7 +1773,34 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_rfc3339;
+    use super::*;
+
+    fn subscriber() -> Subscriber {
+        Subscriber {
+            events: mpsc::channel(1).0,
+            overflowed: Arc::default(),
+            kick: Arc::new(watch::Sender::new(false)),
+        }
+    }
+
+    #[test]
+    fn a_view_holds_its_latest_events_and_a_subscribe_from_before_them_starts_there() {
+        let mut hub = Hub::default();
+        for seq in 0..10 {
+            let line = format!("event {seq:02}"); // 8 bytes each
+            hub.hold_within(Arc::new(Published { seq, line }), 32);
+        }
+        assert_eq!(hub.first_seq, 6);
+        assert_eq!(hub.last_seq(), Some(9));
+        let (_, subscribed, backlog) = register(&mut hub, subscriber(), 2);
+        assert_eq!(subscribed.first_seq, Some(6));
+        assert_eq!(subscribed.last_seq, Some(9));
+        let seqs: Vec<u64> = backlog.iter().map(|e| e.seq).collect();
+        assert_eq!(seqs, [6, 7, 8, 9]);
+        // From within what is held, as asked.
+        let (_, _, backlog) = register(&mut hub, subscriber(), 8);
+        assert_eq!(backlog.iter().map(|e| e.seq).collect::<Vec<_>>(), [8, 9]);
+    }
 
     #[test]
     fn only_rfc3339_times_are_taken_from_a_record() {
