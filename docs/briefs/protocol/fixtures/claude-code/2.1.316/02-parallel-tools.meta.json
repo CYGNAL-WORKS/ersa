@@ -1,0 +1,117 @@
+{
+  "recorded_at": "2026-11-01T19:40:07.021Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "885fc6e8-02c3-4ccd-ba0a-d8e1a3b14d0b",
+  "session_record": "record/02-parallel-tools.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 3993,
+  "stderr": "",
+  "stdout_lines": 41,
+  "stdout_timing_ms": [
+    616,
+    879,
+    882,
+    1792,
+    1792,
+    1792,
+    2129,
+    2129,
+    2129,
+    2129,
+    2129,
+    2139,
+    2289,
+    2293,
+    2314,
+    2316,
+    2316,
+    2330,
+    2390,
+    2672,
+    2672,
+    2672,
+    2672,
+    2672,
+    2742,
+    2743,
+    2755,
+    2759,
+    2760,
+    2760,
+    2766,
+    2783,
+    3428,
+    3428,
+    3428,
+    3428,
+    3429,
+    3429,
+    3434,
+    3434,
+    3441
+  ],
+  "sent": [
+    {
+      "t": 9,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 616,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"In one message, make two Read tool calls in parallel: one for README.md and one for NOTES.md. Then reply with the first word of each file, separated by a space.\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "In one message, make two Read tool calls in parallel: one for README.md and one for NOTES.md. Then reply with the first word of each file, separated by a space.",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}

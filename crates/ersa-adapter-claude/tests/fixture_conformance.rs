@@ -563,3 +563,116 @@ fn keep_alive_and_control_cancel_request_parse_typed() {
         assert_eq!(reserialised, serde_json::from_str::<Value>(line).unwrap());
     }
 }
+
+/// Every entry of every session-record fixture (`<version>/record/*.jsonl`),
+/// with a `version/record/file:line` label.
+fn record_entries() -> Vec<(String, String)> {
+    let mut entries = Vec::new();
+    for version in fs::read_dir(fixtures_root()).expect("fixtures directory exists") {
+        let records = version.unwrap().path().join("record");
+        if !records.is_dir() {
+            continue;
+        }
+        let mut files: Vec<PathBuf> = fs::read_dir(&records)
+            .unwrap()
+            .map(|f| f.unwrap().path())
+            .filter(|f| f.extension().is_some_and(|e| e == "jsonl"))
+            .collect();
+        files.sort();
+        for file in files {
+            let version = file.parent().unwrap().parent().unwrap();
+            let name = format!(
+                "{}/record/{}",
+                version.file_name().unwrap().to_string_lossy(),
+                file.file_name().unwrap().to_string_lossy()
+            );
+            let text = fs::read_to_string(&file).unwrap();
+            for (n, line) in text.lines().enumerate() {
+                if !line.trim().is_empty() {
+                    entries.push((format!("{name}:{}", n + 1), line.to_string()));
+                }
+            }
+        }
+    }
+    assert!(!entries.is_empty(), "no session-record fixtures found");
+    entries
+}
+
+/// The record entry kinds this crate models.
+const MODELLED_RECORD: &[&str] = &[
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+];
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R11
+#[test]
+fn every_session_record_entry_parses_and_keeps_its_fields() {
+    let mut typed = BTreeSet::new();
+    for (at, line) in record_entries() {
+        let entry =
+            RecordEntry::from_line(&line).unwrap_or_else(|e| panic!("{at} does not parse: {e}"));
+        let original: Value = serde_json::from_str(&line).unwrap();
+        let kind = original["type"].as_str().unwrap_or("?").to_string();
+        match &entry {
+            RecordEntry::Other(_) => assert!(
+                !MODELLED_RECORD.contains(&kind.as_str()),
+                "{at}: a {kind} entry did not fit its model"
+            ),
+            RecordEntry::User(user) => {
+                if let MessageContent::Blocks(blocks) = &user.message.content {
+                    for block in blocks {
+                        assert!(!matches!(block, ContentBlock::Other(_)), "{at}: {block:?}");
+                    }
+                }
+                typed.insert(kind);
+            }
+            RecordEntry::Assistant(reply) => {
+                for block in &reply.message.content {
+                    assert!(!matches!(block, ContentBlock::Other(_)), "{at}: {block:?}");
+                }
+                typed.insert(kind);
+            }
+            _ => {
+                typed.insert(kind);
+            }
+        }
+        let reserialised = serde_json::to_value(&entry).unwrap();
+        assert_eq!(
+            normalise(&reserialised),
+            normalise(&original),
+            "{at} lost or changed data"
+        );
+    }
+    // `ai-title` arises only in the interactive CLI and the IDE extensions,
+    // which the recorder does not drive; the listing tests cover it.
+    for kind in ["user", "assistant", "last-prompt", "custom-title"] {
+        assert!(typed.contains(kind), "no record fixture has a {kind} entry");
+    }
+}
+
+#[test]
+fn record_tool_results_carry_the_permission_decision() {
+    let decisions: Vec<RecordPermissionDecision> = record_entries()
+        .into_iter()
+        .filter_map(|(_, line)| match RecordEntry::from_line(&line).unwrap() {
+            RecordEntry::User(user) => user.permission_decision,
+            _ => None,
+        })
+        .collect();
+    assert!(!decisions.is_empty());
+    assert!(decisions.iter().all(|d| d.decision == "accept"));
+    // One the user allowed when asked, one the permission mode allowed.
+    assert!(
+        decisions
+            .iter()
+            .any(|d| d.source.as_deref() == Some("user_temporary"))
+    );
+    assert!(
+        decisions
+            .iter()
+            .any(|d| d.reason_type.as_deref() == Some("mode"))
+    );
+}
