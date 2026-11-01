@@ -301,6 +301,21 @@ pub(super) async fn workspace_create(
     // `<root>/<project name>/<id>`: outside the project tree, grouped by
     // project so the folder is readable, unique by id.
     let root = settings::workspaces_root(&core.store.settings().await?, &core.config.data_dir);
+    // Canonical, so the path Core stores is the one git prints back: git
+    // resolves links and junctions, and a root reached through one would
+    // otherwise never match. Off the async threads; file system calls block.
+    let root = tokio::task::spawn_blocking(move || {
+        std::fs::create_dir_all(&root)?;
+        platform::canonicalize(&root)
+    })
+    .await
+    .map_err(|_| ApiError::internal("preparing the workspaces root panicked"))?
+    .map_err(|e| {
+        ApiError::new(
+            ersa_protocol::core_api::ErrorKind::Permission,
+            format!("cannot use the workspaces root: {e}"),
+        )
+    })?;
     let path = workspace_path(&root, &project.name, &id)?;
 
     let mut workspace = Workspace {
@@ -380,13 +395,20 @@ pub(super) async fn workspace_remove(
     // the files go, so no backend is left running in a deleted directory.
 
     let force = params.force.unwrap_or(false);
-    let removed =
-        workspace::git_worktree_remove(transport.as_ref(), &project.path, &workspace.path, force)
-            .await;
+    let removed = workspace::git_worktree_remove(
+        transport.as_ref(),
+        &project.path,
+        &workspace.path,
+        force,
+        // An `error` workspace may be an add that was killed mid-way;
+        // its leftover `initializing` lock must not block removal.
+        workspace.state == WorkspaceState::Error,
+    )
+    .await;
     if let Err(e) = removed {
-        // A refusal (locked, or local changes without `force`) leaves the
-        // worktree as it was, so it goes back to the state it had; any other
-        // failure leaves it in an unknown state.
+        // A refusal (locked, local changes without `force`, or a folder git
+        // does not list) leaves the worktree as it was, so it goes back to
+        // the state it had; any other failure leaves it in an unknown state.
         let state = if e.is_refusal() {
             workspace.state
         } else {

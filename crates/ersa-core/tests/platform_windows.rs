@@ -36,12 +36,16 @@ async fn the_pipe_admits_only_the_current_user() {
     let core = support::start().await;
     let name = core.endpoint.trim_start_matches(r"\\.\pipe\");
     // Read the pipe's access list through a client handle, from outside
-    // Core: a protected list (`P`) with one entry allowing full access to
-    // this user's SID.
+    // Core: whether it is protected from inheritance, then each entry as
+    // `<SID> <Allow|Deny> <rights>`. SIDs rather than SDDL text, because SDDL
+    // abbreviates well-known accounts (the built-in Administrator is `LA`).
     let script = format!(
         "$p = New-Object System.IO.Pipes.NamedPipeClientStream('.', '{name}', \
          [System.IO.Pipes.PipeDirection]::InOut); $p.Connect(5000); \
-         $p.GetAccessControl().GetSecurityDescriptorSddlForm('Access'); $p.Dispose()"
+         $a = $p.GetAccessControl(); $a.AreAccessRulesProtected; \
+         $a.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | \
+         ForEach-Object {{ \"$($_.IdentityReference.Value) $($_.AccessControlType) $([int]$_.PipeAccessRights)\" }}; \
+         $p.Dispose()"
     );
     let output = tokio::task::spawn_blocking(move || {
         Command::new("powershell")
@@ -51,8 +55,15 @@ async fn the_pipe_admits_only_the_current_user() {
     })
     .await
     .expect("joined");
-    let sddl = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    assert_eq!(sddl, format!("D:P(A;;FA;;;{})", current_sid()));
+    let text = String::from_utf8_lossy(&output.stdout);
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    // 2032127 is 0x1F01FF, full control of a file or pipe.
+    let expected = format!("{} Allow 2032127", current_sid());
+    assert_eq!(lines, ["True", expected.as_str()], "{text}");
 }
 
 #[test]
