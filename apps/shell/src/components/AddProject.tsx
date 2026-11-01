@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { Sending } from "../session/follow";
 import { Button } from "./Button";
 import { TrustQuestion, folderName } from "./TrustQuestion";
@@ -20,8 +20,14 @@ export function AddProject({ onAdd, adding, initialPath = "", initialAsking = fa
   // Whether the trust question is showing; the project is added only once it is answered.
   const [asking, setAsking] = useState(initialAsking);
   const busy = adding?.state === "sending";
-  const answer = async (trusted: boolean) => {
+  // Focus goes back to the path once the question closes, where the user was before it opened.
+  const input = useRef<HTMLInputElement>(null);
+  const close = () => {
     setAsking(false);
+    input.current?.focus();
+  };
+  const answer = async (trusted: boolean) => {
+    close();
     if (await onAdd(path.trim(), trusted)) setPath("");
   };
   return (
@@ -33,11 +39,9 @@ export function AddProject({ onAdd, adding, initialPath = "", initialAsking = fa
         if (busy || path.trim() === "") return;
         setAsking(true);
       }}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") setAsking(false);
-      }}
     >
       <input
+        ref={input}
         className="add-project-input mono"
         aria-label="Project folder"
         placeholder="Folder path"
@@ -59,7 +63,7 @@ export function AddProject({ onAdd, adding, initialPath = "", initialAsking = fa
       </Button>
       {asking && (
         <div className="add-project-question">
-          <TrustQuestion name={folderName(path.trim())} onAnswer={answer} busy={busy} />
+          <TrustQuestion name={folderName(path.trim())} onAnswer={answer} onDismiss={close} />
         </div>
       )}
       {adding?.state === "failed" && (

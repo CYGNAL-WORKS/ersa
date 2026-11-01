@@ -72,6 +72,14 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         String::new()
     };
 
+    // Trust is read again here, after the detection above, which can take
+    // seconds: an answer the user changed meanwhile is the one that counts.
+    let trusted = core
+        .store
+        .project(project.id.clone())
+        .await?
+        .is_some_and(|p| p.trusted);
+
     let session = SessionRow {
         id: persistence::new_id("s"),
         workspace_id: workspace.id,
@@ -90,7 +98,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         model: None,
         // The project's own configuration loads only when the user trusts
         // it (ADR 0018).
-        project_trusted: project.trusted,
+        project_trusted: trusted,
         extra: Value::Null,
     };
     Ok(core
