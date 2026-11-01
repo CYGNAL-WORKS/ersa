@@ -39,15 +39,6 @@ pub enum RunError {
     Incomplete(io::Error),
 }
 
-/// Stands in for a line of output that was not UTF-8. The transport's line
-/// readers return only text, so such a line is reported and skipped rather
-/// than passed on; one stray byte must not fail an otherwise healthy command.
-pub const UNREADABLE_LINE: &str = "\u{FFFD}";
-
-/// More unreadable lines than this in one stream means the stream is not
-/// text at all, and reading stops rather than looping.
-const MAX_UNREADABLE_LINES: usize = 1000;
-
 /// Runs `spec` to completion through `transport`, with no input, and
 /// collects its output. Gives up and kills the process after `timeout`.
 pub async fn run(
@@ -84,26 +75,15 @@ pub async fn run(
     Err(RunError::Incomplete(failure))
 }
 
-/// Every line of `reader`. A line that is not UTF-8 becomes
-/// [`UNREADABLE_LINE`]: the local transport reports it as `InvalidData` and
-/// moves past it, so reading can go on.
+/// Every line of `reader`. Output that is not UTF-8 does not fail the
+/// command: the transport's line readers replace invalid bytes with U+FFFD
+/// (see `ersa-adapter`'s `LineReader`), so no decoding happens here.
 async fn read_all(reader: Option<Box<dyn LineReader>>) -> io::Result<Vec<String>> {
     let mut lines = Vec::new();
-    let Some(mut reader) = reader else {
-        return Ok(lines);
-    };
-    let mut unreadable = 0;
-    loop {
-        match reader.next_line().await {
-            Ok(Some(line)) => lines.push(line),
-            Ok(None) => return Ok(lines),
-            Err(e)
-                if e.kind() == io::ErrorKind::InvalidData && unreadable < MAX_UNREADABLE_LINES =>
-            {
-                unreadable += 1;
-                lines.push(UNREADABLE_LINE.to_string());
-            }
-            Err(e) => return Err(e),
+    if let Some(mut reader) = reader {
+        while let Some(line) = reader.next_line().await? {
+            lines.push(line);
         }
     }
+    Ok(lines)
 }
