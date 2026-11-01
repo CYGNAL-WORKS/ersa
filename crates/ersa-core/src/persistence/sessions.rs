@@ -116,8 +116,10 @@ impl Store {
     /// projected. Normally the state follows its events.
     pub async fn set_session_state(&self, id: String, state: LifecycleState) -> Result<()> {
         self.call(move |conn| {
+            // The tile carries the state too, and must agree.
             conn.execute(
-                "UPDATE sessions SET state = ?2 WHERE id = ?1",
+                "UPDATE sessions SET state = ?2, tile = json_set(tile, '$.state', ?2)
+                 WHERE id = ?1",
                 params![id, to_sql_enum(&state)],
             )?;
             Ok(())
@@ -293,36 +295,78 @@ impl Store {
         .await
     }
 
+    /// Appends one raw line, stamped with the next index, without projecting
+    /// it: for a session whose adapter is not registered. Its cache then no
+    /// longer reaches the end of the log, so a Core that has the adapter
+    /// re-derives it.
+    pub async fn append_raw_line(
+        &self,
+        session_id: String,
+        dir: Direction,
+        ts: String,
+        line: String,
+    ) -> Result<()> {
+        self.call(move |conn| {
+            let tx = conn.transaction()?;
+            let index = next_index(&tx, &session_id)?;
+            let line = RawLine {
+                index,
+                ts,
+                dir,
+                line,
+            };
+            insert_raw_line(&tx, &session_id, &line)?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Whether the session's last cached event is `session.ended`.
+    pub async fn last_event_ends_session(&self, session_id: String) -> Result<bool> {
+        self.call(move |conn| {
+            let last: Option<String> = conn
+                .query_row(
+                    "SELECT envelope FROM projection_cache WHERE session_id = ?1
+                     ORDER BY seq DESC LIMIT 1",
+                    [&session_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            Ok(match last {
+                Some(json) => matches!(
+                    serde_json::from_str::<Envelope>(&json)?.event,
+                    ersa_protocol::events::Event::SessionEnded(_)
+                ),
+                None => false,
+            })
+        })
+        .await
+    }
+
     /// Re-derives a session's projection from its raw log with `projection`
-    /// (fresh, never fed a line), replacing every cached event and the row's
-    /// summary, in one transaction. When `append` is given, that line is
-    /// first added to the log, stamped with the next index and `ts`.
+    /// (fresh, never fed a line), replacing the cached events and the row's
+    /// summary, in one transaction.
     ///
     /// Returns the projection after the whole log, for a caller that carries
-    /// on from there.
+    /// on from there, and whether any cached event changed: one that was
+    /// there before reads differently now, or is gone. Rows that come out
+    /// the same are left as they are.
     pub async fn rebuild_projection(
         &self,
         session_id: String,
         mut projection: Projection,
-        append: Option<(Direction, String, String)>,
-    ) -> Result<Projection> {
+    ) -> Result<(Projection, bool)> {
         self.call(move |conn| {
             let tx = conn.transaction()?;
-            if let Some((dir, ts, line)) = append {
-                let index = next_index(&tx, &session_id)?;
-                let line = RawLine {
-                    index,
-                    ts,
-                    dir,
-                    line,
-                };
-                insert_raw_line(&tx, &session_id, &line)?;
-            }
-            tx.execute(
-                "DELETE FROM projection_cache WHERE session_id = ?1",
-                [&session_id],
-            )?;
             let version = projection.projector_version();
+            // Rows made by another version all go, and count as a change.
+            let stale = tx.execute(
+                "DELETE FROM projection_cache
+                 WHERE session_id = ?1 AND NOT (v = ?2 AND projection_version = ?3)",
+                params![session_id, PROJECTION_VERSION, version],
+            )?;
+            let mut changed = stale > 0;
             // A page at a time, so a long log is never all in memory.
             const PAGE: i64 = 1000;
             let mut next: i64 = 0;
@@ -339,13 +383,46 @@ impl Store {
                 next = last.index as i64 + 1;
                 for line in &lines {
                     for event in projection.project(line) {
-                        insert_event(&tx, &event, version)?;
+                        let json = serde_json::to_string(&event)?;
+                        let old: Option<String> = tx
+                            .prepare_cached(
+                                "SELECT envelope FROM projection_cache
+                                 WHERE session_id = ?1 AND v = ?2 AND projection_version = ?3
+                                   AND seq = ?4",
+                            )?
+                            .query_row(
+                                params![session_id, event.v, version, event.seq as i64],
+                                |row| row.get(0),
+                            )
+                            .optional()?;
+                        if old.as_deref() != Some(json.as_str()) {
+                            changed |= old.is_some();
+                            tx.prepare_cached(
+                                "INSERT OR REPLACE INTO projection_cache
+                                     (session_id, v, projection_version, seq, envelope)
+                                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                            )?
+                            .execute(params![
+                                session_id,
+                                event.v,
+                                version,
+                                event.seq as i64,
+                                json
+                            ])?;
+                        }
                     }
                 }
             }
+            // Events past the new last one no longer exist.
+            let beyond = projection.last_seq().map_or(-1, |seq| seq as i64);
+            let removed = tx.execute(
+                "DELETE FROM projection_cache WHERE session_id = ?1 AND seq > ?2",
+                params![session_id, beyond],
+            )?;
+            changed |= removed > 0;
             write_progress(&tx, &session_id, &SessionProgress::of(&projection))?;
             tx.commit()?;
-            Ok(projection)
+            Ok((projection, changed))
         })
         .await
     }
@@ -368,13 +445,16 @@ fn read_session(conn: &Connection, id: &str) -> Result<Option<Session>> {
 fn session_row(row: &Row) -> rusqlite::Result<Session> {
     let id: String = row.get(0)?;
     let tile: String = row.get(9)?;
-    let tile: Tile = serde_json::from_str(&tile).unwrap_or_else(|e| {
-        tracing::error!(session = %id, error = %e, "unreadable tile; showing an empty one");
-        Tile::default()
-    });
     let state = from_sql_enum(row, 6).unwrap_or_else(|e| {
         tracing::error!(session = %id, error = %e, "unreadable state; showing error");
         LifecycleState::Error
+    });
+    let tile: Tile = serde_json::from_str(&tile).unwrap_or_else(|e| {
+        tracing::error!(session = %id, error = %e, "unreadable tile; showing an empty one");
+        Tile {
+            state,
+            ..Tile::starting()
+        }
     });
     Ok(Session {
         id,

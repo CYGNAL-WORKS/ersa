@@ -109,7 +109,7 @@ impl Projection {
             backend_version: String::new(),
             next_seq: 0,
             ended: false,
-            tile: Tile::default(),
+            tile: Tile::starting(),
             state: LifecycleState::Starting,
             turn: 0,
             backend_session_id: None,
@@ -211,7 +211,10 @@ impl Projection {
                     self.backend_session_id = started.backend_session_id.clone();
                 }
             }
-            Event::SessionState(state) => self.state = state.state,
+            Event::SessionState(state) => {
+                self.state = state.state;
+                self.tile.state = state.state;
+            }
             Event::TurnStarted(started) => self.turn = started.turn,
             Event::UsageUpdated(usage) => {
                 // Absent means "no new information": keep the last value.

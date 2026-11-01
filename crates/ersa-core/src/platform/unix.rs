@@ -174,6 +174,10 @@ pub struct ProcessTree {
     /// The group's id, which is the child's process id.
     group: i32,
     kill_on_drop: bool,
+    /// Set once the leader has been reaped and the leftovers dealt with.
+    /// After that the group's id may be freed and reused by an unrelated
+    /// group, so it is never signalled again.
+    spent: std::sync::atomic::AtomicBool,
 }
 
 impl ProcessTree {
@@ -193,12 +197,34 @@ impl ProcessTree {
         Ok(ProcessTree {
             group,
             kill_on_drop,
+            spent: std::sync::atomic::AtomicBool::new(false),
         })
+    }
+
+    /// Called as soon as the leader has been reaped: kills the leftovers
+    /// when the tree was made with `kill_on_drop`, then retires the group's
+    /// id. The kernel keeps the id reserved while any member lives, so the
+    /// kill can only reach this group; once it is retired nothing signals
+    /// it, so a reused id is never hit. (If Core itself dies, nothing is
+    /// signalled at all: the leftovers outlive it on Unix.)
+    pub fn leader_exited(&self) {
+        if self.kill_on_drop {
+            let _ = self.signal();
+        }
+        self.spent.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Kills every process in the group. A group that has already ended is
     /// not an error.
     pub fn kill(&self) -> io::Result<()> {
+        if self.spent.load(std::sync::atomic::Ordering::SeqCst) {
+            // The leader is gone and the leftovers were dealt with then.
+            return Ok(());
+        }
+        self.signal()
+    }
+
+    fn signal(&self) -> io::Result<()> {
         // SAFETY: `kill` has no memory-safety preconditions. A negative pid
         // addresses the whole process group.
         if unsafe { libc::kill(-self.group, libc::SIGKILL) } == 0 {
@@ -216,11 +242,10 @@ impl ProcessTree {
 
 impl Drop for ProcessTree {
     fn drop(&mut self) {
-        // The kernel does not reuse a group's id while any member lives, and
-        // the tree is dropped right after its leader exits, so this reaches
-        // the leader's leftovers. Once every member has gone, the id is free
-        // again; a new group taking it in the moment between would be hit,
-        // which no portable call rules out (pidfd groups are Linux-only).
+        // A tree dropped before its leader was reaped (a failed start, say):
+        // the leader is a zombie at worst, which keeps the id reserved, so
+        // the signal reaches only this group. `kill` does nothing once the
+        // id is retired.
         if self.kill_on_drop {
             let _ = self.kill();
         }
