@@ -1,0 +1,167 @@
+//! The state every request handler shares: the database, the transports, and
+//! what Core knows about its own host.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use ersa_adapter::{LocalTransport, Transport};
+use ersa_protocol::core_api::{BackendState, HelloHost};
+use tokio::sync::{Mutex, watch};
+
+use crate::adapters::{self, Detected};
+use crate::persistence::{LOCAL_HOST_ID, Store};
+use crate::platform;
+
+/// How a Core process is set up. Built by the `ersa-core` binary from its
+/// command line, and by tests with a temporary data directory and a unique
+/// endpoint.
+#[derive(Debug, Clone)]
+pub struct CoreConfig {
+    /// Where the database (and, by default, worktrees) live.
+    pub data_dir: PathBuf,
+    /// The named pipe or socket path to listen on.
+    pub endpoint: String,
+    /// Runs this program instead of each backend's own when detecting
+    /// backends. For tests, which must not depend on what is installed.
+    pub backend_program_override: Option<String>,
+    /// How long a new connection may take to send `core.hello` before Core
+    /// closes it.
+    pub handshake_timeout: Duration,
+    /// The longest line Core reads from a client, in bytes, terminator
+    /// excluded. A longer line is answered with a parse error and closes
+    /// the connection.
+    pub max_line_bytes: usize,
+}
+
+/// The default for [`CoreConfig::max_line_bytes`]: 16 MiB, far above any
+/// request the Interface sends, low enough that one client cannot exhaust
+/// memory.
+pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
+
+/// The default for [`CoreConfig::handshake_timeout`].
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How long a backend detection that found anything other than `available`
+/// is reused, so a backend installed while Core runs shows up soon after.
+const FAILED_DETECTION_TTL: Duration = Duration::from_secs(30);
+
+impl CoreConfig {
+    /// The configuration for `data_dir` with the platform's default endpoint
+    /// and limits. Fails only if the endpoint cannot be named (on Windows, if
+    /// the user's SID cannot be read).
+    pub fn new(data_dir: PathBuf) -> std::io::Result<Self> {
+        Ok(CoreConfig {
+            data_dir,
+            endpoint: platform::default_endpoint()?,
+            backend_program_override: None,
+            handshake_timeout: HANDSHAKE_TIMEOUT,
+            max_line_bytes: MAX_LINE_BYTES,
+        })
+    }
+
+    /// The database file.
+    pub fn db_path(&self) -> PathBuf {
+        self.data_dir.join("ersa.db")
+    }
+}
+
+/// Core's shared state. Handlers receive `&Core`; the server holds it in an
+/// `Arc` so every connection task can.
+///
+/// The session manager (M0-T6) belongs here as another field, built in
+/// `Core::new` from the store and the transports.
+pub struct Core {
+    pub config: CoreConfig,
+    pub store: Store,
+    local_transport: Arc<dyn Transport>,
+    host_name: String,
+    started: Instant,
+    /// The last backend detection for the local host and when it ran. Kept
+    /// for the life of the process when every backend was available, and for
+    /// [`FAILED_DETECTION_TTL`] otherwise. An async mutex, held while
+    /// detecting, so concurrent requests run one detection between them.
+    local_backends: Mutex<Option<(Instant, Vec<Detected>)>>,
+    /// Flips to `true` once when shutdown is requested. A `watch` channel
+    /// rather than a `Notify`, because a late waiter must still see it.
+    shutdown: watch::Sender<bool>,
+}
+
+impl Core {
+    pub fn new(config: CoreConfig, store: Store) -> Core {
+        Core {
+            config,
+            store,
+            local_transport: Arc::new(LocalTransport),
+            host_name: platform::host_name(),
+            started: Instant::now(),
+            local_backends: Mutex::new(None),
+            shutdown: watch::Sender::new(false),
+        }
+    }
+
+    /// The local host's name.
+    pub fn host_name(&self) -> &str {
+        &self.host_name
+    }
+
+    /// The local host as the handshake reports it.
+    pub fn hello_host(&self) -> HelloHost {
+        HelloHost {
+            id: LOCAL_HOST_ID.to_string(),
+            name: self.host_name.clone(),
+            platform: platform_name().to_string(),
+        }
+    }
+
+    /// The transport that reaches `host_id`, or `None` for a host Core
+    /// cannot reach. Only the local host exists until remote hosts (M4) add
+    /// an SSH transport here.
+    pub fn transport_for(&self, host_id: &str) -> Option<Arc<dyn Transport>> {
+        (host_id == LOCAL_HOST_ID).then(|| Arc::clone(&self.local_transport))
+    }
+
+    /// The backends detected on the local host, detecting again when the
+    /// last result has expired.
+    pub async fn local_backends(&self) -> Vec<Detected> {
+        let mut cached = self.local_backends.lock().await;
+        if let Some((at, found)) = cached.as_ref() {
+            let all_available = found.iter().all(|d| d.state == BackendState::Available);
+            if all_available || at.elapsed() < FAILED_DETECTION_TTL {
+                return found.clone();
+            }
+        }
+        let found = adapters::detect(
+            self.local_transport.as_ref(),
+            self.config.backend_program_override.as_deref(),
+        )
+        .await;
+        *cached = Some((Instant::now(), found.clone()));
+        found
+    }
+
+    /// Seconds since this Core started.
+    pub fn uptime_s(&self) -> u64 {
+        self.started.elapsed().as_secs()
+    }
+
+    /// Asks the server to stop.
+    pub fn request_shutdown(&self) {
+        self.shutdown.send_replace(true);
+    }
+
+    /// Completes once shutdown has been requested, even if that was earlier.
+    pub async fn shutdown_requested(&self) {
+        let mut receiver = self.shutdown.subscribe();
+        // `wait_for` checks the current value first, so an earlier request
+        // counts. It fails only if the sender is gone, which it cannot be
+        // while `self` is alive.
+        let _ = receiver.wait_for(|requested| *requested).await;
+    }
+}
+
+/// The operating system's name as `core.hello` reports it.
+fn platform_name() -> &'static str {
+    // `std::env::consts::OS` is `"windows"`, `"macos"`, `"linux"`, and so on.
+    std::env::consts::OS
+}
