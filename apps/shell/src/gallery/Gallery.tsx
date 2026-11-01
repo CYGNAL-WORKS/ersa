@@ -239,7 +239,21 @@ const entries: Entry[] = [
       ],
       [
         "Changing trust",
-        <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} onSetTrust={() => {}} trusting={{ p1: { state: "sending" } }} />,
+        <ProjectList
+          view={{ state: "ready", projects }}
+          onNewSession={() => {}}
+          onSetTrust={() => {}}
+          trusting={{ p1: { state: "sending" }, p4: { state: "sending" } }}
+        />,
+      ],
+      [
+        "Trust withdrawn, sessions running",
+        <ProjectList
+          view={{ state: "ready", projects: projects.map((p) => (p.id === "p1" ? { ...p, trusted: false } : p)) }}
+          onNewSession={() => {}}
+          onSetTrust={() => {}}
+          notes={{ p1: "Running sessions keep their current settings until they are stopped." }}
+        />,
       ],
       [
         "Trust refused",
