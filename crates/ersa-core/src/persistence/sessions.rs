@@ -8,6 +8,8 @@
 use ersa_adapter::{Direction, RawLine};
 use ersa_protocol::core_api::{Session, Tile};
 use ersa_protocol::events::{Envelope, LifecycleState, PROJECTION_VERSION};
+use std::sync::Arc;
+
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 
 use super::{Error, Result, Store, collect, conflict, from_sql_enum, to_sql_enum};
@@ -34,7 +36,6 @@ impl SessionProgress {
 }
 
 /// Raw lines and the events they projected to, written together.
-#[derive(Clone)]
 pub struct LogBatch {
     pub session_id: String,
     pub lines: Vec<RawLine>,
@@ -148,7 +149,10 @@ impl Store {
 
     /// Appends raw lines, caches the events they projected to, and updates
     /// the session's row, all in one transaction.
-    pub async fn append_session_log(&self, batch: LogBatch) -> Result<()> {
+    ///
+    /// Shared rather than owned, so a caller retrying a failed write does not
+    /// copy the batch each time.
+    pub async fn append_session_log(&self, batch: Arc<LogBatch>) -> Result<()> {
         self.call(move |conn| {
             let tx = conn.transaction()?;
             for line in &batch.lines {
@@ -164,13 +168,16 @@ impl Store {
         .await
     }
 
-    /// Raw lines `from..=to` of a session, at most `limit` of them.
+    /// Raw lines `from..=to` of a session: at most `limit` of them, and no
+    /// more once they add up to `max_bytes` (always at least one, so a
+    /// caller paging through the log makes progress).
     pub async fn raw_log(
         &self,
         session_id: String,
         from: u64,
         to: u64,
         limit: usize,
+        max_bytes: usize,
     ) -> Result<Vec<RawLine>> {
         self.call(move |conn| {
             let mut stmt = conn.prepare(
@@ -182,7 +189,7 @@ impl Store {
                 params![session_id, sql_int(from), sql_int(to), limit as i64],
                 raw_line_row,
             )?;
-            collect(rows)
+            take_bytes(rows, max_bytes, |line| line.line.len())
         })
         .await
     }
@@ -192,18 +199,20 @@ impl Store {
         self.call(move |conn| next_index(conn, &session_id)).await
     }
 
-    /// Cached envelopes `from..=to` (by `seq`), made with projector version
-    /// `projection_version`, as the JSON they were stored as.
+    /// Cached envelopes `from..=to` with their `seq`, made with projector
+    /// version `projection_version`, as the JSON they were stored as; no more
+    /// once they add up to `max_bytes` (always at least one).
     pub async fn cached_events(
         &self,
         session_id: String,
         projection_version: u32,
         from: u64,
         to: u64,
-    ) -> Result<Vec<String>> {
+        max_bytes: usize,
+    ) -> Result<Vec<(u64, String)>> {
         self.call(move |conn| {
             let mut stmt = conn.prepare(
-                "SELECT envelope FROM projection_cache
+                "SELECT seq, envelope FROM projection_cache
                  WHERE session_id = ?1 AND v = ?2 AND projection_version = ?3
                    AND seq BETWEEN ?4 AND ?5
                  ORDER BY seq",
@@ -216,9 +225,9 @@ impl Store {
                     sql_int(from),
                     sql_int(to)
                 ],
-                |row| row.get(0),
+                |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, String>(1)?)),
             )?;
-            collect(rows)
+            take_bytes(rows, max_bytes, |(_, envelope)| envelope.len())
         })
         .await
     }
@@ -420,6 +429,26 @@ fn next_index(conn: &Connection, session_id: &str) -> Result<u64> {
         |row| row.get(0),
     )?;
     Ok(last.map_or(0, |idx| idx as u64 + 1))
+}
+
+/// Rows until they add up to `max_bytes` by `size`, and always the first:
+/// lines can be large, so a count alone does not bound what is read.
+fn take_bytes<T>(
+    rows: impl Iterator<Item = rusqlite::Result<T>>,
+    max_bytes: usize,
+    size: impl Fn(&T) -> usize,
+) -> Result<Vec<T>> {
+    let mut out = Vec::new();
+    let mut total = 0;
+    for row in rows {
+        let row = row?;
+        total += size(&row);
+        if total > max_bytes && !out.is_empty() {
+            break;
+        }
+        out.push(row);
+    }
+    Ok(out)
 }
 
 /// A `u64` bound as SQLite's signed integer, saturating: an index past

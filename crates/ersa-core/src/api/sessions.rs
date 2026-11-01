@@ -15,9 +15,11 @@ use super::{ApiError, ConnectionState};
 use crate::persistence::{self, LOCAL_HOST_ID};
 use crate::state::Core;
 
-/// The most raw lines one `session.raw_log` call returns. A client pages
+/// The most raw lines one `session.raw_log` call returns, and the most bytes
+/// of line text (one line always comes back, however long). A client pages
 /// through a longer log by asking again from the last index it got plus one.
 pub const RAW_LOG_LIMIT: usize = 1000;
+pub const RAW_LOG_BYTES: usize = 8 * 1024 * 1024;
 
 pub(super) async fn list(core: &Core, _: Empty) -> Result<Vec<Session>, ApiError> {
     Ok(core.store.sessions().await?)
@@ -227,6 +229,7 @@ pub(super) async fn raw_log(
             params.from.unwrap_or(0),
             params.to.unwrap_or(u64::MAX),
             RAW_LOG_LIMIT,
+            RAW_LOG_BYTES,
         )
         .await?;
     Ok(lines
