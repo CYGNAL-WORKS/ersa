@@ -51,6 +51,21 @@ describe("follow", () => {
     ]);
   });
 
+  it("subscribes again from a gap on a live subscription, once per gap", async () => {
+    const { follower, calls } = following();
+    follower.attached();
+    await settle();
+    for (const event of replay.slice(0, 5)) follower.receive(event);
+    // Event 5 was lost on the way; 6 and 7 arrive.
+    follower.receive(replay[6] as (typeof replay)[number]);
+    follower.receive(replay[7] as (typeof replay)[number]);
+    await settle();
+    expect(calls.filter((c) => c.method === "session.subscribe").map((c) => c.params)).toEqual([
+      { id: "s-replay", from_seq: 0 },
+      { id: "s-replay", from_seq: 5 },
+    ]);
+  });
+
   it("applies only this session's events", () => {
     const { follower, last } = following();
     const other = { ...(replay[5] as (typeof replay)[number]), session_id: "s-other" };

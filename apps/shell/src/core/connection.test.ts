@@ -150,6 +150,27 @@ describe("connect", () => {
     expect(answers).toHaveLength(2);
   });
 
+  it("reads the list again when a tile arrives while a read is in flight, so the older answer does not win", async () => {
+    const answers: ((sessions: Session[]) => void)[] = [];
+    const { client, notify } = fakeClient({ ...answering, "session.list": () => new Promise((r) => answers.push(r)) });
+    const seen: CoreView[] = [];
+    const connection = connect(client, (v) => seen.push(v));
+    await settle();
+    answers[0]?.([session]);
+    await settle();
+    connection.reload("sessions");
+    const waiting = { state: "waiting_user" as const, pending: [{ kind: "permission" as const, request_id: "r1" }] };
+    notify({ method: "session.tile", params: { session_id: "s1", tile: waiting } });
+    // The read in flight was taken before the tile: it answers with the old one.
+    answers[1]?.([session]);
+    await settle();
+    answers[2]?.([{ ...session, tile: waiting }]);
+    await settle();
+    const last = seen.at(-1);
+    expect(answers).toHaveLength(3);
+    expect(last?.phase === "connected" && last.sessions).toEqual({ state: "ready", sessions: [{ ...session, tile: waiting }] });
+  });
+
   it("numbers each connection, so subscriptions know to start again", async () => {
     vi.useFakeTimers();
     const { client, drop } = fakeClient(answering);

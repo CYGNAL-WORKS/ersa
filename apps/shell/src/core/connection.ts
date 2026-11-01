@@ -149,6 +149,9 @@ export function connect(
           // A tile for a session the list lacks means a session was created
           // since it was read: read it again.
           if (known) {
+            // A read in flight may answer with a list older than this
+            // tile; read once more after it so the newer tile is not lost.
+            if (sessionRead !== "idle") listSessions();
             patch((view) =>
               view.sessions.state === "ready"
                 ? {
