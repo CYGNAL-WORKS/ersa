@@ -166,7 +166,9 @@ function scratchRepo() {
   git("config", "user.name", "Ersa recorder");
   git("config", "user.email", "recorder@example.com");
   writeFileSync(join(repo, "README.md"), "Scratch repository for an Ersa protocol recording.\n");
-  git("add", "README.md");
+  // A second file, so a recording can read two at once.
+  writeFileSync(join(repo, "NOTES.md"), "Notes for the scratch repository.\n");
+  git("add", "README.md", "NOTES.md");
   git("commit", "--quiet", "-m", "Scratch");
   return repo;
 }
@@ -378,14 +380,16 @@ if (!keep && isScratch) {
 }
 // A killed CLI cannot remove its registry file; one that exited removed its
 // own. The file is named by the CLI's pid, which is not the spawned pid when
-// a shim started it, so it is found by the session it names.
-if (killed && recordPath) {
+// a shim started it, so it is found by the session it names; killed before
+// `init` named a session, by the spawned pid.
+if (killed) {
   const registry = join(homedir(), ".claude", "sessions");
   for (const name of existsSync(registry) ? readdirSync(registry) : []) {
     if (!name.endsWith(".json")) continue;
     try {
       const file = JSON.parse(readFileSync(join(registry, name), "utf8"));
-      if (file?.sessionId === init.session_id) rmSync(join(registry, name), { force: true });
+      const ours = recordPath ? file?.sessionId === init.session_id : file?.pid === child.pid;
+      if (ours) rmSync(join(registry, name), { force: true });
     } catch {
       // Not ours to judge.
     }

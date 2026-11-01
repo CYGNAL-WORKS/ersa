@@ -273,6 +273,7 @@ fn only_the_branch_that_ends_the_record_is_projected() {
     );
 }
 
+// verifies: PROTO-CLAUDE-CODE-STREAM-R20
 #[test]
 fn a_damaged_line_mid_record_loses_no_history_silently() {
     // The CLI crashed mid-write once; later entries chain through the entry
@@ -304,14 +305,72 @@ fn a_damaged_line_mid_record_loses_no_history_silently() {
 
 #[test]
 fn entries_that_form_no_chain_are_shown_in_file_order_with_an_error() {
-    // Two entries naming each other: a cycle, no leaf.
+    // Two entries naming each other: a cycle, no leaf. A subagent's entry is
+    // still left out.
     let entries = [
         prompt("u1", Some("a1"), "Loop"),
         reply("a1", "u1", "msg_1", "Back"),
+        json!({"type": "user", "uuid": "s1", "parentUuid": "a1", "isSidechain": true,
+            "message": {"role": "user", "content": "Subagent task"}}),
     ];
     let events = events_of(&entries);
     assert!(matches!(events[0], Event::Error(_)), "{events:?}");
     assert_eq!(texts(&events), ["user: Loop", "assistant: Back"]);
+}
+
+#[test]
+fn an_entry_written_twice_is_projected_once() {
+    let first = prompt("u1", None, "First");
+    let entries = [
+        first.clone(),
+        reply("a1", "u1", "msg_1", "One"),
+        first,
+        prompt("u2", Some("a1"), "Second"),
+    ];
+    assert_eq!(
+        texts(&events_of(&entries)),
+        ["user: First", "assistant: One", "user: Second"]
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R15
+// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+#[test]
+fn parallel_tool_calls_all_stay_in_the_conversation() {
+    // Two Read calls in one model message: 2.1.316 chains them one after the
+    // other in the record (call, result, call, result), so no branch drops
+    // one. Every call and result on the stream is in the record's projection.
+    let name = "2.1.316/02-parallel-tools";
+    let stream = fixtures()
+        .into_iter()
+        .find(|f| f.name == name)
+        .expect("the fixture exists");
+    let record = record_fixtures()
+        .into_iter()
+        .find(|r| r.name == name)
+        .expect("its record exists");
+    let tool_ids = |events: Vec<Event>| -> Vec<String> {
+        events
+            .into_iter()
+            .filter_map(|e| match e {
+                Event::ToolRequested(t) => Some(format!("requested {}", t.tool_use_id)),
+                Event::ToolResult(t) => Some(format!("result {}", t.tool_use_id)),
+                _ => None,
+            })
+            .collect()
+    };
+    let live = tool_ids(common::events(&stream.raw_log()));
+    let recorded = tool_ids(
+        project_record(&record.text)
+            .into_iter()
+            .map(|e| e.event)
+            .collect(),
+    );
+    assert_eq!(
+        live.iter().filter(|t| t.starts_with("requested")).count(),
+        2
+    );
+    assert_eq!(recorded, live);
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R20
