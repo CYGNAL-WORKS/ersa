@@ -87,6 +87,22 @@ async fn a_stale_socket_is_replaced() {
     );
 }
 
+#[tokio::test]
+async fn a_file_that_is_not_a_socket_is_kept() {
+    let dir = support::tempdir();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    // An explicit endpoint that names an ordinary file by mistake.
+    let endpoint = dir.path().join("notes.txt");
+    std::fs::write(&endpoint, "keep me").unwrap();
+
+    let error = Listener::bind(&endpoint.display().to_string())
+        .await
+        .err()
+        .expect("refused");
+    assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists, "{error}");
+    assert_eq!(std::fs::read_to_string(&endpoint).unwrap(), "keep me");
+}
+
 #[test]
 fn path_keys_keep_case() {
     assert_eq!(path_key("/srv/repo/"), "/srv/repo");
