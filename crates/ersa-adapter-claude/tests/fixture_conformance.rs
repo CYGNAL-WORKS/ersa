@@ -407,7 +407,7 @@ fn host_messages_serialise_to_the_recorded_stdin_lines() {
                     .as_str()
                     .unwrap(),
                 &PermissionDecision::Allow {
-                    updated_input: line.pointer("/response/response/updatedInput").cloned(),
+                    updated_input: line["response"]["response"]["updatedInput"].clone(),
                     updated_permissions: None,
                 },
             )
@@ -434,7 +434,7 @@ fn host_messages_match_the_shapes_in_the_brief() {
     );
 
     let allow = PermissionDecision::Allow {
-        updated_input: Some(json!({"command": "ls"})),
+        updated_input: json!({"command": "ls"}),
         updated_permissions: Some(vec![PermissionUpdate::AddRules {
             rules: vec![PermissionRule {
                 tool_name: "Bash".into(),

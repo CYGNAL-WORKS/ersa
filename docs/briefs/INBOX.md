@@ -8,5 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-01 PROTO-CLAUDE-CODE-STREAM: the CLI binary's embedded protocol schemas (the source of the SDK `.d.ts`) mark `system/task_summary` and `system/post_turn_summary` `@internal`, which is why the SDK omits them; the brief still derives rail activity from them, so that state rests on unsupported surface. Nothing changed meanwhile; the wire layer parses them and would pass anything unknown through.
 
 ## Resolved recently (optional, trimmed in planning passes)
