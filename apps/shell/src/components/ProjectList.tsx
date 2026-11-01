@@ -16,6 +16,8 @@ interface ProjectListProps {
   onSetTrust?: (project: Project, trusted: boolean) => void;
   /** Trust being changed, by project id, and why it could not be. */
   trusting?: Record<string, Sending>;
+  /** A line to show under a project, by project id: that its running sessions keep the trust they started with. */
+  notes?: Record<string, string>;
   /** For the gallery: the project whose trust question is showing. */
   initialAsking?: string;
   /** Shown beneath the list: the way to add a project. */
@@ -23,7 +25,16 @@ interface ProjectListProps {
 }
 
 /** The projects Core knows, with their loading, empty and error states. */
-export function ProjectList({ view, onNewSession, starting = {}, onSetTrust, trusting = {}, initialAsking, children }: ProjectListProps) {
+export function ProjectList({
+  view,
+  onNewSession,
+  starting = {},
+  onSetTrust,
+  trusting = {},
+  notes = {},
+  initialAsking,
+  children,
+}: ProjectListProps) {
   // The project whose trust question is showing, if any.
   const [asking, setAsking] = useState(initialAsking);
   // Once a question closes, focus returns to the button that opened it. After "Trust" that button is
@@ -100,6 +111,8 @@ export function ProjectList({ view, onNewSession, starting = {}, onSetTrust, tru
                   <div className="project-question">
                     <TrustQuestion
                       name={p.name}
+                      purpose="change"
+                      takeFocus={p.id !== initialAsking}
                       onAnswer={(trusted) => {
                         close(p.id);
                         if (trusted) onSetTrust(p, true);
@@ -108,6 +121,7 @@ export function ProjectList({ view, onNewSession, starting = {}, onSetTrust, tru
                     />
                   </div>
                 )}
+                {notes[p.id] && <p className="project-note">{notes[p.id]}</p>}
                 {start?.state === "failed" && (
                   <p className="problem project-problem" role="alert">
                     {start.message}

@@ -67,7 +67,14 @@ export function AddProject({ onAdd, adding, initialPath = "", initialAsking = fa
       </Button>
       {asking && (
         <div className="add-project-question">
-          <TrustQuestion name={folderName(path.trim())} path={path.trim()} onAnswer={answer} onDismiss={close} />
+          <TrustQuestion
+            name={folderName(path.trim())}
+            path={path.trim()}
+            purpose="add"
+            onAnswer={answer}
+            onDismiss={close}
+            takeFocus={!initialAsking}
+          />
         </div>
       )}
       {adding?.state === "failed" && (
