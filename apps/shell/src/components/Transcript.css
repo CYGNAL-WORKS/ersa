@@ -121,7 +121,8 @@
   white-space: pre-wrap;
 }
 
-/* A permission request's input, field by field; a long value scrolls rather than hides. */
+/* A permission request's input, field by field. While the request is open every value is shown whole:
+   nothing the user approves may sit below a scrollbar. Once decided, a long value scrolls. */
 .transcript-fields {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -141,10 +142,28 @@
 .transcript-field dd {
   margin: 0;
   min-width: 0;
-  max-height: var(--size-rail);
-  overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.transcript-permission:not([data-open]) .transcript-field dd {
+  max-height: var(--size-rail);
+  overflow: auto;
+}
+
+/* A character that would otherwise be invisible, shown as its code point and set apart in caution. */
+.transcript-hidden {
+  padding: 0 var(--space-xs);
+  color: var(--color-caution);
+  border: var(--line-hairline) solid var(--color-caution);
+  border-radius: var(--radius-sm);
+}
+
+/* A card's state: the shared glyph, then a word. */
+.transcript-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
 }
 
 .transcript-output {

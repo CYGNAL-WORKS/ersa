@@ -69,7 +69,7 @@
 .session:active,
 .session[data-force="pressed"] {
   background: var(--color-canvas);
-  border-color: var(--color-ink-muted);
+  border-color: var(--color-ink-faint);
 }
 
 /* The active session is outlined in the accent. */
@@ -77,10 +77,12 @@
   border-color: var(--color-accent);
 }
 
-/* Focus takes the accent on the edge and the title, as the button's does, so it shows on the active tile too. */
+/* Focus takes the accent on the edge and the title, and a hairline ring outside the edge, so it shows on the
+   active tile too. */
 .session:focus-visible,
 .session[data-force="focus"] {
-  outline: none;
+  outline: var(--line-hairline) solid var(--color-accent);
+  outline-offset: var(--line-hairline);
   border-color: var(--color-accent);
 }
 

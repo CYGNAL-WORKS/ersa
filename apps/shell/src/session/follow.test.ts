@@ -31,7 +31,9 @@ const replayRefusal = (method: string): BridgeError => ({
 const replay = events("11-stream-permission-prompt-tool-stdio");
 
 function following(answers: Parameters<typeof fakeClient>[0] = {}) {
-  const { client, calls } = fakeClient({ "session.subscribe": () => Promise.resolve({}), ...answers });
+  // Core's history holds the whole replay: subscribing never finds it shorter than what is shown.
+  const lastSeq = replay.at(-1)?.seq;
+  const { client, calls } = fakeClient({ "session.subscribe": () => Promise.resolve({ last_seq: lastSeq }), ...answers });
   const seen: SessionView[] = [];
   const follower = follow(client, "s-replay", (v) => seen.push(v));
   return { follower, calls, seen, last: () => seen.at(-1) as SessionView };
@@ -52,12 +54,15 @@ describe("follow", () => {
   });
 
   it("subscribes again from a gap on a live subscription, once per gap", async () => {
-    const { follower, calls } = following();
+    const { follower, calls, last } = following();
     follower.attached();
     await settle();
     for (const event of replay.slice(0, 5)) follower.receive(event);
-    // Event 5 was lost on the way; 6 and 7 arrive.
+    // Event 5 was lost on the way; 6 arrives, and the follower subscribes again.
     follower.receive(replay[6] as (typeof replay)[number]);
+    await settle();
+    expect(last().stream).toEqual({ state: "live" });
+    // A stray from the old subscription, beyond the same gap, while live again: no second resubscribe.
     follower.receive(replay[7] as (typeof replay)[number]);
     await settle();
     expect(calls.filter((c) => c.method === "session.subscribe").map((c) => c.params)).toEqual([
@@ -84,7 +89,8 @@ describe("follow", () => {
   it("keeps a refused message's reason", async () => {
     const { follower, last } = following({ "session.send": () => Promise.reject(replayRefusal("session.send")) });
     expect(await follower.send("hello")).toBe(false);
-    expect(last().message).toEqual({ state: "failed", message: "session.send: the session is a replay of a recording and cannot change" });
+    // The method name Core puts first means nothing to the user and is dropped.
+    expect(last().message).toEqual({ state: "failed", message: "the session is a replay of a recording and cannot change" });
   });
 
   it("answers a permission request, and the decision event settles the answer", async () => {
@@ -116,8 +122,37 @@ describe("follow", () => {
     await settle();
     expect(last().answers.r1).toEqual({
       state: "failed",
-      message: "session.decide_permission: the session is a replay of a recording and cannot change",
+      message: "the session is a replay of a recording and cannot change",
     });
+  });
+
+  it("starts again from the beginning when Core's history is shorter than what is shown", async () => {
+    // A replay restarted on the same endpoint: the second subscribe finds no events past 3.
+    const answers = [{ last_seq: 21 }, { last_seq: 3 }, { last_seq: 3 }];
+    const { follower, calls, last } = following({ "session.subscribe": () => Promise.resolve(answers.shift()) });
+    follower.attached();
+    await settle();
+    for (const event of replay.slice(0, 10)) follower.receive(event);
+    follower.attached();
+    await settle();
+    expect(calls.filter((c) => c.method === "session.subscribe").map((c) => c.params)).toEqual([
+      { id: "s-replay", from_seq: 0 },
+      { id: "s-replay", from_seq: 10 },
+      { id: "s-replay", from_seq: 0 },
+    ]);
+    expect(last().transcript.lastSeq).toBe(-1);
+    expect(last().stream).toEqual({ state: "live" });
+  });
+
+  it("goes offline when the connection is lost, and live again once subscribed", async () => {
+    const { follower, last } = following();
+    follower.attached();
+    await settle();
+    follower.detached();
+    expect(last().stream).toEqual({ state: "offline" });
+    follower.attached();
+    await settle();
+    expect(last().stream).toEqual({ state: "live" });
   });
 
   it("unsubscribes when stopped, and reports nothing after", () => {

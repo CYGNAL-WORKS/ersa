@@ -19,7 +19,7 @@
   color: var(--color-ink-faint);
 }
 
-.add-project-input:hover:not(:read-only),
+.add-project-input:hover:not(:read-only):not(:focus-visible),
 .add-project-input[data-force="hover"] {
   border-color: var(--color-ink-faint);
 }
@@ -34,6 +34,11 @@
 .add-project-input:read-only {
   color: var(--color-ink-faint);
   background: var(--color-canvas);
+}
+
+/* The button keeps its width when its label becomes "Adding…", so nothing beside it moves. */
+.add-project .button {
+  min-width: calc(var(--space-xxl) * 2);
 }
 
 .add-project-problem {

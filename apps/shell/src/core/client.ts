@@ -52,7 +52,9 @@ export interface CoreClient {
 export function describeError(error: unknown): string {
   if (typeof error === "object" && error !== null && "kind" in error) {
     const bridge = error as BridgeError;
-    if (bridge.kind === "rpc") return bridge.error.data?.detail ?? bridge.error.message;
+    // Core's messages start with the method they answer ("session.send: …"),
+    // which means nothing to the user.
+    if (bridge.kind === "rpc") return (bridge.error.data?.detail ?? bridge.error.message).replace(/^[a-z_]+\.[a-z_]+: /, "");
     if (bridge.kind === "unavailable") return bridge.message;
   }
   if (error instanceof globalThis.Error) return error.message;

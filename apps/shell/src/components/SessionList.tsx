@@ -74,7 +74,7 @@ function SessionTile({
       <span className="session-state">
         {needsYou ? (
           <>
-            Needs you <span className="readout">{tile.pending.length}</span>
+            Needs you · <span className="readout">{tile.pending.length}</span>
           </>
         ) : (
           stateText(tile.state)

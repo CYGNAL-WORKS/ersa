@@ -171,6 +171,21 @@ describe("connect", () => {
     expect(last?.phase === "connected" && last.sessions).toEqual({ state: "ready", sessions: [{ ...session, tile: waiting }] });
   });
 
+  it("keeps the list it shows when reading it again fails", async () => {
+    let listed = 0;
+    const { client } = fakeClient({
+      ...answering,
+      "session.list": () => (listed++ === 0 ? Promise.resolve([session]) : Promise.reject({ kind: "unavailable", message: "busy" })),
+    });
+    const seen: CoreView[] = [];
+    const connection = connect(client, (v) => seen.push(v));
+    await settle();
+    connection.reload("sessions");
+    await settle();
+    const last = seen.at(-1);
+    expect(last?.phase === "connected" && last.sessions).toEqual({ state: "ready", sessions: [session] });
+  });
+
   it("numbers each connection, so subscriptions know to start again", async () => {
     vi.useFakeTimers();
     const { client, drop } = fakeClient(answering);

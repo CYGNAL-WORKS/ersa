@@ -12,10 +12,12 @@ interface ComposerProps {
   /** For the gallery: text already typed, and a pointer or keyboard state shown without one. */
   initialText?: string;
   force?: "hover" | "focus";
+  /** Whether the composer takes focus when it appears: when a session opens (FLOW-NEW-SESSION). Off in the gallery. */
+  autoFocus?: boolean;
 }
 
 /** Where the user writes to the agent. Enter sends; Shift+Enter starts a new line. */
-export function Composer({ unavailable, sending, onSend, initialText = "", force }: ComposerProps) {
+export function Composer({ unavailable, sending, onSend, initialText = "", force, autoFocus = true }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const busy = sending?.state === "sending";
   const canSend = !unavailable && !busy && text.trim() !== "";
@@ -48,8 +50,7 @@ export function Composer({ unavailable, sending, onSend, initialText = "", force
         aria-label="Message"
         placeholder="Write to the agent"
         rows={3}
-        // The composer is focused when a session opens (FLOW-NEW-SESSION), ready to write.
-        autoFocus={force === undefined}
+        autoFocus={autoFocus}
         data-force={force}
         value={text}
         disabled={!!unavailable}
