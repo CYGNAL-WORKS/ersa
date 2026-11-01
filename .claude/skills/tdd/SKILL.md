@@ -3,7 +3,7 @@ name: tdd
 description: Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions "red-green-refactor", or wants integration tests.
 ---
 
-> **Ersa adaptation.** This repo's glossary is `docs/GLOSSARY.md`; read that wherever this skill says `GLOSSARY.md`. In an implementing session the seams are set by the ticket and the briefs it cites, and tests cite requirement IDs with `verifies: <ID>`: name the seams in the pull request instead of stopping to ask. Refactoring belongs to the review stage (the `code-review` skill).
+> **Ersa adaptation.** This repo's glossary is `docs/GLOSSARY.md`; read that wherever this skill says `GLOSSARY.md`. Tests cite requirement IDs with `verifies: <ID>`.
 
 # Test-Driven Development
 
@@ -21,9 +21,9 @@ See [tests.md](tests.md) for examples and [mocking.md](mocking.md) for mocking g
 
 A **seam** is the public boundary you test at: the interface where you observe behavior without reaching inside. Tests live at seams, never against internals.
 
-**Test only at pre-agreed seams.** Before writing any test, write down the seams under test and confirm them with the user. No test is written at an unconfirmed seam. You can't test everything, so agreeing the seams up front is how testing effort lands on the critical paths and complex logic instead of every edge case.
+**Test only at pre-agreed seams.** Before writing any test, write down the seams under test and agree them: from the ticket's **Test seams** in an unattended implementing session, or with the user when one is present. Every test sits at an agreed seam. You can't test everything, so agreeing the seams up front is how testing effort lands on the critical paths and complex logic instead of every edge case.
 
-Ask: "What's the public interface, and which seams should we test?" Give each proposed seam a one-line note on what it catches and what it misses.
+For each seam, note in one line what it catches and what it misses, and list the seams in the pull request.
 
 When the shape of that interface is itself in question (how deep the module is, where the seam belongs, what the interface should expose), call the Skill tool with "codebase-design" for the vocabulary. It is the shared source of the module, interface, depth, seam, adapter, leverage and locality terms, and it is a reference to consult, not a session to run.
 
@@ -36,5 +36,7 @@ When the shape of that interface is itself in question (how deep the module is, 
 ## Rules of the loop
 
 - **Red before green.** Write the failing test first, then only enough code to pass it. Don't anticipate future tests or add speculative features.
+- **Every async test has a timeout,** so a hang fails the test instead of the CI run.
+- **Seams that cross a process, pipe, socket or database get failure-mode tests too:** a child that never exits or stops reading, a line with a field removed, oversized input, a crash mid-operation. Use real processes or stubs that behave that way.
 - **One slice at a time.** One seam, one test, one minimal implementation per cycle.
-- **Refactoring is not part of the loop.** It belongs to the review stage (see the `code-review` skill), not the red → green implementation cycle.
+- **Refactoring is not part of the loop.** It belongs to the review stage, not the red → green implementation cycle.
