@@ -110,6 +110,11 @@ async fn stop_any_core(endpoint: &str) {
         if let Ok(link) = CoreLink::open(stream, LinkOptions::default(), |_| {}).await {
             let _ = link.request("core.shutdown", None).await;
         }
+        // Wait until it has gone, so it no longer holds the data directory
+        // the test is about to remove.
+        while ersa_core::connect(endpoint).await.is_ok() {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
     };
     if tokio::time::timeout(CLEANUP, stop).await.is_err() {
         eprintln!("could not stop the Core at {endpoint} within {CLEANUP:?}; it may still run");
