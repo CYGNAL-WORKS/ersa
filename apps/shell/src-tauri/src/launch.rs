@@ -84,11 +84,14 @@ impl CoreLocation {
     }
 }
 
-/// `ERSA_CORE_BIN`, else `ersa-core` beside the running executable, else (in a
-/// debug build) the root workspace's debug build of it, which is where
-/// `cargo build -p ersa-cli` puts it during development.
+/// `ersa-core` beside the running executable. A debug build also honours
+/// `ERSA_CORE_BIN`, and otherwise falls back to the root workspace's debug
+/// build, which is where `cargo build -p ersa-cli` puts it. A release build
+/// ignores the environment: it runs only the Core installed with it.
 fn default_program() -> io::Result<PathBuf> {
-    if let Some(path) = std::env::var_os("ERSA_CORE_BIN") {
+    if cfg!(debug_assertions)
+        && let Some(path) = std::env::var_os("ERSA_CORE_BIN")
+    {
         return Ok(PathBuf::from(path));
     }
     let name = format!("ersa-core{}", std::env::consts::EXE_SUFFIX);
@@ -119,6 +122,9 @@ pub async fn attach_or_launch(location: &CoreLocation) -> Result<(BoxStream, How
 
     // Where this run's output starts in the shared, append-only log, so a
     // failure shows its own output and not an earlier run's.
+    if let Some(path) = &location.log_file {
+        rotate_log(path);
+    }
     let log_start = location
         .log_file
         .as_deref()
@@ -130,9 +136,13 @@ pub async fn attach_or_launch(location: &CoreLocation) -> Result<(BoxStream, How
         // Try to connect before looking at the child: when two Shells launch
         // at once, one Core loses the race and exits, but the other serves.
         match ersa_core::connect(&location.endpoint).await {
-            Ok(stream) => return Ok((stream, How::Launched)),
+            Ok(stream) => {
+                reap(child);
+                return Ok((stream, How::Launched));
+            }
             Err(e) if nobody_serving(&e) => {}
             Err(source) => {
+                reap(child);
                 return Err(LaunchError::Attach {
                     endpoint: location.endpoint.clone(),
                     source,
@@ -174,31 +184,63 @@ fn nobody_serving(e: &io::Error) -> bool {
     )
 }
 
+/// Waits for the launched Core on a thread of its own, so that when it exits
+/// (long after the Shell has attached) it leaves no zombie behind on Unix.
+/// Waiting neither stops Core nor ties its lifetime to the Shell's.
+fn reap(mut child: std::process::Child) {
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+}
+
 fn spawn(location: &CoreLocation) -> Result<std::process::Child, LaunchError> {
     let spawn_error = |source| LaunchError::Spawn {
         program: location.program.display().to_string(),
         source,
     };
-    let (stdout, stderr) = match &location.log_file {
-        Some(path) => {
-            let file = open_log(path).map_err(spawn_error)?;
-            let copy = file.try_clone().map_err(spawn_error)?;
-            (Stdio::from(file), Stdio::from(copy))
-        }
-        None => (Stdio::null(), Stdio::null()),
+    let command = |breakaway: bool| -> io::Result<Command> {
+        let (stdout, stderr) = match &location.log_file {
+            Some(path) => {
+                let file = open_log(path)?;
+                let copy = file.try_clone()?;
+                (Stdio::from(file), Stdio::from(copy))
+            }
+            None => (Stdio::null(), Stdio::null()),
+        };
+        let mut command = Command::new(&location.program);
+        command
+            .arg("serve")
+            .args(&location.serve_args)
+            .envs(location.env.iter().map(|(k, v)| (k, v)))
+            .stdin(Stdio::null())
+            .stdout(stdout)
+            .stderr(stderr);
+        detach(&mut command, breakaway);
+        Ok(command)
     };
-    let mut command = Command::new(&location.program);
-    command
-        .arg("serve")
-        .args(&location.serve_args)
-        .envs(location.env.iter().map(|(k, v)| (k, v)))
-        .stdin(Stdio::null())
-        .stdout(stdout)
-        .stderr(stderr);
-    detach(&mut command);
-    // The child handle is dropped once Core serves; dropping it neither
-    // waits for nor kills the process.
-    command.spawn().map_err(spawn_error)
+    // Core must outlive the Shell even when the Shell runs inside a job that
+    // kills its processes on close (some terminals and launchers do that), so
+    // ask to leave the job; a job that forbids leaving refuses the spawn, and
+    // then Core starts inside it.
+    match command(true).map_err(spawn_error)?.spawn() {
+        Ok(child) => Ok(child),
+        Err(e) if cfg!(windows) && e.kind() == io::ErrorKind::PermissionDenied => command(false)
+            .map_err(spawn_error)?
+            .spawn()
+            .map_err(spawn_error),
+        Err(e) => Err(spawn_error(e)),
+    }
+}
+
+/// The log is kept to about [`MAX_LOG_BYTES`]: past that, the old log moves
+/// to `core.log.1` (replacing the one before) and a new log starts. A Core
+/// still writing to the old file (on Windows, one holding it open) keeps it.
+const MAX_LOG_BYTES: u64 = 4 * 1024 * 1024;
+
+fn rotate_log(path: &Path) {
+    if std::fs::metadata(path).is_ok_and(|meta| meta.len() > MAX_LOG_BYTES) {
+        let _ = std::fs::rename(path, path.with_extension("log.1"));
+    }
 }
 
 fn open_log(path: &Path) -> io::Result<File> {
@@ -236,18 +278,25 @@ fn log_tail(path: &Path, start: u64) -> String {
 }
 
 /// Windows: no console window, and a process group of its own so a Ctrl+C in
-/// the terminal that started the Shell does not reach Core.
+/// the terminal that started the Shell does not reach Core; with `breakaway`,
+/// outside the Shell's job as well.
 #[cfg(windows)]
-fn detach(command: &mut Command) {
+fn detach(command: &mut Command, breakaway: bool) {
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    let mut flags = CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW;
+    if breakaway {
+        flags |= CREATE_BREAKAWAY_FROM_JOB;
+    }
+    command.creation_flags(flags);
 }
 
-/// Unix: a process group of its own, for the same reason.
+/// Unix: a process group of its own, for the same reason. Jobs are a Windows
+/// idea, so `breakaway` means nothing here.
 #[cfg(unix)]
-fn detach(command: &mut Command) {
+fn detach(command: &mut Command, _breakaway: bool) {
     use std::os::unix::process::CommandExt;
     command.process_group(0);
 }

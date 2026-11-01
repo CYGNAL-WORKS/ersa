@@ -23,11 +23,12 @@
   border-color: var(--color-ink-muted);
 }
 
+/* Focus takes the accent, the colour of the thing you can act on: edge and label. */
 .button:focus-visible,
 .button[data-force="focus"] {
-  outline: 1px solid var(--color-accent);
-  outline-offset: 1px;
+  outline: none;
   border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 
 /* Disabled keeps the default fill and loses the edge's weight and the text's ink. */
