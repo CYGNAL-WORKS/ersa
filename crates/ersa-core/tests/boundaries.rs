@@ -95,7 +95,13 @@ fn no_default_member_depends_on_tauri() {
         "the walk should start from Core's crates; found {deps:?}"
     );
 
-    let tauri: Vec<_> = deps.iter().filter(|d| d.starts_with("tauri")).collect();
+    // Tauri's own crates, and the window and webview crates it draws with,
+    // which need a display just as much.
+    let display_stack = ["wry", "tao", "webkit2gtk", "webview2-com"];
+    let tauri: Vec<_> = deps
+        .iter()
+        .filter(|d| d.starts_with("tauri") || display_stack.contains(&d.as_str()))
+        .collect();
     assert!(
         tauri.is_empty(),
         "Core must build without Tauri, but the default members depend on {tauri:?}"

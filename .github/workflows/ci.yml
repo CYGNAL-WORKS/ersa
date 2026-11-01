@@ -90,7 +90,7 @@ jobs:
 
       - name: Sources, bans, licences
         if: ${{ !cancelled() }}
-        run: cargo deny --locked check bans licenses sources
+        run: cargo deny --workspace --locked check bans licenses sources
 
   # The Interface (apps/shell): generated files current, types, unit tests, and
   # the gallery's screenshot tests. Runs in the Playwright container so the
