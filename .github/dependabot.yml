@@ -1,0 +1,29 @@
+# Weekly version updates (ADR 0015). The 7-day cooldown matches min_age_days in
+# deps-policy.toml for the packages Dependabot chooses to update. An update can
+# also move transitive packages, which may be younger than that; the age check
+# then fails the pull request like any other. Security updates are not delayed
+# by the cooldown.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+
+  # Uncomment when the interface's package.json lands, with `directory` set to
+  # the folder that holds it.
+  # - package-ecosystem: npm
+  #   directory: /
+  #   schedule:
+  #     interval: weekly
+  #   cooldown:
+  #     default-days: 7
