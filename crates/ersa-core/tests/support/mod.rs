@@ -11,6 +11,7 @@
 pub mod claude;
 pub mod fake;
 pub mod procs;
+pub mod suite;
 
 use std::collections::VecDeque;
 use std::io;

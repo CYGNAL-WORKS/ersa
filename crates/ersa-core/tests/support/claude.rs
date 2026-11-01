@@ -5,12 +5,17 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ersa_adapter::fake::FakeTransport;
+use ersa_adapter::recording::Recording;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, Projector, SessionConfig, Transport,
     async_trait,
 };
 use ersa_adapter_claude::ClaudeAdapter;
+use ersa_core::replay::{Pace, Replay};
+use ersa_core::{CoreConfig, Server};
 use serde_json::Value;
+
+use super::{TestCore, tempdir, test_config, unique_endpoint};
 
 pub const FIXTURE: &str = "11-stream-permission-prompt-tool-stdio";
 
@@ -51,26 +56,40 @@ pub fn fixture_dir() -> PathBuf {
         .join("docs/briefs/protocol/fixtures/claude-code/2.1.302")
 }
 
+/// Fixture 11 as a recording.
+pub fn recording() -> Recording {
+    Recording::load(&fixture_dir().join(format!("{FIXTURE}.jsonl"))).expect("fixture loads")
+}
+
 /// The fixture's stdout lines, and the lines the recording wrote to stdin.
 pub fn fixture() -> (Vec<String>, Vec<String>) {
-    let dir = fixture_dir();
-    let stdout = std::fs::read_to_string(dir.join(format!("{FIXTURE}.jsonl"))).unwrap();
-    let stdout: Vec<String> = stdout
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(String::from)
-        .collect();
-    let meta: Value = serde_json::from_str(
-        &std::fs::read_to_string(dir.join(format!("{FIXTURE}.meta.json"))).unwrap(),
-    )
-    .unwrap();
-    let sent = meta["sent"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|s| s["line"].as_str().unwrap().to_string())
-        .collect();
-    (stdout, sent)
+    let recording = recording();
+    (recording.stdout(), recording.sent())
+}
+
+/// A replay server for fixture 11 in a temporary data directory, with
+/// `configure` applied to its configuration.
+pub async fn start_replay_with(configure: impl FnOnce(&mut CoreConfig), pace: Pace) -> TestCore {
+    let dir = tempdir();
+    let endpoint = unique_endpoint();
+    let mut config = test_config(&dir.path().join("data"), &endpoint);
+    configure(&mut config);
+    let replay = Replay {
+        adapter: Arc::new(ClaudeAdapter::new()),
+        recording: recording(),
+        title: FIXTURE.to_string(),
+        // What detection finds in these tests' Cores, which have no backend
+        // installed; a live test Core starts its sessions with it too.
+        backend_version: String::new(),
+        pace,
+    };
+    let server = Server::bind_replay(config, replay).await.expect("bind");
+    let task = tokio::spawn(server.run());
+    TestCore {
+        dir,
+        endpoint,
+        task,
+    }
 }
 
 pub fn parse(line: &str) -> Value {
