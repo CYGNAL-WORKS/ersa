@@ -1,0 +1,17 @@
+[package]
+name = "ersa-protocol"
+description = "Types for the two protocols the Interface speaks to Core: the Core API and the agent event stream."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
