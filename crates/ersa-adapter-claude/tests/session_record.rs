@@ -244,6 +244,8 @@ fn prompts_in_the_record_are_user_messages_and_other_entries_yield_nothing() {
 #[test]
 fn an_unreadable_or_drifted_message_entry_is_an_error_and_kept() {
     let mut projector = RecordProjector::new();
+    assert_eq!(projector.project(""), []);
+    assert_eq!(projector.project("  \t"), []);
     let events = projector.project("{not json");
     assert!(matches!(
         events[0].event,

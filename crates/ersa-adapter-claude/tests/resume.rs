@@ -101,6 +101,21 @@ fn a_new_session_passes_no_resume() {
 }
 
 #[tokio::test]
+async fn a_null_resume_starts_a_new_session() {
+    let transport = ready_stub();
+    let session = adapter()
+        .start(
+            Arc::new(transport.clone()),
+            config(json!({ "resume": null })),
+            Arc::new(RecordingSink::new()),
+        )
+        .await
+        .expect("start");
+    assert_eq!(flag_value(&transport.spawned()[0].args, "--resume"), None);
+    session.stop().await.expect("stop");
+}
+
+#[tokio::test]
 async fn a_resume_id_that_is_not_a_session_id_fails_start_without_spawning() {
     // Session ids can come from file names in the CLI's record directory; one
     // that looks like a flag must never reach the command line.
