@@ -954,6 +954,7 @@ async fn a_failed_session_still_lists_as_failed_after_core_restarts() {
     assert_eq!(row["tile"]["state"], "error");
 }
 
+// verifies: PROTO-CORE-API-R13
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_nobody_reads_lets_its_view_go_and_reopens_under_a_new_identity() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
