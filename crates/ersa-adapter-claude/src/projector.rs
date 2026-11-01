@@ -74,7 +74,8 @@ struct PendingPrompt {
 
 #[derive(Debug)]
 struct StreamedText {
-    /// The raw line the block's streaming started on.
+    /// The raw line the block's streaming started on, to finish unfinished
+    /// blocks in the order they started.
     first_raw: u64,
     text: String,
     /// Whether a partial `assistant.text` went out for it, which obliges a
@@ -154,7 +155,7 @@ impl ClaudeProjector {
             }
             CliMessage::Assistant(reply) => self.assistant(line, reply, value),
             CliMessage::User(user) => {
-                self.tool_results(line, user.message.content, user.is_replay, value)
+                self.tool_results(line, user.message.content, user.is_replay, user.uuid, value)
             }
             CliMessage::StreamEvent(stream) => self.stream_event(line, stream, value),
             CliMessage::RateLimitEvent(event) => vec![at(
@@ -249,6 +250,9 @@ impl ClaudeProjector {
         if reply.parent_tool_use_id.is_none() && reply.error.is_none() {
             self.main_model = Some(reply.message.model.clone());
         }
+        // The session record keeps this message under the same `uuid`, which
+        // is how Core yields it once when it is in both (PROTO-AGENT-EVENTS-R12).
+        let message_id = Some(reply.uuid.clone());
         let events = reply_events(
             &mut self.blocks_seen,
             reply.message,
@@ -256,19 +260,18 @@ impl ClaudeProjector {
             reply.parent_tool_use_id,
         );
         if events.is_empty() {
-            out.push(passthrough(line, value));
+            out.push(Projected::of_message(
+                message_id,
+                passthrough(line, value).event,
+            ));
             return out;
         }
         for event in events {
-            // A streamed block's final event covers its whole stream.
-            let raw_from = match &event {
-                Event::AssistantText(text) => self
-                    .streaming
-                    .remove(&text.block_id)
-                    .map_or(line.index, |streamed| streamed.first_raw),
-                _ => line.index,
-            };
-            out.push(Projected { raw_from, event });
+            // The complete block ends its stream.
+            if let Event::AssistantText(text) = &event {
+                self.streaming.remove(&text.block_id);
+            }
+            out.push(Projected::of_message(message_id.clone(), event));
         }
         out
     }
@@ -280,6 +283,7 @@ impl ClaudeProjector {
         line: &RawLine,
         content: MessageContent,
         is_replay: Option<bool>,
+        uuid: String,
         value: Value,
     ) -> Vec<Projected> {
         // An echo repeats a host line that already projected to `user.message`.
@@ -291,7 +295,11 @@ impl ClaudeProjector {
             return vec![passthrough(line, value)];
         }
         let mut out = self.ensure_turn(line);
-        out.extend(results.into_iter().map(|event| at(line, event)));
+        out.extend(
+            results
+                .into_iter()
+                .map(|event| Projected::of_message(Some(uuid.clone()), event)),
+        );
         out
     }
 
@@ -346,14 +354,14 @@ impl ClaudeProjector {
                         });
                     streamed.text.push_str(&text);
                     streamed.shown = true;
-                    let event = Projected {
-                        raw_from: streamed.first_raw,
-                        event: Event::AssistantText(AssistantText {
+                    let event = at(
+                        line,
+                        Event::AssistantText(AssistantText {
                             block_id,
                             text: streamed.text.clone(),
                             is_final: false,
                         }),
-                    };
+                    );
                     let mut out = self.ensure_turn(line);
                     out.push(event);
                     return out;
@@ -442,7 +450,7 @@ impl ClaudeProjector {
         unfinished
             .into_iter()
             .map(|(block_id, streamed)| Projected {
-                raw_from: streamed.first_raw,
+                message_id: None,
                 event: Event::AssistantText(AssistantText {
                     block_id,
                     text: streamed.text,

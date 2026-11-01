@@ -19,7 +19,8 @@ use common::{fixtures, fixtures_root};
 use ersa_adapter::{Direction, Projector};
 use ersa_adapter_claude::ClaudeProjector;
 use ersa_adapter_claude::record::{
-    RecordEvent, SessionList, encoded_cwd, list_sessions, project_record,
+    RecordCache, RecordEvent, SessionList, encoded_cwd, find_record, list_sessions, project_record,
+    read_record, record_version,
 };
 use ersa_protocol::events::*;
 use ersa_protocol::schema::validate_event;
@@ -184,7 +185,7 @@ fn every_record_fixture_projects_to_its_golden_file_and_validates() {
                 event.event
             );
             rendered.push_str(
-                &json!({ "message_id": event.message_id, "ts": event.ts, "event": payload })
+                &json!({ "message_id": event.message_id, "ts": event.ts, "backend_version": event.backend_version, "event": payload })
                     .to_string(),
             );
             rendered.push('\n');
@@ -411,7 +412,7 @@ fn a_compaction_keeps_the_history_before_it() {
 #[test]
 fn prompts_are_user_messages_and_what_the_cli_wrote_is_system() {
     let entries = [
-        json!({"type": "user", "uuid": "u1", "timestamp": "2026-11-01T10:00:00.000Z",
+        json!({"type": "user", "uuid": "u1", "timestamp": "2026-11-01T10:00:00.000Z", "version": "2.1.316",
             "message": {"role": "user", "content": [{"type": "text", "text": "Hello"}]}}),
         json!({"type": "user", "uuid": "u2", "isMeta": true,
             "message": {"role": "user", "content": "<local-command-caveat>Caveat</local-command-caveat>"}}),
@@ -431,6 +432,7 @@ fn prompts_are_user_messages_and_what_the_cli_wrote_is_system() {
         RecordEvent {
             message_id: Some("u1".into()),
             ts: Some("2026-11-01T10:00:00.000Z".into()),
+            backend_version: Some("2.1.316".into()),
             event: Event::UserMessage(UserMessage {
                 text: "Hello".into(),
                 origin: MessageOrigin::Human,
@@ -785,4 +787,216 @@ fn a_record_that_cannot_be_opened_is_reported_not_dropped() {
     assert_eq!(listed.sessions.len(), 1);
     assert_eq!(listed.sessions[0].session_id, SESSION_A);
     assert_eq!(listed.unreadable, [locked]);
+}
+
+/// A scratch Claude home holding `record` as session `id`'s record, under
+/// the directory the CLI would use for `cwd`.
+fn record_home(cwd: &str, id: &str, record: &str) -> tempfile::TempDir {
+    let home = tempfile::tempdir().unwrap();
+    let dir = home.path().join("projects").join(encoded_cwd(cwd));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join(format!("{id}.jsonl")), record).unwrap();
+    home
+}
+
+const SESSION: &str = "d34f0c1b-64ee-437e-a4e3-3487df29a506";
+
+// verifies: PROTO-AGENT-EVENTS-R11
+#[test]
+fn a_session_record_read_twice_yields_identical_events() {
+    for fixture in record_fixtures() {
+        let home = record_home("C:/work", SESSION, &fixture.text);
+        let read = || read_record(home.path(), "C:/work", SESSION).unwrap();
+        let first = read();
+        assert!(!first.is_empty(), "{}", fixture.name);
+        assert_eq!(first, read(), "{}", fixture.name);
+        assert_eq!(first, project_record(&fixture.text), "{}", fixture.name);
+    }
+}
+
+#[test]
+fn a_record_is_found_by_its_session_id_whatever_the_cwd_is_spelled() {
+    let text = record_fixtures().remove(0).text;
+    // The CLI spelled the directory `C:\work`; Core asks with `c:/work/`.
+    let home = record_home(r"C:\work", SESSION, &text);
+    let found = find_record(home.path(), "c:/work/", SESSION).unwrap();
+    assert_eq!(
+        found,
+        Some(
+            home.path()
+                .join("projects")
+                .join(encoded_cwd(r"C:\work"))
+                .join(format!("{SESSION}.jsonl"))
+        )
+    );
+    assert_eq!(
+        read_record(home.path(), "c:/work/", SESSION).unwrap(),
+        project_record(&text)
+    );
+}
+
+#[test]
+fn a_session_with_no_record_has_no_history_and_a_bad_id_is_refused() {
+    let empty = tempfile::tempdir().unwrap();
+    // No `projects` directory at all: the CLI never ran here.
+    assert_eq!(read_record(empty.path(), "C:/work", SESSION).unwrap(), []);
+    let home = record_home("C:/work", SESSION, "");
+    let other = "00000000-0000-4000-8000-000000000000";
+    assert_eq!(read_record(home.path(), "C:/work", other).unwrap(), []);
+    // An id that is not a session id never becomes a path.
+    let refused = read_record(home.path(), "C:/work", "../../secrets").unwrap_err();
+    assert_eq!(refused.kind(), std::io::ErrorKind::InvalidInput);
+}
+
+/// The merge key against the real CLI: every message event the projector
+/// tags on a recorded stream carries a `uuid` the session record of the same
+/// run gives a message with the same events, so Core can match them
+/// (PROTO-AGENT-EVENTS-R12). The record may hold more: a resumed session's
+/// record keeps the earlier run's messages too.
+// verifies: PROTO-AGENT-EVENTS-R12
+#[test]
+fn live_message_ids_are_the_record_uuids_of_the_same_messages() {
+    let records = record_fixtures();
+    let mut matched = 0;
+    for stream in fixtures() {
+        let Some(record) = records.iter().find(|r| r.name == stream.name) else {
+            continue;
+        };
+        let mut projector = ClaudeProjector::new();
+        let live: BTreeSet<String> = stream
+            .raw_log()
+            .iter()
+            .flat_map(|line| projector.project(line))
+            .filter(|p| {
+                matches!(
+                    p.event,
+                    Event::AssistantText(AssistantText { is_final: true, .. })
+                        | Event::ToolRequested(_)
+                        | Event::ToolResult(_)
+                )
+            })
+            .filter_map(|p| p.message_id)
+            .collect();
+        let recorded: BTreeSet<String> = project_record(&record.text)
+            .into_iter()
+            .filter(|e| {
+                matches!(
+                    e.event,
+                    Event::AssistantText(_) | Event::ToolRequested(_) | Event::ToolResult(_)
+                )
+            })
+            .filter_map(|e| e.message_id)
+            .collect();
+        // Entries the fixture trimmed (a local command's output) keep their
+        // uuid but nothing to project.
+        let elided: BTreeSet<String> = record
+            .text
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|e| e["ersa_elided"] == true)
+            .filter_map(|e| e["uuid"].as_str().map(String::from))
+            .collect();
+        assert!(
+            !live.is_empty(),
+            "{}: no message ids on the stream",
+            stream.name
+        );
+        let unmatched: Vec<&String> = live
+            .iter()
+            .filter(|id| !recorded.contains(*id) && !elided.contains(*id))
+            .collect();
+        assert!(unmatched.is_empty(), "{}: {unmatched:?}", stream.name);
+        matched += 1;
+    }
+    assert!(matched > 0, "no stream fixture has a record beside it");
+}
+
+#[test]
+fn a_cached_record_is_reused_while_unchanged_and_read_again_once_it_grows() {
+    let text = record_fixtures().remove(0).text;
+    let home = record_home("C:/work", SESSION, &text);
+    let cache = RecordCache::default();
+    let first = cache.read(home.path(), "C:/work", SESSION).unwrap();
+    assert_eq!(*first, project_record(&text));
+    assert_eq!(cache.reads(), 1);
+    // Unchanged: the same projection, shared, and the file not read again.
+    let second = cache.read(home.path(), "C:/work", SESSION).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&first, &second));
+    assert_eq!(cache.reads(), 1);
+
+    // The CLI appends a turn taken elsewhere: the record is read again.
+    let path = find_record(home.path(), "C:/work", SESSION)
+        .unwrap()
+        .unwrap();
+    let grown = format!(
+        "{text}{}
+",
+        json!({"type": "user", "uuid": "u-later", "parentUuid": null,
+            "message": {"role": "user", "content": "later"}})
+    );
+    fs::write(&path, &grown).unwrap();
+    let again = cache.read(home.path(), "C:/work", SESSION).unwrap();
+    assert_eq!(*again, project_record(&grown));
+    assert_eq!(cache.reads(), 2);
+
+    // A session Ersa no longer shows is let go.
+    cache.forget(SESSION);
+    cache.read(home.path(), "C:/work", SESSION).unwrap();
+    assert_eq!(cache.reads(), 3);
+}
+
+#[test]
+fn an_entry_too_long_to_read_is_reported_unless_it_is_still_being_written() {
+    let first = json!({"type": "user", "uuid": "u1", "parentUuid": null,
+        "message": {"role": "user", "content": "Hello"}});
+    let long = format!(
+        "{{\"type\":\"user\",\"uuid\":\"u2\",\"message\":{{\"content\":\"{}\"}}}}",
+        "x".repeat(16 * 1024 * 1024 + 10)
+    );
+    // Whole, with its line end: reported, and the pass carries on.
+    let ended = format!("{first}\r\n{long}\r\n{first}\n");
+    let events: Vec<Event> = project_record(&ended)
+        .into_iter()
+        .map(|e| e.event)
+        .collect();
+    assert!(
+        events.iter().any(|e| matches!(e, Event::Error(_))),
+        "{:?}",
+        events.iter().map(|e| e.type_name()).collect::<Vec<_>>()
+    );
+    // The last line, still being written: left for the next read, quietly.
+    let writing = format!("{first}\n{long}");
+    let events: Vec<Event> = project_record(&writing)
+        .into_iter()
+        .map(|e| e.event)
+        .collect();
+    assert_eq!(
+        events.len(),
+        1,
+        "{:?}",
+        events.iter().map(|e| e.type_name()).collect::<Vec<_>>()
+    );
+    assert!(matches!(events[0], Event::UserMessage(_)));
+}
+
+#[test]
+fn a_records_version_changes_when_it_grows() {
+    let text = record_fixtures().remove(0).text;
+    let home = record_home("C:/work", SESSION, &text);
+    let before = record_version(home.path(), "C:/work", SESSION).unwrap();
+    assert!(before.is_some());
+    assert_eq!(
+        record_version(home.path(), "C:/work", SESSION).unwrap(),
+        before
+    );
+    let path = find_record(home.path(), "C:/work", SESSION)
+        .unwrap()
+        .unwrap();
+    fs::write(&path, format!("{text}\n")).unwrap();
+    assert_ne!(
+        record_version(home.path(), "C:/work", SESSION).unwrap(),
+        before
+    );
+    let other = "00000000-0000-4000-8000-000000000000";
+    assert_eq!(record_version(home.path(), "C:/work", other).unwrap(), None);
 }

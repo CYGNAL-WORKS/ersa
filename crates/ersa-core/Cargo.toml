@@ -1,6 +1,6 @@
 [package]
 name = "ersa-core"
-description = "Ersa's domain: sessions, raw logs and projections, adapters, transports, workspaces, packs, modes, harness tools, and persistence."
+description = "Ersa's domain: sessions and their projections, adapters, transports, workspaces, packs, modes, harness tools, and persistence."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

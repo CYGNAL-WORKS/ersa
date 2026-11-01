@@ -24,16 +24,18 @@ fn golden_path(fixture_name: &str) -> PathBuf {
         .join(format!("{fixture_name}.events.jsonl"))
 }
 
-/// One JSON object per event: the raw-line range it came from, then the event.
-/// Written by hand so the range leads each line, where a reviewer looks first.
+/// One JSON object per event: the raw line it came from and the message id
+/// the session record shares, then the event. Written by hand so the line
+/// leads, where a reviewer looks first.
 fn render(projection: &[(u64, ersa_adapter::Projected)]) -> String {
     let mut text = String::new();
-    for (raw_to, projected) in projection {
+    for (raw, projected) in projection {
         let event = serde_json::to_string(&projected.event).unwrap();
-        let raw_from = projected.raw_from;
-        text.push_str(&format!(
-            r#"{{"raw_from":{raw_from},"raw_to":{raw_to},"event":{event}}}"#
-        ));
+        let message_id = match &projected.message_id {
+            Some(id) => format!(r#""message_id":{},"#, serde_json::to_string(id).unwrap()),
+            None => String::new(),
+        };
+        text.push_str(&format!(r#"{{"raw":{raw},{message_id}"event":{event}}}"#));
         text.push('\n');
     }
     text
@@ -55,7 +57,6 @@ fn every_fixture_projects_to_its_golden_file_and_validates() {
                     fixture.name
                 )
             });
-            assert!(projected.raw_from <= projection.iter().map(|(to, _)| *to).max().unwrap());
         }
 
         let rendered = render(&projection);
@@ -146,11 +147,11 @@ fn streamed_text_shares_a_block_id_and_ends_with_exactly_one_final() {
     let texts: Vec<_> = projection
         .iter()
         .filter_map(|(to, p)| match &p.event {
-            Event::AssistantText(t) => Some((p.raw_from, *to, t.text.as_str(), t.is_final)),
+            Event::AssistantText(t) => Some((*to, t.text.as_str(), t.is_final)),
             _ => None,
         })
         .collect();
-    assert_eq!(texts, [(3, 4, "ready", false), (3, 5, "ready", true)]);
+    assert_eq!(texts, [(4, "ready", false), (5, "ready", true)]);
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R03
@@ -721,27 +722,20 @@ fn blocks_still_streaming_when_the_turn_ends_are_finished() {
         // An interrupt or API error: no complete `assistant` lines, then the end.
         (Backend, result),
     ]));
-    let at_result: Vec<(u64, String)> = projection
+    // Finished in the order their streams started.
+    let at_result: Vec<String> = projection
         .iter()
         .filter(|(to, _)| *to == 5)
-        .map(|(_, p)| {
-            (
-                p.raw_from,
-                summary(std::slice::from_ref(&p.event)).remove(0),
-            )
-        })
+        .map(|(_, p)| summary(std::slice::from_ref(&p.event)).remove(0))
         .collect();
     assert_eq!(
         at_result,
         [
-            (3, r#"assistant.text sub/0 "Sub" true"#.to_string()),
-            (
-                4,
-                r#"assistant.text main/0 "Interrupted mid" true"#.to_string()
-            ),
-            (5, "turn.completed 1 Success".to_string()),
-            (5, "usage.updated".to_string()),
-            (5, "session.state Idle".to_string()),
+            r#"assistant.text sub/0 "Sub" true"#,
+            r#"assistant.text main/0 "Interrupted mid" true"#,
+            "turn.completed 1 Success",
+            "usage.updated",
+            "session.state Idle",
         ]
     );
 }

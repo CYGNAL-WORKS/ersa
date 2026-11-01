@@ -44,6 +44,9 @@ pub struct SessionSummary {
     pub title: Option<String>,
     /// When the record last changed.
     pub modified: Option<SystemTime>,
+    /// When the session began: the `timestamp` of the record's first entry
+    /// that has one, as the record gives it.
+    pub created_at: Option<String>,
 }
 
 /// The sessions the CLI recorded for working directory `cwd`. A directory
@@ -86,6 +89,7 @@ pub fn list_sessions(claude_home: &Path, cwd: &str) -> io::Result<SessionList> {
                 session_id: id.to_string(),
                 title: ends.title(),
                 modified: metadata.modified().ok(),
+                created_at: ends.created_at,
             }),
             // The CLI's retention deleted it since the directory was read.
             Err(e) if e.kind() == io::ErrorKind::NotFound => {}
@@ -102,6 +106,32 @@ pub fn list_sessions(claude_home: &Path, cwd: &str) -> io::Result<SessionList> {
     Ok(list)
 }
 
+/// The summary of one session, read from the head and tail of its record
+/// like a list's ([`super::find_record`] finds the record). `None` when the
+/// session has no record.
+pub fn summarize_session(
+    claude_home: &Path,
+    cwd: &str,
+    session_id: &str,
+) -> io::Result<Option<SessionSummary>> {
+    let Some(path) = super::find_record(claude_home, cwd, session_id)? else {
+        return Ok(None);
+    };
+    let modified = fs::metadata(&path)?.modified().ok();
+    let ends = match read_ends(&path) {
+        Ok(ends) => ends,
+        // The CLI's retention deleted it since it was found.
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    Ok(Some(SessionSummary {
+        session_id: session_id.to_string(),
+        title: ends.title(),
+        modified,
+        created_at: ends.created_at,
+    }))
+}
+
 /// The complete entries in the first and last `CHUNK` bytes of a record. A
 /// line cut by either boundary is dropped; a line the CLI is still writing
 /// fails to parse and is dropped too. When the file is shorter than two
@@ -109,6 +139,8 @@ pub fn list_sessions(claude_home: &Path, cwd: &str) -> io::Result<SessionList> {
 struct Ends {
     head: Vec<RecordEntry>,
     tail: Vec<RecordEntry>,
+    /// The first `timestamp` in the head.
+    created_at: Option<String>,
 }
 
 fn read_ends(path: &Path) -> io::Result<Ends> {
@@ -123,6 +155,7 @@ fn read_ends(path: &Path) -> io::Result<Ends> {
         return Ok(Ends {
             head: entries.clone(),
             tail: entries,
+            created_at: first_timestamp(&head),
         });
     }
 
@@ -135,7 +168,17 @@ fn read_ends(path: &Path) -> io::Result<Ends> {
     Ok(Ends {
         head: entries(&head, false, true),
         tail: entries(&tail, start > 0, false),
+        created_at: first_timestamp(&head),
     })
+}
+
+/// The `timestamp` of the first complete line in `head` that has one. Read
+/// from the raw JSON: the first entries are snapshots and other kinds the
+/// typed entries do not keep.
+fn first_timestamp(head: &[u8]) -> Option<String> {
+    head.split(|b| *b == b'\n')
+        .filter_map(|line| serde_json::from_slice::<serde_json::Value>(line).ok())
+        .find_map(|entry| entry.get("timestamp")?.as_str().map(String::from))
 }
 
 /// The entries of the complete lines in `bytes`, skipping the first segment

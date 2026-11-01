@@ -150,18 +150,24 @@ async fn core_shutdown_stops_running_sessions_and_their_trees() {
     task.await.unwrap().unwrap();
     eventually_gone(grandchild).await;
 
-    // The next Core finds the session ended by the user, not cut off.
+    // The next Core finds the session ended by the user, not cut off: the
+    // app log's last fact about it is the user's stop.
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(TreeAdapter)];
     let core = start_with_adapters(dir, |_| {}, adapters).await;
     let mut client = core.client().await;
     let sessions = client.result("session.list", json!({})).await;
     assert_eq!(sessions[0]["id"], id.as_str());
     assert_eq!(sessions[0]["state"], "ended");
-    let log = client.result("session.raw_log", json!({ "id": id })).await;
-    let last = log.as_array().unwrap().last().unwrap().clone();
-    assert_eq!(last["dir"], "core");
+    let facts = ersa_core::app_log::read_entries(&core.data_dir()).unwrap();
+    let last = facts.iter().rfind(|e| e.session_id == id).unwrap();
     assert!(
-        last["line"].as_str().unwrap().contains("stopped_by_user"),
-        "{last}"
+        matches!(
+            last.fact,
+            ersa_core::app_log::LifecycleFact::ProcessExited {
+                stopped_by_user: true,
+                ..
+            }
+        ),
+        "{last:?}"
     );
 }
