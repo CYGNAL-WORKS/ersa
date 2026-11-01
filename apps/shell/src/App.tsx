@@ -115,7 +115,10 @@ export function App({ client }: { client: CoreClient }) {
     }
   };
 
-  const active = sessions.state === "ready" ? sessions.sessions.find((s) => s.id === activeId) : undefined;
+  // The title as last listed, so the header keeps it while the list reloads
+  // or Core is away.
+  const titles = useRef<Record<string, string>>({});
+  if (sessions.state === "ready") for (const s of sessions.sessions) if (s.title) titles.current[s.id] = s.title;
   const shown = session && session.id === activeId ? session : undefined;
 
   return (
@@ -133,7 +136,7 @@ export function App({ client }: { client: CoreClient }) {
         <main className="stage">
           <Transcript
             key={shown.id}
-            title={active?.title ?? "Untitled session"}
+            title={(activeId && titles.current[activeId]) || "Untitled session"}
             view={shown}
             onDecide={(requestId, behavior) => follower.current?.decide(requestId, behavior)}
           />

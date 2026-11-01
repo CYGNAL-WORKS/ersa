@@ -134,8 +134,15 @@ async fn received(name: &str) -> Value {
     .await
     .expect("session.subscribe");
 
+    // How many lines the replay feeds into the raw log: the recording's
+    // backend output and what was written to the backend.
+    let recorded = ersa_core::replay::Recording::load(&fixture(name))
+        .expect("the recording loads")
+        .into_lines()
+        .len();
     let mut notifications = Vec::new();
     let mut last_seq: Option<u64> = None;
+    let mut last_raw_to: Option<u64> = None;
     let after = tokio::time::timeout(COLLECT, async {
         loop {
             match tokio::time::timeout(QUIET, incoming.recv()).await {
@@ -143,6 +150,7 @@ async fn received(name: &str) -> Value {
                     if method == "session.event" =>
                 {
                     last_seq = params["event"]["seq"].as_u64();
+                    last_raw_to = params["event"]["source"]["raw_to"].as_u64();
                     notifications.push(
                         json!({ "kind": "notification", "method": method, "params": params }),
                     );
@@ -152,18 +160,30 @@ async fn received(name: &str) -> Value {
                     panic!("the replay closed the connection: {reason}")
                 }
                 Ok(None) => panic!("the link's event channel closed"),
-                // Quiet: the capture is complete once Core says the session
-                // is idle with no event past the last one received (a
-                // replayed session stays idle after its last line,
-                // PROTO-CORE-API, Conformance).
+                // Quiet: the capture is complete once every recorded line
+                // is in the session's raw log, the events received reach
+                // the last of them, and Core lists no event past the last
+                // one received. Silence alone never ends it.
                 Err(_) => {
                     let after = link
                         .request("session.list", None)
                         .await
                         .expect("session.list");
-                    let session = &after[0];
-                    if session["tile"]["state"] == "idle"
-                        && session["last_event_seq"].as_u64() == last_seq
+                    let raw = link
+                        .request("session.raw_log", Some(json!({ "id": id })))
+                        .await
+                        .expect("session.raw_log");
+                    // Core's own lifecycle records are not the recording's.
+                    let fed: Vec<&Value> = raw
+                        .as_array()
+                        .expect("raw log entries")
+                        .iter()
+                        .filter(|entry| entry["dir"] != "core")
+                        .collect();
+                    let last_fed = fed.last().and_then(|entry| entry["index"].as_u64());
+                    if fed.len() == recorded
+                        && last_raw_to >= last_fed
+                        && after[0]["last_event_seq"].as_u64() == last_seq
                     {
                         return after;
                     }
