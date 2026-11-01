@@ -55,12 +55,14 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
             format!("Ersa has no adapter for backend {}", params.backend),
         ));
     }
-    let transport = core.transport_for(&project.host_id).ok_or_else(|| {
-        ApiError::new(
-            ersa_protocol::core_api::ErrorKind::TransportError,
-            format!("host {} cannot be reached", project.host_id),
-        )
-    })?;
+    let transport = core
+        .session_transport_for(&project.host_id)
+        .ok_or_else(|| {
+            ApiError::new(
+                ersa_protocol::core_api::ErrorKind::TransportError,
+                format!("host {} cannot be reached", project.host_id),
+            )
+        })?;
     // The version detection found, until the backend announces its own.
     let backend_version = if project.host_id == LOCAL_HOST_ID {
         core.local_backends()
@@ -199,13 +201,14 @@ pub(super) fn subscribe(
     conn: &mut ConnectionState,
     params: SubscribeParams,
 ) -> Result<SubscribeResult, ApiError> {
-    conn.subscriptions.remove(&params.id);
     let (subscription, last_seq) = core.sessions.subscribe(
         &params.id,
         params.from_seq,
         conn.outbound.clone(),
         conn.kick.clone(),
     )?;
+    // Only now is the old subscription, if any, dropped: a resubscribe that
+    // fails leaves the client the stream it had.
     conn.subscriptions.insert(params.id, subscription);
     Ok(SubscribeResult { last_seq })
 }

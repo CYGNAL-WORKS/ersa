@@ -168,10 +168,12 @@ fn euid() -> u32 {
 ///
 /// On Unix that unit is a process group: the child leads a new group, and
 /// what it starts joins the group unless it deliberately leaves (a daemon
-/// that calls `setsid` does). Dropping a `ProcessTree` kills the group.
+/// that calls `setsid` does). Dropping a `ProcessTree` made with
+/// `kill_on_drop` kills the group.
 pub struct ProcessTree {
     /// The group's id, which is the child's process id.
     group: i32,
+    kill_on_drop: bool,
 }
 
 impl ProcessTree {
@@ -181,13 +183,17 @@ impl ProcessTree {
         command.process_group(0);
     }
 
-    /// Remembers a just-spawned `child`'s group.
-    pub fn adopt(child: &tokio::process::Child) -> io::Result<ProcessTree> {
+    /// Remembers a just-spawned `child`'s group. With `kill_on_drop`,
+    /// dropping the tree kills what is left of it.
+    pub fn adopt(child: &tokio::process::Child, kill_on_drop: bool) -> io::Result<ProcessTree> {
         let pid = child
             .id()
             .ok_or_else(|| io::Error::other("the process exited before its group was known"))?;
         let group = i32::try_from(pid).map_err(io::Error::other)?;
-        Ok(ProcessTree { group })
+        Ok(ProcessTree {
+            group,
+            kill_on_drop,
+        })
     }
 
     /// Kills every process in the group. A group that has already ended is
@@ -215,7 +221,9 @@ impl Drop for ProcessTree {
         // the leader's leftovers. Once every member has gone, the id is free
         // again; a new group taking it in the moment between would be hit,
         // which no portable call rules out (pidfd groups are Linux-only).
-        let _ = self.kill();
+        if self.kill_on_drop {
+            let _ = self.kill();
+        }
     }
 }
 

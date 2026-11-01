@@ -112,6 +112,19 @@ impl Store {
         .await
     }
 
+    /// Overwrites a session's state, for when its ending could not be
+    /// projected. Normally the state follows its events.
+    pub async fn set_session_state(&self, id: String, state: LifecycleState) -> Result<()> {
+        self.call(move |conn| {
+            conn.execute(
+                "UPDATE sessions SET state = ?2 WHERE id = ?1",
+                params![id, to_sql_enum(&state)],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn set_session_title(&self, id: String, title: String) -> Result<()> {
         self.call(move |conn| {
             conn.execute(

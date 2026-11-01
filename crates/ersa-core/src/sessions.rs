@@ -287,7 +287,7 @@ impl SessionManager {
     /// bad session must not keep Core from starting for all the others.
     pub async fn recover(&self) -> persistence::Result<()> {
         for session in self.store.sessions().await? {
-            let version = self
+            let mut version = self
                 .adapters
                 .get(&session.backend)
                 .map(|adapter| adapter.projector().version());
@@ -295,6 +295,17 @@ impl SessionManager {
                 Ok(last_seq) => last_seq,
                 Err(e) => {
                     tracing::error!(session = %session.id, error = %e, "could not repair the session; leaving it as it is");
+                    // Its cache may be from another version, so its events
+                    // are not served, and it is not shown as still running.
+                    version = None;
+                    if is_live(session.state)
+                        && let Err(e) = self
+                            .store
+                            .set_session_state(session.id.clone(), LifecycleState::Error)
+                            .await
+                    {
+                        tracing::error!(session = %session.id, error = %e, "could not mark the session as failed");
+                    }
                     session.last_event_seq
                 }
             };
@@ -448,6 +459,7 @@ impl SessionManager {
             tiles: self.tiles.clone(),
         }));
         tokio::spawn(run_session(SessionTask {
+            store: self.store.clone(),
             handle,
             live,
             adapter,
@@ -512,6 +524,8 @@ impl SessionManager {
         self.store.delete_session(id.to_string()).await?;
         lock(&self.sessions).remove(id);
         // Dropping the senders ends every subscription's forwarding task.
+        // The connections stay open: the client that removed the session
+        // may be one of them, and the session is gone from `session.list`.
         lock(&handle.hub).subscribers.clear();
         Ok(session)
     }
@@ -611,8 +625,9 @@ impl SessionManager {
     ) -> Result<(Subscription, Option<u64>), SessionError> {
         let handle = self.handle(id)?;
         let Some(projection_version) = handle.projection_version else {
-            return Err(SessionError::BackendMissing(format!(
-                "no adapter for backend {}",
+            return Err(SessionError::InvalidState(format!(
+                "the events of session {id} cannot be read: Core has no adapter for backend {}, \
+                 or could not repair its projection at startup",
                 handle.backend
             )));
         };
@@ -889,6 +904,7 @@ impl AdapterSink for CoreSink {
 // -- The session task ----------------------------------------------------------
 
 struct SessionTask {
+    store: Store,
     handle: Arc<Handle>,
     live: Arc<Live>,
     adapter: Arc<dyn Adapter>,
@@ -902,6 +918,7 @@ struct SessionTask {
 
 async fn run_session(task: SessionTask) {
     let SessionTask {
+        store,
         handle,
         live,
         adapter,
@@ -987,6 +1004,17 @@ async fn run_session(task: SessionTask) {
     sink.close();
     if !pipeline_done && let Err(e) = pipeline.await {
         tracing::error!(session = %handle.id, error = %e, "the session's pipeline failed");
+    }
+    if pipeline_done {
+        // Its ending could not be recorded, so its row still says it runs.
+        // Say `error` instead, so the rail does not show a live session
+        // nothing can stop; the next Core's repair re-derives the rest.
+        if let Err(e) = store
+            .set_session_state(handle.id.clone(), LifecycleState::Error)
+            .await
+        {
+            tracing::error!(session = %handle.id, error = %e, "could not mark the session as failed");
+        }
     }
     *lock(&handle.live) = None;
     finished.send_replace(true);

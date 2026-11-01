@@ -12,7 +12,14 @@ use support::procs::{eventually_gone, parent_of_a_grandchild, running, shell};
 
 /// Spawns `spec` and reads the grandchild's pid from its first line.
 async fn spawn_with_grandchild(spec: ProcessSpec) -> (Box<dyn Process>, u32) {
-    let mut process = LocalTreeTransport::new().spawn(spec).await.expect("spawn");
+    spawn_with_grandchild_on(LocalTreeTransport::new(), spec).await
+}
+
+async fn spawn_with_grandchild_on(
+    transport: LocalTreeTransport,
+    spec: ProcessSpec,
+) -> (Box<dyn Process>, u32) {
+    let mut process = transport.spawn(spec).await.expect("spawn");
     let mut stdout = process.take_stdout().expect("stdout");
     let line = tokio::time::timeout(Duration::from_secs(30), stdout.next_line())
         .await
@@ -51,6 +58,39 @@ async fn a_process_that_exits_by_itself_takes_its_grandchildren_when_dropped() {
     assert!(running(grandchild));
     drop(process);
     eventually_gone(grandchild).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_command_may_leave_a_helper_running_but_is_killed_whole_on_a_timeout() {
+    // A finished command keeps what it meant to leave running.
+    let commands = LocalTreeTransport::for_commands();
+    let (mut process, helper) =
+        spawn_with_grandchild_on(commands, parent_of_a_grandchild(false)).await;
+    process.wait().await.expect("wait");
+    drop(process);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(running(helper), "the helper outlives the command");
+    kill_by_pid(helper);
+    eventually_gone(helper).await;
+
+    // One that is killed takes its tree with it.
+    let (mut process, grandchild) =
+        spawn_with_grandchild_on(commands, parent_of_a_grandchild(true)).await;
+    process.kill().await.expect("kill");
+    eventually_gone(grandchild).await;
+}
+
+fn kill_by_pid(pid: u32) {
+    let pid = pid.to_string();
+    let _ = if cfg!(windows) {
+        std::process::Command::new("taskkill")
+            .args(["/F", "/PID", &pid])
+            .output()
+    } else {
+        std::process::Command::new("kill")
+            .args(["-9", &pid])
+            .output()
+    };
 }
 
 #[tokio::test(flavor = "multi_thread")]
