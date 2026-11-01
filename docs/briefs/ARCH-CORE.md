@@ -58,7 +58,7 @@ A Rust library wrapped in a thin binary, running as its own process (ADR 0011). 
 
 - **Core API**: the request/response surface the Interface uses. Schema-defined; TypeScript types are generated from it.
 - **Session manager**: the lifecycle of every session (created, starting, running, waiting on user, idle, disconnected, ended). Routes user input and permission decisions to adapters and raw backend output to the log.
-- **Raw log and projection**: every line a backend emits, and every line the host writes to it, is stored verbatim per session with its direction (ADR 0010), so user messages and permission decisions are projectable from the raw log alone. Ersa events are a versioned projection derived from it, cached, and re-derived when the projection version changes. Transcript, rail state, and resume are all projections.
+- **Raw log and projection**: every line a backend emits, every line the host writes to it, and Core's own lifecycle records for the session are stored verbatim per session with their direction (ADR 0010), so the whole event stream, lifecycle included, is projectable from the raw log alone. Ersa events are a versioned projection derived from it, cached, and re-derived when the projection version changes. Transcript, rail state, and resume are all projections.
 - **Adapter registry**: which backends are installed on which hosts, their versions and capabilities, and how to start them.
 - **Transport layer**: starts processes and carries their stdio on a host: local spawn, or SSH. Adapters and the VCS layer run through it without knowing which one they got.
 - **Workspace and VCS**: creates and destroys isolated workspaces for a project behind a VCS interface. Git worktrees first; Perforce second. Executes through the transport so remote hosts work the same way.
@@ -85,7 +85,7 @@ One per backend, behind one interface: start a session on a transport with a con
 
 ## Cross-cutting concerns
 
-- **Persistence**: SQLite in the user's application data directory. Raw log lines are append-only. Projection cache is keyed by session and projection version. Schema migrations run at startup.
+- **Persistence**: SQLite in the user's application data directory. Raw log lines are append-only. Projection cache is keyed by session, event schema version, and the adapter's projection version. Schema migrations run at startup.
 - **Errors**: every failure the user could act on appears as an event in the session's projection and, where relevant, as a rail state. Internal errors use structured tracing and are never swallowed.
 - **Security**: no model credentials. Remote connections use the user's own SSH client and configuration. The harness tools server listens on a local per-launch socket; the per-session token identifies the caller and is advisory, since all local sessions share the OS user.
 - **Configuration**: user settings in the database; project-level configuration in the project's own files where the backend expects it (packs render there).
@@ -144,6 +144,8 @@ Verified by review at this level; testable requirements live in the protocol bri
 - Which local-inference harness to support first.
 
 ## Changes
+
+- 2026-11-01: raw log includes Core lifecycle records; projection cache key spelled out. No requirement IDs changed.
 
 - 2026-10-31: aligned with ADR 0014 (permissions over the Claude Code control channel, harness tools in-process) and ADR 0008 (React); raw log records both directions. No requirement IDs changed.
 - 2026-10-31: revised after adversarial review: Core as its own process; two Interface protocols; raw log as truth with versioned projection; harness tools server and permission routing in M0; Copilot via official SDK; SSH transport in M1 with single multiplexed connection; replay server; backends never in a PTY, terminal pane is a real hosted terminal; Perforce in M4; worktree handling; show-me constraints.
