@@ -23,10 +23,17 @@ use serde_json::{Map, Value};
 
 use crate::settings;
 
+mod sessions;
+
+pub use sessions::{LogBatch, SessionProgress};
+
 /// The migrations, in order. Migration `n` (1-based) is applied when the
 /// database's `user_version` is below `n`, and then sets it to `n`. Append
 /// new migrations; never edit one that has shipped.
-const MIGRATIONS: &[&str] = &[include_str!("persistence/0001_initial.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("persistence/0001_initial.sql"),
+    include_str!("persistence/0002_session_tiles.sql"),
+];
 
 /// The id of the local host's row, which always exists.
 pub const LOCAL_HOST_ID: &str = "local";

@@ -131,6 +131,7 @@ impl Projector for EchoProjector {
         let kind = match line.dir {
             Direction::Backend => "backend",
             Direction::Host => "host",
+            Direction::Core => "core",
         };
         vec![Projected::from_line(
             line,
