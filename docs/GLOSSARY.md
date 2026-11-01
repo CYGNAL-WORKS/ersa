@@ -14,6 +14,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 ## Work
 
 - **Project**: a repository or root folder the user has added to Ersa, on a particular host.
+- **Trusted project**: a project whose own configuration (settings, hooks, MCP servers, permission rules) the user has agreed may run in its sessions. Asked when the project is added; an untrusted project's sessions run with the user's own configuration only.
 - **Workspace**: an isolated checkout belonging to a project where one or more sessions do their work. A git worktree is one kind; a Perforce workspace is another.
 - **Session**: one conversation with one agent, in one workspace, on one host. An ordinary backend session: its history is the backend's session record, and Ersa stores only what finds it again (host, project, workspace, backend, and the backend's session id).
 - **Session record**: the backend's own record of a session, which the backend resumes from and its own tools list. The history of a session, whether its turns were taken in Ersa or elsewhere. Retention is the backend's.
