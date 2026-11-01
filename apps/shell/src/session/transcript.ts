@@ -119,6 +119,8 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
     case "permission.denied_unanswered":
       return add(next, { kind: "problem", key: `problem:${envelope.seq}`, message: event.message });
     case "question.asked":
+      // Shown once, like a permission request: a repeat must not reopen an answered question.
+      if (next.items.some((i) => i.key === `question:${event.request_id}`)) return next;
       return put(next, { kind: "question", key: `question:${event.request_id}`, questions: event.questions, answered: false });
     case "question.answered":
       return patch(next, `question:${event.request_id}`, "question", (item) => ({ ...item, answered: true }));

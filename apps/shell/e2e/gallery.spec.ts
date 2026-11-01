@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 // Every component section in the gallery, photographed in both themes.
-const components = ["CoreStatus", "ProjectList", "AddProject", "SessionList", "Transcript", "Composer", "Button"];
+const components = ["CoreStatus", "ProjectList", "AddProject", "SessionList", "Transcript", "ErrorBoundary", "Composer", "Button"];
 
 for (const theme of ["light", "dark"]) {
   for (const component of components) {

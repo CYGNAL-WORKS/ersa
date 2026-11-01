@@ -36,7 +36,11 @@ export function AddProject({ onAdd, adding, initialPath = "", force }: AddProjec
         onChange={(event) => setPath(event.target.value)}
       />
       <Button type="submit" disabled={busy || path.trim() === ""}>
-        {busy ? "Adding…" : "Add"}
+        {/* Both labels share one cell, so the button is always as wide as the wider and nothing beside it moves. */}
+        <span className="add-project-label">
+          <span data-shown={!busy || undefined}>Add</span>
+          <span data-shown={busy || undefined}>Adding…</span>
+        </span>
       </Button>
       {adding?.state === "failed" && (
         <p className="problem add-project-problem" role="alert">

@@ -5,7 +5,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { Transcript as TranscriptView } from "../components/Transcript";
+import { Revealed, Transcript as TranscriptView } from "../components/Transcript";
 import type { Envelope, Event } from "../protocol/agent-events.gen";
 import type { SessionView } from "./follow";
 import { events } from "./replays";
@@ -202,12 +202,12 @@ describe("what a permission request shows", () => {
     });
 
   it("marks characters that would hide or reorder text, as their code points", () => {
-    const html = render(play([request(0, { command: "echo safe ‮; rm -rf ~ #​⁦" })]));
+    const html = render(play([request(0, { command: "echo safe \u202E; rm -rf ~ #\u200B\u2066" })]));
     expect(html).toContain("U+202E");
     expect(html).toContain("U+200B");
     expect(html).toContain("U+2066");
-    expect(html).not.toContain("‮");
-    expect(html).not.toContain("​");
+    expect(html).not.toContain("\u202E");
+    expect(html).not.toContain("\u200B");
   });
 
   it("is the first request with an id: a repeat changes nothing", () => {
@@ -233,5 +233,34 @@ describe("what a permission request shows", () => {
       ]),
     );
     expect(html.split("List files")).toHaveLength(2);
+  });
+});
+
+describe("marking hidden characters", () => {
+  const html = (text: string) => renderToStaticMarkup(createElement(Revealed, { text }));
+
+  it("marks tag characters and a lone carriage return, but not a line ending", () => {
+    const tag = String.fromCodePoint(0xe0041);
+    expect(html("ok" + tag)).toContain("U+E0041");
+    expect(html("a\rb")).toContain("U+000D");
+    expect(html("a\r\nb")).not.toContain("U+");
+  });
+
+  it("counts a flood of them instead of marking each", () => {
+    const flood = "x" + "\u200B".repeat(5000) + "y";
+    const out = html(flood);
+    expect(out.match(/U\+200B/g)?.length).toBe(64);
+    expect(out).toContain("4936 more invisible characters");
+    expect(out).toContain("y");
+  });
+});
+
+describe("a repeated question", () => {
+  it("does not reopen one already answered", () => {
+    const asked = envelope(0, { type: "question.asked", request_id: "q", questions: [{ id: "a", text: "Which?", multi_select: false }] });
+    const answered = envelope(1, { type: "question.answered", request_id: "q", answers: [], answered_by: "user" });
+    const again = { ...asked, seq: 2 };
+    const shown = play([asked, answered, again]);
+    expect(shown.items).toEqual([{ kind: "question", key: "question:q", questions: [{ id: "a", text: "Which?", multi_select: false }], answered: true }]);
   });
 });
