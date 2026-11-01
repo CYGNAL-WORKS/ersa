@@ -193,9 +193,12 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
     Ok(())
 }
 
-/// Refuses a recording with a line longer than `max_bytes`.
+/// Refuses a recording with a backend line longer than `max_bytes`, the
+/// limit a live Core reads a backend's stdout under.
 fn check_lines(lines: &[TimedLine], max_bytes: usize) -> Result<(), SessionError> {
-    match lines.iter().position(|l| l.line.len() > max_bytes) {
+    let too_long =
+        |l: &TimedLine| l.dir == ersa_adapter::Direction::Backend && l.line.len() > max_bytes;
+    match lines.iter().position(too_long) {
         Some(at) => Err(SessionError::InvalidState(format!(
             "line {at} of the recording is longer than Core's limit of {max_bytes} bytes"
         ))),
@@ -257,6 +260,12 @@ impl Adapter for ReplayAdapter {
                 line,
             } in lines.iter()
             {
+                // At an instant pace nothing else awaits here: yield now and
+                // then, so a long recording does not hold a worker thread
+                // the sockets need.
+                if pace == Pace::Instant {
+                    tokio::task::yield_now().await;
+                }
                 if *stopped.borrow() {
                     break;
                 }
@@ -487,6 +496,8 @@ mod tests {
             line(1, Direction::Backend, "12345"),
         ];
         assert!(check_lines(&lines[..1], 4).is_ok());
+        // The limit is on what a backend writes, as in a live Core.
+        assert!(check_lines(&[line(0, Direction::Host, "12345")], 4).is_ok());
         let refused = check_lines(&lines, 4).unwrap_err();
         assert!(
             matches!(&refused, SessionError::InvalidState(m) if m.contains("line 1")),
