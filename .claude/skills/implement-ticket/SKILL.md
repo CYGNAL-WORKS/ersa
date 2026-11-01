@@ -36,7 +36,7 @@ When the ticket's scope is built, everything is committed, and `node scripts/che
    - **Design**, when the diff touches interface code: a `general-purpose` sub-agent that checks it against `docs/design/DESIGN.md` and the design rules in `CLAUDE.md`, both themes, every state.
 3. **Verify before acting.** Check each finding against the code yourself, or reproduce it with a test. Dismiss what you cannot ground, with a one-line reason.
 4. Fix every confirmed finding of medium severity or above, with a test where one is cheap; fix low ones when trivial and list the rest as follow-ups. A confirmed gap the brief does not cover also gets an inbox line, so it becomes a requirement.
-5. If the fixes were substantial, run the Correctness and Failure reviewers once more on the new diff.
+5. If the fixes were substantial, run the Correctness and Failure reviewers once more on the new diff. Do the same for every later round of fixes, including those asked for by the orchestration session's review: fixes to concurrency findings are where new races come from.
 
 ## 4. Check, push, open the pull request
 
