@@ -100,7 +100,7 @@ A projection failure on one raw line yields an `error` event with `code: protoco
 
 ## Versioning
 
-`v` on every event. The schema file carries the same version. The cache key is the session, `v`, and the adapter's projection version. Core's own projection of `core` lines is part of the event schema's meaning, so any change to it bumps `v`. The Interface refuses to render a `v` it does not know and asks Core to re-project (via `PROTO-CORE-API`).
+`v` on every event. The schema file carries the same version. The cache key is the session, `v`, and the adapter's projection version. Core's own projection of `core` lines is part of the event schema's meaning, so any change to it bumps `v`. The Interface refuses to render a `v` it does not know and says that the window is older than Core and needs updating. It does not ask Core to re-project: Core projects only at its own `v`, so re-projection cannot help an Interface older than Core.
 
 ## Conformance
 
@@ -131,6 +131,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 ## Changes
 
+- 2026-11-01: from #14 inbox: an Interface that meets an unknown `v` says it needs updating rather than asking Core to re-project. No requirement IDs changed.
 - 2026-11-01: from M0-T6 inbox: `core` lifecycle records listed as built (start failed, Core restarted); a change to Core's projection of them bumps `v`.
 
 - 2026-11-01: `usage.updated.turns` counts Ersa turns.
