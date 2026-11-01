@@ -39,6 +39,9 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
   let stopped = false;
   // Each subscribe gets a number; only the latest one's answer counts.
   let generation = 0;
+  // The last event before a gap this follower already resubscribed for, so
+  // one gap costs one resubscribe, not one per event behind it.
+  let resumedAt: number | undefined;
 
   const set = (change: (view: SessionView) => SessionView) => {
     if (stopped) return;
@@ -56,9 +59,36 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
 
   update(view);
 
+  /** Subscribes on the current connection from after the last event applied. */
+  const attached = () => {
+    const mine = ++generation;
+    set((v) => ({ ...v, stream: { state: "subscribing" } }));
+    // Every event after the last one applied; events Core sends again
+    // (the subscription overlaps a notification already received) are
+    // ignored by seq.
+    client.call("session.subscribe", { id, from_seq: view.transcript.lastSeq + 1 }).then(
+      () => {
+        if (mine === generation) set((v) => ({ ...v, stream: { state: "live" } }));
+      },
+      (error) => {
+        if (mine === generation) set((v) => ({ ...v, stream: { state: "failed", message: describeError(error) } }));
+      },
+    );
+  };
+
   return {
     receive(envelope) {
       if (envelope.session_id !== id) return;
+      const { lastSeq } = view.transcript;
+      // An event beyond the next on a live subscription means one was lost on
+      // the way (Core's sequence is gap-free): subscribe again from the gap.
+      // While subscribing, a stray from an earlier subscription is expected
+      // and the backlog fills in behind it.
+      if (envelope.seq > lastSeq + 1 && view.stream.state === "live" && resumedAt !== lastSeq) {
+        resumedAt = lastSeq;
+        attached();
+        return;
+      }
       set((v) => {
         const transcript = apply(v.transcript, envelope);
         if (transcript === v.transcript) return v;
@@ -72,21 +102,7 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
       });
     },
 
-    attached() {
-      const mine = ++generation;
-      set((v) => ({ ...v, stream: { state: "subscribing" } }));
-      // Every event after the last one applied; events Core sends again
-      // (the subscription overlaps a notification already received) are
-      // ignored by seq.
-      client.call("session.subscribe", { id, from_seq: view.transcript.lastSeq + 1 }).then(
-        () => {
-          if (mine === generation) set((v) => ({ ...v, stream: { state: "live" } }));
-        },
-        (error) => {
-          if (mine === generation) set((v) => ({ ...v, stream: { state: "failed", message: describeError(error) } }));
-        },
-      );
-    },
+    attached,
 
     async send(text) {
       set((v) => ({ ...v, message: { state: "sending" } }));
