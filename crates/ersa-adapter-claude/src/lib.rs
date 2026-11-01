@@ -18,6 +18,7 @@
 //! - [`wire`] holds the typed models of every line in both directions.
 
 mod driver;
+mod platform;
 mod projector;
 pub mod record;
 mod suggestions;
