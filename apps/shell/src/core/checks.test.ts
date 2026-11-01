@@ -9,11 +9,11 @@ import { checkSessions, checkTile, eventProblem } from "./checks";
 
 const envelope = (seq: number, event: unknown) =>
   ({
-    v: 1,
+    v: 2,
     session_id: "s1",
     seq,
     ts: "2026-01-01T00:00:00Z",
-    source: { backend: "claude-code", backend_version: "2.1.302", raw_from: seq, raw_to: seq },
+    source: { backend: "claude-code", backend_version: "2.1.302", input: "live" },
     event,
   }) as unknown as Envelope;
 
