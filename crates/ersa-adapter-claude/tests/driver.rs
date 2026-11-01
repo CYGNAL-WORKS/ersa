@@ -272,10 +272,17 @@ async fn a_permission_round_trips_against_a_stub_of_fixture_11() {
 #[tokio::test]
 async fn decisions_carry_edits_suggestions_and_denial_messages() {
     let out = fixture("11-stream-permission-prompt-tool-stdio").stdout;
+    // A suggestion carrying a field a newer CLI might add: it must come back
+    // verbatim in `updatedPermissions`.
+    let ask = out[4].replace(
+        r#""destination":"session"}]"#,
+        r#""destination":"session","addedLater":1}]"#,
+    );
+    assert_ne!(ask, out[4]);
     let second_ask = out[4].replace(PERMISSION_ID, "second");
     let transport = FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(expect("initialize", is_initialize))
-        .then_stdout([out[0].clone(), out[4].clone(), second_ask])
+        .then_stdout([out[0].clone(), ask, second_ask])
         .hold_open();
     let sink = Arc::new(RecordingSink::new());
     let session = adapter()
@@ -336,7 +343,8 @@ async fn decisions_carry_edits_suggestions_and_denial_messages() {
             "updatedPermissions": [{
                 "type": "addDirectories",
                 "directories": ["C:\\Users\\breno\\AppData\\Local\\Temp\\ersa-rec-zww2Oe"],
-                "destination": "session"
+                "destination": "session",
+                "addedLater": 1
             }]
         })
     );
@@ -456,4 +464,225 @@ async fn after_stop_the_session_is_not_running_and_stderr_is_drained() {
     .expect("stderr drained");
     assert_eq!(sink.stderr(), ["a warning"]);
     assert!(sink.lines().iter().all(|l| l.line != "a warning"));
+}
+
+// ---------------------------------------------------------------------------
+// A CLI that will not go quietly
+
+/// Fails the test if `future` takes longer than `WAIT`.
+async fn promptly<T>(what: &str, future: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(WAIT, future)
+        .await
+        .unwrap_or_else(|_| panic!("{what} did not finish within {WAIT:?}"))
+}
+
+#[tokio::test]
+async fn the_exit_is_reported_even_when_stdout_never_ends() {
+    // A process the agent started holds stdout open after the CLI exits.
+    let transport = ready_stub().stdout_outlives_process();
+    let sink = Arc::new(RecordingSink::new());
+    let session = adapter()
+        .start(Arc::new(transport), config(), sink.clone())
+        .await
+        .expect("start");
+
+    // Closing stdin ends the CLI; its exit is seen without stdout ending.
+    promptly("stop", session.stop()).await.expect("stop");
+    assert_eq!(sink.exit_codes(), [Some(0)]);
+}
+
+#[tokio::test]
+async fn a_kill_is_reported_even_when_stdout_never_ends() {
+    // Dropping the session kills the CLI; stdout outlives it.
+    let transport = ready_stub().stdout_outlives_process();
+    let sink = Arc::new(RecordingSink::new());
+    let session = adapter()
+        .start(Arc::new(transport), config(), sink.clone())
+        .await
+        .expect("start");
+    drop(session);
+    promptly("the exit after a dropped session", sink.wait_for_exit(WAIT)).await;
+    assert_eq!(sink.exit_codes(), [None], "killed");
+}
+
+#[tokio::test]
+async fn a_failed_start_ends_even_when_stdout_never_ends() {
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .hold_open()
+        .stdout_outlives_process();
+    let sink = Arc::new(RecordingSink::new());
+    let result = promptly(
+        "the failed start",
+        ClaudeAdapter::new()
+            .with_handshake_timeout(Duration::from_millis(50))
+            .start(Arc::new(transport), config(), sink.clone()),
+    )
+    .await;
+    assert!(matches!(result, Err(AdapterError::Protocol(_))));
+    assert_eq!(sink.exit_codes(), [None]);
+}
+
+#[tokio::test]
+async fn stop_kills_a_cli_that_stopped_reading_without_waiting_on_a_stuck_write() {
+    // `initialize` fits in the pipe; every later write hangs.
+    let transport = ready_stub().wedge_stdin_after(1);
+    let sink = Arc::new(RecordingSink::new());
+    let session: Arc<dyn ersa_adapter::AdapterSession> = Arc::from(
+        adapter()
+            .start(Arc::new(transport), config(), sink.clone())
+            .await
+            .expect("start"),
+    );
+
+    let stuck = tokio::spawn({
+        let session = session.clone();
+        async move { session.send_user("into a full pipe").await }
+    });
+    // The write is recorded, then blocks holding the stdin lock.
+    sink.wait_for_line(WAIT, |l| l.line.contains("into a full pipe"))
+        .await;
+
+    promptly("stop", session.stop()).await.expect("stop");
+    assert_eq!(sink.exit_codes(), [None], "killed after the grace period");
+    let stuck = promptly("the stuck write", stuck).await.unwrap();
+    // Given up on, or failed as the pipe closed: either way it returned.
+    assert!(matches!(
+        stuck,
+        Err(AdapterError::NotRunning | AdapterError::Io(_))
+    ));
+    assert!(matches!(
+        session.send_user("after stop").await,
+        Err(AdapterError::NotRunning)
+    ));
+}
+
+#[tokio::test]
+async fn a_refusal_stuck_on_a_wedged_cli_does_not_stall_the_read_loop() {
+    let hook = json!({
+        "type": "control_request",
+        "request_id": "cli-7",
+        "request": { "subtype": "hook_callback" }
+    })
+    .to_string();
+    // The refusal to the hook callback is the write that hangs.
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(expect("initialize", is_initialize))
+        .then_stdout([init_answer(), hook])
+        .hold_open()
+        .wedge_stdin_after(1);
+    let sink = Arc::new(RecordingSink::new());
+    let session = adapter()
+        .start(Arc::new(transport), config(), sink.clone())
+        .await
+        .expect("start");
+    sink.wait_for_line(WAIT, |l| {
+        l.dir == Direction::Host && l.line.contains("cli-7")
+    })
+    .await;
+    promptly("stop", session.stop()).await.expect("stop");
+    assert_eq!(sink.exit_codes(), [None]);
+}
+
+#[tokio::test]
+async fn a_failed_start_quotes_the_cli_stderr() {
+    // The CLI rejects its flags and exits without answering.
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .with_stderr(["error: unknown option '--await-initialize'"])
+        .with_exit_code(1);
+    let sink = Arc::new(RecordingSink::new());
+    let result = adapter()
+        .start(Arc::new(transport), config(), sink.clone())
+        .await;
+    let Err(AdapterError::Protocol(message)) = result else {
+        panic!("expected a protocol error");
+    };
+    assert!(message.contains("exited before answering"), "{message}");
+    assert!(
+        message.contains("unknown option '--await-initialize'"),
+        "{message}"
+    );
+}
+
+#[tokio::test]
+async fn a_missing_cli_says_what_was_tried() {
+    let mut config = config();
+    config.cwd = String::new();
+    config.extra = json!({ "claude_path": "C:/nowhere/claude-missing.exe" });
+    let result = adapter()
+        .start(
+            Arc::new(ersa_adapter::LocalTransport),
+            config,
+            Arc::new(RecordingSink::new()),
+        )
+        .await;
+    let Err(AdapterError::Io(error)) = result else {
+        panic!("expected an I/O error");
+    };
+    let message = error.to_string();
+    assert!(
+        message.contains("C:/nowhere/claude-missing.exe"),
+        "{message}"
+    );
+    assert!(message.contains("ERSA_CLAUDE"), "{message}");
+}
+
+#[tokio::test]
+async fn an_empty_claude_path_counts_as_unset() {
+    let transport = ready_stub();
+    let mut config = config();
+    config.extra = json!({ "claude_path": "" });
+    let session = adapter()
+        .start(
+            Arc::new(transport.clone()),
+            config,
+            Arc::new(RecordingSink::new()),
+        )
+        .await
+        .expect("start");
+    let program = transport.spawned()[0].program.clone();
+    let expected = std::env::var("ERSA_CLAUDE")
+        .ok()
+        .filter(|p| !p.is_empty())
+        .unwrap_or_else(|| "claude".into());
+    assert_eq!(program, expected);
+    session.stop().await.expect("stop");
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R03
+#[tokio::test]
+async fn a_prompt_whose_shape_drifted_can_still_be_answered() {
+    let drifted = json!({
+        "type": "control_request",
+        "request_id": "r-9",
+        "request": {
+            "subtype": "can_use_tool",
+            "tool_name": "Bash",
+            "input": { "command": "ls" },
+            "permission_suggestions": null,
+            "decision_reason": { "rule": "ask" }
+        }
+    })
+    .to_string();
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(expect("initialize", is_initialize))
+        .then_stdout([init_answer(), drifted])
+        .hold_open();
+    let sink = Arc::new(RecordingSink::new());
+    let session = adapter()
+        .start(Arc::new(transport.clone()), config(), sink.clone())
+        .await
+        .expect("start");
+    sink.wait_for_line(WAIT, |l| l.line.contains("r-9")).await;
+
+    session
+        .decide_permission("r-9", allow())
+        .await
+        .expect("allow");
+    let answer = parse(&transport.stdin_lines()[1]);
+    assert_eq!(answer["response"]["request_id"], "r-9");
+    assert_eq!(
+        answer["response"]["response"],
+        json!({ "behavior": "allow", "updatedInput": { "command": "ls" } })
+    );
+    session.stop().await.expect("stop");
 }

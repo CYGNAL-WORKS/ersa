@@ -5,19 +5,24 @@
 //! user picks suggestions by their index in the event, and the driver turns
 //! those indices back into the CLI's own suggestion objects. Keeping the one
 //! mapping here is what makes the two agree.
+//!
+//! Suggestions are read as raw JSON and passed on untouched: the typed model
+//! only decides what kind each one is, so fields a newer CLI adds survive the
+//! trip to the shelf and back into `updatedPermissions`.
 
 use ersa_protocol::events::{PermissionSuggestion, SuggestionKind};
+use serde_json::Value;
 
 use crate::wire::{PermissionRule, PermissionUpdate};
 
 /// The suggestions Ersa can offer the user, in the CLI's order, each with its
-/// index in `updates`.
+/// index in `updates` (the request's `permission_suggestions`).
 ///
 /// The event's suggestion kinds are "allow a rule", "allow a directory", and
 /// "set a mode". A CLI suggestion that is none of those (removing rules, say,
 /// or adding a deny rule) has no place on the shelf and is left out, which is
 /// why the event's indices and the CLI's can differ.
-pub(crate) fn offered(updates: &[PermissionUpdate]) -> Vec<(usize, PermissionSuggestion)> {
+pub(crate) fn offered(updates: &[Value]) -> Vec<(usize, PermissionSuggestion)> {
     updates
         .iter()
         .enumerate()
@@ -25,8 +30,9 @@ pub(crate) fn offered(updates: &[PermissionUpdate]) -> Vec<(usize, PermissionSug
         .collect()
 }
 
-fn to_suggestion(update: &PermissionUpdate) -> Option<PermissionSuggestion> {
-    let (kind, label) = match update {
+fn to_suggestion(raw: &Value) -> Option<PermissionSuggestion> {
+    let update: PermissionUpdate = serde_json::from_value(raw.clone()).ok()?;
+    let (kind, label) = match &update {
         PermissionUpdate::AddRules {
             rules,
             behavior,
@@ -60,7 +66,7 @@ fn to_suggestion(update: &PermissionUpdate) -> Option<PermissionSuggestion> {
         kind,
         label,
         // The CLI's own object, untouched, so the driver can hand it back.
-        payload: serde_json::to_value(update).ok()?,
+        payload: raw.clone(),
     })
 }
 
@@ -94,15 +100,15 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn updates(value: serde_json::Value) -> Vec<PermissionUpdate> {
-        serde_json::from_value(value).unwrap()
+    fn updates(value: Value) -> Vec<Value> {
+        value.as_array().unwrap().clone()
     }
 
     #[test]
     fn offers_allow_rules_directories_and_modes_and_keeps_cli_indices() {
         let updates = updates(json!([
             {"type":"removeRules","rules":[{"toolName":"Bash"}],"behavior":"allow","destination":"session"},
-            {"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"echo probe *"}],"behavior":"allow","destination":"localSettings"},
+            {"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"echo probe *"}],"behavior":"allow","destination":"localSettings","addedLater":true},
             {"type":"addDirectories","directories":["C:\\work"],"destination":"session"},
             {"type":"setMode","mode":"acceptEdits","destination":"session"}
         ]));
@@ -132,10 +138,9 @@ mod tests {
                 ),
             ]
         );
-        // The payload is the CLI's object exactly as it arrived.
-        assert_eq!(
-            offered[0].1.payload,
-            serde_json::to_value(&updates[1]).unwrap()
-        );
+        // The payload is the CLI's object exactly as it arrived, including a
+        // field the typed model does not know.
+        assert_eq!(offered[0].1.payload, updates[1]);
+        assert_eq!(offered[0].1.payload["addedLater"], true);
     }
 }

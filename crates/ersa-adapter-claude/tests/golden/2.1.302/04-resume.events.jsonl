@@ -1,6 +1,6 @@
 {"raw_from":0,"raw_to":0,"event":{"type":"session.started","backend":"claude-code","backend_version":"2.1.302","model":"claude-fable-5-1","cwd":"C:\\Users\\breno\\AppData\\Local\\Temp\\ersa-rec-UZYxVS","capabilities":["interrupt_receipt_v1","interrupt_cancel_queued_v1","interrupt_send_now_v1","msg_lifecycle_v1","request_marker_lists_v1","sdk_mcp_tools_list_changed","sdk_mcp_manifests","mcp_read_resource_v1","mcp_tool_ui_meta_v1","ui_surface_v1","mcp_call_result_not_for_model_v1"],"backend_session_id":"14018460-f6a7-4b07-831c-9e7ec48b841f"}}
-{"raw_from":1,"raw_to":1,"event":{"type":"turn.started","turn":1,"trigger":"system"}}
-{"raw_from":1,"raw_to":1,"event":{"type":"session.state","state":"running"}}
+{"raw_from":0,"raw_to":0,"event":{"type":"turn.started","turn":1,"trigger":"user"}}
+{"raw_from":0,"raw_to":0,"event":{"type":"session.state","state":"running"}}
 {"raw_from":1,"raw_to":1,"event":{"type":"assistant.text","block_id":"msg_011CgbD6LYzwYU18MdC11aJ1/0","text":"ready","final":true}}
 {"raw_from":2,"raw_to":2,"event":{"type":"usage.updated","rate_limit":{"status":"allowed","resets_at":"2026-11-04T20:00:00Z","detail":"seven_day"}}}
 {"raw_from":3,"raw_to":3,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"system/post_turn_summary","payload":{"needs_action":"","session_id":"14018460-f6a7-4b07-831c-9e7ec48b841f","status_category":"completed","status_detail":"replied with single word 'ready' as asked","subtype":"post_turn_summary","summarizes_uuid":"952d0ce1-191b-42de-bb17-10c465a6b418","type":"system","uuid":"76f47cf4-1735-4524-bda5-a04e22fc8239"}}}

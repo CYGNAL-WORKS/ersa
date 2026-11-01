@@ -440,7 +440,7 @@ fn a_line_that_cannot_be_projected_is_a_recoverable_error_and_projection_continu
     let events = events(&log(&[
         (Backend, "not json {"),
         // A modelled type whose fields do not fit.
-        (Backend, r#"{"type":"result","subtype":"success"}"#),
+        (Backend, r#"{"type":"rate_limit_event","uuid":"u"}"#),
         (Backend, r#"{"type":"keep_alive"}"#),
     ]));
     let summary: Vec<String> = events
@@ -459,7 +459,7 @@ fn a_line_that_cannot_be_projected_is_a_recoverable_error_and_projection_continu
             "error Protocol recoverable=true",
             "passthrough unparsed true",
             "error Protocol recoverable=true",
-            "passthrough result/success false",
+            "passthrough rate_limit_event false",
             "passthrough keep_alive false",
         ]
     );
@@ -530,4 +530,277 @@ fn an_answer_that_applies_suggestions_names_their_indices() {
         })
         .expect("decided");
     assert_eq!(decided.applied_suggestions, Some(vec![1]));
+}
+
+// ---------------------------------------------------------------------------
+// Drift, interleaving, and unfinished work
+
+/// A short summary of each event, for asserting sequences.
+fn summary(events: &[Event]) -> Vec<String> {
+    events
+        .iter()
+        .map(|e| match e {
+            Event::TurnStarted(t) => format!("turn.started {} {:?}", t.turn, t.trigger),
+            Event::TurnCompleted(t) => format!("turn.completed {} {:?}", t.turn, t.outcome),
+            Event::SessionState(s) => format!("session.state {:?}", s.state),
+            Event::AssistantText(t) => {
+                format!("assistant.text {} {:?} {}", t.block_id, t.text, t.is_final)
+            }
+            Event::PermissionDecided(d) => format!("permission.decided {}", d.request_id),
+            Event::PermissionRequested(r) => format!("permission.requested {}", r.request_id),
+            Event::Error(e) => format!("error {:?}", e.code),
+            Event::BackendPassthrough(p) => format!("passthrough {}", p.kind),
+            other => other.type_name().to_string(),
+        })
+        .collect()
+}
+
+const USER_MESSAGE: &str =
+    r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}"#;
+
+// verifies: PROTO-AGENT-EVENTS-R10
+#[test]
+fn a_result_whose_shape_drifted_still_closes_the_turn() {
+    // `usage` is gone, so the typed model cannot read it.
+    let drifted = r#"{"type":"result","subtype":"success","is_error":false,"duration_ms":1200,"total_cost_usd":0.5,"session_id":"s","uuid":"u"}"#;
+    let events = events(&log(&[
+        (Host, USER_MESSAGE),
+        (Backend, drifted),
+        (Host, USER_MESSAGE),
+    ]));
+    assert_eq!(
+        summary(&events),
+        [
+            "turn.started 1 User",
+            "session.state Running",
+            "user.message",
+            "error Protocol",
+            "turn.completed 1 Error",
+            "usage.updated",
+            "session.state Idle",
+            "passthrough result/success",
+            // The turn really closed: the next message starts turn 2.
+            "turn.started 2 User",
+            "session.state Running",
+            "user.message",
+        ]
+    );
+    let completed = events
+        .iter()
+        .find_map(|e| match e {
+            Event::TurnCompleted(t) => Some(t),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(completed.duration_ms, 1200);
+    assert_eq!(completed.final_text, None);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::UsageUpdated(u) if u.cost_usd_total == Some(0.5)))
+    );
+}
+
+// verifies: PROTO-AGENT-EVENTS-R10
+#[test]
+fn an_init_whose_shape_drifted_still_starts_the_session() {
+    // `permissionMode` and `apiKeySource` are gone.
+    let drifted = r#"{"type":"system","subtype":"init","session_id":"s","uuid":"u","claude_code_version":"2.1.302","model":"m","cwd":"C:/w","capabilities":["interrupt_receipt_v1"]}"#;
+    let events = events(&log(&[(Host, USER_MESSAGE), (Backend, drifted)]));
+    assert_eq!(
+        summary(&events)[3..],
+        [
+            "error Protocol",
+            "session.started",
+            "passthrough system/init"
+        ]
+    );
+    assert_eq!(
+        events[4],
+        Event::SessionStarted(SessionStarted {
+            backend: "claude-code".into(),
+            backend_version: "2.1.302".into(),
+            model: "m".into(),
+            cwd: "C:/w".into(),
+            capabilities: vec!["interrupt_receipt_v1".into()],
+            backend_session_id: Some("s".into()),
+        })
+    );
+}
+
+// verifies: PROTO-AGENT-EVENTS-R04
+#[test]
+fn a_can_use_tool_whose_shape_drifted_still_reaches_the_shelf() {
+    // Null suggestions, a structured reason, and no `tool_use_id`.
+    let drifted = json!({
+        "type": "control_request",
+        "request_id": "r-9",
+        "request": {
+            "subtype": "can_use_tool",
+            "tool_name": "Bash",
+            "input": { "command": "ls" },
+            "permission_suggestions": null,
+            "decision_reason": { "rule": "ask" },
+            "default_to_no": true
+        }
+    })
+    .to_string();
+    let events = events(&log(&[(Backend, &drifted)]));
+    let request = events
+        .iter()
+        .find_map(|e| match e {
+            Event::PermissionRequested(r) => Some(r),
+            _ => None,
+        })
+        .expect("a permission request");
+    assert_eq!(request.request_id, "r-9");
+    assert_eq!(request.tool_name, "Bash");
+    assert_eq!(request.input["command"], "ls");
+    assert!(request.suggestions.is_empty());
+    assert!(request.flags.default_to_no);
+    assert_eq!(
+        request.reason,
+        Some(PermissionReason {
+            kind: "unspecified".into(),
+            text: r#"{"rule":"ask"}"#.into(),
+        })
+    );
+}
+
+fn stream(parent: Option<&str>, event: Value) -> String {
+    json!({ "type": "stream_event", "session_id": "s", "uuid": "u", "parent_tool_use_id": parent, "event": event })
+        .to_string()
+}
+
+fn message_start(id: &str) -> Value {
+    json!({ "type": "message_start", "message": { "id": id, "model": "m", "role": "assistant", "content": [] } })
+}
+
+fn text_delta(text: &str) -> Value {
+    json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": text } })
+}
+
+// verifies: PROTO-AGENT-EVENTS-R07
+#[test]
+fn interleaved_main_and_subagent_streams_keep_their_own_blocks() {
+    let events = events(&log(&[
+        (Host, USER_MESSAGE),
+        (Backend, &stream(None, message_start("main"))),
+        (Backend, &stream(Some("toolu_sub"), message_start("sub"))),
+        (Backend, &stream(None, text_delta("Hel"))),
+        (Backend, &stream(Some("toolu_sub"), text_delta("Sub"))),
+        (Backend, &stream(None, text_delta("lo"))),
+    ]));
+    let texts: Vec<String> = summary(&events)
+        .into_iter()
+        .filter(|s| s.starts_with("assistant.text"))
+        .collect();
+    assert_eq!(
+        texts,
+        [
+            r#"assistant.text main/0 "Hel" false"#,
+            r#"assistant.text sub/0 "Sub" false"#,
+            r#"assistant.text main/0 "Hello" false"#,
+        ]
+    );
+}
+
+// verifies: PROTO-AGENT-EVENTS-R07
+#[test]
+fn blocks_still_streaming_when_the_turn_ends_are_finished() {
+    let result = &fixture("11-stream-permission-prompt-tool-stdio").stdout[10];
+    let projection = project(&log(&[
+        (Host, USER_MESSAGE),
+        (Backend, &stream(None, message_start("main"))),
+        (Backend, &stream(Some("toolu_sub"), message_start("sub"))),
+        (Backend, &stream(Some("toolu_sub"), text_delta("Sub"))),
+        (Backend, &stream(None, text_delta("Interrupted mid"))),
+        // An interrupt or API error: no complete `assistant` lines, then the end.
+        (Backend, result),
+    ]));
+    let at_result: Vec<(u64, String)> = projection
+        .iter()
+        .filter(|(to, _)| *to == 5)
+        .map(|(_, p)| {
+            (
+                p.raw_from,
+                summary(std::slice::from_ref(&p.event)).remove(0),
+            )
+        })
+        .collect();
+    assert_eq!(
+        at_result,
+        [
+            (3, r#"assistant.text sub/0 "Sub" true"#.to_string()),
+            (
+                4,
+                r#"assistant.text main/0 "Interrupted mid" true"#.to_string()
+            ),
+            (5, "turn.completed 1 Success".to_string()),
+            (5, "usage.updated".to_string()),
+            (5, "session.state Idle".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn the_session_stays_waiting_while_any_prompt_is_pending() {
+    let ask = &fixture("11-stream-permission-prompt-tool-stdio").stdout[4];
+    let second = ask.replace("1ddd13c0-dd2c-4061-a8a8-86574059182e", "second");
+    let answer = |id: &str| {
+        json!({
+            "type": "control_response",
+            "response": { "subtype": "success", "request_id": id, "response": { "behavior": "deny", "message": "no" } }
+        })
+        .to_string()
+    };
+    let first_answer = answer("1ddd13c0-dd2c-4061-a8a8-86574059182e");
+    let second_answer = answer("second");
+    let events = events(&log(&[
+        (Host, USER_MESSAGE),
+        (Backend, ask),
+        (Backend, &second),
+        (Host, &first_answer),
+        (Host, &second_answer),
+    ]));
+    assert_eq!(
+        summary(&events)[3..],
+        [
+            "permission.requested 1ddd13c0-dd2c-4061-a8a8-86574059182e",
+            "session.state WaitingUser",
+            "permission.requested second",
+            "session.state WaitingUser",
+            // One answered, one still waiting: no `running` yet.
+            "permission.decided 1ddd13c0-dd2c-4061-a8a8-86574059182e",
+            "permission.decided second",
+            "session.state Running",
+        ]
+    );
+}
+
+#[test]
+fn a_message_queued_during_a_turn_gets_a_turn_of_its_own() {
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let events = events(&log(&[
+        (Host, USER_MESSAGE),
+        (Backend, init),
+        // Sent while turn 1 runs: it joins turn 1 as a message...
+        (Host, USER_MESSAGE),
+        (Backend, result),
+        // ...and the CLI's next `init` starts the turn that answers it.
+        (Backend, init),
+    ]));
+    let turns: Vec<String> = summary(&events)
+        .into_iter()
+        .filter(|s| s.starts_with("turn."))
+        .collect();
+    assert_eq!(
+        turns,
+        [
+            "turn.started 1 User",
+            "turn.completed 1 Success",
+            "turn.started 2 User"
+        ]
+    );
 }
