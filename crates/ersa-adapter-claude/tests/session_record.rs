@@ -237,7 +237,7 @@ fn texts(events: &[Event]) -> Vec<String> {
         .collect()
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R15
+// verifies: PROTO-CLAUDE-CODE-STREAM-R20
 #[test]
 fn only_the_branch_that_ends_the_record_is_projected() {
     // A prompt, a reply, a rewind to the first prompt with an edited second
@@ -314,6 +314,7 @@ fn entries_that_form_no_chain_are_shown_in_file_order_with_an_error() {
     assert_eq!(texts(&events), ["user: Loop", "assistant: Back"]);
 }
 
+// verifies: PROTO-CLAUDE-CODE-STREAM-R20
 #[test]
 fn a_compaction_keeps_the_history_before_it() {
     let entries = [
