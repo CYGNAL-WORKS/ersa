@@ -34,6 +34,10 @@ pub struct CoreLocation {
     /// Where the launched Core's stdout and stderr go. `None` discards them.
     pub log_file: Option<PathBuf>,
     pub start_timeout: Duration,
+    /// Whether to start Core when nothing serves the endpoint. `false` for a
+    /// Core someone else runs, such as a replay server: then nothing serving
+    /// is an error, never a reason to start the user's Core there.
+    pub launch: bool,
 }
 
 /// Whether we found Core running or started it.
@@ -65,6 +69,11 @@ pub enum LaunchError {
     Exited { status: ExitStatus, log: String },
     #[error("Core did not start serving at {endpoint} within {timeout:?}")]
     Timeout { endpoint: String, timeout: Duration },
+    /// The location may not launch, and nothing serves it.
+    #[error(
+        "nothing serves {endpoint}; start it first (a replay: ersa-core replay --fixture <path>)"
+    )]
+    NotServing { endpoint: String },
 }
 
 impl CoreLocation {
@@ -80,6 +89,22 @@ impl CoreLocation {
             env: Vec::new(),
             log_file,
             start_timeout: START_TIMEOUT,
+            launch: true,
+        })
+    }
+
+    /// A Core someone else runs on the user's endpoint labelled `label`
+    /// (`ersa-core serve` or `replay --endpoint <label>`): attach only,
+    /// never launch.
+    pub fn attach_only(label: &str) -> io::Result<CoreLocation> {
+        Ok(CoreLocation {
+            program: PathBuf::new(),
+            endpoint: ersa_core::platform::labelled_endpoint(label)?,
+            serve_args: Vec::new(),
+            env: Vec::new(),
+            log_file: None,
+            start_timeout: START_TIMEOUT,
+            launch: false,
         })
     }
 }
@@ -111,6 +136,11 @@ fn default_program() -> io::Result<PathBuf> {
 pub async fn attach_or_launch(location: &CoreLocation) -> Result<(BoxStream, How), LaunchError> {
     match ersa_core::connect(&location.endpoint).await {
         Ok(stream) => return Ok((stream, How::Attached)),
+        Err(e) if nobody_serving(&e) && !location.launch => {
+            return Err(LaunchError::NotServing {
+                endpoint: location.endpoint.clone(),
+            });
+        }
         Err(e) if nobody_serving(&e) => {}
         Err(source) => {
             return Err(LaunchError::Attach {
