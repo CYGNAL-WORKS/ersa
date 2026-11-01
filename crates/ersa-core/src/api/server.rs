@@ -225,7 +225,12 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
             }
             Incoming::Invalid { id, error } => (Response::failure(id, error), After::Continue),
         };
-        let sent = send(&conn, &response).await;
+        // A client that stopped reading can leave the queue full; the
+        // kick that closes it must still get through.
+        let sent = tokio::select! {
+            sent = send(&conn, &response) => sent,
+            _ = kicked.wait_for(|kicked| *kicked) => false,
+        };
         // The response is queued; subscriptions it created may send now,
         // behind it. Tile notifications begin once the handshake is done.
         for subscription in conn.subscriptions.values_mut() {
