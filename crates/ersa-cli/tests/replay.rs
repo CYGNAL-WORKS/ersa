@@ -18,18 +18,15 @@ async fn replay_serves_a_recorded_session_to_list_and_subscribe_to() {
         .nth(2)
         .expect("the crate sits two levels below the workspace root")
         .join("docs/briefs/protocol/fixtures/claude-code/2.1.302/11-stream-permission-prompt-tool-stdio.jsonl");
-    let endpoint = format!(
-        "{}-replay-test-{}",
-        ersa_core::platform::default_endpoint().unwrap(),
-        std::process::id()
-    );
+    let label = format!("replay-test-{}", std::process::id());
+    let endpoint = ersa_core::platform::labelled_endpoint(&label).unwrap();
     let mut core = tokio::process::Command::new(env!("CARGO_BIN_EXE_ersa-core"))
         .args([
             "replay",
             "--pace",
             "instant",
             "--endpoint",
-            &endpoint,
+            &label,
             "--fixture",
         ])
         .arg(&fixture)
