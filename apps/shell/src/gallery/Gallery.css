@@ -40,7 +40,7 @@
 
 .gallery-states {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-xxl) * 7), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--size-tile-min), 1fr));
   gap: var(--space-lg);
   align-items: start;
 }
@@ -61,6 +61,6 @@
 .gallery-specimen {
   padding: var(--space-md);
   background: var(--color-surface);
-  border: 1px solid var(--color-line);
+  border: var(--line-hairline) solid var(--color-line);
   border-radius: var(--radius-md);
 }
