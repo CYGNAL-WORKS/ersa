@@ -102,24 +102,33 @@ pub fn project_record(record: &str) -> Vec<RecordEvent> {
             event: protocol_error(problem),
         });
     }
+    let mut projected_ids = HashSet::new();
     for line in lines {
         match line {
             Line::Failed(events) => out.extend(events),
             Line::Entry(value) => {
                 // An entry on another branch, or a subagent's, is not part of
-                // the conversation. Entries without an id (titles) are let
-                // through; they yield nothing.
+                // the conversation (PROTO-CLAUDE-CODE-STREAM-R20). Entries
+                // without an id (titles) are let through; they yield nothing.
                 let off_branch = match (&chain, uuid(&value)) {
                     (Some(chain), Some(id)) => !chain.contains(id),
-                    _ => false,
+                    // In file order, still no subagent's entries.
+                    (None, _) => is_sidechain(&value),
+                    (Some(_), None) => false,
                 };
-                if !off_branch {
+                // An entry written twice (a resume can repeat one) counts once.
+                let repeated = uuid(&value).is_some_and(|id| !projected_ids.insert(id.to_string()));
+                if !off_branch && !repeated {
                     out.extend(projector.project(value));
                 }
             }
         }
     }
     out
+}
+
+fn is_sidechain(value: &Value) -> bool {
+    value.get("isSidechain").and_then(Value::as_bool) == Some(true)
 }
 
 enum Line {
@@ -181,7 +190,7 @@ fn conversation(entries: &[&Value]) -> Conversation {
             Node {
                 index,
                 parent: text("parentUuid").or_else(|| text("logicalParentUuid")),
-                main: entry.get("isSidechain").and_then(Value::as_bool) != Some(true)
+                main: !is_sidechain(entry)
                     && entry.get("teamName").is_none()
                     && kind != Some("progress"),
                 message: matches!(kind, Some("user" | "assistant")),
