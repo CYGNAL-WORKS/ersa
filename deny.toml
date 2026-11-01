@@ -1,6 +1,6 @@
 # cargo-deny configuration (ADR 0015). CI runs
 #
-#   cargo deny --locked check bans licenses sources
+#   cargo deny --workspace --locked check bans licenses sources
 #
 # Advisories are deliberately not checked here: OSV-Scanner owns vulnerability
 # scanning so that every vulnerability exception lives in deps-policy.toml.
