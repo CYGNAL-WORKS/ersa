@@ -22,6 +22,10 @@ allow = [
     "ISC",
     "MIT",
     "MIT-0",
+    # File-level copyleft: fine to ship unmodified; changing one of its files
+    # means publishing that file. Tauri 2 needs it (cssparser, selectors and
+    # three others). Owner's decision, issue #20.
+    "MPL-2.0",
     "Unicode-3.0",
     "Unlicense",
     "Zlib",

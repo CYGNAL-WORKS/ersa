@@ -197,7 +197,7 @@ jobs:
       # Licences are not checked here yet: Tauri depends on MPL-2.0 crates,
       # which deny.toml does not allow (see docs/briefs/INBOX.md).
       - name: Sources, bans
-        run: cargo deny --manifest-path apps/shell/src-tauri/Cargo.toml --locked check bans sources
+        run: cargo deny --manifest-path apps/shell/src-tauri/Cargo.toml --locked check bans licenses sources
 
   # Decides whether a pull request, or a push to main, touches anything the
   # Windows build or tests read. A skipped `windows` job still reports a
