@@ -8,72 +8,19 @@
 //! - [`events`]: the agent event stream (`PROTO-AGENT-EVENTS`), implementing
 //!   `protocol/schema/agent-events.schema.json`.
 //! - `schema` (with the `schema-validation` feature): checks serialized events
-//!   against that schema, for tests in this and other crates.
-//! - The Core API types are still a placeholder below; the Core API ticket owns them.
+//!   and Core API messages against their schemas, for tests in this and other
+//!   crates.
+//! - [`core_api`]: the Core request/response API (`PROTO-CORE-API`),
+//!   implementing `protocol/schema/core-api.schema.json`, with its JSON-RPC
+//!   framing in [`core_api::rpc`].
 //!
 //! This crate must stay free of Core's internals and of any runtime: the
 //! Interface's generated TypeScript types and a replay server both depend on
 //! exactly what is here, so it is plain data with serde derives and nothing else.
 
+pub mod core_api;
 pub mod events;
 
 // `#[cfg(feature = "...")]` compiles the module only when the feature is on.
 #[cfg(feature = "schema-validation")]
 pub mod schema;
-
-use serde::{Deserialize, Serialize};
-
-/// The version of the protocols between the Interface and Core.
-///
-/// A Shell compares this with the version a Core reports and refuses to attach
-/// when they differ (see `PROTO-CORE-API`). It is a plain integer that only
-/// ever goes up; there is no notion of "compatible minor versions".
-///
-/// `#[serde(transparent)]` makes this serialize as the bare number (`1`)
-/// rather than as a wrapper object, which is what the wire format wants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ProtocolVersion(pub u32);
-
-impl ProtocolVersion {
-    /// The protocol version this build speaks.
-    pub const CURRENT: ProtocolVersion = ProtocolVersion(1);
-}
-
-/// What a Core reports about itself when a Shell attaches.
-///
-/// A placeholder: the real shape is decided by the Core API schema. It exists
-/// now so the crate has one serializable type with a round-trip test.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VersionInfo {
-    /// The Core binary's version, the workspace version at build time.
-    pub core_version: String,
-    /// The protocol version that Core speaks.
-    pub protocol_version: ProtocolVersion,
-}
-
-// Unit tests live next to the code in a `tests` module. `#[cfg(test)]` means
-// the module is only compiled for `cargo test`, never into a normal build.
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn version_info_round_trips_through_json() {
-        let original = VersionInfo {
-            core_version: "0.1.0".to_string(),
-            protocol_version: ProtocolVersion::CURRENT,
-        };
-
-        let json = serde_json::to_string(&original).expect("serialize");
-        let parsed: VersionInfo = serde_json::from_str(&json).expect("deserialize");
-
-        assert_eq!(parsed, original);
-    }
-
-    #[test]
-    fn protocol_version_serializes_as_a_bare_number() {
-        let json = serde_json::to_string(&ProtocolVersion(7)).expect("serialize");
-        assert_eq!(json, "7");
-    }
-}

@@ -2,7 +2,11 @@
 //! it (or attaches to one already running), and remote hosts run the same binary.
 //! It stays thin: argument parsing here, everything else in the `ersa-core` library.
 
+use std::path::PathBuf;
+use std::process::ExitCode;
+
 use clap::{Parser, Subcommand};
+use ersa_core::{CoreConfig, ServeError, Server};
 
 /// Command-line arguments.
 ///
@@ -21,16 +25,69 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Run Core and serve the Interface protocols on a local socket.
-    Serve,
+    Serve {
+        /// Where the database and worktrees live, instead of the user's
+        /// application data directory.
+        #[arg(long, value_name = "DIR")]
+        data_dir: Option<PathBuf>,
+    },
 }
 
-fn main() {
+// `#[tokio::main]` wraps `main` in a Tokio runtime, so it can be `async`.
+#[tokio::main]
+async fn main() -> ExitCode {
     // `parse` exits the process itself on `--help`, `--version`, or bad
     // arguments, so past this line we always have a valid command.
     let cli = Cli::parse();
 
+    // Logs go to stderr. `RUST_LOG` (for example `RUST_LOG=ersa_core=debug`)
+    // chooses what is shown; `info` and above by default.
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        // Colour only on a terminal, so a log redirected to a file stays plain.
+        .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stderr()))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
+
     match cli.command {
-        Command::Serve => println!("not implemented"),
+        Command::Serve { data_dir } => serve(data_dir).await,
+    }
+}
+
+async fn serve(data_dir: Option<PathBuf>) -> ExitCode {
+    let Some(data_dir) = data_dir.or_else(ersa_core::platform::default_data_dir) else {
+        eprintln!("ersa-core: cannot find the application data directory; pass --data-dir");
+        return ExitCode::FAILURE;
+    };
+    // Worktree paths are derived from the data directory and handed to git,
+    // which runs in the project's directory; a relative path would land there.
+    let data_dir = match std::path::absolute(&data_dir) {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("ersa-core: invalid --data-dir {}: {e}", data_dir.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let server = match Server::bind(CoreConfig::new(data_dir)).await {
+        Ok(server) => server,
+        Err(e @ ServeError::AlreadyRunning { .. }) => {
+            eprintln!("ersa-core: {e}. Attach to it instead, or stop it first.");
+            return ExitCode::FAILURE;
+        }
+        Err(e) => {
+            eprintln!("ersa-core: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match server.run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("ersa-core: {e}");
+            ExitCode::FAILURE
+        }
     }
 }
 
@@ -49,6 +106,14 @@ mod tests {
     #[test]
     fn serve_parses() {
         let cli = Cli::try_parse_from(["ersa-core", "serve"]).expect("serve is a valid command");
-        assert!(matches!(cli.command, Command::Serve));
+        assert!(matches!(cli.command, Command::Serve { data_dir: None }));
+    }
+
+    #[test]
+    fn serve_takes_a_data_dir() {
+        let cli = Cli::try_parse_from(["ersa-core", "serve", "--data-dir", "D:/tmp/ersa"])
+            .expect("--data-dir is accepted");
+        let Command::Serve { data_dir } = cli.command;
+        assert_eq!(data_dir, Some(PathBuf::from("D:/tmp/ersa")));
     }
 }
