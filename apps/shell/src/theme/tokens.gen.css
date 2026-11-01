@@ -28,6 +28,9 @@
   --space-lg: 16px;
   --space-xl: 24px;
   --space-xxl: 32px;
+  --line-hairline: 1px;
+  --size-rail: 224px;
+  --size-tile-min: 224px;
   --motion-instant: 80ms;
   --motion-quick: 160ms;
   --motion-settle: 260ms;
