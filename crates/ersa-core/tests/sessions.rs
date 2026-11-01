@@ -312,6 +312,11 @@ async fn the_raw_log_holds_every_line_exactly_as_it_crossed() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
+    // Read while the session is open: once nobody reads a session Core is
+    // not running, its raw log goes.
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
     client
         .result(
             "session.send",
@@ -947,4 +952,48 @@ async fn a_failed_session_still_lists_as_failed_after_core_restarts() {
     let row = session_row(&mut client, &id).await;
     assert_eq!(row["state"], "error");
     assert_eq!(row["tile"]["state"], "error");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_nobody_reads_lets_its_view_go_and_reopens_under_a_new_identity() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    let live = client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    // While it runs, resubscribing keeps the view.
+    let again = client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 3 }))
+        .await;
+    assert_eq!(again["view"], live["view"]);
+    client.result("session.stop", json!({ "id": id })).await;
+    client.events_until("session.ended").await;
+    let held = client.result("session.raw_log", json!({ "id": id })).await;
+    assert!(!held.as_array().unwrap().is_empty());
+
+    // The last reader leaves: the view and raw log go.
+    client
+        .result("session.unsubscribe", json!({ "id": id }))
+        .await;
+    assert_eq!(
+        client.result("session.raw_log", json!({ "id": id })).await,
+        json!([])
+    );
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(row["state"], "ended");
+    assert!(row.get("last_event_seq").is_none(), "{row:#}");
+
+    // A client coming back from where it was finds another view, and its
+    // events start over from the record.
+    let back = client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 9 }))
+        .await;
+    assert_ne!(back["view"], live["view"]);
+    let fresh = all_events(&mut client, &id).await;
+    assert_eq!(fresh[0]["seq"], 0);
+    assert_eq!(fresh[0]["source"]["input"], "record");
 }

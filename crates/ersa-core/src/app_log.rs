@@ -6,18 +6,27 @@
 //!
 //! One JSON object per line, appended: `{"ts", "session_id", "type", ...}`,
 //! where `type` and the rest are a [`LifecycleFact`]. Core reads the log back
-//! once, at startup, for each session's last fact: one whose last fact is
-//! `process_started` was live when the previous Core ended without recording
-//! its exit, and gets `core_restarted`; any other tells how Core last saw
-//! the session's backend end, which Core shows when the session is opened.
+//! once, at startup, for each session's first and last fact: one whose last
+//! fact is `process_started` was live when the previous Core ended without
+//! recording its exit, and gets `core_restarted`; any other tells how Core
+//! last saw the session's backend end, which Core shows when the session is
+//! opened.
+//!
+//! Writes go to one writer thread, so no session's tasks ever wait on the
+//! disk. The writer rotates the log when it grows past [`ROTATE_BYTES`],
+//! carrying every session's first and last facts into the new file, so
+//! rotation never loses what startup reads.
 
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::mpsc;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use tokio::sync::oneshot;
 
 /// The app log's file name in Core's data directory.
 pub const FILE_NAME: &str = "app-log.jsonl";
@@ -26,9 +35,13 @@ pub const FILE_NAME: &str = "app-log.jsonl";
 /// [`ROTATE_BYTES`].
 pub const PREVIOUS_FILE_NAME: &str = "app-log.1.jsonl";
 
-/// How large the app log may grow before startup moves it aside. Each fact
-/// is a short line, so this holds a great many sessions' worth.
+/// How large the app log may grow before it is moved aside. Each fact is a
+/// short line, so this holds a great many sessions' worth.
 const ROTATE_BYTES: u64 = 8 * 1024 * 1024;
+
+/// How long [`AppLog::flushed`] waits for the writer before going on: a disk
+/// that hangs must not keep a session from starting.
+const FLUSH_WAIT: Duration = Duration::from_secs(5);
 
 /// What Core knows about a session's backend process.
 ///
@@ -100,49 +113,46 @@ pub struct Entry {
 /// What the app log says about one session.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Facts {
-    /// When Core first learnt anything about it: when it first started the
-    /// session's backend.
-    pub first_ts: String,
-    /// Its latest fact.
-    pub last: Entry,
+    /// Its first entry: when Core first started the session's backend.
+    pub first: Entry,
+    /// Its latest fact; `None` when the latest line about it could not be
+    /// read (a newer Core's fact, say), so nothing is known of how it ended.
+    pub last: Option<Entry>,
 }
 
-/// The app log, open for appending.
+/// The app log. Cheap to share: writes are handed to the writer thread.
 ///
-/// Writes are one short line each, under a lock, straight to the file: a
-/// fact must be on disk before a crash for startup to repair what the crash
-/// left. A write that fails is reported through tracing and otherwise
-/// ignored; a session must not stop because its log could not be written.
+/// A write that fails is reported through tracing and otherwise ignored; a
+/// session must not stop because its log could not be written.
 pub struct AppLog {
     path: PathBuf,
-    file: Mutex<Option<File>>,
+    /// `None` for a log that writes nowhere.
+    writer: Option<mpsc::Sender<Job>>,
+}
+
+/// What the writer thread is asked to do.
+enum Job {
+    Write(Entry),
+    /// Answer once everything sent before is on disk.
+    Flush(oneshot::Sender<()>),
 }
 
 impl AppLog {
     /// Opens the app log in `data_dir`, and returns it with what it says of
-    /// each session, by session id. A session whose last fact is
-    /// `process_started` was live when the log was last written; one whose
-    /// last fact ends it tells how Core last saw its backend end.
+    /// each session, by session id.
     ///
-    /// A log past [`ROTATE_BYTES`] is read, then moved aside for an empty
-    /// one; its predecessor is read too, so what happened just before a
-    /// rotation is still found. A file that cannot be read is reported and
-    /// passed over: what it held is lost, but the log still records from
-    /// now on. Fails only when the log cannot be opened for appending.
+    /// Both the current log and the one moved aside before it are read. A
+    /// file that cannot be read is reported and passed over: what it held is
+    /// lost, but the log still records from now on. Fails only when the log
+    /// cannot be opened for appending.
     pub fn open(data_dir: &Path) -> io::Result<(AppLog, HashMap<String, Facts>)> {
         let path = data_dir.join(FILE_NAME);
         let previous = data_dir.join(PREVIOUS_FILE_NAME);
-        let mut last = HashMap::new();
+        let mut facts = HashMap::new();
         for file in [&previous, &path] {
-            if let Err(e) = read_into(file, &mut last) {
+            if let Err(e) = read_into(file, &mut facts) {
                 tracing::error!(path = %file.display(), error = %e, "could not read the app log; sessions it would have repaired are not");
             }
-        }
-        if fs::metadata(&path).is_ok_and(|m| m.len() > ROTATE_BYTES)
-            && let Err(e) = fs::rename(&path, &previous)
-        {
-            // Another process may hold it open; it grows a while longer.
-            tracing::warn!(path = %path.display(), error = %e, "could not move the app log aside");
         }
         let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
         // A crash mid-write leaves a last line without its end; the next fact
@@ -159,47 +169,158 @@ impl AppLog {
                 tracing::warn!(path = %path.display(), error = %e, "could not check the app log's last line");
             }
         }
+        let size = file.metadata().map(|m| m.len()).unwrap_or(0);
+        let (sender, jobs) = mpsc::channel();
+        let writer = Writer {
+            path: path.clone(),
+            previous,
+            file: Some(file),
+            size,
+            kept: facts
+                .iter()
+                .map(|(id, f)| (id.clone(), (f.first.clone(), f.last.clone())))
+                .collect(),
+        };
+        std::thread::Builder::new()
+            .name("ersa-app-log".into())
+            .spawn(move || writer.run(jobs))?;
         Ok((
             AppLog {
                 path,
-                file: Mutex::new(Some(file)),
+                writer: Some(sender),
             },
-            last,
+            facts,
         ))
     }
 
     /// An app log that writes nowhere, for a Core whose log could not be
     /// opened: sessions still run, and the failure was reported once.
     pub fn disabled(path: PathBuf) -> AppLog {
-        AppLog {
-            path,
-            file: Mutex::new(None),
-        }
+        AppLog { path, writer: None }
     }
 
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// Appends one fact about session `session_id`, learnt at `ts`. Written
-    /// before this returns, so a fact is on disk before what it describes
-    /// happens (a process started) and survives a crash right after.
+    /// Appends one fact about session `session_id`, learnt at `ts`. Never
+    /// waits: the writer thread writes it.
     pub fn write(&self, session_id: &str, ts: &str, fact: &LifecycleFact) {
-        let entry = Entry {
-            ts: ts.to_string(),
-            session_id: session_id.to_string(),
-            fact: fact.clone(),
-        };
-        let mut line = serde_json::to_string(&entry).expect("app log entries serialize");
-        line.push('\n');
-        let mut file = self.file.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(file) = file.as_mut() else {
+        if let Some(writer) = &self.writer {
+            let _ = writer.send(Job::Write(Entry {
+                ts: ts.to_string(),
+                session_id: session_id.to_string(),
+                fact: fact.clone(),
+            }));
+        }
+    }
+
+    /// Returns once every fact written before is on disk, or after
+    /// [`FLUSH_WAIT`] if the disk has not taken them by then.
+    pub async fn flushed(&self) {
+        let Some(writer) = &self.writer else {
             return;
         };
-        // One `write_all` of the whole line: appends from one process land
-        // whole, so a reader never sees two facts interleaved.
-        if let Err(e) = file.write_all(line.as_bytes()) {
-            tracing::error!(path = %self.path.display(), error = %e, session = session_id, "could not write the app log");
+        let (done, written) = oneshot::channel();
+        if writer.send(Job::Flush(done)).is_err() {
+            return;
+        }
+        if tokio::time::timeout(FLUSH_WAIT, written).await.is_err() {
+            tracing::warn!(path = %self.path.display(), "the app log did not take its facts in time");
+        }
+    }
+}
+
+/// The writer thread's state.
+struct Writer {
+    path: PathBuf,
+    previous: PathBuf,
+    /// `None` after a rotation that could not reopen the file.
+    file: Option<File>,
+    size: u64,
+    /// Each session's first entry and latest readable one, carried into the
+    /// new file when the log rotates.
+    kept: HashMap<String, (Entry, Option<Entry>)>,
+}
+
+impl Writer {
+    /// Writes jobs until every [`AppLog`] is gone.
+    fn run(mut self, jobs: mpsc::Receiver<Job>) {
+        for job in jobs {
+            match job {
+                Job::Write(entry) => self.write(entry),
+                Job::Flush(done) => {
+                    if let Some(file) = &mut self.file
+                        && let Err(e) = file.flush()
+                    {
+                        tracing::error!(path = %self.path.display(), error = %e, "could not flush the app log");
+                    }
+                    let _ = done.send(());
+                }
+            }
+        }
+    }
+
+    fn write(&mut self, entry: Entry) {
+        self.kept
+            .entry(entry.session_id.clone())
+            .and_modify(|(_, last)| *last = Some(entry.clone()))
+            .or_insert_with(|| (entry.clone(), Some(entry.clone())));
+        self.append(&entry);
+        if self.size > ROTATE_BYTES {
+            self.rotate();
+        }
+    }
+
+    fn append(&mut self, entry: &Entry) {
+        let Some(file) = &mut self.file else {
+            return;
+        };
+        let mut line = serde_json::to_string(entry).expect("app log entries serialize");
+        line.push('\n');
+        // One `write_all` of the whole line, so a reader never sees two facts
+        // interleaved.
+        match file.write_all(line.as_bytes()) {
+            Ok(()) => self.size += line.len() as u64,
+            Err(e) => {
+                tracing::error!(path = %self.path.display(), error = %e, session = %entry.session_id, "could not write the app log");
+            }
+        }
+    }
+
+    /// Moves the log aside and starts a new one holding each session's first
+    /// and last facts, so what startup reads survives any number of
+    /// rotations.
+    fn rotate(&mut self) {
+        // Closed first: a file open elsewhere cannot be renamed on Windows.
+        self.file = None;
+        if let Err(e) = fs::rename(&self.path, &self.previous) {
+            tracing::warn!(path = %self.path.display(), error = %e, "could not move the app log aside; it grows a while longer");
+        }
+        match OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+        {
+            Ok(file) => {
+                self.file = Some(file);
+                self.size = fs::metadata(&self.path).map(|m| m.len()).unwrap_or(0);
+            }
+            Err(e) => {
+                tracing::error!(path = %self.path.display(), error = %e, "could not reopen the app log; facts are not kept from now on");
+                return;
+            }
+        }
+        let carried: Vec<Entry> = self
+            .kept
+            .values()
+            .flat_map(|(first, last)| {
+                let last = last.clone().filter(|last| last != first);
+                std::iter::once(first.clone()).chain(last)
+            })
+            .collect();
+        for entry in &carried {
+            self.append(entry);
         }
     }
 }
@@ -216,46 +337,64 @@ fn ends_with_newline(file: &mut File) -> io::Result<bool> {
     Ok(last[0] == b'\n')
 }
 
-/// Reads one app log file, keeping each session's first time and last entry.
-/// A missing file is an empty log; a line that is not a fact (a newer Core's,
-/// one cut short by a crash, or one far too long to be a fact) is skipped.
-fn read_into(path: &Path, last: &mut HashMap<String, Facts>) -> io::Result<()> {
-    for entry in entries_in(path)? {
-        last.entry(entry.session_id.clone())
-            .and_modify(|facts: &mut Facts| facts.last = entry.clone())
-            .or_insert_with(|| Facts {
-                first_ts: entry.ts.clone(),
-                last: entry,
-            });
+/// Reads one app log file into each session's first and last facts. A
+/// missing file is an empty log. A line that names a session but cannot be
+/// read as a fact (a newer Core's, say) leaves that session's ending
+/// unknown rather than taking an earlier fact for its last.
+fn read_into(path: &Path, facts: &mut HashMap<String, Facts>) -> io::Result<()> {
+    let mut unreadable = 0;
+    for line in lines_in(path)? {
+        match serde_json::from_slice::<Entry>(&line) {
+            Ok(entry) => {
+                facts
+                    .entry(entry.session_id.clone())
+                    .and_modify(|f| f.last = Some(entry.clone()))
+                    .or_insert_with(|| Facts {
+                        first: entry.clone(),
+                        last: Some(entry),
+                    });
+            }
+            Err(_) => {
+                unreadable += 1;
+                let named = serde_json::from_slice::<Value>(&line)
+                    .ok()
+                    .and_then(|v| v.get("session_id")?.as_str().map(String::from));
+                if let Some(id) = named
+                    && let Some(f) = facts.get_mut(&id)
+                {
+                    f.last = None;
+                }
+            }
+        }
+    }
+    if unreadable > 0 {
+        tracing::warn!(path = %path.display(), lines = unreadable, "app log lines that are not facts this Core knows were passed over");
     }
     Ok(())
 }
 
-/// The entries of one app log file, in order; none for a missing file.
-fn entries_in(path: &Path) -> io::Result<Vec<Entry>> {
+/// The lines of one app log file, without their ends; none for a missing
+/// file. A read error partway keeps the lines read before it.
+fn lines_in(path: &Path) -> io::Result<Vec<Vec<u8>>> {
     let file = match File::open(path) {
         Ok(file) => file,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
     };
     let mut reader = BufReader::new(file);
-    let mut entries = Vec::new();
+    let mut lines = Vec::new();
     loop {
         match next_line(&mut reader) {
-            Ok(Some(line)) => {
-                if let Ok(entry) = serde_json::from_slice::<Entry>(&line) {
-                    entries.push(entry);
-                }
-            }
+            Ok(Some(line)) if line.is_empty() => {}
+            Ok(Some(line)) => lines.push(line),
             Ok(None) => break,
-            // What was read before the error still counts.
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "could not read the rest of the app log");
                 break;
             }
         }
     }
-    Ok(entries)
+    Ok(lines)
 }
 
 /// The longest app log line read. Core writes short facts; a longer line is
@@ -305,8 +444,14 @@ fn next_line(reader: &mut impl BufRead) -> io::Result<Option<Vec<u8>>> {
 /// Every entry of the app log in `data_dir`, oldest first, for tests and
 /// diagnostics.
 pub fn read_entries(data_dir: &Path) -> io::Result<Vec<Entry>> {
-    let mut entries = entries_in(&data_dir.join(PREVIOUS_FILE_NAME))?;
-    entries.extend(entries_in(&data_dir.join(FILE_NAME))?);
+    let mut entries = Vec::new();
+    for name in [PREVIOUS_FILE_NAME, FILE_NAME] {
+        for line in lines_in(&data_dir.join(name))? {
+            if let Ok(entry) = serde_json::from_slice::<Entry>(&line) {
+                entries.push(entry);
+            }
+        }
+    }
     Ok(entries)
 }
 
@@ -315,11 +460,11 @@ mod tests {
     use super::*;
 
     /// The sessions whose last fact leaves them live, by id.
-    fn left_live(last: &HashMap<String, Facts>) -> Vec<&str> {
-        let mut live: Vec<&str> = last
-            .values()
-            .filter(|f| !f.last.fact.ends())
-            .map(|f| f.last.session_id.as_str())
+    fn left_live(facts: &HashMap<String, Facts>) -> Vec<&str> {
+        let mut live: Vec<&str> = facts
+            .iter()
+            .filter(|(_, f)| f.last.as_ref().is_some_and(|last| !last.fact.ends()))
+            .map(|(id, _)| id.as_str())
             .collect();
         live.sort();
         live
@@ -332,20 +477,33 @@ mod tests {
         }
     }
 
-    #[test]
-    fn facts_round_trip_and_a_session_left_started_is_found_live() {
+    /// Opens the log in `dir`, writes `entries`, and waits until they are on
+    /// disk.
+    async fn write_all(dir: &Path, entries: &[(&str, &str, LifecycleFact)]) {
+        let (log, _) = AppLog::open(dir).unwrap();
+        for (id, ts, fact) in entries {
+            log.write(id, ts, fact);
+        }
+        log.flushed().await;
+    }
+
+    #[tokio::test]
+    async fn facts_round_trip_and_a_session_left_started_is_found_live() {
         let dir = tempfile::tempdir().unwrap();
-        let (log, live) = AppLog::open(dir.path()).unwrap();
-        assert!(live.is_empty());
         let exited = LifecycleFact::ProcessExited {
             code: Some(0),
             stopped_by_user: true,
             error: None,
         };
-        log.write("s-1", "2026-11-01T00:00:00.000Z", &started());
-        log.write("s-2", "2026-11-01T00:00:01.000Z", &started());
-        log.write("s-1", "2026-11-01T00:00:02.000Z", &exited);
-        drop(log);
+        write_all(
+            dir.path(),
+            &[
+                ("s-1", "2026-11-01T00:00:00.000Z", started()),
+                ("s-2", "2026-11-01T00:00:01.000Z", started()),
+                ("s-1", "2026-11-01T00:00:02.000Z", exited.clone()),
+            ],
+        )
+        .await;
         // A line cut short by a crash is skipped.
         let mut file = OpenOptions::new()
             .append(true)
@@ -361,42 +519,72 @@ mod tests {
         let entries = read_entries(dir.path()).unwrap();
         assert_eq!(entries.len(), 3);
         assert_eq!(entries[2].fact, exited);
-        let (log, live) = AppLog::open(dir.path()).unwrap();
-        assert_eq!(left_live(&live), ["s-2"]);
-        assert_eq!(live["s-1"].last.fact, exited);
+        let (log, facts) = AppLog::open(dir.path()).unwrap();
+        assert_eq!(left_live(&facts), ["s-2"]);
+        assert_eq!(facts["s-1"].last.as_ref().unwrap().fact, exited);
+        assert_eq!(facts["s-1"].first.ts, "2026-11-01T00:00:00.000Z");
         // The next fact does not join the cut line, so it is kept.
         log.write(
             "s-2",
             "2026-11-01T00:00:03.000Z",
             &LifecycleFact::CoreRestarted,
         );
-        drop(log);
-        let (_, live) = AppLog::open(dir.path()).unwrap();
-        assert!(left_live(&live).is_empty());
-        assert_eq!(live["s-1"].first_ts, "2026-11-01T00:00:00.000Z");
+        log.flushed().await;
+        let (_, facts) = AppLog::open(dir.path()).unwrap();
+        assert!(left_live(&facts).is_empty());
     }
 
-    #[test]
-    fn a_large_log_is_moved_aside_and_still_read() {
+    #[tokio::test]
+    async fn a_fact_this_core_cannot_read_never_makes_a_session_restarted() {
         let dir = tempfile::tempdir().unwrap();
-        let line = serde_json::to_string(&Entry {
-            ts: "2026-11-01T00:00:00.000Z".into(),
-            session_id: "s-old".into(),
-            fact: started(),
-        })
-        .unwrap();
-        let big = format!("{line}\n").repeat((ROTATE_BYTES as usize / line.len()) + 2);
-        fs::write(dir.path().join(FILE_NAME), big).unwrap();
-        let (log, live) = AppLog::open(dir.path()).unwrap();
-        assert_eq!(left_live(&live), ["s-old"]);
+        write_all(
+            dir.path(),
+            &[("s-1", "2026-11-01T00:00:00.000Z", started())],
+        )
+        .await;
+        let mut file = OpenOptions::new()
+            .append(true)
+            .open(dir.path().join(FILE_NAME))
+            .unwrap();
+        file.write_all(b"{\"ts\":\"2026-11-01T00:00:01.000Z\",\"session_id\":\"s-1\",\"type\":\"from_the_future\"}\n")
+            .unwrap();
+        drop(file);
+        let (_, facts) = AppLog::open(dir.path()).unwrap();
+        assert!(left_live(&facts).is_empty());
+        assert_eq!(facts["s-1"].last, None);
+        assert_eq!(facts["s-1"].first.ts, "2026-11-01T00:00:00.000Z");
+    }
+
+    #[tokio::test]
+    async fn rotating_while_running_keeps_every_sessions_first_and_last_facts() {
+        let dir = tempfile::tempdir().unwrap();
+        let (log, _) = AppLog::open(dir.path()).unwrap();
+        log.write("s-old", "2026-01-01T00:00:00.000Z", &started());
         log.write(
             "s-old",
-            "2026-11-01T00:00:01.000Z",
+            "2026-01-01T00:00:01.000Z",
             &LifecycleFact::CoreRestarted,
         );
+        // Enough facts about other sessions to rotate twice over.
+        let filler = LifecycleFact::StartFailed {
+            message: "x".repeat(1024),
+            code: None,
+            stopped_by_user: false,
+        };
+        let lines = (ROTATE_BYTES as usize / 1024) * 2 + 10;
+        for i in 0..lines {
+            log.write(&format!("s-{}", i % 3), "2026-01-02T00:00:00.000Z", &filler);
+        }
+        log.flushed().await;
         drop(log);
         assert!(dir.path().join(PREVIOUS_FILE_NAME).exists());
-        let (_, live) = AppLog::open(dir.path()).unwrap();
-        assert!(left_live(&live).is_empty());
+        let (_, facts) = AppLog::open(dir.path()).unwrap();
+        let old = &facts["s-old"];
+        assert_eq!(old.first.ts, "2026-01-01T00:00:00.000Z");
+        assert_eq!(
+            old.last.as_ref().unwrap().fact,
+            LifecycleFact::CoreRestarted
+        );
+        assert!(left_live(&facts).is_empty());
     }
 }

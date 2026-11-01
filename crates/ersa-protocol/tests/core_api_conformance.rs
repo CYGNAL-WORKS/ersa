@@ -158,11 +158,19 @@ fn result_examples() -> Vec<(Method, Value)> {
         (Method::SessionUnsubscribe, to_value(&Empty {})),
         (
             Method::SessionSubscribe,
-            to_value(&SubscribeResult { last_seq: Some(41) }),
+            to_value(&SubscribeResult {
+                last_seq: Some(41),
+                view: "v-1".into(),
+                first_seq: Some(7),
+            }),
         ),
         (
             Method::SessionSubscribe,
-            to_value(&SubscribeResult { last_seq: None }),
+            to_value(&SubscribeResult {
+                last_seq: None,
+                view: "v-2".into(),
+                first_seq: None,
+            }),
         ),
         (
             Method::SessionRawLog,
