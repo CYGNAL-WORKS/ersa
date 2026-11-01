@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 pub mod fake;
+pub mod procs;
 
 use std::collections::VecDeque;
 use std::io;

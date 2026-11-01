@@ -409,20 +409,27 @@ unsafe impl Send for ProcessTree {}
 unsafe impl Sync for ProcessTree {}
 
 impl ProcessTree {
-    /// Sets up `command` before it is spawned: no console window. Core runs
-    /// without a console of its own when the Shell starts it, and a console
-    /// program started from such a process would otherwise open a window.
+    /// Sets up `command` before it is spawned:
+    ///
+    /// - Suspended, so it cannot start anything before [`ProcessTree::adopt`]
+    ///   has put it in the job and resumed it. A `.cmd` shim starts its real
+    ///   program at once, which would otherwise escape the job.
+    /// - No console window. Core runs without a console of its own when the
+    ///   Shell starts it, and a console program started from such a process
+    ///   would otherwise open a window.
+    /// - `NoDefaultCurrentDirectoryInExePath`, so the command prompt running
+    ///   a `.cmd` shim never looks for the program it calls (`node`, say) in
+    ///   the working directory, which is a workspace whose files the user may
+    ///   not have written.
     pub fn prepare(command: &mut tokio::process::Command) {
-        use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
-        command.creation_flags(CREATE_NO_WINDOW);
+        use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+        command.env("NoDefaultCurrentDirectoryInExePath", "1");
     }
 
-    /// Puts a just-spawned `child` in a new job that dies with its handle.
-    ///
-    /// The child runs from the moment it was spawned, so anything it starts
-    /// before this call stays outside the job. A backend starts nothing
-    /// before it has read its first line of input, which it cannot have been
-    /// sent yet, so in practice the gap does not matter.
+    /// Puts a just-spawned, suspended `child` in a new job that dies with its
+    /// handle, then lets it run. On an error the child is still suspended,
+    /// and the caller kills it.
     pub fn adopt(child: &tokio::process::Child) -> io::Result<ProcessTree> {
         use windows_sys::Win32::System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
@@ -463,6 +470,10 @@ impl ProcessTree {
         if unsafe { AssignProcessToJobObject(tree.job, process as HANDLE) } == 0 {
             return Err(io::Error::last_os_error());
         }
+        let pid = child
+            .id()
+            .ok_or_else(|| io::Error::other("the process exited before it could be resumed"))?;
+        resume_process(pid)?;
         Ok(tree)
     }
 
@@ -484,6 +495,61 @@ impl Drop for ProcessTree {
         // SAFETY: the handle came from CreateJobObjectW and is closed exactly
         // once, here. Closing the last handle kills what is left in the job.
         unsafe { CloseHandle(self.job) };
+    }
+}
+
+/// Resumes every thread of process `pid`, which was created suspended and so
+/// has exactly one. Windows has no documented call to resume a process, and
+/// the spawned child's thread handle is not kept, so the thread is found by
+/// listing the system's threads.
+fn resume_process(pid: u32) -> io::Result<()> {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
+    };
+    use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+
+    // SAFETY: no pointers; the process id is ignored for a thread snapshot.
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    let mut entry = THREADENTRY32 {
+        dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
+        ..THREADENTRY32::default()
+    };
+    let mut resumed = 0;
+    let mut failure = None;
+    // SAFETY: `snapshot` is a valid snapshot handle and `entry` has its
+    // `dwSize` set, as both calls require.
+    let mut more = unsafe { Thread32First(snapshot, &mut entry) } != 0;
+    while more {
+        if entry.th32OwnerProcessID == pid {
+            // SAFETY: plain values in; the handle is checked and closed.
+            let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
+            if thread.is_null() {
+                failure = Some(io::Error::last_os_error());
+            } else {
+                // SAFETY: `thread` was opened with the right to resume it.
+                if unsafe { ResumeThread(thread) } == u32::MAX {
+                    failure = Some(io::Error::last_os_error());
+                } else {
+                    resumed += 1;
+                }
+                unsafe { CloseHandle(thread) };
+            }
+        }
+        // SAFETY: as for Thread32First.
+        more = unsafe { Thread32Next(snapshot, &mut entry) } != 0;
+    }
+    // SAFETY: closed once, here.
+    unsafe { CloseHandle(snapshot) };
+    match (resumed, failure) {
+        (0, Some(e)) => Err(e),
+        (0, None) => Err(io::Error::other(format!(
+            "process {pid} has no thread to resume"
+        ))),
+        _ => Ok(()),
     }
 }
 
