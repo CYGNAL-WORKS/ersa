@@ -917,22 +917,32 @@ fn a_cached_record_is_reused_while_unchanged_and_read_again_once_it_grows() {
     let home = record_home("C:/work", SESSION, &text);
     let cache = RecordCache::default();
     let first = cache.read(home.path(), "C:/work", SESSION).unwrap();
-    assert_eq!(first, project_record(&text));
-    assert_eq!(cache.read(home.path(), "C:/work", SESSION).unwrap(), first);
+    assert_eq!(*first, project_record(&text));
+    assert_eq!(cache.reads(), 1);
+    // Unchanged: the same projection, shared, and the file not read again.
+    let second = cache.read(home.path(), "C:/work", SESSION).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&first, &second));
+    assert_eq!(cache.reads(), 1);
 
     // The CLI appends a turn taken elsewhere: the record is read again.
     let path = find_record(home.path(), "C:/work", SESSION)
         .unwrap()
         .unwrap();
     let grown = format!(
-        "{text}{}\n",
+        "{text}{}
+",
         json!({"type": "user", "uuid": "u-later", "parentUuid": null,
             "message": {"role": "user", "content": "later"}})
     );
     fs::write(&path, &grown).unwrap();
     let again = cache.read(home.path(), "C:/work", SESSION).unwrap();
-    assert_eq!(again, project_record(&grown));
-    assert_ne!(again, first);
+    assert_eq!(*again, project_record(&grown));
+    assert_eq!(cache.reads(), 2);
+
+    // A session Ersa no longer shows is let go.
+    cache.forget(SESSION);
+    cache.read(home.path(), "C:/work", SESSION).unwrap();
+    assert_eq!(cache.reads(), 3);
 }
 
 #[test]

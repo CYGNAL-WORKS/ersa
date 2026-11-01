@@ -186,14 +186,15 @@ impl Adapter for FakeAdapter {
         _transport: Arc<dyn Transport>,
         _cwd: &str,
         backend_session_id: &str,
-    ) -> Result<Vec<RecordEvent>, AdapterError> {
-        Ok(self
-            .records
-            .lock()
-            .unwrap()
-            .get(backend_session_id)
-            .cloned()
-            .unwrap_or_default())
+    ) -> Result<Arc<Vec<RecordEvent>>, AdapterError> {
+        Ok(Arc::new(
+            self.records
+                .lock()
+                .unwrap()
+                .get(backend_session_id)
+                .cloned()
+                .unwrap_or_default(),
+        ))
     }
 
     /// Titled by its last prompt, as Claude Code titles a print-mode
