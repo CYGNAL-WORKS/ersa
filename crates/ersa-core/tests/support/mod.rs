@@ -53,9 +53,21 @@ pub fn test_config(data_dir: &Path, endpoint: &str) -> CoreConfig {
     config
 }
 
+/// A new temporary directory, under the canonical form of the system's
+/// temporary directory.
+///
+/// Core canonicalises the paths it stores, so tests compare against
+/// canonical paths too. The system's own may not be: on GitHub's Windows
+/// runners `TEMP` is an 8.3 short path (`C:\Users\RUNNER~1\...`), which Core
+/// stores as `C:\Users\runneradmin\...`.
+pub fn tempdir() -> tempfile::TempDir {
+    let base = platform::canonicalize(&std::env::temp_dir()).expect("canonical temp dir");
+    tempfile::tempdir_in(base).expect("temp dir")
+}
+
 /// Starts a Core in a temporary data directory.
 pub async fn start() -> TestCore {
-    start_with(tempfile::tempdir().expect("temp dir"), |_| {}).await
+    start_with(tempdir(), |_| {}).await
 }
 
 /// Starts a Core whose data directory is `dir/data`, with `configure`

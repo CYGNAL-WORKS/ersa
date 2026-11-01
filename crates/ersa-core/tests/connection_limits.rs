@@ -20,7 +20,7 @@ async fn expect_parse_error_then_close(client: &mut Client) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_line_over_the_cap_gets_a_parse_error_and_closes() {
-    let dir = tempfile::tempdir().expect("temp dir");
+    let dir = support::tempdir();
     let core = start_with(dir, |config| config.max_line_bytes = 1024).await;
 
     // Exactly at the cap is fine (a valid request padded with spaces).
@@ -44,7 +44,7 @@ async fn a_line_over_the_cap_gets_a_parse_error_and_closes() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_line_that_is_not_utf8_gets_a_parse_error_and_closes() {
-    let dir = tempfile::tempdir().expect("temp dir");
+    let dir = support::tempdir();
     let core = start_with(dir, |_| {}).await;
     let mut client = core.client().await;
     client
@@ -55,7 +55,7 @@ async fn a_line_that_is_not_utf8_gets_a_parse_error_and_closes() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_connection_without_hello_is_closed_after_the_deadline() {
-    let dir = tempfile::tempdir().expect("temp dir");
+    let dir = support::tempdir();
     let core = start_with(dir, |config| {
         config.handshake_timeout = Duration::from_millis(300);
     })

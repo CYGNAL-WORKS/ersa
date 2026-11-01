@@ -53,7 +53,7 @@ async fn the_socket_is_private_and_removed_on_shutdown() {
 
 #[tokio::test]
 async fn a_directory_others_can_enter_is_refused() {
-    let dir = tempfile::tempdir().expect("temp dir");
+    let dir = support::tempdir();
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
     let endpoint = dir.path().join("core.sock").display().to_string();
     let error = Listener::bind(&endpoint).await.err().expect("refused");
@@ -63,7 +63,7 @@ async fn a_directory_others_can_enter_is_refused() {
 
 #[tokio::test]
 async fn a_stale_socket_is_replaced() {
-    let dir = tempfile::tempdir().expect("temp dir");
+    let dir = support::tempdir();
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
     let endpoint = dir.path().join("core.sock");
     // A socket file nobody accepts on, as a crashed Core leaves behind.
