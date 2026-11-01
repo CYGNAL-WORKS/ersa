@@ -273,14 +273,33 @@ function PermissionCard({
 
 /**
  * Characters that change what text appears to say without showing
- * themselves: controls (other than tab, newline, and a carriage return
- * before a newline), bidirectional marks, overrides and isolates, line and
- * paragraph separators, zero-width, blank and filler characters, variation
- * selectors, and the tag characters used to smuggle text past a reader. An
- * agent could use them to make a command read as something else.
+ * themselves: every control (other than tab, newline, and a carriage return
+ * before a newline), every format character (bidirectional marks, overrides
+ * and isolates, zero-width characters, tag characters), every default-
+ * ignorable code point (fillers, variation selectors), line and paragraph
+ * separators, and the blank braille pattern. An agent could use them to make
+ * a command read as something else.
  */
 const HIDDEN =
-  /\r(?!\n)|[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u2028-\u202E\u2060-\u206F\u2800\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}]/gu;
+  /\r(?!\n)|(?![\t\n\r])[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Zl}\p{Zp}\u2800]/gu;
+
+/**
+ * Joiners and the emoji presentation selector do real work inside emoji
+ * (a warning sign drawn as emoji, family sequences) and between letters
+ * (Persian, Indic scripts); there they hide nothing and are left as they
+ * are. Anywhere else, they are marked.
+ */
+function benign(text: string, at: number, hidden: string): boolean {
+  const code = hidden.codePointAt(0);
+  const prev = text.slice(Math.max(0, at - 2), at);
+  const after = text.slice(at + hidden.length, at + hidden.length + 2);
+  if (code === 0xfe0f) return /\p{Extended_Pictographic}$/u.test(prev);
+  if (code === 0x200d && /(\p{Extended_Pictographic}|\p{Emoji_Modifier}|\uFE0F)$/u.test(prev)) {
+    return /^\p{Extended_Pictographic}/u.test(after);
+  }
+  if (code === 0x200c || code === 0x200d) return /[\p{L}\p{M}]$/u.test(prev) && /^[\p{L}\p{M}]/u.test(after);
+  return false;
+}
 
 /** Past this many, hidden characters are counted rather than each marked, so a flood of them cannot stall the window. */
 const MARKED = 64;
@@ -292,14 +311,20 @@ export function Revealed({ text }: { text: string }) {
   let marked = 0;
   for (const match of text.matchAll(HIDDEN)) {
     const at = match.index;
+    if (benign(text, at, match[0])) continue;
     if (marked === MARKED) {
-      // The rest without its hidden characters, and how many there were.
+      // Past the cap each hidden character stays where it was, as the
+      // replacement character in one plain run of text (cheap however many
+      // there are), and a note at the end says how many there were.
       const rest = text.slice(last);
-      const more = [...rest.matchAll(HIDDEN)].length;
+      let more = 0;
       parts.push(
-        rest.replace(HIDDEN, ""),
+        rest.replace(HIDDEN, () => {
+          more++;
+          return "\uFFFD";
+        }),
         <span key="more" className="transcript-hidden" title="Invisible characters">
-          {more} more invisible characters
+          {more} more invisible characters, each shown as {"\uFFFD"}
         </span>,
       );
       return <>{parts}</>;
