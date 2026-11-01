@@ -5,100 +5,35 @@
 mod support;
 
 use ersa_core::{ServeError, Server};
-use ersa_protocol::core_api::Method;
-use ersa_protocol::events::PROJECTION_VERSION;
-use serde_json::{Value, json};
-use support::{Client, assert_valid, kind, start, test_config};
+use serde_json::json;
+use support::suite::{self, Target};
+use support::{assert_valid, kind, start, test_config};
+
+// The shared request/response suite, run on Core; `replay.rs` runs it on
+// the replay server.
 
 // verifies: PROTO-CORE-API-R01
 #[tokio::test(flavor = "multi_thread")]
 async fn every_method_before_hello_is_refused_with_invalid_state() {
-    let core = start().await;
-    let mut client = Client::connect(&core.endpoint).await;
-
-    // A real method, an unknown one, and a reserved one: all refused alike.
-    for method in ["project.list", "core.status", "no.such_method", "host.add"] {
-        let error = client.error(method, json!({})).await;
-        assert_eq!(kind(&error), "invalid_state", "{method}: {error}");
-        assert!(error["message"].as_str().unwrap().contains("core.hello"));
-    }
-
-    // The connection stays usable, and hello then unlocks everything.
-    client.hello().await;
-    client.result("project.list", json!({})).await;
+    suite::every_method_before_hello_is_refused_with_invalid_state(Target::Core).await;
 }
 
 // verifies: PROTO-CORE-API-R01
 #[tokio::test(flavor = "multi_thread")]
 async fn hello_reports_versions_and_the_local_host() {
-    let core = start().await;
-    let mut client = Client::connect(&core.endpoint).await;
-    let hello = client
-        .result(
-            "core.hello",
-            json!({ "client": "test", "client_version": "0", "api_versions": [1, 7] }),
-        )
-        .await;
-    assert_eq!(hello["api_version"], json!(1), "the highest shared version");
-    assert_eq!(hello["event_projection_version"], json!(PROJECTION_VERSION));
-    assert_eq!(hello["host"]["id"], json!("local"));
-    assert_eq!(hello["host"]["platform"], json!(std::env::consts::OS));
-    assert_eq!(hello["core_version"], json!(env!("CARGO_PKG_VERSION")));
-
-    // A second hello on the same connection is a mistake.
-    let error = client
-        .error(
-            "core.hello",
-            json!({ "client": "test", "client_version": "0", "api_versions": [1] }),
-        )
-        .await;
-    assert_eq!(kind(&error), "invalid_state");
+    suite::hello_reports_versions_and_the_local_host(Target::Core).await;
 }
 
 // verifies: PROTO-CORE-API-R07
 #[tokio::test(flavor = "multi_thread")]
 async fn hello_without_a_shared_version_names_the_supported_ones_and_closes() {
-    let core = start().await;
-    let mut client = Client::connect(&core.endpoint).await;
-    let error = client
-        .error(
-            "core.hello",
-            json!({ "client": "test", "client_version": "0", "api_versions": [2, 3] }),
-        )
-        .await;
-    assert_eq!(kind(&error), "invalid_state");
-    let message = error["message"].as_str().unwrap();
-    assert!(message.contains("supports [1]"), "{message}");
-    assert!(message.contains("[2, 3]"), "{message}");
-
-    assert_eq!(client.read_line().await, None, "Core closed the connection");
-
-    // Other clients are unaffected.
-    core.client().await;
+    suite::hello_without_a_shared_version_names_the_supported_ones_and_closes(Target::Core).await;
 }
 
 // verifies: PROTO-CORE-API-R10
 #[tokio::test(flavor = "multi_thread")]
 async fn reserved_methods_answer_invalid_state_naming_their_milestone() {
-    let core = start().await;
-    let mut client = core.client().await;
-    let reserved: Vec<_> = Method::ALL
-        .iter()
-        .filter_map(|m| m.reserved_for().map(|milestone| (m.name(), milestone)))
-        .collect();
-    assert!(!reserved.is_empty());
-    for (method, milestone) in reserved {
-        // Params are not checked: the answer does not depend on them.
-        let error = client.error(method, json!({})).await;
-        assert_eq!(
-            error["code"],
-            json!(-32000),
-            "{method}: an application error"
-        );
-        assert_eq!(kind(&error), "invalid_state", "{method}");
-        let message = error["message"].as_str().unwrap();
-        assert!(message.contains(milestone), "{method}: {message}");
-    }
+    suite::reserved_methods_answer_invalid_state_naming_their_milestone(Target::Core).await;
 }
 
 // verifies: PROTO-CORE-API-R10
@@ -114,57 +49,22 @@ async fn session_resume_answers_invalid_state_naming_m1() {
 // verifies: PROTO-CORE-API-R06
 #[tokio::test(flavor = "multi_thread")]
 async fn protocol_errors_use_the_standard_codes() {
-    let core = start().await;
-    let mut client = core.client().await;
+    suite::protocol_errors_use_the_standard_codes(Target::Core).await;
+}
 
-    client.send_line("{ this is not json").await;
-    let response = client.read_line().await.expect("a response");
-    assert_valid("core.status", &response);
-    assert_eq!(response["id"], Value::Null);
-    assert_eq!(response["error"]["code"], json!(-32700));
-
-    client.send_line(r#"{"jsonrpc":"2.0","id":"x"}"#).await;
-    let response = client.read_line().await.expect("a response");
-    assert_valid("core.status", &response);
-    assert_eq!(response["id"], json!("x"));
-    assert_eq!(response["error"]["code"], json!(-32600));
-
-    let error = client.error("no.such_method", json!({})).await;
-    assert_eq!(error["code"], json!(-32601));
-
-    let error = client.error("project.add", json!({ "path": 3 })).await;
-    assert_eq!(error["code"], json!(-32602));
-
-    let error = client
-        .error("core.status", json!({ "unexpected": true }))
-        .await;
-    assert_eq!(error["code"], json!(-32602));
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unknown_session_is_not_found() {
+    suite::an_unknown_session_is_not_found(Target::Core).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn client_notifications_get_no_answer() {
-    let core = start().await;
-    let mut client = core.client().await;
-    client
-        .send_line(r#"{"jsonrpc":"2.0","method":"interface.focused","params":{}}"#)
-        .await;
-    // The next line Core writes answers the next request, not the notification.
-    client.result("project.list", json!({})).await;
+    suite::client_notifications_get_no_answer(Target::Core).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn pipelined_requests_are_answered_in_order() {
-    let core = start().await;
-    let mut client = core.client().await;
-    let lines: Vec<String> = (100..110)
-        .map(|id| json!({ "jsonrpc": "2.0", "id": id, "method": "core.status" }).to_string())
-        .collect();
-    client.send_line(&lines.join("\n")).await;
-    for id in 100..110 {
-        let response = client.read_line().await.expect("a response");
-        assert_valid("core.status", &response);
-        assert_eq!(response["id"], json!(id));
-    }
+    suite::pipelined_requests_are_answered_in_order(Target::Core).await;
 }
 
 // verifies: PROTO-CORE-API-R06

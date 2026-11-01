@@ -5,7 +5,9 @@
 //! as usual, records a project, a workspace and one session in its
 //! database, and starts that session with a [`ReplayAdapter`]: instead of a
 //! backend process, it feeds the recording's lines into the session's raw
-//! log, on the recorded timing or all at once. Everything else (the raw log,
+//! log, on the recorded timing or all at once, from the moment a client
+//! first subscribes (so an Interface that attaches later still sees the
+//! session stream as it did). Everything else (the raw log,
 //! projection, subscriptions, tiles, every read-only method) is Core's own
 //! code, which is what makes the replay answer exactly as Core would.
 //!
@@ -20,6 +22,7 @@ use std::time::Duration;
 
 // Re-exported for the binary, which builds a [`Replay`] from a file.
 pub use ersa_adapter::recording::Recording;
+use ersa_adapter::recording::TimedLine;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, PermissionDecision, ProcessExit, Projector,
     SessionConfig, Transport, async_trait,
@@ -33,6 +36,7 @@ use crate::api::ApiError;
 use crate::persistence::{self, LOCAL_HOST_ID};
 use crate::sessions::SessionError;
 use crate::state::Core;
+use crate::transport::MAX_PROCESS_LINE_BYTES;
 
 /// How fast a replay feeds its lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,6 +129,10 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         backend_version,
         pace,
     } = replay;
+    // Core's own limits apply: a live Core ends a backend that writes a
+    // longer line, so a replay must not serve one either.
+    let lines = recording.into_lines();
+    check_lines(&lines, MAX_PROCESS_LINE_BYTES)?;
     // The data directory stands in for the folder the recording was made
     // in: it exists, and nothing ever runs there.
     let path = core.config.data_dir.display().to_string();
@@ -168,9 +176,6 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         model: None,
         extra: Value::Null,
     };
-    let lines = recording
-        .timed_lines()
-        .map_err(|e| SessionError::Internal(format!("the recording is unreadable: {e}")))?;
     core.sessions
         .create_with(
             session,
@@ -178,6 +183,7 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
                 inner: adapter,
                 lines: Arc::new(lines),
                 pace,
+                audience: core.replay_audience(),
             }),
             transport,
             config,
@@ -187,12 +193,32 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
     Ok(())
 }
 
+/// Refuses a recording with a line longer than `max_bytes`.
+fn check_lines(lines: &[TimedLine], max_bytes: usize) -> Result<(), SessionError> {
+    match lines.iter().position(|l| l.line.len() > max_bytes) {
+        Some(at) => Err(SessionError::InvalidState(format!(
+            "line {at} of the recording is longer than Core's limit of {max_bytes} bytes"
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// Raised once a client has subscribed to the replayed session: the
+/// replay's clock starts then. Called on every successful
+/// `session.subscribe`; does nothing outside a replay server.
+pub(crate) fn subscribed(core: &Core) {
+    if core.config.replay {
+        core.replay_audience_sender().send_replace(true);
+    }
+}
+
 /// Feeds a recording into a session's raw log in place of a backend.
 pub struct ReplayAdapter {
     inner: Arc<dyn Adapter>,
-    /// Each line with the milliseconds after the start at which it crossed.
-    lines: Arc<Vec<(u64, ersa_adapter::Direction, String)>>,
+    lines: Arc<Vec<TimedLine>>,
     pace: Pace,
+    /// Rises when a client first subscribes; nothing is fed before.
+    audience: watch::Receiver<bool>,
 }
 
 #[async_trait]
@@ -215,9 +241,25 @@ impl Adapter for ReplayAdapter {
         let (done, finished) = watch::channel(false);
         let lines = Arc::clone(&self.lines);
         let pace = self.pace;
+        let mut audience = self.audience.clone();
         tokio::spawn(async move {
+            // Held until someone is watching, so the recorded timing is what
+            // they see rather than a backlog of everything played so far.
+            // `Err` means Core is gone; the stop below ends the task then.
+            tokio::select! {
+                _ = audience.wait_for(|watched| *watched) => {}
+                _ = stopped.wait_for(|stop| *stop) => {}
+            }
             let begun = tokio::time::Instant::now();
-            for (at, dir, line) in lines.iter() {
+            for TimedLine {
+                at_ms: at,
+                dir,
+                line,
+            } in lines.iter()
+            {
+                if *stopped.borrow() {
+                    break;
+                }
                 if pace == Pace::Realtime {
                     // The recording caps its times, but a time past what the
                     // clock can hold must still not panic this task, which
@@ -353,16 +395,29 @@ mod tests {
         }
     }
 
-    fn adapter(pace: Pace) -> ReplayAdapter {
-        ReplayAdapter {
+    fn line(at_ms: u64, dir: Direction, line: &str) -> TimedLine {
+        TimedLine {
+            at_ms,
+            dir,
+            line: line.into(),
+        }
+    }
+
+    /// A replay adapter over three lines, and the flag that says a client
+    /// subscribed, already raised.
+    fn adapter(pace: Pace) -> (ReplayAdapter, watch::Sender<bool>) {
+        let (audience, watching) = watch::channel(true);
+        let adapter = ReplayAdapter {
             inner: Arc::new(NoBackend),
             lines: Arc::new(vec![
-                (0, Direction::Host, "a".into()),
-                (1500, Direction::Backend, "b".into()),
-                (4000, Direction::Backend, "c".into()),
+                line(0, Direction::Host, "a"),
+                line(1500, Direction::Backend, "b"),
+                line(4000, Direction::Backend, "c"),
             ]),
             pace,
-        }
+            audience: watching,
+        };
+        (adapter, audience)
     }
 
     // Tokio's clock is paused, so the sleeps take no real time and the
@@ -371,7 +426,8 @@ mod tests {
     async fn realtime_feeds_each_line_on_its_recorded_time_and_stop_ends_it() {
         let sink = Timed::new();
         let transport: Arc<dyn Transport> = Arc::new(ersa_adapter::LocalTransport);
-        let session = adapter(Pace::Realtime)
+        let (adapter, _audience) = adapter(Pace::Realtime);
+        let session = adapter
             .start(transport, SessionConfig::default(), sink.clone())
             .await
             .unwrap();
@@ -396,10 +452,54 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn the_clock_starts_when_a_client_first_subscribes() {
+        let sink = Timed::new();
+        let transport: Arc<dyn Transport> = Arc::new(ersa_adapter::LocalTransport);
+        let (adapter, audience) = adapter(Pace::Realtime);
+        audience.send_replace(false);
+        let session = adapter
+            .start(transport, SessionConfig::default(), sink.clone())
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        assert!(
+            sink.lines.lock().unwrap().is_empty(),
+            "nothing before a subscriber"
+        );
+        audience.send_replace(true);
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let arrived = sink.lines.lock().unwrap().clone();
+        assert_eq!(
+            arrived,
+            [
+                (Duration::from_millis(10_000), "a".to_string()),
+                (Duration::from_millis(11_500), "b".to_string()),
+                (Duration::from_millis(14_000), "c".to_string()),
+            ]
+        );
+        session.stop().await.unwrap();
+    }
+
+    #[test]
+    fn a_line_over_the_limit_is_refused() {
+        let lines = [
+            line(0, Direction::Backend, "1234"),
+            line(1, Direction::Backend, "12345"),
+        ];
+        assert!(check_lines(&lines[..1], 4).is_ok());
+        let refused = check_lines(&lines, 4).unwrap_err();
+        assert!(
+            matches!(&refused, SessionError::InvalidState(m) if m.contains("line 1")),
+            "{refused}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_stop_partway_ends_the_replay_without_the_rest() {
         let sink = Timed::new();
         let transport: Arc<dyn Transport> = Arc::new(ersa_adapter::LocalTransport);
-        let session = adapter(Pace::Realtime)
+        let (adapter, _audience) = adapter(Pace::Realtime);
+        let session = adapter
             .start(transport, SessionConfig::default(), sink.clone())
             .await
             .unwrap();
