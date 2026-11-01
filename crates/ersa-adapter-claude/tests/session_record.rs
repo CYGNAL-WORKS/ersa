@@ -253,6 +253,10 @@ fn only_the_branch_that_ends_the_record_is_projected() {
         // Entries that are not messages can end the chain.
         json!({"type": "attachment", "uuid": "t1", "parentUuid": "a3", "isSidechain": false}),
         json!({"type": "custom-title", "customTitle": "Title", "sessionId": "s"}),
+        // A subagent still working writes the latest leaf of all.
+        json!({"type": "assistant", "uuid": "s3", "parentUuid": "s2", "isSidechain": true,
+            "message": {"id": "msg_s2", "model": "m", "role": "assistant",
+                "content": [{"type": "text", "text": "Subagent later"}]}}),
     ];
     assert_eq!(
         texts(&events_of(&entries)),
@@ -263,6 +267,47 @@ fn only_the_branch_that_ends_the_record_is_projected() {
             "assistant: Edited reply"
         ]
     );
+}
+
+#[test]
+fn a_damaged_line_mid_record_loses_no_history_silently() {
+    // The CLI crashed mid-write once; later entries chain through the entry
+    // that line held.
+    let text = format!(
+        "{}\n{}\n{{\"type\":\"user\",\"uuid\":\"u2\",\"parentUuid\":\"a1\",\"mess\n{}\n{}\n",
+        prompt("u1", None, "First"),
+        reply("a1", "u1", "msg_1", "One"),
+        reply("a2", "u2", "msg_2", "Two"),
+        prompt("u3", Some("a2"), "Three"),
+    );
+    let events: Vec<Event> = project_record(&text).into_iter().map(|e| e.event).collect();
+    assert_eq!(
+        texts(&events),
+        [
+            "user: First",
+            "assistant: One",
+            "assistant: Two",
+            "user: Three"
+        ]
+    );
+    // The chain's break and the line itself are both reported.
+    let errors = events
+        .iter()
+        .filter(|e| matches!(e, Event::Error(_)))
+        .count();
+    assert_eq!(errors, 2, "{events:?}");
+}
+
+#[test]
+fn entries_that_form_no_chain_are_shown_in_file_order_with_an_error() {
+    // Two entries naming each other: a cycle, no leaf.
+    let entries = [
+        prompt("u1", Some("a1"), "Loop"),
+        reply("a1", "u1", "msg_1", "Back"),
+    ];
+    let events = events_of(&entries);
+    assert!(matches!(events[0], Event::Error(_)), "{events:?}");
+    assert_eq!(texts(&events), ["user: Loop", "assistant: Back"]);
 }
 
 #[test]
@@ -374,9 +419,12 @@ fn a_half_written_last_line_is_left_for_the_next_read() {
     let torn = &whole[..whole.len() - 20];
     assert_eq!(
         project_record(torn),
-        project_record(&record(&[first])),
+        project_record(&record(std::slice::from_ref(&first))),
         "the torn line yielded something"
     );
+    // A whole last entry with no newline (a crash just before it) counts.
+    let unterminated = whole.trim_end();
+    assert_eq!(project_record(unterminated), project_record(&whole));
 }
 
 #[test]
@@ -525,7 +573,7 @@ fn a_title_is_one_line_of_bounded_length() {
         Some("Fix the build please")
     );
     let long = title_of(vec![user(&"word ".repeat(100))]).unwrap();
-    assert_eq!(long.chars().count(), 201);
+    assert_eq!(long.chars().count(), 200);
     assert!(long.ends_with('…'));
 }
 
@@ -556,16 +604,23 @@ fn listing_reads_only_the_head_and_the_tail_of_a_record() {
 
 #[test]
 fn a_line_cut_by_a_chunk_boundary_is_not_misread() {
-    // A prompt longer than a chunk, ending in text shaped like a title entry:
-    // the head cuts it at its end and the tail at its start, so neither reads
-    // it, and nothing inside it is taken for an entry.
-    let fake = format!(
-        "\n{}\n",
-        entry("custom-title", "customTitle", "Not a title")
-    );
-    let long_prompt = format!("{}{fake}", "y".repeat(80 * 1024));
-    let lines = vec![user("First prompt"), user(&long_prompt)];
-    assert_eq!(title_of(lines).as_deref(), Some("First prompt"));
+    // A damaged line whose end is a whole title entry, placed so the tail
+    // chunk begins exactly at that entry's `{`. Read from the boundary, the
+    // fragment would parse as a title; the listing must drop the cut line.
+    const CHUNK: usize = 64 * 1024;
+    let fake = entry("custom-title", "customTitle", "Not a title");
+    let last = user("Real last prompt");
+    // What follows the fake entry fills the rest of the chunk exactly.
+    let rest_len = CHUNK - fake.len();
+    let padded_last = format!("{last}{}", " ".repeat(rest_len - last.len() - 1));
+    let damaged = format!("{}{fake}", "y".repeat(100 * 1024));
+    let lines = vec![user("First prompt"), damaged, padded_last];
+    assert_eq!(title_of(lines).as_deref(), Some("Real last prompt"));
+
+    // The head's cut line, likewise: a first prompt longer than a chunk is
+    // not read from its start.
+    let long_first = user(&"z".repeat(70 * 1024));
+    assert_eq!(title_of(vec![long_first]), None);
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R16
