@@ -28,9 +28,10 @@ const hello: CoreHelloResult = {
 };
 
 const projects: Project[] = [
-  { id: "p1", host_id: "local", path: "D:\\Projects\\ersa", name: "ersa", vcs: "git" },
-  { id: "p2", host_id: "local", path: "D:\\Projects\\game\\engine\\source\\runtime", name: "engine", vcs: "perforce" },
-  { id: "p3", host_id: "local", path: "C:\\Users\\me\\notes", name: "notes with a rather long project name", vcs: "none" },
+  { id: "p1", host_id: "local", path: "D:\\Projects\\ersa", name: "ersa", vcs: "git", trusted: true },
+  { id: "p2", host_id: "local", path: "D:\\Projects\\game\\engine\\source\\runtime", name: "engine", vcs: "perforce", trusted: false },
+  { id: "p3", host_id: "local", path: "C:\\Users\\me\\notes", name: "notes with a rather long project name", vcs: "none", trusted: false },
+  { id: "p4", host_id: "local", path: "D:\\Clones\\stranger", name: "stranger", vcs: "git", trusted: false },
 ];
 
 const coreViews: [string, CoreView][] = [
@@ -231,6 +232,24 @@ const entries: Entry[] = [
         "Starting a session",
         <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} starting={{ p1: { state: "sending" } }} />,
       ],
+      ["Trust controls", <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} onSetTrust={() => {}} />],
+      [
+        "Asking to trust",
+        <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} onSetTrust={() => {}} initialAsking="p4" />,
+      ],
+      [
+        "Changing trust",
+        <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} onSetTrust={() => {}} trusting={{ p1: { state: "sending" } }} />,
+      ],
+      [
+        "Trust refused",
+        <ProjectList
+          view={{ state: "ready", projects }}
+          onNewSession={() => {}}
+          onSetTrust={() => {}}
+          trusting={{ p4: { state: "failed", message: "no project p4" } }}
+        />,
+      ],
       [
         "Session refused",
         <ProjectList
@@ -248,6 +267,7 @@ const entries: Entry[] = [
       ["Typed", <AddProject onAdd={async () => false} initialPath="D:\Projects\ersa" />],
       ["Hover", <AddProject onAdd={async () => false} force="hover" />],
       ["Focus", <AddProject onAdd={async () => false} initialPath="D:\Projects\ersa" force="focus" />],
+      ["Asking to trust", <AddProject onAdd={async () => false} initialPath="D:\Clones\stranger" initialAsking />],
       ["Adding", <AddProject onAdd={async () => false} initialPath="D:\Projects\ersa" adding={{ state: "sending" }} />],
       [
         "Refused",
