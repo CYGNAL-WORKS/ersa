@@ -1,9 +1,11 @@
 /* The window: the rail on the left, the transcript's place in the centre (LAY-SHELL). */
 
+/* The window's whole viewport, edge to edge. */
 .app {
+  position: fixed;
+  inset: 0;
   display: grid;
-  grid-template-columns: minmax(calc(var(--space-xxl) * 7), 22%) 1fr;
-  height: 100%;
+  grid-template-columns: calc(var(--space-xxl) * 7) 1fr;
 }
 
 .rail {

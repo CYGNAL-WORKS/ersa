@@ -44,3 +44,9 @@ jobs:
       - name: Sources, bans, licences
         if: ${{ !cancelled() }}
         run: cargo deny --locked check bans licenses sources
+
+      # The Shell is its own Cargo workspace. Licences are left out until
+      # deny.toml rules on Tauri's MPL-2.0 crates (docs/briefs/INBOX.md).
+      - name: Shell sources, bans
+        if: ${{ !cancelled() }}
+        run: cargo deny --manifest-path apps/shell/src-tauri/Cargo.toml --locked check bans sources

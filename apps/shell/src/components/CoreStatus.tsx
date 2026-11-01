@@ -4,11 +4,11 @@ import { StatusTile } from "./StatusTile";
 
 interface CoreStatusProps {
   view: CoreView;
-  /** Attach again, after the connection was lost or could not be made. */
+  /** Attach again, after the first attach failed. A lost connection reattaches by itself. */
   onRetry: () => void;
 }
 
-/** Core's state in the rail: connecting, connected (with its readouts), lost, or unavailable. */
+/** Core's state in the rail: connecting, connected (with its readouts), reconnecting, or unavailable. */
 export function CoreStatus({ view, onRetry }: CoreStatusProps) {
   switch (view.phase) {
     case "connecting":
@@ -36,13 +36,7 @@ export function CoreStatus({ view, onRetry }: CoreStatusProps) {
     }
     case "lost":
       return (
-        <StatusTile
-          title="Core"
-          tone="danger"
-          summary="Connection lost"
-          detail={view.reason}
-          action={<Button onClick={onRetry}>Reconnect</Button>}
-        />
+        <StatusTile title="Core" tone="danger" summary="Reconnecting…" detail={view.reason} />
       );
     case "failed":
       return (

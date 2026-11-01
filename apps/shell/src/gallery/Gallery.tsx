@@ -38,7 +38,7 @@ const coreViews: [string, CoreView][] = [
     },
   ],
   ["Attached, before status", { phase: "connected", how: "attached", hello, projects: { state: "loading" } }],
-  ["Lost", { phase: "lost", reason: "Core closed the connection", hello }],
+  ["Lost, reconnecting", { phase: "lost", reason: "Core closed the connection", hello }],
   [
     "Unavailable",
     {
@@ -88,9 +88,10 @@ export function Gallery() {
         <div key={theme} className="gallery-theme" data-theme={theme}>
           {entries.map((entry) => (
             <section key={entry.name} className="gallery-entry" data-component={entry.name}>
-              <h2 className="gallery-name">
-                {entry.name} <span className="gallery-theme-name">{theme}</span>
-              </h2>
+              <div className="gallery-heading">
+                <h2 className="gallery-name">{entry.name}</h2>
+                <span className="gallery-theme-name">{theme}</span>
+              </div>
               <div className="gallery-states">
                 {entry.states.map(([label, node]) => (
                   <figure key={label} className="gallery-state">

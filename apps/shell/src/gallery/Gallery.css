@@ -1,7 +1,6 @@
 .gallery {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  min-height: 100%;
 }
 
 /* Each theme column paints its own canvas, so dark sits on dark. */
@@ -22,6 +21,12 @@
   background: var(--color-canvas);
 }
 
+.gallery-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
 .gallery-name {
   margin: 0;
   font-size: var(--type-heading-size);
@@ -30,8 +35,7 @@
 }
 
 .gallery-theme-name {
-  color: var(--color-ink-faint);
-  font-weight: normal;
+  color: var(--color-ink-muted);
 }
 
 .gallery-states {

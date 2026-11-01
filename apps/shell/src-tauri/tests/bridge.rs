@@ -4,12 +4,16 @@
 //!
 //! Needs the `ersa-core` executable: `ERSA_CORE_BIN`, or the root workspace's
 //! debug build (`cargo build -p ersa-cli` at the repository root).
+//!
+//! On Windows `serve` cannot be given a private pipe name yet, so the launch
+//! test would use the user's own and could stop their Core. It runs only when
+//! `ERSA_SHELL_TEST_USER_PIPE=1` says that is fine (CI sets it).
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use ersa_shell::bridge::{BridgeError, CoreLink, LinkEvent};
+use ersa_shell::bridge::{BridgeError, CoreLink, LinkEvent, LinkOptions};
 use ersa_shell::launch::{self, CoreLocation, How};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -59,8 +63,17 @@ async fn open(location: &CoreLocation) -> (CoreLink, How, mpsc::UnboundedReceive
         .unwrap_or_else(|e| panic!("attach, launch or handshake failed: {e}"))
 }
 
+/// Whether the launch test may use this user's real pipe (Windows only).
+fn may_use_user_pipe() -> bool {
+    cfg!(unix) || std::env::var_os("ERSA_SHELL_TEST_USER_PIPE").is_some_and(|v| v == "1")
+}
+
 #[tokio::test]
 async fn launches_core_then_attaches_and_round_trips_requests() {
+    if !may_use_user_pipe() {
+        eprintln!("skipped: set ERSA_SHELL_TEST_USER_PIPE=1 to run against this user's pipe");
+        return;
+    }
     let dir = tempfile::tempdir().expect("temp dir");
     let location = private_location(dir.path());
 
@@ -90,7 +103,11 @@ async fn try_open(
         .await
         .map_err(|e| e.to_string())?;
     let (events, received) = mpsc::unbounded_channel();
-    let link = CoreLink::open(stream, move |event| {
+    let options = LinkOptions {
+        probe_endpoint: Some(location.endpoint.clone()),
+        timeout: None,
+    };
+    let link = CoreLink::open(stream, options, move |event| {
         let _ = events.send(event);
     })
     .await
@@ -174,8 +191,7 @@ async fn a_core_that_cannot_start_is_reported_with_its_output() {
     }
     // An earlier run's output is in the shared log; the error must not show it.
     let log = location.log_file.clone().expect("a log file");
-    std::fs::write(&log, "a line from an earlier run
-").expect("seed the log");
+    std::fs::write(&log, "a line from an earlier run\n").expect("seed the log");
     let error = launch::attach_or_launch(&location)
         .await
         .err()

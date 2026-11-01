@@ -25,12 +25,13 @@ docker run --rm \
     tar --exclude=node_modules --exclude=target --exclude=.git -cf - \
       pnpm-workspace.yaml pnpm-lock.yaml protocol docs/design apps/shell | tar -xf - -C /work
     cd /work
-    npx -y pnpm@12.15.0 install --frozen-lockfile >/dev/null
+    npm install --global corepack@0.36.0 >/dev/null && corepack enable pnpm
+    cd apps/shell && pnpm install --frozen-lockfile >/dev/null && cd ../..
     cd apps/shell
     if [ "$UPDATE" = "--update" ]; then
-      npx pnpm@12.15.0 exec playwright test --update-snapshots
+      pnpm exec playwright test --update-snapshots
       rm -rf /out/__screenshots__ && cp -r e2e/__screenshots__ /out/
     else
-      npx pnpm@12.15.0 exec playwright test
+      pnpm exec playwright test
     fi
   '
