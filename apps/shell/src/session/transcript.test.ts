@@ -268,6 +268,9 @@ describe("marking hidden characters", () => {
     expect(html("warning \u26A0\uFE0F")).not.toContain("U+");
     expect(html("\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645")).not.toContain("U+");
     expect(html("rm\u200D -rf")).toContain("U+200D");
+    // Between Latin letters a joiner only hides a split word.
+    expect(html("r\u200Cm -rf")).toContain("U+200C");
+    expect(html("\u0915\u094D\u200D\u0937")).not.toContain("U+");
   });
 });
 
