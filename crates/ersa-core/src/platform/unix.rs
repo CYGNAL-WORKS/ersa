@@ -208,10 +208,13 @@ impl ProcessTree {
     /// it, so a reused id is never hit. (If Core itself dies, nothing is
     /// signalled at all: the leftovers outlive it on Unix.)
     pub fn leader_exited(&self) {
+        // Once retired, never again: the id may belong to someone else.
+        if self.spent.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         if self.kill_on_drop {
             let _ = self.signal();
         }
-        self.spent.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// Kills every process in the group. A group that has already ended is

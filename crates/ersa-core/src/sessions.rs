@@ -500,6 +500,7 @@ impl SessionManager {
         }));
         tokio::spawn(run_session(SessionTask {
             store: self.store.clone(),
+            tiles: Arc::clone(&self.tiles),
             handle,
             live,
             adapter,
@@ -957,6 +958,7 @@ impl AdapterSink for CoreSink {
 
 struct SessionTask {
     store: Store,
+    tiles: Arc<TileHub>,
     handle: Arc<Handle>,
     live: Arc<Live>,
     adapter: Arc<dyn Adapter>,
@@ -971,6 +973,7 @@ struct SessionTask {
 async fn run_session(task: SessionTask) {
     let SessionTask {
         store,
+        tiles,
         handle,
         live,
         adapter,
@@ -1066,6 +1069,14 @@ async fn run_session(task: SessionTask) {
             .await
         {
             tracing::error!(session = %handle.id, error = %e, "could not mark the session as failed");
+        }
+        // And the rail hears of it, as it hears of every state change.
+        match store.session(handle.id.clone()).await {
+            Ok(Some(row)) => send_tile(&tiles, &handle.id, &row.tile),
+            Ok(None) => {}
+            Err(e) => {
+                tracing::error!(session = %handle.id, error = %e, "could not read the failed session's tile");
+            }
         }
     }
     *lock(&handle.live) = None;

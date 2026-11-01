@@ -572,6 +572,39 @@ async fn a_request_waiting_on_one_session_does_not_hold_up_another() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn pipelined_requests_about_one_session_keep_their_order() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    // Sent back to back, none waiting for the one before it to be answered.
+    let mut sends = Vec::new();
+    for i in 0..300 {
+        let text = format!("m{i}");
+        sends.push(
+            client
+                .request("session.send", json!({ "id": id, "text": text }))
+                .await,
+        );
+    }
+    let interrupt = client
+        .request("session.interrupt", json!({ "id": id }))
+        .await;
+    let stop = client.request("session.stop", json!({ "id": id })).await;
+    let remove = client.request("session.remove", json!({ "id": id })).await;
+
+    let mut turns = Vec::new();
+    for request in sends {
+        let response = client.response(request).await;
+        turns.push(response["result"]["turn"].as_u64().expect("a turn"));
+    }
+    assert_eq!(turns, (1..=300).collect::<Vec<_>>());
+    assert!(client.response(interrupt).await.get("result").is_some());
+    assert_eq!(client.response(stop).await["result"]["state"], "ended");
+    let removed = client.response(remove).await;
+    assert_eq!(removed["result"]["id"], id.as_str(), "{removed:#}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_resubscribe_delivers_exactly_from_its_seq_after_its_answer() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
     let mut driver = core.client().await;
