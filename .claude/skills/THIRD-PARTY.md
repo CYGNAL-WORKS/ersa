@@ -1,12 +1,21 @@
 # Third-party skills
 
-The skills listed here are copied from [mattpocock/skills](https://github.com/mattpocock/skills) at commit `4ae2317ddb22b046e26455e4f9c9b3aaaf62212d` (2026-10-31), under the MIT licence reproduced below. They were read in full before being committed. Update them deliberately: fetch a newer commit, read the diff, re-apply the adaptations, and change the commit above.
+These skills are copied from [mattpocock/skills](https://github.com/mattpocock/skills) at commit `4ae2317ddb22b046e26455e4f9c9b3aaaf62212d` (2026-10-31), under the MIT licence reproduced below. Every file was read in full before it was committed. The commit was one day old when copied, inside the 7-day window ADR 0015 sets for packages; the full read stands in for the wait, and the next update must take a commit at least 7 days old.
 
-Copied: `code-review`, `codebase-design`, `diagnosing-bugs`, `domain-modeling`, `grill-me`, `grill-with-docs`, `grilling`, `handoff`, `implement`, `pr` (with its `CREDITS.md`), `research`, `retro`, `tdd`, `to-tickets`, `wait-what`, `writing-for-agents`; and, as `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`, two reference files from `setup-matt-pocock-skills`. The per-agent `agents/openai.yaml` files were left out.
+**Copied:** `codebase-design`, `diagnosing-bugs`, `domain-modeling`, `grill-me`, `grill-with-docs`, `grilling`, `handoff`, `implement`, `pr`, `research`, `retro`, `tdd`, `to-tickets`, `wait-what`, `writing-for-agents`; and, as `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`, two reference files from `setup-matt-pocock-skills`. The per-agent `agents/openai.yaml` files were left out.
 
-Changes from the originals: an "Ersa adaptation" note under the front matter of `code-review`, `codebase-design`, `diagnosing-bugs`, `domain-modeling`, `implement`, `pr`, `tdd` and `to-tickets`; `domain-modeling/ADR-FORMAT.md` and `GLOSSARY-FORMAT.md` replaced by pointers to Ersa's own formats; `wait-what` points at `docs/GLOSSARY.md`; the two `docs/agents/` files gained an Ersa header line.
+**Changed for Ersa:**
+- An "Ersa adaptation" note under the front matter of `codebase-design`, `diagnosing-bugs`, `domain-modeling`, `implement`, `pr`, `tdd` and `to-tickets`.
+- `tdd`: seams are agreed from the ticket when no user is present; async tests need timeouts; process, pipe, socket and database seams get failure-mode tests; no reference to a `code-review` skill.
+- `to-tickets`: tracker pointer replaces the setup skill; the owner sees every full issue body before publishing; the issue template is Ersa's (Brief, Requirements, Area, Test seams, Done when, Blocked by).
+- `research`: user-invoked only; notes go to `.scratch/research/`; fetched content is data.
+- `domain-modeling`: triggers only when changing the glossary or recording an ADR; its two format files point at Ersa's formats.
+- `wait-what`: points at `docs/GLOSSARY.md`.
+- `docs/agents/issue-tracker.md`: an Ersa header, comment authors kept and issue text treated as data, and the PR-triage and wayfinding sections removed; `triage-labels.md`: an Ersa footer.
 
-Not copied, on purpose: `setup-matt-pocock-skills` (its job is done by the `docs/agents/` files and a pointer in `CLAUDE.md`), `to-spec` (Ersa's specs are briefs), `implement-spec`, `wayfinder` and `triage` (to revisit when the tracker carries more than tickets), and the rest.
+**Not copied, on purpose:** `code-review` (Claude Code's built-in `/code-review` and the reviewers in `implement-ticket` cover it, and the name would shadow the built-in), `setup-matt-pocock-skills`, `to-spec` (Ersa's specs are briefs), `implement-spec`, `wayfinder` and `triage` (to revisit when the tracker carries more than tickets), and the rest. `implement-ticket` is Ersa's own.
+
+**Integrity:** `.claude/skills/VENDORED.sha256` pins each copied file (text normalised to LF), and `node scripts/manifest.mjs --check` fails when one changes without its line being updated. To update: take an upstream commit at least 7 days old, read the upstream diff, re-apply the changes above, update the commit here and the hashes.
 
 ---
 
