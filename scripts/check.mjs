@@ -26,13 +26,22 @@ const checks = [
   { name: "clippy", cmd: "cargo", args: ["clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"] },
   ...(QUICK ? [] : [{ name: "tests", cmd: "cargo", args: ["test", "--workspace", "--locked"] }]),
   ...(scriptTests.length ? [{ name: "script tests", cmd: "node", args: ["--test", ...scriptTests] }] : []),
+  // The interface's TypeScript types and design tokens are generated from the
+  // protocol schemas and DESIGN.md; a schema change in a Rust ticket makes them
+  // stale. Needs the interface's packages installed (`pnpm install` in apps/shell).
+  ...(existsSync(join(ROOT, "apps", "shell", "node_modules"))
+    ? [
+        { name: "interface types", cmd: "node", args: ["scripts/gen-types.mjs", "--check"], cwd: join(ROOT, "apps", "shell") },
+        { name: "interface tokens", cmd: "node", args: ["scripts/gen-tokens.mjs", "--check"], cwd: join(ROOT, "apps", "shell") },
+      ]
+    : []),
   { name: "manifest", cmd: "node", args: ["scripts/manifest.mjs", "--check"], manifest: true },
 ];
 
 const results = [];
 for (const check of checks) {
   process.stdout.write(`\n== ${check.name}: ${check.cmd} ${check.args.join(" ")}\n`);
-  const run = spawnSync(check.cmd, check.args, { cwd: ROOT, stdio: "inherit", shell: process.platform === "win32" });
+  const run = spawnSync(check.cmd, check.args, { cwd: check.cwd ?? ROOT, stdio: "inherit", shell: process.platform === "win32" });
   let status = run.status === 0 ? "pass" : "FAIL";
   if (status === "FAIL" && check.manifest && onlyInboxProblems()) status = "warn (open inbox entries only)";
   results.push({ name: check.name, status });
