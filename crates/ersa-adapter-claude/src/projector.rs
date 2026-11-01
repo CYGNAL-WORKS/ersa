@@ -422,7 +422,7 @@ impl ClaudeProjector {
             }
             StreamEvent::ContentBlockDelta {
                 index,
-                delta: Delta::TextDelta { text },
+                delta: Delta::TextDelta { text, .. },
             } => {
                 if let Some(message_id) = message_id {
                     // Text so far, growing with each delta; the complete
