@@ -886,8 +886,9 @@ async fn apply_summary(
     }
 }
 
-/// Whether `text` has the shape of an RFC 3339 time:
-/// `YYYY-MM-DDTHH:MM:SS`, an optional fraction, then `Z` or an offset.
+/// Whether `text` has the shape of an RFC 3339 UTC time:
+/// `YYYY-MM-DDTHH:MM:SS`, an optional fraction, then `Z`. That is the form
+/// Core issues, so session times sort as text the way they sort as times.
 fn is_rfc3339(text: &str) -> bool {
     let bytes = text.as_bytes();
     let digits = |range: std::ops::Range<usize>| {
@@ -901,7 +902,7 @@ fn is_rfc3339(text: &str) -> bool {
         && digits(5..7)
         && at(7, b'-')
         && digits(8..10)
-        && (at(10, b'T') || at(10, b't'))
+        && at(10, b'T')
         && digits(11..13)
         && at(13, b':')
         && digits(14..16)
@@ -920,11 +921,7 @@ fn is_rfc3339(text: &str) -> bool {
         }
         rest = &fraction[end..];
     }
-    match rest.as_bytes() {
-        [b'Z' | b'z'] => true,
-        [b'+' | b'-', h1, h2, b':', m1, m2] => [h1, h2, m1, m2].iter().all(|d| d.is_ascii_digit()),
-        _ => false,
-    }
+    rest == "Z"
 }
 
 /// Makes `view`, whose events so far are `events`, the session's open view.
@@ -1622,11 +1619,7 @@ mod tests {
 
     #[test]
     fn only_rfc3339_times_are_taken_from_a_record() {
-        for good in [
-            "2026-11-01T20:56:51.893Z",
-            "2026-11-01T20:56:51Z",
-            "2026-11-01T20:56:51+02:00",
-        ] {
+        for good in ["2026-11-01T20:56:51.893Z", "2026-11-01T20:56:51Z"] {
             assert!(is_rfc3339(good), "{good}");
         }
         for bad in [
@@ -1635,6 +1628,8 @@ mod tests {
             "2026-11-01",
             "2026-11-01T20:56:51",
             "2026-11-01T20:56:51.Z",
+            // Right, but would not sort among the times Core issues.
+            "2026-11-01T20:56:51+02:00",
         ] {
             assert!(!is_rfc3339(bad), "{bad}");
         }
