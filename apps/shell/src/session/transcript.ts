@@ -13,7 +13,7 @@ import type {
 } from "../protocol/agent-events.gen";
 
 /** The event schema version this Interface renders (PROTO-AGENT-EVENTS, Versioning). */
-export const EVENT_VERSION: Envelope["v"] = 1;
+export const EVENT_VERSION: Envelope["v"] = 2;
 
 /** One block of the transcript. `key` is stable while the block changes, so it updates in place. */
 export type Item =
