@@ -295,14 +295,14 @@ impl Store {
         .await
     }
 
-    /// Appends one raw line, stamped with the next index, without projecting
-    /// it: for a session whose adapter is not registered. Its cache then no
-    /// longer reaches the end of the log, so a Core that has the adapter
-    /// re-derives it.
-    pub async fn append_raw_line(
+    /// Ends a session whose adapter is not registered: appends the `core`
+    /// record `line`, stamped with the next index, without projecting it,
+    /// and marks the row `ended`, in one transaction, so a crash cannot
+    /// leave one without the other. The cache then no longer reaches the
+    /// end of the log, so a Core that has the adapter re-derives it.
+    pub async fn end_unprojected(
         &self,
         session_id: String,
-        dir: Direction,
         ts: String,
         line: String,
     ) -> Result<()> {
@@ -312,10 +312,15 @@ impl Store {
             let line = RawLine {
                 index,
                 ts,
-                dir,
+                dir: Direction::Core,
                 line,
             };
             insert_raw_line(&tx, &session_id, &line)?;
+            tx.execute(
+                "UPDATE sessions SET state = 'ended', tile = json_set(tile, '$.state', 'ended')
+                 WHERE id = ?1",
+                [&session_id],
+            )?;
             tx.commit()?;
             Ok(())
         })

@@ -605,6 +605,38 @@ async fn pipelined_requests_about_one_session_keep_their_order() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_stop_overtakes_requests_stuck_on_a_hung_start() {
+    let hung = FakeAdapter::slow_start(std::time::Duration::from_secs(600));
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(hung)];
+    let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    // Queued on the session: a message that waits for the start, then a
+    // stop. A subscribe in between is answered at once, in line.
+    let send = client
+        .request("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    let subscribed = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        client.call("session.subscribe", json!({ "id": id, "from_seq": 0 })),
+    )
+    .await
+    .expect("an in-line request is not held behind a detached one");
+    assert!(subscribed.get("result").is_some());
+    let stop = client.request("session.stop", json!({ "id": id })).await;
+
+    let started = std::time::Instant::now();
+    let failed = client.response(send).await;
+    assert_eq!(kind(&failed["error"]), "invalid_state", "{failed:#}");
+    let stopped = client.response(stop).await;
+    assert_eq!(stopped["result"]["state"], "ended", "{stopped:#}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(20),
+        "the stop did not wait for the start"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn a_resubscribe_delivers_exactly_from_its_seq_after_its_answer() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
     let mut driver = core.client().await;
