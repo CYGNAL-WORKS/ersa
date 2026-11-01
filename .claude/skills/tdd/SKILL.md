@@ -3,7 +3,7 @@ name: tdd
 description: Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions "red-green-refactor", or wants integration tests.
 ---
 
-> **Ersa adaptation.** This repo's glossary is `docs/GLOSSARY.md`; read that wherever this skill says `GLOSSARY.md`. In an implementing session the seams are set by the ticket and the briefs it cites, and tests cite requirement IDs with `verifies: <ID>`: name the seams in the pull request instead of stopping to ask. Refactoring and review happen in the review step of the `implement-ticket` skill (this repo has no `code-review` skill of this family).
+> **Ersa adaptation.** This repo's glossary is `docs/GLOSSARY.md`; read that wherever this skill says `GLOSSARY.md`. In an implementing session the seams are set by the ticket and the briefs it cites, and tests cite requirement IDs with `verifies: <ID>`: name the seams in the pull request instead of stopping to ask. Refactoring belongs to the review stage (the `code-review` skill).
 
 # Test-Driven Development
 
