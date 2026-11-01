@@ -16,6 +16,7 @@
 //! projected.
 
 use std::collections::{HashMap, HashSet};
+use std::io::{self, BufRead, Read, Seek, SeekFrom};
 
 use ersa_protocol::events::{
     BackendPassthrough, ErrorCode, ErrorEvent, Event, MessageOrigin, UserMessage,
@@ -35,18 +36,11 @@ const MAX_ENTRY_BYTES: usize = 16 * 1024 * 1024;
 /// How much of a line that could not be read a passthrough event keeps.
 const PASSTHROUGH_PREFIX_BYTES: usize = 4 * 1024;
 
-/// One event projected from a record entry.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RecordEvent {
-    /// The entry's `uuid`: the backend's message id, on which record and live
-    /// input are merged. `None` for a line that could not be read.
-    pub message_id: Option<String>,
-    /// When the CLI wrote the entry, as the entry gives it.
-    pub ts: Option<String>,
-    pub event: Event,
-}
+/// One event projected from a record entry: `message_id` is the entry's
+/// `uuid`, `ts` its `timestamp` and `backend_version` its `version`.
+pub use ersa_adapter::RecordEvent;
 
-/// The events of a whole session record, as read from its file.
+/// The events of a whole session record, as read from its text.
 ///
 /// The CLI ends every entry with a newline and appends as it runs, so the
 /// last line of a live session's record may be half written. A last line
@@ -56,38 +50,79 @@ pub struct RecordEvent {
 /// and the pass carries on. Pure: the same record always yields the same
 /// events.
 pub fn project_record(record: &str) -> Vec<RecordEvent> {
-    let (complete, unterminated) = match record.rfind('\n') {
-        Some(end) => (&record[..end], &record[end + 1..]),
-        None => ("", record),
-    };
+    let mut text = io::Cursor::new(record.as_bytes());
+    project_record_from(&mut text, record.len() as u64).expect("text in memory always reads")
+}
+
+/// [`project_record`] over the first `limit` bytes `reader` gives, read
+/// line by line in two passes: the first keeps only what the conversation's
+/// chain needs of each entry and where the entry lies, the second reads each
+/// entry on the chain again to project it. Neither the record's text nor its
+/// entries as JSON are ever held whole. Bytes that are not UTF-8 are read
+/// with replacement characters.
+pub fn project_record_from<R: BufRead + Seek>(
+    reader: &mut R,
+    limit: u64,
+) -> io::Result<Vec<RecordEvent>> {
     let mut lines = Vec::new();
-    for line in complete.split('\n') {
-        let line = line.strip_suffix('\r').unwrap_or(line);
-        if line.trim().is_empty() {
+    let mut offset = 0u64;
+    while offset < limit {
+        let start = offset;
+        let mut bytes = Vec::new();
+        // Room for the longest entry and its line end (CRLF included).
+        let cap = (MAX_ENTRY_BYTES as u64 + 2).min(limit - offset);
+        let read = reader.by_ref().take(cap).read_until(b'\n', &mut bytes)?;
+        if read == 0 {
+            break;
+        }
+        offset += read as u64;
+        let mut terminated = bytes.last() == Some(&b'\n');
+        if !terminated && read as u64 == cap && offset < limit {
+            // Longer than any entry read: skip the rest of it.
+            let (skipped, ended) = skip_line(reader, limit - offset)?;
+            offset += skipped;
+            terminated = ended;
+        }
+        if bytes.last() == Some(&b'\n') {
+            bytes.pop();
+            if bytes.last() == Some(&b'\r') {
+                bytes.pop();
+            }
+        }
+        if bytes.len() > MAX_ENTRY_BYTES {
+            // A last line still being written is left for the next read,
+            // however long it already is.
+            if terminated {
+                lines.push(Line::Failed(unreadable(
+                    &String::from_utf8_lossy(&bytes),
+                    format!("a record entry is longer than {MAX_ENTRY_BYTES} bytes"),
+                )));
+            }
             continue;
         }
-        if line.len() > MAX_ENTRY_BYTES {
-            lines.push(Line::Failed(unreadable(
-                line,
-                format!("a record entry is longer than {MAX_ENTRY_BYTES} bytes"),
-            )));
+        let text = String::from_utf8_lossy(&bytes);
+        if text.trim().is_empty() {
             continue;
         }
-        lines.push(match serde_json::from_str::<Value>(line) {
-            Ok(value) => Line::Entry(value),
-            Err(e) => Line::Failed(unreadable(line, format!("a record entry is not JSON: {e}"))),
-        });
-    }
-    if unterminated.len() <= MAX_ENTRY_BYTES
-        && let Ok(value) = serde_json::from_str::<Value>(unterminated)
-    {
-        lines.push(Line::Entry(value));
+        match serde_json::from_str::<Value>(&text) {
+            Ok(value) => lines.push(Line::Entry {
+                offset: start,
+                len: bytes.len(),
+                chain: chain_fields(&value),
+            }),
+            Err(e) if terminated => lines.push(Line::Failed(unreadable(
+                &text,
+                format!("a record entry is not JSON: {e}"),
+            ))),
+            // The last line, still being written: left for the next read.
+            Err(_) => {}
+        }
     }
 
     let entries: Vec<&Value> = lines
         .iter()
         .filter_map(|line| match line {
-            Line::Entry(value) => Some(value),
+            Line::Entry { chain, .. } => Some(chain),
             Line::Failed(_) => None,
         })
         .collect();
@@ -99,6 +134,7 @@ pub fn project_record(record: &str) -> Vec<RecordEvent> {
         out.push(RecordEvent {
             message_id: None,
             ts: None,
+            backend_version: None,
             event: protocol_error(problem),
         });
     }
@@ -106,25 +142,72 @@ pub fn project_record(record: &str) -> Vec<RecordEvent> {
     for line in lines {
         match line {
             Line::Failed(events) => out.extend(events),
-            Line::Entry(value) => {
+            Line::Entry {
+                offset,
+                len,
+                chain: fields,
+            } => {
                 // An entry on another branch, or a subagent's, is not part of
                 // the conversation (PROTO-CLAUDE-CODE-STREAM-R20). Entries
                 // without an id (titles) are let through; they yield nothing.
-                let off_branch = match (&chain, uuid(&value)) {
+                let off_branch = match (&chain, uuid(&fields)) {
                     (Some(chain), Some(id)) => !chain.contains(id),
                     // In file order, still only the main thread's entries.
-                    (None, _) => !is_main_thread(&value),
+                    (None, _) => !is_main_thread(&fields),
                     (Some(_), None) => false,
                 };
                 // An entry written twice (a resume can repeat one) counts once.
-                let repeated = uuid(&value).is_some_and(|id| !projected_ids.insert(id.to_string()));
-                if !off_branch && !repeated {
+                let repeated =
+                    uuid(&fields).is_some_and(|id| !projected_ids.insert(id.to_string()));
+                if off_branch || repeated {
+                    continue;
+                }
+                // Read whole again only now, one entry at a time. It parsed in
+                // the first pass, so it parses here.
+                reader.seek(SeekFrom::Start(offset))?;
+                let mut bytes = vec![0; len];
+                // A file cut short since the first pass (rewritten by
+                // something other than the CLI) loses the entry, not the read.
+                if let Err(e) = reader.read_exact(&mut bytes) {
+                    if e.kind() == io::ErrorKind::UnexpectedEof {
+                        continue;
+                    }
+                    return Err(e);
+                }
+                if let Ok(value) = serde_json::from_str::<Value>(&String::from_utf8_lossy(&bytes)) {
                     out.extend(projector.project(value));
                 }
             }
         }
     }
-    out
+    Ok(out)
+}
+
+/// Skips the rest of a line too long to read, up to `limit` bytes, and
+/// returns how many bytes it skipped and whether it reached the line's end.
+fn skip_line<R: BufRead>(reader: &mut R, limit: u64) -> io::Result<(u64, bool)> {
+    let mut skipped = 0;
+    while skipped < limit {
+        let buffer = reader.fill_buf()?;
+        if buffer.is_empty() {
+            break;
+        }
+        let room = usize::try_from(limit - skipped).unwrap_or(usize::MAX);
+        let window = &buffer[..buffer.len().min(room)];
+        match window.iter().position(|b| *b == b'\n') {
+            Some(end) => {
+                reader.consume(end + 1);
+                skipped += end as u64 + 1;
+                return Ok((skipped, true));
+            }
+            None => {
+                let all = window.len();
+                reader.consume(all);
+                skipped += all as u64;
+            }
+        }
+    }
+    Ok((skipped, false))
 }
 
 /// Whether an entry belongs to the main conversation rather than to a
@@ -136,9 +219,35 @@ fn is_main_thread(value: &Value) -> bool {
 }
 
 enum Line {
-    Entry(Value),
+    Entry {
+        /// Where the entry's text lies, to read it again to project it.
+        offset: u64,
+        len: usize,
+        /// Only the fields the conversation's chain reads.
+        chain: Value,
+    },
     /// The events already reported for a line that could not be read.
     Failed(Vec<RecordEvent>),
+}
+
+/// The fields of an entry the conversation's chain and the main-thread test
+/// read; everything else (the message, often the bulk of the line) is left
+/// in the text until the entry is projected.
+fn chain_fields(value: &Value) -> Value {
+    let mut kept = serde_json::Map::new();
+    for key in [
+        "uuid",
+        "parentUuid",
+        "logicalParentUuid",
+        "isSidechain",
+        "teamName",
+        "type",
+    ] {
+        if let Some(field) = value.get(key) {
+            kept.insert(key.to_string(), field.clone());
+        }
+    }
+    Value::Object(kept)
 }
 
 fn uuid(value: &Value) -> Option<&str> {
@@ -288,13 +397,13 @@ impl RecordProjector {
     /// snapshots, attachments, and whatever else the CLI keeps) yield none.
     fn project(&mut self, value: Value) -> Vec<RecordEvent> {
         let id = uuid(&value).map(String::from);
-        let ts = value
-            .get("timestamp")
-            .and_then(Value::as_str)
-            .map(String::from);
+        let text = |key: &str| value.get(key).and_then(Value::as_str).map(String::from);
+        let ts = text("timestamp");
+        let version = text("version");
         let attribute = |event| RecordEvent {
             message_id: id.clone(),
             ts: ts.clone(),
+            backend_version: version.clone(),
             event,
         };
 
@@ -378,6 +487,7 @@ fn unreadable(line: &str, message: String) -> Vec<RecordEvent> {
     let event = |event| RecordEvent {
         message_id: None,
         ts: None,
+        backend_version: None,
         event,
     };
     vec![

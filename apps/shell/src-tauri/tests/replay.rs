@@ -142,7 +142,6 @@ async fn received(name: &str) -> Value {
         .len();
     let mut notifications = Vec::new();
     let mut last_seq: Option<u64> = None;
-    let mut last_raw_to: Option<u64> = None;
     let after = tokio::time::timeout(COLLECT, async {
         loop {
             match tokio::time::timeout(QUIET, incoming.recv()).await {
@@ -150,7 +149,6 @@ async fn received(name: &str) -> Value {
                     if method == "session.event" =>
                 {
                     last_seq = params["event"]["seq"].as_u64();
-                    last_raw_to = params["event"]["source"]["raw_to"].as_u64();
                     notifications.push(
                         json!({ "kind": "notification", "method": method, "params": params }),
                     );
@@ -161,9 +159,9 @@ async fn received(name: &str) -> Value {
                 }
                 Ok(None) => panic!("the link's event channel closed"),
                 // Quiet: the capture is complete once every recorded line
-                // is in the session's raw log, the events received reach
-                // the last of them, and Core lists no event past the last
-                // one received. Silence alone never ends it.
+                // is in the session's raw log (Core projects a line as it
+                // takes it in) and Core lists no event past the last one
+                // received. Silence alone never ends it.
                 Err(_) => {
                     let after = link
                         .request("session.list", None)
@@ -173,18 +171,8 @@ async fn received(name: &str) -> Value {
                         .request("session.raw_log", Some(json!({ "id": id })))
                         .await
                         .expect("session.raw_log");
-                    // Core's own lifecycle records are not the recording's.
-                    let fed: Vec<&Value> = raw
-                        .as_array()
-                        .expect("raw log entries")
-                        .iter()
-                        .filter(|entry| entry["dir"] != "core")
-                        .collect();
-                    let last_fed = fed.last().and_then(|entry| entry["index"].as_u64());
-                    if fed.len() == recorded
-                        && last_raw_to >= last_fed
-                        && after[0]["last_event_seq"].as_u64() == last_seq
-                    {
+                    let fed = raw.as_array().expect("raw log entries").len();
+                    if fed == recorded && after[0]["last_event_seq"].as_u64() == last_seq {
                         return after;
                     }
                 }

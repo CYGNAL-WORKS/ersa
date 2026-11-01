@@ -145,6 +145,64 @@ describe("follow", () => {
     expect(last().stream).toEqual({ state: "live" });
   });
 
+  // Two ways a client meets another view: Core restarted after turns were taken
+  // in a terminal (its history is longer, but numbered afresh), or another
+  // window opened the session afresh while this one was away. Either way the
+  // numbers no longer line up with what is shown.
+  for (const [why, answers] of [
+    ["Core restarted with a longer history", [{ last_seq: 21, view: "v-1" }, { last_seq: 40, view: "v-2" }, { last_seq: 40, view: "v-2" }]],
+    ["another window reopened the session", [{ last_seq: 21, view: "v-1" }, { last_seq: 21, view: "v-3" }, { last_seq: 21, view: "v-3" }]],
+  ] as const) {
+    it(`starts over when Core answers with another view: ${why}`, async () => {
+      const queue: unknown[] = [...answers];
+      const { follower, calls, last } = following({ "session.subscribe": () => Promise.resolve(queue.shift()) });
+      follower.attached();
+      await settle();
+      for (const event of replay.slice(0, 10)) follower.receive(event);
+      follower.attached();
+      await settle();
+      expect(calls.filter((c) => c.method === "session.subscribe").map((c) => c.params)).toEqual([
+        { id: "s-replay", from_seq: 0 },
+        { id: "s-replay", from_seq: 10 },
+        { id: "s-replay", from_seq: 0 },
+      ]);
+      expect(last().transcript.lastSeq).toBe(-1);
+      expect(last().transcript.items).toEqual([]);
+      expect(last().stream).toEqual({ state: "live" });
+      // The new view's events apply from the start.
+      follower.receive(replay[0] as (typeof replay)[number]);
+      expect(last().transcript.lastSeq).toBe(0);
+    });
+  }
+
+  it("keeps what it shows when Core answers with the same view", async () => {
+    const queue: unknown[] = [{ last_seq: 21, view: "v-1" }, { last_seq: 21, view: "v-1" }];
+    const { follower, calls, last } = following({ "session.subscribe": () => Promise.resolve(queue.shift()) });
+    follower.attached();
+    await settle();
+    for (const event of replay.slice(0, 10)) follower.receive(event);
+    follower.attached();
+    await settle();
+    expect(calls.filter((c) => c.method === "session.subscribe")).toHaveLength(2);
+    expect(last().transcript.lastSeq).toBe(9);
+  });
+
+  it("starts where the view does when it no longer holds what came between", async () => {
+    const queue: unknown[] = [{ last_seq: 21, view: "v-1" }, { last_seq: 21, view: "v-1", first_seq: 15 }];
+    const { follower, calls, last } = following({ "session.subscribe": () => Promise.resolve(queue.shift()) });
+    follower.attached();
+    await settle();
+    for (const event of replay.slice(0, 10)) follower.receive(event);
+    follower.attached();
+    await settle();
+    expect(calls.filter((c) => c.method === "session.subscribe")).toHaveLength(2);
+    expect(last().transcript.lastSeq).toBe(14);
+    expect(last().transcript.items).toEqual([
+      { kind: "notice", key: "earlier:15", message: "Earlier events of this session are no longer held." },
+    ]);
+    expect(last().stream).toEqual({ state: "live" });
+  });
+
   it("goes offline when the connection is lost, and live again once subscribed", async () => {
     const { follower, last } = following();
     follower.attached();
@@ -158,7 +216,7 @@ describe("follow", () => {
 
   it("survives an envelope without an event: a notice in its place, and the next event applies", () => {
     const { follower, last } = following();
-    const broken = { v: 1, session_id: "s-replay", seq: 0 } as unknown as (typeof replay)[number];
+    const broken = { v: 2, session_id: "s-replay", seq: 0 } as unknown as (typeof replay)[number];
     follower.receive(broken);
     follower.receive(null as unknown as (typeof replay)[number]);
     follower.receive({ ...(replay[1] as (typeof replay)[number]) });

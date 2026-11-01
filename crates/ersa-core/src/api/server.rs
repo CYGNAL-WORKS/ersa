@@ -14,6 +14,7 @@ use tokio::task::JoinSet;
 
 use super::lines::{CappedLines, LineError};
 use super::{After, ConnectionState};
+use crate::app_log::AppLog;
 use crate::persistence::{self, Store};
 use crate::platform::{self, BoxStream, Listener};
 use crate::replay::Replay;
@@ -99,7 +100,17 @@ impl Server {
             source,
         })?;
         let store = Store::open(&config.db_path())?;
-        let core = Core::new(config, store, adapters);
+        let (app_log, last_facts) = match AppLog::open(&config.app_log_dir()) {
+            Ok(opened) => opened,
+            // Sessions run without it; what it would have said is in the
+            // tracing output instead.
+            Err(e) => {
+                tracing::error!(error = %e, "could not open the app log; lifecycle facts will not be kept");
+                let path = config.app_log_dir().join(crate::app_log::FILE_NAME);
+                (AppLog::disabled(path), Default::default())
+            }
+        };
+        let core = Core::new(config, store, adapters, Arc::new(app_log));
         core.store
             .ensure_local_host(core.host_name().to_string())
             .await?;
@@ -110,9 +121,11 @@ impl Server {
         if stuck > 0 {
             tracing::warn!(stuck, "marked interrupted workspaces as error");
         }
-        // Sessions the previous Core left running are ended, and stale
-        // projections re-derived, before any client can see them.
-        core.sessions.recover().await?;
+        // Sessions the previous Core left running are ended before any
+        // client can see them.
+        core.sessions
+            .recover(&last_facts, |host| core.session_transport_for(host))
+            .await?;
         Ok(Server {
             core: Arc::new(core),
             listener,
@@ -126,8 +139,10 @@ impl Server {
     pub async fn bind_replay(mut config: CoreConfig, replay: Replay) -> Result<Server, ServeError> {
         config.replay = true;
         // The recorded backend's adapter is registered too, so anything that
-        // looks a session's backend up by name finds its projector.
-        let server = Server::bind_with(config, vec![Arc::clone(&replay.adapter)]).await?;
+        // looks a session's backend up by name finds its projector, but
+        // without its session records: a replay reads no file of the user's.
+        let recordless = crate::replay::Recordless::new(Arc::clone(&replay.adapter));
+        let server = Server::bind_with(config, vec![Arc::new(recordless)]).await?;
         crate::replay::start(&server.core, replay)
             .await
             .map_err(ServeError::Replay)?;
@@ -171,6 +186,9 @@ impl Server {
         // closing never stops sessions, but `core.shutdown` does (ADR 0011).
         tracing::info!("shutting down");
         core.sessions.stop_all().await;
+        // The stopped sessions' last facts are on disk before the process
+        // ends, or the next Core would take them for sessions left running.
+        core.sessions.flush_app_log().await;
         let drain = async { while connections.join_next().await.is_some() {} };
         if tokio::time::timeout(SHUTDOWN_GRACE, drain).await.is_err() {
             connections.abort_all();

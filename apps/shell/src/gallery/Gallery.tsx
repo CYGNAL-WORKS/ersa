@@ -102,11 +102,11 @@ function transcriptOf(events: Event[]) {
   return events
     .map(
       (event, seq): Envelope => ({
-        v: 1,
+        v: 2,
         session_id: "s1",
         seq,
         ts: "2026-11-01T09:00:00Z",
-        source: { backend: "claude-code", backend_version: "2.1.302", raw_from: seq, raw_to: seq },
+        source: { backend: "claude-code", backend_version: "2.1.302", input: "live" },
         event,
       }),
     )

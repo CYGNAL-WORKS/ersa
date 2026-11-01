@@ -25,11 +25,11 @@ const steps = (list: Envelope[]) => {
 };
 
 const envelope = (seq: number, event: Event): Envelope => ({
-  v: 1,
+  v: 2,
   session_id: "s1",
   seq,
   ts: "2026-01-01T00:00:00Z",
-  source: { backend: "claude-code", backend_version: "2.1.302", raw_from: seq, raw_to: seq },
+  source: { backend: "claude-code", backend_version: "2.1.302", input: "live" },
   event,
 });
 
@@ -121,11 +121,11 @@ describe("applying events", () => {
   });
 
   it("refuses a schema version it does not know, and applies nothing after it", () => {
-    const unknown = { ...envelope(0, { type: "user.message", text: "hi", origin: "human" }), v: 2 } as unknown as Envelope;
+    const unknown = { ...envelope(0, { type: "user.message", text: "hi", origin: "human" }), v: 3 } as unknown as Envelope;
     const refused = play([unknown, envelope(1, { type: "user.message", text: "later", origin: "human" })]);
     expect(refused.items).toEqual([]);
     expect(refused.refused).toMatch(/older than Core and needs updating/);
-    expect(refused.refused).toMatch(/version 2/);
+    expect(refused.refused).toMatch(/version 3/);
   });
 });
 

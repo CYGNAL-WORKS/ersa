@@ -18,43 +18,64 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-/// The projection version this build produces and understands.
+/// The event schema version this build produces and understands.
 ///
 /// It is the `v` on every [`Envelope`] and the `const` on `v` in the schema;
 /// a test checks the two agree. Bump it when any event's meaning or shape
-/// changes. A cached projection with an older `v` is discarded and re-derived.
-pub const PROJECTION_VERSION: u32 = 1;
+/// changes, including the lifecycle events Core emits itself. Nothing
+/// projected is stored (ADR 0017), so a bump needs no migration: Core
+/// projects at its own `v` each time it opens a session.
+///
+/// 2: `source` names the input and the backend's message id instead of a
+/// range of raw-log lines.
+pub const PROJECTION_VERSION: u32 = 2;
 
 /// One event as Core streams it: a typed payload plus where it came from.
 ///
 /// Adapters produce only the payload ([`Event`]); Core wraps it in an envelope,
-/// assigning `seq` and copying `ts` from the raw log (PROTO-AGENT-EVENTS-R01).
+/// assigning `seq` and taking `ts` from the input the event came from
+/// (PROTO-AGENT-EVENTS-R01).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Envelope {
-    /// The projection version; [`PROJECTION_VERSION`] for events this build made.
+    /// The event schema version; [`PROJECTION_VERSION`] for events this build made.
     pub v: u32,
     /// Ersa's session identifier, not the backend's.
     pub session_id: String,
     /// Gap-free and increasing within a session.
     pub seq: u64,
-    /// RFC 3339 time at which the raw log recorded the line at `source.raw_to`.
-    /// Never the clock at projection time, so re-projection gives the same value.
+    /// RFC 3339 time of the input the event came from: the time the session
+    /// record gives the entry, or the time Core received the live line. Never
+    /// the clock at projection time, so projecting again gives the same value.
     pub ts: String,
     pub source: Source,
     pub event: Event,
 }
 
-/// Which backend produced an event, and the raw-log lines it came from.
+/// Which backend produced an event, and from which input.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Source {
     pub backend: String,
     pub backend_version: String,
-    /// First raw-log line index the event came from, inclusive.
-    pub raw_from: u64,
-    /// Last raw-log line index the event came from, inclusive.
-    pub raw_to: u64,
+    pub input: Input,
+    /// The backend's id for the message the event came from. Events from the
+    /// session record and the live stream are merged on it: a message in both
+    /// yields its events once (PROTO-AGENT-EVENTS-R12).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+}
+
+/// What an event was projected from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Input {
+    /// The backend's own session record: the session's history.
+    Record,
+    /// The live stream of a running backend, in either direction.
+    Live,
+    /// Core's own knowledge of the backend process: its lifecycle.
+    Core,
 }
 
 /// The typed payload of an event, discriminated by `type`.
