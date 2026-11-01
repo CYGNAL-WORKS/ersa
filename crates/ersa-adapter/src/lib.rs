@@ -29,6 +29,7 @@
 mod adapter;
 mod local;
 mod raw;
+pub mod recording;
 mod transport;
 
 // `#[cfg(feature = "...")]` compiles the module only when the feature is on.

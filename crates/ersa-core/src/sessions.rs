@@ -428,6 +428,21 @@ impl SessionManager {
             .ok_or_else(|| {
                 SessionError::BackendMissing(format!("no adapter for backend {}", session.backend))
             })?;
+        self.create_with(session, adapter, transport, config, backend_version)
+            .await
+    }
+
+    /// [`SessionManager::create`] with a given adapter rather than the
+    /// registered one for the session's backend: the replay server's, which
+    /// feeds a recording in place of a backend.
+    pub async fn create_with(
+        &self,
+        session: Session,
+        adapter: Arc<dyn Adapter>,
+        transport: Arc<dyn Transport>,
+        config: SessionConfig,
+        backend_version: String,
+    ) -> Result<Session, SessionError> {
         let shutting_down =
             || SessionError::InvalidState("Core is shutting down; no session can start".into());
         if self.closing.load(Ordering::SeqCst) {

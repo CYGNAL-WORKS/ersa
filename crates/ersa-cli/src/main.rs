@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use ersa_core::replay::{Pace, Recording, Replay};
 use ersa_core::{CoreConfig, ServeError, Server};
 
 /// Command-line arguments.
@@ -34,6 +35,35 @@ enum Command {
         #[command(flatten)]
         endpoint: EndpointArg,
     },
+    /// Serve one recorded session over the Interface protocols, with no
+    /// backend: the replay server, for developing the Interface. It serves
+    /// the label `replay` unless given another, never the user's own
+    /// endpoint.
+    Replay {
+        /// The recording's stdout file (`<name>.jsonl`); its notes are the
+        /// `<name>.meta.json` beside it.
+        #[arg(long, value_name = "PATH")]
+        fixture: PathBuf,
+        /// `realtime` feeds each line when it arrived in the recording,
+        /// counted from the first subscribe; `instant` feeds them all at once.
+        #[arg(long, value_enum, default_value_t = PaceArg::Realtime)]
+        pace: PaceArg,
+        #[command(flatten)]
+        endpoint: EndpointArg,
+    },
+}
+
+/// The label a replay server serves when given none: never the user's own
+/// endpoint, so an Interface reaches a replay only when told to, and a
+/// replay never stands in for, or blocks, the user's Core.
+const REPLAY_LABEL: &str = "replay";
+
+/// `--pace`, as clap parses it. `ValueEnum` turns the variants into the
+/// accepted values `realtime` and `instant`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum PaceArg {
+    Realtime,
+    Instant,
 }
 
 /// `--endpoint`, shared by every subcommand that serves the Core API
@@ -81,6 +111,11 @@ async fn main() -> ExitCode {
 
     match cli.command {
         Command::Serve { data_dir, endpoint } => serve(data_dir, endpoint).await,
+        Command::Replay {
+            fixture,
+            pace,
+            endpoint,
+        } => replay(fixture, pace, endpoint).await,
     }
 }
 
@@ -139,6 +174,107 @@ async fn serve(data_dir: Option<PathBuf>, endpoint: EndpointArg) -> ExitCode {
     }
 }
 
+async fn replay(fixture: PathBuf, pace: PaceArg, endpoint: EndpointArg) -> ExitCode {
+    let recording = match Recording::load(&fixture) {
+        Ok(recording) => recording,
+        Err(e) => {
+            eprintln!("ersa-core: cannot replay {}: {e}", fixture.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    let endpoint = match endpoint.endpoint.as_deref() {
+        Some(label) => ersa_core::platform::labelled_endpoint(label),
+        None => ersa_core::platform::labelled_endpoint(REPLAY_LABEL),
+    };
+    let endpoint = match endpoint {
+        Ok(endpoint) => endpoint,
+        Err(e) => {
+            eprintln!("ersa-core: invalid --endpoint: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    // A fresh data directory per run: the replay records its session in a
+    // database of its own, never the user's. `tempfile` makes it private to
+    // the user (0700 on Unix) under an unguessable name, and removes it when
+    // `data_dir` is dropped at the end of this function.
+    let data_dir = match tempfile::Builder::new().prefix("ersa-replay-").tempdir() {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!("ersa-core: cannot create a data directory for the replay: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let mut config = match CoreConfig::new(data_dir.path().to_path_buf()) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("ersa-core: cannot name the endpoint to listen on: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    config.endpoint = endpoint;
+    let title = fixture
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "replay".into());
+    // Only Claude Code recordings exist so far, and they note the CLI's
+    // version under this key.
+    let backend_version = match recording.meta["claude_code_version"].as_str() {
+        Some(version) => version.to_string(),
+        None => {
+            tracing::warn!("the recording does not say which Claude Code version made it");
+            String::new()
+        }
+    };
+    let replay = Replay {
+        adapter: Arc::new(ersa_adapter_claude::ClaudeAdapter::new()),
+        recording,
+        title,
+        backend_version,
+        pace: match pace {
+            PaceArg::Realtime => Pace::Realtime,
+            PaceArg::Instant => Pace::Instant,
+        },
+    };
+    let code = match Server::bind_replay(config, replay).await {
+        Ok(server) => {
+            tracing::info!("replaying {}", fixture.display());
+            // Ctrl+C is how a replay is usually stopped: shut down as
+            // core.shutdown does, so the data directory is removed below.
+            // Held weakly: a strong hold would keep the database open, and
+            // the directory with it, after the server has stopped.
+            let core = Arc::downgrade(&server.core());
+            tokio::spawn(async move {
+                if tokio::signal::ctrl_c().await.is_ok()
+                    && let Some(core) = core.upgrade()
+                {
+                    core.request_shutdown();
+                }
+            });
+            match server.run().await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("ersa-core: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Err(e @ ServeError::AlreadyRunning { .. }) => {
+            eprintln!("ersa-core: {e}. Pass another --endpoint label to replay beside it.");
+            ExitCode::FAILURE
+        }
+        Err(e) => {
+            eprintln!("ersa-core: {e}");
+            ExitCode::FAILURE
+        }
+    };
+    // Best effort: on Windows a file still open (the database, if a task
+    // outlived the server) keeps the directory, and it is left behind.
+    if let Err(e) = data_dir.close() {
+        tracing::warn!(error = %e, "could not remove the replay's data directory");
+    }
+    code
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,7 +303,9 @@ mod tests {
     fn serve_takes_an_endpoint() {
         let cli = Cli::try_parse_from(["ersa-core", "serve", "--endpoint", "second"])
             .expect("--endpoint is accepted");
-        let Command::Serve { endpoint, .. } = cli.command;
+        let Command::Serve { endpoint, .. } = cli.command else {
+            panic!("serve parses as serve");
+        };
         assert_eq!(
             endpoint.or("default".into()).unwrap(),
             ersa_core::platform::labelled_endpoint("second").unwrap()
@@ -192,7 +330,50 @@ mod tests {
     fn serve_takes_a_data_dir() {
         let cli = Cli::try_parse_from(["ersa-core", "serve", "--data-dir", "D:/tmp/ersa"])
             .expect("--data-dir is accepted");
-        let Command::Serve { data_dir, .. } = cli.command;
+        let Command::Serve { data_dir, .. } = cli.command else {
+            panic!("serve parses as serve");
+        };
         assert_eq!(data_dir, Some(PathBuf::from("D:/tmp/ersa")));
+    }
+
+    #[test]
+    fn replay_takes_a_fixture_and_a_pace_that_defaults_to_realtime() {
+        let cli = Cli::try_parse_from(["ersa-core", "replay", "--fixture", "f.jsonl"])
+            .expect("replay parses");
+        let Command::Replay {
+            fixture,
+            pace,
+            endpoint,
+        } = cli.command
+        else {
+            panic!("replay parses as replay");
+        };
+        assert_eq!(fixture, PathBuf::from("f.jsonl"));
+        assert_eq!(pace, PaceArg::Realtime);
+        assert_eq!(endpoint, EndpointArg::default());
+        let cli = Cli::try_parse_from([
+            "ersa-core",
+            "replay",
+            "--fixture",
+            "f.jsonl",
+            "--pace",
+            "instant",
+            "--endpoint",
+            "mine",
+        ])
+        .expect("--pace instant and --endpoint are accepted");
+        assert!(matches!(
+            cli.command,
+            Command::Replay {
+                pace: PaceArg::Instant,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn the_replay_label_names_an_endpoint_that_is_not_the_users_own() {
+        let replay = ersa_core::platform::labelled_endpoint(REPLAY_LABEL).unwrap();
+        assert_ne!(replay, ersa_core::platform::default_endpoint().unwrap());
     }
 }
