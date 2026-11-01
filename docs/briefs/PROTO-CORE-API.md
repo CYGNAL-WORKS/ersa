@@ -17,11 +17,11 @@ One Core process per machine (the user's local machine, or a remote host reached
 
 ## Transport and framing
 
-A local stream socket: a named pipe on Windows (`\\.\pipe\ersa-core-<user>`), a Unix domain socket elsewhere (`$XDG_RUNTIME_DIR/ersa-core.sock` or equivalent). Newline-delimited JSON-RPC 2.0: requests carry `id`, `method`, `params`; responses carry `id` and `result` or `error`; notifications carry `method` and `params` with no `id`. Either side may send notifications. Core writes nothing unsolicited except notifications for active subscriptions.
+A local stream socket: a named pipe on Windows (`\\.\pipe\ersa-core-<user SID>`, the SID because a user name comes from the environment), a Unix domain socket elsewhere (`$XDG_RUNTIME_DIR/ersa-core.sock` or equivalent). Only the current user may connect: the pipe's security descriptor grants the current user alone, and the socket lives in a directory only the user can enter. Before sending anything, a client verifies that the process serving the pipe or socket runs as the same user, and refuses to talk to it otherwise, so a squatter on the name never receives the user's requests. Lines are capped at a size Core states; an over-long or non-UTF-8 line gets a protocol error and the connection closes. A connection that sends no `core.hello` within a short deadline is closed. Newline-delimited JSON-RPC 2.0: requests carry `id`, `method`, `params`; responses carry `id` and `result` or `error`; notifications carry `method` and `params` with no `id`. Either side may send notifications. Core writes nothing unsolicited except notifications for active subscriptions.
 
 ## Handshake
 
-The first request on a connection is `core.hello` with `{ client, client_version, api_versions: [..] }`. Core answers `{ core_version, api_version, event_projection_version, host: { id, name, platform }, capabilities: [..] }`. If no `api_version` overlaps, Core answers with an error and closes.
+The first request on a connection is `core.hello` with `{ client, client_version, api_versions: [..] }`. Core answers `{ core_version, api_version, event_projection_version, host: { id, name, platform }, capabilities: [..] }`. If no `api_version` overlaps, Core answers with an `invalid_state` error whose message and `detail` name the versions it supports, and closes.
 
 ## Methods
 
@@ -35,20 +35,20 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 
 ### Hosts
 
-- `host.list`: the local host and configured remote hosts: `{ id, name, kind (local | ssh), status (connected | disconnected | unknown), backends: [{ name, version, status }] }`.
+- `host.list`: the local host and configured remote hosts: `{ id, name, kind (local | ssh), status (connected | disconnected | unknown), backends: [{ name, version (optional, present when available), status (available | missing | error) }] }`.
 - `host.add`, `host.remove`, `host.probe` (re-detect backends and VCS tools): remote hosts are milestone M4; the methods are reserved now so the Interface shape is stable.
 
 ### Projects
 
-- `project.list`, `project.add { host_id, path }`, `project.remove { id }`: `{ id, host_id, path, name, vcs (git | perforce | none) }`.
+- `project.list`, `project.add { host_id, path }`, `project.remove { id }`: `{ id, host_id, path, name, vcs (git | perforce | none) }`. `project.remove` is refused with `invalid_state` while the project has workspaces; it never cascades.
 
 ### Workspaces
 
-- `workspace.list { project_id }`, `workspace.create { project_id, name (optional), base (optional) }`, `workspace.remove { id, force (optional) }`: `{ id, project_id, path, vcs_ref, state (ready | creating | removing | error) }`.
+- `workspace.list { project_id }`, `workspace.create { project_id, name (optional), base (optional) }`, `workspace.remove { id, force (optional) }`: `{ id, project_id, path, vcs_ref, state (ready | creating | removing | error) }`. `workspace.remove` returns the workspace as it was claimed for removal, with `state: removing`.
 
 ### Sessions
 
-- `session.list`: `{ id, workspace_id, host_id, backend, mode, title, state, created_at, last_event_seq, tile: { context_tokens, context_window, cost_usd_total, pending: [{ kind (permission | question), request_id }] } }`. The `tile` object is what the rail renders; Core keeps it current from events.
+- `session.list`: `{ id, workspace_id, host_id, backend, mode, title, state, created_at, last_event_seq (absent before the first event), tile: { context_tokens, context_window, cost_usd_total, pending: [{ kind (permission | question), request_id }] } }`. The `tile` object is what the rail renders; Core keeps it current from events.
 - `session.create { workspace_id, backend, mode (optional), title (optional) }`: creates and starts.
 - `session.start { id }`, `session.stop { id }`, `session.resume { id }`, `session.remove { id }`.
 - `session.send { id, text }`: sends a user message; returns `{ turn }`.
@@ -56,7 +56,7 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 - `session.decide_permission { id, request_id, behavior (allow | deny), message (optional), updated_input (optional), apply_suggestions (optional array of indices) }`.
 - `session.answer_question { id, request_id, answers }`.
 - `session.set_title { id, title }`, `session.set_mode { id, mode }` (takes effect on next start).
-- `session.subscribe { id, from_seq }`: Core sends every event with `seq >= from_seq` as `session.event` notifications, then continues live. Returns `{ last_seq }`.
+- `session.subscribe { id, from_seq }`: Core sends every event with `seq >= from_seq` as `session.event` notifications, then continues live. Returns `{ last_seq }`, absent when the session has no events yet.
 - `session.unsubscribe { id }`.
 - `session.raw_log { id, from, to }`: raw lines for the developer pane: `[{ index, ts, dir (backend | host | core), line }]`.
 - `session.reproject { id }`: discards the cached projection and re-derives; used after a projection version change.
@@ -68,7 +68,7 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 
 ### Settings
 
-- `settings.get`, `settings.set { patch }`: user settings as a JSON object, patch-merged.
+- `settings.get`, `settings.set { patch }`: user settings as a JSON object, patch-merged (RFC 7386). `settings.get` returns only what the user has set; defaults are Core's and are not echoed. Known keys so far: `workspaces.root` (where workspaces are created; default under Core's data directory).
 
 ### Workbench (milestone M2, reserved)
 
@@ -84,7 +84,7 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 
 ## Errors
 
-JSON-RPC error objects with `code` (standard JSON-RPC codes for protocol-level failures; `-32000` for application errors), `message`, and `data: { kind, detail (optional) }` where `kind` is one of `not_found`, `invalid_state`, `backend_missing`, `backend_not_logged_in`, `vcs_error`, `transport_error`, `permission`, `internal`.
+JSON-RPC error objects with `code` (standard JSON-RPC codes for protocol-level failures, including `-32602` for invalid params; `-32000` for application errors), `message`, and, on application errors only, `data: { kind, detail (optional) }` where `kind` is one of `not_found`, `invalid_state`, `backend_missing`, `backend_not_logged_in`, `vcs_error`, `transport_error`, `permission`, `internal`.
 
 ## Versioning
 
@@ -115,9 +115,12 @@ A conforming Core passes a request/response test suite driven over the socket, a
 ## Open questions
 
 - Whether to allow more than one Interface attached at once (useful for a second window), and if so whether notifications fan out to all.
-- Named pipe security descriptor on Windows: current user only.
 
 ## Changes
+
+- 2026-11-01: the pipe name uses the user's SID; clients verify the server runs as the same user; line cap and handshake deadline; the security-descriptor open question closed.
+
+- 2026-11-01: from M0-T5 inbox: backend status values; `data` only on application errors; version mismatch is `invalid_state`; `settings.get` returns user-set values only, `workspaces.root` named; sequence numbers absent before the first event; `workspace.remove` and `project.remove` behaviour stated. No requirement IDs changed.
 
 - 2026-11-01: `dir` includes `core` for Core's lifecycle records.
 - 2026-10-31: `session.raw_log` entries carry `dir`, since the raw log records host-written lines too.

@@ -2,13 +2,18 @@
 //! binary, built from the `ersa-cli` crate) is a thin wrapper around this library
 //! (ADR 0011), and the same binary runs on remote hosts.
 //!
-//! Each module below is one part of Core as `ARCH-CORE` lists them. They are
-//! empty for now; their doc comments state what each will own.
+//! Most modules below are one part of Core as `ARCH-CORE` lists them; the
+//! ones still empty state in their doc comments what each will own. Three
+//! more hold what those parts share: `state` (the [`Core`] every request
+//! handler receives), `settings`, and `platform`.
+//!
+//! [`Server::bind`] then [`Server::run`] is the whole Core process: claim the
+//! socket, open the database, answer requests until `core.shutdown`.
 //!
 //! Two rules hold for the whole crate. Nothing here depends on Tauri, so Core
 //! builds and tests without a window or a display. Code that only works on one
-//! operating system lives behind a narrow `platform` module (ADR 0006); there is
-//! none yet. `tests/boundaries.rs` checks both.
+//! operating system lives behind the narrow `platform` module (ADR 0006).
+//! `tests/boundaries.rs` checks both.
 
 // `pub mod name;` tells the compiler to load the module from `src/name.rs`.
 pub mod adapters;
@@ -17,7 +22,13 @@ pub mod harness_tools;
 pub mod modes;
 pub mod packs;
 pub mod persistence;
+pub mod platform;
 pub mod raw_log;
 pub mod sessions;
+pub mod settings;
+pub mod state;
 pub mod transport;
 pub mod workspace;
+
+pub use api::server::{ServeError, Server, connect};
+pub use state::{Core, CoreConfig};

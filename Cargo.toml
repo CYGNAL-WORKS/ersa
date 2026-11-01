@@ -26,12 +26,23 @@ clap = { version = "4", features = ["derive"] }
 # Only the validator: the default features fetch remote schemas over HTTP and
 # build a TLS stack, neither of which Ersa wants.
 jsonschema = { version = "0.60", default-features = false }
+# SQLite for Core's database. `bundled` compiles SQLite from source into the
+# binary, so there is no system library to install on Windows.
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tempfile = "3"
 thiserror = "2"
+# The current UTC time, for timestamps on database rows and raw log lines.
+time = "0.3"
 tokio = { version = "1", features = ["full"] }
 toml = "1"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Random identifiers for projects and workspaces.
+uuid = { version = "1", features = ["v4"] }
+# Win32 bindings for platform modules only.
+windows-sys = "0.61"
 
 # Lints every crate inherits with `[lints] workspace = true`.
 # `cargo clippy --all-targets -- -D warnings` turns every warning into an error,
