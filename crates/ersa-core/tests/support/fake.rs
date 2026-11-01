@@ -15,8 +15,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, Direction, PermissionDecision,
-    ProcessExit, Projected, Projector, RawLine, SessionConfig, Transport, async_trait,
+    Adapter, AdapterError, AdapterSession, AdapterSink, Direction, PermissionDecision, ProcessExit,
+    Projected, Projector, RawLine, SessionConfig, Transport, async_trait,
 };
 use ersa_protocol::events::{
     AssistantText, BackendPassthrough, DecidedBy, Event, LifecycleState, MessageOrigin,
@@ -71,7 +71,10 @@ impl Adapter for FakeAdapter {
         sink: Arc<dyn AdapterSink>,
     ) -> Result<Box<dyn AdapterSession>, AdapterError> {
         self.stats.starts.fetch_add(1, Ordering::SeqCst);
-        sink.record(Direction::Host, json!({ "t": "hello", "cwd": config.cwd }).to_string());
+        sink.record(
+            Direction::Host,
+            json!({ "t": "hello", "cwd": config.cwd }).to_string(),
+        );
         if self.fail_start {
             sink.process_exited(Ok(ProcessExit { code: Some(1) }));
             return Err(AdapterError::Protocol("the fake refused to start".into()));
