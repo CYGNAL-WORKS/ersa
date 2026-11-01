@@ -172,10 +172,14 @@ struct Handle {
     /// up waiting; the next open waits on it rather than start another, so
     /// a file system that hangs gathers one stuck read per session, not one
     /// per attempt.
-    record_read: ReadSlot<Result<Arc<Vec<RecordEvent>>, String>>,
+    record_read: ReadSlot<RecordReadResult>,
     /// The same for reading the record's title and creation time.
     summary_read: ReadSlot<Result<Option<RecordSummary>, String>>,
 }
+
+/// A read of a session's record: the record's version when the read began,
+/// and its events.
+type RecordReadResult = Result<(Option<String>, Arc<Vec<RecordEvent>>), String>;
 
 /// One read of a session's record that may still be running.
 type ReadSlot<T> = tokio::sync::Mutex<Option<tokio::task::JoinHandle<T>>>;
@@ -187,15 +191,15 @@ type ReadSlot<T> = tokio::sync::Mutex<Option<tokio::task::JoinHandle<T>>>;
 /// `timeout`; it is kept for the next caller.
 ///
 /// What a read returns is what the record held when that read began. A
-/// caller that joined a read already running reads again once it finishes,
-/// since the record may have grown meanwhile; for an unchanged record that
-/// costs a look at its size and modified time (the adapter keeps what it
-/// read last). For the same reason a read that finished after its caller
-/// gave up is not handed on.
+/// caller that joined a read already running takes its result only when
+/// `still_current` says the record has not changed since that read began,
+/// and reads again otherwise. A read that finished after its caller gave up
+/// is not handed on: nothing says when it was taken.
 async fn read_once<T: Send + 'static>(
     slot: &ReadSlot<T>,
     timeout: Duration,
     start: impl FnOnce() -> tokio::task::JoinHandle<T>,
+    still_current: impl AsyncFnOnce(&T) -> bool,
 ) -> Option<T> {
     let mut slot = slot.lock().await;
     if slot.as_ref().is_some_and(|task| task.is_finished()) {
@@ -210,6 +214,9 @@ async fn read_once<T: Send + 'static>(
         // Joined a read already running: the record may have grown since
         // that read began.
         Some(start) => {
+            if still_current(&first).await {
+                return Some(first);
+            }
             *slot = Some(start());
             wait(&mut slot, timeout).await
         }
@@ -990,18 +997,43 @@ impl SessionManager {
             Some(backend_id) => {
                 let read = match transport_for(&row.host_id) {
                     Some(transport) => {
-                        let (adapter, cwd, id) =
+                        let (reader, cwd, id) =
                             (Arc::clone(&adapter), row.cwd.clone(), backend_id.clone());
+                        let at = Arc::clone(&transport);
+                        // The record's version is taken before it is read, so
+                        // events read are never newer than the version they
+                        // are kept under.
                         let start = move || {
                             tokio::spawn(async move {
-                                adapter
-                                    .read_record(transport, &cwd, &id)
+                                let version = reader
+                                    .record_version(Arc::clone(&at), &cwd, &id)
                                     .await
+                                    .ok()
+                                    .flatten();
+                                reader
+                                    .read_record(at, &cwd, &id)
+                                    .await
+                                    .map(|events| (version, events))
                                     .map_err(|e| e.to_string())
                             })
                         };
-                        read_once(&handle.record_read, RECORD_READ, start)
+                        // A read this open joined still holds if the record's
+                        // version is the one it was read at; one whose version
+                        // nobody can tell is taken as it is.
+                        let still_current = async |read: &RecordReadResult| match read {
+                            Ok((Some(version), _)) => {
+                                let now = adapter
+                                    .record_version(transport, &row.cwd, backend_id)
+                                    .await
+                                    .ok()
+                                    .flatten();
+                                now.as_ref() == Some(version)
+                            }
+                            _ => true,
+                        };
+                        read_once(&handle.record_read, RECORD_READ, start, still_current)
                             .await
+                            .map(|read| read.map(|(_, events)| events))
                             .unwrap_or_else(|| {
                                 Err(format!(
                                     "it is still being read after {RECORD_READ:?}, or the read failed"
@@ -1080,7 +1112,9 @@ async fn apply_summary(
                 .map_err(|e| e.to_string())
         })
     };
-    match read_once(&handle.summary_read, SUMMARY_READ, start).await {
+    // A summary is small and the adapter keeps them by the record's state,
+    // so a joiner simply reads again.
+    match read_once(&handle.summary_read, SUMMARY_READ, start, async |_| false).await {
         Some(Ok(Some(summary))) => {
             let mut presented = lock(&handle.presented);
             if summary.title.is_some() {
@@ -1846,9 +1880,9 @@ mod tests {
             })
         };
         let short = Duration::from_millis(20);
-        assert_eq!(read_once(&slot, short, slow).await, None);
+        assert_eq!(read_once(&slot, short, slow, async |_| false).await, None);
         // The disk still hangs: the next open waits on the same read.
-        assert_eq!(read_once(&slot, short, slow).await, None);
+        assert_eq!(read_once(&slot, short, slow, async |_| false).await, None);
         assert_eq!(starts.load(Ordering::SeqCst), 1);
         gate.notify_one();
         // Joining it, this open reads again once it finishes: the record may
@@ -1858,7 +1892,7 @@ mod tests {
             tokio::spawn(async { 9 })
         };
         assert_eq!(
-            read_once(&slot, Duration::from_secs(5), current).await,
+            read_once(&slot, Duration::from_secs(5), current, async |_| false).await,
             Some(9)
         );
         assert_eq!(starts.load(Ordering::SeqCst), 2);
@@ -1874,7 +1908,7 @@ mod tests {
                 1
             })
         };
-        assert_eq!(read_once(&slot, short, late).await, None);
+        assert_eq!(read_once(&slot, short, late, async |_| false).await, None);
         gate.notify_one();
         tokio::time::sleep(short).await;
         let fresh = || {
@@ -1882,10 +1916,36 @@ mod tests {
             tokio::spawn(async { 2 })
         };
         assert_eq!(
-            read_once(&slot, Duration::from_secs(5), fresh).await,
+            read_once(&slot, Duration::from_secs(5), fresh, async |_| false).await,
             Some(2)
         );
         assert_eq!(starts.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn a_joined_read_is_taken_while_the_record_is_unchanged() {
+        use std::sync::atomic::AtomicUsize;
+        let slot: ReadSlot<u32> = ReadSlot::default();
+        let starts = AtomicUsize::new(0);
+        let gate = Arc::new(Notify::new());
+        let slow = || {
+            starts.fetch_add(1, Ordering::SeqCst);
+            let gate = Arc::clone(&gate);
+            tokio::spawn(async move {
+                gate.notified().await;
+                7
+            })
+        };
+        let short = Duration::from_millis(20);
+        assert_eq!(read_once(&slot, short, slow, async |_| true).await, None);
+        gate.notify_one();
+        // Unchanged: the read already made is taken, none started beside it,
+        // so a record slower to read than the timeout still opens.
+        assert_eq!(
+            read_once(&slot, Duration::from_secs(5), slow, async |read| *read == 7).await,
+            Some(7)
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
     }
 
     #[test]
