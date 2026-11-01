@@ -34,6 +34,10 @@ pub struct CoreConfig {
     /// excluded. A longer line is answered with a parse error and closes
     /// the connection.
     pub max_line_bytes: usize,
+    /// Whether this Core is a replay server, which refuses every request
+    /// that would change anything (see `replay`). Set by
+    /// `Server::bind_replay`.
+    pub replay: bool,
 }
 
 /// The default for [`CoreConfig::max_line_bytes`]: 16 MiB, far above any
@@ -59,6 +63,7 @@ impl CoreConfig {
             backend_program_override: None,
             handshake_timeout: HANDSHAKE_TIMEOUT,
             max_line_bytes: MAX_LINE_BYTES,
+            replay: false,
         })
     }
 
