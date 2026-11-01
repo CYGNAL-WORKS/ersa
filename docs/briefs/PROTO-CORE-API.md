@@ -4,7 +4,7 @@ type: protocol
 title: Core request/response API
 status: ready
 references: [PROTO-AGENT-EVENTS]
-adrs: [0011, 0017]
+adrs: [0011, 0017, 0018]
 ---
 
 # Core request/response API
@@ -40,7 +40,7 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 
 ### Projects
 
-- `project.list`, `project.add { host_id, path }`, `project.remove { id }`: `{ id, host_id, path, name, vcs (git | perforce | none) }`. `project.remove` is refused with `invalid_state` while the project has workspaces; it never cascades.
+- `project.list`, `project.add { host_id, path, trusted }`, `project.set_trust { id, trusted }`, `project.remove { id }`: `{ id, host_id, path, name, vcs (git | perforce | none), trusted }`. `trusted` is the user's answer when adding the project, and only a trusted project's own configuration loads in its sessions (ADR 0018). `project.remove` is refused with `invalid_state` while the project has workspaces; it never cascades.
 
 ### Workspaces
 
@@ -108,6 +108,7 @@ The replay server answers read-only requests exactly as Core does. It never chan
 - **PROTO-CORE-API-R08**: `session.raw_log` shall return lines exactly as the backend emitted them, without their line terminator.
 - **PROTO-CORE-API-R09**: The replay server shall accept the same requests and produce the same notifications as Core for a recorded session.
 - **PROTO-CORE-API-R10**: A reserved method shall return an error with `kind: invalid_state` and a message naming the milestone, never a protocol-level error.
+- **PROTO-CORE-API-R11**: A project shall be trusted only when `project.add` or `project.set_trust` said so, and its `trusted` value shall persist until `project.set_trust` changes it.
 
 ## Out of scope
 
@@ -121,6 +122,7 @@ The replay server answers read-only requests exactly as Core does. It never chan
 
 ## Changes
 
+- 2026-11-01: project trust (ADR 0018): `trusted` on projects, `project.add` takes it, `project.set_trust` added; PROTO-CORE-API-R11 added.
 - 2026-11-01: aligned with ADR 0017: `session.raw_log` serves the in-memory raw log, `dir` no longer includes `core` (lifecycle facts go to the app log); `session.reproject` withdrawn. No requirement IDs changed.
 
 - 2026-11-01: from #14 inbox: notifications for created projects and sessions, and a pushed `core.status`, added as an open question.
