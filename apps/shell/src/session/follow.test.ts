@@ -62,9 +62,10 @@ describe("follow", () => {
     follower.receive(replay[6] as (typeof replay)[number]);
     await settle();
     expect(last().stream).toEqual({ state: "live" });
-    // Another event beyond the same gap, while live again: no second resubscribe.
+    // Another event beyond the same gap, while live again: no second resubscribe; the stream says it failed.
     follower.receive(replay[7] as (typeof replay)[number]);
     await settle();
+    expect(last().stream).toMatchObject({ state: "failed", gap: true });
     expect(calls.filter((c) => c.method === "session.subscribe").map((c) => c.params)).toEqual([
       { id: "s-replay", from_seq: 0 },
       { id: "s-replay", from_seq: 5 },
@@ -200,8 +201,12 @@ describe("follow", () => {
     await settle();
     // The backlog came without event 5; a later event arrives beyond the same gap.
     follower.receive(replay[8] as (typeof replay)[number]);
-    expect(last().stream).toEqual({ state: "failed", message: "event 5 never arrived" });
+    expect(last().stream).toEqual({ state: "failed", message: "event 5 never arrived", gap: true });
     expect(calls.filter((c) => c.method === "session.subscribe")).toHaveLength(2);
+    // The backlog was late, not lost: the missing event arrives, and the stream is live again.
+    follower.receive(replay[5] as (typeof replay)[number]);
+    expect(last().stream).toEqual({ state: "live" });
+    expect(last().transcript.lastSeq).toBe(5);
   });
 
   it("keeps what it shows when a subscribe answer cannot be read", async () => {
