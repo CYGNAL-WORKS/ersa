@@ -33,8 +33,8 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 - `--permission-mode` must be stated; the shelf flow depends on it.
 - `--setting-sources ""` and `--strict-mcp-config` isolate a session from the user's own project and user settings; modes and packs will supply what a session should see.
 - `--permission-prompt-tool stdio` makes permission prompts arrive on the control channel (fixture 11). Without it, or without `initialize`, prompts are auto-denied (fixtures 05, 08, 09).
-- `--include-partial-messages` adds `stream_event` lines for token-level streaming (fixture 02).
-- `--replay-user-messages` echoes each stdin user message back on stdout as a `user` message (fixture 07), useful for ordering in the raw log.
+- `--include-partial-messages` adds `stream_event` lines for token-level streaming (fixture 02). Ersa passes it, so replies stream.
+- `--replay-user-messages` echoes each stdin user message back on stdout as a `user` message (fixture 07). Ersa does not pass it: the raw log already records every line the host writes, in order.
 - `--resume <session_id>` continues a session; the CLI keeps the same `session_id` (fixture 04).
 - `--mcp-config <absolute path> --permission-prompt-tool mcp__<server>__<tool>` is the fallback permission route (fixture 10).
 
@@ -187,9 +187,10 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 - Whether Ersa replays its own raw log or passes `--resume` on reconnect, and how the two agree.
 - Exact shapes of `interrupt`, `set_model`, `get_context_usage`, `get_session_cost`, and `mcp_message` responses (to be recorded).
-- Whether `--replay-user-messages` should be on by default for raw-log completeness.
 
 ## Changes
+
+- 2026-11-01: Ersa passes `--include-partial-messages` and not `--replay-user-messages` (host lines are in the raw log); that open question closed.
 
 - 2026-11-01: R10 names the event it emits (`session.notice`); meaning unchanged.
 
