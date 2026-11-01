@@ -286,6 +286,22 @@ pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
         )
 }
 
+/// The session a request is about, when it names one: requests about the
+/// same session from one connection are handled in the order they were
+/// sent, detached or not, so pipelined messages reach the backend in order
+/// and a stop is not overtaken by the remove behind it.
+pub fn session_lane(conn: &ConnectionState, request: &Request) -> Option<String> {
+    if conn.api_version.is_none() || !request.method.starts_with("session.") {
+        return None;
+    }
+    request
+        .params
+        .as_ref()?
+        .get("id")?
+        .as_str()
+        .map(String::from)
+}
+
 /// Answers a request [`runs_detached`] chose.
 pub async fn handle_detached(core: &Core, request: Request) -> Response {
     let id = request.id.clone();
