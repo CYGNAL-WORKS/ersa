@@ -7,7 +7,7 @@
 //! is still running.
 
 use std::fs::{self, File};
-use std::io::{self, Read};
+use std::io::{self, Read as _};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -26,9 +26,10 @@ pub enum LiveCheck {
     /// A running process has it open. Resuming it too would interleave both
     /// transcripts in one record, so Ersa says so.
     Open(LiveSession),
-    /// No readable file names it, but these files could not be read, so one
-    /// of them may: the CLI may have changed the registry's format. Ersa says
-    /// it could not tell, rather than that the session is free.
+    /// No readable file names it, but these could not be read (a file of a
+    /// shape this version does not know, say, or something that is not a
+    /// file), so one of them may. Ersa says it could not tell, rather than
+    /// that the session is free.
     Unknown { unreadable: Vec<PathBuf> },
 }
 
@@ -84,7 +85,18 @@ pub fn live_session(claude_home: &Path, session_id: &str) -> LiveCheck {
         if path.extension().is_none_or(|ext| ext != "json") {
             continue;
         }
-        let Some(file) = read_registry_file(&path) else {
+        let file = match read_registry_file(&path) {
+            Read::File(file) => Some(file),
+            // A CLI removed its file as it exited.
+            Read::Gone => continue,
+            // Another CLI may be writing it this moment: read it once more.
+            Read::Unreadable => match read_registry_file(&path) {
+                Read::File(file) => Some(file),
+                Read::Gone => continue,
+                Read::Unreadable => None,
+            },
+        };
+        let Some(file) = file else {
             // The file is named by its pid. When that process has gone, the
             // file is a crashed CLI's leftover and says nothing about now.
             let pid = path
@@ -114,22 +126,39 @@ pub fn live_session(claude_home: &Path, session_id: &str) -> LiveCheck {
     }
 }
 
+/// The outcome of reading one registry file.
+enum Read {
+    File(RegistryFile),
+    /// It no longer exists.
+    Gone,
+    /// It is not a regular file of the expected shape and size.
+    Unreadable,
+}
+
 /// One registry file, read through a bound so a file that keeps growing
-/// cannot make the read unbounded. `None` when it is not a regular file of
-/// the expected shape.
-fn read_registry_file(path: &Path) -> Option<RegistryFile> {
+/// cannot make the read unbounded.
+fn read_registry_file(path: &Path) -> Read {
+    let gone_or_unreadable = |e: io::Error| match e.kind() {
+        io::ErrorKind::NotFound => Read::Gone,
+        _ => Read::Unreadable,
+    };
     // `symlink_metadata` so a link is not followed, and a FIFO is never opened.
-    if !fs::symlink_metadata(path).ok()?.is_file() {
-        return None;
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return Read::Unreadable,
+        Err(e) => return gone_or_unreadable(e),
     }
     let mut text = String::new();
-    File::open(path)
-        .ok()?
-        .take(MAX_REGISTRY_FILE + 1)
-        .read_to_string(&mut text)
-        .ok()?;
-    if text.len() as u64 > MAX_REGISTRY_FILE {
-        return None;
+    let read = File::open(path)
+        .and_then(|file| file.take(MAX_REGISTRY_FILE + 1).read_to_string(&mut text));
+    if let Err(e) = read {
+        return gone_or_unreadable(e);
     }
-    serde_json::from_str(&text).ok()
+    if text.len() as u64 > MAX_REGISTRY_FILE {
+        return Read::Unreadable;
+    }
+    match serde_json::from_str(&text) {
+        Ok(file) => Read::File(file),
+        Err(_) => Read::Unreadable,
+    }
 }

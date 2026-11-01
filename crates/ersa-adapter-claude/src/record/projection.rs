@@ -76,7 +76,7 @@ impl RecordProjector {
             event,
         };
 
-        // Read from a reference, so a large entry is not copied to be typed.
+        // Typed from a reference rather than a clone of the whole entry.
         // `RecordEntry` keeps any entry it cannot type, so the fallback (which
         // the arms below never look inside) only satisfies the type checker.
         let entry = RecordEntry::deserialize(&value).unwrap_or(RecordEntry::Other(Value::Null));
