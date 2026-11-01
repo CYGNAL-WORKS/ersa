@@ -498,7 +498,11 @@ impl SessionManager {
         transport_for: impl Fn(&str) -> Option<Arc<dyn Transport>>,
     ) -> persistence::Result<()> {
         let mut summaries = tokio::task::JoinSet::new();
-        for row in self.store.sessions().await? {
+        let rows = self.store.sessions().await?;
+        // Facts of sessions removed in an earlier run are not carried on.
+        self.app_log
+            .retain_only(rows.iter().map(|row| row.id.clone()).collect());
+        for row in rows {
             let known = facts.get(&row.id);
             let started = known.map_or(UNKNOWN_TIME.to_string(), |f| f.first.ts.clone());
             let handle = Arc::new(Handle::new(row, started));
