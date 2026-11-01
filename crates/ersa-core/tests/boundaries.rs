@@ -105,7 +105,16 @@ fn no_default_member_depends_on_tauri() {
 
     // Tauri's own crates, and the window and webview crates it draws with,
     // which need a display just as much.
-    let display_stack = ["wry", "tao", "webkit2gtk", "webview2-com"];
+    let display_stack = [
+        "wry",
+        "tao",
+        "webview2-com",
+        "gtk",
+        "gdk",
+        "soup3",
+        "webkit2gtk",
+        "javascriptcore-rs",
+    ];
     let tauri: Vec<_> = deps
         .iter()
         .filter(|d| d.starts_with("tauri") || display_stack.contains(&d.as_str()))
