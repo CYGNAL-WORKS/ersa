@@ -126,10 +126,6 @@ impl Server {
         core.sessions
             .recover(&last_facts, |host| core.session_transport_for(host))
             .await?;
-        // Space a migration freed goes back to the disk without holding up
-        // the first client.
-        let store = core.store.clone();
-        tokio::spawn(async move { store.compact_if_sparse().await });
         Ok(Server {
             core: Arc::new(core),
             listener,

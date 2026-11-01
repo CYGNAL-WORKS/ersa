@@ -16,6 +16,7 @@
 //! projected.
 
 use std::collections::{HashMap, HashSet};
+use std::io::{self, BufRead, Read, Seek, SeekFrom};
 
 use ersa_protocol::events::{
     BackendPassthrough, ErrorCode, ErrorEvent, Event, MessageOrigin, UserMessage,
@@ -39,7 +40,7 @@ const PASSTHROUGH_PREFIX_BYTES: usize = 4 * 1024;
 /// `uuid`, `ts` its `timestamp` and `backend_version` its `version`.
 pub use ersa_adapter::RecordEvent;
 
-/// The events of a whole session record, as read from its file.
+/// The events of a whole session record, as read from its text.
 ///
 /// The CLI ends every entry with a newline and appends as it runs, so the
 /// last line of a live session's record may be half written. A last line
@@ -48,44 +49,64 @@ pub use ersa_adapter::RecordEvent;
 /// yields an error and a passthrough of its start (PROTO-AGENT-EVENTS-R10),
 /// and the pass carries on. Pure: the same record always yields the same
 /// events.
-///
-/// Read in two passes over the text, one entry at a time: the first keeps
-/// only what the conversation's chain needs of each entry, the second reads
-/// each entry on the chain again to project it. A record of many megabytes
-/// is never held as JSON all at once.
 pub fn project_record(record: &str) -> Vec<RecordEvent> {
-    let (complete, unterminated) = match record.rfind('\n') {
-        Some(end) => (&record[..end], &record[end + 1..]),
-        None => ("", record),
-    };
+    let mut text = io::Cursor::new(record.as_bytes());
+    project_record_from(&mut text, record.len() as u64).expect("text in memory always reads")
+}
+
+/// [`project_record`] over the first `limit` bytes `reader` gives, read
+/// line by line in two passes: the first keeps only what the conversation's
+/// chain needs of each entry and where the entry lies, the second reads each
+/// entry on the chain again to project it. Neither the record's text nor its
+/// entries as JSON are ever held whole. Bytes that are not UTF-8 are read
+/// with replacement characters.
+pub fn project_record_from<R: BufRead + Seek>(
+    reader: &mut R,
+    limit: u64,
+) -> io::Result<Vec<RecordEvent>> {
     let mut lines = Vec::new();
-    for line in complete.split('\n') {
-        let line = line.strip_suffix('\r').unwrap_or(line);
-        if line.trim().is_empty() {
-            continue;
+    let mut offset = 0u64;
+    while offset < limit {
+        let start = offset;
+        let mut bytes = Vec::new();
+        let cap = (MAX_ENTRY_BYTES as u64 + 1).min(limit - offset);
+        let read = reader.by_ref().take(cap).read_until(b'\n', &mut bytes)?;
+        if read == 0 {
+            break;
         }
-        if line.len() > MAX_ENTRY_BYTES {
+        offset += read as u64;
+        let terminated = bytes.last() == Some(&b'\n');
+        if !terminated && read as u64 > MAX_ENTRY_BYTES as u64 {
+            offset += skip_line(reader, limit - offset)?;
             lines.push(Line::Failed(unreadable(
-                line,
+                &String::from_utf8_lossy(&bytes),
                 format!("a record entry is longer than {MAX_ENTRY_BYTES} bytes"),
             )));
             continue;
         }
-        lines.push(match serde_json::from_str::<Value>(line) {
-            Ok(value) => Line::Entry {
-                text: line,
+        if terminated {
+            bytes.pop();
+            if bytes.last() == Some(&b'\r') {
+                bytes.pop();
+            }
+        }
+        let text = String::from_utf8_lossy(&bytes);
+        if text.trim().is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<Value>(&text) {
+            Ok(value) => lines.push(Line::Entry {
+                offset: start,
+                len: bytes.len(),
                 chain: chain_fields(&value),
-            },
-            Err(e) => Line::Failed(unreadable(line, format!("a record entry is not JSON: {e}"))),
-        });
-    }
-    if unterminated.len() <= MAX_ENTRY_BYTES
-        && let Ok(value) = serde_json::from_str::<Value>(unterminated)
-    {
-        lines.push(Line::Entry {
-            text: unterminated,
-            chain: chain_fields(&value),
-        });
+            }),
+            Err(e) if terminated => lines.push(Line::Failed(unreadable(
+                &text,
+                format!("a record entry is not JSON: {e}"),
+            ))),
+            // The last line, still being written: left for the next read.
+            Err(_) => {}
+        }
     }
 
     let entries: Vec<&Value> = lines
@@ -112,7 +133,8 @@ pub fn project_record(record: &str) -> Vec<RecordEvent> {
         match line {
             Line::Failed(events) => out.extend(events),
             Line::Entry {
-                text,
+                offset,
+                len,
                 chain: fields,
             } => {
                 // An entry on another branch, or a subagent's, is not part of
@@ -127,18 +149,48 @@ pub fn project_record(record: &str) -> Vec<RecordEvent> {
                 // An entry written twice (a resume can repeat one) counts once.
                 let repeated =
                     uuid(&fields).is_some_and(|id| !projected_ids.insert(id.to_string()));
+                if off_branch || repeated {
+                    continue;
+                }
                 // Read whole again only now, one entry at a time. It parsed in
                 // the first pass, so it parses here.
-                if !off_branch
-                    && !repeated
-                    && let Ok(value) = serde_json::from_str::<Value>(text)
-                {
+                reader.seek(SeekFrom::Start(offset))?;
+                let mut bytes = vec![0; len];
+                reader.read_exact(&mut bytes)?;
+                if let Ok(value) = serde_json::from_str::<Value>(&String::from_utf8_lossy(&bytes)) {
                     out.extend(projector.project(value));
                 }
             }
         }
     }
-    out
+    Ok(out)
+}
+
+/// Skips the rest of a line too long to read, up to `limit` bytes, and
+/// returns how many bytes it skipped.
+fn skip_line<R: BufRead>(reader: &mut R, limit: u64) -> io::Result<u64> {
+    let mut skipped = 0;
+    while skipped < limit {
+        let buffer = reader.fill_buf()?;
+        if buffer.is_empty() {
+            break;
+        }
+        let room = usize::try_from(limit - skipped).unwrap_or(usize::MAX);
+        let window = &buffer[..buffer.len().min(room)];
+        match window.iter().position(|b| *b == b'\n') {
+            Some(end) => {
+                reader.consume(end + 1);
+                skipped += end as u64 + 1;
+                break;
+            }
+            None => {
+                let all = window.len();
+                reader.consume(all);
+                skipped += all as u64;
+            }
+        }
+    }
+    Ok(skipped)
 }
 
 /// Whether an entry belongs to the main conversation rather than to a
@@ -149,10 +201,11 @@ fn is_main_thread(value: &Value) -> bool {
         && value.get("type").and_then(Value::as_str) != Some("progress")
 }
 
-enum Line<'a> {
+enum Line {
     Entry {
-        /// The entry's text, read again to project it.
-        text: &'a str,
+        /// Where the entry's text lies, to read it again to project it.
+        offset: u64,
+        len: usize,
         /// Only the fields the conversation's chain reads.
         chain: Value,
     },

@@ -19,7 +19,8 @@ use common::{fixtures, fixtures_root};
 use ersa_adapter::{Direction, Projector};
 use ersa_adapter_claude::ClaudeProjector;
 use ersa_adapter_claude::record::{
-    RecordEvent, SessionList, encoded_cwd, find_record, list_sessions, project_record, read_record,
+    RecordCache, RecordEvent, SessionList, encoded_cwd, find_record, list_sessions, project_record,
+    read_record,
 };
 use ersa_protocol::events::*;
 use ersa_protocol::schema::validate_event;
@@ -908,4 +909,28 @@ fn live_message_ids_are_the_record_uuids_of_the_same_messages() {
         matched += 1;
     }
     assert!(matched > 0, "no stream fixture has a record beside it");
+}
+
+#[test]
+fn a_cached_record_is_reused_while_unchanged_and_read_again_once_it_grows() {
+    let text = record_fixtures().remove(0).text;
+    let home = record_home("C:/work", SESSION, &text);
+    let cache = RecordCache::default();
+    let first = cache.read(home.path(), "C:/work", SESSION).unwrap();
+    assert_eq!(first, project_record(&text));
+    assert_eq!(cache.read(home.path(), "C:/work", SESSION).unwrap(), first);
+
+    // The CLI appends a turn taken elsewhere: the record is read again.
+    let path = find_record(home.path(), "C:/work", SESSION)
+        .unwrap()
+        .unwrap();
+    let grown = format!(
+        "{text}{}\n",
+        json!({"type": "user", "uuid": "u-later", "parentUuid": null,
+            "message": {"role": "user", "content": "later"}})
+    );
+    fs::write(&path, &grown).unwrap();
+    let again = cache.read(home.path(), "C:/work", SESSION).unwrap();
+    assert_eq!(again, project_record(&grown));
+    assert_ne!(again, first);
 }

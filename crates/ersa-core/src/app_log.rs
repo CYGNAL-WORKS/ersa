@@ -137,6 +137,8 @@ pub struct AppLog {
 /// What the writer thread is asked to do.
 enum Job {
     Write(Entry),
+    /// Stop carrying a removed session's facts into rotated logs.
+    Forget(String),
     /// Answer once everything sent before is on disk.
     Flush(oneshot::Sender<()>),
 }
@@ -220,6 +222,14 @@ impl AppLog {
         }
     }
 
+    /// Forgets session `session_id`, which was removed: its facts are not
+    /// carried into the log when it next rotates.
+    pub fn forget(&self, session_id: &str) {
+        if let Some(writer) = &self.writer {
+            let _ = writer.send(Job::Forget(session_id.to_string()));
+        }
+    }
+
     /// Returns once every fact written before is on disk, or after
     /// [`FLUSH_WAIT`] if the disk has not taken them by then.
     pub async fn flushed(&self) {
@@ -257,6 +267,9 @@ impl Writer {
         for job in jobs {
             match job {
                 Job::Write(entry) => self.write(entry),
+                Job::Forget(session_id) => {
+                    self.kept.remove(&session_id);
+                }
                 Job::Flush(done) => {
                     // To the disk, not only the system's cache.
                     if let Some(file) = &mut self.file
@@ -605,6 +618,8 @@ mod tests {
         .unwrap();
         let (log, _) = AppLog::open(dir.path()).unwrap();
         log.write("s-old", "2026-01-01T00:00:00.000Z", &started());
+        log.write("s-gone", "2026-01-01T00:00:00.000Z", &started());
+        log.forget("s-gone");
         log.write(
             "s-old",
             "2026-01-01T00:00:01.000Z",
@@ -632,6 +647,12 @@ mod tests {
         );
         assert!(left_live(&facts).is_empty());
         assert_eq!(facts["s-new"].last, None);
+        // A session removed is not carried into the next rotation.
+        let current = fs::read_to_string(dir.path().join(FILE_NAME)).unwrap();
+        assert!(
+            !current.contains("s-gone"),
+            "the removed session was carried"
+        );
         assert_eq!(facts["s-new"].first.ts, "2026-01-01T00:00:00.000Z");
         // Rotated whole: no new file is left half written beside it.
         assert!(!dir.path().join("app-log.jsonl.new").exists());
