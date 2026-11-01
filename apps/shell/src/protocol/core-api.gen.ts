@@ -635,7 +635,7 @@ export interface Session {
 export interface RawLogEntry {
   index: number;
   ts: string;
-  dir: "backend" | "host" | "core";
+  dir: "backend" | "host";
   /**
    * The line verbatim, without its terminator.
    */
