@@ -8,7 +8,8 @@
 //
 // Names: `colors.light.ink` -> `--color-ink` (light and dark set the same
 // names), `typography.ui.fontSize` -> `--type-ui-size`, `rounded.md` ->
-// `--radius-md`, `spacing.lg` -> `--space-lg`, `motion.quick` ->
+// `--radius-md`, `spacing.lg` -> `--space-lg`, `line.hairline` ->
+// `--line-hairline`, `size.rail` -> `--size-rail`, `motion.quick` ->
 // `--motion-quick` (milliseconds), `motion.ease-out` -> `--motion-ease-out`.
 //
 // Themes: light by default; dark when the system asks for it, unless an
@@ -54,6 +55,8 @@ export function css(tokens) {
   }
   for (const [name, v] of Object.entries(tokens.rounded)) shared.push(`  --radius-${name}: ${v};`);
   for (const [name, v] of Object.entries(tokens.spacing)) shared.push(`  --space-${name}: ${v};`);
+  for (const [name, v] of Object.entries(tokens.line)) shared.push(`  --line-${name}: ${v};`);
+  for (const [name, v] of Object.entries(tokens.size)) shared.push(`  --size-${name}: ${v};`);
   for (const [name, v] of Object.entries(tokens.motion)) {
     shared.push(`  --motion-${name}: ${typeof v === "number" ? `${v}ms` : v};`);
   }
