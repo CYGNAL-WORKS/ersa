@@ -165,8 +165,9 @@ impl Process for TreeProcess {
         // promises it has exited when this returns.
         let killed = self.tree.kill();
         self.child.kill().await?;
-        // The leader is reaped now; retire the tree as `wait` does.
-        self.tree.leader_exited();
+        // The leader is reaped now and the tree was just signalled, so its
+        // group is retired without signalling it again.
+        self.tree.retire();
         killed
     }
 }

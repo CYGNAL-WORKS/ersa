@@ -20,6 +20,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use ersa_adapter::AdapterError;
 
@@ -129,8 +130,9 @@ pub struct ConnectionState {
     /// keep up with its notifications.
     pub kick: Kick,
     /// This connection's subscriptions, by session id. Dropping one (or the
-    /// connection) ends it; the session itself carries on.
-    pub subscriptions: HashMap<String, Subscription>,
+    /// connection) ends it; the session itself carries on. Shared with the
+    /// detached requests that subscribe and unsubscribe.
+    pub subscriptions: Subscriptions,
     /// Forwards `session.tile` notifications once the handshake is done.
     tile_task: Option<server::AbortOnDrop>,
 }
@@ -141,10 +143,52 @@ impl ConnectionState {
             api_version: None,
             outbound,
             kick,
-            subscriptions: HashMap::new(),
+            subscriptions: Arc::default(),
             tile_task: None,
         }
     }
+
+    /// What a detached request may use of this connection.
+    pub fn peer(&self) -> Peer {
+        Peer {
+            outbound: self.outbound.downgrade(),
+            kick: Arc::clone(&self.kick),
+            subscriptions: Arc::clone(&self.subscriptions),
+        }
+    }
+}
+
+/// A connection's subscriptions, by session id.
+pub type Subscriptions = Arc<Mutex<HashMap<String, Subscription>>>;
+
+/// The parts of a connection a detached request may use. The queue is held
+/// weakly, so a request still running does not keep a closed connection's
+/// writer alive.
+#[derive(Clone)]
+pub struct Peer {
+    pub outbound: mpsc::WeakSender<String>,
+    pub kick: Kick,
+    pub subscriptions: Subscriptions,
+}
+
+impl Peer {
+    /// Lets a subscription made by request `method` about `session` send,
+    /// now that its answer is on the connection.
+    pub fn after_answer(&self, method: &str, session: Option<&str>) {
+        if method != Method::SessionSubscribe.name() {
+            return;
+        }
+        if let Some(session) = session
+            && let Some(subscription) = lock(&self.subscriptions).get_mut(session)
+        {
+            subscription.start();
+        }
+    }
+}
+
+/// Locks a std mutex, carrying on if a panicking thread poisoned it.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// What the connection does after answering.
@@ -243,8 +287,10 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         }
         Method::SessionSetTitle => to_json(sessions::set_title(core, parse(params)?).await),
         Method::SessionSetMode => to_json(sessions::set_mode(core, parse(params)?).await),
-        Method::SessionSubscribe => to_json(sessions::subscribe(core, conn, parse(params)?)),
-        Method::SessionUnsubscribe => to_json(sessions::unsubscribe(conn, parse(params)?)),
+        Method::SessionSubscribe => {
+            to_json(sessions::subscribe(core, &conn.peer(), parse(params)?))
+        }
+        Method::SessionUnsubscribe => to_json(sessions::unsubscribe(&conn.peer(), parse(params)?)),
         Method::SessionRawLog => to_json(sessions::raw_log(core, parse(params)?).await),
         Method::SessionReproject => {
             to_json(sessions::reproject(core, &conn.kick, parse(params)?).await)
@@ -269,14 +315,12 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         .map_err(|e| (e, After::Continue))
 }
 
-/// Whether `request` runs detached: a session request that acts on a
-/// session (and so may wait on its backend, or must keep its place behind
-/// one that does), which the server runs on its own rather than in line
-/// with the connection's other requests. Only after the handshake.
-///
-/// The ones that stay in line act on the connection itself (subscribe,
-/// unsubscribe) or only read (list, raw log); they never wait on a backend
-/// and never wait for the detached ones, so the connection keeps reading.
+/// Whether `request` runs detached: a session request about one session
+/// (which may wait on its backend, or must keep its place behind one that
+/// does), which the server runs on its own rather than in line with the
+/// connection's other requests. Only after the handshake. Every request
+/// that names a session is one, so requests about one session keep their
+/// order whatever they are; `session.list` and `session.create` name none.
 pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
     conn.api_version.is_some()
         && matches!(
@@ -294,6 +338,9 @@ pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
                     | Method::SessionSetTitle
                     | Method::SessionSetMode
                     | Method::SessionReproject
+                    | Method::SessionSubscribe
+                    | Method::SessionUnsubscribe
+                    | Method::SessionRawLog
             )
         )
 }
@@ -330,9 +377,9 @@ pub fn session_lane(conn: &ConnectionState, request: &Request) -> Option<String>
         .map(String::from)
 }
 
-/// Answers a request [`runs_detached`] chose. `kick` is the requesting
-/// connection's, which a re-projection must not close.
-pub async fn handle_detached(core: &Core, request: Request, kick: &Kick) -> Response {
+/// Answers a request [`runs_detached`] chose, on behalf of connection
+/// `peer`.
+pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Response {
     let id = request.id.clone();
     let params = request.params;
     let result = match Method::from_name(&request.method) {
@@ -381,7 +428,19 @@ pub async fn handle_detached(core: &Core, request: Request, kick: &Kick) -> Resp
             Err((e, _)) => Err(e),
         },
         Some(Method::SessionReproject) => match parse(params) {
-            Ok(params) => to_json(sessions::reproject(core, kick, params).await),
+            Ok(params) => to_json(sessions::reproject(core, &peer.kick, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionSubscribe) => match parse(params) {
+            Ok(params) => to_json(sessions::subscribe(core, peer, params)),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionUnsubscribe) => match parse(params) {
+            Ok(params) => to_json(sessions::unsubscribe(peer, params)),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionRawLog) => match parse(params) {
+            Ok(params) => to_json(sessions::raw_log(core, params).await),
             Err((e, _)) => Err(e),
         },
         _ => unreachable!("runs_detached chose a session method"),
