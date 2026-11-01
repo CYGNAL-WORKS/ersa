@@ -12,10 +12,14 @@
 //!
 //! - [`ClaudeAdapter`] starts and drives one CLI process per session.
 //! - [`ClaudeProjector`] turns that session's raw log into Ersa events.
+//! - [`record`] reads the CLI's own session record, which is a session's
+//!   history (ADR 0017): its projection, the list of a directory's sessions,
+//!   and the registry of sessions open in running CLI processes.
 //! - [`wire`] holds the typed models of every line in both directions.
 
 mod driver;
 mod projector;
+pub mod record;
 mod suggestions;
 pub mod wire;
 
@@ -27,4 +31,4 @@ pub const BACKEND: &str = "claude-code";
 
 /// The newest CLI version the fixtures were recorded on. A newer CLI still
 /// runs, with a `session.notice` saying so (PROTO-CLAUDE-CODE-STREAM-R10).
-pub const MAX_TESTED_VERSION: &str = "2.1.302";
+pub const MAX_TESTED_VERSION: &str = "2.1.316";

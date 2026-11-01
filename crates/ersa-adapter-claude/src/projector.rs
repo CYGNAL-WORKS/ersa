@@ -26,7 +26,7 @@ use serde_json::Value;
 
 use crate::suggestions;
 use crate::wire::{
-    AssistantMessage, CliMessage, CliResponse, ContentBlock, Delta, InitializeResponse,
+    ApiMessage, AssistantMessage, CliMessage, CliResponse, ContentBlock, Delta, InitializeResponse,
     MessageContent, RateLimitInfo, StreamEvent, StreamEventMessage, SystemMessage,
 };
 use crate::{BACKEND, MAX_TESTED_VERSION};
@@ -246,105 +246,31 @@ impl ClaudeProjector {
         value: Value,
     ) -> Vec<Projected> {
         let mut out = self.ensure_turn(line);
-
-        // A synthetic message carrying an error is the CLI telling Ersa
-        // something went wrong, not the model speaking: it becomes a session
-        // error and never transcript text (PROTO-CLAUDE-CODE-STREAM-R05).
-        if let Some(error) = &reply.error {
-            let text = plain_text(&reply.message.content);
-            let event = if reply.is_authentication_failure() {
-                ErrorEvent {
-                    code: ErrorCode::AuthenticationFailed,
-                    message: text.unwrap_or_else(|| "Claude Code is not logged in.".into()),
-                    // The CLI keeps running; logging in and sending again works.
-                    recoverable: true,
-                    action: Some(ErrorAction::LogIn),
-                }
-            } else {
-                ErrorEvent {
-                    code: ErrorCode::BackendError,
-                    message: text.unwrap_or_else(|| error.clone()),
-                    recoverable: true,
-                    action: None,
-                }
-            };
-            out.push(at(line, Event::Error(event)));
-            return out;
-        }
-
-        if reply.parent_tool_use_id.is_none() {
+        if reply.parent_tool_use_id.is_none() && reply.error.is_none() {
             self.main_model = Some(reply.message.model.clone());
         }
-        let before = out.len();
-        let message_id = reply.message.id;
-        for block in reply.message.content {
-            let block_id = self.next_block_id(&message_id);
-            match block {
-                ContentBlock::Text { text, .. } => {
-                    // A streamed block's final event covers its whole stream.
-                    let raw_from = self
-                        .streaming
-                        .remove(&block_id)
-                        .map_or(line.index, |streamed| streamed.first_raw);
-                    out.push(Projected {
-                        raw_from,
-                        event: Event::AssistantText(AssistantText {
-                            block_id,
-                            text,
-                            is_final: true,
-                        }),
-                    });
-                }
-                ContentBlock::Thinking { thinking, .. } => out.push(at(
-                    line,
-                    Event::AssistantThinking(AssistantThinking {
-                        block_id,
-                        // Usually empty: the CLI withholds the text.
-                        summary: (!thinking.is_empty()).then_some(thinking),
-                        is_final: true,
-                    }),
-                )),
-                ContentBlock::ToolUse {
-                    id, name, input, ..
-                } => match input {
-                    Value::Object(input) => out.push(at(
-                        line,
-                        Event::ToolRequested(ToolRequested {
-                            tool_use_id: id,
-                            name,
-                            display_name: None,
-                            input,
-                            parent_tool_use_id: reply.parent_tool_use_id.clone(),
-                        }),
-                    )),
-                    _ => out.push(protocol_error(
-                        line,
-                        format!(
-                            "raw line {}: tool_use {id} has an input that is not an object",
-                            line.index
-                        ),
-                    )),
-                },
-                // A tool result never comes from the assistant; any other block
-                // kind is new. The passthrough below keeps the line.
-                ContentBlock::ToolResult { .. } | ContentBlock::Other(_) => {}
-            }
-        }
-        if out.len() == before {
+        let events = reply_events(
+            &mut self.blocks_seen,
+            reply.message,
+            reply.error.as_deref(),
+            reply.parent_tool_use_id,
+        );
+        if events.is_empty() {
             out.push(passthrough(line, value));
+            return out;
+        }
+        for event in events {
+            // A streamed block's final event covers its whole stream.
+            let raw_from = match &event {
+                Event::AssistantText(text) => self
+                    .streaming
+                    .remove(&text.block_id)
+                    .map_or(line.index, |streamed| streamed.first_raw),
+                _ => line.index,
+            };
+            out.push(Projected { raw_from, event });
         }
         out
-    }
-
-    /// The id of the next content block of message `message_id`. The CLI
-    /// writes one `assistant` line per block, in order, so counting the blocks
-    /// seen gives the block's index, which is also the index its stream events
-    /// carry.
-    fn next_block_id(&mut self, message_id: &str) -> String {
-        let seen = self.blocks_seen.entry(message_id.to_string()).or_insert(0);
-        let index = *seen;
-        *seen += 1;
-        block_id(message_id, index)
     }
 
     /// A `user` line: tool results the CLI produced, or (with
@@ -357,29 +283,10 @@ impl ClaudeProjector {
         value: Value,
     ) -> Vec<Projected> {
         // An echo repeats a host line that already projected to `user.message`.
-        let MessageContent::Blocks(blocks) = content else {
-            return vec![passthrough(line, value)];
-        };
         if is_replay == Some(true) {
             return vec![passthrough(line, value)];
         }
-        let results: Vec<Event> = blocks
-            .into_iter()
-            .filter_map(|block| match block {
-                ContentBlock::ToolResult {
-                    tool_use_id,
-                    content,
-                    is_error,
-                    ..
-                } => Some(Event::ToolResult(ToolResult {
-                    tool_use_id,
-                    content: tool_output(content),
-                    is_error: is_error.unwrap_or(false),
-                    duration_ms: None,
-                })),
-                _ => None,
-            })
-            .collect();
+        let results = tool_result_events(content);
         if results.is_empty() {
             return vec![passthrough(line, value)];
         }
@@ -833,6 +740,116 @@ impl ClaudeProjector {
 }
 
 // ---------------------------------------------------------------------------
+// Messages, from either input
+
+/// The events of one `assistant` message, live or from the session record:
+/// both carry the same `message`, so both project through here
+/// (PROTO-CLAUDE-CODE-STREAM-R15). Empty when no block maps to an event, in
+/// which case the caller keeps the line as a passthrough.
+///
+/// `blocks_seen` counts, per message id, the blocks earlier lines carried. The
+/// CLI writes one line per block, in order, so the count is the block's index,
+/// which is also the index its stream events carry.
+pub(crate) fn reply_events(
+    blocks_seen: &mut HashMap<String, u64>,
+    message: ApiMessage,
+    error: Option<&str>,
+    parent_tool_use_id: Option<String>,
+) -> Vec<Event> {
+    // A synthetic message carrying an error is the CLI telling Ersa something
+    // went wrong, not the model speaking: it becomes a session error and never
+    // transcript text (PROTO-CLAUDE-CODE-STREAM-R05).
+    if let Some(error) = error {
+        let text = plain_text(&message.content);
+        let event = if error == "authentication_failed" {
+            ErrorEvent {
+                code: ErrorCode::AuthenticationFailed,
+                message: text.unwrap_or_else(|| "Claude Code is not logged in.".into()),
+                // The CLI keeps running; logging in and sending again works.
+                recoverable: true,
+                action: Some(ErrorAction::LogIn),
+            }
+        } else {
+            ErrorEvent {
+                code: ErrorCode::BackendError,
+                message: text.unwrap_or_else(|| error.to_string()),
+                recoverable: true,
+                action: None,
+            }
+        };
+        return vec![Event::Error(event)];
+    }
+
+    let mut events = Vec::new();
+    for block in message.content {
+        let seen = blocks_seen.entry(message.id.clone()).or_insert(0);
+        let block_id = block_id(&message.id, *seen);
+        *seen += 1;
+        match block {
+            ContentBlock::Text { text, .. } => events.push(Event::AssistantText(AssistantText {
+                block_id,
+                text,
+                is_final: true,
+            })),
+            ContentBlock::Thinking { thinking, .. } => {
+                events.push(Event::AssistantThinking(AssistantThinking {
+                    block_id,
+                    // Usually empty: the CLI withholds the text.
+                    summary: (!thinking.is_empty()).then_some(thinking),
+                    is_final: true,
+                }))
+            }
+            ContentBlock::ToolUse {
+                id, name, input, ..
+            } => match input {
+                Value::Object(input) => events.push(Event::ToolRequested(ToolRequested {
+                    tool_use_id: id,
+                    name,
+                    display_name: None,
+                    input,
+                    parent_tool_use_id: parent_tool_use_id.clone(),
+                })),
+                _ => events.push(Event::Error(ErrorEvent {
+                    code: ErrorCode::Protocol,
+                    message: format!("tool_use {id} has an input that is not an object"),
+                    recoverable: true,
+                    action: None,
+                })),
+            },
+            // A tool result never comes from the assistant; any other block
+            // kind is new, and the caller's passthrough keeps it.
+            ContentBlock::ToolResult { .. } | ContentBlock::Other(_) => {}
+        }
+    }
+    events
+}
+
+/// The `tool.result` events of a `user` message, live or from the session
+/// record (PROTO-CLAUDE-CODE-STREAM-R15). Empty when it carries no tool result.
+pub(crate) fn tool_result_events(content: MessageContent) -> Vec<Event> {
+    let MessageContent::Blocks(blocks) = content else {
+        return Vec::new();
+    };
+    blocks
+        .into_iter()
+        .filter_map(|block| match block {
+            ContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+                ..
+            } => Some(Event::ToolResult(ToolResult {
+                tool_use_id,
+                content: tool_output(content),
+                is_error: is_error.unwrap_or(false),
+                duration_ms: None,
+            })),
+            _ => None,
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 
 /// An event that came from `line` alone.
@@ -868,7 +885,7 @@ fn passthrough(line: &RawLine, payload: Value) -> Projected {
 
 /// `type` and the subtype that matters for it, joined with `/`, such as
 /// `system/status` or `control_request/initialize`.
-fn kind_of(payload: &Value) -> String {
+pub(crate) fn kind_of(payload: &Value) -> String {
     let Some(kind) = payload.get("type").and_then(Value::as_str) else {
         return "unknown".into();
     };
@@ -969,7 +986,7 @@ fn drift_error(line: &RawLine, kind: &str) -> Projected {
 }
 
 /// The text of a message's text blocks, if it has any.
-fn plain_text(blocks: &[ContentBlock]) -> Option<String> {
+pub(crate) fn plain_text(blocks: &[ContentBlock]) -> Option<String> {
     let texts: Vec<&str> = blocks
         .iter()
         .filter_map(|block| match block {
@@ -1158,8 +1175,9 @@ mod tests {
     #[test]
     fn compares_versions_numerically() {
         assert!(!newer_than_tested("2.1.302"));
+        assert!(!newer_than_tested("2.1.316"));
         assert!(!newer_than_tested("2.1.99"));
-        assert!(newer_than_tested("2.1.303"));
+        assert!(newer_than_tested("2.1.317"));
         assert!(newer_than_tested("2.10.0"));
         assert!(newer_than_tested("3.0.0-beta"));
         assert!(!newer_than_tested("nightly"));
