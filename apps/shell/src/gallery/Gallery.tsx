@@ -185,7 +185,8 @@ const sessionView = (events: Event[], more: Partial<SessionView> = {}): SessionV
   ...more,
 });
 
-const refusal = (method: string) => `${method}: the session is a replay of a recording and cannot change`;
+// What the user sees of Core's refusal: its message without the method name (describeError).
+const refusal = "the session is a replay of a recording and cannot change";
 
 const transcriptStates: [string, SessionView][] = [
   ["Loading", sessionView([], { stream: { state: "subscribing" } })],
@@ -193,7 +194,7 @@ const transcriptStates: [string, SessionView][] = [
   ["Streaming", sessionView(streaming)],
   ["Permission open", sessionView(asked)],
   ["Permission sending", sessionView(asked, { answers: { r1: { state: "sending" } } })],
-  ["Permission refused", sessionView(asked, { answers: { r1: { state: "failed", message: refusal("session.decide_permission") } } })],
+  ["Permission refused", sessionView(asked, { answers: { r1: { state: "failed", message: refusal } } })],
   ["Permission while Core is away", sessionView(asked, { stream: { state: "offline" } })],
   ["Hidden characters", sessionView(hiding)],
   ["Answered", sessionView(answered)],
@@ -235,7 +236,7 @@ const entries: Entry[] = [
         <ProjectList
           view={{ state: "ready", projects }}
           onNewSession={() => {}}
-          starting={{ p1: { state: "failed", message: "workspace.create: this Core is a replay server and changes nothing" } }}
+          starting={{ p1: { state: "failed", message: "this Core is a replay server and changes nothing" } }}
         />,
       ],
     ],
@@ -315,7 +316,7 @@ const entries: Entry[] = [
           autoFocus={false}
           onSend={async () => false}
           initialText="Run the tests again."
-          sending={{ state: "failed", message: refusal("session.send") }}
+          sending={{ state: "failed", message: refusal }}
         />,
       ],
       ["Core not connected", <Composer autoFocus={false} onSend={async () => false} unavailable="Core is not connected." />],
