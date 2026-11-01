@@ -77,13 +77,12 @@
   border-color: var(--color-accent);
 }
 
-/* Focus takes the accent on the edge and the title, and a hairline ring outside the edge, so it shows on the
-   active tile too. */
+/* Focus turns the edge to ink and the title to the accent; ink, because the active tile's edge is already
+   the accent and a change to it would show nothing there. */
 .session:focus-visible,
 .session[data-force="focus"] {
-  outline: var(--line-hairline) solid var(--color-accent);
-  outline-offset: var(--line-hairline);
-  border-color: var(--color-accent);
+  outline: none;
+  border-color: var(--color-ink);
 }
 
 .session:focus-visible .session-title,
