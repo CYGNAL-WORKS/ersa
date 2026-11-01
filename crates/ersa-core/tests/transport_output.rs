@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use ersa_adapter::{LocalTransport, ProcessSpec};
-use ersa_core::transport::{RunError, UNREADABLE_LINE, run};
+use ersa_core::transport::{RunError, run};
 
 /// A command whose output has a line that is not UTF-8 between two that
 /// are. On Windows, PowerShell writes the raw bytes; elsewhere, printf.
@@ -39,7 +39,11 @@ async fn a_line_that_is_not_utf8_does_not_fail_the_command() {
     .await
     .expect("the command completes");
     assert!(output.exit.success());
-    assert_eq!(output.stdout, vec!["a", UNREADABLE_LINE, "b"]);
+    // The middle line is the bytes 0xFF 0xFE, decoded the way the
+    // transport's line reader decodes anything that is not UTF-8.
+    let middle = String::from_utf8_lossy(&[0xff, 0xfe]).into_owned();
+    assert!(middle.contains('\u{FFFD}'));
+    assert_eq!(output.stdout, ["a", middle.as_str(), "b"]);
 }
 
 #[tokio::test]
