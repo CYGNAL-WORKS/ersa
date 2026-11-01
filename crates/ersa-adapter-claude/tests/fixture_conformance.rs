@@ -145,6 +145,13 @@ impl Tally {
                 }
                 CliResponse::Other(raw) => self.unknown(at, "control_response/", raw, "subtype"),
             },
+            // Modelled but unrecorded, so not in MODELLED.
+            CliMessage::ControlCancelRequest(_) => {
+                self.typed.insert("control_cancel_request".into());
+            }
+            CliMessage::KeepAlive { .. } => {
+                self.typed.insert("keep_alive".into());
+            }
             CliMessage::Unknown(raw) => self.unknown(at, "", raw, "type"),
         }
     }
@@ -292,7 +299,7 @@ fn parsing_keeps_every_field_of_every_fixture_line() {
 // verifies: PROTO-CLAUDE-CODE-STREAM-R09
 #[test]
 fn unknown_kinds_parse_as_passthrough_with_their_data() {
-    let line = r#"{"type":"keep_alive","session_id":"s","novel":{"a":1}}"#;
+    let line = r#"{"type":"tool_progress","session_id":"s","novel":{"a":1}}"#;
     let CliMessage::Unknown(raw) = CliMessage::from_line(line).unwrap() else {
         panic!("an unmodelled type should be Unknown");
     };
@@ -400,7 +407,7 @@ fn host_messages_serialise_to_the_recorded_stdin_lines() {
                     .as_str()
                     .unwrap(),
                 &PermissionDecision::Allow {
-                    updated_input: line.pointer("/response/response/updatedInput").cloned(),
+                    updated_input: line["response"]["response"]["updatedInput"].clone(),
                     updated_permissions: None,
                 },
             )
@@ -427,7 +434,7 @@ fn host_messages_match_the_shapes_in_the_brief() {
     );
 
     let allow = PermissionDecision::Allow {
-        updated_input: Some(json!({"command": "ls"})),
+        updated_input: json!({"command": "ls"}),
         updated_permissions: Some(vec![PermissionUpdate::AddRules {
             rules: vec![PermissionRule {
                 tool_name: "Bash".into(),
@@ -476,6 +483,12 @@ fn host_messages_match_the_shapes_in_the_brief() {
         json!({"subtype": "get_session_cost"})
     );
     assert_eq!(
+        line(HostMessage::ControlCancelRequest {
+            request_id: "q".into()
+        }),
+        json!({"type": "control_cancel_request", "request_id": "q"})
+    );
+    assert_eq!(
         request(HostRequest::Initialize(InitializeRequest {
             append_system_prompt: Some("be brief".into()),
             sdk_mcp_servers: Some(vec!["ersa".into()]),
@@ -520,4 +533,33 @@ fn the_initialize_response_and_permission_prompt_read_as_typed_payloads() {
         }
     }
     assert!(saw_initialize && saw_prompt);
+}
+
+// Unrecorded kinds, modelled from the SDK types: the shapes come from there
+// until a fixture captures them.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R09
+#[test]
+fn keep_alive_and_control_cancel_request_parse_typed() {
+    let line = r#"{"type":"keep_alive"}"#;
+    assert!(matches!(
+        CliMessage::from_line(line).unwrap(),
+        CliMessage::KeepAlive { .. }
+    ));
+
+    let line =
+        r#"{"type":"control_cancel_request","request_id":"1ddd13c0","reason":"interrupted"}"#;
+    let CliMessage::ControlCancelRequest(cancel) = CliMessage::from_line(line).unwrap() else {
+        panic!("control_cancel_request should parse typed");
+    };
+    assert_eq!(cancel.request_id, "1ddd13c0");
+    assert_eq!(cancel.extra["reason"], "interrupted");
+
+    // Both keep every field on the way back out.
+    for line in [
+        r#"{"type":"keep_alive","seq":3}"#,
+        r#"{"type":"control_cancel_request","request_id":"r"}"#,
+    ] {
+        let reserialised = serde_json::to_value(CliMessage::from_line(line).unwrap()).unwrap();
+        assert_eq!(reserialised, serde_json::from_str::<Value>(line).unwrap());
+    }
 }
