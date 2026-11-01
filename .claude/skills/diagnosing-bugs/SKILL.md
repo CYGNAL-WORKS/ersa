@@ -3,7 +3,7 @@ name: diagnosing-bugs
 description: Diagnosis loop for hard bugs and performance regressions. Use when the user says "diagnose"/"debug this", or reports something broken/throwing/failing/slow.
 ---
 
-> **Ersa adaptation.** This repo's glossary is `docs/GLOSSARY.md`; read that wherever this skill says `GLOSSARY.md`.
+> **Ersa adaptation.** This repo's glossary is `docs/GLOSSARY.md`. Build loops from recorded fixtures, stub CLIs and the replay server; a loop that would launch a live vendor CLI or reach a remote host needs the owner's go-ahead first, since it runs real agents with real permissions. The HITL script is for sessions with a person present.
 
 # Diagnosing Bugs
 

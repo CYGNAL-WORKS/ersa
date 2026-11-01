@@ -4,7 +4,7 @@ description: "Implement a piece of work based on a spec or set of tickets."
 disable-model-invocation: true
 ---
 
-> **Ersa adaptation.** Tickets are GitHub issues (`docs/agents/issue-tracker.md`); read the issue with its comments and stop if a blocker is still open. Work only in your own git worktree on a branch for the ticket, never `main`. Read `CLAUDE.md` and every brief and ADR the ticket names, including each brief's `## Changes`. Tests cite requirement IDs with `verifies: <ID>`; commits that implement requirements end with `Implements: <IDs>`. Where a brief is wrong or silent, add a line to `docs/briefs/INBOX.md` and carry on. The checks are `node scripts/check.mjs --quick` while working and `node scripts/check.mjs` at the end. Run `code-review` with `main` as the fixed point and fix what it confirms. Then push, open a pull request against `main` written with the `pr` skill, and end your turn with the link.
+> **Ersa adaptation.** This is the owner's interactive flow. Sessions the orchestrator starts use `implement-ticket` instead. Tickets are GitHub issues (`docs/agents/issue-tracker.md`). Commit before reviewing. "code-review" below is Claude Code's built-in `/code-review`; run it as `/code-review high` on the branch.
 
 Implement the work described by the user in the spec or tickets.
 

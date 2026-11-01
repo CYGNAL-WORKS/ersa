@@ -7,7 +7,8 @@
 // Both outputs are generated. Edit briefs and ADRs, not the outputs.
 // Rules implemented here are those of ADR 0013 and docs/briefs/README.md.
 
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -170,6 +171,29 @@ try {
   problems.push("docs/briefs/INBOX.md is missing");
 }
 if (openInbox > 0) problems.push(`${openInbox} open inbox entr${openInbox === 1 ? "y" : "ies"} need a planning pass`);
+
+// ---- Vendored files ----------------------------------------------------------
+// .claude/skills/VENDORED.sha256 pins every third-party file we copied (after our
+// adaptations) to a SHA-256 of its text with line endings normalised to LF, so a
+// Windows checkout (CRLF) and CI (LF) agree. Any change to one of those files must
+// update its line here, which keeps updates deliberate and visible in review.
+
+const VENDORED = join(ROOT, ".claude", "skills", "VENDORED.sha256");
+if (existsSync(VENDORED)) {
+  for (const entry of readFileSync(VENDORED, "utf8").split(/\r?\n/)) {
+    const m = entry.match(/^([0-9a-f]{64})\s+(\S.*)$/);
+    if (!m) continue;
+    const [, expected, rel] = m;
+    const file = join(ROOT, rel);
+    if (!existsSync(file)) {
+      problems.push(`vendored file ${rel} is missing`);
+      continue;
+    }
+    const text = readFileSync(file, "utf8").replace(/\r\n/g, "\n");
+    const actual = createHash("sha256").update(text).digest("hex");
+    if (actual !== expected) problems.push(`vendored file ${rel} changed without updating .claude/skills/VENDORED.sha256`);
+  }
+}
 
 // ---- ADR index -------------------------------------------------------------
 

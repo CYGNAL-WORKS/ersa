@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Claude Code PreToolUse hook: blocks file edits under docs/briefs/ and docs/adr/
-// unless the session has declared the planning role, either with ERSA_ROLE=planning
+// Claude Code PreToolUse hook: blocks edits to planning-only paths (docs/briefs/,
+// docs/adr/, docs/GLOSSARY.md, CLAUDE.md, .claude/skills/, .claude/settings.json,
+// scripts/hooks/) unless the session has declared the planning role, either with ERSA_ROLE=planning
 // in the environment or by running `node scripts/role.mjs planning`, which writes
 // the uncommitted file .claude/role.local. The inbox is always writable so
 // implementing sessions can record findings.
@@ -37,7 +38,14 @@ const target = String(
 
 if (!target) process.exit(0);
 
-const guarded = /(^|\/)docs\/(briefs|adr)\//.test(target);
+// Planning-only paths: the specification, the decisions, the vocabulary, the
+// agent instructions, and this guard itself.
+const guarded =
+  /(^|\/)docs\/(briefs|adr)\//.test(target) ||
+  /(^|\/)docs\/glossary\.md$/.test(target) ||
+  /(^|\/)claude\.md$/.test(target) ||
+  /(^|\/)\.claude\/(skills\/|settings\.json$)/.test(target) ||
+  /(^|\/)scripts\/hooks\//.test(target);
 // Always writable: the inbox (findings) and recorded protocol fixtures (evidence).
 const inbox = /(^|\/)docs\/briefs\/inbox\.md$/.test(target) || /(^|\/)docs\/briefs\/protocol\/fixtures\//.test(target);
 
@@ -49,9 +57,8 @@ function role() {
 
 if (guarded && !inbox && role() !== "planning") {
   process.stderr.write(
-    "Blocked: briefs and ADRs are edited only in planning sessions. " +
-      "Planning sessions declare themselves with `node scripts/role.mjs planning`. " +
-      "If a brief contradicts reality or a decision is missing, append a line to docs/briefs/INBOX.md and continue.\n"
+    "Blocked: briefs, ADRs, the glossary, CLAUDE.md, .claude/skills, .claude/settings.json and scripts/hooks " +
+      "are edited only in planning sessions. Record what should change as one line in docs/briefs/INBOX.md and continue.\n"
   );
   process.exit(2);
 }
