@@ -16,20 +16,22 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, Direction, LineReader, LineWriter,
-    PermissionDecision, Process, ProcessExit, ProcessSpec, Projector, SessionConfig, Transport,
-    async_trait,
+    PermissionDecision, Process, ProcessExit, ProcessSpec, Projector, RecordEvent, RecordSummary,
+    SessionConfig, Transport, async_trait,
 };
 use ersa_protocol::events::PermissionBehavior;
 use serde_json::{Value, json};
 use tokio::sync::{oneshot, watch};
 
 use crate::projector::ClaudeProjector;
+use crate::record;
 use crate::suggestions;
 use crate::wire::{HostControlResponse, HostMessage, HostRequest, HostResponse, InitializeRequest};
 
@@ -50,6 +52,11 @@ const STDERR_TAIL: usize = 5;
 pub struct ClaudeAdapter {
     handshake_timeout: Duration,
     stop_grace: Duration,
+    /// Where the CLI keeps session records; `None` for wherever the CLI
+    /// itself would ([`record::default_claude_home`]).
+    claude_home: Option<PathBuf>,
+    /// The records read last, reused while unchanged.
+    records: Arc<record::RecordCache>,
 }
 
 impl ClaudeAdapter {
@@ -59,7 +66,16 @@ impl ClaudeAdapter {
             // this leaves plenty of room for a slow disk or a remote host.
             handshake_timeout: Duration::from_secs(60),
             stop_grace: Duration::from_secs(3),
+            claude_home: None,
+            records: Arc::default(),
         }
+    }
+
+    /// Reads session records under `claude_home` instead of the CLI's own
+    /// default, for tests with a scratch home.
+    pub fn with_claude_home(mut self, claude_home: PathBuf) -> Self {
+        self.claude_home = Some(claude_home);
+        self
     }
 
     /// How long `start` waits for the CLI to answer `initialize`.
@@ -306,6 +322,81 @@ impl Adapter for ClaudeAdapter {
     fn projector(&self) -> Box<dyn Projector> {
         Box::new(ClaudeProjector::new())
     }
+
+    /// The session's record, read from this machine's files: the transport
+    /// has no file access yet, so a remote host's record is not read (M4).
+    async fn read_record(
+        &self,
+        _transport: Arc<dyn Transport>,
+        cwd: &str,
+        backend_session_id: &str,
+    ) -> Result<Arc<Vec<RecordEvent>>, AdapterError> {
+        let home = self.claude_home()?;
+        let (cwd, id) = (cwd.to_string(), backend_session_id.to_string());
+        // Reading a long record takes a while; off the async threads.
+        let records = Arc::clone(&self.records);
+        blocking(move || records.read(&home, &cwd, &id)).await
+    }
+
+    /// The record file's size and modified time.
+    async fn record_version(
+        &self,
+        _transport: Arc<dyn Transport>,
+        cwd: &str,
+        backend_session_id: &str,
+    ) -> Result<Option<String>, AdapterError> {
+        let home = self.claude_home()?;
+        let (cwd, id) = (cwd.to_string(), backend_session_id.to_string());
+        blocking(move || record::record_version(&home, &cwd, &id)).await
+    }
+
+    fn forget_record(&self, _cwd: &str, backend_session_id: &str) {
+        self.records.forget(backend_session_id);
+    }
+
+    /// The record's title and first time, from its head and tail
+    /// (PROTO-CLAUDE-CODE-STREAM-R16), read from this machine's files.
+    async fn summarize_record(
+        &self,
+        _transport: Arc<dyn Transport>,
+        cwd: &str,
+        backend_session_id: &str,
+    ) -> Result<Option<RecordSummary>, AdapterError> {
+        let home = self.claude_home()?;
+        let (cwd, id) = (cwd.to_string(), backend_session_id.to_string());
+        let records = Arc::clone(&self.records);
+        let summary = blocking(move || records.summarize(&home, &cwd, &id)).await?;
+        Ok(summary.map(|summary| RecordSummary {
+            title: summary.title,
+            created_at: summary.created_at,
+        }))
+    }
+}
+
+impl ClaudeAdapter {
+    /// Where the CLI keeps its records: the one set for tests, else the CLI's
+    /// own default.
+    fn claude_home(&self) -> Result<PathBuf, AdapterError> {
+        self.claude_home
+            .clone()
+            .or_else(record::default_claude_home)
+            .ok_or_else(|| {
+                AdapterError::Io(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "no home directory to find Claude Code's session records in",
+                ))
+            })
+    }
+}
+
+/// Runs file reads off the async threads.
+async fn blocking<T: Send + 'static>(
+    read: impl FnOnce() -> io::Result<T> + Send + 'static,
+) -> Result<T, AdapterError> {
+    tokio::task::spawn_blocking(read)
+        .await
+        .map_err(|e| AdapterError::Protocol(format!("reading the session record failed: {e}")))?
+        .map_err(AdapterError::Io)
 }
 
 /// Adds the CLI's last stderr lines to a protocol error's message.

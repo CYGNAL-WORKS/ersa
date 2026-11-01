@@ -1,31 +1,43 @@
 //! Session manager: the lifecycle of every session (created, starting,
 //! running, waiting on user, idle, ended). Routes user input and permission
-//! decisions to adapters, and raw backend output to the raw log.
+//! decisions to adapters, and what crosses a backend's stdio to the session's
+//! projection.
+//!
+//! A session's history is the backend's own session record (ADR 0017).
+//! Nothing projected is stored: each session Core shows has an open
+//! [`View`] in memory, made from the record when the session is opened and
+//! extended by the live stream while Core runs its backend.
 //!
 //! One running session is three tasks and a sink:
 //!
 //! - The **sink** ([`CoreSink`]) is what the adapter records lines into. It
 //!   stamps each line with the next index and the time and queues it, never
-//!   blocking, as `AdapterSink` requires. Stamping under one lock is what
-//!   keeps the raw log in the order lines happened.
-//! - The **pipeline** task takes queued lines in batches, projects them, and
-//!   writes lines, events, and the session's summary row in one transaction.
-//!   Only then does it hand the events to subscribers, so an event a client
-//!   sees is always one it can replay later.
+//!   blocking, as `AdapterSink` requires, together with Core's own lifecycle
+//!   facts. Stamping under one lock keeps them in the order they happened.
+//! - The **pipeline** task takes what was queued in batches: lines go to the
+//!   in-memory raw log for the developer pane, facts to the app log, and both
+//!   through the view, whose new events it hands to subscribers.
 //! - The **session** task starts the backend through its adapter, waits for
 //!   the process to end, then closes the sink, lets the pipeline drain, and
 //!   marks the session no longer live.
-//! - Each **subscription** has a task of its own that replays the cached
-//!   events a client asked for and then forwards live ones. The pipeline
-//!   never waits for a client: it offers each event to a subscription's queue
-//!   and drops a subscription whose queue is full, and that subscription's
-//!   connection is closed, so the client knows to reconnect and resubscribe.
+//! - Each **subscription** has a task of its own that replays the events a
+//!   client asked for and then forwards live ones. The pipeline never waits
+//!   for a client: it offers each event to a subscription's queue and drops a
+//!   subscription whose queue is full, and that subscription's connection is
+//!   closed, so the client knows to reconnect and resubscribe.
+//!
+//! When views are opened: a session whose backend Core starts gets a view as
+//! it starts. A session not running in this Core gets one when a client first
+//! subscribes, and a fresh one when a client subscribes from the start
+//! (`from_seq` 0) while nobody else is subscribed, so turns taken elsewhere
+//! (in the terminal, say) show when the session is opened again. A client
+//! resubscribing from where it left off keeps the view it was reading.
 //!
 //! Disconnecting a client affects only its subscriptions; a session runs
 //! until it is stopped, its backend exits, or Core shuts down
 //! (PROTO-CORE-API-R03, ARCH-CORE-R08).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
@@ -33,33 +45,31 @@ use std::time::Duration;
 
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, Direction, PermissionDecision, ProcessExit,
-    RawLine, SessionConfig, Transport,
+    RawLine, RecordEvent, RecordSummary, SessionConfig, Transport,
 };
 use ersa_protocol::core_api::rpc::Notification;
 use ersa_protocol::core_api::{Session, SessionEventParams, SessionTileParams, Tile};
-use ersa_protocol::events::{Envelope, LifecycleState};
+use ersa_protocol::events::{Envelope, ErrorCode, ErrorEvent, Event, LifecycleState};
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::AbortHandle;
 
-use crate::persistence::{self, LogBatch, SessionProgress, Store, now_rfc3339};
-use crate::raw_log::{CoreRecord, Projection};
+use crate::app_log::{AppLog, Facts, LifecycleFact};
+use crate::persistence::{self, SessionRow, Store, now_rfc3339};
+use crate::projection::View;
+use crate::raw_log::RawLog;
 
 /// How many events may wait for one subscriber before it counts as unable
 /// to keep up. Streaming text produces many small events, so this is
 /// generous; a client further behind than this is disconnected.
 const SUBSCRIBER_QUEUE: usize = 4096;
 
-/// The most raw lines the pipeline writes in one transaction, and the most
-/// bytes of them (a batch always takes at least one line).
+/// The most raw lines the pipeline projects in one go, before it hands the
+/// events on.
 const BATCH: usize = 256;
-const BATCH_BYTES: usize = 8 * 1024 * 1024;
-
-/// How many cached events a replay reads at a time.
-const REPLAY_PAGE: u64 = 500;
 
 /// How long `session.stop` waits for the backend to end and its last lines
-/// to be stored. The Claude Code adapter kills after three seconds; this is
-/// the backstop for an adapter that never returns.
+/// to be projected. The Claude Code adapter kills after three seconds; this
+/// is the backstop for an adapter that never returns.
 const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long a request waits for a session that is still starting to become
@@ -72,29 +82,34 @@ const START_WAIT: Duration = Duration::from_secs(120);
 /// backend that stopped reading.
 const ADAPTER_CALL: Duration = Duration::from_secs(30);
 
-/// The most bytes of cached events a replay reads at a time (always at least
-/// one event, however large).
-const REPLAY_BYTES: usize = 8 * 1024 * 1024;
+/// How many events a replay sends before it looks again for whether the
+/// subscription is still wanted.
+const REPLAY_PAGE: usize = 500;
+
+/// The most bytes of event lines one open view holds. A long live session
+/// with streaming replies emits a great many events; a client that asks for
+/// ones older than these starts from the oldest held, as `first_seq` in the
+/// subscribe answer says.
+const MAX_VIEW_BYTES: usize = 64 * 1024 * 1024;
 
 /// How long `session.send` waits for its message to be projected, to report
 /// the turn it started.
 const SEND_SETTLE: Duration = Duration::from_secs(10);
 
+/// How long reading a session's record may take before the session opens
+/// with an error saying so. Records are local files, normally read in well
+/// under a second; a file system that hangs (a network drive, a synced
+/// folder) must not hold the session's other operations for ever.
+const RECORD_READ: Duration = Duration::from_secs(30);
+
+/// How long reading a record's title and creation time may take, and how
+/// long startup waits for all of them together.
+const SUMMARY_READ: Duration = Duration::from_secs(5);
+const STARTUP_SUMMARIES: Duration = Duration::from_secs(10);
+
 /// After a stop interrupts a start, how long the session task waits for the
 /// adapter to report the half-started process's exit.
 const CANCELLED_START_GRACE: Duration = Duration::from_secs(10);
-
-/// Delays between attempts at a raw-log write that failed, about ten
-/// seconds in all. A database that cannot take the write by then is not
-/// coming back soon; the session is stopped rather than left running with
-/// nothing recorded.
-const WRITE_RETRY: [Duration; 5] = [
-    Duration::from_millis(50),
-    Duration::from_millis(200),
-    Duration::from_secs(1),
-    Duration::from_secs(3),
-    Duration::from_secs(5),
-];
 
 /// Signals a connection to close; see `ConnectionState::kick` in `api`.
 pub type Kick = Arc<watch::Sender<bool>>;
@@ -120,15 +135,13 @@ pub enum SessionError {
 pub struct SessionManager {
     store: Store,
     adapters: HashMap<String, Arc<dyn Adapter>>,
+    /// Where Core writes each backend process's lifecycle facts.
+    app_log: Arc<AppLog>,
     /// Every session in the database, by id. A std mutex: only held to look
     /// up, insert, or remove, never across an await.
     sessions: Mutex<HashMap<String, Arc<Handle>>>,
     /// Where `session.tile` notifications go, for every attached client.
     tiles: Arc<TileHub>,
-    /// Re-derivations of a whole raw log, one at a time across Core: each
-    /// holds the database for its whole log, and live sessions' pipelines
-    /// must get a turn between them.
-    rebuilds: tokio::sync::Semaphore,
     /// Set by [`SessionManager::stop_all`]; no session starts after it.
     /// Read and written under the `sessions` lock.
     closing: AtomicBool,
@@ -138,34 +151,203 @@ pub struct SessionManager {
 struct Handle {
     id: String,
     backend: String,
-    /// The adapter projector version its cached events are made with;
-    /// `None` when no adapter for its backend is registered, or its cache
-    /// could not be repaired. A successful re-projection sets it.
-    projection_version: Mutex<Option<u32>>,
-    /// Serialises the operations that change whether the session is live:
-    /// stop, remove, and re-project. Held across awaits, so an async mutex.
+    /// The session's row as last written.
+    row: Mutex<SessionRow>,
+    /// What the session's record says of it, as last read.
+    presented: Mutex<Presented>,
+    /// Serialises the operations that change whether the session is live or
+    /// which view it has: stop, remove, and opening a view. Held across
+    /// awaits, so an async mutex.
     op: tokio::sync::Mutex<()>,
     hub: Mutex<Hub>,
     live: Mutex<Option<Arc<Live>>>,
+    /// The lines exchanged with the backend since Core started it, for the
+    /// developer pane.
+    raw: Mutex<RawLog>,
+    /// The fact that ended the backend the last time Core ran it, and when
+    /// Core learnt it: shown again at the end of a view opened afresh, since
+    /// it is Core's knowledge and never in the record.
+    ending: Mutex<Option<(LifecycleFact, String)>>,
+    /// A read of the session's record still running after its caller gave
+    /// up waiting; the next open waits on it rather than start another, so
+    /// a file system that hangs gathers one stuck read per session, not one
+    /// per attempt.
+    record_read: ReadSlot<RecordReadResult>,
+    /// The same for reading the record's title and creation time.
+    summary_read: ReadSlot<Result<Option<RecordSummary>, String>>,
 }
 
-/// Who receives a session's events, and how far they have been published.
+/// A read of a session's record: the record's version when the read began,
+/// and its events.
+type RecordReadResult = Result<(Option<String>, Arc<Vec<RecordEvent>>), String>;
+
+/// One read of a session's record that may still be running.
+type ReadSlot<T> = tokio::sync::Mutex<Option<tokio::task::JoinHandle<T>>>;
+
+/// The result of a read of the session's record, started with `start`
+/// unless one is still running in `slot`, which is waited on instead: a
+/// read is never started beside one that has not finished (a thread stuck on
+/// a hung disk stays one thread). `None` when it takes longer than
+/// `timeout`; it is kept for the next caller.
+///
+/// What a read returns is what the record held when that read began. A
+/// caller that joined a read already running takes its result only when
+/// `still_current` says the record has not changed since that read began,
+/// and reads again otherwise. A read that finished after its caller gave up
+/// is not handed on: nothing says when it was taken.
+async fn read_once<T: Send + 'static>(
+    slot: &ReadSlot<T>,
+    timeout: Duration,
+    start: impl FnOnce() -> tokio::task::JoinHandle<T>,
+    still_current: impl AsyncFnOnce(&T) -> bool,
+) -> Option<T> {
+    let mut slot = slot.lock().await;
+    if slot.as_ref().is_some_and(|task| task.is_finished()) {
+        *slot = None;
+    }
+    let mut start = Some(start);
+    if slot.is_none() {
+        *slot = start.take().map(|start| start());
+    }
+    let first = wait(&mut slot, timeout).await?;
+    match start {
+        // Joined a read already running: the record may have grown since
+        // that read began.
+        Some(start) => {
+            if still_current(&first).await {
+                return Some(first);
+            }
+            *slot = Some(start());
+            wait(&mut slot, timeout).await
+        }
+        // Started here: what it read is current.
+        None => Some(first),
+    }
+}
+
+/// Waits up to `timeout` for the read in `slot`, awaited where it lies, so a
+/// caller that goes away (its connection closed) leaves it for the next one,
+/// never a second read beside it. `None` (the read kept) when it is still
+/// running, or (the read gone) when it failed.
+async fn wait<T>(slot: &mut Option<tokio::task::JoinHandle<T>>, timeout: Duration) -> Option<T> {
+    let task = slot.as_mut()?;
+    match tokio::time::timeout(timeout, task).await {
+        Ok(result) => {
+            *slot = None;
+            match result {
+                Ok(value) => Some(value),
+                Err(e) => {
+                    tracing::error!(error = %e, "a session record read failed");
+                    None
+                }
+            }
+        }
+        // Still running: kept for the next caller to wait on.
+        Err(_) => None,
+    }
+}
+
+/// The session's open view, and who receives its events.
 #[derive(Default)]
 struct Hub {
-    /// The seq of the last event handed to subscribers, which is also the
-    /// last one committed to the cache.
-    last_seq: Option<u64>,
+    /// `None` until the session is opened in this Core, and again once
+    /// nobody reads a session Core is not running.
+    view: Option<View>,
+    /// The open view's identity, which `session.subscribe` answers with: a
+    /// client that sees it change knows the events it holds belong to
+    /// another view, and starts over.
+    view_id: String,
+    /// The view's events still held, as notification lines:
+    /// `events[seq - first_seq]`. Only the latest [`MAX_VIEW_BYTES`] are held.
+    events: VecDeque<Arc<Published>>,
+    /// The `seq` of the first event held.
+    first_seq: u64,
+    /// Bytes of notification lines held.
+    held_bytes: usize,
     subscribers: HashMap<u64, Subscriber>,
     next_subscriber: u64,
 }
 
+/// A session's title and when it began, which are its record's to say
+/// (ADR 0017), not Ersa's to store.
+#[derive(Debug, Clone)]
+struct Presented {
+    title: Option<String>,
+    /// RFC 3339: from the record when it has said, else when Core first
+    /// started the session's backend, else [`UNKNOWN_TIME`].
+    created_at: String,
+}
+
+/// The creation time of a session nothing remembers starting: one from
+/// before the app log, whose backend never wrote a record. It sorts first.
+const UNKNOWN_TIME: &str = "1970-01-01T00:00:00.000Z";
+
+impl Hub {
+    /// The `seq` of the last event handed to subscribers; `None` before the
+    /// first.
+    fn last_seq(&self) -> Option<u64> {
+        (self.first_seq + self.events.len() as u64).checked_sub(1)
+    }
+
+    /// Holds a published event, letting the oldest go past
+    /// [`MAX_VIEW_BYTES`] (the latest is always held).
+    fn hold(&mut self, event: Arc<Published>) {
+        self.hold_within(event, MAX_VIEW_BYTES);
+    }
+
+    fn hold_within(&mut self, event: Arc<Published>, max_bytes: usize) {
+        self.held_bytes += event.line.len();
+        self.events.push_back(event);
+        while self.held_bytes > max_bytes && self.events.len() > 1 {
+            if let Some(old) = self.events.pop_front() {
+                self.held_bytes -= old.line.len();
+                self.first_seq += 1;
+            }
+        }
+    }
+
+    /// Makes `view`, whose events so far are `events`, the open view, under a
+    /// new identity.
+    fn install(&mut self, session_id: &str, view: View, events: &[Envelope]) {
+        self.view = Some(view);
+        self.view_id = persistence::new_id("v");
+        self.events.clear();
+        self.first_seq = 0;
+        self.held_bytes = 0;
+        for event in events {
+            self.hold(Arc::new(published(session_id, event)));
+        }
+    }
+
+    /// Lets the view and its events go.
+    fn close(&mut self) {
+        self.view = None;
+        self.view_id.clear();
+        self.events = VecDeque::new();
+        self.first_seq = 0;
+        self.held_bytes = 0;
+    }
+}
+
+/// What `session.subscribe` answers with.
+#[derive(Debug, Clone)]
+pub struct Subscribed {
+    /// The seq of the last event so far; `None` before the first.
+    pub last_seq: Option<u64>,
+    /// The identity of the view the subscription reads.
+    pub view: String,
+    /// The first event the view still holds, when it no longer holds them
+    /// all from 0.
+    pub first_seq: Option<u64>,
+}
+
 struct Subscriber {
     events: mpsc::Sender<Arc<Published>>,
-    /// Set when the pipeline dropped this subscriber for falling behind.
+    /// Set when the hub dropped this subscriber for falling behind.
     overflowed: Arc<AtomicBool>,
-    /// Closes the subscriber's connection. Raised by the pipeline itself
-    /// when it drops the subscriber: the forwarding task may be parked
-    /// waiting on a client that stopped reading, and would never notice.
+    /// Closes the subscriber's connection. Raised by the hub itself when it
+    /// drops the subscriber: the forwarding task may be parked waiting on a
+    /// client that stopped reading, and would never notice.
     kick: Kick,
 }
 
@@ -184,7 +366,7 @@ struct Live {
     cancel: watch::Sender<bool>,
     /// The pipeline's progress, for `session.send` to wait on.
     progress: watch::Receiver<Progress>,
-    /// Becomes true once the session has ended and its last line is stored.
+    /// Becomes true once the session has ended and its last line is projected.
     finished: watch::Receiver<bool>,
 }
 
@@ -199,7 +381,7 @@ enum Started {
 
 #[derive(Debug, Clone, Copy, Default)]
 struct Progress {
-    /// Raw lines stored so far, which is also the index of the next one.
+    /// Raw lines projected so far, which is also the index of the next one.
     lines: u64,
     turn: u32,
 }
@@ -239,149 +421,162 @@ fn not_running() -> SessionError {
 }
 
 impl Handle {
-    fn new(
-        id: &str,
-        backend: &str,
-        projection_version: Option<u32>,
-        last_seq: Option<u64>,
-    ) -> Self {
+    /// A session first known to have begun at `created_at`, until its
+    /// record says.
+    fn new(row: SessionRow, created_at: String) -> Self {
         Handle {
-            id: id.to_string(),
-            backend: backend.to_string(),
-            projection_version: Mutex::new(projection_version),
-            op: tokio::sync::Mutex::new(()),
-            hub: Mutex::new(Hub {
-                last_seq,
-                ..Hub::default()
+            id: row.id.clone(),
+            backend: row.backend.clone(),
+            row: Mutex::new(row),
+            presented: Mutex::new(Presented {
+                title: None,
+                created_at,
             }),
+            op: tokio::sync::Mutex::new(()),
+            hub: Mutex::default(),
             live: Mutex::new(None),
+            raw: Mutex::default(),
+            ending: Mutex::new(None),
+            record_read: tokio::sync::Mutex::new(None),
+            summary_read: tokio::sync::Mutex::new(None),
         }
     }
 
     fn live(&self) -> Option<Arc<Live>> {
         lock(&self.live).clone()
     }
+
+    /// Lets the view and the raw log go when Core is not running the session
+    /// and nobody reads it: a session opened again is projected afresh.
+    fn close_if_idle(&self) {
+        // Checked under the hub's lock, so a session that starts meanwhile is
+        // seen as live rather than losing its view (live is only ever taken
+        // after the hub, never before it).
+        let mut hub = lock(&self.hub);
+        if self.live().is_some() || !hub.subscribers.is_empty() || hub.view.is_none() {
+            return;
+        }
+        hub.close();
+        drop(hub);
+        *lock(&self.raw) = RawLog::default();
+    }
+
+    /// The session as `session.list` reports it. A session no view has
+    /// been opened for is not running in this Core, so it has ended.
+    fn describe(&self) -> Session {
+        let row = lock(&self.row).clone();
+        let presented = lock(&self.presented).clone();
+        let ending = lock(&self.ending).clone();
+        let hub = lock(&self.hub);
+        let (state, tile) = match &hub.view {
+            Some(view) => (view.state(), view.tile().clone()),
+            // Not opened yet in this Core: as its ending left it, which a
+            // view would end with too (an exit with an error is `error`).
+            None => {
+                let (mut view, _) = View::open(&self.id, &self.backend, None, &[]);
+                if let Some((fact, ts)) = &ending {
+                    view.lifecycle(fact, ts);
+                }
+                (view.state(), view.tile().clone())
+            }
+        };
+        Session {
+            id: row.id,
+            workspace_id: row.workspace_id,
+            host_id: row.host_id,
+            backend: row.backend,
+            mode: row.mode,
+            title: presented.title,
+            state,
+            created_at: presented.created_at,
+            last_event_seq: hub.last_seq(),
+            tile,
+        }
+    }
 }
 
 impl SessionManager {
-    pub fn new(store: Store, adapters: Vec<Arc<dyn Adapter>>) -> Self {
+    pub fn new(store: Store, adapters: Vec<Arc<dyn Adapter>>, app_log: Arc<AppLog>) -> Self {
         SessionManager {
             store,
             adapters: adapters
                 .into_iter()
                 .map(|adapter| (adapter.backend().to_string(), adapter))
                 .collect(),
+            app_log,
             sessions: Mutex::new(HashMap::new()),
             tiles: Arc::default(),
-            rebuilds: tokio::sync::Semaphore::new(1),
             closing: AtomicBool::new(false),
         }
     }
 
-    /// Loads every session at startup and repairs what a previous Core left.
+    /// Loads every session at startup, with how each last ended, from
+    /// `last_facts` (each session's last fact in the app log), and ends those
+    /// a previous Core left running.
     ///
-    /// A session still marked live was running when that Core ended without
-    /// recording the backend's exit (it crashed or was killed). On Windows
-    /// its process tree died with that Core's job handle; elsewhere the CLI
-    /// sees its stdin close and exits, though anything it started may
-    /// linger. It gets a `core_restarted` record, which ends it. A cached
-    /// projection made by another projector version, or one that does not
-    /// reach the end of the raw log, is re-derived.
+    /// A session whose last fact is `process_started` was running when that
+    /// Core crashed or was killed. On Windows its process tree died with that
+    /// Core's job handle; elsewhere the CLI sees its stdin close and exits,
+    /// though anything it started may linger. It gets a `core_restarted` fact
+    /// in the app log, which ends its views.
     ///
-    /// A session that cannot be repaired is logged and left as it is: one
-    /// bad session must not keep Core from starting for all the others.
-    pub async fn recover(&self) -> persistence::Result<()> {
-        for session in self.store.sessions().await? {
-            let (last_seq, version) = match self.recover_one(&session).await {
-                Ok(recovered) => recovered,
-                Err(e) => {
-                    tracing::error!(session = %session.id, error = %e, "could not repair the session; leaving it as it is");
-                    // Its cache may be from another version, so its events
-                    // are not served until a re-projection works, and it is
-                    // not shown as still running.
-                    if is_live(session.state)
-                        && let Err(e) = self
-                            .store
-                            .set_session_state(session.id.clone(), LifecycleState::Error)
-                            .await
-                    {
-                        tracing::error!(session = %session.id, error = %e, "could not mark the session as failed");
-                    }
-                    (session.last_event_seq, None)
+    /// Each session's title and creation time are read from its record, on
+    /// the host `transport_for` reaches.
+    pub async fn recover(
+        &self,
+        facts: &HashMap<String, Facts>,
+        transport_for: impl Fn(&str) -> Option<Arc<dyn Transport>>,
+    ) -> persistence::Result<()> {
+        let mut summaries = tokio::task::JoinSet::new();
+        let rows = self.store.sessions().await?;
+        // Facts of sessions removed in an earlier run are not carried on.
+        self.app_log
+            .retain_only(rows.iter().map(|row| row.id.clone()).collect());
+        for row in rows {
+            let known = facts.get(&row.id);
+            let started = known.map_or(UNKNOWN_TIME.to_string(), |f| f.first.ts.clone());
+            let handle = Arc::new(Handle::new(row, started));
+            match known.map(|f| &f.last) {
+                Some(Some(last)) if !last.fact.ends() => {
+                    let ts = now_rfc3339();
+                    let fact = LifecycleFact::CoreRestarted;
+                    self.app_log.write(&handle.id, &ts, &fact);
+                    *lock(&handle.ending) = Some((fact, ts));
                 }
-            };
-            let handle = Handle::new(&session.id, &session.backend, version, last_seq);
-            lock(&self.sessions).insert(session.id.clone(), Arc::new(handle));
+                Some(Some(last)) => {
+                    *lock(&handle.ending) = Some((last.fact.clone(), last.ts.clone()));
+                }
+                // Its last fact could not be read: how it ended is unknown,
+                // and nothing is made up for it.
+                Some(None) | None => {}
+            }
+            if let Some(adapter) = self.adapters.get(&handle.backend) {
+                let row = lock(&handle.row).clone();
+                if let (Some(backend_id), Some(transport)) =
+                    (row.backend_session_id, transport_for(&row.host_id))
+                {
+                    let (handle, adapter) = (Arc::clone(&handle), Arc::clone(adapter));
+                    summaries.spawn(async move {
+                        apply_summary(&handle, adapter, transport, row.cwd, backend_id).await;
+                    });
+                }
+            }
+            lock(&self.sessions).insert(handle.id.clone(), handle);
+        }
+        // Read side by side, and not waited on past a bound: a file system
+        // that hangs leaves those titles to the next time a session opens,
+        // rather than keeping Core from serving at all.
+        let all = async { while summaries.join_next().await.is_some() {} };
+        if tokio::time::timeout(STARTUP_SUMMARIES, all).await.is_err() {
+            tracing::warn!("reading the sessions' titles took too long; some are left to later");
         }
         Ok(())
     }
 
-    /// Repairs one session as [`SessionManager::recover`] describes, and
-    /// returns the seq of its last event and the projector version its cache
-    /// is now made with.
-    ///
-    /// Whether the session ended is read from its projection, not from its
-    /// row: a session whose ending was never recorded (its Core died, or its
-    /// raw log could not be written) gets `core_restarted` whatever the row
-    /// says.
-    async fn recover_one(
-        &self,
-        session: &Session,
-    ) -> persistence::Result<(Option<u64>, Option<u32>)> {
-        let restarted = || CoreRecord::CoreRestarted.to_line();
-        let Some(adapter) = self.adapters.get(&session.backend) else {
-            tracing::warn!(session = %session.id, backend = %session.backend, "no adapter for the session's backend; its events stay as they are");
-            if is_live(session.state) {
-                // It cannot be running: end it in the log, which a Core with
-                // the adapter projects, and on its row.
-                self.store
-                    .end_unprojected(session.id.clone(), now_rfc3339(), restarted())
-                    .await?;
-            }
-            return Ok((session.last_event_seq, None));
-        };
-        let version = adapter.projector().version();
-        // An unreadable cache is re-derived like a stale one.
-        let current = self
-            .store
-            .projection_is_current(session.id.clone(), version)
-            .await
-            .unwrap_or(false);
-        if current
-            && self
-                .store
-                .last_event_ends_session(session.id.clone())
-                .await
-                .unwrap_or(false)
-        {
-            return Ok((session.last_event_seq, Some(version)));
-        }
-        tracing::info!(session = %session.id, "re-deriving the session's projection");
-        let projection = Projection::new(&session.id, &session.backend, adapter.projector());
-        let (mut projection, _) = self
-            .store
-            .rebuild_projection(session.id.clone(), projection)
-            .await?;
-        if !projection.ended() {
-            // Carry on from the end of the log with the record that ends it.
-            let line = RawLine {
-                index: self.store.next_raw_index(session.id.clone()).await?,
-                ts: now_rfc3339(),
-                dir: Direction::Core,
-                line: restarted(),
-            };
-            let events = projection.project(&line);
-            self.store
-                .append_session_log(Arc::new(LogBatch {
-                    session_id: session.id.clone(),
-                    lines: vec![line],
-                    events,
-                    projection_version: version,
-                    progress: SessionProgress::of(&projection),
-                }))
-                .await?;
-        }
-        Ok((projection.last_seq(), Some(version)))
+    /// Returns once every lifecycle fact written so far is on disk, for a
+    /// Core about to exit.
+    pub async fn flush_app_log(&self) {
+        self.app_log.flushed().await;
     }
 
     /// Whether an adapter for `backend` is registered.
@@ -411,33 +606,60 @@ impl SessionManager {
         Ok(self.handle(id)?.live().is_some())
     }
 
-    /// Records `session` (state `starting`) and starts its backend in the
-    /// background. Returns once the row exists; the start itself shows up as
-    /// events.
+    /// Every session, oldest first.
+    pub fn list(&self) -> Vec<Session> {
+        let handles: Vec<Arc<Handle>> = lock(&self.sessions).values().cloned().collect();
+        let mut sessions: Vec<Session> = handles.iter().map(|h| h.describe()).collect();
+        sessions.sort_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
+        sessions
+    }
+
+    /// One session.
+    pub fn get(&self, id: &str) -> Result<Session, SessionError> {
+        Ok(self.handle(id)?.describe())
+    }
+
+    /// How many sessions are running, and how many are waiting on the user.
+    pub fn counts(&self) -> (u64, u64) {
+        let handles: Vec<Arc<Handle>> = lock(&self.sessions).values().cloned().collect();
+        let (mut running, mut waiting) = (0, 0);
+        for handle in handles.iter().filter(|h| h.live().is_some()) {
+            match handle.describe().state {
+                LifecycleState::WaitingUser => waiting += 1,
+                LifecycleState::Starting | LifecycleState::Running | LifecycleState::Idle => {
+                    running += 1
+                }
+                _ => {}
+            }
+        }
+        (running, waiting)
+    }
+
+    /// Records `row` and starts its backend in the background. Returns the
+    /// session (state `starting`) once the row exists; the start itself
+    /// shows up as events.
     pub async fn create(
         &self,
-        session: Session,
+        row: SessionRow,
         transport: Arc<dyn Transport>,
         config: SessionConfig,
         backend_version: String,
     ) -> Result<Session, SessionError> {
-        let adapter = self
-            .adapters
-            .get(&session.backend)
-            .cloned()
-            .ok_or_else(|| {
-                SessionError::BackendMissing(format!("no adapter for backend {}", session.backend))
-            })?;
-        self.create_with(session, adapter, transport, config, backend_version)
+        let adapter = self.adapters.get(&row.backend).cloned().ok_or_else(|| {
+            SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
+        })?;
+        self.create_with(row, None, adapter, transport, config, backend_version)
             .await
     }
 
     /// [`SessionManager::create`] with a given adapter rather than the
-    /// registered one for the session's backend: the replay server's, which
-    /// feeds a recording in place of a backend.
+    /// registered one for the session's backend, and a title to show until
+    /// the record gives one: the replay server's, which feeds a recording in
+    /// place of a backend.
     pub async fn create_with(
         &self,
-        session: Session,
+        row: SessionRow,
+        title: Option<String>,
         adapter: Arc<dyn Adapter>,
         transport: Arc<dyn Transport>,
         config: SessionConfig,
@@ -448,37 +670,37 @@ impl SessionManager {
         if self.closing.load(Ordering::SeqCst) {
             return Err(shutting_down());
         }
-        self.store.insert_session(session.clone()).await?;
-        let projection = Projection::new(&session.id, &session.backend, adapter.projector());
-        let handle = Arc::new(Handle::new(
-            &session.id,
-            &session.backend,
-            Some(projection.projector_version()),
-            None,
-        ));
+        self.store.insert_session(row.clone()).await?;
+        let handle = Arc::new(Handle::new(row, now_rfc3339()));
+        lock(&handle.presented).title = title;
+        // A new session has no record yet: the backend has not been told
+        // anything, so its events are the live stream's from the start.
+        let (view, events) =
+            View::open(&handle.id, &handle.backend, Some(adapter.projector()), &[]);
+        lock(&handle.hub).install(&handle.id, view, &events);
         {
             // Registered and launched under the lock `stop_all` takes, so a
             // session either starts before shutdown and is stopped by it, or
             // does not start at all.
             let mut sessions = lock(&self.sessions);
             if !self.closing.load(Ordering::SeqCst) {
-                sessions.insert(session.id.clone(), Arc::clone(&handle));
+                sessions.insert(handle.id.clone(), Arc::clone(&handle));
                 self.launch(
-                    handle,
+                    Arc::clone(&handle),
                     adapter,
                     transport,
                     config,
                     backend_version,
-                    projection,
                 );
-                return Ok(session);
+                return Ok(handle.describe());
             }
         }
-        self.store.delete_session(session.id.clone()).await?;
+        self.store.delete_session(handle.id.clone()).await?;
         Err(shutting_down())
     }
 
-    /// Starts the session's tasks. The handle is live when this returns.
+    /// Starts the session's tasks; its view must be open. The handle is live
+    /// when this returns.
     fn launch(
         &self,
         handle: Arc<Handle>,
@@ -486,10 +708,9 @@ impl SessionManager {
         transport: Arc<dyn Transport>,
         config: SessionConfig,
         backend_version: String,
-        projection: Projection,
     ) {
-        let (lines_tx, lines_rx) = mpsc::unbounded_channel();
-        let sink = Arc::new(CoreSink::new(&handle.id, lines_tx));
+        let (fed_tx, fed_rx) = mpsc::unbounded_channel();
+        let sink = Arc::new(CoreSink::new(&handle.id, Arc::clone(&self.app_log), fed_tx));
         let (started_tx, started_rx) = watch::channel(Started::Pending);
         let (progress_tx, progress_rx) = watch::channel(Progress::default());
         let (finished_tx, finished_rx) = watch::channel(false);
@@ -505,14 +726,11 @@ impl SessionManager {
         let pipeline = tokio::spawn(run_pipeline(Pipeline {
             store: self.store.clone(),
             handle: Arc::clone(&handle),
-            projection,
-            lines: lines_rx,
+            fed: fed_rx,
             progress: progress_tx,
             tiles: self.tiles.clone(),
         }));
         tokio::spawn(run_session(SessionTask {
-            store: self.store.clone(),
-            tiles: Arc::clone(&self.tiles),
             handle,
             live,
             adapter,
@@ -537,7 +755,7 @@ impl SessionManager {
     }
 
     /// Stops a session and waits until its backend has ended and every line
-    /// is stored. Stopping a session that is not running does nothing.
+    /// is projected. Stopping a session that is not running does nothing.
     pub async fn stop(&self, id: &str) -> Result<(), SessionError> {
         let handle = self.handle(id)?;
         let _op = handle.op.lock().await;
@@ -571,7 +789,7 @@ impl SessionManager {
         }
     }
 
-    /// Deletes a stopped session with its raw log and events.
+    /// Forgets a stopped session. Its record is the backend's, and stays.
     pub async fn remove(&self, id: &str) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
         let _op = handle.op.lock().await;
@@ -580,13 +798,17 @@ impl SessionManager {
                 "session {id} is running; stop it first"
             )));
         }
-        let session = self
-            .store
-            .session(id.to_string())
-            .await?
-            .ok_or_else(|| SessionError::NotFound(id.to_string()))?;
+        let session = handle.describe();
         self.store.delete_session(id.to_string()).await?;
         lock(&self.sessions).remove(id);
+        self.app_log.forget(id);
+        // What the adapter kept of its record goes too.
+        let row = lock(&handle.row).clone();
+        if let (Some(backend_id), Some(adapter)) =
+            (&row.backend_session_id, self.adapters.get(&row.backend))
+        {
+            adapter.forget_record(&row.cwd, backend_id);
+        }
         // A tile still waiting to go out would show the session again.
         self.tiles.forget(id);
         // Dropping the senders ends every subscription's forwarding task.
@@ -594,6 +816,16 @@ impl SessionManager {
         // may be one of them, and the session is gone from `session.list`.
         lock(&handle.hub).subscribers.clear();
         Ok(session)
+    }
+
+    /// Takes effect on the session's next start.
+    pub async fn set_mode(&self, id: &str, mode: String) -> Result<Session, SessionError> {
+        let handle = self.handle(id)?;
+        self.store
+            .set_session_mode(id.to_string(), mode.clone())
+            .await?;
+        lock(&handle.row).mode = Some(mode);
+        Ok(handle.describe())
     }
 
     /// Sends a user message and returns the turn it belongs to.
@@ -612,10 +844,10 @@ impl SessionManager {
             Ok(Ok(_))
         );
         if !settled {
-            // Sent, but not stored in time: the turn is not known, and a
-            // made-up number would hide that the raw log is falling behind.
+            // Sent, but not projected in time: the turn is not known, and a
+            // made-up number would hide that the pipeline is falling behind.
             return Err(SessionError::Internal(
-                "the message was sent, but Core could not store it in time".into(),
+                "the message was sent, but Core could not project it in time".into(),
             ));
         }
         let turn = progress.borrow().turn;
@@ -642,116 +874,98 @@ impl SessionManager {
         bounded(async move { session.decide_permission(&request_id, decision).await }).await
     }
 
-    /// Discards the cached projection and re-derives it from the raw log.
-    /// Returns whether any event changed.
-    ///
-    /// When one did, subscribers were sent events that no longer hold, so
-    /// their connections are closed and their clients resubscribe; the
-    /// caller's own connection (`caller`) is left open, and its subscription
-    /// to this session simply ends, since it asked for the change and gets
-    /// the answer. Same-version re-projection changes nothing and disturbs
-    /// nobody.
-    pub async fn reproject(&self, id: &str, caller: &Kick) -> Result<bool, SessionError> {
+    /// Raw lines `from..=to` of the session's in-memory raw log, at most
+    /// `limit` of them and about `max_bytes` of text.
+    pub fn raw_log(
+        &self,
+        id: &str,
+        from: u64,
+        to: u64,
+        limit: usize,
+        max_bytes: usize,
+    ) -> Result<Vec<RawLine>, SessionError> {
         let handle = self.handle(id)?;
-        let _op = handle.op.lock().await;
-        // Removed while this waited for the lock: nothing to re-derive.
-        if !lock(&self.sessions)
-            .get(id)
-            .is_some_and(|current| Arc::ptr_eq(current, &handle))
-        {
-            return Err(SessionError::NotFound(id.to_string()));
-        }
-        let _rebuild = self
-            .rebuilds
-            .acquire()
-            .await
-            .map_err(|_| SessionError::Internal("Core is shutting down".into()))?;
-        if handle.live().is_some() {
-            // A live session is always projected by this build's projector,
-            // so there is nothing to re-derive until it stops.
-            return Err(SessionError::InvalidState(format!(
-                "session {id} is running; it is already projected with the current version"
-            )));
-        }
-        let adapter = self.adapters.get(&handle.backend).ok_or_else(|| {
-            SessionError::BackendMissing(format!("no adapter for backend {}", handle.backend))
-        })?;
-        let projection = Projection::new(id, &handle.backend, adapter.projector());
-        let version = projection.projector_version();
-        let (projection, changed) = self
-            .store
-            .rebuild_projection(id.to_string(), projection)
-            .await?;
-        *lock(&handle.projection_version) = Some(version);
-        {
-            let mut hub = lock(&handle.hub);
-            hub.last_seq = projection.last_seq();
-            if changed {
-                for subscriber in hub.subscribers.values() {
-                    subscriber.overflowed.store(true, Ordering::SeqCst);
-                    if !Arc::ptr_eq(&subscriber.kick, caller) {
-                        subscriber.kick.send_replace(true);
-                    }
-                }
-                hub.subscribers.clear();
-            }
-        }
-        send_tile(&self.tiles, id, projection.tile());
-        Ok(changed)
+        let raw = lock(&handle.raw);
+        Ok(raw.read(from, to, limit, max_bytes))
     }
 
     /// Subscribes a connection to a session's events from `from_seq` on
-    /// (PROTO-CORE-API-R02). Returns the subscription, which stops when
-    /// dropped, and the seq of the last event so far.
+    /// (PROTO-CORE-API-R14), opening the session's view first when it needs
+    /// one (see the module's notes). `transport_for` reaches a host, to read
+    /// the session record there. Returns the subscription, which stops when
+    /// dropped, and what the subscribe answer says.
+    ///
+    /// A request from before the first event the view holds starts there
+    /// instead, and the answer says so (`first_seq`).
     ///
     /// Nothing is sent until [`Subscription::start`], so the caller can put
     /// its response on the connection first.
-    pub fn subscribe(
+    pub async fn subscribe(
         &self,
         id: &str,
         from_seq: u64,
+        transport_for: impl Fn(&str) -> Option<Arc<dyn Transport>>,
         outbound: mpsc::Sender<String>,
         kick: Kick,
-    ) -> Result<(Subscription, Option<u64>), SessionError> {
+    ) -> Result<(Subscription, Subscribed), SessionError> {
         let handle = self.handle(id)?;
-        let Some(projection_version) = *lock(&handle.projection_version) else {
-            return Err(SessionError::InvalidState(format!(
-                "the events of session {id} cannot be read: Core has no adapter for backend {}, \
-                 or could not repair its projection at startup",
-                handle.backend
-            )));
+        // A session Core is not running gets a fresh view when it has none,
+        // or when a client starts from the beginning with nobody else
+        // reading (so turns taken elsewhere show). A live view is never
+        // replaced.
+        let wants_view = |hub: &Hub, live: bool| {
+            !live && (hub.view.is_none() || (from_seq == 0 && hub.subscribers.is_empty()))
         };
         let (events_tx, events_rx) = mpsc::channel(SUBSCRIBER_QUEUE);
         let overflowed = Arc::new(AtomicBool::new(false));
-        // Registered and `last_seq` read under one lock, the lock the
-        // pipeline publishes under: every event up to `last_seq` is in the
-        // cache, and every later one will arrive on the queue. That split is
-        // what makes the stream gap-free and duplicate-free.
-        let (subscriber, last_seq) = {
-            let mut hub = lock(&handle.hub);
-            let subscriber = hub.next_subscriber;
-            hub.next_subscriber += 1;
-            hub.subscribers.insert(
-                subscriber,
-                Subscriber {
-                    events: events_tx,
-                    overflowed: Arc::clone(&overflowed),
-                    kick: Arc::clone(&kick),
-                },
-            );
-            (subscriber, hub.last_seq)
+        let subscriber = Subscriber {
+            events: events_tx,
+            overflowed: Arc::clone(&overflowed),
+            kick: Arc::clone(&kick),
         };
+        let mut opened: Option<(View, Vec<Envelope>)> = None;
+        let mut installed = false;
+        let mut subscriber = Some(subscriber);
+        let (subscriber, subscribed, backlog) = loop {
+            {
+                let mut hub = lock(&handle.hub);
+                let live = handle.live().is_some();
+                // A view just opened goes in only if it is still wanted: a
+                // client that subscribed to the open one meanwhile keeps it.
+                if let Some((view, events)) = opened.take()
+                    && wants_view(&hub, live)
+                {
+                    hub.install(&handle.id, view, &events);
+                    installed = true;
+                }
+                // Registered and the backlog taken under one lock, the lock
+                // the pipeline publishes under: every event up to `last_seq`
+                // is in the backlog, and every later one will arrive on the
+                // queue. That split is what makes the stream gap-free and
+                // duplicate-free.
+                if hub.view.is_some() && (installed || !wants_view(&hub, live)) {
+                    let subscriber = subscriber.take().expect("registered once");
+                    break register(&mut hub, subscriber, from_seq);
+                }
+            }
+            // Opened outside the hub's lock, one opening at a time.
+            let _op = handle.op.lock().await;
+            if handle.live().is_some() || !wants_view(&lock(&handle.hub), false) {
+                continue;
+            }
+            opened = Some(self.open_view(&handle, &transport_for).await?);
+        };
+        if installed {
+            send_tile(&self.tiles, &handle.id, &handle.describe().tile);
+        }
+        let first_seq = subscribed.first_seq.unwrap_or(0).max(from_seq);
         let (go_tx, go_rx) = oneshot::channel();
         let task = tokio::spawn(forward(Forward {
-            store: self.store.clone(),
-            session_id: id.to_string(),
-            projection_version,
-            from_seq,
-            replay_to: last_seq,
+            from_seq: first_seq,
+            backlog,
             live: events_rx,
             outbound,
             overflowed,
-            kick,
             go: go_rx,
         }));
         let subscription = Subscription {
@@ -760,8 +974,208 @@ impl SessionManager {
             task: task.abort_handle(),
             go: Some(go_tx),
         };
-        Ok((subscription, last_seq))
+        Ok((subscription, subscribed))
     }
+
+    /// A fresh view of a session this Core is not running: the events of its
+    /// record, then how Core last saw its backend end, if it did.
+    async fn open_view(
+        &self,
+        handle: &Arc<Handle>,
+        transport_for: &impl Fn(&str) -> Option<Arc<dyn Transport>>,
+    ) -> Result<(View, Vec<Envelope>), SessionError> {
+        let row = lock(&handle.row).clone();
+        let Some(adapter) = self.adapters.get(&row.backend).cloned() else {
+            return Err(SessionError::InvalidState(format!(
+                "the events of session {} cannot be read: Core has no adapter for backend {}",
+                row.id, row.backend
+            )));
+        };
+        let record = match &row.backend_session_id {
+            // The backend never announced the session, so it has no record.
+            None => Arc::default(),
+            Some(backend_id) => {
+                let read = match transport_for(&row.host_id) {
+                    Some(transport) => {
+                        let (reader, cwd, id) =
+                            (Arc::clone(&adapter), row.cwd.clone(), backend_id.clone());
+                        let at = Arc::clone(&transport);
+                        // The record's version is taken before it is read, so
+                        // events read are never newer than the version they
+                        // are kept under.
+                        let start = move || {
+                            tokio::spawn(async move {
+                                let version = reader
+                                    .record_version(Arc::clone(&at), &cwd, &id)
+                                    .await
+                                    .ok()
+                                    .flatten();
+                                reader
+                                    .read_record(at, &cwd, &id)
+                                    .await
+                                    .map(|events| (version, events))
+                                    .map_err(|e| e.to_string())
+                            })
+                        };
+                        // A read this open joined still holds if the record's
+                        // version is the one it was read at; one whose version
+                        // nobody can tell is taken as it is.
+                        let still_current = async |read: &RecordReadResult| match read {
+                            Ok((Some(version), _)) => {
+                                let now = adapter
+                                    .record_version(transport, &row.cwd, backend_id)
+                                    .await
+                                    .ok()
+                                    .flatten();
+                                now.as_ref() == Some(version)
+                            }
+                            _ => true,
+                        };
+                        read_once(&handle.record_read, RECORD_READ, start, still_current)
+                            .await
+                            .map(|read| read.map(|(_, events)| events))
+                            .unwrap_or_else(|| {
+                                Err(format!(
+                                    "it is still being read after {RECORD_READ:?}, or the read failed"
+                                ))
+                            })
+                    }
+                    None => Err(format!("host {} cannot be reached", row.host_id)),
+                };
+                // A record that cannot be read is something the user should
+                // see, in the session, rather than a refused subscription.
+                read.unwrap_or_else(|e| {
+                    tracing::warn!(session = %row.id, error = %e, "could not read the session record");
+                    Arc::new(vec![RecordEvent {
+                        message_id: None,
+                        ts: Some(now_rfc3339()),
+                        backend_version: None,
+                        event: Event::Error(ErrorEvent {
+                            code: ErrorCode::Transport,
+                            message: format!("the session's history could not be read: {e}"),
+                            recoverable: true,
+                            action: None,
+                        }),
+                    }])
+                })
+            }
+        };
+        // Turns taken elsewhere may have changed its title too.
+        if let (Some(backend_id), Some(transport)) =
+            (row.backend_session_id.clone(), transport_for(&row.host_id))
+        {
+            apply_summary(handle, adapter, transport, row.cwd.clone(), backend_id).await;
+        }
+        let (mut view, mut events) = View::open(&row.id, &row.backend, None, &record);
+        if let Some((fact, ts)) = lock(&handle.ending).clone() {
+            events.extend(view.lifecycle(&fact, &ts));
+        }
+        Ok((view, events))
+    }
+}
+
+/// Registers `subscriber` on the hub's open view and takes its backlog from
+/// `from_seq` (or the first event held, if later).
+fn register(
+    hub: &mut Hub,
+    subscriber: Subscriber,
+    from_seq: u64,
+) -> (u64, Subscribed, Vec<Arc<Published>>) {
+    let id = hub.next_subscriber;
+    hub.next_subscriber += 1;
+    hub.subscribers.insert(id, subscriber);
+    let skip = usize::try_from(from_seq.saturating_sub(hub.first_seq)).unwrap_or(usize::MAX);
+    let backlog = hub.events.iter().skip(skip).cloned().collect();
+    let subscribed = Subscribed {
+        last_seq: hub.last_seq(),
+        view: hub.view_id.clone(),
+        first_seq: (hub.first_seq > 0).then_some(hub.first_seq),
+    };
+    (id, subscribed, backlog)
+}
+
+/// Reads the session's title and creation time from its record, keeping
+/// what was known when the record has none or cannot be read. One read at
+/// a time per session ([`read_once`]).
+async fn apply_summary(
+    handle: &Handle,
+    adapter: Arc<dyn Adapter>,
+    transport: Arc<dyn Transport>,
+    cwd: String,
+    backend_id: String,
+) {
+    let start = move || {
+        tokio::spawn(async move {
+            adapter
+                .summarize_record(transport, &cwd, &backend_id)
+                .await
+                .map_err(|e| e.to_string())
+        })
+    };
+    // A summary is small and the adapter keeps them by the record's state,
+    // so a joiner simply reads again.
+    match read_once(&handle.summary_read, SUMMARY_READ, start, async |_| false).await {
+        Some(Ok(Some(summary))) => {
+            let mut presented = lock(&handle.presented);
+            if summary.title.is_some() {
+                presented.title = summary.title;
+            }
+            // The record's wrapper is the backend's and changes between
+            // versions: a time that is not RFC 3339 is not used.
+            match summary.created_at {
+                Some(at) if is_rfc3339(&at) => presented.created_at = at,
+                Some(at) => {
+                    tracing::warn!(session = %handle.id, created_at = %at, "the session record's first time is not RFC 3339; not used");
+                }
+                None => {}
+            }
+        }
+        Some(Ok(None)) => {}
+        Some(Err(e)) => {
+            tracing::warn!(session = %handle.id, error = %e, "could not read the session record's title");
+        }
+        None => {
+            tracing::warn!(session = %handle.id, "reading the session record's title took too long");
+        }
+    }
+}
+
+/// Whether `text` has the shape of an RFC 3339 UTC time:
+/// `YYYY-MM-DDTHH:MM:SS`, an optional fraction, then `Z`. That is the form
+/// Core issues, so session times sort as text the way they sort as times.
+fn is_rfc3339(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let digits = |range: std::ops::Range<usize>| {
+        bytes
+            .get(range)
+            .is_some_and(|d| d.iter().all(u8::is_ascii_digit))
+    };
+    let at = |i: usize, c: u8| bytes.get(i) == Some(&c);
+    if !(digits(0..4)
+        && at(4, b'-')
+        && digits(5..7)
+        && at(7, b'-')
+        && digits(8..10)
+        && at(10, b'T')
+        && digits(11..13)
+        && at(13, b':')
+        && digits(14..16)
+        && at(16, b':')
+        && digits(17..19))
+    {
+        return false;
+    }
+    let mut rest = &text[19..];
+    if let Some(fraction) = rest.strip_prefix('.') {
+        let end = fraction
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(fraction.len());
+        if end == 0 {
+            return false;
+        }
+        rest = &fraction[end..];
+    }
+    rest == "Z"
 }
 
 /// Runs one adapter call, answering after at most [`ADAPTER_CALL`]: a
@@ -784,16 +1198,6 @@ async fn bounded(
             format!("the backend did not take the line within {ADAPTER_CALL:?}"),
         )))),
     }
-}
-
-fn is_live(state: LifecycleState) -> bool {
-    matches!(
-        state,
-        LifecycleState::Starting
-            | LifecycleState::Running
-            | LifecycleState::WaitingUser
-            | LifecycleState::Idle
-    )
 }
 
 /// Asks a live session to stop without waiting: marks the stop as the
@@ -824,28 +1228,39 @@ async fn wait_finished(live: &Live, timeout: Duration) -> Result<(), SessionErro
 
 // -- The sink ------------------------------------------------------------------
 
+/// What the sink queues for the pipeline, in the order it happened.
+enum Fed {
+    /// A line that crossed the backend's stdio.
+    Line(RawLine),
+    /// One of Core's lifecycle facts, learnt at `ts`.
+    Fact { fact: LifecycleFact, ts: String },
+}
+
 /// Core's side of `AdapterSink` for one live session.
 struct CoreSink {
     session_id: String,
+    /// Where each lifecycle fact is written as the sink takes it in, before
+    /// anything it describes can happen.
+    app_log: Arc<AppLog>,
     inner: Mutex<SinkInner>,
     /// Set by `session.stop`: the exit that follows is the user's doing.
     stop_requested: AtomicBool,
     /// Becomes true when the adapter reports the process exit, even one held
     /// back because the start had not finished.
     exit_seen: watch::Sender<bool>,
-    /// Becomes true when the record that ends the session is queued.
+    /// Becomes true when the fact that ends the session is queued.
     ended: watch::Sender<bool>,
 }
 
 struct SinkInner {
     next_index: u64,
     /// `None` once Core has closed the sink, which ends the pipeline.
-    lines: Option<mpsc::UnboundedSender<RawLine>>,
+    fed: Option<mpsc::UnboundedSender<Fed>>,
     start_done: bool,
     /// An exit reported before the start finished, recorded when it does:
-    /// the record that ends the session must come last.
+    /// the fact that ends the session must come last.
     deferred_exit: Option<io::Result<ProcessExit>>,
-    /// The ending record is in; nothing more from the adapter is recorded.
+    /// The ending fact is in; nothing more from the adapter is recorded.
     ended: bool,
 }
 
@@ -856,12 +1271,13 @@ struct StartFailure {
 }
 
 impl CoreSink {
-    fn new(session_id: &str, lines: mpsc::UnboundedSender<RawLine>) -> Self {
+    fn new(session_id: &str, app_log: Arc<AppLog>, fed: mpsc::UnboundedSender<Fed>) -> Self {
         CoreSink {
             session_id: session_id.to_string(),
+            app_log,
             inner: Mutex::new(SinkInner {
                 next_index: 0,
-                lines: Some(lines),
+                fed: Some(fed),
                 start_done: false,
                 deferred_exit: None,
                 ended: false,
@@ -872,9 +1288,17 @@ impl CoreSink {
         }
     }
 
-    /// Stamps and queues one line. Called with the lock held, so indices
-    /// follow the order of the calls.
-    fn push(inner: &mut SinkInner, dir: Direction, line: String) {
+    /// Queues `item`. Called with the lock held, so items follow the order
+    /// of the calls. Unbounded, so this never blocks the adapter's read
+    /// loop; the pipeline only projects, which keeps up with any backend.
+    fn queue(inner: &mut SinkInner, item: Fed) {
+        if let Some(fed) = &inner.fed {
+            let _ = fed.send(item);
+        }
+    }
+
+    /// Stamps and queues one line.
+    fn push_line(inner: &mut SinkInner, dir: Direction, line: String) {
         let raw = RawLine {
             index: inner.next_index,
             ts: now_rfc3339(),
@@ -882,18 +1306,21 @@ impl CoreSink {
             line,
         };
         inner.next_index += 1;
-        if let Some(lines) = &inner.lines {
-            // Unbounded, so this never blocks the adapter's read loop. The
-            // pipeline writes whole batches per transaction, which keeps up
-            // with any backend; the queue only grows while the database
-            // cannot be written at all.
-            let _ = lines.send(raw);
-        }
+        Self::queue(inner, Fed::Line(raw));
     }
 
-    fn record_core(&self, record: &CoreRecord) {
-        let mut inner = lock(&self.inner);
-        Self::push(&mut inner, Direction::Core, record.to_line());
+    /// Writes a fact to the app log, then queues it. Written here rather
+    /// than by the pipeline, so `process_started` is on disk before the
+    /// process starts, and a crash just after still leaves the fact that
+    /// startup repairs from.
+    fn push_fact(&self, inner: &mut SinkInner, fact: LifecycleFact) {
+        let ts = now_rfc3339();
+        self.app_log.write(&self.session_id, &ts, &fact);
+        Self::queue(inner, Fed::Fact { fact, ts });
+    }
+
+    fn record_fact(&self, fact: LifecycleFact) {
+        self.push_fact(&mut lock(&self.inner), fact);
     }
 
     /// The index the next line will get.
@@ -901,30 +1328,30 @@ impl CoreSink {
         lock(&self.inner).next_index
     }
 
-    fn exit_record(&self, exit: io::Result<ProcessExit>) -> CoreRecord {
+    fn exit_fact(&self, exit: io::Result<ProcessExit>) -> LifecycleFact {
         let (code, error) = match exit {
             Ok(exit) => (exit.code, None),
             Err(e) => (None, Some(e.to_string())),
         };
-        CoreRecord::ProcessExited {
+        LifecycleFact::ProcessExited {
             code,
             stopped_by_user: self.stop_requested.load(Ordering::SeqCst),
             error,
         }
     }
 
-    /// The session task's report of how the start went. Records the line
+    /// The session task's report of how the start went. Records the fact
     /// that ends the session when the start failed, or when the process
     /// already exited while it was starting.
     fn start_finished(&self, outcome: Result<(), StartFailure>) {
         let mut inner = lock(&self.inner);
         inner.start_done = true;
-        let record = match outcome {
+        let fact = match outcome {
             Ok(()) => match inner.deferred_exit.take() {
-                Some(exit) => self.exit_record(exit),
+                Some(exit) => self.exit_fact(exit),
                 None => return,
             },
-            Err(failure) => CoreRecord::StartFailed {
+            Err(failure) => LifecycleFact::StartFailed {
                 message: failure.message,
                 code: inner
                     .deferred_exit
@@ -937,32 +1364,28 @@ impl CoreSink {
         if inner.ended {
             return;
         }
-        Self::push(&mut inner, Direction::Core, record.to_line());
+        self.push_fact(&mut inner, fact);
         inner.ended = true;
         drop(inner);
         self.ended.send_replace(true);
     }
 
-    /// Stops queueing lines, which ends the pipeline once it has stored the
-    /// ones already queued.
+    /// Stops queueing, which ends the pipeline once it has projected what is
+    /// already queued.
     fn close(&self) {
-        lock(&self.inner).lines = None;
+        lock(&self.inner).fed = None;
     }
 }
 
 impl AdapterSink for CoreSink {
     fn record(&self, dir: Direction, line: String) {
-        if dir == Direction::Core {
-            tracing::warn!(session = %self.session_id, "an adapter recorded a core line; ignored");
-            return;
-        }
         let mut inner = lock(&self.inner);
         if inner.ended {
             // The adapter promised the exit comes after its last line.
             tracing::warn!(session = %self.session_id, "line recorded after the session ended; ignored");
             return;
         }
-        Self::push(&mut inner, dir, line);
+        Self::push_line(&mut inner, dir, line);
     }
 
     fn stderr_line(&self, line: String) {
@@ -978,8 +1401,8 @@ impl AdapterSink for CoreSink {
             return;
         }
         if inner.start_done {
-            let record = self.exit_record(exit);
-            Self::push(&mut inner, Direction::Core, record.to_line());
+            let fact = self.exit_fact(exit);
+            self.push_fact(&mut inner, fact);
             inner.ended = true;
             drop(inner);
             self.ended.send_replace(true);
@@ -994,8 +1417,6 @@ impl AdapterSink for CoreSink {
 // -- The session task ----------------------------------------------------------
 
 struct SessionTask {
-    store: Store,
-    tiles: Arc<TileHub>,
     handle: Arc<Handle>,
     live: Arc<Live>,
     adapter: Arc<dyn Adapter>,
@@ -1009,8 +1430,6 @@ struct SessionTask {
 
 async fn run_session(task: SessionTask) {
     let SessionTask {
-        store,
-        tiles,
         handle,
         live,
         adapter,
@@ -1022,16 +1441,21 @@ async fn run_session(task: SessionTask) {
         pipeline,
     } = task;
     let sink = Arc::clone(&live.sink);
-    sink.record_core(&CoreRecord::ProcessStarted {
+    sink.record_fact(LifecycleFact::ProcessStarted {
         backend: handle.backend.clone(),
         backend_version,
     });
+    // On disk before the process exists, so a crash just after starting it
+    // still leaves the fact startup repairs from.
+    sink.app_log.flushed().await;
 
     let mut cancel = live.cancel.subscribe();
     let as_sink: Arc<dyn AdapterSink> = sink.clone();
     // The start runs in a task of its own, so an adapter that panics fails
     // the start instead of leaving the session live forever.
-    let mut start = tokio::spawn(async move { adapter.start(transport, config, as_sink).await });
+    let (starter, start_transport) = (Arc::clone(&adapter), Arc::clone(&transport));
+    let mut start =
+        tokio::spawn(async move { starter.start(start_transport, config, as_sink).await });
     let outcome = tokio::select! {
         result = &mut start => Some(result.unwrap_or_else(|e| {
             Err(AdapterError::Protocol(format!("the adapter failed while starting: {e}")))
@@ -1055,8 +1479,8 @@ async fn run_session(task: SessionTask) {
                 begin_stop(&live);
             }
             // Until the process exits, by itself or because of a stop. A
-            // pipeline that gave up can no longer record anything, so the
-            // backend is stopped rather than left running unrecorded.
+            // pipeline that died (a bug) can no longer show anything, so the
+            // backend is stopped rather than left running unseen.
             let mut ended = sink.ended.subscribe();
             let pipeline_result = tokio::select! {
                 _ = ended.wait_for(|ended| *ended) => None,
@@ -1064,10 +1488,7 @@ async fn run_session(task: SessionTask) {
             };
             if let Some(result) = pipeline_result {
                 pipeline_done = true;
-                if let Err(e) = result {
-                    tracing::error!(session = %handle.id, error = %e, "the session's pipeline failed");
-                }
-                tracing::error!(session = %handle.id, "the raw log cannot be written; stopping the backend");
+                tracing::error!(session = %handle.id, error = ?result.err(), "the session's pipeline ended early; stopping the backend");
                 begin_stop(&live);
                 let _ = tokio::time::timeout(STOP_TIMEOUT, ended.wait_for(|ended| *ended)).await;
             }
@@ -1097,27 +1518,21 @@ async fn run_session(task: SessionTask) {
     if !pipeline_done && let Err(e) = pipeline.await {
         tracing::error!(session = %handle.id, error = %e, "the session's pipeline failed");
     }
-    if pipeline_done {
-        // Its ending could not be recorded, so its row still says it runs.
-        // Say `error` instead, so the rail does not show a live session
-        // nothing can stop; the next Core's repair re-derives the rest.
-        if let Err(e) = store
-            .set_session_state(handle.id.clone(), LifecycleState::Error)
-            .await
-        {
-            tracing::error!(session = %handle.id, error = %e, "could not mark the session as failed");
-        }
-        // And the rail hears of it, as it hears of every state change.
-        match store.session(handle.id.clone()).await {
-            Ok(Some(row)) => send_tile(&tiles, &handle.id, &row.tile),
-            Ok(None) => {}
-            Err(e) => {
-                tracing::error!(session = %handle.id, error = %e, "could not read the failed session's tile");
-            }
-        }
+    if let Some(view) = lock(&handle.hub).view.as_mut() {
+        view.finish_live();
     }
     *lock(&handle.live) = None;
+    // Nobody reading it: nothing more will be added, so it goes.
+    handle.close_if_idle();
     finished.send_replace(true);
+    // The record now holds the session's turns, and with them its title.
+    // Read after the stop has its answer, never on its way.
+    let row = lock(&handle.row).clone();
+    if let Some(backend_id) = row.backend_session_id {
+        tokio::spawn(async move {
+            apply_summary(&handle, adapter, transport, row.cwd, backend_id).await;
+        });
+    }
 }
 
 /// Returns once the flag is raised; never if its sender is gone.
@@ -1132,8 +1547,7 @@ async fn raised(flag: &mut watch::Receiver<bool>) {
 struct Pipeline {
     store: Store,
     handle: Arc<Handle>,
-    projection: Projection,
-    lines: mpsc::UnboundedReceiver<RawLine>,
+    fed: mpsc::UnboundedReceiver<Fed>,
     progress: watch::Sender<Progress>,
     tiles: Arc<TileHub>,
 }
@@ -1142,94 +1556,96 @@ async fn run_pipeline(pipeline: Pipeline) {
     let Pipeline {
         store,
         handle,
-        mut projection,
-        mut lines,
+        mut fed,
         progress,
         tiles,
     } = pipeline;
-    let projection_version = projection.projector_version();
-    let mut last_tile = projection.tile().clone();
-    // Ends once the sink is closed and every queued line has been taken.
-    while let Some(first) = lines.recv().await {
-        let mut bytes = first.line.len();
+    let mut last_tile = handle.describe().tile;
+    let mut lines_done = 0;
+    // Ends once the sink is closed and everything queued has been taken.
+    while let Some(first) = fed.recv().await {
         let mut batch = vec![first];
-        while batch.len() < BATCH && bytes < BATCH_BYTES {
-            match lines.try_recv() {
-                Ok(line) => {
-                    bytes += line.line.len();
-                    batch.push(line);
-                }
+        while batch.len() < BATCH {
+            match fed.try_recv() {
+                Ok(item) => batch.push(item),
                 Err(_) => break,
             }
         }
-        let next_line = batch.last().map_or(0, |line| line.index + 1);
-        let events: Vec<Envelope> = batch.iter().flat_map(|l| projection.project(l)).collect();
-        let write = Arc::new(LogBatch {
-            session_id: handle.id.clone(),
-            lines: batch,
-            events,
-            projection_version,
-            progress: SessionProgress::of(&projection),
-        });
-        if !store_with_retry(&store, &write).await {
-            // Nothing after this can be stored in order either. Ending here
-            // tells the session task, which stops the backend.
-            return;
+        // How the backend ended, to show again when the session is reopened.
+        for item in &batch {
+            if let Fed::Fact { fact, ts } = item
+                && fact.ends()
+            {
+                *lock(&handle.ending) = Some((fact.clone(), ts.clone()));
+            }
         }
+        let (events, tile, turn, announced) = {
+            let mut hub = lock(&handle.hub);
+            let Some(view) = hub.view.as_mut() else {
+                // Never: a live session's view is open from its start.
+                tracing::error!(session = %handle.id, "a live session has no view; its events are lost");
+                continue;
+            };
+            let mut events = Vec::new();
+            for item in batch {
+                match item {
+                    Fed::Line(line) => {
+                        events.extend(view.live(&line));
+                        lines_done = line.index + 1;
+                        lock(&handle.raw).push(line);
+                    }
+                    Fed::Fact { fact, ts } => events.extend(view.lifecycle(&fact, &ts)),
+                }
+            }
+            let announced = view.backend_session_id().map(String::from);
+            let (tile, turn) = (view.tile().clone(), view.turn());
+            (events, tile, turn, announced)
+        };
 
-        publish(&handle, &write.events);
-        if projection.tile() != &last_tile {
-            last_tile = projection.tile().clone();
-            send_tile(&tiles, &handle.id, &last_tile);
+        // The backend's own id finds the session's record later; it is the
+        // one thing about the session's history Ersa keeps. Stored before
+        // anyone hears of the session's events, so a crash after a client
+        // saw them cannot leave a session whose record is lost.
+        if let Some(backend_id) = announced {
+            let known = lock(&handle.row).backend_session_id.clone();
+            if known.as_deref() != Some(backend_id.as_str()) {
+                match store
+                    .set_backend_session_id(handle.id.clone(), backend_id.clone())
+                    .await
+                {
+                    Ok(()) => lock(&handle.row).backend_session_id = Some(backend_id),
+                    Err(e) => {
+                        tracing::error!(session = %handle.id, error = %e, "could not record the backend's session id");
+                    }
+                }
+            }
+        }
+        publish(&mut lock(&handle.hub), &handle.id, &events);
+        if tile != last_tile {
+            send_tile(&tiles, &handle.id, &tile);
+            last_tile = tile;
         }
         progress.send_replace(Progress {
-            lines: next_line,
-            turn: projection.turn(),
+            lines: lines_done,
+            turn,
         });
     }
 }
 
-/// Writes `batch`, retrying a few times. `false` when it could not be
-/// stored.
-async fn store_with_retry(store: &Store, batch: &Arc<LogBatch>) -> bool {
-    let mut delays = WRITE_RETRY.iter();
-    loop {
-        match store.append_session_log(Arc::clone(batch)).await {
-            Ok(()) => return true,
-            Err(e) => match delays.next() {
-                Some(delay) => {
-                    tracing::error!(session = %batch.session_id, error = %e, ?delay, "could not store raw log lines; retrying");
-                    tokio::time::sleep(*delay).await;
-                }
-                None => {
-                    tracing::error!(session = %batch.session_id, error = %e, "could not store raw log lines; giving up");
-                    return false;
-                }
-            },
-        }
-    }
-}
-
-/// Offers committed events to every subscriber. A subscriber whose queue is
-/// full is dropped, never waited for: one slow client must not stall the
-/// session for everyone else.
-fn publish(handle: &Handle, events: &[Envelope]) {
-    let Some(last) = events.last() else {
+/// Adds new events to the view's list and offers them to every subscriber.
+/// A subscriber whose queue is full is dropped, never waited for: one slow
+/// client must not stall the session for everyone else.
+fn publish(hub: &mut Hub, session_id: &str, events: &[Envelope]) {
+    if events.is_empty() {
         return;
-    };
-    // Serialized before taking the lock, so the lock is held only for the
-    // hand-off.
+    }
     let published: Vec<Arc<Published>> = events
         .iter()
-        .map(|event| {
-            Arc::new(Published {
-                seq: event.seq,
-                line: event_line(&handle.id, event),
-            })
-        })
+        .map(|event| Arc::new(published(session_id, event)))
         .collect();
-    let mut hub = lock(&handle.hub);
-    hub.last_seq = Some(last.seq);
+    for event in &published {
+        hub.hold(Arc::clone(event));
+    }
     hub.subscribers.retain(|_, subscriber| {
         for event in &published {
             match subscriber.events.try_send(Arc::clone(event)) {
@@ -1246,13 +1662,16 @@ fn publish(handle: &Handle, events: &[Envelope]) {
     });
 }
 
-/// A `session.event` notification line.
-fn event_line(session_id: &str, event: &Envelope) -> String {
+/// An event as a `session.event` notification line.
+fn published(session_id: &str, event: &Envelope) -> Published {
     let params = SessionEventParams {
         session_id: session_id.to_string(),
         event: event.clone(),
     };
-    notification_line("session.event", &params)
+    Published {
+        seq: event.seq,
+        line: notification_line("session.event", &params),
+    }
 }
 
 fn send_tile(tiles: &TileHub, session_id: &str, tile: &Tile) {
@@ -1359,22 +1778,21 @@ impl Drop for Subscription {
         self.task.abort();
         if let Some(handle) = self.handle.upgrade() {
             lock(&handle.hub).subscribers.remove(&self.subscriber);
+            // The last reader of a session Core is not running: its view
+            // goes, and is projected afresh when it is opened again.
+            handle.close_if_idle();
         }
     }
 }
 
 struct Forward {
-    store: Store,
-    session_id: String,
-    projection_version: u32,
     from_seq: u64,
-    /// The last event already committed when the subscription began; those
-    /// up to it are replayed from the cache, later ones arrive on `live`.
-    replay_to: Option<u64>,
+    /// The events from `from_seq` already in the view when the subscription
+    /// began; later ones arrive on `live`.
+    backlog: Vec<Arc<Published>>,
     live: mpsc::Receiver<Arc<Published>>,
     outbound: mpsc::Sender<String>,
     overflowed: Arc<AtomicBool>,
-    kick: Kick,
     go: oneshot::Receiver<()>,
 }
 
@@ -1383,15 +1801,11 @@ struct Forward {
 /// the connection's write queue.
 async fn forward(task: Forward) {
     let Forward {
-        store,
-        session_id,
-        projection_version,
         from_seq,
-        replay_to,
+        backlog,
         mut live,
         outbound,
         overflowed,
-        kick,
         go,
     } = task;
     // Dropped unsent: the subscribe response never went out.
@@ -1400,54 +1814,17 @@ async fn forward(task: Forward) {
     }
 
     let mut next = from_seq;
-    if let Some(last) = replay_to {
-        while next <= last {
-            let to = last.min(next.saturating_add(REPLAY_PAGE - 1));
-            let page = match store
-                .cached_events(
-                    session_id.clone(),
-                    projection_version,
-                    next,
-                    to,
-                    REPLAY_BYTES,
-                )
-                .await
-            {
-                Ok(page) => page,
-                Err(e) => {
-                    // A gap would break the promise of the subscription;
-                    // closing the connection tells the client to retry.
-                    tracing::error!(session = %session_id, error = %e, "replaying events failed");
-                    kick.send_replace(true);
-                    return;
-                }
-            };
-            if overflowed.load(Ordering::SeqCst) {
-                // Dropped meanwhile (re-projected, or fell behind); the hub
-                // closed the connection if it had to.
+    for page in backlog.chunks(REPLAY_PAGE) {
+        if overflowed.load(Ordering::SeqCst) {
+            // Dropped meanwhile for falling behind; the hub closed the
+            // connection.
+            return;
+        }
+        for event in page {
+            if outbound.send(event.line.clone()).await.is_err() {
                 return;
             }
-            let mut progressed = false;
-            for (seq, envelope) in &page {
-                if *seq != next {
-                    break;
-                }
-                let line = cached_event_line(&session_id, envelope);
-                if outbound.send(line).await.is_err() {
-                    return;
-                }
-                next += 1;
-                progressed = true;
-            }
-            if !progressed {
-                // The next event is not in the cache: the session was
-                // removed or re-projected meanwhile. Skipping ahead would
-                // leave a gap the client never hears about; closing the
-                // connection tells it to resubscribe.
-                tracing::warn!(session = %session_id, next, "the cache changed during a replay; disconnecting");
-                kick.send_replace(true);
-                return;
-            }
+            next = event.seq + 1;
         }
     }
 
@@ -1470,17 +1847,141 @@ async fn forward(task: Forward) {
     // behind, the hub has already closed its connection.
 }
 
-/// A `session.event` line around an envelope stored as JSON, without
-/// parsing it again.
-fn cached_event_line(session_id: &str, envelope: &str) -> String {
-    let session_id = serde_json::to_string(session_id).expect("strings serialize");
-    format!(
-        r#"{{"jsonrpc":"2.0","method":"session.event","params":{{"session_id":{session_id},"event":{envelope}}}}}"#
-    )
-}
-
 /// Locks a std mutex, carrying on if a panicking thread poisoned it: every
 /// value behind these locks stays consistent between single updates.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn subscriber() -> Subscriber {
+        Subscriber {
+            events: mpsc::channel(1).0,
+            overflowed: Arc::default(),
+            kick: Arc::new(watch::Sender::new(false)),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_read_still_running_is_waited_on_never_started_beside_it() {
+        use std::sync::atomic::AtomicUsize;
+        let slot: ReadSlot<u32> = ReadSlot::default();
+        let starts = AtomicUsize::new(0);
+        let gate = Arc::new(Notify::new());
+        let slow = || {
+            starts.fetch_add(1, Ordering::SeqCst);
+            let gate = Arc::clone(&gate);
+            tokio::spawn(async move {
+                gate.notified().await;
+                7
+            })
+        };
+        let short = Duration::from_millis(20);
+        assert_eq!(read_once(&slot, short, slow, async |_| false).await, None);
+        // The disk still hangs: the next open waits on the same read.
+        assert_eq!(read_once(&slot, short, slow, async |_| false).await, None);
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+        gate.notify_one();
+        // Joining it, this open reads again once it finishes: the record may
+        // have grown meanwhile.
+        let current = || {
+            starts.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async { 9 })
+        };
+        assert_eq!(
+            read_once(&slot, Duration::from_secs(5), current, async |_| false).await,
+            Some(9)
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 2);
+
+        // A read that finished after its caller gave up is not handed on:
+        // the record may have changed since. A fresh one is started.
+        let gate = Arc::new(Notify::new());
+        let late = || {
+            starts.fetch_add(1, Ordering::SeqCst);
+            let gate = Arc::clone(&gate);
+            tokio::spawn(async move {
+                gate.notified().await;
+                1
+            })
+        };
+        assert_eq!(read_once(&slot, short, late, async |_| false).await, None);
+        gate.notify_one();
+        tokio::time::sleep(short).await;
+        let fresh = || {
+            starts.fetch_add(1, Ordering::SeqCst);
+            tokio::spawn(async { 2 })
+        };
+        assert_eq!(
+            read_once(&slot, Duration::from_secs(5), fresh, async |_| false).await,
+            Some(2)
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 4);
+    }
+
+    #[tokio::test]
+    async fn a_joined_read_is_taken_while_the_record_is_unchanged() {
+        use std::sync::atomic::AtomicUsize;
+        let slot: ReadSlot<u32> = ReadSlot::default();
+        let starts = AtomicUsize::new(0);
+        let gate = Arc::new(Notify::new());
+        let slow = || {
+            starts.fetch_add(1, Ordering::SeqCst);
+            let gate = Arc::clone(&gate);
+            tokio::spawn(async move {
+                gate.notified().await;
+                7
+            })
+        };
+        let short = Duration::from_millis(20);
+        assert_eq!(read_once(&slot, short, slow, async |_| true).await, None);
+        gate.notify_one();
+        // Unchanged: the read already made is taken, none started beside it,
+        // so a record slower to read than the timeout still opens.
+        assert_eq!(
+            read_once(&slot, Duration::from_secs(5), slow, async |read| *read == 7).await,
+            Some(7)
+        );
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_view_holds_its_latest_events_and_a_subscribe_from_before_them_starts_there() {
+        let mut hub = Hub::default();
+        for seq in 0..10 {
+            let line = format!("event {seq:02}"); // 8 bytes each
+            hub.hold_within(Arc::new(Published { seq, line }), 32);
+        }
+        assert_eq!(hub.first_seq, 6);
+        assert_eq!(hub.last_seq(), Some(9));
+        let (_, subscribed, backlog) = register(&mut hub, subscriber(), 2);
+        assert_eq!(subscribed.first_seq, Some(6));
+        assert_eq!(subscribed.last_seq, Some(9));
+        let seqs: Vec<u64> = backlog.iter().map(|e| e.seq).collect();
+        assert_eq!(seqs, [6, 7, 8, 9]);
+        // From within what is held, as asked.
+        let (_, _, backlog) = register(&mut hub, subscriber(), 8);
+        assert_eq!(backlog.iter().map(|e| e.seq).collect::<Vec<_>>(), [8, 9]);
+    }
+
+    #[test]
+    fn only_rfc3339_times_are_taken_from_a_record() {
+        for good in ["2026-11-01T20:56:51.893Z", "2026-11-01T20:56:51Z"] {
+            assert!(is_rfc3339(good), "{good}");
+        }
+        for bad in [
+            "",
+            "yesterday",
+            "2026-11-01",
+            "2026-11-01T20:56:51",
+            "2026-11-01T20:56:51.Z",
+            // Right, but would not sort among the times Core issues.
+            "2026-11-01T20:56:51+02:00",
+        ] {
+            assert!(!is_rfc3339(bad), "{bad}");
+        }
+    }
 }

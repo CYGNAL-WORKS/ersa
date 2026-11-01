@@ -6,31 +6,27 @@ use ersa_adapter::{Direction, PermissionDecision, SessionConfig};
 use ersa_protocol::core_api::{
     AnswerQuestionParams, DecidePermissionParams, Empty, IdParams, RawDirection, RawLogEntry,
     RawLogParams, Session, SessionCreateParams, SessionSendParams, SessionSendResult,
-    SetModeParams, SetTitleParams, SubscribeParams, SubscribeResult, Tile, WorkspaceState,
+    SetModeParams, SetTitleParams, SubscribeParams, SubscribeResult, WorkspaceState,
 };
-use ersa_protocol::events::LifecycleState;
 use serde_json::Value;
 
 use super::{ApiError, Peer};
-use crate::persistence::{self, LOCAL_HOST_ID};
-use crate::sessions::Kick;
+use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
 use crate::state::Core;
 
 /// The most raw lines one `session.raw_log` call returns, and the most bytes
 /// of line text (one line always comes back, however long). A client pages
 /// through a longer log by asking again from the last index it got plus one.
+/// The log is held in memory, from when Core started the session's backend.
 pub const RAW_LOG_LIMIT: usize = 1000;
 pub const RAW_LOG_BYTES: usize = 8 * 1024 * 1024;
 
 pub(super) async fn list(core: &Core, _: Empty) -> Result<Vec<Session>, ApiError> {
-    Ok(core.store.sessions().await?)
+    Ok(core.sessions.list())
 }
 
 async fn find(core: &Core, id: &str) -> Result<Session, ApiError> {
-    core.store
-        .session(id.to_string())
-        .await?
-        .ok_or_else(|| ApiError::not_found(format!("no session {id}")))
+    Ok(core.sessions.get(id)?)
 }
 
 pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<Session, ApiError> {
@@ -76,17 +72,14 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         String::new()
     };
 
-    let session = Session {
+    let session = SessionRow {
         id: persistence::new_id("s"),
         workspace_id: workspace.id,
         host_id: project.host_id,
         backend: params.backend,
+        backend_session_id: None,
         mode: params.mode,
-        title: params.title,
-        state: LifecycleState::Starting,
-        created_at: persistence::now_rfc3339(),
-        last_event_seq: None,
-        tile: Tile::starting(),
+        cwd: workspace.path.clone(),
     };
     let config = SessionConfig {
         cwd: workspace.path,
@@ -178,26 +171,28 @@ pub(super) async fn answer_question(
     )))
 }
 
+/// Refused: a session's title is its backend's to keep, in the session
+/// record, where the backend's own tools show it too (ADR 0017).
 pub(super) async fn set_title(core: &Core, params: SetTitleParams) -> Result<Session, ApiError> {
     find(core, &params.id).await?;
-    core.store
-        .set_session_title(params.id.clone(), params.title)
-        .await?;
-    find(core, &params.id).await
+    Err(title_refused())
+}
+
+fn title_refused() -> ApiError {
+    ApiError::invalid_state(
+        "a session's title comes from its backend's session record; rename it there (in Claude Code, /rename)",
+    )
 }
 
 /// Takes effect on the session's next start.
 pub(super) async fn set_mode(core: &Core, params: SetModeParams) -> Result<Session, ApiError> {
-    find(core, &params.id).await?;
-    core.store
-        .set_session_mode(params.id.clone(), params.mode)
-        .await?;
-    find(core, &params.id).await
+    Ok(core.sessions.set_mode(&params.id, params.mode).await?)
 }
 
 /// Subscribes this connection to a session's events; a second subscription
-/// to the same session replaces the first.
-pub(super) fn subscribe(
+/// to the same session replaces the first. Opens the session first when it
+/// needs opening, which reads its record on its host.
+pub(super) async fn subscribe(
     core: &Core,
     peer: &Peer,
     params: SubscribeParams,
@@ -206,9 +201,16 @@ pub(super) fn subscribe(
         .outbound
         .upgrade()
         .ok_or_else(|| ApiError::invalid_state("the connection is closing"))?;
-    let (subscription, last_seq) =
-        core.sessions
-            .subscribe(&params.id, params.from_seq, outbound, peer.kick.clone())?;
+    let (subscription, subscribed) = core
+        .sessions
+        .subscribe(
+            &params.id,
+            params.from_seq,
+            |host| core.session_transport_for(host),
+            outbound,
+            peer.kick.clone(),
+        )
+        .await?;
     // A replay starts playing once someone is watching it.
     crate::replay::subscribed(core);
     // Only now is the old subscription, if any, dropped: a resubscribe that
@@ -220,7 +222,11 @@ pub(super) fn subscribe(
         .unwrap_or_else(|e| e.into_inner())
         .insert(params.id, subscription);
     drop(old);
-    Ok(SubscribeResult { last_seq })
+    Ok(SubscribeResult {
+        last_seq: subscribed.last_seq,
+        view: subscribed.view,
+        first_seq: subscribed.first_seq,
+    })
 }
 
 pub(super) fn unsubscribe(peer: &Peer, params: IdParams) -> Result<Empty, ApiError> {
@@ -233,23 +239,19 @@ pub(super) fn unsubscribe(peer: &Peer, params: IdParams) -> Result<Empty, ApiErr
     Ok(Empty {})
 }
 
-/// Raw lines `from..=to`, exactly as stored (PROTO-CORE-API-R08), at most
-/// [`RAW_LOG_LIMIT`] of them.
+/// Raw lines `from..=to`, exactly as they crossed (PROTO-CORE-API-R08), at
+/// most [`RAW_LOG_LIMIT`] of them.
 pub(super) async fn raw_log(
     core: &Core,
     params: RawLogParams,
 ) -> Result<Vec<RawLogEntry>, ApiError> {
-    find(core, &params.id).await?;
-    let lines = core
-        .store
-        .raw_log(
-            params.id,
-            params.from.unwrap_or(0),
-            params.to.unwrap_or(u64::MAX),
-            RAW_LOG_LIMIT,
-            RAW_LOG_BYTES,
-        )
-        .await?;
+    let lines = core.sessions.raw_log(
+        &params.id,
+        params.from.unwrap_or(0),
+        params.to.unwrap_or(u64::MAX),
+        RAW_LOG_LIMIT,
+        RAW_LOG_BYTES,
+    )?;
     Ok(lines
         .into_iter()
         .map(|line| RawLogEntry {
@@ -258,23 +260,8 @@ pub(super) async fn raw_log(
             dir: match line.dir {
                 Direction::Backend => RawDirection::Backend,
                 Direction::Host => RawDirection::Host,
-                Direction::Core => RawDirection::Core,
             },
             line: line.line,
         })
         .collect())
-}
-
-/// Re-derives a stopped session's events. When they changed, the caller's
-/// own subscription to the session ends quietly (its connection, `kick`'s,
-/// is not closed, as other subscribers' are), so the client resubscribes
-/// after reading this answer.
-pub(super) async fn reproject(
-    core: &Core,
-    kick: &Kick,
-    params: IdParams,
-) -> Result<Session, ApiError> {
-    find(core, &params.id).await?;
-    core.sessions.reproject(&params.id, kick).await?;
-    find(core, &params.id).await
 }

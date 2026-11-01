@@ -3,7 +3,7 @@
 import type * as AgentEvents from "./agent-events.gen";
 
 /** The Core API version these types describe (the schema's `x-api-version`). */
-export const CORE_API_VERSION = 1;
+export const CORE_API_VERSION = 2;
 
 /**
  * Any line on the socket.
@@ -180,12 +180,6 @@ export type Request =
       id: RequestId;
       method: "session.raw_log";
       params: SessionRawLogParams;
-    }
-  | {
-      jsonrpc: "2.0";
-      id: RequestId;
-      method: "session.reproject";
-      params: SessionReprojectParams;
     }
   | {
       jsonrpc: "2.0";
@@ -394,7 +388,6 @@ export interface SessionCreateParams {
   workspace_id: Id;
   backend: string;
   mode?: string;
-  title?: string;
 }
 export interface SessionStartParams {
   id: Id;
@@ -459,9 +452,6 @@ export interface SessionRawLogParams {
    * Last raw-log index, inclusive; the end of the log when absent.
    */
   to?: number;
-}
-export interface SessionReprojectParams {
-  id: Id;
 }
 export interface BackendListParams {
   host_id: Id;
@@ -635,7 +625,7 @@ export interface Session {
 export interface RawLogEntry {
   index: number;
   ts: string;
-  dir: "backend" | "host" | "core";
+  dir: "backend" | "host";
   /**
    * The line verbatim, without its terminator.
    */
@@ -900,26 +890,19 @@ export interface SessionSubscribeResult {
    * Absent when the session has no events yet.
    */
   last_seq?: number;
+  /**
+   * The identity of the view the subscription reads. When it differs from the view a client's events came from, they no longer line up, and the client starts over.
+   */
+  view: string;
+  /**
+   * The first event the view still holds, when it no longer holds every event from 0; a subscription from before it starts here.
+   */
+  first_seq?: number;
 }
 /**
  * No fields.
  */
 export interface SessionUnsubscribeResult {}
-export interface Session11 {
-  id: Id;
-  workspace_id: Id;
-  host_id: Id;
-  backend: string;
-  mode?: string;
-  title?: string;
-  state: AgentEvents.SessionState["state"];
-  created_at: string;
-  /**
-   * Absent when the session has no events yet.
-   */
-  last_event_seq?: number;
-  tile: Tile;
-}
 /**
  * User settings, an open JSON object. Known keys: workspaces.root (string), the directory new worktrees go under.
  */
@@ -987,7 +970,6 @@ export type SessionDecidePermissionResult = Session;
 export type SessionAnswerQuestionResult = Session;
 export type SessionSetTitleResult = Session;
 export type SessionSetModeResult = Session;
-export type SessionReprojectResult = Session;
 
 /** Every Core API method with its params and result types. */
 export interface CoreApiMethods {
@@ -1019,7 +1001,6 @@ export interface CoreApiMethods {
   "session.subscribe": { params: SessionSubscribeParams; result: SessionSubscribeResult };
   "session.unsubscribe": { params: SessionUnsubscribeParams; result: SessionUnsubscribeResult };
   "session.raw_log": { params: SessionRawLogParams; result: SessionRawLogResult };
-  "session.reproject": { params: SessionReprojectParams; result: SessionReprojectResult };
   "backend.list": { params: BackendListParams; result: BackendListResult };
   "mode.list": { params: ModeListParams; result: ModeListResult };
   "settings.get": { params: SettingsGetParams; result: SettingsGetResult };

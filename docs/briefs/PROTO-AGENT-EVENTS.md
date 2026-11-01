@@ -23,7 +23,7 @@ Every event is an object with:
 
 - `v`: event schema version, an integer. Bumped when any event's meaning or shape changes. Nothing projected is stored, so a fix to an adapter's projection applies the next time a session is opened.
 - `session_id`: Ersa's session identifier (not the backend's).
-- `seq`: a monotonically increasing integer within the session, assigned by Core, gap-free: the session record's events first, then the live stream's. Used for resubscribing (`from_seq`) and ordering.
+- `seq`: a monotonically increasing integer within the session's view (see Opening a session), assigned by Core, gap-free: the session record's events first, then the live stream's. A new view numbers from the start again. Used for resubscribing (`from_seq`) and ordering.
 - `ts`: ISO 8601 time of the input the event came from: the time the session record gives the entry, or the time Core received the live line. Never the clock at projection time, so projecting the same input again yields the same value.
 - `source`: `{ backend, backend_version, input, message_id (optional) }`: which backend and version produced the event's input; `input` is `record` (the session record), `live` (the live stream) or `core` (Core's own lifecycle facts); `message_id` is the backend's id for the message the event came from, on which record and live input are merged.
 - `event`: the typed payload; `event.type` discriminates.
@@ -94,6 +94,14 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 - Events never contain backend-specific field names outside `backend.passthrough.payload` and `permission.requested.suggestions[].payload`. Tool data is not backend protocol: `tool.requested.input`, `permission.requested.input`, and structured `tool.result.content` carry the tool's own arguments and output as the tool defines them.
 - Projection is a pure function of its input and the adapter version; running it again over the same session record and raw log yields the same events with the same `seq`.
 
+## Opening a session
+
+Opening a session is projecting it into a view: the events Core holds for the session's subscribers, with its own identity (`view` in `PROTO-CORE-API`'s `session.subscribe`) and its own sequence numbers.
+
+- A session Core runs is projected when its backend starts, and is not projected again while it is live.
+- A session Core does not run is projected when it is first subscribed. It is projected afresh, as a new view, on a subscribe from `seq` 0 while it has no other subscribers, so turns taken elsewhere show, and when it is first opened after Core restarts.
+- A view that has no subscribers and whose session is not running may be dropped; the next subscribe builds a new one.
+
 ## Sequencing
 
 Within a session: `session.started` first; `turn.started` before any `assistant.*`, `tool.*`, or `permission.*` of that turn; `permission.decided` after its `permission.requested`; `tool.result` after its `tool.requested`; `turn.completed` after everything in the turn; `session.ended` last. `usage.updated`, `session.state`, `error`, and `backend.passthrough` may appear anywhere. These rules govern live input; events projected from a session record carry only the event types its entries yield.
@@ -137,9 +145,12 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - Whether `question.*` is projected from a backend tool call (Claude Code's AskUserQuestion arrives as a tool use plus permission request) or needs backend-specific handling in the adapter; first implementation decides and records it.
 - Whether subagent trees get their own `session_id` or stay nested under `parent_tool_use_id`.
 - How history shows a permission decision read from the session record, which keeps no permission prompt or request id, and which turn boundaries history shows without the turn ends the record omits. Claude Code records the decision on the tool result with `decision`, `source` (such as `config` or `user_temporary`), `reasonType`, and `grantScope`; `permission.decided` needs a request id, so no event carries it yet.
+- How record and live input merge once resume exists. Today a live view starts empty and a record view is only for sessions Core does not run, so a message cannot yet reach one view from both. Resume must settle: a live line whose message the record already yielded yields no event, which PROTO-AGENT-EVENTS-R02 will need an exception for; matching the user's prompt, live only as Ersa's host line and without a message id, to its record entry; and partial `assistant.text` events, which carry no message id, of a message still streaming when its record entry was read.
 - Whether a Claude Code record entry with a `peer` origin maps to `user.message` origin `peer_session`, and how its `peer` is filled.
 
 ## Changes
+
+- 2026-11-01: from #35 inbox: Opening a session added: when Core projects a session into a view, when it rebuilds one, and when it may drop one; `seq` counts within a view. Open question on what resume must settle for merging record and live input (R02's exception, matching prompts, partial text). No requirement IDs changed; R02 and R12 unchanged.
 
 - 2026-11-01: from #34 inbox: `session.notice` gains `session_open_elsewhere` (with `pid`) and `session_open_check_failed`, emitted by Core's resume from the adapter's live-session check (PROTO-AGENT-EVENTS-R14 added); who wrote a record prompt decides its origin and whether it can title a session; the permission-decision open question names the recorded fields; open question on `peer` origins.
 

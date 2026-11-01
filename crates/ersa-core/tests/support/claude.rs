@@ -48,6 +48,14 @@ impl Adapter for OnTransport {
     }
 }
 
+/// The Claude adapter with a Claude home that does not exist, so nothing a
+/// test does can read the user's own session records.
+pub fn isolated_claude() -> ClaudeAdapter {
+    let nowhere =
+        std::env::temp_dir().join(format!("ersa-test-no-claude-home-{}", std::process::id()));
+    ClaudeAdapter::new().with_claude_home(nowhere)
+}
+
 pub fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
@@ -75,7 +83,7 @@ pub async fn start_replay_with(configure: impl FnOnce(&mut CoreConfig), pace: Pa
     let mut config = test_config(&dir.path().join("data"), &endpoint);
     configure(&mut config);
     let replay = Replay {
-        adapter: Arc::new(ClaudeAdapter::new()),
+        adapter: Arc::new(isolated_claude()),
         recording: recording(),
         title: FIXTURE.to_string(),
         // What detection finds in these tests' Cores, which have no backend

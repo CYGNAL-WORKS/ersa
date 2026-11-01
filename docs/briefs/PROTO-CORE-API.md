@@ -48,18 +48,18 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 
 ### Sessions
 
-- `session.list`: `{ id, workspace_id, host_id, backend, mode, title, state, created_at, last_event_seq (absent before the first event), tile: { state, context_tokens, context_window, cost_usd_total, pending: [{ kind (permission | question), request_id }] } }`. The `tile` object is what the rail renders; Core keeps it current from events.
-- `session.create { workspace_id, backend, mode (optional), title (optional) }`: creates and starts. `mode` is stored and shown; it takes effect from milestone M3, when modes exist.
+- `session.list`: `{ id, workspace_id, host_id, backend, mode, title, state, created_at, last_event_seq (absent before the first event), tile: { state, context_tokens, context_window, cost_usd_total, pending: [{ kind (permission | question), request_id }] } }`. The `tile` object is what the rail renders; Core keeps it current from events. A session's `title` is its backend's: the title the backend's own tools list for it, which Ersa never stores. Its `created_at` is the time of the first entry in its session record, else the time of the app log's first fact for it. Its `mode` is Ersa's.
+- `session.create { workspace_id, backend, mode (optional) }`: creates and starts; it takes no title, since the title is the backend's. `mode` is stored and shown; it takes effect from milestone M3, when modes exist.
 - `session.start { id }`, `session.stop { id }`, `session.resume { id }`, `session.remove { id }`. Restarting a stopped session is `session.resume` (milestone M1); until then `session.start` on a stopped session answers `invalid_state` naming M1. `session.remove` is refused while the session is live.
 - `session.send { id, text }`: sends a user message; returns `{ turn }`.
 - `session.interrupt { id }`.
 - `session.decide_permission { id, request_id, behavior (allow | deny), message (optional), updated_input (optional), apply_suggestions (optional array of indices) }`.
 - `session.answer_question { id, request_id, answers }`.
-- `session.set_title { id, title }`, `session.set_mode { id, mode }` (takes effect on next start).
-- `session.subscribe { id, from_seq }`: Core sends every event with `seq >= from_seq` as `session.event` notifications, then continues live. Returns `{ last_seq }`, absent when the session has no events yet.
+- `session.set_title { id, title }`: renames the session in its backend, so the new title shows in the backend's own tools too (for Claude Code, `PROTO-CLAUDE-CODE-STREAM`, Session record). Ersa keeps no title of its own.
+- `session.set_mode { id, mode }` (takes effect on next start).
+- `session.subscribe { id, from_seq }`: Core sends every event with `seq >= from_seq` as `session.event` notifications, then continues live. Returns `{ view, last_seq, first_seq }`; `last_seq` is absent when the view has no events yet. A view holds a bounded amount of events (64 MiB); once it has let go of its earliest ones, `first_seq` is the first event it still holds, a subscription from before it starts there, and the Interface says that earlier events are no longer shown. `first_seq` is absent while the view holds every event from 0. `view` identifies the projection Core is serving (when Core rebuilds one: `PROTO-AGENT-EVENTS`, Opening a session), and changes whenever Core rebuilds it. Sequence numbers count within a view, so a client holding events from a different view discards them and subscribes again from 0, or from `first_seq`.
 - `session.unsubscribe { id }`.
 - `session.raw_log { id, from, to }`: the session's raw log for the developer pane, the lines exchanged with its backend since Core opened it (held in memory, never stored): `[{ index, ts, dir (backend | host), line }]`, at most 1000 per call; the client pages on from the last index plus one. Core's lifecycle facts are in the app log, not here.
-- `session.reproject` is withdrawn: nothing projected is stored, so a session is projected afresh each time it is opened (ADR 0017).
 
 ### Backends and modes
 
@@ -99,7 +99,7 @@ The replay server answers read-only requests exactly as Core does. It never chan
 ## Requirements
 
 - **PROTO-CORE-API-R01**: The first request on a connection shall be `core.hello`, and Core shall reject any other method before it with `invalid_state`.
-- **PROTO-CORE-API-R02**: `session.subscribe` with `from_seq` shall deliver every event from that sequence number onward, in order, with no gaps or duplicates, then continue live.
+- ~~**PROTO-CORE-API-R02**~~: retired 2026-11-01 (a view holds a bounded number of events), replaced by R14.
 - **PROTO-CORE-API-R03**: Disconnecting all Interfaces shall not stop any session; only `session.stop` or `core.shutdown` shall.
 - **PROTO-CORE-API-R04**: `session.decide_permission` shall cause the adapter to answer the backend's pending request with the given behavior, and a `permission.decided` event shall follow.
 - **PROTO-CORE-API-R05**: `session.list` shall return each session's `tile` object reflecting the latest `usage.updated` and the set of pending permission and question requests.
@@ -109,6 +109,9 @@ The replay server answers read-only requests exactly as Core does. It never chan
 - **PROTO-CORE-API-R09**: The replay server shall accept the same requests and produce the same notifications as Core for a recorded session.
 - **PROTO-CORE-API-R10**: A reserved method shall return an error with `kind: invalid_state` and a message naming the milestone, never a protocol-level error.
 - **PROTO-CORE-API-R11**: A project shall be trusted only when `project.add` or `project.set_trust` said so, and its `trusted` value shall persist until `project.set_trust` changes it.
+- **PROTO-CORE-API-R12**: `session.set_title` shall rename the session in its backend, so that the backend's own session listing and `session.list` both show the new title.
+- **PROTO-CORE-API-R13**: `session.subscribe` shall return the `view` it serves, the same `view` for as long as Core keeps that projection and a different one whenever Core rebuilds it.
+- **PROTO-CORE-API-R14**: `session.subscribe` with `from_seq` shall deliver every event from that sequence number onward, or from `first_seq` when the view no longer holds events before it, in order, with no gaps or duplicates, then continue live.
 
 ## Out of scope
 
@@ -122,6 +125,8 @@ The replay server answers read-only requests exactly as Core does. It never chan
 
 ## Changes
 
+- 2026-11-01: from #35 inbox: a view holds a bounded amount of events; `session.subscribe` returns `first_seq` once it has let go of its earliest. PROTO-CORE-API-R02 retired, R14 added.
+- 2026-11-01: from #35 inbox: a session's title is its backend's: `session.set_title` renames through the backend (PROTO-CORE-API-R12 added) and `session.create` takes no title; `created_at` is the record's first entry, else the app log's first fact; `session.subscribe` returns `view`, and a client holding events from another view starts over from 0 (PROTO-CORE-API-R13 added); `session.reproject` removed, which bumps `api_version`; the bump ships with the method's removal in code.
 - 2026-11-01: project trust (ADR 0018): `trusted` on projects, `project.add` takes it, `project.set_trust` added; PROTO-CORE-API-R11 added.
 - 2026-11-01: aligned with ADR 0017: `session.raw_log` serves the in-memory raw log, `dir` no longer includes `core` (lifecycle facts go to the app log); `session.reproject` withdrawn. No requirement IDs changed.
 

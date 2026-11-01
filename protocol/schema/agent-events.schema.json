@@ -11,8 +11,8 @@
       "required": ["v", "session_id", "seq", "ts", "source", "event"],
       "properties": {
         "v": {
-          "description": "Projection version. Bumped when any event's meaning or shape changes.",
-          "const": 1
+          "description": "Event schema version. Bumped when any event's meaning or shape changes, including the lifecycle events Core emits itself.",
+          "const": 2
         },
         "session_id": { "type": "string", "minLength": 1 },
         "seq": {
@@ -21,7 +21,7 @@
           "minimum": 0
         },
         "ts": {
-          "description": "When the raw log recorded the last line the event came from (raw_to).",
+          "description": "Time of the input the event came from: the time the session record gives the entry, or the time Core received the live line. Never the clock at projection time.",
           "type": "string",
           "format": "date-time"
         },
@@ -32,15 +32,21 @@
     "source": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["backend", "backend_version", "raw_from", "raw_to"],
+      "required": ["backend", "backend_version", "input"],
       "properties": {
         "backend": { "type": "string", "minLength": 1 },
         "backend_version": { "type": "string" },
-        "raw_from": { "$ref": "#/$defs/raw_index" },
-        "raw_to": { "$ref": "#/$defs/raw_index" }
+        "input": {
+          "description": "What the event was projected from: the backend's session record, its live stream, or Core's own knowledge of the backend process.",
+          "enum": ["record", "live", "core"]
+        },
+        "message_id": {
+          "description": "The backend's id for the message the event came from, on which record and live events are merged.",
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
-    "raw_index": { "type": "integer", "minimum": 0 },
     "event": {
       "description": "The typed payload; type discriminates.",
       "oneOf": [

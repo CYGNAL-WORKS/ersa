@@ -27,13 +27,12 @@ use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, PermissionDecision, ProcessExit, Projector,
     SessionConfig, Transport, async_trait,
 };
-use ersa_protocol::core_api::{Method, Project, Session, Tile, Vcs, Workspace, WorkspaceState};
-use ersa_protocol::events::LifecycleState;
+use ersa_protocol::core_api::{Method, Project, Vcs, Workspace, WorkspaceState};
 use serde_json::Value;
 use tokio::sync::watch;
 
 use crate::api::ApiError;
-use crate::persistence::{self, LOCAL_HOST_ID};
+use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
 use crate::sessions::SessionError;
 use crate::state::Core;
 use crate::transport::MAX_PROCESS_LINE_BYTES;
@@ -95,8 +94,7 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::SessionDecidePermission
         | Method::SessionAnswerQuestion
         | Method::SessionSetTitle
-        | Method::SessionSetMode
-        | Method::SessionReproject => "the session is a replay of a recording and cannot change",
+        | Method::SessionSetMode => "the session is a replay of a recording and cannot change",
         Method::ProjectAdd
         | Method::ProjectRemove
         | Method::WorkspaceCreate
@@ -155,17 +153,14 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
     };
     core.store.insert_workspace(workspace.clone()).await?;
 
-    let session = Session {
+    let session = SessionRow {
         id: persistence::new_id("s"),
         workspace_id: workspace.id,
         host_id: LOCAL_HOST_ID.to_string(),
         backend: adapter.backend().to_string(),
+        backend_session_id: None,
         mode: None,
-        title: Some(title),
-        state: LifecycleState::Starting,
-        created_at: persistence::now_rfc3339(),
-        last_event_seq: None,
-        tile: Tile::starting(),
+        cwd: path.clone(),
     };
     let transport = core
         .session_transport_for(LOCAL_HOST_ID)
@@ -179,6 +174,7 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
     core.sessions
         .create_with(
             session,
+            Some(title),
             Arc::new(ReplayAdapter {
                 inner: adapter,
                 lines: Arc::new(lines),
@@ -212,6 +208,38 @@ fn check_lines(lines: &[TimedLine], max_bytes: usize) -> Result<(), SessionError
 pub(crate) fn subscribed(core: &Core) {
     if core.config.replay {
         core.replay_audience_sender().send_replace(true);
+    }
+}
+
+/// A backend's adapter without its session records: the record methods
+/// keep their defaults (no history, no summary). A replay server registers
+/// its recorded backend this way, so nothing it does reads the user's own
+/// records.
+pub struct Recordless(Arc<dyn Adapter>);
+
+impl Recordless {
+    pub fn new(adapter: Arc<dyn Adapter>) -> Self {
+        Recordless(adapter)
+    }
+}
+
+#[async_trait]
+impl Adapter for Recordless {
+    fn backend(&self) -> &str {
+        self.0.backend()
+    }
+
+    async fn start(
+        &self,
+        transport: Arc<dyn Transport>,
+        config: SessionConfig,
+        sink: Arc<dyn AdapterSink>,
+    ) -> Result<Box<dyn AdapterSession>, AdapterError> {
+        self.0.start(transport, config, sink).await
+    }
+
+    fn projector(&self) -> Box<dyn Projector> {
+        self.0.projector()
     }
 }
 

@@ -8,10 +8,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ersa_adapter::{Adapter, Direction};
-use ersa_adapter_claude::ClaudeAdapter;
 use ersa_core::replay::Pace;
 use serde_json::{Value, json};
-use support::claude::{FIXTURE, OnTransport, fixture, parse, recording, start_replay_with, stub};
+use support::claude::{
+    FIXTURE, OnTransport, fixture, isolated_claude, parse, recording, start_replay_with, stub,
+};
 use support::suite::{self, Target};
 use support::{Client, TestCore, kind, start_with_adapters, tempdir, workspace};
 
@@ -87,7 +88,7 @@ impl Watched {
 async fn live_core_turn() -> Watched {
     let (stdout, sent) = fixture();
     let adapter = OnTransport {
-        adapter: ClaudeAdapter::new().with_stop_grace(Duration::from_secs(1)),
+        adapter: isolated_claude().with_stop_grace(Duration::from_secs(1)),
         transport: Arc::new(stub(&stdout)),
     };
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
@@ -145,12 +146,7 @@ async fn played_through(client: &mut Client, id: &Value) {
     let lines = recording().lines().len();
     for _ in 0..600 {
         let log = client.result("session.raw_log", json!({ "id": id })).await;
-        let crossed = log
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|e| e["dir"] != "core")
-            .count();
+        let crossed = log.as_array().unwrap().len();
         if crossed == lines {
             return;
         }
@@ -231,13 +227,9 @@ async fn read_only_requests_are_answered_as_core_answers_them() {
 
     // Nothing is played until a client subscribes.
     let log = client.result("session.raw_log", json!({ "id": id })).await;
-    assert!(
-        log.as_array().unwrap().iter().all(|e| e["dir"] == "core"),
-        "{log:#}"
-    );
+    assert_eq!(log, json!([]));
 
-    // Once the whole recording is in, the raw log holds it line for line,
-    // between Core's own records.
+    // Once the whole recording is in, the raw log holds it line for line.
     client
         .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
         .await;
@@ -247,7 +239,6 @@ async fn read_only_requests_are_answered_as_core_answers_them() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|e| e["dir"] != "core")
         .map(|e| {
             (
                 e["dir"].as_str().unwrap().to_string(),
@@ -262,13 +253,11 @@ async fn read_only_requests_are_answered_as_core_answers_them() {
             let dir = match l.dir {
                 Direction::Backend => "backend",
                 Direction::Host => "host",
-                Direction::Core => "core",
             };
             (dir.to_string(), l.line.clone())
         })
         .collect();
     assert_eq!(crossed, recorded);
-    assert_eq!(log[0]["dir"], "core");
 
     // core.shutdown stops the replay server as it stops Core.
     client.result("core.shutdown", json!({})).await;
@@ -313,7 +302,6 @@ async fn requests_that_would_change_anything_answer_invalid_state_naming_the_rep
         ),
         ("session.set_title", json!({ "id": id, "title": "t" })),
         ("session.set_mode", json!({ "id": id, "mode": "m" })),
-        ("session.reproject", json!({ "id": id })),
         ("project.add", json!({ "host_id": "local", "path": "." })),
         ("project.remove", json!({ "id": "p" })),
         ("workspace.create", json!({ "project_id": "p" })),

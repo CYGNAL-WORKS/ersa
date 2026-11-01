@@ -8,7 +8,8 @@
 //! normally `~/.claude` on the session's host; callers pass it in.
 //!
 //! - [`project_record`] turns a record into Ersa events, through the
-//!   same projection of messages as the live stream.
+//!   same projection of messages as the live stream, and [`read_record`]
+//!   finds a session's record and does that to it.
 //! - [`list_sessions`] lists a directory's sessions, reading only the head and
 //!   tail of each record.
 //! - [`live_session`] says whether a running CLI has a session open.
@@ -20,10 +21,16 @@ mod listing;
 mod projection;
 mod registry;
 
+use std::collections::VecDeque;
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 
-pub use listing::{SessionList, SessionSummary, list_sessions};
-pub use projection::{RecordEvent, project_record};
+pub use listing::{SessionList, SessionSummary, list_sessions, summarize_session};
+pub use projection::{RecordEvent, project_record, project_record_from};
 pub use registry::{LiveCheck, LiveSession, live_session};
 
 /// The longest encoded directory name the CLI uses whole; a longer one is cut
@@ -91,6 +98,276 @@ pub fn project_dir(claude_home: &Path, cwd: &str) -> PathBuf {
 /// The session record of session `session_id`, started in `cwd`.
 pub fn record_path(claude_home: &Path, cwd: &str, session_id: &str) -> PathBuf {
     project_dir(claude_home, cwd).join(format!("{session_id}.jsonl"))
+}
+
+/// The longest record [`read_record`] reads. Records of long sessions with
+/// large tool results run to tens of megabytes; one far beyond is not
+/// something a transcript can show, and projecting it costs Core several
+/// times its size in memory while it is opened.
+pub const MAX_RECORD_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Where the CLI keeps its files on this machine, as the CLI itself decides:
+/// `CLAUDE_CONFIG_DIR` when set and not empty, else `.claude` in the user's
+/// home directory. `None` when there is no home directory either.
+///
+/// Read from Core's own environment, which the CLI inherits: the adapter
+/// does not remove `CLAUDE_CONFIG_DIR`, so the CLI writes where this reads.
+pub fn default_claude_home() -> Option<PathBuf> {
+    match std::env::var_os("CLAUDE_CONFIG_DIR") {
+        Some(dir) if !dir.is_empty() => Some(PathBuf::from(dir)),
+        _ => std::env::home_dir().map(|home| home.join(".claude")),
+    }
+}
+
+/// The file holding session `session_id`'s record: under `cwd`'s directory
+/// when it is there, else under whichever project directory has it. `cwd`
+/// may be spelled differently from the CLI's own spelling (a canonicalised
+/// path, another drive-letter case), and a session id names one session
+/// wherever it ran, so the search is what finds it then. `None` when no
+/// record exists: never written yet, or deleted by the CLI's retention.
+pub fn find_record(claude_home: &Path, cwd: &str, session_id: &str) -> io::Result<Option<PathBuf>> {
+    if !is_session_id(session_id) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{session_id:?} is not a Claude Code session id"),
+        ));
+    }
+    let expected = record_path(claude_home, cwd, session_id);
+    if is_plain_file(&expected) {
+        return Ok(Some(expected));
+    }
+    let projects = match fs::read_dir(claude_home.join("projects")) {
+        Ok(projects) => projects,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let file = format!("{session_id}.jsonl");
+    for project in projects {
+        let candidate = project?.path().join(&file);
+        if is_plain_file(&candidate) {
+            return Ok(Some(candidate));
+        }
+    }
+    Ok(None)
+}
+
+/// Whether `path` is a file itself, not a link to one: the CLI writes its
+/// records as plain files, and listing skips links too.
+fn is_plain_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_file())
+}
+
+/// The events of session `session_id`'s record ([`project_record`]), or none
+/// when it has no record ([`find_record`]). Read line by line; bytes that are
+/// not UTF-8 are read with replacement characters, as Core reads a backend's
+/// lines. Only the bytes the file holds when it is opened are read: the CLI
+/// may be appending to it.
+pub fn read_record(
+    claude_home: &Path,
+    cwd: &str,
+    session_id: &str,
+) -> io::Result<Vec<RecordEvent>> {
+    match find_record(claude_home, cwd, session_id)? {
+        Some(path) => Ok(read_record_at(&path)?.events),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// A token for the state of session `session_id`'s record: its file's size
+/// and modified time. `None` when it has no record, or its file system
+/// keeps no modified times.
+pub fn record_version(
+    claude_home: &Path,
+    cwd: &str,
+    session_id: &str,
+) -> io::Result<Option<String>> {
+    let Some(path) = find_record(claude_home, cwd, session_id)? else {
+        return Ok(None);
+    };
+    let metadata = fs::metadata(&path)?;
+    let Ok(modified) = metadata.modified() else {
+        return Ok(None);
+    };
+    let since = modified
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    Ok(Some(format!("{}:{}", metadata.len(), since.as_nanos())))
+}
+
+/// A record's events, with the size and modified time of the file they were
+/// read from.
+#[derive(Debug, Clone)]
+struct ReadRecord {
+    len: u64,
+    modified: Option<SystemTime>,
+    events: Vec<RecordEvent>,
+}
+
+fn read_record_at(path: &Path) -> io::Result<ReadRecord> {
+    let file = fs::File::open(path)?;
+    let metadata = file.metadata()?;
+    let len = metadata.len();
+    if len > MAX_RECORD_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "the session record {} is {len} bytes, more than the {MAX_RECORD_BYTES} Ersa reads",
+                path.display()
+            ),
+        ));
+    }
+    let mut reader = io::BufReader::new(file);
+    Ok(ReadRecord {
+        len,
+        modified: metadata.modified().ok(),
+        events: projection::project_record_from(&mut reader, len)?,
+    })
+}
+
+/// The most bytes of projected events [`RecordCache`] keeps across all the
+/// records it holds: the same budget as one open view in Core.
+const CACHED_RECORD_BYTES: usize = 64 * 1024 * 1024;
+
+/// How many summaries [`RecordCache`] keeps; each is a few hundred bytes.
+const CACHED_SUMMARIES: usize = 256;
+
+/// One record's projection, kept while its file is unchanged.
+#[derive(Debug)]
+struct CachedRecord {
+    path: PathBuf,
+    len: u64,
+    modified: SystemTime,
+    events: Arc<Vec<RecordEvent>>,
+    /// About how much memory `events` holds.
+    bytes: usize,
+}
+
+/// The projections of the records read last, each kept for as long as its
+/// file's size and modified time say it has not changed, so opening a large
+/// unchanged record again costs a look at its metadata, not a read. A record
+/// that changed (the CLI appended a turn) is read again. Bounded by
+/// [`CACHED_RECORD_BYTES`] in all; results are shared, never copied.
+#[derive(Debug, Default)]
+pub struct RecordCache {
+    /// Most recently used last.
+    records: Mutex<VecDeque<CachedRecord>>,
+    /// Summaries of the records summarized last, by the same key. A summary
+    /// that took long to read is still there for the next caller while the
+    /// record is unchanged.
+    summaries: Mutex<VecDeque<(PathBuf, u64, SystemTime, SessionSummary)>>,
+    /// How many times a record file was read and projected.
+    reads: AtomicUsize,
+}
+
+impl RecordCache {
+    /// [`read_record`], through the cache.
+    pub fn read(
+        &self,
+        claude_home: &Path,
+        cwd: &str,
+        session_id: &str,
+    ) -> io::Result<Arc<Vec<RecordEvent>>> {
+        let Some(path) = find_record(claude_home, cwd, session_id)? else {
+            return Ok(Arc::default());
+        };
+        let metadata = fs::metadata(&path)?;
+        let (len, modified) = (metadata.len(), metadata.modified().ok());
+        if let Some(modified) = modified {
+            let mut records = lock(&self.records);
+            if let Some(at) = records
+                .iter()
+                .position(|r| r.path == path && r.len == len && r.modified == modified)
+            {
+                let hit = records.remove(at).expect("found");
+                let events = Arc::clone(&hit.events);
+                records.push_back(hit);
+                return Ok(events);
+            }
+        }
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        let read = read_record_at(&path)?;
+        let events = Arc::new(read.events);
+        // Keyed by what the file was when it was opened for this read.
+        if let Some(modified) = read.modified {
+            let bytes = approximate_bytes(&events);
+            let mut records = lock(&self.records);
+            records.retain(|r| r.path != path);
+            if bytes <= CACHED_RECORD_BYTES {
+                records.push_back(CachedRecord {
+                    path,
+                    len: read.len,
+                    modified,
+                    events: Arc::clone(&events),
+                    bytes,
+                });
+                while records.iter().map(|r| r.bytes).sum::<usize>() > CACHED_RECORD_BYTES {
+                    records.pop_front();
+                }
+            }
+        }
+        Ok(events)
+    }
+
+    /// [`summarize_session`], through the cache.
+    pub fn summarize(
+        &self,
+        claude_home: &Path,
+        cwd: &str,
+        session_id: &str,
+    ) -> io::Result<Option<SessionSummary>> {
+        let Some(path) = find_record(claude_home, cwd, session_id)? else {
+            return Ok(None);
+        };
+        let metadata = fs::metadata(&path)?;
+        let len = metadata.len();
+        let Ok(modified) = metadata.modified() else {
+            return summarize_session(claude_home, cwd, session_id);
+        };
+        if let Some((.., summary)) = lock(&self.summaries)
+            .iter()
+            .find(|(p, l, m, _)| *p == path && *l == len && *m == modified)
+        {
+            return Ok(Some(summary.clone()));
+        }
+        let Some(summary) = summarize_session(claude_home, cwd, session_id)? else {
+            return Ok(None);
+        };
+        let mut summaries = lock(&self.summaries);
+        summaries.retain(|(p, ..)| *p != path);
+        summaries.push_back((path, len, modified, summary.clone()));
+        while summaries.len() > CACHED_SUMMARIES {
+            summaries.pop_front();
+        }
+        Ok(Some(summary))
+    }
+
+    /// Lets go of what is kept of session `session_id`'s record.
+    pub fn forget(&self, session_id: &str) {
+        let named = |path: &Path| path.file_stem().is_some_and(|stem| stem == session_id);
+        lock(&self.records).retain(|r| !named(&r.path));
+        lock(&self.summaries).retain(|(p, ..)| !named(p));
+    }
+
+    /// How many times a record file has been read and projected, rather than
+    /// taken from the cache.
+    pub fn reads(&self) -> usize {
+        self.reads.load(Ordering::SeqCst)
+    }
+}
+
+/// About how much memory `events` holds: their size as JSON, plus a little
+/// for each event's own fields.
+fn approximate_bytes(events: &[RecordEvent]) -> usize {
+    events
+        .iter()
+        .map(|e| serde_json::to_vec(&e.event).map_or(0, |json| json.len()) + 128)
+        .sum()
+}
+
+/// Locks a mutex, carrying on if a panicking thread poisoned it: what it
+/// guards is a cache, consistent between single updates.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Whether `id` has the shape of a Claude Code session id: a UUID in its

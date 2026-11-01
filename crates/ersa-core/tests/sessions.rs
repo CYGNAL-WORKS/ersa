@@ -1,7 +1,8 @@
 //! The session manager driven through the Core API over the real socket,
 //! with a fake adapter (`support/fake.rs`) standing in for a backend:
-//! sequencing, subscriptions, tiles, the raw log, stopping, and what a
-//! restarted Core does with the sessions it finds.
+//! sequencing, subscriptions, tiles, the raw log, stopping, what a restarted
+//! Core does with the sessions it finds, and opening a session from its
+//! backend's record.
 
 mod support;
 
@@ -10,7 +11,7 @@ use std::sync::atomic::Ordering;
 
 use ersa_core::Adapter;
 use serde_json::{Value, json};
-use support::fake::{self, FakeAdapter, Stats};
+use support::fake::{self, FakeAdapter, Records, Stats};
 use support::{Client, TestCore, kind, start_with_adapters, tempdir, workspace};
 
 async fn start_fake(adapter: FakeAdapter) -> (TestCore, Arc<Stats>) {
@@ -28,11 +29,10 @@ async fn new_session(core: &TestCore, client: &mut Client) -> String {
     let session = client
         .result(
             "session.create",
-            json!({ "workspace_id": workspace_id, "backend": fake::BACKEND, "title": "test" }),
+            json!({ "workspace_id": workspace_id, "backend": fake::BACKEND }),
         )
         .await;
     assert_eq!(session["state"], "starting");
-    assert_eq!(session["title"], "test");
     session["id"].as_str().unwrap().to_string()
 }
 
@@ -75,17 +75,16 @@ async fn events_are_numbered_from_zero_without_gaps() {
     let events = client.events_until("assistant.text").await;
     assert_eq!(seqs(&events), (0..events.len() as u64).collect::<Vec<_>>());
     for event in &events {
-        assert_eq!(event["v"], 1);
+        assert_eq!(event["v"], 2);
         assert_eq!(event["session_id"], id.as_str());
         assert_eq!(event["source"]["backend"], fake::BACKEND);
-        let (from, to) = (&event["source"]["raw_from"], &event["source"]["raw_to"]);
-        assert!(from.as_u64() <= to.as_u64());
     }
     assert_eq!(
         types(&events),
         [
             "session.state",
             "backend.passthrough",
+            "session.started",
             "session.state",
             "turn.started",
             "user.message",
@@ -93,14 +92,25 @@ async fn events_are_numbered_from_zero_without_gaps() {
             "assistant.text"
         ]
     );
+    let inputs: Vec<&str> = events
+        .iter()
+        .map(|e| e["source"]["input"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        inputs,
+        [
+            "core", "live", "live", "live", "live", "live", "live", "live"
+        ]
+    );
     assert_eq!(events[0]["event"]["state"], "starting");
-    assert_eq!(events[2]["event"]["state"], "running");
-    // `ts` is when the raw log recorded the event's last line.
+    assert_eq!(events[3]["event"]["state"], "running");
+    // A live event's `ts` is when Core received its line.
     let log = client.result("session.raw_log", json!({ "id": id })).await;
-    for event in &events {
-        let raw_to = event["source"]["raw_to"].as_u64().unwrap() as usize;
-        assert_eq!(event["ts"], log[raw_to]["ts"], "{event:#}");
+    let received: Vec<&Value> = log.as_array().unwrap().iter().map(|l| &l["ts"]).collect();
+    for event in &events[1..] {
+        assert!(received.contains(&&event["ts"]), "{event:#}");
     }
+    assert_eq!(events[7]["source"]["message_id"], "r-2");
 
     let second = client
         .result("session.send", json!({ "id": id, "text": "again" }))
@@ -108,7 +118,7 @@ async fn events_are_numbered_from_zero_without_gaps() {
     assert_eq!(second["turn"], 2);
 }
 
-// verifies: PROTO-CORE-API-R02
+// verifies: PROTO-CORE-API-R14
 #[tokio::test(flavor = "multi_thread")]
 async fn subscribing_from_a_seq_replays_then_continues_live() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
@@ -296,11 +306,17 @@ async fn a_question_waiting_on_the_user_is_in_the_tile() {
 }
 
 // verifies: PROTO-CORE-API-R08
+// verifies: PROTO-AGENT-EVENTS-R13
 #[tokio::test(flavor = "multi_thread")]
 async fn the_raw_log_holds_every_line_exactly_as_it_crossed() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
+    // Read while the session is open: once nobody reads a session Core is
+    // not running, its raw log goes.
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
     client
         .result(
             "session.send",
@@ -317,11 +333,10 @@ async fn the_raw_log_holds_every_line_exactly_as_it_crossed() {
         .collect();
     let user = json!({ "t": "user", "text": "hello \"there\"" }).to_string();
     let usage = json!({ "t": "usage", "tokens": 130 }).to_string();
-    let reply = json!({ "t": "reply", "text": "echo: hello \"there\"" }).to_string();
+    let reply = json!({ "t": "reply", "id": "r-2", "text": "echo: hello \"there\"" }).to_string();
     let adapter_lines: Vec<(&str, &str)> = lines
         .iter()
         .copied()
-        .filter(|(dir, _)| *dir != "core")
         .skip(2) // the start: hello and ready
         .collect();
     assert_eq!(
@@ -332,12 +347,20 @@ async fn the_raw_log_holds_every_line_exactly_as_it_crossed() {
             ("backend", reply.as_str())
         ]
     );
-    // Core's own records frame the session.
-    assert_eq!(lines[0].0, "core");
-    assert!(lines[0].1.contains("process_started"), "{}", lines[0].1);
-    let last = lines.last().unwrap();
-    assert_eq!(last.0, "core");
-    assert!(last.1.contains("process_exited"), "{}", last.1);
+    // Nothing but what crossed: Core's lifecycle facts are in the app log.
+    assert_eq!(lines.len(), 5);
+    let facts: Vec<String> = ersa_core::app_log::read_entries(&core.data_dir())
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.session_id == id)
+        .map(|e| {
+            serde_json::to_value(&e.fact).unwrap()["type"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(facts, ["process_started", "process_exited"]);
     let indices: Vec<u64> = log.iter().map(|e| e["index"].as_u64().unwrap()).collect();
     assert_eq!(indices, (0..log.len() as u64).collect::<Vec<_>>());
 
@@ -389,6 +412,8 @@ async fn a_stopped_session_has_ended_and_can_then_be_removed() {
     client
         .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
         .await;
+    // Ready, so the stop reaches the backend rather than cancelling its start.
+    client.events_until("session.started").await;
 
     let stopped = client.result("session.stop", json!({ "id": id })).await;
     assert_eq!(stopped["state"], "ended");
@@ -431,10 +456,11 @@ async fn a_running_session_cannot_be_removed_and_titles_and_modes_change() {
     let id = new_session(&core, &mut client).await;
     let error = client.error("session.remove", json!({ "id": id })).await;
     assert_eq!(kind(&error), "invalid_state");
-    let renamed = client
-        .result("session.set_title", json!({ "id": id, "title": "renamed" }))
+    // A title is the backend's to keep, in its record.
+    let error = client
+        .error("session.set_title", json!({ "id": id, "title": "renamed" }))
         .await;
-    assert_eq!(renamed["title"], "renamed");
+    assert_eq!(kind(&error), "invalid_state");
     let moded = client
         .result("session.set_mode", json!({ "id": id, "mode": "review" }))
         .await;
@@ -487,52 +513,6 @@ async fn an_adapter_that_panics_while_starting_fails_the_session_cleanly() {
     assert_eq!(events.last().unwrap()["event"]["reason"], "error");
     // Not live any more: it can be removed.
     client.result("session.remove", json!({ "id": id })).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn re_projecting_disturbs_subscribers_only_when_events_change() {
-    let (core, _) = start_fake(FakeAdapter::new(1)).await;
-    let mut caller = core.client().await;
-    let id = new_session(&core, &mut caller).await;
-    caller
-        .result("session.send", json!({ "id": id, "text": "hello" }))
-        .await;
-    caller.result("session.stop", json!({ "id": id })).await;
-    let mut watcher = core.client().await;
-    for client in [&mut caller, &mut watcher] {
-        client
-            .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
-            .await;
-        client.events_until("session.ended").await;
-    }
-
-    // The same version re-derives the same events: nobody is disturbed,
-    // and the caller, itself subscribed, gets its answer.
-    let row = caller
-        .result("session.reproject", json!({ "id": id }))
-        .await;
-    assert_eq!(row["id"], id.as_str());
-    caller.result("session.list", json!({})).await;
-    watcher.result("session.list", json!({})).await;
-
-    // A cached event that no longer matches the raw log is a change: other
-    // subscribers are disconnected, the caller is answered and kept.
-    let conn = rusqlite::Connection::open(core.data_dir().join("ersa.db")).unwrap();
-    conn.execute(
-        "UPDATE projection_cache SET envelope = replace(envelope, 'echo: hello', 'tampered')
-         WHERE session_id = ?1",
-        [&id],
-    )
-    .unwrap();
-    let row = caller
-        .result("session.reproject", json!({ "id": id }))
-        .await;
-    assert_eq!(row["state"], "ended");
-    while watcher.read_raw().await.is_some() {}
-    caller.result("session.list", json!({})).await;
-    // And the caller reads the re-derived events by subscribing again.
-    let events = all_events(&mut caller, &id).await;
-    assert!(events.iter().any(|e| e["event"]["text"] == "echo: hello"));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -692,20 +672,142 @@ async fn the_tile_carries_the_state_and_follows_it() {
     );
 }
 
-/// Sets a session's row state directly, as a Core that wrote the row but
-/// not the session's ending would leave it.
-fn set_row_state(core_dir: &std::path::Path, id: &str, state: &str) {
-    let conn = rusqlite::Connection::open(core_dir.join("data").join("ersa.db")).unwrap();
-    conn.execute(
-        "UPDATE sessions SET state = ?2 WHERE id = ?1",
-        rusqlite::params![id, state],
-    )
-    .unwrap();
+#[tokio::test(flavor = "multi_thread")]
+async fn re_projecting_is_gone_and_a_title_is_not_ersas_to_give() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client.result("session.stop", json!({ "id": id })).await;
+    // Nothing is stored to re-project: the method is gone from the API.
+    let error = client.error("session.reproject", json!({ "id": id })).await;
+    assert_eq!(error["code"], -32601, "{error:#}");
+    // session.create takes no title; the backend's record gives one.
+    let workspace_id = session_row(&mut client, &id).await["workspace_id"].clone();
+    let error = client
+        .error(
+            "session.create",
+            json!({ "workspace_id": workspace_id, "backend": fake::BACKEND, "title": "mine" }),
+        )
+        .await;
+    assert_eq!(error["code"], -32602, "{error:#}");
+}
+
+// verifies: ARCH-CORE-R12
+// verifies: PROTO-AGENT-EVENTS-R11
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stopped_session_reopened_shows_its_record_and_turns_taken_elsewhere() {
+    let records = Records::default();
+    let (core, _) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+
+    // Opened from the start with nobody else reading: the record, then how
+    // Core saw the backend end. What only the live stream carried (the turn,
+    // the usage) is not kept.
+    let first = all_events(&mut client, &id).await;
+    let summary = |events: &[Value]| -> Vec<(String, String)> {
+        events
+            .iter()
+            .map(|e| {
+                (
+                    e["source"]["input"].as_str().unwrap().to_string(),
+                    e["event"]["type"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect()
+    };
+    let expected = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
+    };
+    assert_eq!(
+        summary(&first),
+        expected(&[
+            ("record", "user.message"),
+            ("record", "assistant.text"),
+            ("core", "session.state"),
+            ("core", "session.ended"),
+        ])
+    );
+    assert_eq!(first[1]["event"]["text"], "echo: hello");
+    assert_eq!(first[1]["source"]["message_id"], "r-2");
+    // Opened again, the same record gives the same events.
+    assert_eq!(all_events(&mut client, &id).await, first);
+
+    // A turn taken in the backend's own tools appends to its record...
+    let backend_id = records.lock().unwrap().keys().next().unwrap().clone();
+    records
+        .lock()
+        .unwrap()
+        .get_mut(&backend_id)
+        .unwrap()
+        .extend([
+            fake::recorded_user("u-t1", "from the terminal"),
+            fake::recorded_reply("r-t2", "answered there"),
+        ]);
+    // ...and shows when the session is opened again.
+    let reopened = all_events(&mut client, &id).await;
+    assert_eq!(reopened.len(), first.len() + 2);
+    assert_eq!(reopened[2]["event"]["text"], "from the terminal");
+    assert_eq!(reopened[3]["event"]["text"], "answered there");
+    assert_eq!(reopened.last().unwrap()["event"]["type"], "session.ended");
+    assert_eq!(
+        seqs(&reopened),
+        (0..reopened.len() as u64).collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_session_whose_ending_was_never_recorded_is_ended_whatever_its_row_says() {
-    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+async fn a_client_resubscribing_keeps_the_view_it_was_reading() {
+    let records = Records::default();
+    let (core, _) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    let mut reader = core.client().await;
+    reader
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    let seen = reader.events_until("session.ended").await;
+    let last = seqs(&seen).last().copied().unwrap();
+
+    // The record grows, but a client resuming from where it was gets the
+    // view it was reading, not a different one spliced in.
+    let backend_id = records.lock().unwrap().keys().next().unwrap().clone();
+    records
+        .lock()
+        .unwrap()
+        .get_mut(&backend_id)
+        .unwrap()
+        .push(fake::recorded_user("u-t1", "elsewhere"));
+    let resumed = client
+        .result(
+            "session.subscribe",
+            json!({ "id": id, "from_seq": last + 1 }),
+        )
+        .await;
+    assert_eq!(resumed["last_seq"], last);
+    // And a client opening it afresh while another reads it gets the same.
+    let mut other = core.client().await;
+    let fresh = other
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    assert_eq!(fresh["last_seq"], last);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_running_session_without_its_adapter_cannot_be_read_until_one_is_back() {
+    let records = Records::default();
+    let (core, _) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
     client
@@ -715,48 +817,25 @@ async fn a_session_whose_ending_was_never_recorded_is_ended_whatever_its_row_say
     let TestCore { dir, task, .. } = core;
     task.abort();
     let _ = task.await;
-    // The row says `error`, as when the raw log could not be written, but
-    // nothing in the log ends the session.
-    set_row_state(dir.path(), &id, "error");
 
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
-    let core = start_with_adapters(dir, |_| {}, adapters).await;
-    let mut client = core.client().await;
-    let events = all_events(&mut client, &id).await;
-    assert_eq!(events.last().unwrap()["event"]["reason"], "error");
-    assert_eq!(session_row(&mut client, &id).await["state"], "ended");
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_running_session_without_its_adapter_is_ended_and_projected_later() {
-    let (core, _) = start_fake(FakeAdapter::new(1)).await;
-    let mut client = core.client().await;
-    let id = new_session(&core, &mut client).await;
-    client
-        .result("session.send", json!({ "id": id, "text": "hello" }))
-        .await;
-    drop(client);
-    let TestCore { dir, task, .. } = core;
-    task.abort();
-    let _ = task.await;
-
-    // A Core without the fake adapter ends it in the log and on its row.
+    // A Core without the fake adapter still ends it, in its app log.
     let core = start_with_adapters(dir, |_| {}, Vec::new()).await;
     let mut client = core.client().await;
     assert_eq!(session_row(&mut client, &id).await["state"], "ended");
-    let log = client.result("session.raw_log", json!({ "id": id })).await;
-    let last = log.as_array().unwrap().last().unwrap().clone();
-    assert_eq!(last["line"], r#"{"type":"core_restarted"}"#);
+    let error = client
+        .error("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    assert_eq!(kind(&error), "invalid_state");
     client.result("core.shutdown", json!({})).await;
     let TestCore { dir, task, .. } = core;
     task.await.unwrap().unwrap();
 
-    // One with the adapter projects that ending.
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
+    // One with the adapter shows its history, ended by that restart.
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(records))];
     let core = start_with_adapters(dir, |_| {}, adapters).await;
     let mut client = core.client().await;
     let events = all_events(&mut client, &id).await;
-    assert_eq!(seqs(&events), (0..events.len() as u64).collect::<Vec<_>>());
+    assert_eq!(types(&events)[..2], ["user.message", "assistant.text"]);
     assert_eq!(events.last().unwrap()["event"]["reason"], "error");
 }
 
@@ -772,59 +851,12 @@ async fn all_events(client: &mut Client, id: &str) -> Vec<Value> {
     events
 }
 
-/// The projector versions of a session's cached events, read straight from
-/// the database.
-fn cached_versions(core_dir: &std::path::Path, id: &str) -> Vec<i64> {
-    let conn = rusqlite::Connection::open(core_dir.join("data").join("ersa.db")).unwrap();
-    let mut stmt = conn
-        .prepare("SELECT DISTINCT projection_version FROM projection_cache WHERE session_id = ?1")
-        .unwrap();
-    stmt.query_map([id], |row| row.get(0))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap()
-}
-
-// verifies: PROTO-AGENT-EVENTS-R03
-#[tokio::test(flavor = "multi_thread")]
-async fn a_new_projector_version_rederives_the_same_events_from_the_raw_log() {
-    let (core, _) = start_fake(FakeAdapter::new(1)).await;
-    let mut client = core.client().await;
-    let id = new_session(&core, &mut client).await;
-    client
-        .result("session.send", json!({ "id": id, "text": "hello" }))
-        .await;
-    client
-        .result("session.send", json!({ "id": id, "text": "ask" }))
-        .await;
-    client.result("session.stop", json!({ "id": id })).await;
-    let before = all_events(&mut client, &id).await;
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
-    assert_eq!(cached_versions(dir.path(), &id), [1]);
-
-    // The same data under a Core whose projector has a new version.
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(2))];
-    let core = start_with_adapters(dir, |_| {}, adapters).await;
-    assert_eq!(cached_versions(core.dir.path(), &id), [2]);
-    let mut client = core.client().await;
-    let after = all_events(&mut client, &id).await;
-    assert_eq!(after, before);
-
-    // And on request.
-    client
-        .result("session.reproject", json!({ "id": id }))
-        .await;
-    assert_eq!(all_events(&mut client, &id).await, before);
-    let row = session_row(&mut client, &id).await;
-    assert_eq!(row["last_event_seq"], *seqs(&before).last().unwrap());
-    assert_eq!(row["state"], "ended");
-}
-
+// verifies: PROTO-AGENT-EVENTS-R13
+// verifies: ARCH-CORE-R12
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_left_running_by_a_core_that_died_is_ended_on_restart() {
-    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let records = Records::default();
+    let (core, _) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
     client
@@ -836,16 +868,133 @@ async fn a_session_left_running_by_a_core_that_died_is_ended_on_restart() {
     task.abort();
     let _ = task.await;
 
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(records))];
     let core = start_with_adapters(dir, |_| {}, adapters).await;
     let mut client = core.client().await;
     assert_eq!(session_row(&mut client, &id).await["state"], "ended");
+    // The transcript comes back from the record alone; the ending is Core's.
     let events = all_events(&mut client, &id).await;
     assert_eq!(seqs(&events), (0..events.len() as u64).collect::<Vec<_>>());
+    let inputs: Vec<&str> = events
+        .iter()
+        .map(|e| e["source"]["input"].as_str().unwrap())
+        .collect();
+    assert_eq!(inputs, ["record", "record", "core", "core"]);
+    assert_eq!(events[1]["event"]["text"], "echo: hello");
     let ended = &events.last().unwrap()["event"];
     assert_eq!(ended["reason"], "error");
+    // This Core never ran the backend, so it has no raw log for it.
     let log = client.result("session.raw_log", json!({ "id": id })).await;
-    let last = log.as_array().unwrap().last().unwrap().clone();
-    assert_eq!(last["dir"], "core");
-    assert_eq!(last["line"], r#"{"type":"core_restarted"}"#);
+    assert_eq!(log, json!([]));
+    // And the app log says what happened.
+    let facts: Vec<String> = ersa_core::app_log::read_entries(&core.data_dir())
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.session_id == id)
+        .map(|e| {
+            serde_json::to_value(&e.fact).unwrap()["type"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(facts, ["process_started", "core_restarted"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sessions_title_and_start_come_from_its_record_and_its_mode_from_ersa() {
+    let records = Records::default();
+    let (core, _) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.set_mode", json!({ "id": id, "mode": "review" }))
+        .await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(row["title"], "hello");
+    assert_eq!(row["created_at"], "2026-11-01T00:00:00.000Z");
+    client.result("core.shutdown", json!({})).await;
+    let TestCore { dir, task, .. } = core;
+    task.await.unwrap().unwrap();
+
+    // A later Core reads them from the record again; the mode is Ersa's own.
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(records))];
+    let core = start_with_adapters(dir, |_| {}, adapters).await;
+    let mut client = core.client().await;
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(row["title"], "hello");
+    assert_eq!(row["created_at"], "2026-11-01T00:00:00.000Z");
+    assert_eq!(row["mode"], "review");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_session_still_lists_as_failed_after_core_restarts() {
+    let (core, _) = start_fake(FakeAdapter::failing()).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.ended").await;
+    assert_eq!(session_row(&mut client, &id).await["state"], "error");
+    client.result("core.shutdown", json!({})).await;
+    let TestCore { dir, task, .. } = core;
+    task.await.unwrap().unwrap();
+
+    // Listed, not opened: its state comes from how Core saw it end.
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
+    let core = start_with_adapters(dir, |_| {}, adapters).await;
+    let mut client = core.client().await;
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(row["state"], "error");
+    assert_eq!(row["tile"]["state"], "error");
+}
+
+// verifies: PROTO-CORE-API-R13
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_nobody_reads_lets_its_view_go_and_reopens_under_a_new_identity() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    let live = client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    // While it runs, resubscribing keeps the view.
+    let again = client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 3 }))
+        .await;
+    assert_eq!(again["view"], live["view"]);
+    client.result("session.stop", json!({ "id": id })).await;
+    client.events_until("session.ended").await;
+    let held = client.result("session.raw_log", json!({ "id": id })).await;
+    assert!(!held.as_array().unwrap().is_empty());
+
+    // The last reader leaves: the view and raw log go.
+    client
+        .result("session.unsubscribe", json!({ "id": id }))
+        .await;
+    assert_eq!(
+        client.result("session.raw_log", json!({ "id": id })).await,
+        json!([])
+    );
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(row["state"], "ended");
+    assert!(row.get("last_event_seq").is_none(), "{row:#}");
+
+    // A client coming back from where it was finds another view, and its
+    // events start over from the record.
+    let back = client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 9 }))
+        .await;
+    assert_ne!(back["view"], live["view"]);
+    let fresh = all_events(&mut client, &id).await;
+    assert_eq!(fresh[0]["seq"], 0);
+    assert_eq!(fresh[0]["source"]["input"], "record");
 }

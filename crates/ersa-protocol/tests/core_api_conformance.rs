@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use ersa_protocol::core_api::rpc::{ErrorObject, Notification, Request, RequestId, Response, code};
 use ersa_protocol::core_api::*;
 use ersa_protocol::events::{
-    Answer, AnswerValue, Envelope, Event, PROJECTION_VERSION, PermissionBehavior, Source,
+    Answer, AnswerValue, Envelope, Event, Input, PROJECTION_VERSION, PermissionBehavior, Source,
     TurnStarted, TurnTrigger,
 };
 use ersa_protocol::schema::{
@@ -105,8 +105,8 @@ fn envelope() -> Envelope {
         source: Source {
             backend: "claude-code".into(),
             backend_version: "2.1.302".into(),
-            raw_from: 4,
-            raw_to: 4,
+            input: Input::Live,
+            message_id: Some("m-1".into()),
         },
         event: Event::TurnStarted(TurnStarted {
             turn: 1,
@@ -158,19 +158,27 @@ fn result_examples() -> Vec<(Method, Value)> {
         (Method::SessionUnsubscribe, to_value(&Empty {})),
         (
             Method::SessionSubscribe,
-            to_value(&SubscribeResult { last_seq: Some(41) }),
+            to_value(&SubscribeResult {
+                last_seq: Some(41),
+                view: "v-1".into(),
+                first_seq: Some(7),
+            }),
         ),
         (
             Method::SessionSubscribe,
-            to_value(&SubscribeResult { last_seq: None }),
+            to_value(&SubscribeResult {
+                last_seq: None,
+                view: "v-2".into(),
+                first_seq: None,
+            }),
         ),
         (
             Method::SessionRawLog,
             to_value(&vec![RawLogEntry {
                 index: 0,
                 ts: "2026-10-31T12:00:00Z".into(),
-                dir: RawDirection::Core,
-                line: r#"{"process":"started"}"#.into(),
+                dir: RawDirection::Host,
+                line: r#"{"type":"user"}"#.into(),
             }]),
         ),
         (
@@ -205,7 +213,7 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&HelloParams {
                 client: "ersa-shell".into(),
                 client_version: "0.1.0".into(),
-                api_versions: vec![1],
+                api_versions: vec![2],
             }),
         ),
         (Method::CoreStatus, to_value(&Empty {})),
@@ -247,7 +255,6 @@ fn params_examples() -> Vec<(Method, Value)> {
                 workspace_id: "w-1".into(),
                 backend: "claude-code".into(),
                 mode: None,
-                title: Some("A title".into()),
             }),
         ),
         (
