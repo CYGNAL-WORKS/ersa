@@ -139,6 +139,8 @@ enum Job {
     Write(Entry),
     /// Stop carrying a removed session's facts into rotated logs.
     Forget(String),
+    /// Carry only these sessions' facts: the ones Core still knows.
+    Retain(std::collections::HashSet<String>),
     /// Answer once everything sent before is on disk.
     Flush(oneshot::Sender<()>),
 }
@@ -230,6 +232,14 @@ impl AppLog {
         }
     }
 
+    /// Carries only sessions `known` into the log when it next rotates: the
+    /// facts of sessions removed in an earlier run go with it.
+    pub fn retain_only(&self, known: std::collections::HashSet<String>) {
+        if let Some(writer) = &self.writer {
+            let _ = writer.send(Job::Retain(known));
+        }
+    }
+
     /// Returns once every fact written before is on disk, or after
     /// [`FLUSH_WAIT`] if the disk has not taken them by then.
     pub async fn flushed(&self) {
@@ -270,6 +280,7 @@ impl Writer {
                 Job::Forget(session_id) => {
                     self.kept.remove(&session_id);
                 }
+                Job::Retain(known) => self.kept.retain(|id, _| known.contains(id)),
                 Job::Flush(done) => {
                     // To the disk, not only the system's cache.
                     if let Some(file) = &mut self.file

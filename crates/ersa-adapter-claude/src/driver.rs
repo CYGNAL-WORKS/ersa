@@ -348,7 +348,8 @@ impl Adapter for ClaudeAdapter {
     ) -> Result<Option<RecordSummary>, AdapterError> {
         let home = self.claude_home()?;
         let (cwd, id) = (cwd.to_string(), backend_session_id.to_string());
-        let summary = blocking(move || record::summarize_session(&home, &cwd, &id)).await?;
+        let records = Arc::clone(&self.records);
+        let summary = blocking(move || records.summarize(&home, &cwd, &id)).await?;
         Ok(summary.map(|summary| RecordSummary {
             title: summary.title,
             created_at: summary.created_at,
