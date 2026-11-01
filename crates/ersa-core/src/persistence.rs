@@ -86,7 +86,7 @@ impl Store {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        migrate(&mut conn)?;
+        migrate(&mut conn, path)?;
         Ok(Store {
             conn: Arc::new(Mutex::new(conn)),
             path: path.to_path_buf(),
@@ -375,15 +375,29 @@ impl Store {
     }
 }
 
-/// Applies every migration the database has not seen yet, each in its own
-/// transaction together with the `user_version` bump.
-fn migrate(conn: &mut Connection) -> Result<()> {
+/// The migration that drops data no later Core can rebuild (the raw log, and
+/// each session's stored title and creation time): a copy of the database
+/// is kept before it runs, and the file is compacted after.
+const DESTRUCTIVE_MIGRATION: usize = 3;
+
+/// Applies every migration the database at `path` has not seen yet, each in
+/// its own transaction together with the `user_version` bump.
+fn migrate(conn: &mut Connection, path: &Path) -> Result<()> {
     let current = user_version(conn)?;
     if current > MIGRATIONS.len() {
         return Err(Error::TooNew {
             found: current,
             known: MIGRATIONS.len(),
         });
+    }
+    let destructive = (1..DESTRUCTIVE_MIGRATION).contains(&current);
+    if destructive {
+        // A consistent copy, taken through the connection rather than of the
+        // file (the WAL may hold what the file does not yet).
+        let backup = backup_path(path, current);
+        let _ = std::fs::remove_file(&backup);
+        conn.execute("VACUUM INTO ?1", [backup.to_string_lossy()])?;
+        tracing::info!(backup = %backup.display(), "kept a copy of the database before migrating it");
     }
     for (index, sql) in MIGRATIONS.iter().enumerate().skip(current) {
         let tx = conn.transaction()?;
@@ -392,7 +406,19 @@ fn migrate(conn: &mut Connection) -> Result<()> {
         tx.commit()?;
         tracing::info!(migration = index + 1, "applied database migration");
     }
+    if destructive {
+        // What the dropped tables held is free space in the file until then.
+        conn.execute_batch("VACUUM")?;
+    }
     Ok(())
+}
+
+/// Where the copy of the database at `path`, at schema `version`, is kept
+/// before a migration that drops data: beside it, named for the version.
+pub fn backup_path(path: &Path, version: usize) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".v{version}.bak"));
+    path.with_file_name(name)
 }
 
 /// The schema version recorded in the database file; 0 for a new file.
@@ -595,6 +621,13 @@ mod tests {
         drop(conn);
 
         drop(Store::open(&path).expect("migrates"));
+        // The copy kept before it still has everything migration 3 drops.
+        let backup = Connection::open(backup_path(&path, 2)).expect("the copy opens");
+        let kept: i64 = backup
+            .query_row("SELECT COUNT(*) FROM raw_log", [], |r| r.get(0))
+            .expect("the copy has the raw log");
+        assert_eq!(kept, 4);
+        drop(backup);
         let conn = Connection::open(&path).expect("open");
         assert_eq!(user_version(&conn).unwrap(), MIGRATIONS.len());
         type Kept = (String, Option<String>, Option<String>);

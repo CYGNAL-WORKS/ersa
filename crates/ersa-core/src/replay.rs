@@ -212,6 +212,38 @@ pub(crate) fn subscribed(core: &Core) {
     }
 }
 
+/// A backend's adapter without its session records: the record methods
+/// keep their defaults (no history, no summary). A replay server registers
+/// its recorded backend this way, so nothing it does reads the user's own
+/// records.
+pub struct Recordless(Arc<dyn Adapter>);
+
+impl Recordless {
+    pub fn new(adapter: Arc<dyn Adapter>) -> Self {
+        Recordless(adapter)
+    }
+}
+
+#[async_trait]
+impl Adapter for Recordless {
+    fn backend(&self) -> &str {
+        self.0.backend()
+    }
+
+    async fn start(
+        &self,
+        transport: Arc<dyn Transport>,
+        config: SessionConfig,
+        sink: Arc<dyn AdapterSink>,
+    ) -> Result<Box<dyn AdapterSession>, AdapterError> {
+        self.0.start(transport, config, sink).await
+    }
+
+    fn projector(&self) -> Box<dyn Projector> {
+        self.0.projector()
+    }
+}
+
 /// Feeds a recording into a session's raw log in place of a backend.
 pub struct ReplayAdapter {
     inner: Arc<dyn Adapter>,

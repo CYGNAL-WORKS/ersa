@@ -8,9 +8,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ersa_adapter::Adapter;
-use ersa_adapter_claude::ClaudeAdapter;
 use serde_json::{Value, json};
-use support::claude::{OnTransport, fixture, parse, stub};
+use support::claude::{OnTransport, fixture, isolated_claude, parse, stub};
 use support::{Client, start_with_adapters, tempdir, workspace};
 
 async fn next_event(client: &mut Client, event_type: &str) -> Value {
@@ -24,7 +23,7 @@ async fn a_claude_session_round_trips_a_permission_through_core() {
     let (stdout, sent) = fixture();
     let transport = stub(&stdout);
     let adapter = OnTransport {
-        adapter: ClaudeAdapter::new().with_stop_grace(Duration::from_secs(1)),
+        adapter: isolated_claude().with_stop_grace(Duration::from_secs(1)),
         transport: Arc::new(transport.clone()),
     };
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
