@@ -121,9 +121,10 @@ export function ProjectList({
                     />
                   </div>
                 )}
-                {notes[p.id] && <p className="project-note" role="status">
-                    {notes[p.id]}
-                  </p>}
+                {/* Always there, so a screen reader announces the text when it appears. */}
+                <p className="project-note" role="status">
+                  {notes[p.id]}
+                </p>
                 {start?.state === "failed" && (
                   <p className="problem project-problem" role="alert">
                     {start.message}

@@ -67,8 +67,8 @@ export function App({ client }: { client: CoreClient }) {
 
   const [starting, setStarting] = useState<Record<string, Sending>>({});
   const [trusting, setTrusting] = useState<Record<string, Sending>>({});
-  // The workspaces of each project whose trust the user withdrew here, as they were then. A session in one
-  // of them started while the project was trusted, and keeps that configuration while it runs.
+  // The workspaces of each project whose trust the user withdrew here, as they were then. A session running
+  // in one of them keeps the configuration it started with.
   const [withdrawn, setWithdrawn] = useState<Record<string, string[]>>({});
   const [adding, setAdding] = useState<Sending>();
 
@@ -162,11 +162,12 @@ export function App({ client }: { client: CoreClient }) {
     }
   };
 
-  // Said beneath an untrusted project while a session that started trusted still runs; derived on each
-  // render, so it goes once those sessions stop or the project is trusted again.
+  // Said beneath an untrusted project while a session from before the withdrawal still runs; derived on each
+  // render, so it goes once those sessions stop or the project is trusted again. A session's state arrives
+  // with its tile (`session.tile`), so that is the state read.
   const trustNotes: Record<string, string> = {};
   if (projects.state === "ready" && sessions.state === "ready") {
-    const live = sessions.sessions.filter((s) => s.state !== "ended" && s.state !== "error");
+    const live = sessions.sessions.filter((s) => s.tile.state !== "ended" && s.tile.state !== "error");
     for (const p of projects.projects) {
       if (!p.trusted && live.some((s) => withdrawn[p.id]?.includes(s.workspace_id))) {
         trustNotes[p.id] = "Running sessions keep their current settings until they are stopped.";

@@ -85,6 +85,11 @@
   margin-top: var(--space-xs);
 }
 
+/* With nothing to say, the note takes no room. */
+.project-note:empty {
+  margin-top: 0;
+}
+
 .project-action {
   display: flex;
   flex-wrap: wrap;
