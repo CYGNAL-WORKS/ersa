@@ -245,6 +245,17 @@ jobs:
         with:
           persist-credentials: false
 
+      # The runner runs as the owner, so by default Rust lives in the owner's
+      # own ~/.cargo and ~/.rustup: rustup-init would reinstall into them and
+      # rust-cache's cleanup would delete the owner's cargo and rustup from
+      # ~/.cargo/bin. The job gets its own homes in the runner's tool cache,
+      # kept between runs, and never touches the owner's toolchain.
+      - name: Rust homes of the runner's own
+        shell: bash
+        run: |
+          echo "CARGO_HOME=$RUNNER_TOOL_CACHE\\ersa-cargo" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=$RUNNER_TOOL_CACHE\\ersa-rustup" >> "$GITHUB_ENV"
+
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
@@ -252,6 +263,10 @@ jobs:
           components: clippy
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          # Never cache or clean the bin folder: on this machine it holds the
+          # toolchain the job just installed.
+          cache-bin: false
 
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
