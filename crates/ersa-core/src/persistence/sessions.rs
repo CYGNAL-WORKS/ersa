@@ -348,19 +348,29 @@ fn read_session(conn: &Connection, id: &str) -> Result<Option<Session>> {
         .optional()?)
 }
 
+/// One `sessions` row. Read leniently: a tile or state this build cannot
+/// read (a corrupt row) shows as an empty tile and `error`, so one bad row
+/// cannot make every session unlistable, or keep Core from starting. Both
+/// are derived, and re-projection rewrites them.
 fn session_row(row: &Row) -> rusqlite::Result<Session> {
+    let id: String = row.get(0)?;
     let tile: String = row.get(9)?;
-    let tile: Tile = serde_json::from_str(&tile).map_err(|e| {
-        rusqlite::Error::FromSqlConversionFailure(9, rusqlite::types::Type::Text, Box::new(e))
-    })?;
+    let tile: Tile = serde_json::from_str(&tile).unwrap_or_else(|e| {
+        tracing::error!(session = %id, error = %e, "unreadable tile; showing an empty one");
+        Tile::default()
+    });
+    let state = from_sql_enum(row, 6).unwrap_or_else(|e| {
+        tracing::error!(session = %id, error = %e, "unreadable state; showing error");
+        LifecycleState::Error
+    });
     Ok(Session {
-        id: row.get(0)?,
+        id,
         workspace_id: row.get(1)?,
         host_id: row.get(2)?,
         backend: row.get(3)?,
         mode: row.get(4)?,
         title: row.get(5)?,
-        state: from_sql_enum(row, 6)?,
+        state,
         created_at: row.get(7)?,
         last_event_seq: row.get::<_, Option<i64>>(8)?.map(|seq| seq as u64),
         tile,

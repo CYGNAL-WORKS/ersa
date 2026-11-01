@@ -159,6 +159,10 @@ struct Subscriber {
     events: mpsc::Sender<Arc<Published>>,
     /// Set when the pipeline dropped this subscriber for falling behind.
     overflowed: Arc<AtomicBool>,
+    /// Closes the subscriber's connection. Raised by the pipeline itself
+    /// when it drops the subscriber: the forwarding task may be parked
+    /// waiting on a client that stopped reading, and would never notice.
+    kick: Kick,
 }
 
 /// One event as subscribers receive it: already a notification line.
@@ -516,7 +520,8 @@ impl SessionManager {
     pub async fn send(&self, id: &str, text: &str) -> Result<u32, SessionError> {
         let live = self.live(id)?;
         let session = live.wait_ready().await?;
-        bounded(session.send_user(text)).await?;
+        let text = text.to_string();
+        bounded(async move { session.send_user(&text).await }).await?;
         // The adapter recorded the message before writing it, so the sink
         // has it. Wait for the pipeline to project it: the turn it starts
         // (or joins) is known then.
@@ -540,7 +545,7 @@ impl SessionManager {
     pub async fn interrupt(&self, id: &str) -> Result<(), SessionError> {
         let live = self.live(id)?;
         let session = live.wait_ready().await?;
-        bounded(session.interrupt()).await
+        bounded(async move { session.interrupt().await }).await
     }
 
     /// Answers a pending permission request (PROTO-CORE-API-R04). The answer
@@ -553,7 +558,8 @@ impl SessionManager {
     ) -> Result<(), SessionError> {
         let live = self.live(id)?;
         let session = live.wait_ready().await?;
-        bounded(session.decide_permission(request_id, decision)).await
+        let request_id = request_id.to_string();
+        bounded(async move { session.decide_permission(&request_id, decision).await }).await
     }
 
     /// Discards the cached projection and re-derives it from the raw log.
@@ -582,6 +588,7 @@ impl SessionManager {
             hub.last_seq = projection.last_seq();
             for subscriber in hub.subscribers.values() {
                 subscriber.overflowed.store(true, Ordering::SeqCst);
+                subscriber.kick.send_replace(true);
             }
             hub.subscribers.clear();
         }
@@ -624,6 +631,7 @@ impl SessionManager {
                 Subscriber {
                     events: events_tx,
                     overflowed: Arc::clone(&overflowed),
+                    kick: Arc::clone(&kick),
                 },
             );
             (subscriber, hub.last_seq)
@@ -651,15 +659,21 @@ impl SessionManager {
     }
 }
 
-/// Runs one adapter call, giving up after [`ADAPTER_CALL`]: a backend that
-/// stopped reading its stdin would otherwise hold the write, and with it
-/// every later request on the client's connection, until someone stopped
-/// the session from elsewhere.
+/// Runs one adapter call, answering after at most [`ADAPTER_CALL`]: a
+/// backend that stopped reading its stdin would otherwise hold the write,
+/// and with it every later request on the client's connection, until
+/// someone stopped the session from elsewhere.
+///
+/// The call runs in a task of its own and is never cancelled: dropping a
+/// write halfway would leave half a line in the backend's stdin, which the
+/// next line would be glued onto. A call still stuck when the request gives
+/// up finishes, or fails, when the session is stopped.
 async fn bounded(
-    call: impl std::future::Future<Output = Result<(), AdapterError>>,
+    call: impl std::future::Future<Output = Result<(), AdapterError>> + Send + 'static,
 ) -> Result<(), SessionError> {
-    match tokio::time::timeout(ADAPTER_CALL, call).await {
-        Ok(result) => result.map_err(SessionError::Adapter),
+    match tokio::time::timeout(ADAPTER_CALL, tokio::spawn(call)).await {
+        Ok(Ok(result)) => result.map_err(SessionError::Adapter),
+        Ok(Err(e)) => Err(SessionError::Internal(format!("the adapter failed: {e}"))),
         Err(_) => Err(SessionError::Adapter(AdapterError::Io(io::Error::new(
             io::ErrorKind::TimedOut,
             format!("the backend did not take the line within {ADAPTER_CALL:?}"),
@@ -1090,6 +1104,7 @@ fn publish(handle: &Handle, events: &[Envelope]) {
                 Ok(()) => {}
                 Err(mpsc::error::TrySendError::Full(_)) => {
                     subscriber.overflowed.store(true, Ordering::SeqCst);
+                    subscriber.kick.send_replace(true);
                     return false;
                 }
                 Err(mpsc::error::TrySendError::Closed(_)) => return false,
