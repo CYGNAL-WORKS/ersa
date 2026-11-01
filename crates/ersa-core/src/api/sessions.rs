@@ -184,7 +184,7 @@ pub(super) async fn set_title(core: &Core, params: SetTitleParams) -> Result<Ses
 
 fn title_refused() -> ApiError {
     ApiError::invalid_state(
-        "a session's title comes from its backend's session record; rename it in the backend          (in Claude Code, /rename)",
+        "a session's title comes from its backend's session record; rename it there (in Claude Code, /rename)",
     )
 }
 

@@ -303,16 +303,19 @@ impl Handle {
     fn describe(&self) -> Session {
         let row = lock(&self.row).clone();
         let presented = lock(&self.presented).clone();
+        let ending = lock(&self.ending).clone();
         let hub = lock(&self.hub);
         let (state, tile) = match &hub.view {
             Some(view) => (view.state(), view.tile().clone()),
-            None => (
-                LifecycleState::Ended,
-                Tile {
-                    state: LifecycleState::Ended,
-                    ..Tile::starting()
-                },
-            ),
+            // Not opened yet in this Core: as its ending left it, which a
+            // view would end with too (an exit with an error is `error`).
+            None => {
+                let (mut view, _) = View::open(&self.id, &self.backend, None, Vec::new());
+                if let Some((fact, ts)) = &ending {
+                    view.lifecycle(fact, ts);
+                }
+                (view.state(), view.tile().clone())
+            }
         };
         Session {
             id: row.id,
@@ -731,8 +734,7 @@ impl SessionManager {
                 let (view, events) = self.open_view(&handle, &transport_for).await?;
                 // Checked again: a client may have subscribed to the view
                 // that was open while the record was read, and must keep it.
-                if wants_view(&lock(&handle.hub)) {
-                    install_view(&handle, view, events);
+                if install_view_if(&handle, view, events, wants_view) {
                     send_tile(&self.tiles, &handle.id, &handle.describe().tile);
                 }
             }
@@ -929,13 +931,29 @@ fn is_rfc3339(text: &str) -> bool {
 /// Subscribers of the view it replaces had none: a view is replaced only
 /// while nobody reads it.
 fn install_view(handle: &Handle, view: View, events: Vec<Envelope>) {
+    install_view_if(handle, view, events, |_| true);
+}
+
+/// [`install_view`] when `wanted` still says so, checked under the lock
+/// that installs it: a client that subscribed to the open view meanwhile
+/// keeps it. Returns whether it was installed.
+fn install_view_if(
+    handle: &Handle,
+    view: View,
+    events: Vec<Envelope>,
+    wanted: impl Fn(&Hub) -> bool,
+) -> bool {
     let published = events
         .iter()
         .map(|event| Arc::new(published(&handle.id, event)))
         .collect();
     let mut hub = lock(&handle.hub);
+    if !wanted(&hub) {
+        return false;
+    }
     hub.view = Some(view);
     hub.events = published;
+    true
 }
 
 /// Runs one adapter call, answering after at most [`ADAPTER_CALL`]: a
