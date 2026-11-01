@@ -23,8 +23,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 use tauri::ipc::Channel;
 use tauri::webview::Url;
-use tauri::{AppHandle, State, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_opener::OpenerExt;
+use tauri::{State, WebviewUrl, WebviewWindowBuilder};
 use tokio::sync::Mutex;
 
 use bridge::{BridgeError, CoreLink, LinkEvent, LinkOptions};
@@ -108,14 +107,30 @@ fn is_app_origin(url: &Url) -> bool {
 
 /// Keeps the window on the app: any other http(s) page opens in the user's
 /// browser instead, and anything else is refused.
-fn guard_navigation(app: &AppHandle, url: &Url) -> bool {
+fn guard_navigation(url: &Url) -> bool {
     if is_app_origin(url) {
         return true;
     }
     if matches!(url.scheme(), "http" | "https") {
-        let _ = app.opener().open_url(url.as_str(), None::<&str>);
+        open_in_browser(url);
     }
     false
+}
+
+/// Hands `url` to the operating system's default browser. The URL is one
+/// argument to the program, never a shell command line, and is already
+/// parsed as http(s).
+fn open_in_browser(url: &Url) {
+    let program = if cfg!(windows) {
+        "explorer.exe"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    let _ = std::process::Command::new(program)
+        .arg(url.as_str())
+        .spawn();
 }
 
 /// Opens the window. Called by `main`.
@@ -126,18 +141,16 @@ pub fn run() {
         sink: Arc::new(std::sync::Mutex::new(None)),
     };
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
         .manage(shell)
         .invoke_handler(tauri::generate_handler![core_attach, core_request])
         // The window is built here rather than in tauri.conf.json so it can
         // carry the navigation guard.
         .setup(|app| {
-            let handle = app.handle().clone();
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Ersa")
                 .inner_size(1200.0, 800.0)
                 .min_inner_size(640.0, 400.0)
-                .on_navigation(move |url| guard_navigation(&handle, url))
+                .on_navigation(guard_navigation)
                 .build()?;
             Ok(())
         })
