@@ -66,6 +66,7 @@ export function App({ client }: { client: CoreClient }) {
   const follower = useRef<Follower | null>(null);
 
   const [starting, setStarting] = useState<Record<string, Sending>>({});
+  const [trusting, setTrusting] = useState<Record<string, Sending>>({});
   const [adding, setAdding] = useState<Sending>();
 
   useEffect(() => {
@@ -127,17 +128,28 @@ export function App({ client }: { client: CoreClient }) {
     }
   };
 
-  const addProject = async (path: string) => {
+  const addProject = async (path: string, trusted: boolean) => {
     if (view.phase !== "connected") return false;
     setAdding({ state: "sending" });
     try {
-      await client.call("project.add", { host_id: view.hello.host.id, path });
+      await client.call("project.add", { host_id: view.hello.host.id, path, trusted });
       setAdding(undefined);
       connection.current?.reload("projects");
       return true;
     } catch (error) {
       setAdding({ state: "failed", message: describeError(error) });
       return false;
+    }
+  };
+
+  const setTrust = async (project: Project, trusted: boolean) => {
+    setTrusting((s) => ({ ...s, [project.id]: { state: "sending" } }));
+    try {
+      await client.call("project.set_trust", { id: project.id, trusted });
+      setTrusting(({ [project.id]: _, ...rest }) => rest);
+      connection.current?.reload("projects");
+    } catch (error) {
+      setTrusting((s) => ({ ...s, [project.id]: { state: "failed", message: describeError(error) } }));
     }
   };
 
@@ -152,7 +164,7 @@ export function App({ client }: { client: CoreClient }) {
       <nav className="rail" aria-label="Rail">
         <div className="rail-lists">
           <ErrorBoundary what="The projects" resetKey={projectsVersion}>
-            <ProjectList view={projects} onNewSession={newSession} starting={starting}>
+            <ProjectList view={projects} onNewSession={newSession} starting={starting} onSetTrust={setTrust} trusting={trusting}>
               {view.phase === "connected" && <AddProject onAdd={addProject} adding={adding} />}
             </ProjectList>
           </ErrorBoundary>
