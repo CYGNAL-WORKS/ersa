@@ -1,6 +1,6 @@
 # 0008: UI framework
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-31
 - Related briefs: ARCH-CORE, LAY-SHELL
 
@@ -16,8 +16,10 @@ The interface runs in Tauri's webview and is written in TypeScript. It needs ric
 
 ## Decision
 
-Pending. Recommendation: option 1, because implementation quality from the implementing model and ecosystem depth matter more than runtime size for a desktop app, and the design system is ours either way.
+Option 1, with the gallery changed. React 19 and TypeScript, because coding agents write the interface and generate React most reliably, and because the hard parts (virtualised transcript, markdown and code rendering, diff view, hosted terminal) have mature React libraries; runtime size does not matter for a desktop app. Motion for the transitions CSS handles badly: exit animations of removed elements and layout animations when the rail reorders or a tile resizes, which is most of what the "motion explains" rule in the design system asks for. Its durations and easings come from the motion tokens.
+
+No Storybook. The owner found a separate component browser rarely used. The gallery is a development-only view inside Ersa itself that renders every component in every state in both themes, and screenshot tests run against it so visual regressions show up in pull requests.
 
 ## Consequences
 
-To be filled in when accepted.
+One toolchain for the interface and its gallery; nothing extra to configure or keep in step. The gallery's value is mainly the screenshot tests and a place for implementing sessions to check every state, not browsing. If Motion proves unnecessary next to CSS and the View Transitions API, removing it is cheap because its use is confined to transition wrappers. Accepted by the owner on 2026-10-31.

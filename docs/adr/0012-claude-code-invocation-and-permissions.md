@@ -1,6 +1,6 @@
 # 0012: Claude Code is driven in streaming JSON mode with explicit flags, permissions through the harness MCP server
 
-- Status: accepted
+- Status: superseded by 0014
 - Date: 2026-10-31
 - Related briefs: PROTO-CLAUDE-CODE-STREAM, PROTO-HARNESS-TOOLS
 

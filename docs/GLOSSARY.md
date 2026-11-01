@@ -18,7 +18,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Session**: one conversation with one agent, in one workspace, on one host. A session has a raw log, a projection, and a lifecycle.
 - **Host**: a machine where sessions can run. The local machine is a host; an SSH-reachable machine is another. A remote host runs its own Core.
 - **Transport**: the mechanism Core uses to start and talk to processes on a host: local spawn or SSH.
-- **Raw log**: the persisted, verbatim, ordered output of a session's backend. The source of truth for everything shown about a session.
+- **Raw log**: the persisted, verbatim, ordered lines exchanged with a session's backend: what it emitted and what Ersa wrote to it, each tagged with its direction. The source of truth for everything shown about a session.
 - **Projection**: the versioned derivation of Ersa events from a raw log. Transcript, rail state, and resume are projections.
 - **Event**: one typed message in the agent event protocol, produced by projection and streamed to the Interface.
 - **Permission request**: the agent asking the user to approve an action before it runs.
@@ -31,7 +31,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Interface**: the TypeScript application in the Shell's webview.
 - **Core**: the Rust process that owns sessions, adapters, transports, workspaces, packs, modes, the harness tools server, and persistence.
 - **Core API**: the request/response protocol between Interface and Core.
-- **Harness tools server**: the MCP server Core exposes to every session's backend: permission prompting, cross-session messaging, session metadata, user-defined tools, and interface-driving tools.
+- **Harness tools server**: the MCP tools Core exposes to every session's backend: cross-session messaging, session metadata, user-defined tools, and interface-driving tools. Never permission prompting.
 
 ## Interface
 
