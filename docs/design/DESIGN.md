@@ -65,6 +65,13 @@ spacing:
   lg: 16px
   xl: 24px
   xxl: 32px
+line:
+  # Custom group. Stroke widths for borders and rules.
+  hairline: 1px
+size:
+  # Custom group. Fixed layout widths.
+  rail: 224px
+  tile-min: 224px
 motion:
   # Custom group. Durations in ms, easings as CSS cubic-bezier.
   instant: 80
