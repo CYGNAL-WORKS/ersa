@@ -12,8 +12,9 @@
 //! - [`canonicalize`] and [`path_key`]: one spelling of a local path, and the
 //!   key under which two spellings of the same folder compare equal.
 //!
-//! Windows is built and tested. The Unix implementation compiles but is not
-//! tested yet, since CI runs on Windows only.
+//! Both are tested in CI: Linux on every push, Windows on changes to Rust.
+//! `tests/platform_windows.rs` and `tests/platform_unix.rs` hold the tests
+//! that only make sense on one of them.
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
