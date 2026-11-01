@@ -18,22 +18,22 @@ interface TrustQuestionProps {
   onDismiss: () => void;
   /** Whether the question takes focus as it opens; true when the user opened it, false for a question shown from the start. */
   takeFocus?: boolean;
+  /** For the gallery: Cancel shown focused, as the keyboard leaves it when the question opens. */
+  forceCancelFocus?: boolean;
 }
 
 /** Asks whether the user trusts a project, saying plainly what trust lets run (ADR 0018). */
-export function TrustQuestion({ name, path, purpose, onAnswer, onDismiss, takeFocus = true }: TrustQuestionProps) {
-  // The control that opened the question is disabled while it shows, so focus moves here rather than
-  // to the page. The question itself takes it, not an answer, so a second Enter never trusts by accident.
-  const self = useRef<HTMLElement>(null);
+export function TrustQuestion({ name, path, purpose, onAnswer, onDismiss, takeFocus = true, forceCancelFocus }: TrustQuestionProps) {
+  // The control that opened the question is disabled while it shows, so focus moves here rather than to the
+  // page: to Cancel, so a second Enter cancels and never trusts by accident.
+  const cancel = useRef<HTMLButtonElement>(null);
   // Only as it opens, so the first value of `takeFocus` is the one that counts.
   const focusOnOpen = useRef(takeFocus);
   useEffect(() => {
-    if (focusOnOpen.current) self.current?.focus({ preventScroll: true });
+    if (focusOnOpen.current) cancel.current?.focus({ preventScroll: true });
   }, []);
   return (
     <section
-      ref={self}
-      tabIndex={-1}
       className="trust-question"
       aria-label={`Trust ${name}?`}
       onKeyDown={(event) => {
@@ -57,7 +57,9 @@ export function TrustQuestion({ name, path, purpose, onAnswer, onDismiss, takeFo
         ) : (
           <Button onClick={() => onAnswer(true)}>Trust</Button>
         )}
-        <Button onClick={onDismiss}>Cancel</Button>
+        <Button ref={cancel} onClick={onDismiss} force={forceCancelFocus ? "focus" : undefined}>
+          Cancel
+        </Button>
       </div>
     </section>
   );

@@ -1,7 +1,9 @@
-import type { ButtonHTMLAttributes } from "react";
+import type { ButtonHTMLAttributes, Ref } from "react";
 import "./Button.css";
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  /** Passed to the button element, for a parent that moves focus to it. */
+  ref?: Ref<HTMLButtonElement>;
   /** For the gallery: show a pointer or keyboard state without one. */
   force?: "hover" | "focus" | "pressed";
   /** `primary` is the one action a moment asks for, such as Allow; quiet is everything else. */
