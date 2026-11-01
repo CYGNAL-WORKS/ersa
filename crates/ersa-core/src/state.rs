@@ -168,6 +168,7 @@ impl Core {
         let found = adapters::detect(
             self.local_transport.as_ref(),
             self.config.backend_program_override.as_deref(),
+            |backend| self.sessions.adapter(backend),
         )
         .await;
         *cached = Some((Instant::now(), found.clone()));

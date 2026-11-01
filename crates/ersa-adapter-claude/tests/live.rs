@@ -65,6 +65,7 @@ async fn a_tiny_prompt_with_a_permission_round_trip_against_the_real_cli() {
         cwd: cwd.to_string_lossy().into_owned(),
         permission_mode: "default".into(),
         model: Some(model),
+        project_trusted: false,
         extra: json!({ "claude_path": claude_path() }),
     };
 

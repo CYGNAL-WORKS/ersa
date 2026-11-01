@@ -35,6 +35,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("persistence/0001_initial.sql"),
     include_str!("persistence/0002_session_tiles.sql"),
     include_str!("persistence/0003_session_record.sql"),
+    include_str!("persistence/0004_project_trust.sql"),
 ];
 
 /// The id of the local host's row, which always exists.
@@ -162,7 +163,7 @@ impl Store {
     pub async fn projects(&self) -> Result<Vec<Project>> {
         self.call(|conn| {
             let mut stmt = conn.prepare(
-                "SELECT id, host_id, path, name, vcs FROM projects ORDER BY created_at, id",
+                "SELECT id, host_id, path, name, vcs, trusted FROM projects ORDER BY created_at, id",
             )?;
             let rows = stmt.query_map([], project_row)?;
             collect(rows)
@@ -174,7 +175,7 @@ impl Store {
         self.call(move |conn| {
             Ok(conn
                 .query_row(
-                    "SELECT id, host_id, path, name, vcs FROM projects WHERE id = ?1",
+                    "SELECT id, host_id, path, name, vcs, trusted FROM projects WHERE id = ?1",
                     [id],
                     project_row,
                 )
@@ -188,7 +189,7 @@ impl Store {
         self.call(move |conn| {
             Ok(conn
                 .query_row(
-                    "SELECT id, host_id, path, name, vcs FROM projects
+                    "SELECT id, host_id, path, name, vcs, trusted FROM projects
                      WHERE host_id = ?1 AND path_key = ?2",
                     [host_id, path_key],
                     project_row,
@@ -203,8 +204,8 @@ impl Store {
     pub async fn insert_project(&self, project: Project, path_key: String) -> Result<()> {
         self.call(move |conn| {
             conn.execute(
-                "INSERT INTO projects (id, host_id, path, path_key, name, vcs, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO projects (id, host_id, path, path_key, name, vcs, trusted, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
                     project.id,
                     project.host_id,
@@ -212,11 +213,28 @@ impl Store {
                     path_key,
                     project.name,
                     to_sql_enum(&project.vcs),
+                    project.trusted,
                     now_rfc3339()
                 ],
             )
             .map_err(|e| conflict(e, "that folder was added as a project meanwhile"))?;
             Ok(())
+        })
+        .await
+    }
+
+    /// Records whether the user trusts project `id`. Returns the project as
+    /// it now is, or `None` when there is no such project.
+    pub async fn set_project_trust(&self, id: String, trusted: bool) -> Result<Option<Project>> {
+        self.call(move |conn| {
+            Ok(conn
+                .query_row(
+                    "UPDATE projects SET trusted = ?2 WHERE id = ?1
+                     RETURNING id, host_id, path, name, vcs, trusted",
+                    params![id, trusted],
+                    project_row,
+                )
+                .optional()?)
         })
         .await
     }
@@ -452,6 +470,7 @@ fn project_row(row: &Row) -> rusqlite::Result<Project> {
         path: row.get(2)?,
         name: row.get(3)?,
         vcs: from_sql_enum::<Vcs>(row, 4)?,
+        trusted: row.get(5)?,
     })
 }
 
@@ -717,6 +736,7 @@ mod tests {
             path: "/r".into(),
             name: "r".into(),
             vcs: Vcs::Git,
+            trusted: false,
         };
         store
             .insert_project(project.clone(), "/r".into())
@@ -770,6 +790,70 @@ mod tests {
             .expect("get")
             .expect("row");
         assert_eq!(workspace.state, WorkspaceState::Error);
+    }
+
+    // verifies: PROTO-CORE-API-R11
+    #[test]
+    fn migration_4_leaves_every_existing_project_untrusted() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("ersa.db");
+        let conn = database_at(&path, 3);
+        conn.execute_batch(
+            "INSERT INTO hosts VALUES ('local', 'pc', 'local', '{}', 't');
+             INSERT INTO projects VALUES ('p', 'local', '/r', '/r', 'r', 'git', 't');",
+        )
+        .expect("old rows");
+        drop(conn);
+
+        drop(Store::open(&path).expect("migrates"));
+        let conn = Connection::open(&path).expect("reopen");
+        let trusted: bool = conn
+            .query_row("SELECT trusted FROM projects WHERE id = 'p'", [], |row| {
+                row.get(0)
+            })
+            .expect("row");
+        assert!(!trusted);
+    }
+
+    // verifies: PROTO-CORE-API-R11
+    #[tokio::test]
+    async fn project_trust_is_stored_as_given_and_changed_only_when_set() {
+        let (_dir, store) = temp_store();
+        store.ensure_local_host("pc".into()).await.expect("host");
+        let project = Project {
+            id: "p".into(),
+            host_id: LOCAL_HOST_ID.into(),
+            path: "/r".into(),
+            name: "r".into(),
+            vcs: Vcs::Git,
+            trusted: true,
+        };
+        store
+            .insert_project(project.clone(), "/r".into())
+            .await
+            .expect("insert");
+        assert_eq!(
+            store.project("p".into()).await.expect("get"),
+            Some(project.clone())
+        );
+
+        let changed = store
+            .set_project_trust("p".into(), false)
+            .await
+            .expect("set");
+        let untrusted = Project {
+            trusted: false,
+            ..project
+        };
+        assert_eq!(changed, Some(untrusted.clone()));
+        assert_eq!(store.projects().await.expect("list"), vec![untrusted]);
+        assert_eq!(
+            store
+                .set_project_trust("nope".into(), true)
+                .await
+                .expect("set"),
+            None
+        );
     }
 
     #[test]

@@ -34,6 +34,7 @@ fn project() -> Project {
         path: "D:/work/ersa".into(),
         name: "ersa".into(),
         vcs: Vcs::Git,
+        trusted: false,
     }
 }
 
@@ -145,6 +146,13 @@ fn result_examples() -> Vec<(Method, Value)> {
         (Method::HostList, to_value(&vec![host()])),
         (Method::ProjectList, to_value(&vec![project()])),
         (Method::ProjectAdd, to_value(&project())),
+        (
+            Method::ProjectSetTrust,
+            to_value(&Project {
+                trusted: true,
+                ..project()
+            }),
+        ),
         (Method::ProjectRemove, to_value(&project())),
         (Method::WorkspaceList, to_value(&vec![workspace()])),
         (Method::WorkspaceCreate, to_value(&workspace())),
@@ -222,6 +230,14 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&ProjectAddParams {
                 host_id: "local".into(),
                 path: "D:/work/ersa".into(),
+                trusted: true,
+            }),
+        ),
+        (
+            Method::ProjectSetTrust,
+            to_value(&ProjectSetTrustParams {
+                id: "p-1".into(),
+                trusted: false,
             }),
         ),
         (

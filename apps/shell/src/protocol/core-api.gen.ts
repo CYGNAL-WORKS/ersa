@@ -70,6 +70,12 @@ export type Request =
   | {
       jsonrpc: "2.0";
       id: RequestId;
+      method: "project.set_trust";
+      params: ProjectSetTrustParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
       method: "project.remove";
       params: ProjectRemoveParams;
     }
@@ -355,6 +361,14 @@ export interface ProjectListParams {}
 export interface ProjectAddParams {
   host_id: Id;
   path: string;
+  /**
+   * The user's answer when adding the project: whether its own configuration may load in its sessions.
+   */
+  trusted: boolean;
+}
+export interface ProjectSetTrustParams {
+  id: Id;
+  trusted: boolean;
 }
 export interface ProjectRemoveParams {
   id: Id;
@@ -593,6 +607,10 @@ export interface Project {
   path: string;
   name: string;
   vcs: "git" | "perforce" | "none";
+  /**
+   * Whether the user trusts the project, so its own configuration loads in its sessions (ADR 0018). False unless project.add or project.set_trust said otherwise.
+   */
+  trusted: boolean;
 }
 export interface Workspace {
   id: Id;
@@ -695,6 +713,10 @@ export interface Project1 {
   path: string;
   name: string;
   vcs: "git" | "perforce" | "none";
+  /**
+   * Whether the user trusts the project, so its own configuration loads in its sessions (ADR 0018). False unless project.add or project.set_trust said otherwise.
+   */
+  trusted: boolean;
 }
 export interface Project2 {
   id: Id;
@@ -705,6 +727,24 @@ export interface Project2 {
   path: string;
   name: string;
   vcs: "git" | "perforce" | "none";
+  /**
+   * Whether the user trusts the project, so its own configuration loads in its sessions (ADR 0018). False unless project.add or project.set_trust said otherwise.
+   */
+  trusted: boolean;
+}
+export interface Project3 {
+  id: Id;
+  host_id: Id;
+  /**
+   * The project's root, as a path on its host.
+   */
+  path: string;
+  name: string;
+  vcs: "git" | "perforce" | "none";
+  /**
+   * Whether the user trusts the project, so its own configuration loads in its sessions (ADR 0018). False unless project.add or project.set_trust said otherwise.
+   */
+  trusted: boolean;
 }
 export interface Workspace1 {
   id: Id;
@@ -957,6 +997,7 @@ export type HostAddResult = Host;
 export type HostRemoveResult = Host;
 export type HostProbeResult = Host;
 export type ProjectAddResult = Project;
+export type ProjectSetTrustResult = Project;
 export type ProjectRemoveResult = Project;
 export type WorkspaceCreateResult = Workspace;
 export type WorkspaceRemoveResult = Workspace;
@@ -982,6 +1023,7 @@ export interface CoreApiMethods {
   "host.probe": { params: HostProbeParams; result: HostProbeResult };
   "project.list": { params: ProjectListParams; result: ProjectListResult };
   "project.add": { params: ProjectAddParams; result: ProjectAddResult };
+  "project.set_trust": { params: ProjectSetTrustParams; result: ProjectSetTrustResult };
   "project.remove": { params: ProjectRemoveParams; result: ProjectRemoveResult };
   "workspace.list": { params: WorkspaceListParams; result: WorkspaceListResult };
   "workspace.create": { params: WorkspaceCreateParams; result: WorkspaceCreateResult };
