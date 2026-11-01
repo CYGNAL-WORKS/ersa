@@ -21,7 +21,11 @@ repository = "https://github.com/KPandaK/ersa"
 # nothing here is compiled unless some crate asks for it.
 [workspace.dependencies]
 anyhow = "1"
+async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
+# Only the validator: the default features fetch remote schemas over HTTP and
+# build a TLS stack, neither of which Ersa wants.
+jsonschema = { version = "0.60", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
