@@ -48,13 +48,18 @@ pub struct RecordEvent {
 
 /// The events of a whole session record, as read from its file.
 ///
-/// Only lines a newline ends are entries: the CLI appends as it runs, so the
-/// last line of a live session's record may be half written, and is left for
-/// the next read. A complete line that cannot be read yields an error and a
-/// passthrough of its start (PROTO-AGENT-EVENTS-R10), and the pass carries on.
-/// Pure: the same record always yields the same events.
+/// The CLI ends every entry with a newline and appends as it runs, so the
+/// last line of a live session's record may be half written. A last line
+/// with no newline counts only when it is a whole JSON entry; otherwise it is
+/// left, silently, for the next read. Any other line that cannot be read
+/// yields an error and a passthrough of its start (PROTO-AGENT-EVENTS-R10),
+/// and the pass carries on. Pure: the same record always yields the same
+/// events.
 pub fn project_record(record: &str) -> Vec<RecordEvent> {
-    let complete = record.rfind('\n').map_or("", |end| &record[..end]);
+    let (complete, unterminated) = match record.rfind('\n') {
+        Some(end) => (&record[..end], &record[end + 1..]),
+        None => ("", record),
+    };
     let mut lines = Vec::new();
     for line in complete.split('\n') {
         let line = line.strip_suffix('\r').unwrap_or(line);
@@ -73,6 +78,11 @@ pub fn project_record(record: &str) -> Vec<RecordEvent> {
             Err(e) => Line::Failed(unreadable(line, format!("a record entry is not JSON: {e}"))),
         });
     }
+    if unterminated.len() <= MAX_ENTRY_BYTES
+        && let Ok(value) = serde_json::from_str::<Value>(unterminated)
+    {
+        lines.push(Line::Entry(value));
+    }
 
     let entries: Vec<&Value> = lines
         .iter()
@@ -81,10 +91,17 @@ pub fn project_record(record: &str) -> Vec<RecordEvent> {
             Line::Failed(_) => None,
         })
         .collect();
-    let conversation = conversation(&entries);
+    let Conversation { chain, problem } = conversation(&entries);
 
     let mut projector = RecordProjector::default();
     let mut out = Vec::new();
+    if let Some(problem) = problem {
+        out.push(RecordEvent {
+            message_id: None,
+            ts: None,
+            event: protocol_error(problem),
+        });
+    }
     for line in lines {
         match line {
             Line::Failed(events) => out.extend(events),
@@ -92,7 +109,7 @@ pub fn project_record(record: &str) -> Vec<RecordEvent> {
                 // An entry on another branch, or a subagent's, is not part of
                 // the conversation. Entries without an id (titles) are let
                 // through; they yield nothing.
-                let off_branch = match (&conversation, uuid(&value)) {
+                let off_branch = match (&chain, uuid(&value)) {
                     (Some(chain), Some(id)) => !chain.contains(id),
                     _ => false,
                 };
@@ -123,17 +140,34 @@ struct Node<'a> {
     message: bool,
 }
 
-/// The ids of the entries on the conversation's chain, or `None` when the
-/// record links no entries at all (then every entry counts, in file order).
+/// Which entries make the conversation.
+struct Conversation {
+    /// The ids of the entries on its chain, or `None` when every entry
+    /// counts, in file order.
+    chain: Option<HashSet<String>>,
+    /// Why the chain could not be followed whole, for an error event.
+    problem: Option<String>,
+}
+
+/// The conversation's chain. It ends at the latest main-thread leaf (an entry
+/// no main-thread entry names as its parent) that leads back to a message,
+/// and runs back through `parentUuid`. Where `parentUuid` is null after a
+/// compaction, `logicalParentUuid` continues it, so the history before the
+/// compaction stays.
 ///
-/// The chain ends at the latest main-thread leaf (an entry no main-thread
-/// entry names as its parent) that leads back to a message, and runs back
-/// through `parentUuid`. Where `parentUuid` is null after a compaction,
-/// `logicalParentUuid` continues it, so the history before the compaction
-/// stays.
-fn conversation(entries: &[&Value]) -> Option<HashSet<String>> {
+/// A damaged record never silently loses history. When the chain names a
+/// parent the record does not have (a line that could not be read, say),
+/// every main-thread entry before the break counts too, in file order; when
+/// no chain reaches a message at all, every entry counts. Either way the
+/// problem is reported.
+fn conversation(entries: &[&Value]) -> Conversation {
+    let every_entry = |problem| Conversation {
+        chain: None,
+        problem,
+    };
+    // A record that links no entries at all (an older or hand-made one).
     if !entries.iter().any(|e| e.get("parentUuid").is_some()) {
-        return None;
+        return every_entry(None);
     }
     let mut nodes: HashMap<&str, Node> = HashMap::new();
     for (index, entry) in entries.iter().enumerate() {
@@ -168,17 +202,19 @@ fn conversation(entries: &[&Value]) -> Option<HashSet<String>> {
     leaves.sort_by_key(|(_, n)| std::cmp::Reverse(n.index));
 
     // The latest leaf whose chain reaches a message; walking back from it
-    // skips trailing entries that are not messages.
+    // skips trailing entries that are not messages. An entry walked from an
+    // earlier leaf without reaching a message leads to none from any leaf,
+    // so each entry is walked at most once (and a cycle ends the walk).
+    let mut walked = HashSet::new();
     let mut last_message = None;
     'leaves: for (leaf, _) in leaves {
-        let mut seen = HashSet::new();
         let mut at = Some(leaf);
         while let Some(id) = at {
             let Some(node) = nodes.get(id) else {
                 break;
             };
-            if !seen.insert(id) {
-                break; // A cycle: a damaged record.
+            if !walked.insert(id) {
+                break;
             }
             if node.message {
                 last_message = Some(id);
@@ -187,16 +223,46 @@ fn conversation(entries: &[&Value]) -> Option<HashSet<String>> {
             at = node.parent;
         }
     }
+    let Some(last_message) = last_message else {
+        let has_messages = nodes.values().any(|n| n.main && n.message);
+        return every_entry(has_messages.then(|| {
+            "the record's entries form no chain to a message; its entries are shown in file order"
+                .to_string()
+        }));
+    };
 
     let mut chain = HashSet::new();
     let mut at = last_message;
-    while let Some(id) = at {
-        if !chain.insert(id.to_string()) {
-            break;
+    loop {
+        if !chain.insert(at.to_string()) {
+            break; // A cycle: the chain is complete as far as it goes.
         }
-        at = nodes.get(id).and_then(|n| n.parent);
+        let node = &nodes[at];
+        match node.parent {
+            None => break,
+            Some(parent) if nodes.contains_key(parent) => at = parent,
+            Some(parent) => {
+                // The chain names an entry the record does not have.
+                let root = node.index;
+                for (id, earlier) in &nodes {
+                    if earlier.main && earlier.index < root {
+                        chain.insert(id.to_string());
+                    }
+                }
+                return Conversation {
+                    chain: Some(chain),
+                    problem: Some(format!(
+                        "the record's chain names entry {parent}, which it does not have; \
+                         the entries before the break are shown in file order"
+                    )),
+                };
+            }
+        }
     }
-    Some(chain)
+    Conversation {
+        chain: Some(chain),
+        problem: None,
+    }
 }
 
 /// Projects record entries one by one, in order. Like the stream's projector

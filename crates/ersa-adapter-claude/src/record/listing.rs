@@ -18,7 +18,8 @@ use crate::wire::{ContentBlock, MessageContent, RecordEntry, RecordUser};
 /// How much of each end of a record is read.
 const CHUNK: u64 = 64 * 1024;
 
-/// The longest title, in characters; a prompt can be pages long.
+/// The longest title, in characters, its ellipsis included; a prompt can be
+/// pages long.
 const MAX_TITLE_CHARS: usize = 200;
 
 /// A directory's sessions, and what could not be read, so a caller can say
@@ -222,7 +223,7 @@ fn one_line(title: &str) -> String {
     if flat.chars().count() <= MAX_TITLE_CHARS {
         return flat;
     }
-    let mut cut: String = flat.chars().take(MAX_TITLE_CHARS).collect();
+    let mut cut: String = flat.chars().take(MAX_TITLE_CHARS - 1).collect();
     cut.push('…');
     cut
 }

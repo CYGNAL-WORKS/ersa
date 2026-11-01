@@ -80,9 +80,9 @@ mod tests {
     fn pids_that_name_no_process_are_not() {
         assert!(!is_running(0));
         assert!(!is_running(u32::MAX));
-        // Above Linux's highest pid, and not a multiple of four, which every
-        // Windows pid is: no process has it. (A pid from an exited child
-        // could be reused before the check.)
+        // Far above Linux's highest pid (2^22); Windows ignores a pid's low
+        // two bits and reads it as 0x3FFF_FFFC, far beyond any it hands out.
+        // (A pid from an exited child could be reused before the check.)
         assert!(!is_running(0x3FFF_FFFF));
     }
 }
