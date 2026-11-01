@@ -56,18 +56,21 @@ pub fn path_key(path: &str) -> String {
     if trimmed.is_empty() { "/" } else { trimmed }.to_string()
 }
 
-/// Accepts connections on one socket path.
+/// Accepts connections on one socket path, and removes the socket file when
+/// dropped, so a stopped Core leaves nothing behind for the next to clear.
 pub struct Listener {
     inner: UnixListener,
+    path: PathBuf,
 }
 
 impl Listener {
     /// Binds the socket inside a directory only this user can enter.
     ///
     /// Fails with `AddrInUse` when a process of this user is accepting on the
-    /// socket, and `PermissionDenied` when the directory or an existing
-    /// socket belongs to someone else. A leftover socket of this user's that
-    /// nobody accepts on is removed and replaced.
+    /// socket, with `PermissionDenied` when an existing socket belongs to
+    /// someone else, and with another error when the directory is not
+    /// private. A leftover socket of this user's that nobody accepts on is
+    /// removed and replaced.
     pub async fn bind(endpoint: &str) -> io::Result<Listener> {
         let path = Path::new(endpoint);
         let dir = path.parent().ok_or_else(|| {
@@ -94,8 +97,13 @@ impl Listener {
             std::fs::remove_file(path)?;
         }
         let inner = UnixListener::bind(path)?;
+        // The directory already keeps others out; this keeps the socket
+        // itself private too, whatever the umask made it.
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-        Ok(Listener { inner })
+        Ok(Listener {
+            inner,
+            path: path.to_path_buf(),
+        })
     }
 
     /// Waits for the next client.
@@ -105,7 +113,15 @@ impl Listener {
     }
 }
 
+impl Drop for Listener {
+    fn drop(&mut self) {
+        std::fs::remove_file(&self.path).ok();
+    }
+}
+
 /// Makes sure `dir` exists, belongs to this user, and admits nobody else.
+/// A directory someone else created first (in a shared `/tmp`, say) is
+/// refused rather than used.
 fn private_dir(dir: &Path) -> io::Result<()> {
     if !dir.exists() {
         std::fs::DirBuilder::new()
@@ -115,13 +131,12 @@ fn private_dir(dir: &Path) -> io::Result<()> {
     }
     let meta = std::fs::metadata(dir)?;
     if meta.uid() != euid() || meta.mode() & 0o077 != 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            format!(
-                "{} must belong to this user and admit nobody else",
-                dir.display()
-            ),
-        ));
+        // Not `PermissionDenied`, which `bind` reserves for a socket held by
+        // another user: this is a setup problem, not a squatter.
+        return Err(io::Error::other(format!(
+            "{} must belong to this user and admit nobody else (mode 0700)",
+            dir.display()
+        )));
     }
     Ok(())
 }
@@ -130,6 +145,8 @@ fn private_dir(dir: &Path) -> io::Result<()> {
 /// serving it runs as the current user, before anything is sent.
 pub async fn connect(endpoint: &str) -> io::Result<BoxStream> {
     let stream = UnixStream::connect(endpoint).await?;
+    // The kernel's record of who is on the other end: `SO_PEERCRED` on
+    // Linux, `getpeereid` on macOS and the BSDs.
     let peer = stream.peer_cred()?;
     if peer.uid() != euid() {
         return Err(io::Error::new(

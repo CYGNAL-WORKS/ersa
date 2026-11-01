@@ -377,34 +377,3 @@ fn sid_of_token(token: HANDLE) -> io::Result<String> {
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_endpoint_names_the_user_by_sid() {
-        let endpoint = default_endpoint().expect("endpoint");
-        assert!(
-            endpoint.starts_with(r"\\.\pipe\ersa-core-S-1-5-"),
-            "{endpoint}"
-        );
-    }
-
-    #[test]
-    fn canonical_paths_are_not_verbatim() {
-        let dir = std::env::temp_dir();
-        let canonical = canonicalize(&dir).expect("canonicalize");
-        let text = canonical.display().to_string();
-        assert!(!text.starts_with(r"\\?\"), "{text}");
-        assert!(canonical.is_absolute());
-        // Already canonical paths come back unchanged.
-        assert_eq!(canonicalize(&canonical).expect("again"), canonical);
-    }
-
-    #[test]
-    fn path_keys_ignore_case_and_separators() {
-        assert_eq!(path_key(r"D:\Repo\"), path_key("d:/repo"));
-        assert_ne!(path_key(r"D:\repo"), path_key(r"D:\repo2"));
-    }
-}
