@@ -24,7 +24,7 @@ pub mod record;
 mod suggestions;
 pub mod wire;
 
-pub use driver::{ClaudeAdapter, invocation_args};
+pub use driver::{ClaudeAdapter, invocation_args, resume_args};
 pub use projector::ClaudeProjector;
 
 /// The backend's name in `source.backend`, `session.started`, and the Core API.

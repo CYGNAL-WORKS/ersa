@@ -7,7 +7,7 @@
 //! session open in `<claude home>/sessions/<pid>.json`. `<claude home>` is
 //! normally `~/.claude` on the session's host; callers pass it in.
 //!
-//! - [`RecordProjector`] turns record entries into Ersa events, through the
+//! - [`project_record`] turns a record into Ersa events, through the
 //!   same projection of messages as the live stream.
 //! - [`list_sessions`] lists a directory's sessions, reading only the head and
 //!   tail of each record.
@@ -22,12 +22,14 @@ mod registry;
 
 use std::path::{Path, PathBuf};
 
-pub use listing::{SessionSummary, list_sessions};
-pub use projection::{RecordEvent, RecordProjector};
+pub use listing::{SessionList, SessionSummary, list_sessions};
+pub use projection::{RecordEvent, project_record};
 pub use registry::{LiveCheck, LiveSession, live_session};
 
 /// The longest encoded directory name the CLI uses whole; a longer one is cut
-/// and given a hash of the full path, as the Agent SDK's reader does.
+/// and given a hash of the full path. Verified on 2.1.316: a 222-character
+/// working directory was recorded under its first 200 encoded characters,
+/// `-`, and exactly the hash [`path_hash`] computes.
 const MAX_ENCODED_LEN: usize = 200;
 
 /// The name of the directory under `projects/` that holds the sessions of

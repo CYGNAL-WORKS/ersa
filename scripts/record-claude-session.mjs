@@ -2,7 +2,15 @@
 // Records a Claude Code session the way Ersa runs one, as a protocol fixture
 // pair: the live stream and the CLI's own session record for the same run.
 //
-//   node scripts/record-claude-session.mjs <name> [--cwd <dir>] [--resume <session id>] "<message 1>" ["<message 2>" ...]
+//   node scripts/record-claude-session.mjs <name> [--keep] [--cwd <dir>] [--resume <session id>] "<message 1>" ["<message 2>" ...]
+//
+// It auto-allows every tool call, and the CLI runs with the user's own
+// settings loaded (`--setting-sources user,project,local`, as Ersa runs it), so
+// whatever the model chooses to run, runs with the user's hooks and rules.
+// Only ever run it in a scratch directory.
+//
+// From Git Bash, set MSYS_NO_PATHCONV=1: otherwise a message such as
+// "/rename x" reaches the CLI as "C:/Program Files/Git/rename x".
 //
 // Starts the CLI with Ersa's command line and environment (PROTO-CLAUDE-CODE-STREAM,
 // Invocation), sends `initialize` and waits for its answer, sends each message
@@ -11,9 +19,11 @@
 // `~/.claude/projects/<encoded cwd>/<session id>.jsonl`, as it stood after the run.
 //
 // Without --cwd it works in a new scratch git repository under the temp
-// directory, never a real project, and prints its path so a later run can
-// resume there with --cwd and --resume. Never point --cwd at a real project:
-// the CLI loads the user's settings, and every tool call is allowed. Writes, under
+// directory, never a real project. Afterwards it deletes that repository and
+// the session record and registry file the run left in the real ~/.claude,
+// unless --keep is given: then it prints the repository's path, so a later run
+// can resume there with --cwd and --resume (and that run cleans up). Never
+// point --cwd at a real project. Writes, under
 // docs/briefs/protocol/fixtures/claude-code/<version>/:
 //   <NN>-<name>.jsonl          the CLI's stdout
 //   <NN>-<name>.meta.json      command line, environment changes, stdin lines, timings
@@ -22,15 +32,16 @@
 // Everything passes through redact() (scripts/redact.mjs) before it is written,
 // and the OS user name is replaced wherever it appears, since streamed tool
 // input can split a path mid-name. The record keeps verbatim the entries the
-// adapter reads (READ_ENTRIES); every other entry is cut to its kind and marked
-// `"ersa_elided": true`, because those bodies are internal to the CLI and carry
-// its system prompt and the recording machine's configuration.
+// adapter reads (READ_ENTRIES); every other entry is cut to its kind and its
+// chain links (`uuid`, `parentUuid`, `logicalParentUuid`, `isSidechain`) and
+// marked `"ersa_elided": true`, because those bodies are internal to the CLI
+// and carry its system prompt and the recording machine's configuration.
 // Set ERSA_CLAUDE to the claude executable if it is not on PATH.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { redact } from "./redact.mjs";
@@ -66,6 +77,8 @@ function scrub(text) {
   return redacted.replace(new RegExp(`\\b${escaped}\\b`, "gi"), "user");
 }
 
+// Every line of the record that is not an entry the adapter reads becomes a
+// marker; nothing else passes through, not even a line that does not parse.
 function elide(recordText) {
   return recordText
     .split("\n")
@@ -75,11 +88,19 @@ function elide(recordText) {
       try {
         entry = JSON.parse(line);
       } catch {
-        return line;
+        return JSON.stringify({ type: "unparsable", ersa_elided: true });
+      }
+      if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+        return JSON.stringify({ type: "not-an-object", ersa_elided: true });
       }
       if (READ_ENTRIES.has(entry.type)) return line;
       const kept = { type: entry.type };
       if (entry.subtype !== undefined) kept.subtype = entry.subtype;
+      // The links that make the conversation's chain, which runs through
+      // these entries too.
+      for (const key of ["uuid", "parentUuid", "logicalParentUuid", "isSidechain"]) {
+        if (entry[key] !== undefined) kept[key] = entry[key];
+      }
       if (entry.attachment?.type !== undefined) kept.attachment = { type: entry.attachment.type };
       kept.ersa_elided = true;
       return JSON.stringify(kept);
@@ -94,6 +115,9 @@ const option = (flag) => {
   const [, value] = argv.splice(i, 2);
   return value;
 };
+const keepIndex = argv.indexOf("--keep");
+const keep = keepIndex !== -1;
+if (keep) argv.splice(keepIndex, 1);
 const givenCwd = option("--cwd");
 const resume = option("--resume");
 const [name, ...messages] = argv;
@@ -130,6 +154,18 @@ function scratchRepo() {
   return repo;
 }
 const cwd = givenCwd ?? scratchRepo();
+// Only a directory this script makes may be deleted by it.
+const isScratch = basename(cwd).startsWith("ersa-rec-") && resolve(dirname(cwd)) === resolve(tmpdir());
+
+// The CLI's directory name for a working directory
+// (PROTO-CLAUDE-CODE-STREAM, Session record; long names verified on 2.1.316).
+function encodeCwd(path) {
+  const encoded = path.replace(/[^a-zA-Z0-9]/g, "-");
+  if (encoded.length <= 200) return encoded;
+  let h = 0;
+  for (let i = 0; i < path.length; i++) h = ((h << 5) - h + path.charCodeAt(i)) | 0;
+  return `${encoded.slice(0, 200)}-${Math.abs(h).toString(36)}`;
+}
 
 const args = [...ERSA_ARGS, ...(resume ? ["--resume", resume] : [])];
 const env = { ...process.env, ...ENV_SET };
@@ -214,8 +250,18 @@ if (initialized) {
   }
 }
 child.stdin.end();
-const exit = await Promise.race([exited, new Promise((r) => setTimeout(() => r({ code: null, signal: "timeout" }), 30_000))]);
-if (exit.signal === "timeout") child.kill();
+let exit = await Promise.race([exited, new Promise((r) => setTimeout(() => r(null), 30_000))]);
+if (exit === null) {
+  // Kill the whole tree (the CLI may be a shim with children), then wait for
+  // the exit, so nothing is still writing the record when it is read.
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"]);
+  } else {
+    child.kill("SIGKILL");
+  }
+  await exited;
+  exit = { code: null, signal: "timeout" };
+}
 const elapsed_ms = Date.now() - started;
 
 // The session record: the init line names the session and the directory the
@@ -230,9 +276,9 @@ const init = stdoutLines
   })
   .find((m) => m?.type === "system" && m?.subtype === "init");
 let recordLines = null;
+let recordPath = null;
 if (init) {
-  const encoded = init.cwd.replace(/[^a-zA-Z0-9]/g, "-");
-  const recordPath = join(homedir(), ".claude", "projects", encoded, `${init.session_id}.jsonl`);
+  recordPath = join(homedir(), ".claude", "projects", encodeCwd(init.cwd), `${init.session_id}.jsonl`);
   if (existsSync(recordPath)) recordLines = readFileSync(recordPath, "utf8");
 }
 
@@ -274,7 +320,26 @@ for (const file of written.filter(existsSync)) {
     console.error(`WARNING: ${file} still contains the user name; redact it before committing`);
   }
 }
-console.log(`recorded ${stem} (${version}) in ${cwd}`);
+// Leave nothing behind in the real ~/.claude or the temp directory, unless a
+// resume run follows.
+if (!keep) {
+  if (recordPath) {
+    rmSync(recordPath, { force: true });
+    // The CLI keeps per-session folders (tool results, subagents) beside it.
+    rmSync(recordPath.replace(/\.jsonl$/, ""), { recursive: true, force: true });
+    // The CLI also makes empty folders there (`memory/`); the directory goes
+    // only when no file is left in it, someone else's session included.
+    const projectDir = dirname(recordPath);
+    const holdsFiles = (d) =>
+      readdirSync(d, { withFileTypes: true }).some((e) => !e.isDirectory() || holdsFiles(join(d, e.name)));
+    if (existsSync(projectDir) && !holdsFiles(projectDir)) rmSync(projectDir, { recursive: true });
+  }
+  if (isScratch) rmSync(cwd, { recursive: true, force: true });
+}
+// A killed CLI cannot remove its registry file.
+rmSync(join(homedir(), ".claude", "sessions", `${child.pid}.json`), { force: true });
+
+console.log(`recorded ${stem} (${version}) in ${cwd}${keep ? " (kept)" : " (cleaned up)"}`);
 console.log(`  session ${init?.session_id ?? "?"}: exit ${exit.code ?? exit.signal}, ${stdoutLines.length} lines out, ${sent.length} in, ${elapsed_ms} ms, record ${recordLines === null ? "NOT FOUND" : "copied"}`);
 for (const t of turns) console.log(`  turn ${t.turn}: ${t.got_result ? t.subtype : "NO RESULT"}${t.is_error ? " (error)" : ""}`);
 if (stderr) console.log("stderr:", stderr.trim().slice(0, 400));

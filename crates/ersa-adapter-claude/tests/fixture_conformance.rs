@@ -646,9 +646,9 @@ fn every_session_record_entry_parses_and_keeps_its_fields() {
             "{at} lost or changed data"
         );
     }
-    // Titles only arise in the interactive CLI and the IDE extensions, which
-    // the recorder does not drive; the listing tests cover them.
-    for kind in ["user", "assistant", "last-prompt"] {
+    // `ai-title` arises only in the interactive CLI and the IDE extensions,
+    // which the recorder does not drive; the listing tests cover it.
+    for kind in ["user", "assistant", "last-prompt", "custom-title"] {
         assert!(typed.contains(kind), "no record fixture has a {kind} entry");
     }
 }

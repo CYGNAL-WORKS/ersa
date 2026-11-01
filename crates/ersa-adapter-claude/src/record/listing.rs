@@ -8,7 +8,7 @@
 
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::{is_session_id, project_dir};
@@ -17,6 +17,21 @@ use crate::wire::{ContentBlock, MessageContent, RecordEntry, RecordUser};
 
 /// How much of each end of a record is read.
 const CHUNK: u64 = 64 * 1024;
+
+/// The longest title, in characters; a prompt can be pages long.
+const MAX_TITLE_CHARS: usize = 200;
+
+/// A directory's sessions, and what could not be read, so a caller can say
+/// that some sessions are missing rather than show a shorter list as whole.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionList {
+    /// Most recently changed first.
+    pub sessions: Vec<SessionSummary>,
+    /// Records that could not be read (locked, access denied, vanished while
+    /// being read). The directory itself is listed when an entry of it could
+    /// not be read.
+    pub unreadable: Vec<PathBuf>,
+}
 
 /// One session in a directory's list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,17 +45,22 @@ pub struct SessionSummary {
     pub modified: Option<SystemTime>,
 }
 
-/// The sessions the CLI recorded for working directory `cwd`, most recently
-/// changed first. A directory with no records lists nothing; a record that
-/// cannot be read is left out rather than failing the list.
-pub fn list_sessions(claude_home: &Path, cwd: &str) -> io::Result<Vec<SessionSummary>> {
-    let entries = match fs::read_dir(project_dir(claude_home, cwd)) {
+/// The sessions the CLI recorded for working directory `cwd`. A directory
+/// with no records lists nothing; a directory that cannot be read is an error;
+/// a record that cannot be read is named in [`SessionList::unreadable`].
+pub fn list_sessions(claude_home: &Path, cwd: &str) -> io::Result<SessionList> {
+    let dir = project_dir(claude_home, cwd);
+    let entries = match fs::read_dir(&dir) {
         Ok(entries) => entries,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(SessionList::default()),
         Err(e) => return Err(e),
     };
-    let mut sessions = Vec::new();
-    for entry in entries.flatten() {
+    let mut list = SessionList::default();
+    for entry in entries {
+        let Ok(entry) = entry else {
+            list.unreadable.push(dir.clone());
+            continue;
+        };
         let name = entry.file_name();
         let Some(id) = name.to_str().and_then(|n| n.strip_suffix(".jsonl")) else {
             continue;
@@ -50,27 +70,35 @@ pub fn list_sessions(claude_home: &Path, cwd: &str) -> io::Result<Vec<SessionSum
         if !is_session_id(id) {
             continue;
         }
-        let Ok(metadata) = entry.metadata() else {
-            continue;
+        let path = entry.path();
+        let metadata = match entry.metadata() {
+            // A folder or link named like a record is not one.
+            Ok(metadata) if !metadata.is_file() => continue,
+            Ok(metadata) => metadata,
+            Err(_) => {
+                list.unreadable.push(path);
+                continue;
+            }
         };
-        if !metadata.is_file() {
-            continue;
+        match read_ends(&path) {
+            Ok(ends) => list.sessions.push(SessionSummary {
+                session_id: id.to_string(),
+                title: ends.title(),
+                modified: metadata.modified().ok(),
+            }),
+            // The CLI's retention deleted it since the directory was read.
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(_) => list.unreadable.push(path),
         }
-        let Ok(ends) = read_ends(&entry.path()) else {
-            continue;
-        };
-        sessions.push(SessionSummary {
-            session_id: id.to_string(),
-            title: ends.title(),
-            modified: metadata.modified().ok(),
-        });
     }
-    sessions.sort_by(|a, b| {
+    list.sessions.sort_by(|a, b| {
         b.modified
             .cmp(&a.modified)
             .then_with(|| a.session_id.cmp(&b.session_id))
     });
-    Ok(sessions)
+    list.unreadable.sort();
+    list.unreadable.dedup();
+    Ok(list)
 }
 
 /// The complete entries in the first and last `CHUNK` bytes of a record. A
@@ -163,6 +191,7 @@ impl Ends {
             .or_else(ai)
             .or_else(last_prompt)
             .or_else(first_prompt)
+            .map(|title| one_line(&title))
     }
 }
 
@@ -184,6 +213,18 @@ fn prompt(user: &RecordUser) -> Option<String> {
             plain_text(blocks).as_deref().and_then(non_empty)
         }
     }
+}
+
+/// A title fit for one line of a list: whitespace runs, line breaks included,
+/// become one space, and a long one is cut with an ellipsis.
+fn one_line(title: &str) -> String {
+    let flat = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= MAX_TITLE_CHARS {
+        return flat;
+    }
+    let mut cut: String = flat.chars().take(MAX_TITLE_CHARS).collect();
+    cut.push('…');
+    cut
 }
 
 fn non_empty(text: &str) -> Option<String> {

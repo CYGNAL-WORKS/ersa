@@ -13,7 +13,7 @@ use common::{RecordingSink, fixture};
 use ersa_adapter::fake::FakeTransport;
 use ersa_adapter::{Adapter, AdapterError, SessionConfig};
 use ersa_adapter_claude::record::{LiveCheck, live_session, record_path};
-use ersa_adapter_claude::{ClaudeAdapter, invocation_args};
+use ersa_adapter_claude::{ClaudeAdapter, invocation_args, resume_args};
 use serde_json::{Value, json};
 
 const SESSION_ID: &str = "d34f0c1b-64ee-437e-a4e3-3487df29a506";
@@ -93,11 +93,16 @@ async fn resuming_passes_the_init_session_id_to_resume() {
 // verifies: PROTO-CLAUDE-CODE-STREAM-R14
 #[test]
 fn a_new_session_passes_no_resume() {
-    assert_eq!(
-        flag_value(&invocation_args(&config(Value::Null)), "--resume"),
-        None
-    );
-    assert!(!invocation_args(&config(json!({}))).contains(&"--resume".to_string()));
+    for extra in [Value::Null, json!({}), json!({ "resume": null })] {
+        assert!(
+            resume_args(&config(extra.clone())).unwrap().is_empty(),
+            "{extra}"
+        );
+        assert_eq!(
+            flag_value(&invocation_args(&config(extra)), "--resume"),
+            None
+        );
+    }
 }
 
 #[tokio::test]
@@ -139,13 +144,7 @@ async fn a_resume_id_that_is_not_a_session_id_fails_start_without_spawning() {
             "{bad:?} was accepted"
         );
         assert!(transport.spawned().is_empty(), "{bad:?} spawned the CLI");
-        assert_eq!(
-            flag_value(
-                &invocation_args(&config(json!({ "resume": bad }))),
-                "--resume"
-            ),
-            None
-        );
+        assert!(resume_args(&config(json!({ "resume": bad }))).is_err());
     }
     // A resume value that is not a string at all is refused too.
     let transport = ready_stub();
@@ -160,17 +159,10 @@ async fn a_resume_id_that_is_not_a_session_id_fails_start_without_spawning() {
     assert!(transport.spawned().is_empty());
 }
 
-/// The pid of a process that has certainly exited: started and waited for.
-fn exited_pid() -> u32 {
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-        .arg("--list")
-        .stdout(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
-    let pid = child.id();
-    child.wait().unwrap();
-    pid
-}
+/// A pid no process can have: above Linux's highest (2^22), and not a
+/// multiple of four, which every Windows pid is. A pid from a child that has
+/// exited could be reused by the time it is checked.
+const DEAD_PID: u32 = 0x3FFF_FFFF;
 
 /// A scratch `~/.claude` holding a registry file for `pid`.
 fn registry_with(pid: u32, session_id: &str) -> tempfile::TempDir {
@@ -215,7 +207,29 @@ fn a_running_process_with_the_session_open_is_reported() {
 // verifies: PROTO-CLAUDE-CODE-STREAM-R17
 #[test]
 fn a_registry_file_left_by_a_process_that_has_exited_is_not_reported() {
-    let home = registry_with(exited_pid(), SESSION_ID);
+    let home = registry_with(DEAD_PID, SESSION_ID);
+    assert_eq!(live_session(home.path(), SESSION_ID), LiveCheck::NotOpen);
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R17
+#[test]
+fn session_ids_match_in_either_case_and_a_file_naming_no_session_is_skipped() {
+    let pid = std::process::id();
+    let home = registry_with(pid, &SESSION_ID.to_uppercase());
+    assert!(matches!(
+        live_session(home.path(), SESSION_ID),
+        LiveCheck::Open(_)
+    ));
+
+    // A running process between sessions writes no session id.
+    let home = tempfile::tempdir().unwrap();
+    let sessions = home.path().join("sessions");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        sessions.join(format!("{pid}.json")),
+        json!({"pid": pid, "status": "idle"}).to_string(),
+    )
+    .unwrap();
     assert_eq!(live_session(home.path(), SESSION_ID), LiveCheck::NotOpen);
 }
 
@@ -257,12 +271,12 @@ fn a_registry_file_of_another_shape_makes_the_answer_unknown_not_free() {
     // One named by a process that has exited is a leftover, and ignored.
     fs::remove_file(&renamed).unwrap();
     fs::remove_file(&damaged).unwrap();
-    fs::write(sessions.join(format!("{}.json", exited_pid())), "not json").unwrap();
+    fs::write(sessions.join(format!("{DEAD_PID}.json")), "not json").unwrap();
     assert_eq!(live_session(home.path(), SESSION_ID), LiveCheck::NotOpen);
 
     // A readable file naming the session open still wins.
     let home = registry_with(pid, SESSION_ID);
-    fs::write(home.path().join("sessions/123.json"), "not json").unwrap();
+    fs::write(home.path().join("sessions/damaged.json"), "not json").unwrap();
     assert!(matches!(
         live_session(home.path(), SESSION_ID),
         LiveCheck::Open(_)
