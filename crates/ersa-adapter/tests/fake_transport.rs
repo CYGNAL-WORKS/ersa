@@ -81,3 +81,88 @@ async fn hold_open_ends_when_stdin_closes() {
     assert_eq!(stdout.next_line().await.unwrap(), None);
     assert!(process.wait().await.unwrap().success());
 }
+
+#[tokio::test]
+async fn wait_for_stdin_pauses_stdout_until_a_line_arrives_and_checks_it() {
+    let transport = FakeTransport::new(["ready"])
+        .wait_for_stdin(|line| {
+            if line == "ping" {
+                Ok(())
+            } else {
+                Err(format!("expected ping, got {line}"))
+            }
+        })
+        .then_stdout(["pong"])
+        .wait_for_stdin(|_| Err("no more input expected".into()))
+        .then_stdout(["never sent"]);
+    let mut process = transport.spawn(spec("backend")).await.expect("spawn");
+    let mut stdin = process.take_stdin().expect("stdin");
+    let mut stdout = process.take_stdout().expect("stdout");
+
+    assert_eq!(stdout.next_line().await.unwrap().as_deref(), Some("ready"));
+    // Paused until stdin gets a line; a cancelled read loses nothing.
+    let pending = tokio::time::timeout(Duration::from_millis(20), stdout.next_line()).await;
+    assert!(pending.is_err());
+
+    stdin.write_line("ping").await.unwrap();
+    assert_eq!(stdout.next_line().await.unwrap().as_deref(), Some("pong"));
+
+    // A line the check rejects ends the script and is reported.
+    stdin.write_line("surprise").await.unwrap();
+    assert_eq!(stdout.next_line().await.unwrap(), None);
+    assert_eq!(transport.stub_failures(), ["no more input expected"]);
+}
+
+#[tokio::test]
+async fn a_stub_waiting_for_stdin_gives_up_when_killed() {
+    let transport = FakeTransport::new(["ready"])
+        .wait_for_stdin(|_| Ok(()))
+        .then_stdout(["never sent"])
+        .hold_open();
+    let mut process = transport.spawn(spec("backend")).await.expect("spawn");
+    let mut stdout = process.take_stdout().expect("stdout");
+    let _stdin = process.take_stdin().expect("stdin");
+
+    assert_eq!(stdout.next_line().await.unwrap().as_deref(), Some("ready"));
+    process.kill().await.unwrap();
+    assert_eq!(stdout.next_line().await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn stdout_can_outlive_the_process() {
+    let transport = FakeTransport::new(["last words"])
+        .hold_open()
+        .stdout_outlives_process();
+    let mut process = transport.spawn(spec("backend")).await.expect("spawn");
+    let mut stdout = process.take_stdout().expect("stdout");
+
+    process.kill().await.unwrap();
+    assert_eq!(process.wait().await.unwrap(), ProcessExit { code: None });
+    assert_eq!(
+        stdout.next_line().await.unwrap().as_deref(),
+        Some("last words")
+    );
+    // Someone else still holds the pipe open: no end of stream.
+    let pending = tokio::time::timeout(Duration::from_millis(20), stdout.next_line()).await;
+    assert!(pending.is_err());
+}
+
+#[tokio::test]
+async fn wedged_stdin_writes_hang_until_the_process_is_killed() {
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .hold_open()
+        .wedge_stdin_after(1);
+    let mut process = transport.spawn(spec("backend")).await.expect("spawn");
+    let mut stdin = process.take_stdin().expect("stdin");
+
+    stdin.write_line("fits").await.unwrap();
+    let stuck = tokio::time::timeout(Duration::from_millis(20), stdin.write_line("stuck")).await;
+    assert!(stuck.is_err());
+
+    process.kill().await.unwrap();
+    assert_eq!(
+        stdin.write_line("after").await.unwrap_err().kind(),
+        std::io::ErrorKind::BrokenPipe
+    );
+    assert_eq!(transport.stdin_lines(), ["fits"]);
+}

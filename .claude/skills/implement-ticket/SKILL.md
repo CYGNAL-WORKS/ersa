@@ -14,6 +14,7 @@ You are an implementing session, usually unattended. The orchestration session r
 - Read `CLAUDE.md`, then every brief and ADR the ticket names, including each brief's `## Changes` section.
 - Confirm you are in your own git worktree on a branch for the ticket, never `main`: `git status -sb`. If not, stop and say so.
 - Find other related issues: `gh issue list --state open --search "<two or three key words>"`.
+- Search the code for what already exists in the ticket's area (types, helpers, test fixtures, fakes) and build on it before writing anything new.
 
 ## 2. Build
 
