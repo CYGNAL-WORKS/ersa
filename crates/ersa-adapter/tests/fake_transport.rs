@@ -81,3 +81,34 @@ async fn hold_open_ends_when_stdin_closes() {
     assert_eq!(stdout.next_line().await.unwrap(), None);
     assert!(process.wait().await.unwrap().success());
 }
+
+#[tokio::test]
+async fn wait_for_stdin_pauses_stdout_until_a_line_arrives_and_checks_it() {
+    let transport = FakeTransport::new(["ready"])
+        .wait_for_stdin(|line| {
+            if line == "ping" {
+                Ok(())
+            } else {
+                Err(format!("expected ping, got {line}"))
+            }
+        })
+        .then_stdout(["pong"])
+        .wait_for_stdin(|_| Err("no more input expected".into()))
+        .then_stdout(["never sent"]);
+    let mut process = transport.spawn(spec("backend")).await.expect("spawn");
+    let mut stdin = process.take_stdin().expect("stdin");
+    let mut stdout = process.take_stdout().expect("stdout");
+
+    assert_eq!(stdout.next_line().await.unwrap().as_deref(), Some("ready"));
+    // Paused until stdin gets a line; a cancelled read loses nothing.
+    let pending = tokio::time::timeout(Duration::from_millis(20), stdout.next_line()).await;
+    assert!(pending.is_err());
+
+    stdin.write_line("ping").await.unwrap();
+    assert_eq!(stdout.next_line().await.unwrap().as_deref(), Some("pong"));
+
+    // A line the check rejects ends the script and is reported.
+    stdin.write_line("surprise").await.unwrap();
+    assert_eq!(stdout.next_line().await.unwrap(), None);
+    assert_eq!(transport.stub_failures(), ["no more input expected"]);
+}

@@ -75,6 +75,8 @@ pub enum Event {
     SessionState(SessionState),
     #[serde(rename = "session.ended")]
     SessionEnded(SessionEnded),
+    #[serde(rename = "session.notice")]
+    SessionNotice(SessionNotice),
 
     #[serde(rename = "turn.started")]
     TurnStarted(TurnStarted),
@@ -125,6 +127,7 @@ impl Event {
             Event::SessionStarted(_) => "session.started",
             Event::SessionState(_) => "session.state",
             Event::SessionEnded(_) => "session.ended",
+            Event::SessionNotice(_) => "session.notice",
             Event::TurnStarted(_) => "turn.started",
             Event::TurnCompleted(_) => "turn.completed",
             Event::UserMessage(_) => "user.message",
@@ -198,6 +201,32 @@ pub enum EndReason {
     UserStopped,
     BackendExited,
     Error,
+}
+
+/// Something the user should know that is not an error, such as a backend
+/// newer than the newest version Ersa was tested against.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionNotice {
+    pub level: NoticeLevel,
+    pub code: NoticeCode,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoticeLevel {
+    Info,
+    Warning,
+}
+
+/// What a notice is about. A closed list, so the Interface can word and place
+/// each one deliberately.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoticeCode {
+    /// The backend is newer than the newest version its adapter was tested with.
+    BackendVersionUntested,
 }
 
 // ---------------------------------------------------------------------------
