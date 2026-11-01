@@ -79,7 +79,7 @@ impl From<VcsError> for ApiError {
             VcsError::Failed { message, stderr } => {
                 ApiError::new(ErrorKind::VcsError, message).with_detail(stderr)
             }
-            VcsError::Locked { .. } | VcsError::Dirty => {
+            VcsError::Locked { .. } | VcsError::Dirty | VcsError::NotListed { .. } => {
                 ApiError::new(ErrorKind::VcsError, e.to_string())
             }
         }

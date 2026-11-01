@@ -48,13 +48,20 @@ pub enum VcsError {
     /// The worktree has local changes and removal was not forced.
     #[error("the worktree has uncommitted changes or untracked files")]
     Dirty,
+    /// A folder is at the workspace's path, but git does not list it as one
+    /// of the repository's worktrees, so removing it is not git's to do.
+    #[error("{path} exists but git does not list it as a worktree; remove the folder by hand")]
+    NotListed { path: String },
 }
 
 impl VcsError {
     /// Whether the worktree was left exactly as it was: git refused before
     /// touching it.
     pub fn is_refusal(&self) -> bool {
-        matches!(self, VcsError::Locked { .. } | VcsError::Dirty)
+        matches!(
+            self,
+            VcsError::Locked { .. } | VcsError::Dirty | VcsError::NotListed { .. }
+        )
     }
 }
 
@@ -83,6 +90,10 @@ pub async fn git_worktree_add(
     check(output, "git worktree add failed")
 }
 
+/// The lock reason `git worktree add` writes while it works and removes
+/// when it finishes. Still present afterwards means the add was killed.
+const INITIALIZING: &str = "initializing";
+
 /// Removes the git worktree at `path`, as far as possible, after an add that
 /// did not complete: forced removal, then `prune` for git's own records.
 /// Errors are returned so the caller can tell whether anything may be left.
@@ -91,17 +102,19 @@ pub async fn git_worktree_discard(
     repo: &str,
     path: &str,
 ) -> Result<(), VcsError> {
+    // A killed add leaves its `initializing` lock behind. One `--force`
+    // ignores local changes; the second also overrides a lock.
     let removed = git(
         transport,
         repo,
-        &["worktree", "remove", "--force", "--", path],
+        &["worktree", "remove", "--force", "--force", "--", path],
     )
     .await?;
     let pruned = git(transport, repo, &["worktree", "prune"]).await?;
     // The removal fails harmlessly when git never registered the worktree;
     // what matters is that git no longer lists it afterwards.
     let listed = git_worktree_list(transport, repo).await?;
-    if find(&listed, path).is_some() {
+    if find(&listed, path).await.is_some() {
         check(removed, "git worktree remove failed")?;
         check(pruned, "git worktree prune failed")?;
     }
@@ -110,9 +123,13 @@ pub async fn git_worktree_discard(
 
 /// Removes the git worktree at `path`.
 ///
-/// - Not a worktree git knows (already removed, or never finished): its
-///   record is pruned and this succeeds.
-/// - Locked: refused with [`VcsError::Locked`], even with `force`.
+/// - Not a worktree git lists: if the folder is gone too, git's record is
+///   pruned and this succeeds; if the folder is still there, it is refused
+///   with [`VcsError::NotListed`] rather than reported removed.
+/// - Locked: refused with [`VcsError::Locked`], even with `force`. The one
+///   exception is a lock left by an add that was killed (reason
+///   `initializing`) when `after_failed_add` says the workspace never
+///   finished: that worktree holds nothing of the user's and is discarded.
 /// - Local changes and no `force`: refused with [`VcsError::Dirty`].
 /// - Otherwise removed, retried while files are busy.
 ///
@@ -122,13 +139,23 @@ pub async fn git_worktree_remove(
     repo: &str,
     path: &str,
     force: bool,
+    after_failed_add: bool,
 ) -> Result<(), VcsError> {
     let listed = git_worktree_list(transport, repo).await?;
-    let Some(entry) = find(&listed, path) else {
+    let Some(entry) = find(&listed, path).await else {
+        if exists(path).await {
+            return Err(VcsError::NotListed {
+                path: path.to_string(),
+            });
+        }
         let pruned = git(transport, repo, &["worktree", "prune"]).await?;
         return check(pruned, "git worktree prune failed");
     };
     if entry.locked {
+        let interrupted = entry.lock_reason.as_deref() == Some(INITIALIZING);
+        if interrupted && after_failed_add {
+            return git_worktree_discard(transport, repo, path).await;
+        }
         return Err(VcsError::Locked {
             reason: entry.lock_reason.clone(),
         });
@@ -243,13 +270,40 @@ fn parse_worktree_list(lines: &[String]) -> Vec<WorktreeEntry> {
     entries
 }
 
-/// The entry for `path`, comparing paths the way the local file system does.
-/// git prints `D:/x` where Core stores `D:\x`.
-fn find<'a>(entries: &'a [WorktreeEntry], path: &str) -> Option<&'a WorktreeEntry> {
-    let key = platform::path_key(path);
-    entries
-        .iter()
-        .find(|entry| platform::path_key(&entry.path) == key)
+/// The entry for `path`.
+///
+/// git prints each worktree's real path: links and junctions resolved, and
+/// `/` separators on Windows. So both sides are canonicalised before they are
+/// compared, falling back to the text when a folder no longer exists (a
+/// prunable entry, or a path already deleted). This reads the local file
+/// system: worktrees are on the local host until remote hosts (M4), whose
+/// paths will need the comparison run on that host.
+async fn find(entries: &[WorktreeEntry], path: &str) -> Option<WorktreeEntry> {
+    let entries = entries.to_vec();
+    let path = path.to_string();
+    tokio::task::spawn_blocking(move || {
+        let key = location_key(&path);
+        entries.into_iter().find(|e| location_key(&e.path) == key)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// The key under which two spellings of one folder compare equal. Blocking.
+fn location_key(path: &str) -> String {
+    match platform::canonicalize(std::path::Path::new(path)) {
+        Ok(canonical) => platform::path_key(&canonical.display().to_string()),
+        Err(_) => platform::path_key(path),
+    }
+}
+
+/// Whether anything exists at `path` on the local file system.
+async fn exists(path: &str) -> bool {
+    let path = path.to_string();
+    tokio::task::spawn_blocking(move || std::path::Path::new(&path).exists())
+        .await
+        .unwrap_or(true)
 }
 
 /// Runs `git -C <dir> <args>` with a fixed environment.
