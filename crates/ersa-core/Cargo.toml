@@ -25,8 +25,14 @@ windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Pipes",
     "Win32_System_Threading",
 ] }
+
+# `geteuid`, used only by src/platform/unix.rs.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 # The socket-level tests validate every response against the Core API schema.

@@ -1,7 +1,7 @@
 //! One function per implemented Core API method. Each takes the parsed params
 //! and returns the typed result or an [`ApiError`].
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path};
 
 use ersa_protocol::core_api::{
     BackendInfo, BackendListParams, Empty, HelloParams, HelloResult, Host, HostKind, HostStatus,
@@ -14,9 +14,10 @@ use serde_json::{Map, Value};
 
 use super::{After, Answer, ApiError, ConnectionState};
 use crate::persistence::{self, LOCAL_HOST_ID};
+use crate::platform;
 use crate::settings;
 use crate::state::Core;
-use crate::workspace;
+use crate::workspace::{self, VcsError};
 
 // -- Core ----------------------------------------------------------------
 
@@ -150,34 +151,21 @@ pub(super) async fn project_add(
     }
 
     // Project paths are on the local host until remote hosts (M4), so the
-    // checks below use this machine's file system. Through a remote host's
-    // transport they become commands run there.
-    let path = Path::new(params.path.trim());
-    if !path.is_absolute() {
-        return Err(ApiError::invalid_params(format!(
-            "path must be absolute: {}",
-            params.path
-        )));
-    }
-    if !path.is_dir() {
-        return Err(ApiError::not_found(format!(
-            "no directory at {}",
-            params.path
-        )));
-    }
-    // Rebuilding the path from its components drops a trailing separator and
-    // uses the platform's separator throughout, so one directory always has
-    // one spelling and is found by the duplicate check.
-    let path: PathBuf = path.components().collect();
-    let path_text = path.display().to_string();
+    // folder is inspected on this machine's file system, off the async
+    // threads since file system calls block. Through a remote host's
+    // transport these become commands run there.
+    let raw = params.path.clone();
+    let folder = tokio::task::spawn_blocking(move || inspect_folder(&raw))
+        .await
+        .map_err(|_| ApiError::internal("inspecting the folder panicked"))??;
 
     if let Some(existing) = core
         .store
-        .project_at(params.host_id.clone(), path_text.clone())
+        .project_at(params.host_id.clone(), folder.key.clone())
         .await?
     {
         return Err(
-            ApiError::invalid_state(format!("{path_text} is already a project"))
+            ApiError::invalid_state(format!("{} is already a project", folder.path))
                 .with_detail(existing.id),
         );
     }
@@ -185,20 +173,68 @@ pub(super) async fn project_add(
     let project = Project {
         id: persistence::new_id("p"),
         host_id: params.host_id,
-        name: path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path_text.clone()),
-        path: path_text,
-        vcs: detect_vcs(&path),
+        path: folder.path,
+        name: folder.name,
+        vcs: folder.vcs,
     };
-    core.store.insert_project(project.clone()).await?;
+    core.store
+        .insert_project(project.clone(), folder.key)
+        .await?;
     Ok(project)
+}
+
+/// A folder about to become a project.
+struct Folder {
+    /// Canonical: absolute, links and `..` resolved, the stored letter case.
+    path: String,
+    /// The uniqueness key: the path as the file system compares paths.
+    key: String,
+    /// The folder's own name, a single path component.
+    name: String,
+    vcs: Vcs,
+}
+
+/// Checks that `raw` names a folder that can be a project, and describes it.
+/// Blocking.
+fn inspect_folder(raw: &str) -> Result<Folder, ApiError> {
+    let raw = raw.trim();
+    if !Path::new(raw).is_absolute() {
+        return Err(ApiError::invalid_params(format!(
+            "path must be absolute: {raw}"
+        )));
+    }
+    let path = platform::canonicalize(Path::new(raw)).map_err(|e| match e.kind() {
+        std::io::ErrorKind::PermissionDenied => ApiError::new(
+            ersa_protocol::core_api::ErrorKind::Permission,
+            format!("cannot open {raw}: {e}"),
+        ),
+        _ => ApiError::not_found(format!("no directory at {raw}")).with_detail(e.to_string()),
+    })?;
+    if !path.is_dir() {
+        return Err(ApiError::not_found(format!("{raw} is not a directory")));
+    }
+    // The name becomes a folder name under `workspaces.root`, so it must be
+    // one ordinary component: never a drive or share root, never `..`.
+    let name = match path.components().next_back() {
+        Some(Component::Normal(name)) => name.to_string_lossy().into_owned(),
+        _ => {
+            return Err(ApiError::invalid_params(format!(
+                "{raw} is a drive or share root; a project must be a named folder"
+            )));
+        }
+    };
+    let text = path.display().to_string();
+    Ok(Folder {
+        key: platform::path_key(&text),
+        path: text,
+        name,
+        vcs: detect_vcs(&path),
+    })
 }
 
 /// A project is a git project when it has a `.git` entry: a directory in an
 /// ordinary clone, a file in a worktree or submodule. Perforce detection
-/// arrives with the Perforce workspace adapter (M4).
+/// arrives with the Perforce workspace adapter (M4). Blocking.
 fn detect_vcs(path: &Path) -> Vcs {
     if path.join(".git").exists() {
         Vcs::Git
@@ -265,7 +301,7 @@ pub(super) async fn workspace_create(
     // `<root>/<project name>/<id>`: outside the project tree, grouped by
     // project so the folder is readable, unique by id.
     let root = settings::workspaces_root(&core.store.settings().await?, &core.config.data_dir);
-    let path = root.join(&project.name).join(&id).display().to_string();
+    let path = workspace_path(&root, &project.name, &id)?;
 
     let mut workspace = Workspace {
         id: id.clone(),
@@ -286,7 +322,21 @@ pub(super) async fn workspace_create(
     )
     .await;
     if let Err(e) = created {
-        // Nothing was created, so nothing is left to remove later.
+        // When git failed, it cleaned up after itself. When it timed out or
+        // its output was lost, a half-made worktree may be on disk: discard
+        // it, and if even that fails keep the row as `error`, so the user
+        // sees it and can remove it later.
+        if let VcsError::Incomplete(_) = e {
+            let discarded =
+                workspace::git_worktree_discard(transport.as_ref(), &project.path, &path).await;
+            if let Err(discard_error) = discarded {
+                tracing::warn!(workspace = %id, error = %discard_error, "could not clean up a failed worktree");
+                core.store
+                    .set_workspace_state(id, WorkspaceState::Error)
+                    .await?;
+                return Err(e.into());
+            }
+        }
         core.store.delete_workspace(id).await?;
         return Err(e.into());
     }
@@ -334,13 +384,13 @@ pub(super) async fn workspace_remove(
         workspace::git_worktree_remove(transport.as_ref(), &project.path, &workspace.path, force)
             .await;
     if let Err(e) = removed {
-        // A refusal (local changes without `force`) leaves the worktree as it
-        // was; any other failure leaves it in an unknown state.
-        let state = match &e {
-            workspace::VcsError::Failed { stderr, .. } if stderr.contains("--force") => {
-                WorkspaceState::Ready
-            }
-            _ => WorkspaceState::Error,
+        // A refusal (locked, or local changes without `force`) leaves the
+        // worktree as it was, so it goes back to the state it had; any other
+        // failure leaves it in an unknown state.
+        let state = if e.is_refusal() {
+            workspace.state
+        } else {
+            WorkspaceState::Error
         };
         core.store
             .set_workspace_state(workspace.id.clone(), state)
@@ -350,6 +400,25 @@ pub(super) async fn workspace_remove(
     core.store.delete_workspace(workspace.id.clone()).await?;
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
+}
+
+/// `<root>/<project name>/<id>`: outside the project tree, grouped by
+/// project so the folder is readable, unique by id. Checked to lie under
+/// `root`, since removal deletes whatever folder this names.
+fn workspace_path(root: &Path, project_name: &str, id: &str) -> Result<String, ApiError> {
+    let path = root.join(project_name).join(id);
+    let relative = path.strip_prefix(root).ok();
+    let inside = relative.is_some_and(|rel| {
+        rel.components().count() == 2 && rel.components().all(|c| matches!(c, Component::Normal(_)))
+    });
+    if !inside {
+        return Err(ApiError::internal(format!(
+            "workspace path {} would not be under {}",
+            path.display(),
+            root.display()
+        )));
+    }
+    Ok(path.display().to_string())
 }
 
 // -- Settings ------------------------------------------------------------

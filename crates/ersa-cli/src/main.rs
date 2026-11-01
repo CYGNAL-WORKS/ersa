@@ -71,10 +71,21 @@ async fn serve(data_dir: Option<PathBuf>) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let server = match Server::bind(CoreConfig::new(data_dir)).await {
+    let config = match CoreConfig::new(data_dir) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("ersa-core: cannot name the endpoint to listen on: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let server = match Server::bind(config).await {
         Ok(server) => server,
         Err(e @ ServeError::AlreadyRunning { .. }) => {
             eprintln!("ersa-core: {e}. Attach to it instead, or stop it first.");
+            return ExitCode::FAILURE;
+        }
+        Err(e @ ServeError::NameTaken { .. }) => {
+            eprintln!("ersa-core: {e}. Refusing to start, so clients never talk to that process.");
             return ExitCode::FAILURE;
         }
         Err(e) => {

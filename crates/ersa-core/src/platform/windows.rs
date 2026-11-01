@@ -1,11 +1,20 @@
-//! Windows: named pipes that only the current user can open.
+//! Windows: named pipes that only the current user can open, and clients that
+//! talk only to a pipe the current user serves (`PROTO-CORE-API`, Transport
+//! and framing).
 //!
-//! The pipe's security descriptor is the reason for the unsafe code here.
-//! Without one, Windows gives a named pipe a default descriptor that lets
-//! other accounts on the machine (including anonymous logons, on some
-//! configurations) open it for reading. `PROTO-CORE-API` relies on the
-//! socket's OS permissions instead of authentication, so the pipe must admit
-//! exactly the user Core runs as.
+//! Two protections, one per direction:
+//!
+//! - The server gives the pipe a security descriptor granting the current
+//!   user alone. Without one, Windows' default descriptor lets other accounts
+//!   on the machine open the pipe for reading.
+//! - The client checks who serves the pipe before sending anything. Another
+//!   account could create a pipe with Core's name before Core starts (pipe
+//!   names are a machine-wide namespace); the client would then hand that
+//!   account its requests. So the client asks Windows for the serving
+//!   process and compares that process's user with its own.
+//!
+//! The pipe's name carries the user's SID rather than the user name, because
+//! the user name comes from the environment, which anything can set.
 
 // Calling Win32 functions is `unsafe`; the workspace denies unsafe code
 // everywhere except where a platform module opts in, as this one does.
@@ -13,11 +22,14 @@
 
 use std::ffi::c_void;
 use std::io;
-use std::path::PathBuf;
+use std::os::windows::io::AsRawHandle;
+use std::path::{Component, Path, PathBuf, Prefix};
 use std::ptr;
 use std::time::Duration;
 
-use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeServer, ServerOptions};
+use tokio::net::windows::named_pipe::{
+    ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions,
+};
 use windows_sys::Win32::Foundation::{
     CloseHandle, ERROR_ACCESS_DENIED, ERROR_PIPE_BUSY, HANDLE, LocalFree,
 };
@@ -28,16 +40,20 @@ use windows_sys::Win32::Security::{
     GetTokenInformation, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
     TokenUser,
 };
-use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+use windows_sys::Win32::Storage::FileSystem::SECURITY_IDENTIFICATION;
+use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
+use windows_sys::Win32::System::Threading::{
+    GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 
 use super::BoxStream;
 
-/// `\\.\pipe\ersa-core-<user>`.
-pub fn default_endpoint() -> String {
-    // A pipe name may contain any character except a backslash, which a
-    // Windows user name cannot contain either; replace it anyway to be safe.
-    let user = std::env::var("USERNAME").unwrap_or_else(|_| "user".to_string());
-    format!(r"\\.\pipe\ersa-core-{}", user.replace('\\', "_"))
+/// How long `connect` keeps retrying while every pipe instance is busy.
+const CONNECT_DEADLINE: Duration = Duration::from_secs(5);
+
+/// `\\.\pipe\ersa-core-<user SID>`.
+pub fn default_endpoint() -> io::Result<String> {
+    Ok(format!(r"\\.\pipe\ersa-core-{}", current_user_sid()?))
 }
 
 /// `%LOCALAPPDATA%\Ersa`. Local rather than roaming app data, because the
@@ -49,6 +65,47 @@ pub fn default_data_dir() -> Option<PathBuf> {
 /// The computer name.
 pub fn host_name() -> String {
     std::env::var("COMPUTERNAME").unwrap_or_else(|_| "localhost".to_string())
+}
+
+/// The canonical form of an existing path: absolute, with `.`, `..`, and
+/// links resolved, and the letter case the file system stores.
+///
+/// `std::fs::canonicalize` returns Windows' verbatim form (`\\?\C:\repo`,
+/// `\\?\UNC\server\share\repo`), which many tools, git among them, do not
+/// accept. This turns it back into the ordinary form (`C:\repo`,
+/// `\\server\share\repo`).
+pub fn canonicalize(path: &Path) -> io::Result<PathBuf> {
+    let verbatim = std::fs::canonicalize(path)?;
+    let mut components = verbatim.components();
+    let ordinary = match components.next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::VerbatimDisk(letter) => {
+                let mut out = PathBuf::from(format!("{}:\\", letter as char));
+                out.extend(components.skip(1)); // skip the root after the prefix
+                out
+            }
+            Prefix::VerbatimUNC(server, share) => {
+                let mut out = PathBuf::from(format!(
+                    r"\\{}\{}\",
+                    server.to_string_lossy(),
+                    share.to_string_lossy()
+                ));
+                out.extend(components.skip(1));
+                out
+            }
+            _ => verbatim.clone(),
+        },
+        _ => verbatim.clone(),
+    };
+    Ok(ordinary)
+}
+
+/// The key two spellings of one path share. Windows file systems ignore
+/// case, so `D:\Repo` and `d:\repo` are one folder; separators are unified
+/// too, since git writes `D:/repo`.
+pub fn path_key(path: &str) -> String {
+    let unified = path.replace('/', "\\");
+    unified.trim_end_matches('\\').to_lowercase()
 }
 
 /// Accepts connections on one named pipe.
@@ -67,22 +124,30 @@ pub struct Listener {
 impl Listener {
     /// Creates the first instance of the pipe.
     ///
-    /// Fails with `io::ErrorKind::AddrInUse` when another process already owns
-    /// the pipe name, which is how a second Core finds out about the first.
-    pub fn bind(endpoint: &str) -> io::Result<Listener> {
+    /// When the name is taken, fails with `io::ErrorKind::AddrInUse` if the
+    /// owner runs as this user (another Core, most likely), and with
+    /// `io::ErrorKind::PermissionDenied` otherwise: someone else holds the
+    /// name, and starting anyway would let them receive this user's clients.
+    pub async fn bind(endpoint: &str) -> io::Result<Listener> {
         let security = SecurityDescriptor::current_user_only()?;
-        let first = create_instance(endpoint, &security, true).map_err(|e| {
+        let first = match create_instance(endpoint, &security, true) {
+            Ok(first) => first,
             // With `first_pipe_instance`, an existing pipe of the same name
-            // makes creation fail with ERROR_ACCESS_DENIED.
-            if e.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) {
-                io::Error::new(
-                    io::ErrorKind::AddrInUse,
-                    format!("another process already owns {endpoint}"),
-                )
-            } else {
-                e
+            // makes creation fail with ERROR_ACCESS_DENIED, whoever owns it.
+            Err(e) if e.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => {
+                return Err(match connect(endpoint).await {
+                    Ok(_) => io::Error::new(
+                        io::ErrorKind::AddrInUse,
+                        format!("a process running as this user already serves {endpoint}"),
+                    ),
+                    Err(e) => io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!("{endpoint} is held by a process that is not this user's ({e})"),
+                    ),
+                });
             }
-        })?;
+            Err(e) => return Err(e),
+        };
         Ok(Listener {
             endpoint: endpoint.to_string(),
             security,
@@ -128,19 +193,77 @@ fn create_instance(
     }
 }
 
-/// Opens a client connection to `endpoint`, waiting while every instance is busy.
+/// Opens a client connection to `endpoint` and checks that the process
+/// serving it runs as the current user, before anything is sent. Retries
+/// for a few seconds while every instance is busy.
 pub async fn connect(endpoint: &str) -> io::Result<BoxStream> {
-    loop {
-        match ClientOptions::new().open(endpoint) {
-            Ok(client) => return Ok(Box::new(client)),
+    let deadline = tokio::time::Instant::now() + CONNECT_DEADLINE;
+    let client = loop {
+        let opened = ClientOptions::new()
+            // Identification level: the server may learn who we are but can
+            // never act as us.
+            .security_qos_flags(SECURITY_IDENTIFICATION)
+            .open(endpoint);
+        match opened {
+            Ok(client) => break client,
             // All instances are taken for a moment, between a client
             // connecting and the listener creating the next instance.
             Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) => {
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        format!("{endpoint} stayed busy for {CONNECT_DEADLINE:?}"),
+                    ));
+                }
                 tokio::time::sleep(Duration::from_millis(20)).await;
             }
             Err(e) => return Err(e),
         }
+    };
+    verify_server(&client, endpoint)?;
+    Ok(Box::new(client))
+}
+
+/// Fails with `PermissionDenied` unless the process serving `client` runs as
+/// the current user.
+fn verify_server(client: &NamedPipeClient, endpoint: &str) -> io::Result<()> {
+    let denied = |why: String| {
+        io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("refusing {endpoint}: {why}"),
+        )
+    };
+    let pipe = client.as_raw_handle() as HANDLE;
+    let mut pid = 0u32;
+    // SAFETY: `pipe` is the open client handle `client` owns.
+    if unsafe { GetNamedPipeServerProcessId(pipe, &mut pid) } == 0 {
+        let e = io::Error::last_os_error();
+        return Err(denied(format!("cannot tell which process serves it ({e})")));
     }
+    // SAFETY: a plain query; a null result is checked below.
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        let e = io::Error::last_os_error();
+        return Err(denied(format!("cannot inspect the serving process ({e})")));
+    }
+    let mut token: HANDLE = ptr::null_mut();
+    // SAFETY: `process` is the handle opened above, closed right after.
+    let opened = unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) };
+    // SAFETY: closed once.
+    unsafe { CloseHandle(process) };
+    if opened == 0 {
+        let e = io::Error::last_os_error();
+        return Err(denied(format!(
+            "cannot read the serving process's user ({e})"
+        )));
+    }
+    let server_sid = sid_of_token(token);
+    // SAFETY: `token` is the handle opened above.
+    unsafe { CloseHandle(token) };
+    if server_sid? != current_user_sid()? {
+        return Err(denied("it is served by another user's process".into()));
+    }
+    Ok(())
 }
 
 /// A security descriptor allocated by Windows, freed on drop.
@@ -205,6 +328,7 @@ fn current_user_sid() -> io::Result<String> {
     result
 }
 
+/// The user SID of an access token, in string form.
 fn sid_of_token(token: HANDLE) -> io::Result<String> {
     // First ask how big the TOKEN_USER structure is, then fetch it into a
     // buffer of that size. The first call fails by design.
@@ -252,4 +376,35 @@ fn sid_of_token(token: HANDLE) -> io::Result<String> {
 /// `s` as a NUL-terminated UTF-16 string, the form Win32 `W` functions take.
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_endpoint_names_the_user_by_sid() {
+        let endpoint = default_endpoint().expect("endpoint");
+        assert!(
+            endpoint.starts_with(r"\\.\pipe\ersa-core-S-1-5-"),
+            "{endpoint}"
+        );
+    }
+
+    #[test]
+    fn canonical_paths_are_not_verbatim() {
+        let dir = std::env::temp_dir();
+        let canonical = canonicalize(&dir).expect("canonicalize");
+        let text = canonical.display().to_string();
+        assert!(!text.starts_with(r"\\?\"), "{text}");
+        assert!(canonical.is_absolute());
+        // Already canonical paths come back unchanged.
+        assert_eq!(canonicalize(&canonical).expect("again"), canonical);
+    }
+
+    #[test]
+    fn path_keys_ignore_case_and_separators() {
+        assert_eq!(path_key(r"D:\Repo\"), path_key("d:/repo"));
+        assert_ne!(path_key(r"D:\repo"), path_key(r"D:\repo2"));
+    }
 }

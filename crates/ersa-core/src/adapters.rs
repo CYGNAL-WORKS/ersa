@@ -11,7 +11,7 @@ use std::time::Duration;
 use ersa_adapter::{ProcessSpec, Transport};
 use ersa_protocol::core_api::{BackendInfo, BackendState, BackendStatus};
 
-use crate::transport;
+use crate::transport::{self, RunError};
 
 /// A backend Core knows how to drive.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,7 +77,9 @@ pub async fn detect(transport: &dyn Transport, program_override: Option<&str>) -
         let (version, state) = match version_of(transport, program).await {
             Ok(Some(version)) => (Some(version), BackendState::Available),
             Ok(None) => (None, BackendState::Error),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => (None, BackendState::Missing),
+            Err(RunError::Spawn(e)) if e.kind() == io::ErrorKind::NotFound => {
+                (None, BackendState::Missing)
+            }
             Err(e) => {
                 tracing::warn!(backend = backend.name, error = %e, "backend detection failed");
                 (None, BackendState::Error)
@@ -94,7 +96,7 @@ pub async fn detect(transport: &dyn Transport, program_override: Option<&str>) -
 
 /// The version `program --version` prints, or `None` when it ran but exited
 /// with an error or printed nothing usable.
-async fn version_of(transport: &dyn Transport, program: &str) -> io::Result<Option<String>> {
+async fn version_of(transport: &dyn Transport, program: &str) -> Result<Option<String>, RunError> {
     let spec = ProcessSpec {
         program: program.to_string(),
         args: vec!["--version".to_string()],

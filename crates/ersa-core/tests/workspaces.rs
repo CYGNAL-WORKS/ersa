@@ -268,3 +268,143 @@ async fn workspaces_need_a_git_project_and_safe_names() {
         .await;
     assert_eq!(kind(&error), "not_found");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn project_paths_are_canonical_and_unique_however_spelled() {
+    let (core, mut client, repo) = setup().await;
+    let project = add_project(&mut client, &repo).await;
+    let stored = project["path"].as_str().unwrap().to_string();
+    assert!(
+        !stored.starts_with(r"\?\"),
+        "not the verbatim form: {stored}"
+    );
+    assert!(Path::new(&stored).is_absolute());
+
+    // The same folder through `..`, and (where the file system ignores case)
+    // in other letter case, is the same project.
+    let mut spellings = vec![repo.join("..").join("repo").display().to_string()];
+    if cfg!(windows) {
+        spellings.push(repo.display().to_string().to_uppercase());
+    }
+    for spelling in spellings {
+        let error = client
+            .error(
+                "project.add",
+                json!({ "host_id": "local", "path": spelling }),
+            )
+            .await;
+        assert_eq!(kind(&error), "invalid_state", "{spelling}");
+        assert_eq!(error["data"]["detail"], project["id"]);
+    }
+
+    // A drive or file system root has no folder name to file workspaces
+    // under, so it cannot be a project.
+    let root = core
+        .dir
+        .path()
+        .ancestors()
+        .last()
+        .unwrap()
+        .display()
+        .to_string();
+    let error = client
+        .error("project.add", json!({ "host_id": "local", "path": root }))
+        .await;
+    assert_eq!(error["code"], json!(-32602), "{root}: {error}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_locked_worktree_is_refused_even_with_force() {
+    let (_core, mut client, repo) = setup().await;
+    let project = add_project(&mut client, &repo).await;
+    let workspace = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    let path = workspace["path"].as_str().unwrap();
+    git(
+        &repo,
+        &["worktree", "lock", "--reason", "kept for review", path],
+    );
+
+    for params in [
+        json!({ "id": workspace["id"] }),
+        json!({ "id": workspace["id"], "force": true }),
+    ] {
+        let error = client.error("workspace.remove", params).await;
+        assert_eq!(kind(&error), "vcs_error");
+        let message = error["message"].as_str().unwrap();
+        assert!(
+            message.contains("locked") && message.contains("kept for review"),
+            "{message}"
+        );
+    }
+    // A refusal leaves the workspace as it was.
+    let listed = client
+        .result("workspace.list", json!({ "project_id": project["id"] }))
+        .await;
+    assert_eq!(listed, json!([workspace]));
+    assert!(Path::new(path).exists());
+
+    git(&repo, &["worktree", "unlock", path]);
+    client
+        .result("workspace.remove", json!({ "id": workspace["id"] }))
+        .await;
+    assert!(!Path::new(path).exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn interrupted_workspaces_become_error_at_startup() {
+    let (core, mut client, repo) = setup().await;
+    let project = add_project(&mut client, &repo).await;
+    let creating = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    let removing = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    client.result("core.shutdown", json!({})).await;
+    core.task.await.expect("joined").expect("stopped cleanly");
+
+    // Leave the rows as a Core that died mid-operation would have.
+    let db = core.dir.path().join("data").join("ersa.db");
+    let store = ersa_core::persistence::Store::open(&db).expect("open");
+    let ids = (
+        creating["id"].as_str().unwrap().to_string(),
+        removing["id"].as_str().unwrap().to_string(),
+    );
+    store
+        .call(move |conn| {
+            conn.execute(
+                "UPDATE workspaces SET state = 'creating' WHERE id = ?1",
+                [&ids.0],
+            )?;
+            conn.execute(
+                "UPDATE workspaces SET state = 'removing' WHERE id = ?1",
+                [&ids.1],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("update");
+    drop(store);
+
+    let core = support::start_with(core.dir, |_| {}).await;
+    let mut client = core.client().await;
+    let listed = client
+        .result("workspace.list", json!({ "project_id": project["id"] }))
+        .await;
+    let states: Vec<&Value> = listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| &w["state"])
+        .collect();
+    assert_eq!(states, [&json!("error"), &json!("error")]);
+
+    // `error` workspaces can be removed.
+    for workspace in listed.as_array().unwrap() {
+        client
+            .result("workspace.remove", json!({ "id": workspace["id"] }))
+            .await;
+    }
+}

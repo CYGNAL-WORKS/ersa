@@ -44,6 +44,10 @@ pub enum Error {
     /// A settings patch would store a value of the wrong type.
     #[error("invalid settings: {0}")]
     InvalidSettings(String),
+    /// A uniqueness or foreign-key constraint refused the change: another
+    /// request changed the same rows first.
+    #[error("{0}")]
+    Conflict(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -170,14 +174,14 @@ impl Store {
         .await
     }
 
-    /// The project already added at `path` on `host_id`, if any.
-    pub async fn project_at(&self, host_id: String, path: String) -> Result<Option<Project>> {
+    /// The project already added on `host_id` whose path has `path_key`.
+    pub async fn project_at(&self, host_id: String, path_key: String) -> Result<Option<Project>> {
         self.call(move |conn| {
             Ok(conn
                 .query_row(
                     "SELECT id, host_id, path, name, vcs FROM projects
-                     WHERE host_id = ?1 AND path = ?2",
-                    [host_id, path],
+                     WHERE host_id = ?1 AND path_key = ?2",
+                    [host_id, path_key],
                     project_row,
                 )
                 .optional()?)
@@ -185,28 +189,35 @@ impl Store {
         .await
     }
 
-    pub async fn insert_project(&self, project: Project) -> Result<()> {
+    /// Adds a project. `path_key` is its path as the host compares paths.
+    /// Fails with [`Error::Conflict`] when that path was added meanwhile.
+    pub async fn insert_project(&self, project: Project, path_key: String) -> Result<()> {
         self.call(move |conn| {
             conn.execute(
-                "INSERT INTO projects (id, host_id, path, name, vcs, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO projects (id, host_id, path, path_key, name, vcs, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                 params![
                     project.id,
                     project.host_id,
                     project.path,
+                    path_key,
                     project.name,
                     to_sql_enum(&project.vcs),
                     now_rfc3339()
                 ],
-            )?;
+            )
+            .map_err(|e| conflict(e, "that folder was added as a project meanwhile"))?;
             Ok(())
         })
         .await
     }
 
+    /// Removes a project. Fails with [`Error::Conflict`] when a workspace was
+    /// created in it meanwhile.
     pub async fn delete_project(&self, id: String) -> Result<()> {
         self.call(move |conn| {
-            conn.execute("DELETE FROM projects WHERE id = ?1", [id])?;
+            conn.execute("DELETE FROM projects WHERE id = ?1", [id])
+                .map_err(|e| conflict(e, "a workspace was created in the project meanwhile"))?;
             Ok(())
         })
         .await
@@ -288,6 +299,19 @@ impl Store {
                 params![id, to_sql_enum(&to), serde_json::to_string(&from)?],
             )?;
             Ok(changed == 1)
+        })
+        .await
+    }
+
+    /// Marks every workspace a previous Core left `creating` or `removing` as
+    /// `error`, and returns how many there were. Run at startup, before any
+    /// request, when no operation can still be in flight.
+    pub async fn reconcile_workspaces(&self) -> Result<usize> {
+        self.call(|conn| {
+            Ok(conn.execute(
+                "UPDATE workspaces SET state = 'error' WHERE state IN ('creating', 'removing')",
+                [],
+            )?)
         })
         .await
     }
@@ -420,6 +444,15 @@ fn workspace_row(row: &Row) -> rusqlite::Result<Workspace> {
     })
 }
 
+/// Turns a constraint violation into [`Error::Conflict`] with `message`;
+/// any other error passes through.
+fn conflict(e: rusqlite::Error, message: &str) -> Error {
+    match e.sqlite_error_code() {
+        Some(rusqlite::ErrorCode::ConstraintViolation) => Error::Conflict(message.to_string()),
+        _ => Error::Sqlite(e),
+    }
+}
+
 fn collect<T>(rows: impl Iterator<Item = rusqlite::Result<T>>) -> Result<Vec<T>> {
     Ok(rows.collect::<rusqlite::Result<Vec<T>>>()?)
 }
@@ -445,12 +478,19 @@ fn from_sql_enum<T: DeserializeOwned>(row: &Row, index: usize) -> rusqlite::Resu
 /// every timestamp Core stores or sends.
 pub fn now_rfc3339() -> String {
     let now = time::OffsetDateTime::now_utc();
-    // Truncate to milliseconds: enough to order lines, and shorter on the wire.
-    let now = now
-        .replace_nanosecond(now.millisecond() as u32 * 1_000_000)
-        .unwrap_or(now);
-    now.format(&time::format_description::well_known::Rfc3339)
-        .expect("a UTC time always formats as RFC 3339")
+    // Written out field by field: `time`'s RFC 3339 formatter drops trailing
+    // zeros from the fraction (`.240` becomes `.24`), and a fixed width keeps
+    // timestamps sortable as text. Milliseconds are enough to order lines.
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        now.year(),
+        u8::from(now.month()),
+        now.day(),
+        now.hour(),
+        now.minute(),
+        now.second(),
+        now.millisecond()
+    )
 }
 
 /// A new identifier: `prefix` and eight random hex digits, such as `w-1a2b3c4d`.
@@ -517,23 +557,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn raw_log_lines_cannot_be_updated() {
+    async fn raw_log_lines_cannot_be_rewritten() {
         let (_dir, store) = temp_store();
         store.ensure_local_host("pc".into()).await.expect("host");
         let result = store
             .call(|conn| {
                 conn.execute_batch(
-                    "INSERT INTO projects VALUES ('p', 'local', '/r', 'r', 'git', 't');
+                    "INSERT INTO projects VALUES ('p', 'local', '/r', '/r', 'r', 'git', 't');
                      INSERT INTO workspaces VALUES ('w', 'p', '/w', 'b', 'ready', 't');
                      INSERT INTO sessions (id, workspace_id, host_id, backend, state, created_at)
                          VALUES ('s', 'w', 'local', 'claude-code', 'running', 't');
                      INSERT INTO raw_log VALUES ('s', 0, 't', 'backend', 'line');",
                 )?;
-                conn.execute("UPDATE raw_log SET line = 'changed'", [])?;
                 Ok(())
             })
             .await;
-        assert!(result.is_err(), "the update must be refused");
+        assert!(result.is_ok(), "{result:?}");
+
+        let rewrites = [
+            "UPDATE raw_log SET line = 'changed'",
+            "INSERT OR REPLACE INTO raw_log VALUES ('s', 0, 't', 'backend', 'changed')",
+            "REPLACE INTO raw_log VALUES ('s', 0, 't', 'backend', 'changed')",
+        ];
+        for sql in rewrites {
+            let result = store.call(move |conn| Ok(conn.execute(sql, [])?)).await;
+            assert!(result.is_err(), "{sql} must be refused");
+        }
+        let line: String = store
+            .call(|conn| Ok(conn.query_row("SELECT line FROM raw_log", [], |r| r.get(0))?))
+            .await
+            .expect("read back");
+        assert_eq!(line, "line");
     }
 
     #[tokio::test]
@@ -564,16 +618,26 @@ mod tests {
     async fn workspace_transitions_only_from_the_given_states() {
         let (_dir, store) = temp_store();
         store.ensure_local_host("pc".into()).await.expect("host");
+        let project = Project {
+            id: "p".into(),
+            host_id: LOCAL_HOST_ID.into(),
+            path: "/r".into(),
+            name: "r".into(),
+            vcs: Vcs::Git,
+        };
         store
-            .insert_project(Project {
-                id: "p".into(),
-                host_id: LOCAL_HOST_ID.into(),
-                path: "/r".into(),
-                name: "r".into(),
-                vcs: Vcs::Git,
-            })
+            .insert_project(project.clone(), "/r".into())
             .await
             .expect("project");
+        // The same key again is a conflict, not an internal error.
+        let again = Project {
+            id: "p2".into(),
+            ..project
+        };
+        assert!(matches!(
+            store.insert_project(again, "/r".into()).await,
+            Err(Error::Conflict(_))
+        ));
         store
             .insert_workspace(Workspace {
                 id: "w".into(),
@@ -598,6 +662,21 @@ mod tests {
                 .await
                 .expect("second")
         );
+
+        // A project with a workspace cannot be deleted: a conflict.
+        assert!(matches!(
+            store.delete_project("p".into()).await,
+            Err(Error::Conflict(_))
+        ));
+
+        // At startup, an interrupted removal becomes `error`.
+        assert_eq!(store.reconcile_workspaces().await.expect("reconcile"), 1);
+        let workspace = store
+            .workspace("w".into())
+            .await
+            .expect("get")
+            .expect("row");
+        assert_eq!(workspace.state, WorkspaceState::Error);
     }
 
     #[test]

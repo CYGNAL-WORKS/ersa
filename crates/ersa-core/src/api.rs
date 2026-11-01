@@ -8,6 +8,7 @@
 //! - `handlers`: one function per implemented method.
 
 mod handlers;
+mod lines;
 pub mod server;
 
 use ersa_protocol::core_api::rpc::{ErrorObject, Request, Response, code};
@@ -57,6 +58,8 @@ impl From<persistence::Error> for ApiError {
     fn from(e: persistence::Error) -> Self {
         match e {
             persistence::Error::InvalidSettings(message) => ApiError::invalid_params(message),
+            // Another request got there first; retrying sees the new state.
+            persistence::Error::Conflict(message) => ApiError::invalid_state(message),
             other => {
                 // Internal errors are logged in full here and reported
                 // briefly, so nothing is swallowed (ARCH-CORE, Errors).
@@ -70,12 +73,14 @@ impl From<persistence::Error> for ApiError {
 impl From<VcsError> for ApiError {
     fn from(e: VcsError) -> Self {
         match e {
-            VcsError::Spawn(io) => ApiError::new(
-                ErrorKind::TransportError,
-                format!("could not run git: {io}"),
-            ),
+            VcsError::Spawn(_) | VcsError::Incomplete(_) => {
+                ApiError::new(ErrorKind::TransportError, e.to_string())
+            }
             VcsError::Failed { message, stderr } => {
                 ApiError::new(ErrorKind::VcsError, message).with_detail(stderr)
+            }
+            VcsError::Locked { .. } | VcsError::Dirty => {
+                ApiError::new(ErrorKind::VcsError, e.to_string())
             }
         }
     }
