@@ -173,6 +173,27 @@ pub fn read_record(
     }
 }
 
+/// A token for the state of session `session_id`'s record: its file's size
+/// and modified time. `None` when it has no record, or its file system
+/// keeps no modified times.
+pub fn record_version(
+    claude_home: &Path,
+    cwd: &str,
+    session_id: &str,
+) -> io::Result<Option<String>> {
+    let Some(path) = find_record(claude_home, cwd, session_id)? else {
+        return Ok(None);
+    };
+    let metadata = fs::metadata(&path)?;
+    let Ok(modified) = metadata.modified() else {
+        return Ok(None);
+    };
+    let since = modified
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default();
+    Ok(Some(format!("{}:{}", metadata.len(), since.as_nanos())))
+}
+
 /// A record's events, with the size and modified time of the file they were
 /// read from.
 #[derive(Debug, Clone)]

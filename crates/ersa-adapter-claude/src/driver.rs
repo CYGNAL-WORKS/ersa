@@ -338,6 +338,18 @@ impl Adapter for ClaudeAdapter {
         blocking(move || records.read(&home, &cwd, &id)).await
     }
 
+    /// The record file's size and modified time.
+    async fn record_version(
+        &self,
+        _transport: Arc<dyn Transport>,
+        cwd: &str,
+        backend_session_id: &str,
+    ) -> Result<Option<String>, AdapterError> {
+        let home = self.claude_home()?;
+        let (cwd, id) = (cwd.to_string(), backend_session_id.to_string());
+        blocking(move || record::record_version(&home, &cwd, &id)).await
+    }
+
     fn forget_record(&self, _cwd: &str, backend_session_id: &str) {
         self.records.forget(backend_session_id);
     }
