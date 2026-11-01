@@ -112,8 +112,8 @@ pub fn project_record(record: &str) -> Vec<RecordEvent> {
                 // without an id (titles) are let through; they yield nothing.
                 let off_branch = match (&chain, uuid(&value)) {
                     (Some(chain), Some(id)) => !chain.contains(id),
-                    // In file order, still no subagent's entries.
-                    (None, _) => is_sidechain(&value),
+                    // In file order, still only the main thread's entries.
+                    (None, _) => !is_main_thread(&value),
                     (Some(_), None) => false,
                 };
                 // An entry written twice (a resume can repeat one) counts once.
@@ -127,8 +127,12 @@ pub fn project_record(record: &str) -> Vec<RecordEvent> {
     out
 }
 
-fn is_sidechain(value: &Value) -> bool {
-    value.get("isSidechain").and_then(Value::as_bool) == Some(true)
+/// Whether an entry belongs to the main conversation rather than to a
+/// subagent (`isSidechain`), a teammate (`teamName`) or a progress report.
+fn is_main_thread(value: &Value) -> bool {
+    value.get("isSidechain").and_then(Value::as_bool) != Some(true)
+        && value.get("teamName").is_none()
+        && value.get("type").and_then(Value::as_str) != Some("progress")
 }
 
 enum Line {
@@ -151,8 +155,8 @@ struct Node<'a> {
 
 /// Which entries make the conversation.
 struct Conversation {
-    /// The ids of the entries on its chain, or `None` when every entry
-    /// counts, in file order.
+    /// The ids of the entries on its chain, or `None` when every
+    /// main-thread entry counts, in file order.
     chain: Option<HashSet<String>>,
     /// Why the chain could not be followed whole, for an error event.
     problem: Option<String>,
@@ -167,8 +171,8 @@ struct Conversation {
 /// A damaged record never silently loses history. When the chain names a
 /// parent the record does not have (a line that could not be read, say),
 /// every main-thread entry before the break counts too, in file order; when
-/// no chain reaches a message at all, every entry counts. Either way the
-/// problem is reported.
+/// no chain reaches a message at all, every main-thread entry counts. Either
+/// way the problem is reported.
 fn conversation(entries: &[&Value]) -> Conversation {
     let every_entry = |problem| Conversation {
         chain: None,
@@ -185,17 +189,14 @@ fn conversation(entries: &[&Value]) -> Conversation {
         };
         let text = |key: &str| entry.get(key).and_then(Value::as_str);
         let kind = text("type");
-        nodes.insert(
-            id,
-            Node {
-                index,
-                parent: text("parentUuid").or_else(|| text("logicalParentUuid")),
-                main: !is_sidechain(entry)
-                    && entry.get("teamName").is_none()
-                    && kind != Some("progress"),
-                message: matches!(kind, Some("user" | "assistant")),
-            },
-        );
+        // An entry written twice keeps its first place, where it is
+        // projected.
+        nodes.entry(id).or_insert(Node {
+            index,
+            parent: text("parentUuid").or_else(|| text("logicalParentUuid")),
+            main: is_main_thread(entry),
+            message: matches!(kind, Some("user" | "assistant")),
+        });
     }
 
     let parents: HashSet<&str> = nodes

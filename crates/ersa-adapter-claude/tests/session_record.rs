@@ -303,15 +303,18 @@ fn a_damaged_line_mid_record_loses_no_history_silently() {
     assert_eq!(errors, 2, "{events:?}");
 }
 
+// verifies: PROTO-CLAUDE-CODE-STREAM-R20
 #[test]
 fn entries_that_form_no_chain_are_shown_in_file_order_with_an_error() {
-    // Two entries naming each other: a cycle, no leaf. A subagent's entry is
-    // still left out.
+    // Two entries naming each other: a cycle, no leaf. A subagent's and a
+    // teammate's entries are still left out.
     let entries = [
         prompt("u1", Some("a1"), "Loop"),
         reply("a1", "u1", "msg_1", "Back"),
         json!({"type": "user", "uuid": "s1", "parentUuid": "a1", "isSidechain": true,
             "message": {"role": "user", "content": "Subagent task"}}),
+        json!({"type": "user", "uuid": "t1", "parentUuid": "a1", "teamName": "crew",
+            "message": {"role": "user", "content": "Teammate task"}}),
     ];
     let events = events_of(&entries);
     assert!(matches!(events[0], Event::Error(_)), "{events:?}");
