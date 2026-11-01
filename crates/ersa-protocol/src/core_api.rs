@@ -334,7 +334,10 @@ pub struct ProjectAddParams {
     pub host_id: String,
     pub path: String,
     /// The user's answer when adding the project: whether its own
-    /// configuration may load in its sessions.
+    /// configuration may load in its sessions. Absent is untrusted, so a
+    /// client that never asks trusts nothing (PROTO-CORE-API-R11), and the
+    /// field is an addition that keeps the API version.
+    #[serde(default)]
     pub trusted: bool,
 }
 
