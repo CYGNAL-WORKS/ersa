@@ -1,0 +1,424 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/KPandaK/ersa/protocol/schema/agent-events.schema.json",
+  "title": "Ersa agent event",
+  "description": "One event in a session's agent event stream (PROTO-AGENT-EVENTS): an envelope around a typed payload. Every object is closed (additionalProperties: false) so backend-specific field names cannot leak (PROTO-AGENT-EVENTS-R08). The open places are backend.passthrough.payload and permission.requested.suggestions[].payload, which are backend-specific by design, and the tool data fields (tool.requested.input, permission.requested.input, structured tool.result.content), which carry a tool's own arguments and output rather than protocol fields.",
+  "$ref": "#/$defs/envelope",
+  "$defs": {
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["v", "session_id", "seq", "ts", "source", "event"],
+      "properties": {
+        "v": {
+          "description": "Projection version. Bumped when any event's meaning or shape changes.",
+          "const": 1
+        },
+        "session_id": { "type": "string", "minLength": 1 },
+        "seq": {
+          "description": "Gap-free and increasing within a session; assigned by Core.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "ts": {
+          "description": "When the raw log recorded the last line the event came from (raw_to).",
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": { "$ref": "#/$defs/source" },
+        "event": { "$ref": "#/$defs/event" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "backend_version", "raw_from", "raw_to"],
+      "properties": {
+        "backend": { "type": "string", "minLength": 1 },
+        "backend_version": { "type": "string" },
+        "raw_from": { "$ref": "#/$defs/raw_index" },
+        "raw_to": { "$ref": "#/$defs/raw_index" }
+      }
+    },
+    "raw_index": { "type": "integer", "minimum": 0 },
+    "event": {
+      "description": "The typed payload; type discriminates.",
+      "oneOf": [
+        { "$ref": "#/$defs/session.started" },
+        { "$ref": "#/$defs/session.state" },
+        { "$ref": "#/$defs/session.ended" },
+        { "$ref": "#/$defs/turn.started" },
+        { "$ref": "#/$defs/turn.completed" },
+        { "$ref": "#/$defs/user.message" },
+        { "$ref": "#/$defs/assistant.text" },
+        { "$ref": "#/$defs/assistant.thinking" },
+        { "$ref": "#/$defs/tool.requested" },
+        { "$ref": "#/$defs/tool.result" },
+        { "$ref": "#/$defs/tool.progress" },
+        { "$ref": "#/$defs/permission.requested" },
+        { "$ref": "#/$defs/permission.decided" },
+        { "$ref": "#/$defs/permission.denied_unanswered" },
+        { "$ref": "#/$defs/question.asked" },
+        { "$ref": "#/$defs/question.answered" },
+        { "$ref": "#/$defs/usage.updated" },
+        { "$ref": "#/$defs/error" },
+        { "$ref": "#/$defs/backend.passthrough" }
+      ]
+    },
+
+    "session.started": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "backend", "backend_version", "model", "cwd", "capabilities"],
+      "properties": {
+        "type": { "const": "session.started" },
+        "backend": { "type": "string" },
+        "backend_version": { "type": "string" },
+        "model": { "type": "string" },
+        "cwd": { "type": "string" },
+        "capabilities": { "type": "array", "items": { "type": "string" } },
+        "backend_session_id": { "type": "string" }
+      }
+    },
+    "session.state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "state"],
+      "properties": {
+        "type": { "const": "session.state" },
+        "state": {
+          "enum": ["starting", "running", "waiting_user", "idle", "disconnected", "ended", "error"]
+        },
+        "reason": { "type": "string" }
+      }
+    },
+    "session.ended": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "reason"],
+      "properties": {
+        "type": { "const": "session.ended" },
+        "reason": { "enum": ["user_stopped", "backend_exited", "error"] },
+        "exit_code": { "type": "integer" }
+      }
+    },
+
+    "turn.started": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "turn", "trigger"],
+      "properties": {
+        "type": { "const": "turn.started" },
+        "turn": { "$ref": "#/$defs/turn_index" },
+        "trigger": { "enum": ["user", "resume", "system"] }
+      }
+    },
+    "turn.completed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "turn", "outcome", "duration_ms", "is_error"],
+      "properties": {
+        "type": { "const": "turn.completed" },
+        "turn": { "$ref": "#/$defs/turn_index" },
+        "outcome": { "enum": ["success", "error", "interrupted", "max_turns"] },
+        "duration_ms": { "type": "integer", "minimum": 0 },
+        "is_error": { "type": "boolean" },
+        "final_text": { "type": "string" }
+      }
+    },
+    "turn_index": {
+      "description": "1-based turn index within the session.",
+      "type": "integer",
+      "minimum": 1
+    },
+
+    "user.message": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "text", "origin"],
+      "properties": {
+        "type": { "const": "user.message" },
+        "text": { "type": "string" },
+        "origin": { "enum": ["human", "peer_session", "system"] },
+        "peer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["session_id", "name"],
+          "properties": {
+            "session_id": { "type": "string" },
+            "name": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "assistant.text": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "block_id", "text", "final"],
+      "properties": {
+        "type": { "const": "assistant.text" },
+        "block_id": { "type": "string" },
+        "text": { "type": "string" },
+        "final": { "type": "boolean" }
+      }
+    },
+    "assistant.thinking": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "block_id", "final"],
+      "properties": {
+        "type": { "const": "assistant.thinking" },
+        "block_id": { "type": "string" },
+        "summary": { "type": "string" },
+        "final": { "type": "boolean" }
+      }
+    },
+
+    "tool.requested": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "tool_use_id", "name", "input"],
+      "properties": {
+        "type": { "const": "tool.requested" },
+        "tool_use_id": { "type": "string" },
+        "name": { "type": "string" },
+        "display_name": { "type": "string" },
+        "input": { "$ref": "#/$defs/tool_input" },
+        "parent_tool_use_id": { "type": "string" }
+      }
+    },
+    "tool.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "tool_use_id", "content", "is_error"],
+      "properties": {
+        "type": { "const": "tool.result" },
+        "tool_use_id": { "type": "string" },
+        "content": {
+          "description": "Plain text, or the tool's structured output (an array or object) as the tool produced it.",
+          "type": ["string", "array", "object"]
+        },
+        "is_error": { "type": "boolean" },
+        "duration_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "tool.progress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "tool_use_id"],
+      "properties": {
+        "type": { "const": "tool.progress" },
+        "tool_use_id": { "type": "string" },
+        "detail": { "type": "string" }
+      }
+    },
+    "tool_input": {
+      "description": "A tool's arguments, as the tool defines them. Open: the keys are the tool's parameter names, not protocol fields.",
+      "type": "object"
+    },
+
+    "permission.requested": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "tool_use_id", "tool_name", "input", "suggestions", "flags"],
+      "properties": {
+        "type": { "const": "permission.requested" },
+        "request_id": { "type": "string" },
+        "tool_use_id": { "type": "string" },
+        "tool_name": { "type": "string" },
+        "display_name": { "type": "string" },
+        "description": { "type": "string" },
+        "input": { "$ref": "#/$defs/tool_input" },
+        "blocked_path": { "type": "string" },
+        "suggestions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "label", "payload"],
+            "properties": {
+              "kind": { "enum": ["allow_rule", "allow_directory", "set_mode"] },
+              "label": { "type": "string" },
+              "payload": {
+                "description": "Backend-specific and opaque to the Interface. Deliberately open (PROTO-AGENT-EVENTS-R08)."
+              }
+            }
+          }
+        },
+        "flags": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "default_to_no",
+            "suppress_always_allow",
+            "requires_user_interaction",
+            "classifier_approvable"
+          ],
+          "properties": {
+            "default_to_no": { "type": "boolean" },
+            "suppress_always_allow": { "type": "boolean" },
+            "requires_user_interaction": { "type": "boolean" },
+            "classifier_approvable": { "type": "boolean" }
+          }
+        },
+        "reason": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "text"],
+          "properties": {
+            "kind": { "type": "string" },
+            "text": { "type": "string" }
+          }
+        }
+      }
+    },
+    "permission.decided": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "behavior", "decided_by"],
+      "properties": {
+        "type": { "const": "permission.decided" },
+        "request_id": { "type": "string" },
+        "behavior": { "enum": ["allow", "deny"] },
+        "decided_by": { "enum": ["user", "rule", "backend", "timeout"] },
+        "message": { "type": "string" },
+        "applied_suggestions": {
+          "description": "Indices into the request's suggestions.",
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "permission.denied_unanswered": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "tool_use_id", "tool_name", "message"],
+      "properties": {
+        "type": { "const": "permission.denied_unanswered" },
+        "tool_use_id": { "type": "string" },
+        "tool_name": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+
+    "question.asked": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "questions"],
+      "properties": {
+        "type": { "const": "question.asked" },
+        "request_id": { "type": "string" },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "text", "multi_select"],
+            "properties": {
+              "id": { "type": "string" },
+              "text": { "type": "string" },
+              "options": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["id", "label"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "label": { "type": "string" }
+                  }
+                }
+              },
+              "multi_select": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "question.answered": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "request_id", "answers", "answered_by"],
+      "properties": {
+        "type": { "const": "question.answered" },
+        "request_id": { "type": "string" },
+        "answers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "value"],
+            "properties": {
+              "id": { "type": "string" },
+              "value": {
+                "description": "Free text or one option id, or several option ids for a multi-select question.",
+                "oneOf": [
+                  { "type": "string" },
+                  { "type": "array", "items": { "type": "string" } }
+                ]
+              }
+            }
+          }
+        },
+        "answered_by": { "enum": ["user", "timeout"] }
+      }
+    },
+
+    "usage.updated": {
+      "description": "Any field absent means no new information; the Interface keeps the last known value per field.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "usage.updated" },
+        "context_tokens": { "type": "integer", "minimum": 0 },
+        "context_window": { "type": "integer", "minimum": 0 },
+        "cost_usd_total": { "type": "number", "minimum": 0 },
+        "turns": { "type": "integer", "minimum": 0 },
+        "rate_limit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {
+            "status": { "type": "string" },
+            "resets_at": { "type": "string", "format": "date-time" },
+            "detail": { "type": "string" }
+          }
+        }
+      }
+    },
+
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "code", "message", "recoverable"],
+      "properties": {
+        "type": { "const": "error" },
+        "code": {
+          "enum": ["authentication_failed", "backend_exited", "protocol", "backend_error", "transport"]
+        },
+        "message": { "type": "string" },
+        "recoverable": { "type": "boolean" },
+        "action": { "enum": ["log_in", "restart", "reconnect"] }
+      }
+    },
+
+    "backend.passthrough": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "backend", "kind", "payload"],
+      "properties": {
+        "type": { "const": "backend.passthrough" },
+        "backend": { "type": "string" },
+        "kind": {
+          "description": "The backend's own type and subtype joined with /.",
+          "type": "string"
+        },
+        "payload": {
+          "description": "The raw line's object, or the verbatim line as a string when it did not parse. Deliberately open (PROTO-AGENT-EVENTS-R08)."
+        }
+      }
+    }
+  }
+}
