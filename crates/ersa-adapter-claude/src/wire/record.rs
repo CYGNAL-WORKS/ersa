@@ -12,7 +12,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::content::{ApiMessage, Extra};
+use super::content::{ApiMessage, ContentBlock, Extra, MessageContent};
 use super::from_cli::UserApiMessage;
 
 /// One line of a session record, picked by its `type` field.
@@ -70,10 +70,48 @@ pub struct RecordUser {
     pub extra: Extra,
 }
 
+/// How the CLI marks up text it writes into the conversation itself: a slash
+/// command and its output, a shell command typed with `!`, a background task's
+/// report, an interrupt. Its own fixed markers, never translated.
+const CLI_MARKUP: &[&str] = &[
+    "<command-name>",
+    "<command-message>",
+    "<command-args>",
+    "<local-command-",
+    "<bash-input>",
+    "<bash-stdout>",
+    "<bash-stderr>",
+    "<task-notification>",
+    "[Request interrupted by user",
+];
+
 impl RecordUser {
-    /// Whether the CLI wrote this message rather than a person or a tool.
+    /// Whether the CLI wrote this message rather than a person typing a prompt
+    /// (or a tool returning a result): flagged as meta or as a compaction
+    /// summary, from an origin other than a person, or in the CLI's markup.
     pub fn is_from_cli(&self) -> bool {
-        self.is_meta == Some(true) || self.is_compact_summary == Some(true)
+        if self.is_meta == Some(true) || self.is_compact_summary == Some(true) {
+            return true;
+        }
+        let origin = self
+            .extra
+            .get("origin")
+            .and_then(|origin| origin.get("kind"))
+            .and_then(Value::as_str);
+        if origin.is_some_and(|kind| kind != "human") {
+            return true;
+        }
+        let text = match &self.message.content {
+            MessageContent::Text(text) => Some(text.as_str()),
+            MessageContent::Blocks(blocks) => blocks.iter().find_map(|block| match block {
+                ContentBlock::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            }),
+        };
+        text.is_some_and(|text| {
+            let text = text.trim_start();
+            CLI_MARKUP.iter().any(|mark| text.starts_with(mark))
+        })
     }
 }
 

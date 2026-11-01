@@ -77,20 +77,12 @@ mod tests {
     }
 
     #[test]
-    fn an_exited_child_is_not() {
-        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
-            .arg("--list")
-            .stdout(std::process::Stdio::null())
-            .spawn()
-            .unwrap();
-        let pid = child.id();
-        child.wait().unwrap();
-        assert!(!is_running(pid));
-    }
-
-    #[test]
     fn pids_that_name_no_process_are_not() {
         assert!(!is_running(0));
         assert!(!is_running(u32::MAX));
+        // Above Linux's highest pid, and not a multiple of four, which every
+        // Windows pid is: no process has it. (A pid from an exited child
+        // could be reused before the check.)
+        assert!(!is_running(0x3FFF_FFFF));
     }
 }

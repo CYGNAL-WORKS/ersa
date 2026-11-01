@@ -44,13 +44,14 @@ pub struct LiveSession {
 }
 
 /// The fields of a registry file the adapter reads; the file has more, and
-/// they are the CLI's own business. A file without a session id or a pid is
-/// not one this version understands.
+/// they are the CLI's own business. A file with no session id names no
+/// session (a process between sessions); one with no pid is named by it.
 #[derive(Deserialize)]
 struct RegistryFile {
-    pid: u32,
-    #[serde(rename = "sessionId")]
-    session_id: String,
+    #[serde(default)]
+    pid: Option<u32>,
+    #[serde(default, rename = "sessionId")]
+    session_id: Option<String>,
     #[serde(default)]
     cwd: Option<String>,
     #[serde(default)]
@@ -96,23 +97,34 @@ pub fn live_session(claude_home: &Path, session_id: &str) -> LiveCheck {
                 Read::Unreadable => None,
             },
         };
+        // The file is named by its pid.
+        let named_pid = path
+            .file_stem()
+            .and_then(|s| s.to_str()?.parse::<u32>().ok());
         let Some(file) = file else {
-            // The file is named by its pid. When that process has gone, the
-            // file is a crashed CLI's leftover and says nothing about now.
-            let pid = path
-                .file_stem()
-                .and_then(|s| s.to_str()?.parse::<u32>().ok());
-            if pid.is_none_or(platform::is_running) {
+            // When that process has gone, the file is a crashed CLI's
+            // leftover and says nothing about now.
+            if named_pid.is_none_or(platform::is_running) {
                 unreadable.push(path);
             }
             continue;
         };
-        if file.session_id != session_id {
+        // Session ids are UUIDs, which may be written in either case.
+        let names_it = file
+            .session_id
+            .as_deref()
+            .is_some_and(|id| id.eq_ignore_ascii_case(session_id));
+        if !names_it {
             continue;
         }
-        if platform::is_running(file.pid) {
+        let Some(pid) = file.pid.or(named_pid) else {
+            // It names the session but no process to check.
+            unreadable.push(path);
+            continue;
+        };
+        if platform::is_running(pid) {
             return LiveCheck::Open(LiveSession {
-                pid: file.pid,
+                pid,
                 cwd: file.cwd,
                 entrypoint: file.entrypoint,
             });
