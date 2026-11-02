@@ -22,6 +22,7 @@ use common::{private_location, unique_label};
 use ersa_shell::bridge::{self, CoreLink, LinkEvent, LinkOptions};
 use ersa_shell::instance::{self, Instance};
 use ersa_shell::launch::{self, CoreLocation, How};
+use ersa_shell::process::CoreProcess;
 use ersa_shell::quit::{self, QUIT_LIMIT, Stopped};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
@@ -45,7 +46,7 @@ async fn quit_shuts_core_down_and_returns_once_it_has_exited() {
         async move {
             let (_link, how, _events) = open(&location).await;
             assert_eq!(how, How::Launched);
-            let stopped = quit::shut_down(&location.endpoint, QUIT_LIMIT)
+            let stopped = quit::shut_down(&location.endpoint, QUIT_LIMIT, None)
                 .await
                 .expect("quit");
             let Stopped::Exited { pid } = stopped else {
@@ -112,7 +113,7 @@ async fn a_session_running_at_quit_ends_user_stopped_and_leaves_no_process() {
             let (backend, grandchild) = read_pids(&pids_file).await;
             assert!(running(backend) && running(grandchild));
 
-            let stopped = quit::shut_down(&location.endpoint, QUIT_LIMIT)
+            let stopped = quit::shut_down(&location.endpoint, QUIT_LIMIT, None)
                 .await
                 .expect("quit");
             assert!(
@@ -158,6 +159,7 @@ async fn a_core_that_does_not_stop_in_time_is_ended_with_what_it_started() {
     let label = unique_label("shell-wedged");
     let endpoint = ersa_core::platform::labelled_endpoint(&label).expect("an endpoint");
     let pids_file = dir.path().join("wedged.pids");
+    common::end_with_this_run();
     let mut wedged = helper("wedged_core")
         .env(HELPER_ENDPOINT, &endpoint)
         .env(HELPER_PIDS, &pids_file)
@@ -172,8 +174,20 @@ async fn a_core_that_does_not_stop_in_time_is_ended_with_what_it_started() {
         let endpoint = endpoint.clone();
         async move {
             let limit = Duration::from_secs(2);
+            // A client took the one pipe instance the wedged Core had
+            // waiting, as the bridge's liveness probe does; on Windows the
+            // endpoint can no longer say which process serves it.
+            let _probe = hold_a_client(&endpoint);
+            if cfg!(windows) {
+                let lost = quit::shut_down(&endpoint, limit, None).await;
+                assert!(lost.is_err(), "found a Core nothing can reach: {lost:?}");
+            }
+            // The Shell that launched it still holds it.
+            let launched = CoreProcess::open(core).expect("hold the Core");
             let started = std::time::Instant::now();
-            let stopped = quit::shut_down(&endpoint, limit).await.expect("quit");
+            let stopped = quit::shut_down(&endpoint, limit, Some(launched))
+                .await
+                .expect("quit");
             assert_eq!(stopped, Stopped::Killed { pid: core });
             assert!(
                 started.elapsed() >= limit,
@@ -270,8 +284,9 @@ async fn helper_wedged_core() {
     // Never waited on: the quit under test ends it, and this process with it.
     #[allow(clippy::zombie_processes)]
     let child = Command::new(stand_in_backend())
-        .env("ERSA_STAND_IN_SLEEP", "1")
-        .stdin(Stdio::null())
+        // It ends when this process does, which holds its input.
+        .env("ERSA_STAND_IN_SLEEP", "stdin")
+        .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .spawn()
         .expect("start a child");
@@ -438,9 +453,12 @@ async fn request(link: &CoreLink, method: &str, params: Value) -> Value {
 /// would stop it.
 async fn finish(checks: tokio::task::JoinHandle<()>, location: &CoreLocation) {
     let outcome = checks.await;
-    if tokio::time::timeout(CLEANUP, quit::shut_down(&location.endpoint, QUIT_LIMIT))
-        .await
-        .is_err()
+    if tokio::time::timeout(
+        CLEANUP,
+        quit::shut_down(&location.endpoint, QUIT_LIMIT, None),
+    )
+    .await
+    .is_err()
     {
         eprintln!("could not stop the Core at {}", location.endpoint);
     }
@@ -491,6 +509,22 @@ fn running(pid: u32) -> bool {
             Err(_) => false,
         }
     }
+}
+
+/// A client connection to `endpoint` that sends nothing, held until dropped.
+fn hold_a_client(endpoint: &str) -> Box<dyn std::any::Any + Send> {
+    #[cfg(windows)]
+    let client: Box<dyn std::any::Any + Send> = Box::new(
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(endpoint)
+            .expect("a client"),
+    );
+    #[cfg(unix)]
+    let client: Box<dyn std::any::Any + Send> =
+        Box::new(std::os::unix::net::UnixStream::connect(endpoint).expect("a client"));
+    client
 }
 
 /// Ends process `pid` if it still runs; for cleaning up after a failed test.

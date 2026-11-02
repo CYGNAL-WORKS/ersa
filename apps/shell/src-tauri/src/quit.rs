@@ -61,12 +61,25 @@ pub fn endpoint_to_stop<'a>(
 /// returns once its process has exited (FLOW-CLOSE-AND-QUIT-R03). A Core
 /// still running `limit` after the call is ended with everything it started
 /// (R06). Core stops its sessions itself as part of shutting down (R05).
-pub async fn shut_down(endpoint: &str, limit: Duration) -> Result<Stopped, QuitError> {
+///
+/// `launched` is the Core this Shell launched, if it did: the process to
+/// wait on and end when the endpoint cannot tell which process serves it (a
+/// wedged Core whose one waiting pipe instance someone else took).
+pub async fn shut_down(
+    endpoint: &str,
+    limit: Duration,
+    launched: Option<CoreProcess>,
+) -> Result<Stopped, QuitError> {
     let deadline = tokio::time::Instant::now() + limit;
     // Core is asked to stop even when its process cannot be found (on macOS,
     // say); then only the fallback of ending it is lost.
+    let launched = launched.filter(|core| !core.has_exited());
     let (core, unfound) = match CoreProcess::serving(endpoint).await {
-        Ok(None) => return Ok(Stopped::NotRunning),
+        Ok(None) => match launched {
+            // Running, yet serving nothing: wedged before it could serve again.
+            Some(core) => (Some(core), None),
+            None => return Ok(Stopped::NotRunning),
+        },
         Ok(Some(core)) => (Some(core), None),
         // Another user's process: never asked, never ended.
         Err(source) if source.kind() == io::ErrorKind::PermissionDenied => {
@@ -75,7 +88,10 @@ pub async fn shut_down(endpoint: &str, limit: Duration) -> Result<Stopped, QuitE
                 source,
             });
         }
-        Err(e) => (None, Some(e)),
+        Err(e) => match launched {
+            Some(core) => (Some(core), None),
+            None => (None, Some(e)),
+        },
     };
 
     // A Core that answers nothing, or takes no client, runs out the limit

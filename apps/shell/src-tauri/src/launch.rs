@@ -134,8 +134,19 @@ fn default_program() -> io::Result<PathBuf> {
 /// none is. The connection is already verified as served by the current
 /// user (the pipe client checks that), but no request has been sent.
 pub async fn attach_or_launch(location: &CoreLocation) -> Result<(BoxStream, How), LaunchError> {
+    attach_or_launch_tracked(location)
+        .await
+        .map(|(stream, how, _)| (stream, how))
+}
+
+/// [`attach_or_launch`], with the process id of the Core it launched, if it
+/// launched one: Quit needs it when a wedged Core can no longer be found
+/// from its endpoint.
+pub async fn attach_or_launch_tracked(
+    location: &CoreLocation,
+) -> Result<(BoxStream, How, Option<u32>), LaunchError> {
     match ersa_core::connect(&location.endpoint).await {
-        Ok(stream) => return Ok((stream, How::Attached)),
+        Ok(stream) => return Ok((stream, How::Attached, None)),
         Err(e) if nobody_serving(&e) && !location.launch => {
             return Err(LaunchError::NotServing {
                 endpoint: location.endpoint.clone(),
@@ -167,8 +178,9 @@ pub async fn attach_or_launch(location: &CoreLocation) -> Result<(BoxStream, How
         // at once, one Core loses the race and exits, but the other serves.
         match ersa_core::connect(&location.endpoint).await {
             Ok(stream) => {
+                let pid = child.id();
                 reap(child);
-                return Ok((stream, How::Launched));
+                return Ok((stream, How::Launched, Some(pid)));
             }
             Err(e) if nobody_serving(&e) => {}
             Err(source) => {
@@ -182,7 +194,7 @@ pub async fn attach_or_launch(location: &CoreLocation) -> Result<(BoxStream, How
         if let Ok(Some(status)) = child.try_wait() {
             // One last try, for the lost race above.
             if let Ok(stream) = ersa_core::connect(&location.endpoint).await {
-                return Ok((stream, How::Attached));
+                return Ok((stream, How::Attached, None));
             }
             let log = location
                 .log_file
