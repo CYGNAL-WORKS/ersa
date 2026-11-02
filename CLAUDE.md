@@ -26,7 +26,7 @@ Ersa must be beautiful, and every session that touches the interface is responsi
 
 ## Content
 
-Every word Ersa shows and every document here follows `docs/design/CONTENT.md`: US English, rules taken from the Microsoft Writing Style Guide and checked by Vale in CI. Read it before writing interface copy or user-facing docs. Interface copy lives in the string catalog, never in a component.
+Every word Ersa shows and every document here follows the rules `docs/design/CONTENT.md` gives its kind: US English, rules taken from the Microsoft Writing Style Guide and checked by Vale in CI. Read it before writing interface copy or user-facing docs. Interface copy lives in the string catalog, never in a component.
 
 ## Stack
 
