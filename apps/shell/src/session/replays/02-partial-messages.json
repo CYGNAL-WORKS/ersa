@@ -553,12 +553,9 @@
     {
       "backend": "claude-code",
       "created_at": "2026-01-01T00:00:00Z",
-      "effort": "",
       "host_id": "local",
       "id": "s-replay",
       "last_event_seq": 0,
-      "model": "",
-      "permission_mode": "",
       "state": "starting",
       "tile": {
         "pending": [],
@@ -572,12 +569,9 @@
     {
       "backend": "claude-code",
       "created_at": "2026-01-01T00:00:00Z",
-      "effort": "",
       "host_id": "local",
       "id": "s-replay",
       "last_event_seq": 16,
-      "model": "",
-      "permission_mode": "",
       "state": "idle",
       "tile": {
         "context_tokens": 38495,

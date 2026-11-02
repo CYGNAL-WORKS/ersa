@@ -25,7 +25,7 @@ use crate::events::{Answer, Envelope, LifecycleState, PermissionBehavior};
 /// The Core API version this build speaks. Negotiated in `core.hello`; bumped
 /// only for removals or changes of meaning, never for additions. The schema
 /// file records the same number as `x-api-version`; a test checks they agree.
-pub const API_VERSION: u32 = 2;
+pub const API_VERSION: u32 = 3;
 
 /// Every Core API version this build can speak, for the handshake.
 pub const SUPPORTED_API_VERSIONS: &[u32] = &[API_VERSION];
@@ -454,11 +454,15 @@ pub struct Session {
     pub workspace_id: String,
     pub host_id: String,
     pub backend: String,
-    /// The model, effort and permission mode the session started with: ids
-    /// from `backend.list` (PROTO-CORE-API-R16).
-    pub model: String,
-    pub effort: String,
-    pub permission_mode: String,
+    /// The model, effort and permission mode `session.create` was given:
+    /// ids from `backend.list`. Absent when left out, which means the
+    /// backend's own default (PROTO-CORE-API-R16).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -523,7 +527,7 @@ pub enum PendingKind {
 pub struct SessionCreateParams {
     pub workspace_id: String,
     pub backend: String,
-    /// Ids from `backend.list`; the backend's defaults when absent.
+    /// Ids from `backend.list`; left to the backend when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
