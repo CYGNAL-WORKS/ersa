@@ -8,7 +8,6 @@
 use std::io;
 
 use ersa_core::platform::Listener;
-use tokio::io::AsyncWriteExt;
 
 /// The label of the window's endpoint, beside the user's own Core endpoint.
 /// A debug window attached to another endpoint (`ERSA_ATTACH`) is a Shell
@@ -34,23 +33,26 @@ pub enum Instance {
 pub async fn claim(endpoint: &str) -> io::Result<Instance> {
     match Listener::bind(endpoint).await {
         Ok(listener) => Ok(Instance::First(listener)),
-        Err(e) if e.kind() == io::ErrorKind::AddrInUse => {
-            // `bind` found the first Shell by connecting to it, and a
-            // connection is the request, so it has already been asked. Ask
-            // once more in words, for a reader; that it fails while the
-            // first Shell takes the next client changes nothing.
-            if let Ok(mut stream) = ersa_core::connect(endpoint).await {
-                let _ = stream.write_all(b"show\n").await;
-                let _ = stream.flush().await;
-            }
-            Ok(Instance::Running)
-        }
+        // `bind` found the first Shell by connecting to it, and a connection
+        // is the request: it has already been asked to show its window.
+        Err(e) if e.kind() == io::ErrorKind::AddrInUse => Ok(Instance::Running),
         Err(e) => Err(e),
     }
 }
 
-/// Waits for the next launch to ask for the window.
-pub async fn next_request(listener: &mut Listener) -> io::Result<()> {
-    // Dropping the connection at once: there is nothing to answer.
-    listener.accept().await.map(drop)
+/// Calls `show` each time a later launch asks for the window, for as long
+/// as the Shell runs. A launch that lets go before it is accepted fails one
+/// accept, never the endpoint: as Core's own loop does, this pauses and goes
+/// on, so the endpoint stays claimed.
+pub async fn serve_requests(mut listener: Listener, show: impl Fn()) {
+    loop {
+        // Dropping the connection at once: there is nothing to answer.
+        match listener.accept().await {
+            Ok(_) => show(),
+            Err(e) => {
+                eprintln!("ersa: a later launch could not reach this window: {e}");
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
+    }
 }
