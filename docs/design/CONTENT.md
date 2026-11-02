@@ -12,8 +12,9 @@ Plain, calm and brief. Name the thing and what happens. Address the person as "y
 |---|---|---|
 | Interface copy (the string catalog) | All rules and all interface patterns | Vale and the catalog test |
 | Product docs (`README.md`, `docs/design/`, user-facing docs) | All rules | Vale |
-| Agent-facing docs (briefs, skills, `CLAUDE.md`, `docs/agents/`) | Spelling, terms and punctuation only; their structure is governed by the `writing-for-agents` skill | Vale |
+| Agent-facing docs (briefs, skills, `CLAUDE.md`, `docs/GLOSSARY.md`, `docs/agents/`) | Spelling, terms and punctuation only; their structure is governed by the `writing-for-agents` skill | Vale |
 | Accepted ADRs | None: they are records, never rewritten | Not checked |
+| Vendored third-party files (listed in `.claude/skills/VENDORED.sha256`) and recorded fixtures | None: they keep their authors' text | Not checked |
 
 ## Rules
 
@@ -22,7 +23,7 @@ Each rule names the check that enforces it, and says so when the check covers on
 **Words**
 
 - Spell in US English: color, behavior, canceled, license. (`Vale.Spelling`, US dictionary)
-- Use the glossary term, and only that term: a session, not a chat; the rail, not the sidebar. (`Ersa.Terms`, built from `docs/GLOSSARY.md`)
+- Use the glossary term, and only that term: the composer, not the input box; the rail, not the sidebar. (`Ersa.Terms`, built from each term's *Not:* list in `docs/GLOSSARY.md`)
 - Use "you". Avoid "we" and "I" in the interface. (`Microsoft.We`, `Microsoft.FirstPerson`)
 - Use contractions: don't, can't, isn't, it's. (`Microsoft.Contractions`)
 - Prefer the active voice and the present tense. (`Microsoft.Passive`, as a suggestion)

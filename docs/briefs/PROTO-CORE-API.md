@@ -127,6 +127,7 @@ The replay server answers read-only requests exactly as Core does. It never chan
 
 ## Changes
 
+- 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: from #43 inbox: `session.set_title`'s title bounds and its answers for a blank title, an unnamed session and a missing record. No requirement IDs changed.
 - 2026-11-02: R16 reworded before it shipped: the permission mode is always stated to the backend, so an unnamed one is the backend's default, stored and reported; model and effort stay absent when not named.
 - 2026-11-02: from #52 inbox: the root workspace's `vcs_ref` is empty; Core stores and reports only the named `model`, `effort` and `permission_mode`, leaving the rest to the backend (PROTO-CORE-API-R15 retired, R16 added); `backend.list`'s `tested { min, max }` replaces two fields, a removal, so `api_version` becomes 3 with this change.
@@ -140,7 +141,7 @@ The replay server answers read-only requests exactly as Core does. It never chan
 - 2026-11-01: from #14 inbox: notifications for created projects and sessions, and a pushed `core.status`, added as an open question.
 - 2026-11-01: from M0-T7 inbox: the replay server refuses every mutating request with `invalid_state`, keeps a replayed session idle after its last line until `core.shutdown`, and paces by recorded timing by default; from review of PR #27: it never serves the user's own endpoint (default label `replay`), applies Core's line limit, and refuses a recording it cannot read faithfully. No requirement IDs changed.
 
-- 2026-10-31: from #18 inbox and review: an explicit endpoint is a label beside the user's own endpoint, never a raw name or path, and nothing in the environment overrides it; on Windows a test stands two labelled endpoints in for "explicit beside default". No requirement IDs changed.
+- 2026-10-31: from #18 inbox and review: an explicit endpoint is a label beside the user's own endpoint, never a raw name or path, and nothing in the environment overrides it; on Windows a test stands two labeled endpoints in for "explicit beside default". No requirement IDs changed.
 
 - 2026-11-01: from M0-T6 inbox and review: unsolicited notifications defined; tile carries `state`; `mode` until M3; start, remove and reproject rules; `raw_log` paging; R08 says the line terminator is not part of a line (meaning unchanged: a line never included it). No requirement IDs added or retired.
 
@@ -148,7 +149,7 @@ The replay server answers read-only requests exactly as Core does. It never chan
 
 - 2026-11-01: the pipe name uses the user's SID; clients verify the server runs as the same user; line cap and handshake deadline; the security-descriptor open question closed.
 
-- 2026-11-01: from M0-T5 inbox: backend status values; `data` only on application errors; version mismatch is `invalid_state`; `settings.get` returns user-set values only, `workspaces.root` named; sequence numbers absent before the first event; `workspace.remove` and `project.remove` behaviour stated. No requirement IDs changed.
+- 2026-11-01: from M0-T5 inbox: backend status values; `data` only on application errors; version mismatch is `invalid_state`; `settings.get` returns user-set values only, `workspaces.root` named; sequence numbers absent before the first event; `workspace.remove` and `project.remove` behavior stated. No requirement IDs changed.
 
 - 2026-11-01: `dir` includes `core` for Core's lifecycle records.
 - 2026-10-31: `session.raw_log` entries carry `dir`, since the raw log records host-written lines too.
