@@ -197,6 +197,7 @@ fn result_examples() -> Vec<(Method, Value)> {
             Method::BackendList,
             to_value(&vec![BackendInfo {
                 name: "claude-code".into(),
+                label: "Claude Code".into(),
                 version: Some("2.1.302".into()),
                 status: BackendState::Available,
                 tested: TestedRange {

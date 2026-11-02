@@ -297,6 +297,10 @@ impl Adapter for ClaudeAdapter {
         crate::BACKEND
     }
 
+    fn label(&self) -> &str {
+        "Claude Code"
+    }
+
     fn tested_versions(&self) -> Option<(&'static str, &'static str)> {
         Some((crate::MIN_TESTED_VERSION, crate::MAX_TESTED_VERSION))
     }

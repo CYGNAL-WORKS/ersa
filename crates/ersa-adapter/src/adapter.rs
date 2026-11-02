@@ -20,6 +20,12 @@ pub trait Adapter: Send + Sync {
     /// as `"claude-code"`.
     fn backend(&self) -> &str;
 
+    /// The backend's own display name, as `backend.list` reports it, such
+    /// as `"Claude Code"`. The default is [`Adapter::backend`].
+    fn label(&self) -> &str {
+        self.backend()
+    }
+
     /// Starts a backend session on `transport` and returns once the backend is
     /// ready for its first user message.
     ///

@@ -1288,6 +1288,7 @@
       "additionalProperties": false,
       "required": [
         "name",
+        "label",
         "status",
         "tested",
         "models",
@@ -1297,6 +1298,10 @@
       "properties": {
         "name": {
           "type": "string"
+        },
+        "label": {
+          "type": "string",
+          "description": "The backend's own display name, such as Claude Code."
         },
         "version": {
           "type": "string",
