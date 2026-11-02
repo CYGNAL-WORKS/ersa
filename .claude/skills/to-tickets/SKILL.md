@@ -4,7 +4,7 @@ description: Break a plan, spec, or the current conversation into a set of trace
 disable-model-invocation: true
 ---
 
-> **Ersa adaptation.** The tracker is GitHub Issues: conventions in `docs/agents/issue-tracker.md`, labels in `docs/agents/triage-labels.md`. In Ersa, tickets are cut from briefs: each one names the brief, the requirement IDs it implements and verifies, the crates or area it touches, and what done looks like, and is built by an implementing session running the `implement` skill. Brief and requirement IDs are stable, so include them (unlike file paths). Ask the owner to approve the breakdown before publishing.
+> **Ersa adaptation.** The tracker is GitHub Issues: conventions in `docs/agents/issue-tracker.md`, labels in `docs/agents/triage-labels.md`. In Ersa, tickets are cut from briefs: each one names the brief, the requirement IDs it implements and verifies, the crates or area it touches, and what done looks like, and is built by an implementing session running the `implement` skill. Brief and requirement IDs are stable, so include them (unlike file paths). Before showing the breakdown, check that every field, id, code and default a ticket's tests will assert is named in a brief; a shape the brief does not name gets its planning pass before the ticket is cut. Size: a ticket that would change more than about 500 lines is two tickets. A manual check that needs the running app or the owner's own configuration is marked "owner check". Ask the owner to approve the breakdown before publishing.
 
 # To Tickets
 
