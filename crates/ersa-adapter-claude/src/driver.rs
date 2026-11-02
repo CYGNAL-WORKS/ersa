@@ -33,7 +33,9 @@ use tokio::sync::{oneshot, watch};
 use crate::projector::ClaudeProjector;
 use crate::record;
 use crate::suggestions;
-use crate::wire::{HostControlResponse, HostMessage, HostRequest, HostResponse, InitializeRequest};
+use crate::wire::{
+    HostControlResponse, HostMessage, HostRequest, HostResponse, InitializeRequest, WorkspaceTrust,
+};
 
 /// After the process has exited, how long stdout may stay quiet before the
 /// read loop stops waiting for the rest of it. Lines the CLI wrote before
@@ -134,6 +136,19 @@ pub fn invocation_args(config: &SessionConfig) -> Vec<String> {
         args.push(model.clone());
     }
     args
+}
+
+/// The attestation `initialize` carries for a trusted project's session: the
+/// user accepted Ersa's trust question for the project's root, so the CLI may
+/// record it as trusted in its own configuration, which Ersa never writes
+/// (ADR 0018). The CLI keys trust by git root, so the record covers every
+/// linked worktree of the project. An untrusted project's session, or one
+/// whose root is unknown, attests nothing.
+fn workspace_trust(config: &SessionConfig) -> Option<WorkspaceTrust> {
+    (config.project_trusted && !config.project_path.is_empty()).then(|| WorkspaceTrust {
+        accepted: true,
+        directory: config.project_path.clone(),
+    })
 }
 
 /// Which settings files the CLI loads. A trusted project's session loads the
@@ -315,7 +330,12 @@ impl Adapter for ClaudeAdapter {
         // The handshake (PROTO-CLAUDE-CODE-STREAM-R02): no user message goes
         // out until the CLI has answered `initialize`, and `start` returns only
         // then, so the answer is in the raw log before anything Core sends.
-        let request = HostRequest::Initialize(InitializeRequest::default());
+        let trust = workspace_trust(&config);
+        let attested = trust.is_some();
+        let request = HostRequest::Initialize(Box::new(InitializeRequest {
+            workspace_trust: trust,
+            ..InitializeRequest::default()
+        }));
         let handshake = async {
             // Failing to send it is as much a failed start as a bad answer,
             // and the CLI's stderr usually says why.
@@ -324,7 +344,18 @@ impl Adapter for ClaudeAdapter {
                 .await
                 .map_err(|e| AdapterError::Protocol(format!("could not send initialize: {e}")))?;
             match answer_rx.await {
-                Ok(answer) if answer["subtype"] == "success" => Ok(()),
+                Ok(answer) if answer["subtype"] == "success" => {
+                    // A trust the CLI did not record leaves the workspace's
+                    // always-allow rules ignored, but the session runs.
+                    if attested && answer["response"]["workspace_trust_recorded"] != true {
+                        tracing::warn!(
+                            directory = %config.project_path,
+                            recorded = %answer["response"]["workspace_trust_recorded"],
+                            "Claude Code did not record the trusted project's workspace trust"
+                        );
+                    }
+                    Ok(())
+                }
                 Ok(answer) => Err(AdapterError::Protocol(format!(
                     "the CLI refused initialize: {}",
                     answer["error"].as_str().unwrap_or("no reason given")
