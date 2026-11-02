@@ -19,6 +19,7 @@ import { type BackendChoices, type SessionValues, sessionShown } from "./session
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, stage } from "./session/stage";
 import { readChoices, rememberPatch, startSession } from "./session/start";
+import { mergeWorkspaces } from "./session/workspaces";
 
 // The same objects every render, so effects and error-boundary keys that
 // depend on a list see no change while Core's phase stays the same.
@@ -179,19 +180,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   useEffect(() => {
     if (!projectList) return;
     let live = true;
-    // A project whose read fails keeps the workspaces last read for it, so its sessions keep their names and
-    // controls; a project never read leaves its sessions in the rail without them.
-    Promise.all(projectList.map((p) => client.call("workspace.list", { project_id: p.id }).then((list) => [p.id, list] as const, () => undefined))).then(
-      (reads) => {
-        if (!live) return;
-        setWorkspaces((known) => {
-          // Kept: the workspaces of a listed project whose read failed; a project no longer listed takes its own.
-          const failed = new Set(projectList.filter((_, i) => reads[i] === undefined).map((p) => p.id));
-          const kept = Object.values(known).filter((w) => failed.has(w.project_id));
-          const read = reads.flatMap((r) => (r ? r[1] : []));
-          return Object.fromEntries([...kept, ...read].map((w) => [w.id, w]));
-        });
-      },
+    // Merged into what is known (session/workspaces.ts): a read that answers late never drops a workspace.
+    Promise.all(projectList.map((p) => client.call("workspace.list", { project_id: p.id }).catch(() => undefined))).then(
+      (reads) => live && setWorkspaces((known) => mergeWorkspaces(known, projectList, reads)),
     );
     return () => {
       live = false;
@@ -216,6 +207,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     const outcome = await startSession(client, values, text);
     if (!outcome.ok) {
       dispatch({ type: "failed", message: outcome.message });
+      // The rail may already list the session the failed start made and removed.
+      connection.current?.reload("sessions");
       return false;
     }
     setLastUsed((l) => ({ ...l, [values.project_id]: values }));

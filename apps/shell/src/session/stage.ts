@@ -18,6 +18,8 @@ export interface StageState {
   starting?: Sending;
   /** The session just started, until the window follows it: the screen stays, sending, so the stage never blinks. */
   opening?: string;
+  /** The session the window follows, as it last said. */
+  following?: string;
   /** A session kept alive whose first message did not go through: its composer shows why, and the text if it is to be sent again. */
   firstSend?: { id: string; text?: string; message: string };
   /** The last `composing.key` given. */
@@ -51,7 +53,9 @@ export function stage(state: StageState, action: StageAction): StageState {
       if (isStarting(state)) return state;
       return { ...state, activeId: action.id, composing: undefined, starting: undefined, firstSend: undefined };
     case "showNewest":
-      return state.activeId === undefined ? { ...state, activeId: action.id } : state;
+      // Not while a start is on its way or has just failed: the newest session may be the one being started, and
+      // the screen, its failure and the message in it stay until the user acts (FLOW-NEW-SESSION-R08).
+      return state.activeId === undefined && state.starting === undefined ? { ...state, activeId: action.id } : state;
     case "sending":
       return { ...state, starting: { state: "sending" } };
     case "failed":
@@ -63,10 +67,14 @@ export function stage(state: StageState, action: StageAction): StageState {
         message: action.firstSend.message,
         ...(action.firstSend.giveBack ? { text: action.text } : {}),
       };
-      // The session becomes the active one (FLOW-NEW-SESSION-R09); the screen stays until the window follows it.
+      // The session becomes the active one (FLOW-NEW-SESSION-R09); the screen stays until the window follows it,
+      // and goes now when the window already does.
+      if (state.following === action.id) return { ...state, activeId: action.id, opening: undefined, composing: undefined, starting: undefined, firstSend };
       return { ...state, activeId: action.id, opening: action.id, firstSend };
     }
     case "followed":
-      return state.opening === action.id ? { ...state, opening: undefined, composing: undefined, starting: undefined } : state;
+      return state.opening === action.id
+        ? { ...state, following: action.id, opening: undefined, composing: undefined, starting: undefined }
+        : { ...state, following: action.id };
   }
 }

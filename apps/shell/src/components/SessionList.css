@@ -36,6 +36,8 @@
 }
 
 .sessions-workspace-name {
+  /* One line tall even before its name is read, so the tiles below never move when it arrives. */
+  min-height: calc(var(--type-ui-small-size) * var(--type-ui-small-leading));
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;

@@ -74,13 +74,15 @@ export async function startSession(client: Pick<CoreClient, "call">, values: Ses
       return { ok: true, session: created, workspace };
     } catch (error) {
       // Core answers a message to a backend that failed to start once the session's run has ended, so its state
-      // already says so. A session Core cannot be asked about is kept: removing a live one loses its work.
+      // already says so. A session Core cannot be asked about is kept: removing a live one loses its work. After
+      // an `internal` answer the backend already has the message, so the session ran: it is kept whatever its
+      // state says now, since a backend that started and then exited reads as `error` too.
+      const internal = (error as BridgeError | undefined)?.kind === "rpc" && (error as Extract<BridgeError, { kind: "rpc" }>).error.data?.kind === "internal";
       const listed = await client.call("session.list").then(
         (all) => all.find((s) => s.id === created.id),
         () => undefined,
       );
-      if (!listed || !NEVER_RAN.includes(listed.state)) {
-        const internal = (error as BridgeError | undefined)?.kind === "rpc" && (error as Extract<BridgeError, { kind: "rpc" }>).error.data?.kind === "internal";
+      if (internal || !listed || !NEVER_RAN.includes(listed.state)) {
         return { ok: true, session: listed ?? created, workspace, firstSend: { message: describeError(error), giveBack: !internal } };
       }
       throw error;
