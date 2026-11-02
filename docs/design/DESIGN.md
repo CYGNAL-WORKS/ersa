@@ -9,8 +9,8 @@ colors:
     surface: "#FBFCFD"
     surface-raised: "#F6F7F9"
     ink: "#212429"
-    ink-muted: "#616368"
-    ink-faint: "#8A8D91"
+    ink-muted: "#505258"
+    ink-faint: "#6A6C72"
     line: "#D4D7DB"
     accent: "#2F61E0"
     accent-ink: "#FFFFFF"
@@ -24,8 +24,8 @@ colors:
     surface: "#181A1F"
     surface-raised: "#222429"
     ink: "#D8DBDF"
-    ink-muted: "#929499"
-    ink-faint: "#686A70"
+    ink-muted: "#A6A8AD"
+    ink-faint: "#8A8C91"
     line: "#2F3137"
     accent: "#739EFF"
     accent-ink: "#0B0D10"
@@ -118,11 +118,11 @@ Principles that resolve trade-offs:
 
 Two token sets, `light` and `dark`, with identical names, so components name a role and never a value. `canvas` is the window background; `surface` is a pane or card; `surface-raised` is a hovered or focused card. `ink` levels carry text hierarchy. `line` is the only border colour. `accent` marks what can be acted on and what is waiting for you. Semantic colours (`positive`, `caution`, `danger`) appear on glyphs and inline status, never as large fills.
 
-Text a person must read meets 4.5:1 against its background; a control's edge and a state glyph meet 3:1. Generate the palette from these targets (the Leonardo method: name each role's contrast against the canvas and derive both themes from it) rather than picking hex values by eye.
+Text meets 4.5:1 against its background; a control's edge and a state glyph meet 3:1. Every `ink` level, `ink-faint` included, meets 4.5:1 against `canvas`, `surface`, and `surface-raised`, so `ink-faint` is safe for placeholders and disabled text, and `ink-muted` stays a clear step above it. Generate the palette from these targets (the Leonardo method: name each role's contrast against the canvas and derive both themes from it) rather than picking hex values by eye.
 
 `wash-primary` and `wash-secondary` are the two colours of the canvas wash, carrying their own low alpha, so a palette sets how faint its wash is.
 
-**Palettes.** A palette is one complete set of these tokens for both themes, and the user chooses theirs. Midnight is the default and its values are the front matter above: near-black neutrals with a deep, saturated blue. Moonlit (blue-black night with a moonlight blue), Nocturne (deep indigo with periwinkle-lavender), Moonrise (blue-black with a soft champagne gold) and Selene (silver greys with the same gold) are offered too; all five come from "light on dew" and are compared in the design system's Palette card. Their values are written here when choosing a palette is built. Every palette meets the contrast targets above in both themes, and because components name roles, a palette changes no component. A gold accent sits close to `caution`, so Moonrise and Selene need their caution separated before they ship.
+**Palettes.** A palette is one complete set of these tokens for both themes, and the user chooses theirs in Ersa's settings, as Slack users choose their colors. That choice is far off and needs its own brief before it is built. Midnight is the default and its values are the front matter above: near-black neutrals with a deep, saturated blue. Moonlit (blue-black night with a moonlight blue), Nocturne (deep indigo with periwinkle-lavender), Moonrise (blue-black with a soft champagne gold) and Selene (silver greys with the same gold) are offered too; all five come from "light on dew" and are compared in the design system's Palette card. Their values are written here when choosing a palette is built. Every palette meets the contrast targets above in both themes, and because components name roles, a palette changes no component. A gold accent sits close to `caution`, so Moonrise and Selene need their caution separated before they ship.
 
 ## Typography
 
