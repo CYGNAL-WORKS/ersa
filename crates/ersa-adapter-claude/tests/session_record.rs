@@ -77,7 +77,7 @@ fn live_only(event: &Event) -> bool {
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R15
-// verifies: PROTO-CLAUDE-CODE-STREAM-R21
+// verifies: PROTO-CLAUDE-CODE-STREAM-R23
 // verifies: PROTO-CLAUDE-CODE-STREAM-R20
 #[test]
 fn record_messages_project_to_the_same_events_as_the_stream_messages() {
@@ -1033,7 +1033,7 @@ fn a_records_version_changes_when_it_grows() {
 
 // A `local_command` entry that is the command's echo rather than its output
 // (older versions wrote both) yields nothing; the output yields its text.
-// verifies: PROTO-CLAUDE-CODE-STREAM-R21
+// verifies: PROTO-CLAUDE-CODE-STREAM-R23
 #[test]
 fn only_a_local_commands_output_is_projected() {
     let entry = |uuid: &str, parent: Option<&str>, content: &str| {

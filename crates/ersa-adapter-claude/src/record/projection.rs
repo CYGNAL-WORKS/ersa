@@ -306,7 +306,7 @@ fn conversation(entries: &[&Value]) -> Conversation {
             parent: text("parentUuid").or_else(|| text("logicalParentUuid")),
             main: is_main_thread(entry),
             // A local command's output shows in the transcript as a message
-            // does (PROTO-CLAUDE-CODE-STREAM-R21), so a chain may end on it.
+            // does (PROTO-CLAUDE-CODE-STREAM-R23), so a chain may end on it.
             message: matches!(kind, Some("user" | "assistant"))
                 || (kind == Some("system") && text("subtype") == Some("local_command")),
         });
@@ -425,7 +425,7 @@ impl RecordProjector {
             ),
             RecordEntry::User(user) => user_events(user),
             // A local command's output, projected as the stream projects the
-            // synthetic message it carried (PROTO-CLAUDE-CODE-STREAM-R21).
+            // synthetic message it carried (PROTO-CLAUDE-CODE-STREAM-R23).
             // That message's own id is not in the record, so its one block is
             // numbered under the entry's `uuid`.
             RecordEntry::System(system) => {
