@@ -322,3 +322,29 @@ async fn a_live_rename_ends_when_the_cli_exits_without_answering() {
         .unwrap_err();
     assert!(matches!(error, AdapterError::NotRunning), "{error}");
 }
+
+#[tokio::test]
+async fn a_live_rename_the_cli_never_answers_gives_up() {
+    let home = home_with(&recorded_record());
+    let init_answer = fixture("11-stream-permission-prompt-tool-stdio").stdout[0].clone();
+    // Answers `initialize`, takes the rename, and says nothing more.
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(|_| Ok(()))
+        .then_stdout([init_answer])
+        .hold_open();
+    let session = adapter(home.path())
+        .with_handshake_timeout(Duration::from_millis(300))
+        .start(
+            Arc::new(transport),
+            config(),
+            Arc::new(RecordingSink::new()),
+        )
+        .await
+        .expect("start");
+    let error = tokio::time::timeout(WAIT, session.rename(SESSION, "x"))
+        .await
+        .expect("gives up in time")
+        .unwrap_err();
+    assert!(error.to_string().contains("did not answer"), "{error}");
+    session.stop().await.unwrap();
+}
