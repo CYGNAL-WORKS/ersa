@@ -117,8 +117,9 @@
       "properties": {
         "type": { "const": "session.notice" },
         "level": { "enum": ["info", "warning"] },
-        "code": { "enum": ["backend_version_untested"] },
-        "message": { "type": "string" }
+        "code": { "enum": ["backend_version_untested", "session_open_elsewhere", "session_open_check_failed"] },
+        "message": { "type": "string" },
+        "pid": { "description": "With session_open_elsewhere: the process that has the session open.", "type": "integer", "minimum": 0 }
       }
     },
 
