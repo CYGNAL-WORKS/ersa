@@ -19,6 +19,8 @@ export interface Choice {
  */
 export interface BackendChoices {
   name: string;
+  /** What the interface shows: the backend's own name, such as "Claude Code". */
+  label: string;
   /** Present when available. */
   version?: string;
   status: "available" | "missing" | "error";
