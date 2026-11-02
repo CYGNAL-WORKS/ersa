@@ -517,6 +517,9 @@ async fn a_message_to_a_backend_that_failed_to_start_is_answered_with_its_reason
             && message.contains("the fake refused to start"),
         "the backend's reason, got {message:?}"
     );
+    // Answered once the run has ended, so the listing already says so: a
+    // failed start reads apart from a slow one by its state.
+    assert_eq!(session_row(&mut client, &early).await["state"], "error");
 
     // A second session in the same workspace, sent to once it has ended.
     let early_row = session_row(&mut client, &early).await;

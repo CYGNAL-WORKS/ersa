@@ -527,15 +527,18 @@ const entries: Entry[] = [
         "Under a session, with its values",
         <>
           <Composer autoFocus={false} onSend={async () => false} />
-          <SessionControls
-            hosts={[hello.host]}
-            projects={projects}
-            backends={[claudeCode]}
-            values={{ host_id: hello.host.id, project_id: "p1", workspace: "isolated", backend: "claude-code", model: "opus", effort: "high", permission_mode: "default" }}
-            onChoose={() => {}}
-            disabled
-            used={0.42}
-          />
+          <div className="stage-controls">
+            <SessionControls
+              hosts={[hello.host]}
+              projects={projects}
+              backends={[claudeCode]}
+              values={{ host_id: hello.host.id, project_id: "p1", workspace: "isolated", backend: "claude-code", model: "opus", effort: "high", permission_mode: "default" }}
+              workspaceLabel="ersa/fix-reconnect"
+              onChoose={() => {}}
+              disabled
+              used={0.42}
+            />
+          </div>
         </>,
       ],
       ["Hover", <Composer autoFocus={false} onSend={async () => false} force="hover" />],

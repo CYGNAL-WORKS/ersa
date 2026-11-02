@@ -15,6 +15,8 @@ interface SessionControlsProps {
   /** The backends on the values' host, from `backend.list`; absent while Core is still detecting them. */
   backends?: readonly BackendChoices[];
   values: SessionValues;
+  /** The workspace as a running session's controls name it: its branch, or the root. */
+  workspaceLabel?: string;
   onChoose: (key: ControlKey, id: string) => void;
   /** While the first message is on its way, nothing changes. */
   disabled?: boolean;
@@ -42,7 +44,7 @@ const choiceOptions = (choices: readonly Choice[]): ChipOption[] => choices.map(
  * permission mode, with the context ring at the row's end (LAY-SHELL). The backend chip shows only when the host
  * has more than one backend, or none to run, and lists a missing backend with its status (FLOW-NEW-SESSION-R07).
  */
-export function SessionControls({ hosts, projects, backends, values, onChoose, disabled, used, open, force }: SessionControlsProps) {
+export function SessionControls({ hosts, projects, backends, values, workspaceLabel, onChoose, disabled, used, open, force }: SessionControlsProps) {
   const project = projects.find((p) => p.id === values.project_id);
   const backend = backends?.find((b) => b.name === values.backend);
   const chip = (key: ControlKey) => ({
@@ -76,7 +78,11 @@ export function SessionControls({ hosts, projects, backends, values, onChoose, d
           <Chip
             name="Workspace"
             value={values.workspace}
-            options={workspaceKinds(project).map((kind) => ({ id: kind, label: WORKSPACE_LABELS[kind] }))}
+            options={
+              workspaceLabel === undefined
+                ? workspaceKinds(project).map((kind) => ({ id: kind, label: WORKSPACE_LABELS[kind] }))
+                : [{ id: values.workspace, label: workspaceLabel }]
+            }
             {...chip("workspace")}
           />
         )}
