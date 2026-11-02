@@ -396,9 +396,20 @@ fn host_messages_serialise_to_the_recorded_stdin_lines() {
                     .unwrap(),
             ),
             (Some("control_request"), Some(subtype)) if subtype == "initialize" => {
+                // A trusted project's session attests trust in a folder
+                // (fixture 2.1.316/03).
+                let workspace_trust =
+                    line.pointer("/request/workspaceTrust")
+                        .map(|trust| WorkspaceTrust {
+                            accepted: trust["accepted"].as_bool().unwrap(),
+                            directory: trust["directory"].as_str().unwrap().into(),
+                        });
                 HostMessage::control_request(
                     line["request_id"].as_str().unwrap(),
-                    HostRequest::Initialize(InitializeRequest::default()),
+                    HostRequest::Initialize(Box::new(InitializeRequest {
+                        workspace_trust,
+                        ..InitializeRequest::default()
+                    })),
                 )
             }
             (Some("control_request"), Some(subtype)) if subtype == "rename_session" => {
@@ -500,11 +511,11 @@ fn host_messages_match_the_shapes_in_the_brief() {
         json!({"type": "control_cancel_request", "request_id": "q"})
     );
     assert_eq!(
-        request(HostRequest::Initialize(InitializeRequest {
+        request(HostRequest::Initialize(Box::new(InitializeRequest {
             append_system_prompt: Some("be brief".into()),
             sdk_mcp_servers: Some(vec!["ersa".into()]),
             ..Default::default()
-        })),
+        }))),
         json!({"subtype": "initialize", "hooks": {}, "sdkMcpServers": ["ersa"], "appendSystemPrompt": "be brief"})
     );
 }
@@ -512,6 +523,7 @@ fn host_messages_match_the_shapes_in_the_brief() {
 #[test]
 fn the_initialize_response_and_permission_prompt_read_as_typed_payloads() {
     let mut saw_initialize = false;
+    let mut saw_trust = false;
     let mut saw_prompt = false;
     for (at, line) in fixture_lines() {
         match CliMessage::from_line(&line).unwrap() {
@@ -523,6 +535,12 @@ fn the_initialize_response_and_permission_prompt_read_as_typed_payloads() {
                     .unwrap_or_else(|e| panic!("{at}: initialize payload: {e}"));
                 assert!(init.claude_code_version.is_some(), "{at}");
                 assert!(!init.models.is_empty(), "{at}");
+                if at.contains("workspace-trust") {
+                    assert_eq!(init.workspace_trust_recorded, Some(true), "{at}");
+                    saw_trust = true;
+                } else {
+                    assert_eq!(init.workspace_trust_recorded, None, "{at}");
+                }
                 saw_initialize = true;
             }
             CliMessage::ControlRequest(CliControlRequest {
@@ -543,7 +561,7 @@ fn the_initialize_response_and_permission_prompt_read_as_typed_payloads() {
             _ => {}
         }
     }
-    assert!(saw_initialize && saw_prompt);
+    assert!(saw_initialize && saw_prompt && saw_trust);
 }
 
 // Unrecorded kinds, modelled from the SDK types: the shapes come from there
