@@ -11,10 +11,22 @@
   white-space: nowrap;
 }
 
-/* An action on the session, at the header's far edge, away from what describes it. */
-.session-heading-rename {
-  margin-left: auto;
-  flex: none;
+/* A title that can be renamed is a control: its rule shows it is there when pointed at, and takes the accent with
+   keyboard focus. The rule is always drawn, in no colour at rest, so nothing moves when it shows. */
+.session-heading {
+  border-bottom: var(--line-hairline) solid transparent;
+}
+
+.session-heading[data-editable]:hover:not(:focus-visible),
+.session-heading[data-force="hover"] {
+  border-bottom-color: var(--color-ink-faint);
+  cursor: text;
+}
+
+.session-heading[data-editable]:focus-visible,
+.session-heading[data-force="focus"] {
+  outline: none;
+  border-bottom-color: var(--color-accent);
 }
 
 /* Editing takes the title's place and the room it had, up to the state. */
