@@ -97,7 +97,9 @@ async fn the_first_message_creates_the_workspace_the_session_and_its_first_turn(
                 .find(|b| b["name"] == "claude-code")
                 .expect("Claude Code listed")
                 .clone();
-            assert_eq!(claude["status"], "available");
+            // Its status is left alone: detection runs `claude` from PATH,
+            // not the stand-in, so it says whether this machine has Claude
+            // Code. The choices are the adapter's, listed either way.
             let listed = workspaces(&link, &project).await;
             assert_eq!(listed.len(), 1, "only the root workspace: {listed:?}");
             assert!(sessions(&link).await.is_empty());
