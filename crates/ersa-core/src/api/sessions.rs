@@ -123,6 +123,9 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         // The project's own configuration loads only when the user trusts
         // it (ADR 0018).
         project_trusted: trusted,
+        // What the user answered the trust question for; a backend that
+        // keeps its own trust record is told of it (ADR 0018).
+        project_path: project.path.clone(),
         extra: Value::Null,
     };
     Ok(core
