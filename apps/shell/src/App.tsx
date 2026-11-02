@@ -114,8 +114,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // Quit from the tray icon: confirmed here first when sessions are busy (FLOW-CLOSE-AND-QUIT-R04). The
   // sessions are read afresh then; the rail's list stands in when Core cannot be asked.
-  const knownSessions = useRef<Session[]>([]);
-  knownSessions.current = sessions.state === "ready" ? sessions.sessions : [];
+  const knownSessions = useRef<Session[] | undefined>(undefined);
+  knownSessions.current = sessions.state === "ready" ? sessions.sessions : undefined;
   useEffect(() => {
     if (!shell) return;
     return shell.onQuitRequested(() => {
@@ -126,7 +126,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         // The Shell no longer quits by itself once the window has heard, so a failed answer is said, never dropped.
         (error) => {
           setQuitAsk((open) => ({
-            busy: open?.busy ?? busySessions(knownSessions.current),
+            busy: open ? open.busy : knownSessions.current && busySessions(knownSessions.current),
             wasHidden: open?.wasHidden ?? false,
             quitting: false,
             failed: `Ersa did not quit: ${describeError(error)}`,

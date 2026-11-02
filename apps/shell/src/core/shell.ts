@@ -29,9 +29,12 @@ export function busySessions(sessions: readonly Session[]): number {
   return sessions.filter((s) => BUSY.has(s.tile.state)).length;
 }
 
-/** What the window asks about after a Quit: how many sessions would stop, and whether the window was hidden. */
+/**
+ * What the window asks about after a Quit: how many sessions would stop (`undefined` when they could not be
+ * counted), and whether the window was hidden.
+ */
 export interface QuitAsk {
-  busy: number;
+  busy: number | undefined;
   wasHidden: boolean;
 }
 
@@ -40,12 +43,13 @@ export interface QuitAsk {
  * returns `undefined`; otherwise it shows the window and returns what to ask,
  * and nothing is sent until the user confirms.
  * Sessions are read afresh; when Core cannot be asked, `known` (the rail's
- * last list) stands in.
+ * last list) stands in, and with neither the window asks anyway: a Core
+ * left running by an earlier window may have busy sessions.
  */
 export async function answerQuit(
   client: CoreClient,
   shell: ShellControl,
-  known: readonly Session[] = [],
+  known?: readonly Session[],
 ): Promise<QuitAsk | undefined> {
   await shell.quitHeard();
   // A Core slow to answer must not hold Quit up: the rail's last list stands in.
@@ -56,7 +60,7 @@ export async function answerQuit(
   const sessions = await Promise.race([client.call("session.list"), timeout])
     .catch(() => known)
     .finally(() => clearTimeout(timer));
-  const busy = busySessions(sessions);
+  const busy = sessions && busySessions(sessions);
   if (busy === 0) {
     await shell.quit();
     return undefined;
