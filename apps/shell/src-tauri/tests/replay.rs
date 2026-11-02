@@ -7,7 +7,10 @@
 //! purpose, rewrite the captures with `ERSA_UPDATE_REPLAYS=1` and review the
 //! diff: the Interface's tests then run against the new stream.
 //!
-//! Needs the `ersa-core` executable, as the bridge tests do.
+//! Needs the `ersa-core` executable, as the bridge tests do. Updating the
+//! captures builds it first, so a capture never comes from a stale binary,
+//! and each capture names the Core commit it came from (`core`), which the
+//! comparison ignores.
 
 mod common;
 
@@ -218,17 +221,69 @@ fn normalise(mut value: Value, session_id: &str) -> Value {
     value
 }
 
+/// Builds `ersa-core` from the current sources, once per test run, so the
+/// captures about to be rewritten come from this Core and not an older
+/// binary left in `target/`. An `ERSA_CORE_BIN` override names a binary this
+/// test cannot rebuild, so updating refuses it.
+fn build_core() {
+    static BUILT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    BUILT.get_or_init(|| {
+        assert!(
+            std::env::var_os("ERSA_CORE_BIN").is_none(),
+            "ERSA_UPDATE_REPLAYS rebuilds ersa-core itself; unset ERSA_CORE_BIN"
+        );
+        // Cargo sets CARGO for the tests it runs: the same toolchain.
+        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+        let status = Command::new(cargo)
+            .args(["build", "-p", "ersa-cli"])
+            .current_dir(repo_root())
+            .status()
+            .expect("run cargo build");
+        assert!(status.success(), "cargo build -p ersa-cli failed");
+    });
+}
+
+/// The commit a capture comes from, marked `-dirty` when the working tree
+/// has uncommitted changes, so a stale capture can be traced.
+fn core_commit() -> String {
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(repo_root())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let head = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    match git(&["status", "--porcelain"]) {
+        Some(changes) if !changes.is_empty() => format!("{head}-dirty"),
+        _ => head,
+    }
+}
+
 async fn check(name: &str) {
+    let update = std::env::var_os("ERSA_UPDATE_REPLAYS").is_some();
+    if update {
+        build_core();
+    }
     let actual = received(name).await;
     let path = capture_path(name);
     let pretty = serde_json::to_string_pretty(&actual).expect("serializes") + "\n";
-    if std::env::var_os("ERSA_UPDATE_REPLAYS").is_some() {
+    if update {
+        let mut written = actual.clone();
+        written["core"] = json!(core_commit());
+        let written = serde_json::to_string_pretty(&written).expect("serializes") + "\n";
         std::fs::create_dir_all(path.parent().expect("a parent")).expect("create the folder");
-        std::fs::write(&path, pretty).expect("write the capture");
+        std::fs::write(&path, written).expect("write the capture");
         return;
     }
     let committed = std::fs::read_to_string(&path).unwrap_or_default();
-    let committed: Value = serde_json::from_str(&committed).unwrap_or(Value::Null);
+    let mut committed: Value = serde_json::from_str(&committed).unwrap_or(Value::Null);
+    // Where the capture came from is provenance, not part of the stream.
+    if let Some(map) = committed.as_object_mut() {
+        map.remove("core");
+    }
     assert!(
         committed == actual,
         "{} is not what the replay server sends now; if Core changed on purpose, run with ERSA_UPDATE_REPLAYS=1 and review the diff. Received:\n{pretty}",
