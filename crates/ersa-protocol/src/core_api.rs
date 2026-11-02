@@ -454,9 +454,11 @@ pub struct Session {
     pub workspace_id: String,
     pub host_id: String,
     pub backend: String,
-    /// The model, effort and permission mode `session.create` was given:
-    /// ids from `backend.list`. Absent when left out, which means the
-    /// backend's own default (PROTO-CORE-API-R16).
+    /// The model and effort `session.create` was given, ids from
+    /// `backend.list`; absent when left out, which means the backend's own
+    /// default. The permission mode the session started with: the one given,
+    /// else the backend's default (PROTO-CORE-API-R16). All three are absent
+    /// for a replayed session and one created before Core recorded them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

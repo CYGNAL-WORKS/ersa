@@ -1494,7 +1494,7 @@
         },
         "permission_mode": {
           "type": "string",
-          "description": "The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default."
+          "description": "The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it."
         },
         "mode": {
           "type": "string"
