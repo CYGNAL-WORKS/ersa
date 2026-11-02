@@ -9,9 +9,8 @@ import type { BackendChoices, SessionValues, WorkspaceKind } from "./controls";
 
 /** What the new-session screen offers on a host: its backends, and the values each project last started with. */
 export interface Choices {
-  /** Absent when `backend.list` failed: the screen then says so rather than offer nothing. */
-  backends?: BackendChoices[];
-  backendsFailed?: string;
+  /** None when `backend.list` failed. */
+  backends: BackendChoices[];
   lastUsed: Record<string, SessionValues>;
 }
 
@@ -22,7 +21,7 @@ export interface Choices {
 export async function readChoices(client: Pick<CoreClient, "call">, hostId: string): Promise<Choices> {
   const [backends, settings] = await Promise.allSettled([client.call("backend.list", { host_id: hostId }), client.call("settings.get")]);
   return {
-    ...(backends.status === "fulfilled" ? { backends: backends.value } : { backendsFailed: describeError(backends.reason) }),
+    backends: backends.status === "fulfilled" ? backends.value : [],
     lastUsed: settings.status === "fulfilled" ? lastUsedFrom(settings.value) : {},
   };
 }
@@ -72,9 +71,17 @@ export async function startSession(client: Pick<CoreClient, "call">, values: Ses
 /** Where Core's settings keep the values each project's last session started with: `new_session.last_used`. */
 const KEY = "new_session";
 
-/** The settings patch that remembers `values` as the last its project started a session with (FLOW-NEW-SESSION-R02). */
-export function rememberPatch(values: SessionValues): { [KEY]: { last_used: Record<string, SessionValues> } } {
-  return { [KEY]: { last_used: { [values.project_id]: values } } };
+/** Each value's key, so the patch names every one. */
+const FIELDS = ["host_id", "project_id", "workspace", "backend", "model", "effort", "permission_mode"] as const;
+
+/**
+ * The settings patch that remembers `values` as the last its project started a session with (FLOW-NEW-SESSION-R02).
+ * Core merges a patch key by key (RFC 7386), so a value left out is sent as null: otherwise the previous start's
+ * model or effort would stay beside a backend that offers none.
+ */
+export function rememberPatch(values: SessionValues): { [KEY]: { last_used: Record<string, Record<string, string | null>> } } {
+  const entry = Object.fromEntries(FIELDS.map((f) => [f, values[f] ?? null]));
+  return { [KEY]: { last_used: { [values.project_id]: entry } } };
 }
 
 const KINDS: readonly WorkspaceKind[] = ["isolated", "root"];

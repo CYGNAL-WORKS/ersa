@@ -150,10 +150,9 @@ describe("opening the new-session screen", () => {
     expect(choices).toEqual({ backends: [], lastUsed: { p1: values("root") } });
   });
 
-  it("says why the backends could not be read, and starts at the defaults without remembered values", async () => {
+  it("offers no backend when they could not be read, and starts at the defaults without remembered values", async () => {
     const { client } = fakeClient({});
-    const choices = await readChoices(client, "local");
-    expect(choices).toEqual({ backendsFailed: "unexpected backend.list", lastUsed: {} });
+    expect(await readChoices(client, "local")).toEqual({ backends: [], lastUsed: {} });
   });
 });
 
@@ -162,6 +161,12 @@ describe("the values remembered for a project", () => {
     const patch = rememberPatch(values("root"));
     expect(patch).toEqual({ new_session: { last_used: { p1: values("root") } } });
     expect(lastUsedFrom(patch)).toEqual({ p1: values("root") });
+  });
+
+  it("clear a value the new start left out, since Core merges the patch key by key", () => {
+    const patch = rememberPatch({ ...values("root"), model: undefined, effort: undefined });
+    expect(patch.new_session.last_used.p1).toMatchObject({ model: null, effort: null, permission_mode: "default" });
+    expect(lastUsedFrom(patch).p1).toEqual({ ...values("root"), model: undefined, effort: undefined });
   });
 
   it("read as none from settings that hold none, or hold something unreadable", () => {

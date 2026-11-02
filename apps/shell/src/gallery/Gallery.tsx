@@ -14,6 +14,7 @@ import { ErrorBoundary } from "../components/ErrorBoundary";
 import { NewSessionScreen } from "../components/NewSessionScreen";
 import { ProjectList } from "../components/ProjectList";
 import { QuitQuestion } from "../components/QuitQuestion";
+import { SessionControls } from "../components/SessionControls";
 import { SessionList } from "../components/SessionList";
 import { SessionTitle } from "../components/SessionTitle";
 import { Transcript } from "../components/Transcript";
@@ -515,6 +516,21 @@ const entries: Entry[] = [
     wide: true,
     states: [
       ["Empty", <Composer autoFocus={false} onSend={async () => false} />],
+      [
+        "Under a session, with its values",
+        <>
+          <Composer autoFocus={false} onSend={async () => false} />
+          <SessionControls
+            hosts={[hello.host]}
+            projects={projects}
+            backends={[claudeCode]}
+            values={{ host_id: hello.host.id, project_id: "p1", workspace: "isolated", backend: "claude-code", model: "opus", effort: "high", permission_mode: "default" }}
+            onChoose={() => {}}
+            disabled
+            used={0.42}
+          />
+        </>,
+      ],
       ["Hover", <Composer autoFocus={false} onSend={async () => false} force="hover" />],
       ["Focus", <Composer autoFocus={false} onSend={async () => false} force="focus" />],
       ["Typed", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again, then summarise what failed." />],
