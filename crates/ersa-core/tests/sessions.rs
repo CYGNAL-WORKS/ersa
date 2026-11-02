@@ -998,3 +998,153 @@ async fn a_session_nobody_reads_lets_its_view_go_and_reopens_under_a_new_identit
     assert_eq!(fresh[0]["seq"], 0);
     assert_eq!(fresh[0]["source"]["input"], "record");
 }
+
+/// The model, effort and permission mode a session names reach its
+/// backend, and `session.list` reports them, also after Core restarts.
+// verifies: PROTO-CORE-API-R15
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_starts_with_the_model_effort_and_permission_mode_it_names() {
+    let (core, stats) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let workspace_id = workspace(&mut client, core.dir.path()).await;
+    let created = client
+        .result(
+            "session.create",
+            json!({
+                "workspace_id": workspace_id,
+                "backend": fake::BACKEND,
+                "model": "model-b",
+                "effort": "low",
+                "permission_mode": "auto",
+            }),
+        )
+        .await;
+    let id = created["id"].as_str().unwrap().to_string();
+    let chosen = |row: &Value| {
+        (
+            row["model"].clone(),
+            row["effort"].clone(),
+            row["permission_mode"].clone(),
+        )
+    };
+    let named = (json!("model-b"), json!("low"), json!("auto"));
+    assert_eq!(chosen(&created), named);
+    assert_eq!(chosen(&session_row(&mut client, &id).await), named);
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.started").await;
+    let config = stats.configs.lock().unwrap()[0].clone();
+    assert_eq!(
+        (
+            config.model.as_deref(),
+            config.effort.as_deref(),
+            config.permission_mode.as_str()
+        ),
+        (Some("model-b"), Some("low"), "auto")
+    );
+
+    client.result("core.shutdown", json!({})).await;
+    let TestCore { dir, task, .. } = core;
+    task.await.unwrap().unwrap();
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
+    let core = start_with_adapters(dir, |_| {}, adapters).await;
+    let mut client = core.client().await;
+    assert_eq!(chosen(&session_row(&mut client, &id).await), named);
+}
+
+/// Absent, each is the backend's default: reported as such, and left to the
+/// backend for the model and effort, while the permission mode is always
+/// stated.
+// verifies: PROTO-CORE-API-R15
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_that_names_none_starts_with_the_backends_defaults() {
+    let (core, stats) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(
+        (&row["model"], &row["effort"], &row["permission_mode"]),
+        (&json!("model-a"), &json!("high"), &json!("ask"))
+    );
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.started").await;
+    let config = stats.configs.lock().unwrap()[0].clone();
+    assert_eq!(
+        (config.model, config.effort, config.permission_mode.as_str()),
+        (None, None, "ask")
+    );
+}
+
+/// Only what `backend.list` offers reaches the backend.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_choice_the_backend_does_not_offer_is_refused() {
+    let (core, stats) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let workspace_id = workspace(&mut client, core.dir.path()).await;
+    for (field, value) in [
+        ("model", "--dangerous"),
+        ("effort", "extreme"),
+        ("permission_mode", "bypassPermissions"),
+    ] {
+        let mut params = json!({ "workspace_id": workspace_id, "backend": fake::BACKEND });
+        params[field] = json!(value);
+        let error = client.error("session.create", params).await;
+        assert_eq!(error["code"], json!(-32602), "{field}: {error}");
+    }
+    assert_eq!(client.result("session.list", json!({})).await, json!([]));
+    assert_eq!(stats.starts.load(Ordering::SeqCst), 0);
+}
+
+/// A session can run in the project's own folder, and while one is there
+/// the project cannot be removed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_in_the_root_workspace_keeps_its_project() {
+    let (core, stats) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let folder = core.dir.path().join("plain");
+    std::fs::create_dir_all(&folder).unwrap();
+    let project = client
+        .result(
+            "project.add",
+            json!({ "host_id": "local", "path": folder.display().to_string(), "trusted": false }),
+        )
+        .await;
+    let root = client
+        .result("workspace.list", json!({ "project_id": project["id"] }))
+        .await[0]
+        .clone();
+    let session = client
+        .result(
+            "session.create",
+            json!({ "workspace_id": root["id"], "backend": fake::BACKEND }),
+        )
+        .await;
+    let id = session["id"].as_str().unwrap().to_string();
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.started").await;
+    assert_eq!(
+        stats.configs.lock().unwrap()[0].cwd,
+        project["path"].as_str().unwrap()
+    );
+
+    let error = client
+        .error("project.remove", json!({ "id": project["id"] }))
+        .await;
+    assert_eq!(kind(&error), "invalid_state");
+
+    client.result("session.stop", json!({ "id": id })).await;
+    client.events_until("session.ended").await;
+    client.result("session.remove", json!({ "id": id })).await;
+    client
+        .result("project.remove", json!({ "id": project["id"] }))
+        .await;
+    assert!(
+        folder.is_dir(),
+        "the project's own folder is left as it was"
+    );
+}

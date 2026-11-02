@@ -16,7 +16,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use ersa_protocol::core_api::{HostKind, Project, Vcs, Workspace, WorkspaceState};
+use ersa_protocol::core_api::{HostKind, Project, Vcs, Workspace, WorkspaceKind, WorkspaceState};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -36,6 +36,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("persistence/0002_session_tiles.sql"),
     include_str!("persistence/0003_session_record.sql"),
     include_str!("persistence/0004_project_trust.sql"),
+    include_str!("persistence/0005_root_workspace.sql"),
 ];
 
 /// The id of the local host's row, which always exists.
@@ -199,11 +200,24 @@ impl Store {
         .await
     }
 
-    /// Adds a project. `path_key` is its path as the host compares paths.
-    /// Fails with [`Error::Conflict`] when that path was added meanwhile.
-    pub async fn insert_project(&self, project: Project, path_key: String) -> Result<()> {
+    /// Adds a project and its root workspace, the project's own folder, in
+    /// one transaction, and returns that workspace. `path_key` is its path as
+    /// the host compares paths. Fails with [`Error::Conflict`] when that path
+    /// was added meanwhile.
+    pub async fn insert_project(&self, project: Project, path_key: String) -> Result<Workspace> {
         self.call(move |conn| {
-            conn.execute(
+            let root = Workspace {
+                id: new_id("w"),
+                project_id: project.id.clone(),
+                kind: WorkspaceKind::Root,
+                path: project.path.clone(),
+                // The root's checkout is the user's to change; Core names none.
+                vcs_ref: String::new(),
+                state: WorkspaceState::Ready,
+            };
+            let created_at = now_rfc3339();
+            let tx = conn.transaction()?;
+            tx.execute(
                 "INSERT INTO projects (id, host_id, path, path_key, name, vcs, trusted, created_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
@@ -214,11 +228,13 @@ impl Store {
                     project.name,
                     to_sql_enum(&project.vcs),
                     project.trusted,
-                    now_rfc3339()
+                    created_at
                 ],
             )
             .map_err(|e| conflict(e, "that folder was added as a project meanwhile"))?;
-            Ok(())
+            insert_workspace(&tx, &root, &created_at)?;
+            tx.commit()?;
+            Ok(root)
         })
         .await
     }
@@ -239,12 +255,21 @@ impl Store {
         .await
     }
 
-    /// Removes a project. Fails with [`Error::Conflict`] when a workspace was
-    /// created in it meanwhile.
+    /// Removes a project and its root workspace, in one transaction. Fails
+    /// with [`Error::Conflict`] when an isolated workspace was created in it,
+    /// or a session in its root workspace, meanwhile: the foreign keys refuse
+    /// the deletes, and nothing is removed.
     pub async fn delete_project(&self, id: String) -> Result<()> {
         self.call(move |conn| {
-            conn.execute("DELETE FROM projects WHERE id = ?1", [id])
+            let tx = conn.transaction()?;
+            tx.execute(
+                "DELETE FROM workspaces WHERE project_id = ?1 AND kind = 'root'",
+                [&id],
+            )
+            .map_err(|e| conflict(e, "a session was started in the project meanwhile"))?;
+            tx.execute("DELETE FROM projects WHERE id = ?1", [&id])
                 .map_err(|e| conflict(e, "a workspace was created in the project meanwhile"))?;
+            tx.commit()?;
             Ok(())
         })
         .await
@@ -252,12 +277,13 @@ impl Store {
 
     // -- Workspaces --------------------------------------------------------
 
+    /// A project's workspaces, its root workspace first.
     pub async fn workspaces(&self, project_id: String) -> Result<Vec<Workspace>> {
         self.call(move |conn| {
-            let mut stmt = conn.prepare(
-                "SELECT id, project_id, path, vcs_ref, state FROM workspaces
-                 WHERE project_id = ?1 ORDER BY created_at, id",
-            )?;
+            let mut stmt = conn.prepare(&format!(
+                "SELECT {WORKSPACE_COLUMNS} FROM workspaces
+                 WHERE project_id = ?1 ORDER BY kind = 'root' DESC, created_at, id"
+            ))?;
             let rows = stmt.query_map([project_id], workspace_row)?;
             collect(rows)
         })
@@ -268,7 +294,7 @@ impl Store {
         self.call(move |conn| {
             Ok(conn
                 .query_row(
-                    "SELECT id, project_id, path, vcs_ref, state FROM workspaces WHERE id = ?1",
+                    &format!("SELECT {WORKSPACE_COLUMNS} FROM workspaces WHERE id = ?1"),
                     [id],
                     workspace_row,
                 )
@@ -280,23 +306,8 @@ impl Store {
     /// Records a workspace. Fails with [`Error::Conflict`] when its project
     /// was removed meanwhile.
     pub async fn insert_workspace(&self, workspace: Workspace) -> Result<()> {
-        self.call(move |conn| {
-            conn.execute(
-                "INSERT INTO workspaces (id, project_id, path, vcs_ref, state, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    workspace.id,
-                    workspace.project_id,
-                    workspace.path,
-                    workspace.vcs_ref,
-                    to_sql_enum(&workspace.state),
-                    now_rfc3339()
-                ],
-            )
-            .map_err(|e| conflict(e, "the project was removed meanwhile"))?;
-            Ok(())
-        })
-        .await
+        self.call(move |conn| insert_workspace(conn, &workspace, &now_rfc3339()))
+            .await
     }
 
     pub async fn set_workspace_state(&self, id: String, state: WorkspaceState) -> Result<()> {
@@ -474,6 +485,8 @@ fn project_row(row: &Row) -> rusqlite::Result<Project> {
     })
 }
 
+const WORKSPACE_COLUMNS: &str = "id, project_id, path, vcs_ref, state, kind";
+
 fn workspace_row(row: &Row) -> rusqlite::Result<Workspace> {
     Ok(Workspace {
         id: row.get(0)?,
@@ -481,7 +494,28 @@ fn workspace_row(row: &Row) -> rusqlite::Result<Workspace> {
         path: row.get(2)?,
         vcs_ref: row.get(3)?,
         state: from_sql_enum(row, 4)?,
+        kind: from_sql_enum(row, 5)?,
     })
+}
+
+/// Fails with [`Error::Conflict`] when the project was removed meanwhile,
+/// or already has a root workspace and this is another.
+fn insert_workspace(conn: &Connection, workspace: &Workspace, created_at: &str) -> Result<()> {
+    conn.execute(
+        "INSERT INTO workspaces (id, project_id, kind, path, vcs_ref, state, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            workspace.id,
+            workspace.project_id,
+            to_sql_enum(&workspace.kind),
+            workspace.path,
+            workspace.vcs_ref,
+            to_sql_enum(&workspace.state),
+            created_at
+        ],
+    )
+    .map_err(|e| conflict(e, "the project changed meanwhile"))?;
+    Ok(())
 }
 
 /// Turns a constraint violation into [`Error::Conflict`] with `message`;
@@ -695,7 +729,11 @@ mod tests {
                 "host_id",
                 "backend",
                 "backend_session_id",
-                "mode"
+                "mode",
+                // Migration 5's.
+                "model",
+                "effort",
+                "permission_mode"
             ]
         );
     }
@@ -755,6 +793,7 @@ mod tests {
             .insert_workspace(Workspace {
                 id: "w".into(),
                 project_id: "p".into(),
+                kind: WorkspaceKind::Isolated,
                 path: "/w".into(),
                 vcs_ref: "b".into(),
                 state: WorkspaceState::Ready,
@@ -813,6 +852,78 @@ mod tests {
             })
             .expect("row");
         assert!(!trusted);
+    }
+
+    #[tokio::test]
+    async fn migration_5_gives_every_existing_project_its_root_workspace_listed_first() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("ersa.db");
+        let conn = database_at(&path, 4);
+        conn.execute_batch(
+            "INSERT INTO hosts VALUES ('local', 'pc', 'local', '{}', 't');
+             INSERT INTO projects VALUES ('p', 'local', '/r', '/r', 'r', 'git', 't0', 1);
+             INSERT INTO workspaces VALUES ('w-old', 'p', '/w', 'ersa/w-old', 'ready', 't1');
+             INSERT INTO sessions VALUES ('s', 'w-old', 'local', 'claude-code', NULL, NULL);",
+        )
+        .expect("old rows");
+        drop(conn);
+
+        let store = Store::open(&path).expect("migrates");
+        let workspaces = store.workspaces("p".into()).await.expect("list");
+        assert_eq!(workspaces.len(), 2);
+        let root = &workspaces[0];
+        assert_eq!(
+            (root.kind, root.path.as_str(), root.state),
+            (WorkspaceKind::Root, "/r", WorkspaceState::Ready)
+        );
+        assert!(
+            root.id.starts_with("w-") && root.id.len() == 10,
+            "{}",
+            root.id
+        );
+        assert_eq!(workspaces[1].kind, WorkspaceKind::Isolated);
+        // A session from before recorded no model, effort or permission mode.
+        let session = store.session("s".into()).await.expect("get").expect("row");
+        assert_eq!(
+            (session.model, session.effort, session.permission_mode),
+            (None, None, None)
+        );
+        // A project has one root workspace, never two.
+        let second = Workspace {
+            id: "w-2".into(),
+            ..root.clone()
+        };
+        assert!(matches!(
+            store.insert_workspace(second).await,
+            Err(Error::Conflict(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_project_comes_and_goes_with_its_root_workspace() {
+        let (_dir, store) = temp_store();
+        store.ensure_local_host("pc".into()).await.expect("host");
+        let project = Project {
+            id: "p".into(),
+            host_id: LOCAL_HOST_ID.into(),
+            path: "/r".into(),
+            name: "r".into(),
+            vcs: Vcs::None,
+            trusted: false,
+        };
+        let root = store
+            .insert_project(project, "/r".into())
+            .await
+            .expect("insert");
+        assert_eq!(
+            store.workspaces("p".into()).await.expect("list"),
+            vec![root.clone()]
+        );
+        assert_eq!((root.kind, root.path.as_str()), (WorkspaceKind::Root, "/r"));
+
+        store.delete_project("p".into()).await.expect("delete");
+        assert_eq!(store.workspace(root.id).await.expect("get"), None);
+        assert_eq!(store.project("p".into()).await.expect("get"), None);
     }
 
     // verifies: PROTO-CORE-API-R11

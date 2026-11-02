@@ -27,7 +27,7 @@ use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, PermissionDecision, ProcessExit, Projector,
     SessionConfig, Transport, async_trait,
 };
-use ersa_protocol::core_api::{Method, Project, Vcs, Workspace, WorkspaceState};
+use ersa_protocol::core_api::{Method, Project, Vcs};
 use serde_json::Value;
 use tokio::sync::watch;
 
@@ -144,17 +144,11 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         // A recording runs no configuration, so there is nothing to trust.
         trusted: false,
     };
-    core.store
+    // The recording plays in the project's root workspace, its own folder.
+    let workspace = core
+        .store
         .insert_project(project.clone(), path.clone())
         .await?;
-    let workspace = Workspace {
-        id: persistence::new_id("w"),
-        project_id: project.id,
-        path: path.clone(),
-        vcs_ref: String::new(),
-        state: WorkspaceState::Ready,
-    };
-    core.store.insert_workspace(workspace.clone()).await?;
 
     let session = SessionRow {
         id: persistence::new_id("s"),
@@ -164,6 +158,9 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         backend_session_id: None,
         mode: None,
         cwd: path.clone(),
+        model: None,
+        effort: None,
+        permission_mode: None,
     };
     let transport = core
         .session_transport_for(LOCAL_HOST_ID)
@@ -172,6 +169,7 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         cwd: path,
         permission_mode: String::new(),
         model: None,
+        effort: None,
         project_trusted: false,
         extra: Value::Null,
     };
