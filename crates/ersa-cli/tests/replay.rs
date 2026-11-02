@@ -114,3 +114,116 @@ async fn replay_serves_a_recorded_session_to_list_and_subscribe_to() {
         .expect("wait");
     assert!(status.success());
 }
+
+/// Writes `stdout` and `meta` as a recording in `dir`; returns the stdout file.
+fn write_recording(dir: &Path, stdout: &str, meta: Value) -> std::path::PathBuf {
+    let jsonl = dir.join("rec.jsonl");
+    std::fs::write(&jsonl, stdout).unwrap();
+    std::fs::write(dir.join("rec.meta.json"), meta.to_string()).unwrap();
+    jsonl
+}
+
+/// Runs `ersa-core replay` on `fixture` and expects it to refuse at start,
+/// returning what it wrote to stderr.
+async fn refused_at_start(fixture: &Path) -> String {
+    let label = format!("replay-refused-{}", std::process::id());
+    let run = tokio::process::Command::new(env!("CARGO_BIN_EXE_ersa-core"))
+        .args([
+            "replay",
+            "--pace",
+            "instant",
+            "--endpoint",
+            &label,
+            "--fixture",
+        ])
+        .arg(fixture)
+        .stdin(Stdio::null())
+        .kill_on_drop(true)
+        .output();
+    let out = tokio::time::timeout(WAIT, run)
+        .await
+        .expect("a refused replay exits")
+        .expect("ersa-core runs");
+    assert!(!out.status.success(), "the replay is refused");
+    String::from_utf8_lossy(&out.stderr).into_owned()
+}
+
+const INIT: &str = r#"{"type":"system","subtype":"init","session_id":"s"}"#;
+
+// Conformance: a recording the replay server cannot read faithfully is
+// refused at start with the reason, never played with a default.
+#[tokio::test]
+async fn replay_refuses_empty_timings_for_stdout_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = write_recording(
+        dir.path(),
+        INIT,
+        json!({ "claude_code_version": "2.1.302", "stdout_timing_ms": [] }),
+    );
+    let stderr = refused_at_start(&fixture).await;
+    assert!(
+        stderr.contains("0 stdout timings for 1 stdout lines"),
+        "{stderr}"
+    );
+}
+
+#[tokio::test]
+async fn replay_refuses_a_recording_without_a_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let fixture = write_recording(dir.path(), INIT, json!({ "stdout_timing_ms": [0] }));
+    let stderr = refused_at_start(&fixture).await;
+    assert!(stderr.contains("claude_code_version"), "{stderr}");
+}
+
+// Ctrl+C during start-up, before the server binds, still removes the
+// replay's temporary data directory. Unix only: a test cannot send one
+// process alone a Ctrl+C on Windows. TMPDIR points the replay at a
+// directory the test watches.
+#[cfg(unix)]
+#[tokio::test]
+async fn ctrl_c_during_start_up_removes_the_data_directory() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .unwrap()
+        .join("docs/briefs/protocol/fixtures/claude-code/2.1.302/11-stream-permission-prompt-tool-stdio.jsonl");
+    let tmp = tempfile::tempdir().unwrap();
+    let label = format!("replay-ctrlc-{}", std::process::id());
+    let mut core = tokio::process::Command::new(env!("CARGO_BIN_EXE_ersa-core"))
+        .args([
+            "replay",
+            "--pace",
+            "instant",
+            "--endpoint",
+            &label,
+            "--fixture",
+        ])
+        .arg(&fixture)
+        .env("TMPDIR", tmp.path())
+        .stdin(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("ersa-core starts");
+    // Interrupt as soon as the data directory exists: the server is then
+    // at most part way through binding.
+    let created = async {
+        while std::fs::read_dir(tmp.path()).unwrap().next().is_none() {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    };
+    tokio::time::timeout(WAIT, created)
+        .await
+        .expect("the replay creates its data directory");
+    let pid = core.id().unwrap().to_string();
+    let kill = std::process::Command::new("kill")
+        .args(["-INT", &pid])
+        .status()
+        .unwrap();
+    assert!(kill.success());
+    tokio::time::timeout(WAIT, core.wait())
+        .await
+        .expect("the replay stops on Ctrl+C")
+        .unwrap();
+    let left: Vec<_> = std::fs::read_dir(tmp.path()).unwrap().collect();
+    assert!(left.is_empty(), "left behind: {left:?}");
+}
