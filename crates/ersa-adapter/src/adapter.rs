@@ -113,6 +113,25 @@ pub trait Adapter: Send + Sync {
     ) -> Result<Option<RecordSummary>, AdapterError> {
         Ok(None)
     }
+
+    /// Renames session `backend_session_id`, which no process of Ersa's has
+    /// open, in the backend's own session record, so the backend's own tools
+    /// show the new title too (PROTO-CORE-API-R12). A live session is renamed
+    /// through [`AdapterSession::rename`] instead. A session with no record
+    /// is an `Io` error of kind `NotFound`. The default: the backend cannot
+    /// rename a session.
+    async fn rename_record(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        _backend_session_id: &str,
+        _title: &str,
+    ) -> Result<(), AdapterError> {
+        Err(AdapterError::Protocol(format!(
+            "the {} backend cannot rename a session",
+            self.backend()
+        )))
+    }
 }
 
 /// What a session of a backend can start with. Each list marks the one a
@@ -180,6 +199,15 @@ pub trait AdapterSession: Send + Sync {
 
     /// Asks the backend to stop the current turn. The session stays alive.
     async fn interrupt(&self) -> Result<(), AdapterError>;
+
+    /// Renames the session, which the backend knows as `backend_session_id`,
+    /// and returns once the backend has taken the new title. The default:
+    /// the backend cannot rename a session.
+    async fn rename(&self, _backend_session_id: &str, _title: &str) -> Result<(), AdapterError> {
+        Err(AdapterError::Protocol(
+            "this backend cannot rename a session".into(),
+        ))
+    }
 
     /// Ends the backend process, gracefully if the backend supports it and by
     /// killing it otherwise, and returns once it has exited.

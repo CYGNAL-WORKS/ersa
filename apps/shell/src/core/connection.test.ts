@@ -174,6 +174,30 @@ describe("connect", () => {
     expect(last?.phase === "connected" && last.sessions).toEqual({ state: "ready", sessions: [{ ...session, tile: waiting }] });
   });
 
+  it("shows a renamed session's new title at once, and a read from before the rename does not put the old one back", async () => {
+    const answers: ((sessions: Session[]) => void)[] = [];
+    const { client } = fakeClient({ ...answering, "session.list": () => new Promise((r) => answers.push(r)) });
+    const seen: CoreView[] = [];
+    const connection = connect(client, (v) => seen.push(v));
+    await settle();
+    answers[0]?.([session]);
+    await settle();
+    connection.reload("sessions");
+    connection.renamed("s1", "Renamed");
+    const shown = () => {
+      const last = seen.at(-1);
+      return last?.phase === "connected" && last.sessions.state === "ready" ? last.sessions.sessions[0]?.title : undefined;
+    };
+    expect(shown()).toBe("Renamed");
+    // The read in flight was taken before the rename.
+    answers[1]?.([session]);
+    await settle();
+    answers[2]?.([{ ...session, title: "Renamed" }]);
+    await settle();
+    expect(answers).toHaveLength(3);
+    expect(shown()).toBe("Renamed");
+  });
+
   it("keeps the list it shows when reading it again fails", async () => {
     let listed = 0;
     const { client } = fakeClient({

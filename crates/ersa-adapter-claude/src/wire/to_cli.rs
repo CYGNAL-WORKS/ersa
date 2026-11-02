@@ -87,8 +87,9 @@ pub struct HostControlRequest {
     pub request: HostRequest,
 }
 
-/// The control requests the adapter sends (ADR 0014). Only `initialize` is
-/// recorded; the others follow the SDK types until fixtures exist.
+/// The control requests the adapter sends (ADR 0014). `initialize` and
+/// `rename_session` are recorded; the others follow the SDK types until
+/// fixtures exist.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "subtype", rename_all = "snake_case")]
 pub enum HostRequest {
@@ -99,6 +100,21 @@ pub enum HostRequest {
         /// advertises `interrupt_cancel_queued_v1`.
         #[serde(skip_serializing_if = "Option::is_none")]
         cancel_queued: Option<bool>,
+    },
+    /// Renames the session (PROTO-CLAUDE-CODE-STREAM, Renaming). The CLI
+    /// announces the new title with a `system/session_title_changed` line,
+    /// writes a `custom-title` entry to the session record, and answers with
+    /// a bare success (2.1.316 fixture `03-session-rename`).
+    RenameSession {
+        title: String,
+        /// Who chose the title. `host` is a rename the user made in the
+        /// hosting application, which the CLI counts as the user's own.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source: Option<RenameSource>,
+        /// The session the title is for: a CLI that has since moved to
+        /// another session refuses the request rather than name that one.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_id: Option<String>,
     },
     SetPermissionMode {
         mode: PermissionMode,
@@ -119,6 +135,16 @@ pub enum HostRequest {
         server_name: String,
         message: Value,
     },
+}
+
+/// Who chose a `rename_session` title: `remote` (the CLI's default) for a
+/// rename relayed from claude.ai, `host` for one made in the hosting
+/// application.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RenameSource {
+    Remote,
+    Host,
 }
 
 /// `full` counts each category with the token-count API; `summary` estimates

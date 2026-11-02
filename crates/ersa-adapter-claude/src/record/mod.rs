@@ -13,6 +13,8 @@
 //! - [`list_sessions`] lists a directory's sessions, reading only the head and
 //!   tail of each record.
 //! - [`live_session`] says whether a running CLI has a session open.
+//! - [`append_title`] renames a session no CLI of Ersa's has open, the only
+//!   write Ersa makes to a record.
 //!
 //! These read local files. A remote host's record needs reading through its
 //! transport, which has no file access yet.
@@ -192,6 +194,122 @@ pub fn record_version(
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
     Ok(Some(format!("{}:{}", metadata.len(), since.as_nanos())))
+}
+
+/// Renames session `session_id` by appending one `custom-title` entry to its
+/// record, as the vendor's IDE extension does for a session no CLI has open
+/// (PROTO-CLAUDE-CODE-STREAM, Renaming). This is the only write Ersa makes to
+/// a session record: everything already in the file stays as it is.
+///
+/// The entry goes out in a single write. A record whose last line has no
+/// newline is being written by a CLI right now (the CLI ends every line it
+/// writes), or was left so by one that crashed: Ersa does not guess which,
+/// and refuses with `ResourceBusy`. A write the disk takes only part of is
+/// ended with a newline, never cut back (cutting could take a CLI's line with
+/// it), so the CLI's next line is not glued onto it; the torn part reads as
+/// an unreadable line. A session with no record is a `NotFound` error, and
+/// nothing is created.
+pub fn append_title(
+    claude_home: &Path,
+    cwd: &str,
+    session_id: &str,
+    title: &str,
+) -> io::Result<()> {
+    let Some(path) = find_record(claude_home, cwd, session_id)? else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("session {session_id} has no record to rename"),
+        ));
+    };
+    let entry = crate::wire::RecordEntry::CustomTitle(crate::wire::CustomTitle {
+        custom_title: title.to_string(),
+        session_id: Some(session_id.to_string()),
+        extra: Default::default(),
+    });
+    // JSON escapes any line break in the title, so the entry is one line.
+    let mut line = serde_json::to_string(&entry)?;
+    line.push('\n');
+
+    append_line(&mut RecordFile::open(path)?, line.as_bytes())
+}
+
+/// Where [`append_line`] appends: a record file, or a stand-in in tests.
+trait AppendTarget {
+    /// The file's length now.
+    fn len(&mut self) -> io::Result<u64>;
+    /// Its last byte, when it has one.
+    fn last_byte(&mut self) -> io::Result<Option<u8>>;
+    /// One write at the end of the file; how much of `bytes` it took.
+    fn append(&mut self, bytes: &[u8]) -> io::Result<usize>;
+}
+
+/// Appends `line` (ending in a newline) to `target` as one write, refusing a
+/// target whose last line is unterminated, and ending a partial write.
+fn append_line(target: &mut impl AppendTarget, line: &[u8]) -> io::Result<()> {
+    if target.last_byte()?.is_some_and(|last| last != b'\n') {
+        return Err(io::Error::new(
+            io::ErrorKind::ResourceBusy,
+            "Claude Code is still writing this session's record, or did not finish it; \
+             resuming the session once in Claude Code completes it, and the rename can be made then",
+        ));
+    }
+    // One write, not a loop: a loop that fails halfway leaves its first part
+    // behind with no way to tell it from a whole line.
+    let written = match target.append(line) {
+        Ok(written) if written == line.len() => return Ok(()),
+        Ok(written) => written,
+        Err(e) if e.kind() == io::ErrorKind::Interrupted => 0,
+        Err(e) => return Err(e),
+    };
+    // Best effort: end the torn part, so it is a line of its own that
+    // readers skip as unreadable, and the CLI's next line stays whole.
+    if written > 0 {
+        let _ = target.append(b"\n");
+    }
+    Err(io::Error::new(
+        io::ErrorKind::WriteZero,
+        format!(
+            "the disk took {written} of the entry's {} bytes; the rename was not made",
+            line.len()
+        ),
+    ))
+}
+
+/// A session record opened to append to.
+struct RecordFile {
+    file: fs::File,
+}
+
+impl RecordFile {
+    fn open(path: PathBuf) -> io::Result<Self> {
+        // Opened for reading too, to look at the last byte; appends always
+        // go to the end, wherever the cursor is.
+        let file = fs::OpenOptions::new().read(true).append(true).open(&path)?;
+        Ok(RecordFile { file })
+    }
+}
+
+impl AppendTarget for RecordFile {
+    fn len(&mut self) -> io::Result<u64> {
+        Ok(self.file.metadata()?.len())
+    }
+
+    fn last_byte(&mut self) -> io::Result<Option<u8>> {
+        use std::io::{Read, Seek, SeekFrom};
+        let len = self.len()?;
+        if len == 0 {
+            return Ok(None);
+        }
+        let mut last = [0u8];
+        self.file.seek(SeekFrom::Start(len - 1))?;
+        self.file.read_exact(&mut last)?;
+        Ok(Some(last[0]))
+    }
+
+    fn append(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        use std::io::Write;
+        self.file.write(bytes)
+    }
 }
 
 /// A record's events, with the size and modified time of the file they were
@@ -527,6 +645,78 @@ mod tests {
             // budget, and not far over, so it keeps what fits.
             assert!(counted >= held, "counted {counted} bytes of {held}");
             assert!(counted <= 2 * held, "counted {counted} bytes of {held}");
+        }
+    }
+
+    /// A file in memory whose next write takes only `take` bytes, and which
+    /// another writer may append to while that write happens.
+    struct ShortFile {
+        bytes: Vec<u8>,
+        take: usize,
+        meanwhile: &'static [u8],
+    }
+
+    impl AppendTarget for ShortFile {
+        fn len(&mut self) -> io::Result<u64> {
+            Ok(self.bytes.len() as u64)
+        }
+        fn last_byte(&mut self) -> io::Result<Option<u8>> {
+            Ok(self.bytes.last().copied())
+        }
+        fn append(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            let taken = self.take.min(bytes.len());
+            self.bytes.extend_from_slice(&bytes[..taken]);
+            self.bytes.extend_from_slice(self.meanwhile);
+            // Only the first write is short.
+            self.take = usize::MAX;
+            self.meanwhile = b"";
+            Ok(taken)
+        }
+    }
+
+    const LINE: &[u8] = b"{\"type\":\"custom-title\"}\n";
+
+    // verifies: PROTO-CLAUDE-CODE-STREAM-R22
+    #[test]
+    fn a_partial_write_is_ended_never_cut_and_reported() {
+        let mut file = ShortFile {
+            bytes: b"{}\n".to_vec(),
+            take: 7,
+            meanwhile: b"",
+        };
+        let error = append_line(&mut file, LINE).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::WriteZero);
+        assert_eq!(file.bytes, b"{}\n{\"type\"\n");
+        // A CLI line that landed after the torn part is kept whole.
+        let mut file = ShortFile {
+            bytes: b"{}\n".to_vec(),
+            take: 7,
+            meanwhile: b"{\"cli\":1}\n",
+        };
+        append_line(&mut file, LINE).unwrap_err();
+        assert_eq!(file.bytes, b"{}\n{\"type\"{\"cli\":1}\n\n");
+    }
+
+    // verifies: PROTO-CLAUDE-CODE-STREAM-R22
+    #[test]
+    fn a_record_whose_last_line_is_unterminated_is_not_written() {
+        let mut file = ShortFile {
+            bytes: b"{}\n{\"half".to_vec(),
+            take: usize::MAX,
+            meanwhile: b"",
+        };
+        let error = append_line(&mut file, LINE).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::ResourceBusy);
+        assert_eq!(file.bytes, b"{}\n{\"half");
+        // An empty record, or one ending its last line, takes the entry whole.
+        for start in [&b""[..], b"{}\n"] {
+            let mut file = ShortFile {
+                bytes: start.to_vec(),
+                take: usize::MAX,
+                meanwhile: b"",
+            };
+            append_line(&mut file, LINE).unwrap();
+            assert_eq!(file.bytes, [start, LINE].concat());
         }
     }
 
