@@ -36,10 +36,12 @@ unsafe impl Sync for CoreProcess {}
 impl CoreProcess {
     /// The process serving `endpoint`, or `None` when nothing does. This
     /// connects and lets go at once, without a request: Core sees a client
-    /// that leaves before its handshake.
+    /// that leaves before its handshake. The connection stays open until the
+    /// process is held, so its id cannot pass to another process meanwhile.
     ///
-    /// This does not check whose process it is; a caller that will end it
-    /// checks that first with the verified client (`ersa_core::connect`).
+    /// Fails with `PermissionDenied` when the process is not this user's:
+    /// it is checked here, on this connection, because a Core that is
+    /// wedged may never take a second one.
     pub async fn serving(endpoint: &str) -> io::Result<Option<CoreProcess>> {
         imp::serving(endpoint).await
     }
@@ -87,12 +89,18 @@ mod imp {
     use std::os::windows::fs::OpenOptionsExt;
     use std::os::windows::io::AsRawHandle;
     use std::os::windows::process::CommandExt;
-    use windows_sys::Win32::Foundation::{ERROR_PIPE_BUSY, HANDLE, WAIT_OBJECT_0};
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_PIPE_BUSY, HANDLE, WAIT_OBJECT_0};
+    use windows_sys::Win32::Security::{
+        EqualSid, GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    };
     use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
-        TerminateProcess, WaitForSingleObject,
+        GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
     };
+
+    /// How long Windows' own tree kill may take before Core is ended alone.
+    const TASKKILL_LIMIT: Duration = Duration::from_secs(5);
 
     /// `SECURITY_IDENTIFICATION` (winbase.h): the server may identify the
     /// client but not impersonate it.
@@ -129,7 +137,7 @@ mod imp {
         if unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle() as HANDLE, &mut pid) } == 0 {
             return Err(io::Error::last_os_error());
         }
-        drop(pipe);
+        // `pipe` is still open, so the server, and with it `pid`, is alive.
         // SAFETY: a plain open by id; a null result is checked below.
         let handle = unsafe {
             OpenProcess(
@@ -141,7 +149,59 @@ mod imp {
         if handle.is_null() {
             return Err(io::Error::last_os_error());
         }
-        Ok(Some(CoreProcess { pid, handle }))
+        drop(pipe);
+        // Owned from here on, so an early return closes the handle.
+        let process = CoreProcess { pid, handle };
+        if !same_user(handle)? {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{endpoint} is served by another user's process"),
+            ));
+        }
+        Ok(Some(process))
+    }
+
+    /// Whether `process` runs as the same user as this process.
+    fn same_user(process: HANDLE) -> io::Result<bool> {
+        let theirs = token_user(process)?;
+        // SAFETY: the pseudo-handle of the current process needs no closing.
+        let ours = token_user(unsafe { GetCurrentProcess() })?;
+        // SAFETY: both buffers hold a TOKEN_USER filled by Windows, whose
+        // SID points inside the buffer that is still alive here.
+        let equal = unsafe {
+            let theirs = &*(theirs.as_ptr() as *const TOKEN_USER);
+            let ours = &*(ours.as_ptr() as *const TOKEN_USER);
+            EqualSid(theirs.User.Sid, ours.User.Sid)
+        };
+        Ok(equal != 0)
+    }
+
+    /// The `TOKEN_USER` of `process`'s token, in a buffer aligned for it.
+    fn token_user(process: HANDLE) -> io::Result<Vec<u64>> {
+        let mut token: HANDLE = std::ptr::null_mut();
+        // SAFETY: `process` is a valid process handle; `token` is closed below.
+        if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mut buffer = vec![0u64; 64];
+        let mut needed = 0u32;
+        // SAFETY: the buffer is 512 bytes, as passed, and `token` is open.
+        let ok = unsafe {
+            GetTokenInformation(
+                token,
+                TokenUser,
+                buffer.as_mut_ptr().cast(),
+                (buffer.len() * 8) as u32,
+                &mut needed,
+            )
+        };
+        let error = io::Error::last_os_error();
+        // SAFETY: opened above, closed once.
+        unsafe { CloseHandle(token) };
+        if ok == 0 {
+            return Err(error);
+        }
+        Ok(buffer)
     }
 
     pub fn has_exited(process: &CoreProcess) -> bool {
@@ -154,14 +214,28 @@ mod imp {
         // sit in job objects that die with Core's handles anyway; this also
         // reaches anything that is not in one. Its output is localised, so
         // only the exit status is read, and Core is ended below regardless.
+        // It is run from System32 by its full path, never looked up, and is
+        // given a few seconds at most.
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let _ = std::process::Command::new("taskkill")
+        let system = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+        let taskkill = std::path::Path::new(&system)
+            .join("System32")
+            .join("taskkill.exe");
+        if let Ok(mut child) = std::process::Command::new(taskkill)
             .args(["/PID", &process.pid.to_string(), "/T", "/F"])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .creation_flags(CREATE_NO_WINDOW)
-            .status();
+            .spawn()
+        {
+            let deadline = std::time::Instant::now() + TASKKILL_LIMIT;
+            while matches!(child.try_wait(), Ok(None)) && std::time::Instant::now() < deadline {
+                std::thread::sleep(POLL_INTERVAL);
+            }
+            let _ = child.kill();
+            let _ = child.wait();
+        }
         if has_exited(process) {
             return Ok(());
         }
@@ -191,12 +265,11 @@ mod imp {
             }
             Err(e) => return Err(e),
         };
-        Ok(Some(CoreProcess {
-            pid: peer_pid(&stream)?,
-        }))
+        let pid = peer_pid(&stream)?;
+        Ok(Some(CoreProcess { pid }))
     }
 
-    /// The process at the other end of `stream`.
+    /// The process at the other end of `stream`, when it is this user's.
     #[cfg(target_os = "linux")]
     fn peer_pid(stream: &std::os::unix::net::UnixStream) -> io::Result<u32> {
         use std::os::fd::AsRawFd;
@@ -219,6 +292,13 @@ mod imp {
         };
         if ok != 0 {
             return Err(io::Error::last_os_error());
+        }
+        // SAFETY: a plain query of this process's effective user.
+        if cred.uid != unsafe { libc::geteuid() } {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "the socket is served by another user's process",
+            ));
         }
         u32::try_from(cred.pid).map_err(io::Error::other)
     }
