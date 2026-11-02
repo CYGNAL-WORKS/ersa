@@ -345,18 +345,11 @@ fn picks_the_ersa_core_executable_from_cargo_messages() {
         "Compiling ersa-cli v0.1.0",
         r#"{"reason":"compiler-artifact","target":{"name":"ersa-core","kind":["bin"]},"executable":"C:/t/debug/ersa-core.exe"}"#,
         r#"{"reason":"build-finished","success":true}"#,
-    ]
-    .join("
-");
+    ];
     assert_eq!(
-        ersa_core_executable(&stdout),
+        ersa_core_executable(&stdout.join("\n")),
         Some(PathBuf::from("C:/t/debug/ersa-core.exe"))
     );
-    assert_eq!(
-        ersa_core_executable(&stdout.lines().take(3).collect::<Vec<_>>().join(
-            "
-"
-        )),
-        None
-    );
+    // Without the bin's line, nothing qualifies.
+    assert_eq!(ersa_core_executable(&stdout[..3].join("\n")), None);
 }
