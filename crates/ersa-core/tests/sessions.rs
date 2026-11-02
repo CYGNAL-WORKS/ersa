@@ -1028,14 +1028,7 @@ async fn a_blank_long_or_multi_line_title_is_refused() {
         .result("session.send", json!({ "id": id, "text": "hello" }))
         .await;
     let long = "x".repeat(201);
-    for title in [
-        "",
-        "   ",
-        "two\nlines",
-        "tab\tbed",
-        "bell\u{7}",
-        long.as_str(),
-    ] {
+    for title in ["", " \n ", "bell\u{7}", "nul\u{0}", long.as_str()] {
         let error = client
             .error("session.set_title", json!({ "id": id, "title": title }))
             .await;
@@ -1055,10 +1048,10 @@ async fn a_blank_long_or_multi_line_title_is_refused() {
     let renamed = client
         .result(
             "session.set_title",
-            json!({ "id": id, "title": "Fix  the   bug" }),
+            json!({ "id": id, "title": "Fix  the \t bug\non Windows\n" }),
         )
         .await;
-    assert_eq!(renamed["title"], "Fix the bug");
+    assert_eq!(renamed["title"], "Fix the bug on Windows");
 }
 
 #[tokio::test(flavor = "multi_thread")]
