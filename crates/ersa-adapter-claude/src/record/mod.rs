@@ -201,18 +201,19 @@ pub fn record_version(
 /// (PROTO-CLAUDE-CODE-STREAM, Renaming). This is the only write Ersa makes to
 /// a session record: everything already in the file stays as it is.
 ///
-/// The entry goes out in a single append, so it cannot interleave with a
-/// line a CLI appends at the same time; a record whose last line has no
-/// newline yet gets one first, so the entry is a line of its own. A session
-/// with no record is a `NotFound` error, and nothing is created.
+/// The entry goes out in a single write. A record whose last line has no
+/// newline is being written by a CLI right now (the CLI ends every line it
+/// writes), or was left so by one that crashed: Ersa does not guess which,
+/// and refuses with `ResourceBusy`, so the rename can be tried again. A
+/// write the disk takes only part of is taken back, so no torn entry is left
+/// for the CLI's next line to be glued onto. A session with no record is a
+/// `NotFound` error, and nothing is created.
 pub fn append_title(
     claude_home: &Path,
     cwd: &str,
     session_id: &str,
     title: &str,
 ) -> io::Result<()> {
-    use std::io::{Read, Seek, SeekFrom, Write};
-
     let Some(path) = find_record(claude_home, cwd, session_id)? else {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
@@ -228,20 +229,100 @@ pub fn append_title(
     let mut line = serde_json::to_string(&entry)?;
     line.push('\n');
 
-    // Opened for reading too, to look at the last byte; appends always go
-    // to the end, wherever the cursor is.
-    let mut file = fs::OpenOptions::new().read(true).append(true).open(&path)?;
-    let len = file.metadata()?.len();
-    if len > 0 {
-        let mut last = [0u8];
-        file.seek(SeekFrom::Start(len - 1))?;
-        file.read_exact(&mut last)?;
-        if last[0] != b'\n' {
-            line.insert(0, '\n');
-        }
+    append_line(&mut RecordFile::open(path)?, line.as_bytes())
+}
+
+/// Where [`append_line`] appends: a record file, or a stand-in in tests.
+trait AppendTarget {
+    /// The file's length now.
+    fn len(&mut self) -> io::Result<u64>;
+    /// Its last byte, when it has one.
+    fn last_byte(&mut self) -> io::Result<Option<u8>>;
+    /// One write at the end of the file; how much of `bytes` it took.
+    fn append(&mut self, bytes: &[u8]) -> io::Result<usize>;
+    /// Cuts the file back to `len`.
+    fn truncate(&mut self, len: u64) -> io::Result<()>;
+}
+
+/// Appends `line` (ending in a newline) to `target` as one write, refusing a
+/// target whose last line is unterminated, and taking a partial write back
+/// when nothing else has appended since.
+fn append_line(target: &mut impl AppendTarget, line: &[u8]) -> io::Result<()> {
+    if target.last_byte()?.is_some_and(|last| last != b'\n') {
+        return Err(io::Error::new(
+            io::ErrorKind::ResourceBusy,
+            "the session record is being written; try the rename again",
+        ));
     }
-    file.write_all(line.as_bytes())?;
-    file.flush()
+    let before = target.len()?;
+    // One write, not a loop: a loop that fails halfway leaves its first part
+    // behind with no way to tell it from a whole line.
+    let written = match target.append(line) {
+        Ok(written) if written == line.len() => return Ok(()),
+        Ok(written) => written,
+        Err(e) if e.kind() == io::ErrorKind::Interrupted => 0,
+        Err(e) => return Err(e),
+    };
+    // Taken back only when the file holds exactly what was there plus this
+    // part: a CLI that appended meanwhile wrote after it, and cutting would
+    // lose its line.
+    if written > 0 && target.len()? == before + written as u64 {
+        target.truncate(before)?;
+    }
+    Err(io::Error::new(
+        io::ErrorKind::WriteZero,
+        format!(
+            "the disk took {written} of the entry's {} bytes; the rename was not made",
+            line.len()
+        ),
+    ))
+}
+
+/// A session record opened to append to.
+struct RecordFile {
+    path: PathBuf,
+    file: fs::File,
+}
+
+impl RecordFile {
+    fn open(path: PathBuf) -> io::Result<Self> {
+        // Opened for reading too, to look at the last byte; appends always
+        // go to the end, wherever the cursor is.
+        let file = fs::OpenOptions::new().read(true).append(true).open(&path)?;
+        Ok(RecordFile { path, file })
+    }
+}
+
+impl AppendTarget for RecordFile {
+    fn len(&mut self) -> io::Result<u64> {
+        Ok(self.file.metadata()?.len())
+    }
+
+    fn last_byte(&mut self) -> io::Result<Option<u8>> {
+        use std::io::{Read, Seek, SeekFrom};
+        let len = self.len()?;
+        if len == 0 {
+            return Ok(None);
+        }
+        let mut last = [0u8];
+        self.file.seek(SeekFrom::Start(len - 1))?;
+        self.file.read_exact(&mut last)?;
+        Ok(Some(last[0]))
+    }
+
+    fn append(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        use std::io::Write;
+        self.file.write(bytes)
+    }
+
+    fn truncate(&mut self, len: u64) -> io::Result<()> {
+        // An append-only handle may not resize the file on every platform, so
+        // a writing one is opened for it.
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&self.path)?
+            .set_len(len)
+    }
 }
 
 /// A record's events, with the size and modified time of the file they were
@@ -577,6 +658,84 @@ mod tests {
             // budget, and not far over, so it keeps what fits.
             assert!(counted >= held, "counted {counted} bytes of {held}");
             assert!(counted <= 2 * held, "counted {counted} bytes of {held}");
+        }
+    }
+
+    /// A file in memory whose next write takes only `take` bytes, and which
+    /// another writer may append to while that write happens.
+    struct ShortFile {
+        bytes: Vec<u8>,
+        take: usize,
+        meanwhile: &'static [u8],
+    }
+
+    impl AppendTarget for ShortFile {
+        fn len(&mut self) -> io::Result<u64> {
+            Ok(self.bytes.len() as u64)
+        }
+        fn last_byte(&mut self) -> io::Result<Option<u8>> {
+            Ok(self.bytes.last().copied())
+        }
+        fn append(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            let taken = self.take.min(bytes.len());
+            self.bytes.extend_from_slice(&bytes[..taken]);
+            self.bytes.extend_from_slice(self.meanwhile);
+            Ok(taken)
+        }
+        fn truncate(&mut self, len: u64) -> io::Result<()> {
+            self.bytes.truncate(len as usize);
+            Ok(())
+        }
+    }
+
+    const LINE: &[u8] = b"{\"type\":\"custom-title\"}\n";
+
+    // verifies: PROTO-CLAUDE-CODE-STREAM-R22
+    #[test]
+    fn a_partial_write_is_taken_back_and_reported() {
+        let mut file = ShortFile {
+            bytes: b"{}\n".to_vec(),
+            take: 7,
+            meanwhile: b"",
+        };
+        let error = append_line(&mut file, LINE).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::WriteZero);
+        assert_eq!(file.bytes, b"{}\n");
+    }
+
+    #[test]
+    fn a_partial_write_is_kept_when_another_writer_appended_after_it() {
+        let mut file = ShortFile {
+            bytes: b"{}\n".to_vec(),
+            take: 7,
+            meanwhile: b"{\"cli\":1}\n",
+        };
+        let error = append_line(&mut file, LINE).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::WriteZero);
+        // Cutting would lose the other writer's line.
+        assert_eq!(file.bytes, b"{}\n{\"type\"{\"cli\":1}\n");
+    }
+
+    // verifies: PROTO-CLAUDE-CODE-STREAM-R22
+    #[test]
+    fn a_record_whose_last_line_is_unterminated_is_not_written() {
+        let mut file = ShortFile {
+            bytes: b"{}\n{\"half".to_vec(),
+            take: usize::MAX,
+            meanwhile: b"",
+        };
+        let error = append_line(&mut file, LINE).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::ResourceBusy);
+        assert_eq!(file.bytes, b"{}\n{\"half");
+        // An empty record, or one ending its last line, takes the entry whole.
+        for start in [&b""[..], b"{}\n"] {
+            let mut file = ShortFile {
+                bytes: start.to_vec(),
+                take: usize::MAX,
+                meanwhile: b"",
+            };
+            append_line(&mut file, LINE).unwrap();
+            assert_eq!(file.bytes, [start, LINE].concat());
         }
     }
 
