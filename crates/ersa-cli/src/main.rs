@@ -186,7 +186,7 @@ async fn replay(fixture: PathBuf, pace: PaceArg, endpoint: EndpointArg) -> ExitC
     // version under this key. Without it the replay would report an empty
     // version, a default in place of the recording, so it is refused.
     let backend_version = match recording.meta["claude_code_version"].as_str() {
-        Some(version) if !version.is_empty() => version.to_string(),
+        Some(version) if !version.trim().is_empty() => version.to_string(),
         _ => {
             eprintln!(
                 "ersa-core: cannot replay {}: the recording does not say which Claude Code version made it (`claude_code_version`)",
@@ -255,28 +255,40 @@ async fn replay(fixture: PathBuf, pace: PaceArg, endpoint: EndpointArg) -> ExitC
             PaceArg::Instant => Pace::Instant,
         },
     };
-    // Start-up races Ctrl+C: stopping before the server binds still reaches
-    // the clean-up at the end of this function.
+    // A Ctrl+C during start-up is remembered, not acted on at once: a bind
+    // cancelled part way through can leave sessions it already launched
+    // holding the database and log open, and on Windows those keep the data
+    // directory. So binding finishes, then the server shuts down the way
+    // `core.shutdown` does, which releases them before the clean-up below.
+    let bind = Server::bind_replay(config, replay);
+    tokio::pin!(bind);
+    let mut interrupted = false;
     let bound = tokio::select! {
-        bound = Server::bind_replay(config, replay) => Some(bound),
-        _ = &mut ctrl_c => None,
+        bound = &mut bind => bound,
+        _ = &mut ctrl_c => {
+            interrupted = true;
+            bind.await
+        }
     };
     let code = match bound {
-        None => ExitCode::FAILURE,
-        Some(Ok(server)) => {
-            tracing::info!("replaying {}", fixture.display());
-            // Ctrl+C is how a replay is usually stopped: shut down as
-            // core.shutdown does, so the data directory is removed below.
+        Ok(server) => {
             // Held weakly: a strong hold would keep the database open, and
             // the directory with it, after the server has stopped.
             let core = Arc::downgrade(&server.core());
-            tokio::spawn(async move {
-                if ctrl_c.await.is_ok()
-                    && let Some(core) = core.upgrade()
-                {
-                    core.request_shutdown();
-                }
-            });
+            if interrupted {
+                server.core().request_shutdown();
+            } else {
+                tracing::info!("replaying {}", fixture.display());
+                // Ctrl+C is how a replay is usually stopped: shut down as
+                // core.shutdown does, so the data directory is removed below.
+                tokio::spawn(async move {
+                    if ctrl_c.await.is_ok()
+                        && let Some(core) = core.upgrade()
+                    {
+                        core.request_shutdown();
+                    }
+                });
+            }
             match server.run().await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
@@ -285,11 +297,11 @@ async fn replay(fixture: PathBuf, pace: PaceArg, endpoint: EndpointArg) -> ExitC
                 }
             }
         }
-        Some(Err(e @ ServeError::AlreadyRunning { .. })) => {
+        Err(e @ ServeError::AlreadyRunning { .. }) => {
             eprintln!("ersa-core: {e}. Pass another --endpoint label to replay beside it.");
             ExitCode::FAILURE
         }
-        Some(Err(e)) => {
+        Err(e) => {
             eprintln!("ersa-core: {e}");
             ExitCode::FAILURE
         }
