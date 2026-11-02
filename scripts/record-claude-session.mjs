@@ -84,7 +84,8 @@ const ENV_REMOVED = [
 ];
 
 // The session record entries the adapter reads (PROTO-CLAUDE-CODE-STREAM, Session record).
-const READ_ENTRIES = new Set(["user", "assistant", "custom-title", "ai-title", "last-prompt"]);
+// A `system` entry is read only for the subtypes named here, as "system/<subtype>".
+const READ_ENTRIES = new Set(["user", "assistant", "custom-title", "ai-title", "last-prompt", "system/local_command"]);
 
 const USER_NAME = userInfo().username;
 function scrub(text) {
@@ -110,7 +111,7 @@ function elide(recordText) {
       if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
         return JSON.stringify({ type: "not-an-object", ersa_elided: true });
       }
-      if (READ_ENTRIES.has(entry.type)) return line;
+      if (READ_ENTRIES.has(entry.type) || READ_ENTRIES.has(`${entry.type}/${entry.subtype}`)) return line;
       const kept = { type: entry.type };
       if (entry.subtype !== undefined) kept.subtype = entry.subtype;
       // The links that make the conversation's chain, which runs through
