@@ -91,7 +91,7 @@ fn session() -> Session {
         backend: "claude-code".into(),
         model: Some("opus".into()),
         effort: Some("high".into()),
-        permission_mode: None,
+        permission_mode: "acceptEdits".into(),
         mode: Some("default".into()),
         title: Some("Rename the module".into()),
         state: ersa_protocol::events::LifecycleState::WaitingUser,

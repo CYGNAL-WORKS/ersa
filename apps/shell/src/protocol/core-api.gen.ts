@@ -693,9 +693,9 @@ export interface Session {
    */
   effort?: string;
   /**
-   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
    */
-  permission_mode?: string;
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -860,9 +860,9 @@ export interface Session1 {
    */
   effort?: string;
   /**
-   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
    */
-  permission_mode?: string;
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -887,9 +887,9 @@ export interface Session2 {
    */
   effort?: string;
   /**
-   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
    */
-  permission_mode?: string;
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -914,9 +914,9 @@ export interface Session3 {
    */
   effort?: string;
   /**
-   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
    */
-  permission_mode?: string;
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -941,9 +941,9 @@ export interface Session4 {
    */
   effort?: string;
   /**
-   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
    */
-  permission_mode?: string;
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -968,9 +968,9 @@ export interface Session5 {
    */
   effort?: string;
   /**
-   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
    */
-  permission_mode?: string;
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -998,9 +998,9 @@ export interface Session6 {
    */
   effort?: string;
   /**
-   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
    */
-  permission_mode?: string;
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -1025,9 +1025,9 @@ export interface Session7 {
    */
   effort?: string;
   /**
-   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
    */
-  permission_mode?: string;
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -1052,9 +1052,9 @@ export interface Session8 {
    */
   effort?: string;
   /**
-   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
    */
-  permission_mode?: string;
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -1079,9 +1079,9 @@ export interface Session9 {
    */
   effort?: string;
   /**
-   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
    */
-  permission_mode?: string;
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -1106,9 +1106,9 @@ export interface Session10 {
    */
   effort?: string;
   /**
-   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
    */
-  permission_mode?: string;
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
