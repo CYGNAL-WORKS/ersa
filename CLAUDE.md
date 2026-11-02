@@ -4,8 +4,8 @@ Ersa is a desktop harness for running many coding-agent sessions at once, each i
 
 ## How we work
 
-- **Ersa is built agentically.** Agents specify, implement, verify and review; the owner directs and makes the judgement calls. Verification is the bottleneck, so prefer a check a machine runs over a person reading a diff. When an agent gets something wrong, fix the harness (brief, skill, check, hook) as well as the code, so the next session gets it right.
-- **Briefs are the source of truth for behaviour.** They live in `docs/briefs/`. Code and tests derive from briefs and cite them by requirement ID. Briefs never cite files, functions, or code. Read `docs/briefs/README.md` before writing or changing one.
+- **Ersa is built agentically.** Agents specify, implement, verify and review; the owner directs and makes the judgment calls. Verification is the bottleneck, so prefer a check a machine runs over a person reading a diff. When an agent gets something wrong, fix the harness (brief, skill, check, hook) as well as the code, so the next session gets it right.
+- **Briefs are the source of truth for behavior.** They live in `docs/briefs/`. Code and tests derive from briefs and cite them by requirement ID. Briefs never cite files, functions, or code. Read `docs/briefs/README.md` before writing or changing one.
 - **Decisions live in `docs/adr/`.** Before proposing a change of direction, read the ADR index. Record a decision when it would be costly to reverse or when a future reader could plausibly choose differently. Supersede, never edit.
 - **Words live in `docs/GLOSSARY.md`.** Use the glossary term everywhere: briefs, identifiers, UI copy. A new concept gets a term before it is used: planning sessions add it, implementing sessions propose it as an inbox line.
 - **Roles.** Planning sessions set `ERSA_ROLE=planning` and may edit briefs, ADRs, the glossary, `CLAUDE.md` and `.claude/`. Implementing sessions build tickets, leave those planning-only paths alone (a hook enforces this for edit tools), and record anything a brief gets wrong or leaves open as a line in `docs/briefs/INBOX.md`, then continue.
@@ -16,9 +16,9 @@ Ersa is a desktop harness for running many coding-agent sessions at once, each i
 
 Ersa must be beautiful, and every session that touches the interface is responsible for that, not a later polish pass. Before writing or changing interface code, read `docs/design/DESIGN.md`. The rules that apply to every change:
 
-- Ersa is an instrument, not a chat app. Quiet warm-neutral surfaces, one accent colour, colour only where it means something.
+- Ersa is an instrument, not a chat app. Quiet warm-neutral surfaces, one accent color, color only where it means something.
 - Agent output reads as a document, never as speech bubbles. Status lives in tiles with one shared anatomy.
-- Every colour, size, radius, and duration comes from a token in `DESIGN.md`. A raw value in interface code is a defect.
+- Every color, size, radius, and duration comes from a token in `DESIGN.md`. A raw value in interface code is a defect.
 - Every transition uses a motion token and explains where something came from or went to. Nothing animates for decoration.
 - Light and dark are designed together. A component is not done until it is right in both.
 - Nothing that signals "AI": no gradients, no glow, no sparkle iconography, no purple. If it would look at home on a model vendor's landing page, choose differently.
