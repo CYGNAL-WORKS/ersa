@@ -75,3 +75,8 @@
   border: var(--line-hairline) solid var(--color-line);
   border-radius: var(--radius-md);
 }
+
+/* Room beneath a specimen whose chip lies open, so its choices do not cover the next state. */
+.gallery-room {
+  padding-bottom: var(--size-card-max);
+}
