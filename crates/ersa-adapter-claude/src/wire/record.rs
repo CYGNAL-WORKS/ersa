@@ -31,6 +31,8 @@ pub enum RecordEntry {
     AiTitle(AiTitle),
     /// The latest prompt, which the CLI appends after each one.
     LastPrompt(LastPrompt),
+    /// Something the CLI noted itself; only `local_command` is read.
+    System(RecordSystem),
     #[serde(untagged)]
     Other(Value),
 }
@@ -177,4 +179,74 @@ pub struct LastPrompt {
     pub session_id: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+/// A `system` entry. With subtype `local_command`, `content` is a local
+/// command's output (from `/rename`, say) inside `<local-command-stdout>` or
+/// `<local-command-stderr>` tags, which the stream carried as a synthetic
+/// `assistant` message with the same `uuid`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecordSystem {
+    #[serde(default)]
+    pub uuid: Option<String>,
+    #[serde(default)]
+    pub subtype: Option<String>,
+    /// A string on every entry seen; kept as JSON so that one that is not
+    /// still parses, and is reported as drifted rather than dropped.
+    #[serde(default)]
+    pub content: Option<Value>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+/// What a `system` entry's content says about a local command.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LocalCommandOutput<'a> {
+    /// Not a `local_command` entry.
+    NotLocalCommand,
+    /// No output tag (or no content): the command's echo, which older CLIs
+    /// wrote beside the output. It shows nothing.
+    Echo,
+    /// The text inside each output tag, in order, as the stream carried it.
+    Output(Vec<&'a str>),
+    /// A tag that is not closed, or content that is not a string.
+    Drifted,
+}
+
+impl RecordSystem {
+    /// Reads a local command's output from `content`.
+    pub fn local_command_output(&self) -> LocalCommandOutput<'_> {
+        if self.subtype.as_deref() != Some("local_command") {
+            return LocalCommandOutput::NotLocalCommand;
+        }
+        // No content at all carries no output to show; it is how the
+        // recorded fixtures trim an entry they do not keep.
+        let content = match &self.content {
+            None => return LocalCommandOutput::Echo,
+            Some(Value::String(content)) => content,
+            Some(_) => return LocalCommandOutput::Drifted,
+        };
+        if !content.contains("<local-command-") {
+            return LocalCommandOutput::Echo;
+        }
+        // One wrapper after another; only whitespace may sit between them.
+        // The text inside a wrapper is kept exactly.
+        let mut texts = Vec::new();
+        let mut rest = content.trim();
+        while !rest.is_empty() {
+            let inner = ["stdout", "stderr"].into_iter().find_map(|stream| {
+                let open = format!("<local-command-{stream}>");
+                let close = format!("</local-command-{stream}>");
+                let after = rest.strip_prefix(open.as_str())?;
+                let end = after.find(close.as_str())?;
+                Some((&after[..end], &after[end + close.len()..]))
+            });
+            let Some((text, after)) = inner else {
+                return LocalCommandOutput::Drifted;
+            };
+            texts.push(text);
+            rest = after.trim_start();
+        }
+        LocalCommandOutput::Output(texts)
+    }
 }
