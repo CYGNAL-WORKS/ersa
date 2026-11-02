@@ -542,8 +542,10 @@ impl Adapter for ClaudeAdapter {
     }
 
     /// Reads the live-session registry on this machine
-    /// (PROTO-CLAUDE-CODE-STREAM-R17). A registry that cannot be found or
-    /// read makes the answer unknown, never "not open".
+    /// (PROTO-CLAUDE-CODE-STREAM-R17): like the record, a remote host's is
+    /// not read yet (M4). With no registry at all no CLI has run, so nothing
+    /// is open; one that cannot be read, or no home to find it in, makes the
+    /// answer unknown, never "not open".
     async fn open_elsewhere(
         &self,
         _transport: Arc<dyn Transport>,
