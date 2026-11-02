@@ -8,6 +8,5 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-02 PROTO-CORE-API: no brief describes the replay capture format; #64 added a top-level `core` field (the commit a capture was written from, `-dirty` when uncommitted) that the comparison ignores. The glossary's **Core** is the process, not a commit, so the name may be wrong. Left as `core` until a planning pass names it.
 
 ## Resolved recently (optional, trimmed in planning passes)
