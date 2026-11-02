@@ -30,12 +30,15 @@ The rail lists projects, each project's workspaces, and each workspace's session
 
 With no active session, or when the user chooses New session, the transcript area shows the new-session screen: the Ersa wordmark above the composer and nothing else, so the first message is the first act. Beneath the composer, on the new-session screen and on every session, sit the session controls: a row of chips for host, project, workspace (a new isolated workspace or the project's root workspace), backend, model, effort and permission mode, with the context ring at the row's end. Before a session starts the chips set it up; during a session they show its values. The backend chip appears only when the host has more than one backend. There is no setup card or form before the composer. The reference is the owner's sketch of 2026-11-02 (FLOW-NEW-SESSION).
 
+The transcript header shows the active session's title. The title is renamed in place: a double-click on it, or Enter or F2 while it has focus, turns it into the rename field; Enter saves and Escape restores it. There is no rename button (owner, 2026-11-02).
+
 ## Development
 
 A debug build attaches to a labelled Core endpoint, such as a replay, only when told to: `ERSA_ATTACH=<label>` makes it attach there and never launch a Core, and the Core tile reads "Attached to <label>". A release build ignores the variable and always uses the user's own Core.
 
 ## Open questions
 
+- Whether the context ring takes a caution or danger tone near full, as the gauge vocabulary in DESIGN.md suggests, or stays one tone with the arc alone saying how much.
 - Minimum window size, and which region collapses first when narrow.
 - Whether the workbench shows one pane at a time (tabs) or allows splits.
 - Whether the shelf overlays the transcript or pushes it, and how several pending shelves queue.
@@ -44,6 +47,7 @@ A debug build attaches to a labelled Core endpoint, such as a replay, only when 
 
 ## Changes
 
+- 2026-11-02: the title is renamed in place by double-click or keyboard, with no button (owner); open question on the context ring's tone near full.
 - 2026-11-02: the new-session screen and the session controls beneath the composer, from the owner's sketch (FLOW-NEW-SESSION).
 - 2026-11-01: from #14 inbox: a debug build attaches to a labelled endpoint when told to (Development).
 
