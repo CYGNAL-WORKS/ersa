@@ -117,30 +117,42 @@ impl TestCore {
     }
 }
 
-/// The `type` of each app log fact about session `id`, oldest first, once
-/// they are `expected`. Core hands facts to the log's writer thread without
-/// waiting for the disk, so a test polls the file, a bounded while, rather
-/// than reading it once and racing the writer.
+/// Waits until the `type`s of the app log's facts about session `id`, oldest
+/// first, are exactly `expected`, and fails after about 10 s. Core hands
+/// facts to the log's writer thread without waiting for the disk, so a test
+/// polls the file, a bounded while, rather than reading it once and racing
+/// the writer.
 pub async fn app_log_facts(data_dir: &Path, id: &str, expected: &[&str]) {
     let mut seen = Vec::new();
+    // The last read that failed, reported if the deadline passes. A read can
+    // fail for a moment: on Windows a scanner holding the file without read
+    // sharing gives os error 32, which is retried like a mismatch.
+    let mut last_error = None;
     for _ in 0..100 {
-        seen = ersa_core::app_log::read_entries(data_dir)
-            .unwrap()
-            .into_iter()
-            .filter(|e| e.session_id == id)
-            .map(|e| {
-                serde_json::to_value(&e.fact).unwrap()["type"]
-                    .as_str()
-                    .unwrap()
-                    .to_string()
-            })
-            .collect::<Vec<String>>();
-        if seen == expected {
-            return;
+        match ersa_core::app_log::read_entries(data_dir) {
+            Ok(entries) => {
+                seen = entries
+                    .into_iter()
+                    .filter(|e| e.session_id == id)
+                    .map(|e| {
+                        serde_json::to_value(&e.fact).unwrap()["type"]
+                            .as_str()
+                            .unwrap()
+                            .to_string()
+                    })
+                    .collect::<Vec<String>>();
+                if seen == expected {
+                    return;
+                }
+            }
+            Err(e) => last_error = Some(e),
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert_eq!(seen, expected, "the app log's facts about {id}");
+    assert_eq!(
+        seen, expected,
+        "the app log's facts about {id}; last read error: {last_error:?}"
+    );
 }
 
 pub struct Client {
