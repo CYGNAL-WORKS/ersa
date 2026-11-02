@@ -168,6 +168,10 @@ struct Handle {
     /// Core learnt it: shown again at the end of a view opened afresh, since
     /// it is Core's knowledge and never in the record.
     ending: Mutex<Option<(LifecycleFact, String)>>,
+    /// Why the backend did not start, the last time Core started it: a
+    /// message sent to the session is answered with it, so whoever sent the
+    /// first message learns the backend's own reason (FLOW-NEW-SESSION-R08).
+    start_failure: Mutex<Option<String>>,
     /// A read of the session's record still running after its caller gave
     /// up waiting; the next open waits on it rather than start another, so
     /// a file system that hangs gathers one stuck read per session, not one
@@ -488,6 +492,7 @@ impl Handle {
             live: Mutex::new(None),
             raw: Mutex::default(),
             ending: Mutex::new(None),
+            start_failure: Mutex::new(None),
             record_read: tokio::sync::Mutex::new(None),
             summary_read: tokio::sync::Mutex::new(None),
             removed: Arc::default(),
@@ -496,6 +501,17 @@ impl Handle {
 
     fn live(&self) -> Option<Arc<Live>> {
         lock(&self.live).clone()
+    }
+
+    /// The error for a request that needs the backend running when it is
+    /// not: the reason it failed to start, when it did.
+    fn not_running(&self) -> SessionError {
+        match &*lock(&self.start_failure) {
+            Some(message) => {
+                SessionError::InvalidState(format!("the backend could not be started: {message}"))
+            }
+            None => not_running(),
+        }
     }
 
     /// Lets the view and the raw log go when Core is not running the session
@@ -972,8 +988,16 @@ impl SessionManager {
 
     /// Sends a user message and returns the turn it belongs to.
     pub async fn send(&self, id: &str, text: &str) -> Result<u32, SessionError> {
-        let live = self.live(id)?;
-        let session = live.wait_ready().await?;
+        let handle = self.handle(id)?;
+        let live = handle.live().ok_or_else(|| handle.not_running())?;
+        // A start that failed sets the failure before it lets go of the
+        // start, so the reason is there when the wait ends.
+        let session = live.wait_ready().await.map_err(|e| match e {
+            SessionError::InvalidState(_) if lock(&handle.start_failure).is_some() => {
+                handle.not_running()
+            }
+            e => e,
+        })?;
         let text = text.to_string();
         bounded(async move { session.send_user(&text).await }).await?;
         // The adapter recorded the message before writing it, so the sink
@@ -1624,6 +1648,7 @@ async fn run_session(task: SessionTask) {
     match outcome {
         Some(Ok(session)) => {
             let session: Arc<dyn AdapterSession> = Arc::from(session);
+            *lock(&handle.start_failure) = None;
             started.send_replace(Started::Ready(Arc::clone(&session)));
             sink.start_finished(Ok(()));
             // A stop that arrived as the start completed saw nothing to stop.
@@ -1647,6 +1672,7 @@ async fn run_session(task: SessionTask) {
         }
         Some(Err(e)) => {
             tracing::warn!(session = %handle.id, error = %e, "the backend did not start");
+            *lock(&handle.start_failure) = Some(e.to_string());
             sink.start_finished(Err(StartFailure {
                 message: e.to_string(),
                 stopped_by_user: false,
