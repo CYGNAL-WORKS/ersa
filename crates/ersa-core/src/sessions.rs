@@ -755,7 +755,7 @@ impl SessionManager {
         }
         // Only what was named is stored: one left to the backend stays its
         // to choose on a later start too. The defaults are filled in for
-        // reporting (PROTO-CORE-API-R15), as they are at every load.
+        // reporting (PROTO-CORE-API-R16), as they are at every load.
         self.store.insert_session(row.clone()).await?;
         let mut row = row;
         fill_defaults(&mut row, &adapter.choices());
