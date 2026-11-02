@@ -6,9 +6,12 @@
 import type { ReactNode } from "react";
 import { AddProject } from "../components/AddProject";
 import { Button } from "../components/Button";
+import { Chip } from "../components/Chip";
+import { ContextRing } from "../components/ContextRing";
 import { Composer } from "../components/Composer";
 import { CoreStatus } from "../components/CoreStatus";
 import { ErrorBoundary } from "../components/ErrorBoundary";
+import { NewSessionScreen } from "../components/NewSessionScreen";
 import { ProjectList } from "../components/ProjectList";
 import { QuitQuestion } from "../components/QuitQuestion";
 import { SessionList } from "../components/SessionList";
@@ -16,6 +19,7 @@ import { Transcript } from "../components/Transcript";
 import type { CoreView } from "../core/connection";
 import type { Envelope, Event } from "../protocol/agent-events.gen";
 import type { CoreHelloResult, Project, Session } from "../protocol/core-api.gen";
+import type { BackendChoices, Choice } from "../session/controls";
 import type { SessionView } from "../session/follow";
 import { apply, emptyTranscript } from "../session/transcript";
 import "./Gallery.css";
@@ -204,6 +208,51 @@ const transcriptStates: [string, SessionView][] = [
   ["Not receiving events", sessionView([], { stream: { state: "failed", message: "Core closed the connection" } })],
 ];
 
+// What the Claude Code adapter lists for `backend.list` (PROTO-CLAUDE-CODE-STREAM), with the CLI's default marked.
+const choices = (pairs: [string, string][], dflt: string): Choice[] =>
+  pairs.map(([id, label]) => ({ id, label, default: id === dflt }));
+const claudeCode: BackendChoices = {
+  name: "claude-code",
+  label: "Claude Code",
+  version: "2.1.302",
+  status: "available",
+  tested: { min: "2.1.0", max: "2.1.400" },
+  models: choices([["fable", "Fable"], ["opus", "Opus"], ["sonnet", "Sonnet"], ["haiku", "Haiku"]], "opus"),
+  efforts: choices([["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], "high"),
+  permission_modes: choices(
+    [["default", "Ask before acting"], ["acceptEdits", "Accept edits"], ["plan", "Plan only"], ["auto", "Auto"]],
+    "default",
+  ),
+};
+const copilot = (status: BackendChoices["status"]): BackendChoices => ({
+  name: "copilot",
+  label: "GitHub Copilot",
+  status,
+  tested: { min: "1.0.0", max: "1.2.0" },
+  models: [],
+  efforts: [],
+  permission_modes: [],
+});
+
+const newSession = {
+  hosts: [hello.host],
+  projects,
+  backends: { local: [claudeCode, copilot("missing")] },
+  onStart: async () => false,
+  onAddProject: async () => false,
+  autoFocus: false,
+} as const;
+const oneBackend = { local: [claudeCode] };
+
+/** Room beneath a specimen for a chip's open choices, which lie over what follows. */
+const room = (node: ReactNode) => <div className="gallery-room">{node}</div>;
+
+const chipOptions = [
+  { id: "isolated", label: "New workspace" },
+  { id: "root", label: "Root workspace" },
+];
+const chip = { name: "Workspace", value: "isolated", options: chipOptions, onChoose: () => {} };
+
 /** Throws while rendering, as a component given data it cannot read would. */
 function Unreadable(): never {
   throw new Error("Cannot read properties of undefined (reading 'toFixed')");
@@ -354,6 +403,78 @@ const entries: Entry[] = [
           <Unreadable />
         </ErrorBoundary>,
       ],
+    ],
+  },
+  {
+    name: "NewSessionScreen",
+    wide: true,
+    states: [
+      ["No project", <NewSessionScreen {...newSession} projects={[]} />],
+      ["Ready, at the defaults", <NewSessionScreen {...newSession} backends={oneBackend} forceFocus />],
+      ["Project without version control", <NewSessionScreen {...newSession} backends={oneBackend} projectId="p3" />],
+      ["Backend missing, beside one available", room(<NewSessionScreen {...newSession} open="backend" />)],
+      ["No backend available", <NewSessionScreen {...newSession} backends={{ local: [{ ...claudeCode, status: "error" }] }} />],
+      ["Detecting backends", <NewSessionScreen {...newSession} backends={{}} />],
+      ["A chip open", room(<NewSessionScreen {...newSession} backends={oneBackend} open="permission_mode" />)],
+      [
+        "Starting",
+        <NewSessionScreen
+          {...newSession}
+          backends={oneBackend}
+          initialText="Find why the reconnect test is flaky."
+          starting={{ state: "sending" }}
+        />,
+      ],
+      [
+        "Start refused",
+        <NewSessionScreen
+          {...newSession}
+          backends={oneBackend}
+          initialText="Find why the reconnect test is flaky."
+          starting={{ state: "failed", message: "Claude Code is not logged in. Run claude and log in, then try again." }}
+        />,
+      ],
+    ],
+  },
+  {
+    name: "Chip",
+    // On the canvas, as the session controls stand, so the hover fill shows as it does on the screen.
+    wide: true,
+    states: [
+      ["Default", <Chip {...chip} />],
+      ["Hover", <Chip {...chip} force="hover" />],
+      ["Focus", <Chip {...chip} force="focus" />],
+      ["Pressed", <Chip {...chip} force="pressed" />],
+      ["Disabled", <Chip {...chip} disabled />],
+      ["With a prefix", <Chip name="Effort" prefix="Effort" value="high" options={[{ id: "high", label: "High" }]} onChoose={() => {}} />],
+      ["A problem", <Chip name="Backend" placeholder="No backend" problem options={[]} onChoose={() => {}} />],
+      ["Open", room(<Chip {...chip} initialOpen />)],
+      ["Open, an option hovered", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "hover" }} />)],
+      ["Open, an option pressed", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "pressed" }} />)],
+      [
+        "Open, with statuses",
+        room(
+          <Chip
+            name="Backend"
+            value="claude-code"
+            options={[
+              { id: "claude-code", label: "Claude Code", status: "2.1.302" },
+              { id: "copilot", label: "GitHub Copilot", status: "Not installed", unavailable: true },
+              { id: "codex", label: "codex", status: "Detection failed", failed: true, unavailable: true },
+            ]}
+            onChoose={() => {}}
+            initialOpen
+          />,
+        ),
+      ],
+    ],
+  },
+  {
+    name: "ContextRing",
+    states: [
+      ["Nothing used yet", <ContextRing />],
+      ["Some used", <ContextRing used={0.42} />],
+      ["Nearly full", <ContextRing used={0.93} />],
     ],
   },
   {

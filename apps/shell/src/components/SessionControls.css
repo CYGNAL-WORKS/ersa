@@ -1,0 +1,22 @@
+/* The session controls: a row of chips beneath the composer, the context ring at its end. */
+
+.session-controls {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+/* Related controls, so the inline gap; a narrow stage wraps them rather than scroll. */
+.session-controls-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+/* The ring centres on the chips' first row. */
+.session-controls > .context-ring {
+  flex: none;
+  padding-block: var(--space-xs);
+}
