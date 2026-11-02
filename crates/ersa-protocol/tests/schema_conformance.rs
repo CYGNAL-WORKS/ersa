@@ -299,7 +299,7 @@ fn the_open_elsewhere_notices_validate_with_and_without_a_pid() {
             pid: Some(4242),
         },
         SessionNotice {
-            level: NoticeLevel::Warning,
+            level: NoticeLevel::Info,
             code: NoticeCode::SessionOpenCheckFailed,
             message: "Ersa could not tell whether another process has this session open.".into(),
             pid: None,
