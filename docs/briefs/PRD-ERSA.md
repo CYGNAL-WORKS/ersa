@@ -43,7 +43,7 @@ Ersa exposes its own tool server to every session, so agents can message other s
 - **Isolation by default, whatever the VCS.** A session cannot accidentally work in another session's checkout, in git or otherwise.
 - **Local and remote feel the same.** A remote session has the same tiles, panes, and shelf as a local one; only latency differs.
 - **The harness is yours.** Ersa's own tools are extensible by the user, and nothing about a backend is hard-wired into the interface.
-- **Beautiful and calm.** The interface is an instrument, not a chat toy. See `docs/design/DESIGN.md`.
+- **Beautiful and calm.** The interface feels like the agentic harnesses people already use, and is more beautiful than they are. See `docs/design/DESIGN.md`.
 - **Dogfood first.** The first usable version is the one its author switches to daily.
 
 ## Flows
