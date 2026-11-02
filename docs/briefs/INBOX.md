@@ -9,5 +9,4 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 ## Open
 
 
-
 ## Resolved recently (optional, trimmed in planning passes)
