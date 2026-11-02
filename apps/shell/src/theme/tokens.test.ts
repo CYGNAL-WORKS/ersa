@@ -94,7 +94,7 @@ describe("the raw-value check", () => {
     expect(flagged("  width: calc(0.5*var(--size-rail));")).toHaveLength(1);
     expect(flagged("  width: calc(-2 * var(--size-rail));")).toHaveLength(1);
     expect(flagged("  width: calc((var(--size-rail)) * (2));")).toHaveLength(1);
-    expect(flagged("  width: calc(var(--size-rail, 4px) * 2);")).toHaveLength(1);
+    expect(flagged("  width: calc(var(--size-rail, var(--space-xs)) * 2);")).toHaveLength(1);
     expect(flagged("  width: calc(var(--size-rail)*1.5);")).toHaveLength(1);
     expect(flagged("  transform: translateY(calc(-1 * var(--space-xs)));")).toEqual([]);
     expect(flagged("  transform: translateY(calc(var(--space-xs) * -1));")).toEqual([]);
