@@ -173,7 +173,7 @@ Shadows are kept for transient layers (menus, popovers, drag previews), soft and
 - **Streaming prose** fades in chunk by chunk, as Claude Desktop's does: each piece of the agent's text fades from transparent to full ink over `motion-stream` with `motion-ease-out` as it arrives, with no movement.
 - **Work in progress** loops only while it runs. Work of unknown length, such as a running tool call, shows a ring that turns once per `motion-loop-ring`; work whose progress can be measured shows a bar that cycles once per `motion-loop-bar`. Both durations sit within Material's, MUI's and Fluent's. A text shimmer was tried and is not used: it is a skeleton-loading pattern, not a sign of work under way.
 - **A working session's glyph** in the rail breathes: its glow swells and fades on a `motion-breath` loop with `motion-ease-in-out` for as long as the session works. It never blinks or ripples outward; shimmering titles and pulse rings were rejected.
-- **Tiles keep their place.** A session that needs the user changes its glyph and breathes once where it is, one glow swell and fade over `motion-breathe-once`; its tile does not move. A new session's tile slides in at the top over `motion-slow` while the others make room.
+- **Status never moves a tile.** Nothing reorders the rail on its own: a session that needs the user changes its glyph and breathes once where it is, one glow swell and fade over `motion-breathe-once`. When the user reorders tiles or changes the rail's sort order, each tile slides to its new position over `motion-settle` with `motion-ease-in-out`, so the eye can follow it. A new session's tile slides in at the top over `motion-slow` while the others make room.
 - **The shelf** slides out from the tile it belongs to over `motion-settle` with `motion-ease-out`, and slides back the same way when answered.
 - **The working mark**, the animated mark at the foot of a turn beside the elapsed time and tokens, is open: it is to be designed as a family of activity marks.
 
@@ -195,7 +195,7 @@ Component style tokens are added here as component briefs reach `ready`. Each co
 - Do use the motion tokens for every transition, and keep motion calm.
 - Do bring things in with a fade, a slide or a glow, and take them out the same way; nothing pops in.
 - Do loop only while work runs, and stop every loop when reduced motion is on.
-- Do keep tiles in place when their state changes: the glyph changes and breathes, the tile stays.
+- Do keep a tile in place when its status changes: the glyph changes and breathes, the tile stays. Move tiles only when the user reorders or re-sorts the rail.
 - Do keep the rail and tiles visually quieter than the transcript, so attention lands on the conversation.
 - Do add a token and a reason for every new colour, gradient or glow.
 - Do keep one focal glow per screen.
