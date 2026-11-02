@@ -491,6 +491,56 @@ async fn a_backend_that_fails_to_start_ends_the_session_with_an_error() {
     assert_eq!(kind(&error), "invalid_state");
 }
 
+// verifies: FLOW-NEW-SESSION-R08
+/// The first message of a session whose backend failed to start is answered
+/// with the backend's own reason, whether it arrives while the start is
+/// still under way or after the session has ended, so the new-session
+/// screen can show why.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_to_a_backend_that_failed_to_start_is_answered_with_its_reason() {
+    let (core, _) = start_fake(FakeAdapter::failing()).await;
+    let mut client = core.client().await;
+
+    let early = new_session(&core, &mut client).await;
+    let error = client
+        .error("session.send", json!({ "id": early, "text": "hello" }))
+        .await;
+    assert_eq!(kind(&error), "invalid_state");
+    let message = error["message"].as_str().unwrap();
+    assert!(
+        message.contains("the backend could not be started")
+            && message.contains("the fake refused to start"),
+        "the backend's reason, got {message:?}"
+    );
+    // Answered once the run has ended, so the listing already says so: a
+    // failed start reads apart from a slow one by its state.
+    assert_eq!(session_row(&mut client, &early).await["state"], "error");
+
+    // A second session in the same workspace, sent to once it has ended.
+    let early_row = session_row(&mut client, &early).await;
+    let late = client
+        .result(
+            "session.create",
+            json!({ "workspace_id": early_row["workspace_id"], "backend": fake::BACKEND }),
+        )
+        .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    client
+        .result("session.subscribe", json!({ "id": late, "from_seq": 0 }))
+        .await;
+    client.events_until("session.ended").await;
+    let error = client
+        .error("session.send", json!({ "id": late, "text": "hello" }))
+        .await;
+    let message = error["message"].as_str().unwrap();
+    assert!(
+        message.contains("the fake refused to start"),
+        "the backend's reason after the end, got {message:?}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn an_adapter_that_panics_while_starting_fails_the_session_cleanly() {
     let (core, _) = start_fake(FakeAdapter::panicking()).await;
