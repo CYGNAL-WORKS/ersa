@@ -71,6 +71,7 @@ export function App({ client }: { client: CoreClient }) {
   // in one of them keeps the configuration it started with.
   const [withdrawn, setWithdrawn] = useState<Record<string, string[]>>({});
   const [adding, setAdding] = useState<Sending>();
+  const [renaming, setRenaming] = useState<Record<string, Sending>>({});
 
   useEffect(() => {
     const running = connect(client, setView, undefined, (notification) => {
@@ -128,6 +129,21 @@ export function App({ client }: { client: CoreClient }) {
       setActiveId(created.id);
     } catch (error) {
       setStarting((s) => ({ ...s, [project.id]: { state: "failed", message: describeError(error) } }));
+    }
+  };
+
+  // The backend keeps the title (PROTO-CORE-API-R12); the list is read again to show it, in the rail and here.
+  const rename = async (id: string, title: string) => {
+    setRenaming((r) => ({ ...r, [id]: { state: "sending" } }));
+    try {
+      await client.call("session.set_title", { id, title });
+      titles.current[id] = title;
+      setRenaming(({ [id]: _, ...rest }) => rest);
+      connection.current?.reload("sessions");
+      return true;
+    } catch (error) {
+      setRenaming((r) => ({ ...r, [id]: { state: "failed", message: describeError(error) } }));
+      return false;
     }
   };
 
@@ -208,6 +224,10 @@ export function App({ client }: { client: CoreClient }) {
               view={shown}
               onDecide={decide}
               onRetry={retrySubscribe}
+              onRename={(title) => rename(shown.id, title)}
+              renaming={renaming[shown.id]}
+              onRenameDone={() => setRenaming(({ [shown.id]: _, ...rest }) => rest)}
+              renameDisabled={view.phase !== "connected"}
             />
           </ErrorBoundary>
           <ErrorBoundary what="The composer" resetKey={shown.id}>

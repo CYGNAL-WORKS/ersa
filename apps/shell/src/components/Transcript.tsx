@@ -4,6 +4,7 @@ import type { SessionView, Sending } from "../session/follow";
 import { stateText } from "../session/states";
 import { type Item, isOpen } from "../session/transcript";
 import { Button } from "./Button";
+import { SessionTitle } from "./SessionTitle";
 import "./Transcript.css";
 
 type Decide = (requestId: string, behavior: "allow" | "deny") => void;
@@ -15,10 +16,15 @@ interface TranscriptProps {
   onDecide: Decide;
   /** Subscribes again after subscribing failed. */
   onRetry?: () => void;
+  /** Renames the session; see SessionTitle. */
+  onRename?: (title: string) => Promise<boolean>;
+  renaming?: Sending;
+  onRenameDone?: () => void;
+  renameDisabled?: boolean;
 }
 
 /** The active session as a document: the user's and the agent's words, tool cards, and permission requests to answer. */
-export function Transcript({ title, view, onDecide, onRetry }: TranscriptProps) {
+export function Transcript({ title, view, onDecide, onRetry, onRename, renaming, onRenameDone, renameDisabled }: TranscriptProps) {
   const { transcript, stream, answers } = view;
   const scroller = useRef<HTMLDivElement>(null);
   // Whether the reader is at the end; new content keeps them there, and
@@ -46,10 +52,11 @@ export function Transcript({ title, view, onDecide, onRetry }: TranscriptProps) 
   return (
     <section className="transcript" aria-label="Transcript">
       <header className="transcript-header">
-        <h1 className="transcript-title">{title}</h1>
-        <span className="transcript-state" data-needs-you={transcript.state === "waiting_user" || undefined}>
-          {stateText(transcript.state)}
-        </span>
+        <SessionTitle title={title} onRename={onRename} renaming={renaming} onDone={onRenameDone} disabled={renameDisabled}>
+          <span className="transcript-state" data-needs-you={transcript.state === "waiting_user" || undefined}>
+            {stateText(transcript.state)}
+          </span>
+        </SessionTitle>
       </header>
       <div className="transcript-scroll" ref={scroller} onScroll={onScroll}>
         <div className="transcript-page">
