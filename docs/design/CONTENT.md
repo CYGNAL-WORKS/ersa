@@ -56,7 +56,7 @@ Each rule names the Vale rule that enforces it. `Microsoft.*` rules come from th
 
 ## The string catalog
 
-Every string the Interface shows lives in the string catalog, including labels only a screen reader hears. Components refer to keys and never hold copy. US English is the source locale; other locales are added beside it.
+Every string the Interface shows lives in the string catalog, including labels only a screen reader hears. Components refer to keys and never hold copy. The component gallery's own sample text is exempt, because it's a development surface; the component copy it renders still comes from the catalog. US English is the source locale; other locales are added beside it.
 
 - **Module.** `apps/shell/src/catalog/en-US.ts`, a typed TypeScript module declared `as const`. Another locale is a sibling file with the same keys.
 - **Keys.** Nested by area, then purpose, in camelCase: `quit.title`, `rail.core.connecting`. An area is a part of the interface the glossary names. A key names a purpose, never the wording, so copy changes without a rename.
