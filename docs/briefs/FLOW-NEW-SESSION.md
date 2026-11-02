@@ -26,23 +26,30 @@ Adding a project is the step before: the user names a folder on a host and says 
 - **FLOW-NEW-SESSION-R05**: When the user sends the first message with the root workspace chosen, Ersa shall start the session in the project's root workspace, the project's own folder, with the chosen backend, model, effort and permission mode, and send the message as the session's first turn.
 - **FLOW-NEW-SESSION-R06**: When the project's version control has no workspace adapter in Ersa, the session controls shall offer the root workspace only.
 - **FLOW-NEW-SESSION-R07**: The session controls shall offer the backends detected on the project's host, and shall show a backend that is missing or failed detection with its status rather than hide it.
-- **FLOW-NEW-SESSION-R08**: When the backend fails to start, Ersa shall show the failure on the new-session screen with the backend's own message, keep the user's message in the composer, and remove the workspace it created for that session.
+- **FLOW-NEW-SESSION-R08**: When the backend fails to start, Ersa shall show the failure on the new-session screen with the backend's own message, keep the user's message in the composer, and remove the session and any workspace it created for that session.
 - **FLOW-NEW-SESSION-R09**: When the session has started, Ersa shall make it the active session, show its tile in the rail under its workspace, and show the session's values in the session controls.
 - **FLOW-NEW-SESSION-R10**: When Ersa has no project, the new-session screen shall offer to add one, and adding a project shall ask whether the user trusts it before the project exists.
+- **FLOW-NEW-SESSION-R11**: When the project's host cannot list its backends, the session controls shall say that detection failed, with the reason, rather than that no backend is available.
 
-## Built in M0
+## Verification
 
-A project is added by typing its folder path and answering the trust question. "New session" on a git project creates a new worktree workspace and a Claude Code session in it at once, with the backend's default model and permission mode; a non-git project offers no session; sessions are a flat list in the rail. With no session chosen, the window shows the newest.
+The replay server refuses every request that would create or change a session (PROTO-CORE-API, Conformance), so it cannot run R03 to R09. Those run against a real Core with a stand-in backend that can answer or fail to start; the Interface's own sequence is tested against a fake client.
+
+## Built so far
+
+A project is added by typing its folder path and answering the trust question. New session shows the new-session screen and creates nothing until the first message (R01 to R05, R08, R09). Until the open question on changing values mid-session is answered, the session controls under a running session show its values read-only. A host whose backend listing fails reads as having no backend available, which R11 replaces. The rail groups sessions under a heading per workspace (LAY-SHELL). With no session chosen, the window shows the newest.
 
 ## Open questions
 
-- Whether model, effort and permission mode can change during a session from the session controls, where the backend allows it, or only at start.
+- Whether model, effort and permission mode can change during a session from the session controls, where the backend allows it, or only at start. Until answered, the controls show a running session's values read-only.
 - The mode control (a named preset, milestone M3) and where it sits among the session controls.
-- Whether sessions in the root workspace sit under the project directly in the rail, or under a "root" workspace entry.
+- Whether sessions in the root workspace sit under the project directly in the rail, or under a "root" workspace entry. Until answered, they sit under a "Root workspace" heading.
 - Which models and efforts a backend offers: the adapter's knowledge of its tested versions, or detected on the host.
 - Which session a reopened window shows when several were running (FLOW-RESUME-SESSION).
 
 ## Changes
+
+- 2026-11-02: from #55 inbox: R08 also removes the session, since a workspace with a session cannot be removed; R11 added for a host whose backend listing fails; Verification added (R03 to R09 run against a real Core, not the replay server); Built in M0 becomes Built so far, with the interim read-only controls and the root workspace's interim place in the rail.
 
 - 2026-11-02: made ready from the owner's sketch: composer-first, session controls, nothing created before the first message, root workspace as the alternative to a worktree, failed start cleans up; FLOW-NEW-SESSION-R01 to R10 added. Open questions on backend detection and mode at start answered (detection; model, effort and permission mode at start, mode at M3).
 - 2026-11-01: the user says whether they trust a project when adding it (ADR 0018).
