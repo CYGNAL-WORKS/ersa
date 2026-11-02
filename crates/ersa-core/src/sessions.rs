@@ -935,6 +935,12 @@ impl SessionManager {
                         "the backend has no record of this session to rename".into(),
                     ));
                 }
+                Err(SessionError::Adapter(AdapterError::Io(e)))
+                    if e.kind() == io::ErrorKind::ResourceBusy =>
+                {
+                    // Something is writing the record right now.
+                    return Err(SessionError::InvalidState(e.to_string()));
+                }
                 renamed => renamed?,
             }
         }

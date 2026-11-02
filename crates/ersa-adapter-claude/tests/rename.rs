@@ -122,25 +122,20 @@ async fn the_entry_has_the_shape_the_cli_itself_writes() {
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R22
 #[tokio::test]
-async fn a_record_without_a_final_newline_gets_its_entry_on_a_line_of_its_own() {
+async fn a_record_whose_last_line_is_still_being_written_is_left_alone() {
+    // A CLI part-way through a line: the entry would split it.
     let mut original = recorded_record();
-    while original.last() == Some(&b'\n') || original.last() == Some(&b'\r') {
-        original.pop();
-    }
+    original.extend_from_slice(b"{\"type\":\"assistant\",\"mess");
     let home = home_with(&original);
-    adapter(home.path())
-        .rename_record(no_transport(), CWD, SESSION, "Own line")
+    let error = adapter(home.path())
+        .rename_record(no_transport(), CWD, SESSION, "Not now")
         .await
-        .expect("rename");
-    let after = fs::read(record_file(home.path())).unwrap();
-    assert_eq!(&after[..original.len()], &original[..]);
-    let added = std::str::from_utf8(&after[original.len()..]).unwrap();
+        .unwrap_err();
     assert!(
-        added.starts_with('\n') && added.ends_with('\n'),
-        "{added:?}"
+        matches!(&error, AdapterError::Io(e) if e.kind() == std::io::ErrorKind::ResourceBusy),
+        "{error}"
     );
-    assert_eq!(added.trim().lines().count(), 1);
-    assert_eq!(listed_title(home.path()).as_deref(), Some("Own line"));
+    assert_eq!(fs::read(record_file(home.path())).unwrap(), original);
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R22

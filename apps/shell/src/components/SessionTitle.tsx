@@ -25,12 +25,12 @@ interface SessionTitleProps {
 }
 
 /**
- * The title to send for `draft`, spaced as Core takes it (each run of spaces, tabs or line breaks as one), or
- * undefined when there is nothing to send: a blank title, which no backend keeps, or the title the session
- * already has.
+ * The title to send for `draft`, or undefined when there is nothing to send: a blank title, which no backend
+ * keeps, or the title the session already has (`current`, empty for one with none). Spacing is Core's to settle,
+ * by one rule, and the title Core answers with is the one shown.
  */
 export function titleToSave(draft: string, current: string): string | undefined {
-  const title = draft.split(/\s+/).filter(Boolean).join(" ");
+  const title = draft.trim();
   return title === "" || title === current ? undefined : title;
 }
 
@@ -69,7 +69,8 @@ export function SessionTitle({ title, untitled, onRename, renaming, onReset, dis
 
   const save = async () => {
     if (draft === undefined || busy) return;
-    const next = titleToSave(draft, title);
+    // An untitled session shows a placeholder, which is not its title.
+    const next = titleToSave(draft, untitled ? "" : title);
     if (next === undefined) {
       // A blank title is not saved; an unchanged one needs no saving.
       if (draft.trim() !== "") close();
