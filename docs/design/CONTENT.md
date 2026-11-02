@@ -12,7 +12,7 @@ Plain, calm and brief. Name the thing and what happens. Address the person as "y
 |---|---|---|
 | Interface copy (the string catalog) | All rules and all interface patterns | Vale and the catalog test |
 | Product docs (`README.md`, `docs/design/`, user-facing docs) | All rules | Vale |
-| Agent-facing docs (briefs, skills, `CLAUDE.md`, `docs/agents/`) | Spelling, terms and punctuation only; their structure is governed by the `writing-for-agents` skill | Vale |
+| Agent-facing docs (briefs, skills, `CLAUDE.md`, `docs/GLOSSARY.md`, `docs/agents/`) | Spelling, terms and punctuation only; their structure is governed by the `writing-for-agents` skill | Vale |
 | Accepted ADRs | None: they are records, never rewritten | Not checked |
 | Vendored third-party files (listed in `.claude/skills/VENDORED.sha256`) and recorded fixtures | None: they keep their authors' text | Not checked |
 

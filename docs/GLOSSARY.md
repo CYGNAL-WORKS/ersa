@@ -1,6 +1,6 @@
 # Glossary
 
-One term per concept. Use these words in briefs, identifiers, and UI copy. Add a term here before using a new concept anywhere else. A term's closing *Not:* list names the words it replaces; Vale's `Ersa.Terms` rule flags them everywhere it checks, so list only words that never mean something else in Ersa.
+One term per concept. Use these words in briefs, identifiers, and UI copy. Add a term here before using a new concept anywhere else. A term that ends in a *Not:* list names the words it replaces; Vale's `Ersa.Terms` rule flags them everywhere it checks except this file, so list only words that never mean something else in Ersa's docs, including another product's concepts.
 
 ## Product
 
@@ -19,7 +19,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Root workspace**: a project's own folder as a workspace. Every project has one. It is not isolated: its sessions share its files with each other and with the user. A session runs there when the user turns the worktree off.
 - **Effort**: how much reasoning a backend spends per turn, in the backend's own levels. Chosen when a session starts.
 - **Permission mode**: a backend's rule for which of the agent's actions ask the user first, in the backend's own names. Chosen when a session starts.
-- **Session**: one conversation with one agent, in one workspace, on one host. An ordinary backend session: its history is the backend's session record, and Ersa stores only what finds it again (host, project, workspace, backend, and the backend's session id) and its mode. Its title is the backend's. *Not: chat session.*
+- **Session**: one conversation with one agent, in one workspace, on one host. An ordinary backend session: its history is the backend's session record, and Ersa stores only what finds it again (host, project, workspace, backend, and the backend's session id) and its mode. Its title is the backend's.
 - **Session record**: the backend's own record of a session, which the backend resumes from and its own tools list. The history of a session, whether its turns were taken in Ersa or elsewhere. Retention is the backend's.
 - **Live stream**: what a running backend sends Ersa as it happens. Carries details the session record omits (text as it arrives, permission prompts, turn ends, cost, rate limits), which are shown and not stored.
 - **Host**: a machine where sessions can run. The local machine is a host; an SSH-reachable machine is another. A remote host runs its own Core.
