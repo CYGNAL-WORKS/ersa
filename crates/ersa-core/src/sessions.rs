@@ -2066,6 +2066,103 @@ mod tests {
         );
     }
 
+    /// An adapter whose record and summary reads wait on gates, as reads on
+    /// a disk that stopped answering do, and which counts its forgets.
+    #[derive(Default)]
+    struct GatedReads {
+        record: Notify,
+        summary: Notify,
+        forgets: std::sync::atomic::AtomicUsize,
+    }
+
+    #[ersa_adapter::async_trait]
+    impl Adapter for GatedReads {
+        fn backend(&self) -> &str {
+            "gated"
+        }
+        async fn start(
+            &self,
+            _transport: Arc<dyn Transport>,
+            _config: SessionConfig,
+            _sink: Arc<dyn AdapterSink>,
+        ) -> Result<Box<dyn AdapterSession>, AdapterError> {
+            Err(AdapterError::Protocol("never started".into()))
+        }
+        fn projector(&self) -> Box<dyn ersa_adapter::Projector> {
+            unreachable!("never started")
+        }
+        async fn read_record(
+            &self,
+            _transport: Arc<dyn Transport>,
+            _cwd: &str,
+            _backend_session_id: &str,
+        ) -> Result<Arc<Vec<RecordEvent>>, AdapterError> {
+            self.record.notified().await;
+            Ok(Arc::default())
+        }
+        async fn summarize_record(
+            &self,
+            _transport: Arc<dyn Transport>,
+            _cwd: &str,
+            _backend_session_id: &str,
+        ) -> Result<Option<RecordSummary>, AdapterError> {
+            self.summary.notified().await;
+            Ok(None)
+        }
+        fn forget_record(&self, _cwd: &str, _backend_session_id: &str) {
+            self.forgets.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    // Paused time: the reads' timeouts run out as soon as nothing else can.
+    #[tokio::test(start_paused = true)]
+    async fn reads_that_outlive_a_removed_session_have_the_adapter_forget_its_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("ersa.db")).unwrap();
+        let (app_log, _) = AppLog::open(dir.path()).unwrap();
+        let adapter = Arc::new(GatedReads::default());
+        let manager = SessionManager::new(
+            store,
+            vec![Arc::clone(&adapter) as Arc<dyn Adapter>],
+            Arc::new(app_log),
+        );
+        let row = SessionRow {
+            id: "s-gated".into(),
+            workspace_id: "w".into(),
+            host_id: "local".into(),
+            backend: "gated".into(),
+            backend_session_id: Some("b-gated".into()),
+            mode: None,
+            cwd: "C:/work".into(),
+        };
+        let handle = Arc::new(Handle::new(row, now_rfc3339()));
+        lock(&manager.sessions).insert(handle.id.clone(), handle);
+
+        // Opening it: the record read and then the summary read time out and
+        // are left running.
+        let transport: Arc<dyn Transport> = Arc::new(ersa_adapter::LocalTransport);
+        let opened = manager
+            .subscribe(
+                "s-gated",
+                0,
+                |_| Some(Arc::clone(&transport)),
+                mpsc::channel(16).0,
+                Arc::new(watch::Sender::new(false)),
+            )
+            .await;
+        assert!(opened.is_ok());
+
+        manager.remove("s-gated").await.unwrap();
+        assert_eq!(adapter.forgets.load(Ordering::SeqCst), 1);
+        // Each read that ends after the removal forgets what it kept.
+        adapter.record.notify_one();
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        assert_eq!(adapter.forgets.load(Ordering::SeqCst), 2);
+        adapter.summary.notify_one();
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        assert_eq!(adapter.forgets.load(Ordering::SeqCst), 3);
+    }
+
     #[tokio::test]
     async fn a_read_that_ends_after_its_session_is_removed_lets_go_of_what_it_kept() {
         let removed = AtomicBool::new(false);
