@@ -9,6 +9,7 @@ mod support;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use ersa_adapter::OpenElsewhere;
 use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Records, Stats};
@@ -995,6 +996,97 @@ async fn a_stopped_session_is_renamed_in_its_record_which_a_later_core_reads() {
     let core = start_with_adapters(dir, |_| {}, adapters).await;
     let mut client = core.client().await;
     assert_eq!(session_row(&mut client, &id).await["title"], "Renamed");
+}
+
+/// A stopped session, renamed while the fake's registry answers `answer`:
+/// the events that reached a client reading the session as it was renamed,
+/// after the session's end.
+async fn rename_while_open_elsewhere(answer: OpenElsewhere) -> (Vec<Value>, Arc<Stats>) {
+    let adapter = FakeAdapter::new(1);
+    *adapter.open_elsewhere.lock().unwrap() = answer;
+    let (core, stats) = start_fake(adapter).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.ended").await;
+
+    client
+        .result("session.set_title", json!({ "id": id, "title": "Renamed" }))
+        .await;
+    assert_eq!(stats.record_renames.load(Ordering::SeqCst), 1);
+    // Whatever the answer, Core asked once, before it wrote the record.
+    let checks = stats.open_checks.lock().unwrap().clone();
+    assert_eq!(checks.len(), 1, "{checks:?}");
+    assert!(checks[0].0.starts_with("fake-"), "{checks:?}");
+    assert_eq!(checks[0].1, 0, "asked after the record was written");
+
+    // Anything Core published for the rename reaches the client in a
+    // moment; wait a little past that for what does.
+    let mut after = Vec::new();
+    while let Ok(Some(n)) =
+        tokio::time::timeout(std::time::Duration::from_millis(300), client.notification()).await
+    {
+        if n["method"] == "session.event" {
+            after.push(n["params"]["event"].clone());
+        }
+    }
+    (after, stats)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn renaming_a_session_another_process_has_open_says_so_and_renames_it() {
+    let (after, _) = rename_while_open_elsewhere(OpenElsewhere::Yes { pid: 4242 }).await;
+    assert_eq!(types(&after), ["session.notice"], "{after:#?}");
+    let notice = &after[0];
+    assert_eq!(notice["event"]["code"], "session_open_elsewhere");
+    assert_eq!(notice["event"]["level"], "warning");
+    assert_eq!(notice["event"]["pid"], 4242);
+    assert!(
+        notice["event"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("4242"),
+        "{notice:#}"
+    );
+    assert_eq!(notice["source"]["input"], "core");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn renaming_a_session_when_the_check_cannot_tell_says_so_and_renames_it() {
+    let (after, _) = rename_while_open_elsewhere(OpenElsewhere::Unknown).await;
+    assert_eq!(types(&after), ["session.notice"], "{after:#?}");
+    let notice = &after[0]["event"];
+    assert_eq!(notice["code"], "session_open_check_failed");
+    assert!(notice.get("pid").is_none(), "{notice:#}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn renaming_a_session_no_other_process_has_open_gives_no_notice() {
+    let (after, _) = rename_while_open_elsewhere(OpenElsewhere::No).await;
+    assert!(after.is_empty(), "{after:#?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn renaming_a_running_session_asks_no_registry() {
+    // Ersa's own process has it open: the rename goes through it.
+    let adapter = FakeAdapter::new(1);
+    *adapter.open_elsewhere.lock().unwrap() = OpenElsewhere::Yes { pid: 4242 };
+    let (core, stats) = start_fake(adapter).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client
+        .result("session.set_title", json!({ "id": id, "title": "Renamed" }))
+        .await;
+    assert!(stats.open_checks.lock().unwrap().is_empty());
 }
 
 #[tokio::test(flavor = "multi_thread")]
