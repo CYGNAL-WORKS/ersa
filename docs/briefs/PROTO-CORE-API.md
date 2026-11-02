@@ -63,7 +63,7 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 
 ### Backends and modes
 
-- `backend.list { host_id }`: `{ name, version (optional, present when available), status (available | missing | error), tested { min, max }, models: [{ id, label, default }], efforts: [{ id, label, default }], permission_modes: [{ id, label, default }] }`. The choices are the adapter's knowledge of its tested versions, not detected on the host; `label` is what the Interface shows and `default` marks the one a new session starts with.
+- `backend.list { host_id }`: `{ name, label, version (optional, present when available), status (available | missing | error), tested { min, max }, models: [{ id, label, default }], efforts: [{ id, label, default }], permission_modes: [{ id, label, default }] }`. The choices are the adapter's knowledge of its tested versions, not detected on the host; `label` is what the Interface shows (the backend's own, such as "Claude Code") and `default` marks the one a new session starts with.
 - `mode.list`: `{ name, description }`; modes as presets are milestone M3; the method is reserved.
 
 ### Settings
@@ -129,6 +129,7 @@ The replay server answers read-only requests exactly as Core does. It never chan
 
 - 2026-11-02: R16 reworded before it shipped: the permission mode is always stated to the backend, so an unnamed one is the backend's default, stored and reported; model and effort stay absent when not named.
 - 2026-11-02: from #52 inbox: the root workspace's `vcs_ref` is empty; Core stores and reports only the named `model`, `effort` and `permission_mode`, leaving the rest to the backend (PROTO-CORE-API-R15 retired, R16 added); `backend.list`'s `tested { min, max }` replaces two fields, a removal, so `api_version` becomes 3 with this change.
+- 2026-11-02: from #53 inbox: `backend.list` carries each backend's `label`. No requirement IDs changed.
 - 2026-11-02: for FLOW-NEW-SESSION: every project has a root workspace (`kind`); `workspace.create` refused without a workspace adapter; `session.create` takes `model`, `effort` and `permission_mode`, reported by `session.list`; `backend.list` lists each backend's models, efforts and permission modes with labels and defaults. PROTO-CORE-API-R15 added.
 - 2026-11-01: from #35 inbox: a view holds a bounded amount of events; `session.subscribe` returns `first_seq` once it has let go of its earliest. PROTO-CORE-API-R02 retired, R14 added.
 - 2026-11-01: from #35 inbox: a session's title is its backend's: `session.set_title` renames through the backend (PROTO-CORE-API-R12 added) and `session.create` takes no title; `created_at` is the record's first entry, else the app log's first fact; `session.subscribe` returns `view`, and a client holding events from another view starts over from 0 (PROTO-CORE-API-R13 added); `session.reproject` removed, which bumps `api_version`; the bump ships with the method's removal in code.

@@ -25,6 +25,7 @@ fn config(extra: Value) -> SessionConfig {
         model: None,
         effort: None,
         project_trusted: false,
+        project_path: String::new(),
         extra,
     }
 }

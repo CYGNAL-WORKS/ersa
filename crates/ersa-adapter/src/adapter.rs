@@ -283,6 +283,10 @@ pub struct SessionConfig {
     /// configuration in its workspace (settings, hooks, MCP servers) may load.
     /// False, the default, loads the user's own configuration only (ADR 0018).
     pub project_trusted: bool,
+    /// The project's root, as a path on the session's host: the folder the
+    /// user answered the trust question for. Empty when unknown.
+    #[serde(default)]
+    pub project_path: String,
     /// Backend-specific settings, read only by that backend's adapter. `null`
     /// when there are none.
     pub extra: Value,
