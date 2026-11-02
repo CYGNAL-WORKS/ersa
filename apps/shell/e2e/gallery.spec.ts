@@ -77,6 +77,18 @@ test("a focused input's edge is the accent, in both themes", async ({ page }) =>
   }
 });
 
+// The rail's workspace headings hold their line before the names arrive, so the tiles never move when they do.
+test("a workspace heading is as tall before its name is read as after", async ({ page }) => {
+  await page.goto("/gallery.html");
+  const headings = page.locator('[data-theme="light"] [data-component="SessionList"] .sessions-workspace-name');
+  const heights = await headings.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+  // Two named headings, then the same two unnamed.
+  expect(heights).toHaveLength(4);
+  expect(heights[0]).toBeGreaterThan(0);
+  expect(heights[2]).toBeCloseTo(heights[0] ?? 0, 1);
+  expect(heights[3]).toBeCloseTo(heights[1] ?? 0, 1);
+});
+
 // The session controls from the keyboard (FLOW-NEW-SESSION-R01): every chip on the way from the composer, each
 // opening its choices, Escape closing them with focus back on the chip, and a choice taking effect.
 test("every session control is reachable and works from the keyboard", async ({ page }) => {
