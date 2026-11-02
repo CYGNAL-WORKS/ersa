@@ -28,6 +28,14 @@ for (const theme of ["light", "dark"]) {
   }
 }
 
+// The screenshots above depend on this: a section photographed alone cannot be moved by its neighbours.
+test("a filtered gallery shows one component in one theme", async ({ page }) => {
+  await page.goto("/gallery.html?component=Chip&theme=dark");
+  await expect(page.locator("[data-theme]")).toHaveCount(1);
+  await expect(page.locator('[data-theme="dark"] [data-component="Chip"]')).toHaveCount(1);
+  await expect(page.locator("[data-component]")).toHaveCount(1);
+});
+
 test("the gallery shows every component", async ({ page }) => {
   await page.goto("/gallery.html");
   const shown = await page.locator('[data-theme="light"] [data-component]').evaluateAll((els) =>
