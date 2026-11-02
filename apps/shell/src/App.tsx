@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import "./App.css";
 import { AddProject } from "./components/AddProject";
 import { Button } from "./components/Button";
@@ -15,8 +15,9 @@ import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { Project, Session, Workspace } from "./protocol/core-api.gen";
-import { type BackendChoices, type SessionValues, valuesFor } from "./session/controls";
+import { type BackendChoices, type SessionValues, sessionShown } from "./session/controls";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
+import { initialStage, stage } from "./session/stage";
 import { readChoices, rememberPatch, startSession } from "./session/start";
 
 // The same objects every render, so effects and error-boundary keys that
@@ -63,25 +64,18 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
   const connection = useRef<Connection | null>(null);
 
-  // The session the stage shows, and what the window knows of it.
-  const [activeId, setActiveId] = useState<string>();
+  // What the stage shows: the active session, or the new-session screen (session/stage.ts); and what the window
+  // knows of the active session.
+  const [{ activeId, composing, starting, firstSend }, dispatch] = useReducer(stage, initialStage);
   const [session, setSession] = useState<SessionView>();
   const follower = useRef<Follower | null>(null);
 
-  // The new-session screen, while the user has chosen New session (for a project, or none yet); with no session
-  // to show, the stage shows it too (LAY-SHELL). Nothing is created until its first message (FLOW-NEW-SESSION-R03).
-  const [composing, setComposing] = useState<{ projectId?: string }>();
-  const [starting, setStarting] = useState<Sending>();
-  // The session just started, until the window follows it: the screen stays, sending, so the stage never passes
-  // through the empty state between the screen and the session's transcript.
-  const [opening, setOpening] = useState<string>();
   // What the screen offers: each host's backends, and the values each project last started a session with.
   const [backends, setBackends] = useState<Record<string, BackendChoices[]>>({});
   const [lastUsed, setLastUsed] = useState<Record<string, SessionValues>>({});
   // Every project's workspaces, by id: the rail names them above their sessions, and the session controls read a
-  // session's workspace from them. Bumped to read them again after a session starts in a new one.
+  // session's workspace from them.
   const [workspaces, setWorkspaces] = useState<Record<string, Workspace>>({});
-  const [workspacesRead, setWorkspacesRead] = useState(0);
   const [trusting, setTrusting] = useState<Record<string, Sending>>({});
   // The workspaces of each project whose trust the user withdrew here, as they were then. A session running
   // in one of them keeps the configuration it started with.
@@ -105,7 +99,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   useEffect(() => {
     if (activeId === undefined && sessions.state === "ready") {
       const newest = newestFirst(sessions.sessions)[0];
-      if (newest) setActiveId(newest.id);
+      if (newest) dispatch({ type: "showNewest", id: newest.id });
     }
   }, [activeId, sessions]);
 
@@ -113,6 +107,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     if (activeId === undefined) return;
     const following = follow(client, activeId, setSession);
     follower.current = following;
+    dispatch({ type: "followed", id: activeId });
     return () => {
       following.stop();
       if (follower.current === following) follower.current = null;
@@ -201,7 +196,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     return () => {
       live = false;
     };
-  }, [client, projectList, workspacesRead]);
+  }, [client, projectList]);
   const projectsVersion = useVersion(projects);
   const sessionsVersion = useVersion(sessions);
   const coreVersion = useVersion(view);
@@ -211,42 +206,27 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const decide = useCallback((requestId: string, behavior: "allow" | "deny") => follower.current?.decide(requestId, behavior), []);
 
   // New session shows the screen; leaving it, by choosing a session, leaves nothing behind (FLOW-NEW-SESSION-R03).
-  const newSession = (project: Project) => {
-    if (starting?.state !== "sending") setStarting(undefined);
-    setComposing({ projectId: project.id });
-  };
-  const select = (id: string) => {
-    if (starting?.state === "sending") return;
-    setComposing(undefined);
-    setStarting(undefined);
-    setActiveId(id);
-  };
+  const newSession = (project: Project) => dispatch({ type: "newSession", projectId: project.id });
+  const select = (id: string) => dispatch({ type: "select", id });
 
   // The first message starts the session; on a failure the screen says why and the composer keeps the message
   // (FLOW-NEW-SESSION-R08). Once started, it is the active session (R09).
   const start = async (text: string, values: SessionValues) => {
-    setStarting({ state: "sending" });
+    dispatch({ type: "sending" });
     const outcome = await startSession(client, values, text);
     if (!outcome.ok) {
-      setStarting({ state: "failed", message: outcome.message });
+      dispatch({ type: "failed", message: outcome.message });
       return false;
     }
     setLastUsed((l) => ({ ...l, [values.project_id]: values }));
     // Best effort: a failure only means the screen starts at these values in this window alone.
     client.call("settings.set", { patch: rememberPatch(values) }).catch(() => {});
+    // Known at once, so the rail names the new session's workspace as its tile appears.
+    setWorkspaces((known) => ({ ...known, [outcome.workspace.id]: outcome.workspace }));
     connection.current?.reload("sessions");
-    if (values.workspace === "isolated") setWorkspacesRead((n) => n + 1);
-    setOpening(outcome.session.id);
-    setActiveId(outcome.session.id);
+    dispatch({ type: "started", id: outcome.session.id, text, firstSend: outcome.firstSend });
     return true;
   };
-  useEffect(() => {
-    if (opening !== undefined && session?.id === opening) {
-      setOpening(undefined);
-      setComposing(undefined);
-      setStarting(undefined);
-    }
-  }, [opening, session]);
 
   // The backend keeps the title (PROTO-CORE-API-R12); the list is read again to show it, in the rail and here.
   const rename = async (id: string, title: string) => {
@@ -312,6 +292,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const titles = useRef<Record<string, string>>({});
   if (sessions.state === "ready") for (const s of sessions.sessions) if (s.title) titles.current[s.id] = s.title;
   const shown = !composing && session && session.id === activeId ? session : undefined;
+  const firstSendHere = firstSend && firstSend.id === shown?.id ? firstSend : undefined;
 
   // The projects as last read, so a screen with a message being written stays while Core is away; sending then
   // fails with the reason, and the message stays in the composer.
@@ -325,25 +306,18 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const workspaceNames: Record<string, WorkspaceName> = {};
   for (const w of Object.values(workspaces)) {
     const project = projectById.get(w.project_id);
-    if (project) workspaceNames[w.id] = { project: project.name, name: w.kind === "root" ? "Root workspace" : w.vcs_ref || w.path };
+    if (!project) continue;
+    // A workspace without a branch is named by its path, set as a path is.
+    workspaceNames[w.id] =
+      w.kind === "root" ? { project: project.name, name: "Root workspace" } : w.vcs_ref ? { project: project.name, name: w.vcs_ref } : { project: project.name, name: w.path, path: true };
   }
 
-  // The session controls under the active session show its values (FLOW-NEW-SESSION-R09); they change nothing
-  // during a session. Absent until the session's workspace and project are known.
+  // The session controls under the active session show its own values, as Core lists them (FLOW-NEW-SESSION-R09);
+  // they change nothing during a session. Absent until the session's workspace and project are known.
   const listed = sessions.state === "ready" ? sessions.sessions.find((s) => s.id === shown?.id) : undefined;
   const listedWorkspace = listed && workspaces[listed.workspace_id];
   const listedProject = listedWorkspace && projectById.get(listedWorkspace.project_id);
-  const sessionValues =
-    listed &&
-    listedWorkspace &&
-    listedProject &&
-    valuesFor(listedProject, backends[listed.host_id] ?? [], {
-      workspace: listedWorkspace.kind,
-      backend: listed.backend,
-      model: listed.model,
-      effort: listed.effort,
-      permission_mode: listed.permission_mode,
-    });
+  const sessionControls = listed && listedWorkspace && sessionShown(listed, listedWorkspace, backends[listed.host_id] ?? []);
   const contextUsed =
     listed?.tile.context_tokens !== undefined && listed.tile.context_window ? listed.tile.context_tokens / listed.tile.context_window : undefined;
 
@@ -393,19 +367,24 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             <Composer
               key={shown.id}
               unavailable={view.phase === "connected" ? undefined : "Core is not connected."}
-              sending={shown.message}
+              // A kept session's first message that did not go through: why, and the text when it is to go again.
+              sending={shown.message ?? (firstSendHere && { state: "failed", message: firstSendHere.message })}
+              initialText={firstSendHere?.text}
               onSend={(text) => follower.current?.send(text) ?? Promise.resolve(false)}
             />
-            {listed && sessionValues && listedProject && (
-              <SessionControls
-                hosts={view.phase === "connected" ? [view.hello.host] : []}
-                projects={[listedProject]}
-                backends={backends[listed.host_id]}
-                values={sessionValues}
-                onChoose={() => {}}
-                disabled
-                used={contextUsed}
-              />
+            {sessionControls && listedProject && hello && (
+              <div className="stage-controls">
+                <SessionControls
+                  hosts={[hello.host]}
+                  projects={[listedProject]}
+                  backends={[sessionControls.backend]}
+                  values={sessionControls.values}
+                  workspaceLabel={sessionControls.workspaceLabel}
+                  onChoose={() => {}}
+                  disabled
+                  used={contextUsed}
+                />
+              </div>
             )}
           </ErrorBoundary>
         </main>
@@ -413,6 +392,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         <main className="stage">
           <ErrorBoundary what="The new-session screen" resetKey={composing?.projectId ?? ""}>
             <NewSessionScreen
+              // Drawn afresh on each New session, so its composer takes focus (FLOW-NEW-SESSION-R01).
+              key={composing?.key ?? 0}
               hosts={[hello.host]}
               projects={screenProjects}
               backends={backends}

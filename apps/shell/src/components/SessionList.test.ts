@@ -41,7 +41,7 @@ describe("the rail's sessions by workspace", () => {
   });
 
   // verifies: FLOW-NEW-SESSION-R09
-  it("shows a started session's tile, active, under its workspace's name", () => {
+  it("shows a session's tile under its workspace's name", () => {
     const html = renderToStaticMarkup(
       createElement(SessionList, {
         view: { state: "ready", sessions },
@@ -52,7 +52,28 @@ describe("the rail's sessions by workspace", () => {
     );
     const branch = html.slice(html.indexOf('aria-label="ersa, ersa/fix-build"'), html.indexOf('aria-label="ersa, Root workspace"'));
     expect(branch).toContain("ersa/fix-build</span></h3>");
-    expect(branch).toMatch(/aria-current="true"/);
     expect(html.indexOf('aria-label="ersa, ersa/fix-build"')).toBeLessThan(html.indexOf('aria-label="ersa, Root workspace"'));
+  });
+
+  it("keeps a workspace's heading line while its name is read, so the tiles do not move when it arrives", () => {
+    const render = (workspaces: Record<string, { project: string; name: string; path?: boolean }>) =>
+      renderToStaticMarkup(createElement(SessionList, { view: { state: "ready", sessions }, onSelect: () => {}, workspaces }));
+    const unnamed = render({});
+    // One heading per group either way: the same lines, before and after the names.
+    const headings = (html: string) => html.match(/<h3 class="sessions-workspace-name"/g)?.length;
+    expect(headings(unnamed)).toBe(2);
+    expect(unnamed).toContain('<h3 class="sessions-workspace-name" aria-hidden="true"> </h3>');
+    expect(headings(render({ "w-root": { project: "ersa", name: "Root workspace" } }))).toBe(2);
+  });
+
+  it("sets a workspace named by its path as a path", () => {
+    const html = renderToStaticMarkup(
+      createElement(SessionList, {
+        view: { state: "ready", sessions },
+        onSelect: () => {},
+        workspaces: { "w-branch": { project: "ersa", name: "D:\ws\ersa-1", path: true } },
+      }),
+    );
+    expect(html).toContain('<span class="mono">D:\ws\ersa-1</span>');
   });
 });

@@ -992,12 +992,19 @@ impl SessionManager {
         let live = handle.live().ok_or_else(|| handle.not_running())?;
         // A start that failed sets the failure before it lets go of the
         // start, so the reason is there when the wait ends.
-        let session = live.wait_ready().await.map_err(|e| match e {
-            SessionError::InvalidState(_) if lock(&handle.start_failure).is_some() => {
-                handle.not_running()
+        let session = match live.wait_ready().await {
+            Ok(session) => session,
+            Err(SessionError::InvalidState(_)) if lock(&handle.start_failure).is_some() => {
+                // The session's run ends just after; answer once it has, so
+                // `session.list` already says the session failed and the
+                // sender can tell a failed start from a slow one by its
+                // state. Bounded: a run that has not ended in time is
+                // answered as it stands.
+                let _ = wait_finished(&live, STOP_TIMEOUT).await;
+                return Err(handle.not_running());
             }
-            e => e,
-        })?;
+            Err(e) => return Err(e),
+        };
         let text = text.to_string();
         bounded(async move { session.send_user(&text).await }).await?;
         // The adapter recorded the message before writing it, so the sink
