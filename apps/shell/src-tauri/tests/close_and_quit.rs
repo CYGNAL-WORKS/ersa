@@ -163,7 +163,11 @@ async fn a_core_that_does_not_stop_in_time_is_ended_with_what_it_started() {
         .env(HELPER_PIDS, &pids_file)
         .spawn()
         .expect("start the wedged Core");
-    let (core, child) = read_pids(&pids_file).await;
+    let Some((core, child)) = try_read_pids(&pids_file).await else {
+        let _ = wedged.kill();
+        let _ = wedged.wait();
+        panic!("the wedged Core did not start");
+    };
     let outcome = tokio::spawn({
         let endpoint = endpoint.clone();
         async move {
@@ -251,8 +255,8 @@ fn a_window_attached_by_label_has_its_own_instance() {
     assert_eq!(instance::label_for(Some("replay")), "window-replay");
 }
 
-/// A Core that accepts connections and never answers, with a child of its
-/// own; writes `<own pid> <child pid>`.
+/// A Core that never accepts a connection, with a child of its own; writes
+/// `<own pid> <child pid>`.
 #[tokio::test]
 #[ignore = "a helper process for a_core_that_does_not_stop_in_time_is_ended_with_what_it_started"]
 async fn helper_wedged_core() {
@@ -260,7 +264,7 @@ async fn helper_wedged_core() {
         return;
     }
     let endpoint = std::env::var(HELPER_ENDPOINT).expect("an endpoint");
-    let mut listener = ersa_core::platform::Listener::bind(&endpoint)
+    let listener = ersa_core::platform::Listener::bind(&endpoint)
         .await
         .expect("bind");
     // Never waited on: the quit under test ends it, and this process with it.
@@ -272,10 +276,10 @@ async fn helper_wedged_core() {
         .spawn()
         .expect("start a child");
     write_pids(std::process::id(), child.id());
-    let mut held = Vec::new();
-    while let Ok(stream) = listener.accept().await {
-        held.push(stream);
-    }
+    // Wedged before it ever accepts: whoever connects takes the one waiting
+    // pipe instance, and nobody else gets in.
+    let _listener = listener;
+    tokio::time::sleep(Duration::from_secs(600)).await;
 }
 
 /// A Shell that launches Core, says `launched`, and waits to be killed.
@@ -323,6 +327,12 @@ fn write_pids(first: u32, second: u32) {
 
 /// The two process ids in `path`, once something has written them.
 async fn read_pids(path: &Path) -> (u32, u32) {
+    try_read_pids(path)
+        .await
+        .unwrap_or_else(|| panic!("nothing wrote {}", path.display()))
+}
+
+async fn try_read_pids(path: &Path) -> Option<(u32, u32)> {
     let read = async {
         loop {
             if let Ok(text) = std::fs::read_to_string(path) {
@@ -335,18 +345,23 @@ async fn read_pids(path: &Path) -> (u32, u32) {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     };
-    tokio::time::timeout(OPEN, read)
-        .await
-        .unwrap_or_else(|_| panic!("nothing wrote {}", path.display()))
+    tokio::time::timeout(OPEN, read).await.ok()
 }
 
-/// Reads `child`'s output until a line equals `line`; false if it ends first.
+/// Reads `child`'s output until a line equals `line`; false if it ends
+/// first, or does not come within [`OPEN`].
 fn wait_for_line(child: &mut Child, line: &str) -> bool {
     let stdout = child.stdout.take().expect("piped stdout");
-    BufReader::new(stdout)
-        .lines()
-        .map_while(Result::ok)
-        .any(|l| l.trim() == line)
+    let line = line.to_string();
+    let (found, result) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let seen = BufReader::new(stdout)
+            .lines()
+            .map_while(Result::ok)
+            .any(|l| l.trim() == line);
+        let _ = found.send(seen);
+    });
+    result.recv_timeout(OPEN).unwrap_or(false)
 }
 
 /// The stand-in backend CLI (examples/stand_in_backend.rs), which `cargo
