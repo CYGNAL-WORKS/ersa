@@ -56,7 +56,7 @@ typography:
   prose:
     fontFamily: "{typography.ui.fontFamily}"
     fontSize: 15px
-    lineHeight: 1.6
+    lineHeight: 1.5
   mono:
     fontFamily: "'JetBrains Mono', 'Cascadia Code', Consolas, monospace"
     fontSize: 13px
@@ -82,7 +82,7 @@ size:
   rail: 224px
   tile-min: 224px
   # The transcript's reading column.
-  measure: 672px
+  measure: 720px
   # The height past which a tool card's output or a long permission field scrolls.
   card-max: 224px
 motion:
@@ -132,11 +132,13 @@ Numeric readouts (context, cost, counts, durations) are set in the UI face with 
 
 The faces: Oxanium for the wordmark and titles (`wordmark`, `heading`), IBM Plex Sans for everything scanned and read (`ui`, `ui-small`, `prose`), and JetBrains Mono for code (`mono`). Code is set with ligatures off, so it shows the characters that were typed. All three are bundled with the interface, so every machine renders them rather than a fallback.
 
+The agent's text stays in IBM Plex Sans: a serif for `prose` was tried and rejected as harder to read.
+
 The wordmark has its own size, much larger than `heading`, and is drawn in `ink`, not `ink-muted`: it is the one large mark on the new-session screen.
 
 ## Layout
 
-Every gap, padding and size is a named step on one scale; space shows grouping, and the gap grows with the distance between ideas. The transcript keeps a reading column of comfortable width however wide the window gets. The shell layout is specified in `LAY-SHELL`. The scale, grid and fixed sizes in the front matter are placeholders.
+Every gap, padding and size is a named step on one scale; space shows grouping, and the gap grows with the distance between ideas. The transcript keeps a reading column of comfortable width (`measure`) however wide the window gets. Blocks in the transcript (messages, tool cards, permission requests) are separated by `space-md`, so the transcript is denser than before on purpose: more of the conversation fits on screen, and grouping comes from the blocks themselves. The shell layout is specified in `LAY-SHELL`. Apart from `measure`, the scale, grid and fixed sizes in the front matter are placeholders.
 
 ## Elevation & Depth
 
