@@ -1076,6 +1076,32 @@ async fn a_session_that_names_none_starts_with_the_backends_defaults() {
         (config.model, config.effort, config.permission_mode.as_str()),
         (None, None, "ask")
     );
+
+    // Stored as left to the backend, so a later start leaves them to it too,
+    // and still reported as its defaults after Core restarts.
+    client.result("core.shutdown", json!({})).await;
+    let TestCore { dir, task, .. } = core;
+    task.await.unwrap().unwrap();
+    let store = ersa_core::persistence::Store::open(&dir.path().join("data").join("ersa.db"))
+        .expect("open");
+    let stored = store.session(id.clone()).await.expect("get").expect("row");
+    assert_eq!(
+        (
+            stored.model,
+            stored.effort,
+            stored.permission_mode.as_deref()
+        ),
+        (None, None, Some("ask"))
+    );
+    drop(store);
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
+    let core = start_with_adapters(dir, |_| {}, adapters).await;
+    let mut client = core.client().await;
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(
+        (&row["model"], &row["effort"], &row["permission_mode"]),
+        (&json!("model-a"), &json!("high"), &json!("ask"))
+    );
 }
 
 /// Only what `backend.list` offers reaches the backend.

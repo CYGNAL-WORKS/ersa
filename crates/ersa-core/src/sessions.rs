@@ -605,8 +605,9 @@ impl SessionManager {
         self.app_log
             .retain_only(rows.iter().map(|row| row.id.clone()).collect());
         for mut row in rows {
-            // Sessions from before Core recorded these started with their
-            // backend's defaults.
+            // What the session did not name (or, for sessions from before
+            // Core recorded these, anything) it started with its backend's
+            // defaults.
             if let Some(adapter) = self.adapters.get(&row.backend) {
                 fill_defaults(&mut row, &adapter.choices());
             }
@@ -752,11 +753,12 @@ impl SessionManager {
         if self.closing.load(Ordering::SeqCst) {
             return Err(shutting_down());
         }
-        // What the session starts with is recorded, the backend's defaults
-        // where none was named (PROTO-CORE-API-R15).
+        // Only what was named is stored: one left to the backend stays its
+        // to choose on a later start too. The defaults are filled in for
+        // reporting (PROTO-CORE-API-R15), as they are at every load.
+        self.store.insert_session(row.clone()).await?;
         let mut row = row;
         fill_defaults(&mut row, &adapter.choices());
-        self.store.insert_session(row.clone()).await?;
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&handle.presented).title = title;
         // A new session has no record yet: the backend has not been told

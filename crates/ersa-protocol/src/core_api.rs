@@ -286,6 +286,8 @@ pub struct BackendListParams {
 #[serde(deny_unknown_fields)]
 pub struct BackendInfo {
     pub name: String,
+    /// The backend's own display name, such as `Claude Code`.
+    pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     pub status: BackendState,
