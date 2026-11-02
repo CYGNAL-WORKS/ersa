@@ -89,12 +89,13 @@ Verified by review at this level; testable requirements live in the flow and pro
 ## Open questions
 
 - Which local-inference harness to target first as proof that backends are pluggable beyond the two vendors.
-- How much of each vendor's native permission vocabulary to surface versus normalise.
+- How much of each vendor's native permission vocabulary to surface versus normalize.
 - Whether modes are per session, per workspace, or per project by default.
 - Perforce isolation model: per-session workspace with its own client spec, or shared workspace with changelists.
 
 ## Changes
 
+- 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-01: ADR 0017 replaces ADR 0010 in the front matter. No requirement IDs changed.
-- 2026-10-31: rewritten after adversarial review: problem statement centred on the three real differentiators (extensible harness, vendor-agnostic, non-git VCS); shelf-based attention from the rail; rail tile contents specified; structured-events principle; packs as neutral definition; content mode deferred.
+- 2026-10-31: rewritten after adversarial review: problem statement centered on the three real differentiators (extensible harness, vendor-agnostic, non-git VCS); shelf-based attention from the rail; rail tile contents specified; structured-events principle; packs as neutral definition; content mode deferred.
 - 2026-10-31: created.

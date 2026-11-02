@@ -1,6 +1,6 @@
 # Third-party skills
 
-These skills are copied from [mattpocock/skills](https://github.com/mattpocock/skills) at commit `4ae2317ddb22b046e26455e4f9c9b3aaaf62212d` (2026-10-31), under the MIT licence reproduced below. Every file was read in full before it was committed. The commit was one day old when copied, inside the 7-day window ADR 0015 sets for packages; the full read stands in for the wait, and the next update must take a commit at least 7 days old.
+These skills are copied from [mattpocock/skills](https://github.com/mattpocock/skills) at commit `4ae2317ddb22b046e26455e4f9c9b3aaaf62212d` (2026-10-31), under the MIT license reproduced below. Every file was read in full before it was committed. The commit was one day old when copied, inside the 7-day window ADR 0015 sets for packages; the full read stands in for the wait, and the next update must take a commit at least 7 days old.
 
 **Copied:** `codebase-design`, `diagnosing-bugs`, `domain-modeling`, `grill-me`, `grill-with-docs`, `grilling`, `handoff`, `implement`, `pr`, `research`, `retro`, `tdd`, `to-tickets`, `wait-what`, `writing-for-agents`; and, as `docs/agents/issue-tracker.md` and `docs/agents/triage-labels.md`, two reference files from `setup-matt-pocock-skills`. The per-agent `agents/openai.yaml` files were left out.
 
@@ -15,7 +15,7 @@ These skills are copied from [mattpocock/skills](https://github.com/mattpocock/s
 
 **Not copied, on purpose:** `code-review` (Claude Code's built-in `/code-review` and the reviewers in `implement-ticket` cover it, and the name would shadow the built-in), `setup-matt-pocock-skills`, `to-spec` (Ersa's specs are briefs), `implement-spec`, `wayfinder` and `triage` (to revisit when the tracker carries more than tickets), and the rest. `implement-ticket` is Ersa's own.
 
-**Integrity:** `.claude/skills/VENDORED.sha256` pins each copied file (text normalised to LF), and `node scripts/manifest.mjs --check` fails when one changes without its line being updated. To update: take an upstream commit at least 7 days old, read the upstream diff, re-apply the changes above, update the commit here and the hashes.
+**Integrity:** `.claude/skills/VENDORED.sha256` pins each copied file (text normalized to LF), and `node scripts/manifest.mjs --check` fails when one changes without its line being updated. To update: take an upstream commit at least 7 days old, read the upstream diff, re-apply the changes above, update the commit here and the hashes.
 
 ---
 
