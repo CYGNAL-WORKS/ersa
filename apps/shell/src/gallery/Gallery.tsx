@@ -13,6 +13,7 @@ import { CoreStatus } from "../components/CoreStatus";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { NewSessionScreen } from "../components/NewSessionScreen";
 import { ProjectList } from "../components/ProjectList";
+import { QuitQuestion } from "../components/QuitQuestion";
 import { SessionList } from "../components/SessionList";
 import { Transcript } from "../components/Transcript";
 import type { CoreView } from "../core/connection";
@@ -268,6 +269,22 @@ const entries: Entry[] = [
   {
     name: "CoreStatus",
     states: coreViews.map(([label, view]) => [label, <CoreStatus view={view} onRetry={() => {}} />]),
+  },
+  {
+    name: "QuitQuestion",
+    states: [
+      ["One session busy", <QuitQuestion busy={1} onQuit={() => {}} onCancel={() => {}} takeFocus={false} />],
+      ["Sessions not counted", <QuitQuestion busy={undefined} onQuit={() => {}} onCancel={() => {}} takeFocus={false} />],
+      [
+        "Several, as it opens",
+        <QuitQuestion busy={3} onQuit={() => {}} onCancel={() => {}} takeFocus={false} forceCancelFocus />,
+      ],
+      ["Quitting", <QuitQuestion busy={3} onQuit={() => {}} onCancel={() => {}} takeFocus={false} quitting />],
+      [
+        "Quit failed",
+        <QuitQuestion busy={2} onQuit={() => {}} onCancel={() => {}} takeFocus={false} failed="Ersa did not quit: not attached to Core" />,
+      ],
+    ],
   },
   {
     name: "ProjectList",

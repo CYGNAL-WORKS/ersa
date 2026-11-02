@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-shell-quit-heard"
+description = "Enables the shell_quit_heard command without any pre-configured scope."
+commands.allow = ["shell_quit_heard"]
+
+[[permission]]
+identifier = "deny-shell-quit-heard"
+description = "Denies the shell_quit_heard command without any pre-configured scope."
+commands.deny = ["shell_quit_heard"]

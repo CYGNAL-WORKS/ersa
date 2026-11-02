@@ -10,10 +10,9 @@
 
 mod common;
 
-use std::path::Path;
 use std::time::Duration;
 
-use common::{core_program, unique_label};
+use common::{private_location, unique_label};
 use ersa_shell::bridge::{BridgeError, CoreLink, LinkEvent, LinkOptions};
 use ersa_shell::launch::{self, CoreLocation, How};
 use serde_json::{Value, json};
@@ -23,28 +22,6 @@ use tokio::sync::mpsc;
 /// Above the location's 60 s start timeout, so that one reports first.
 const OPEN: Duration = Duration::from_secs(90);
 const CLEANUP: Duration = Duration::from_secs(30);
-
-/// A Core location private to this test: the user's endpoint labelled with
-/// the process id and a counter (`serve --endpoint <label>`), and a data
-/// directory in `dir`.
-fn private_location(dir: &Path) -> CoreLocation {
-    let label = unique_label("shell-test");
-    let endpoint = ersa_core::platform::labelled_endpoint(&label).expect("an endpoint");
-    CoreLocation {
-        program: core_program(),
-        endpoint,
-        serve_args: vec![
-            "--endpoint".into(),
-            label.into(),
-            "--data-dir".into(),
-            dir.join("data").into_os_string(),
-        ],
-        env: Vec::new(),
-        log_file: Some(dir.join("core.log")),
-        start_timeout: Duration::from_secs(60),
-        launch: true,
-    }
-}
 
 async fn open(location: &CoreLocation) -> (CoreLink, How, mpsc::UnboundedReceiver<LinkEvent>) {
     try_open(location)

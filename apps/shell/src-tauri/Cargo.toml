@@ -39,12 +39,36 @@ ersa-core = { path = "../../../crates/ersa-core" }
 ersa-protocol = { path = "../../../crates/ersa-protocol" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", features = [] }
+# `tray-icon`: the icon closing the window hides to (FLOW-CLOSE-AND-QUIT).
+tauri = { version = "2", features = ["tray-icon"] }
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 
+# Watching and ending the Core process at Quit, used only by src/process.rs:
+# the pipe's server process, and waiting on or terminating it.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
+# The socket's peer process, and signals, used only by src/process.rs.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"
+
+# A job object that ends what the tests start when the test run ends, used
+# only by tests/common/mod.rs.
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
 
 # The root workspace's lints (Cargo.toml there).
 [lints]
