@@ -201,11 +201,11 @@ fn show_window(app: &AppHandle) {
 /// no session the window could name, and the Shell quits at once.
 async fn quit_requested(app: AppHandle) {
     let shell = app.state::<Shell>();
-    // An attach still in progress holds the lock, maybe for a launch; the
-    // window cannot have counted sessions yet, so that counts as none.
-    let attached = shell
-        .link
-        .try_lock()
+    // Requests hold the lock only for a moment; an attach still in progress
+    // holds it for longer, maybe for a launch, and then the window cannot
+    // have counted sessions yet, so that counts as none.
+    let attached = tokio::time::timeout(Duration::from_secs(2), shell.link.lock())
+        .await
         .is_ok_and(|link| link.as_ref().is_some_and(|link| !link.is_closed()));
     if !attached {
         return quit_now(&app).await;

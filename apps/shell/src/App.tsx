@@ -11,7 +11,7 @@ import { SessionList, newestFirst } from "./components/SessionList";
 import { Transcript } from "./components/Transcript";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
-import { type QuitAsk, type ShellControl, answerQuit, cancelQuit } from "./core/shell";
+import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { Project, Session } from "./protocol/core-api.gen";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 
@@ -120,9 +120,19 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     if (!shell) return;
     return shell.onQuitRequested(() => {
       answerQuit(client, shell, knownSessions.current).then(
-        // Asked again while open: the count is the fresh one, and the window goes back where it first was.
-        (ask) => ask && setQuitAsk((open) => ({ ...ask, wasHidden: open?.wasHidden ?? ask.wasHidden, quitting: false })),
-        (error) => setQuitAsk((open) => open && { ...open, quitting: false, failed: describeError(error) }),
+        // Asked again while open: the count is the fresh one, and Cancel puts the window back in the tray if it
+        // was there before either Quit.
+        (ask) => ask && setQuitAsk((open) => ({ ...ask, wasHidden: ask.wasHidden || (open?.wasHidden ?? false), quitting: false })),
+        // The Shell no longer quits by itself once the window has heard, so a failed answer is said, never dropped.
+        (error) => {
+          setQuitAsk((open) => ({
+            busy: open?.busy ?? busySessions(knownSessions.current),
+            wasHidden: open?.wasHidden ?? false,
+            quitting: false,
+            failed: `Ersa did not quit: ${describeError(error)}`,
+          }));
+          shell.show().catch(() => {});
+        },
       );
     });
   }, [client, shell]);
