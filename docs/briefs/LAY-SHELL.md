@@ -11,7 +11,7 @@ adrs: [0008]
 
 ## Intent
 
-The fixed structure of the Ersa window: a rail on the left, the transcript in the centre with the composer beneath it, and the workbench on the right. The rail and workbench are collapsible and resizable; the transcript always has the most space.
+The fixed structure of the Ersa window: a rail on the left, the transcript in the center with the composer beneath it, and the workbench on the right. The rail and workbench are collapsible and resizable; the transcript always has the most space.
 
 ```
 +----------+----------------------------+-----------+
@@ -34,7 +34,7 @@ The transcript header shows the active session's title. The title is renamed in 
 
 ## Development
 
-A debug build attaches to a labelled Core endpoint, such as a replay, only when told to: `ERSA_ATTACH=<label>` makes it attach there and never launch a Core, and the Core tile reads "Attached to <label>". A release build ignores the variable and always uses the user's own Core.
+A debug build attaches to a labeled Core endpoint, such as a replay, only when told to: `ERSA_ATTACH=<label>` makes it attach there and never launch a Core, and the Core tile reads "Attached to <label>". A release build ignores the variable and always uses the user's own Core.
 
 ## Open questions
 
@@ -44,13 +44,16 @@ A debug build attaches to a labelled Core endpoint, such as a replay, only when 
 - Whether the shelf overlays the transcript or pushes it, and how several pending shelves queue.
 - Where global status (connected hosts, usage today) lives.
 - Keyboard model: which shortcuts the shell owns versus the active pane.
+- Whether the user can reorder the rail's tiles or change its sort order; today it lists sessions newest first. DESIGN.md says how tiles move if so.
 
 ## Changes
 
+- 2026-11-02: open question on reordering and sorting the rail, which DESIGN.md's motion rules anticipate. No requirement IDs changed.
+- 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: the title is renamed in place by double-click or keyboard, with no button (owner); open question on the context ring's tone near full.
 - 2026-11-02: from #53 inbox: the backend chip also shows a lone backend that is missing or failed.
 - 2026-11-02: the new-session screen and the session controls beneath the composer, from the owner's sketch (FLOW-NEW-SESSION).
-- 2026-11-01: from #14 inbox: a debug build attaches to a labelled endpoint when told to (Development).
+- 2026-11-01: from #14 inbox: a debug build attaches to a labeled endpoint when told to (Development).
 
-- 2026-10-31: tile contents and shelf behaviour added from the owner's description; attention mark specified as edge or glyph.
+- 2026-10-31: tile contents and shelf behavior added from the owner's description; attention mark specified as edge or glyph.
 - 2026-10-31: created as draft.
