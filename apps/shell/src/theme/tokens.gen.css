@@ -17,7 +17,7 @@
   --type-wordmark-leading: 1;
   --type-prose-family: 'IBM Plex Sans', 'Segoe UI Variable', system-ui, sans-serif;
   --type-prose-size: 15px;
-  --type-prose-leading: 1.6;
+  --type-prose-leading: 1.5;
   --type-mono-family: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
   --type-mono-size: 13px;
   --type-mono-leading: 1.55;
@@ -35,7 +35,7 @@
   --line-hairline: 1px;
   --size-rail: 224px;
   --size-tile-min: 224px;
-  --size-measure: 672px;
+  --size-measure: 720px;
   --size-card-max: 224px;
   --motion-instant: 80ms;
   --motion-quick: 160ms;
