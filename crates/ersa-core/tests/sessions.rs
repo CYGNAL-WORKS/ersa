@@ -1053,20 +1053,22 @@ async fn a_session_starts_with_the_model_effort_and_permission_mode_it_names() {
     assert_eq!(chosen(&session_row(&mut client, &id).await), named);
 }
 
-/// Absent, each is the backend's default: reported as such, and left to the
-/// backend for the model and effort, while the permission mode is always
-/// stated.
+/// A value left out is passed as nothing and reported as absent, also
+/// after Core restarts: the backend chooses it, and Core does not know what
+/// it chose.
 // verifies: PROTO-CORE-API-R16
 #[tokio::test(flavor = "multi_thread")]
-async fn a_session_that_names_none_starts_with_the_backends_defaults() {
+async fn a_session_that_names_none_leaves_them_to_its_backend() {
     let (core, stats) = start_fake(FakeAdapter::new(1)).await;
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
+    let absent = |row: &Value| {
+        ["model", "effort", "permission_mode"]
+            .iter()
+            .all(|field| row.get(*field).is_none())
+    };
     let row = session_row(&mut client, &id).await;
-    assert_eq!(
-        (&row["model"], &row["effort"], &row["permission_mode"]),
-        (&json!("model-a"), &json!("high"), &json!("ask"))
-    );
+    assert!(absent(&row), "{row:#}");
     client
         .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
         .await;
@@ -1074,34 +1076,17 @@ async fn a_session_that_names_none_starts_with_the_backends_defaults() {
     let config = stats.configs.lock().unwrap()[0].clone();
     assert_eq!(
         (config.model, config.effort, config.permission_mode.as_str()),
-        (None, None, "ask")
+        (None, None, "")
     );
 
-    // Stored as left to the backend, so a later start leaves them to it too,
-    // and still reported as its defaults after Core restarts.
     client.result("core.shutdown", json!({})).await;
     let TestCore { dir, task, .. } = core;
     task.await.unwrap().unwrap();
-    let store = ersa_core::persistence::Store::open(&dir.path().join("data").join("ersa.db"))
-        .expect("open");
-    let stored = store.session(id.clone()).await.expect("get").expect("row");
-    assert_eq!(
-        (
-            stored.model,
-            stored.effort,
-            stored.permission_mode.as_deref()
-        ),
-        (None, None, Some("ask"))
-    );
-    drop(store);
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
     let core = start_with_adapters(dir, |_| {}, adapters).await;
     let mut client = core.client().await;
     let row = session_row(&mut client, &id).await;
-    assert_eq!(
-        (&row["model"], &row["effort"], &row["permission_mode"]),
-        (&json!("model-a"), &json!("high"), &json!("ask"))
-    );
+    assert!(absent(&row), "{row:#}");
 }
 
 /// Only what `backend.list` offers reaches the backend.

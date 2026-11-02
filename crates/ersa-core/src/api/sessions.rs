@@ -2,7 +2,7 @@
 //! parsed params and returns the typed result or an [`ApiError`]; the work
 //! is the session manager's.
 
-use ersa_adapter::{BackendChoices, Direction, PermissionDecision, SessionConfig};
+use ersa_adapter::{Direction, PermissionDecision, SessionConfig};
 use ersa_protocol::core_api::{
     AnswerQuestionParams, Choice, DecidePermissionParams, Empty, IdParams, RawDirection,
     RawLogEntry, RawLogParams, Session, SessionCreateParams, SessionSendParams, SessionSendResult,
@@ -62,11 +62,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         &params.permission_mode,
         &choices.permission_modes,
     )?;
-    // Always stated to the backend: the named one, else the default.
-    let permission_mode = params
-        .permission_mode
-        .clone()
-        .unwrap_or_else(|| BackendChoices::default_of(&choices.permission_modes));
+
     let transport = core
         .session_transport_for(&project.host_id)
         .ok_or_else(|| {
@@ -103,17 +99,18 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         backend_session_id: None,
         mode: params.mode,
         cwd: workspace.path.clone(),
-        // The session manager records the backend's defaults for those not
-        // named (PROTO-CORE-API-R16).
+        // Only what was named; a value left out is the backend's to choose
+        // (PROTO-CORE-API-R16).
         model: params.model.clone(),
         effort: params.effort.clone(),
-        permission_mode: Some(permission_mode.clone()),
+        permission_mode: params.permission_mode.clone(),
     };
     let config = SessionConfig {
         cwd: workspace.path,
         // Modes are presets of their own (milestone M3), not the backend's
-        // permission mode.
-        permission_mode,
+        // permission mode. Empty when not named: the adapter then states the
+        // backend's own default, as Claude Code's must be stated.
+        permission_mode: params.permission_mode.unwrap_or_default(),
         // Passed only when named, so the backend's own defaults apply
         // otherwise (PROTO-CLAUDE-CODE-STREAM, Invocation).
         model: params.model,

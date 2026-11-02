@@ -3,7 +3,7 @@
   "$id": "https://github.com/KPandaK/ersa/protocol/schema/core-api.schema.json",
   "title": "Ersa Core API",
   "description": "The Core request/response API (PROTO-CORE-API): newline-delimited JSON-RPC 2.0 between the Interface and Core. Each method has a `<method>.params` and a `<method>.result` definition; each notification a `<method>.notification` definition. Objects are closed (additionalProperties: false) except settings and the shapes reserved for later milestones. Agent events are not copied here: session.event carries an envelope from agent-events.schema.json by reference.",
-  "x-api-version": 2,
+  "x-api-version": 3,
   "$ref": "#/$defs/message",
   "$defs": {
     "message": {
@@ -1467,9 +1467,6 @@
         "workspace_id",
         "host_id",
         "backend",
-        "model",
-        "effort",
-        "permission_mode",
         "state",
         "created_at",
         "tile"
@@ -1489,15 +1486,15 @@
         },
         "model": {
           "type": "string",
-          "description": "The model the session started with, an id from backend.list."
+          "description": "The model session.create was given, an id from backend.list. Absent when left out: the backend's own default."
         },
         "effort": {
           "type": "string",
-          "description": "The effort the session started with, an id from backend.list."
+          "description": "The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default."
         },
         "permission_mode": {
           "type": "string",
-          "description": "The permission mode the session started with, an id from backend.list."
+          "description": "The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default."
         },
         "mode": {
           "type": "string"
@@ -1940,15 +1937,15 @@
         },
         "model": {
           "type": "string",
-          "description": "An id from backend.list; the backend's default when absent."
+          "description": "An id from backend.list; left to the backend when absent."
         },
         "effort": {
           "type": "string",
-          "description": "An id from backend.list; the backend's default when absent."
+          "description": "An id from backend.list; left to the backend when absent."
         },
         "permission_mode": {
           "type": "string",
-          "description": "An id from backend.list; the backend's default when absent."
+          "description": "An id from backend.list; left to the backend when absent."
         },
         "mode": {
           "type": "string"

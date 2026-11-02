@@ -139,8 +139,7 @@ impl Adapter for FakeAdapter {
         BACKEND
     }
 
-    /// Two of each, the first model and the second effort and the first
-    /// permission mode the defaults, so a test can tell named from default.
+    /// Two of each, with a default marked in each list as Claude Code's are.
     fn choices(&self) -> BackendChoices {
         let list = |ids: [&str; 2], default: &str| -> Vec<Choice> {
             ids.iter()

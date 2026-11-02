@@ -22,9 +22,8 @@ pub struct SessionRow {
     /// Ersa's mode for the session (milestone M3).
     pub mode: Option<String>,
     /// The model, effort and permission mode the session named, ids from
-    /// `backend.list`. `None` for one it left to its backend (and for every
-    /// session created before Core recorded them): it started with the
-    /// backend's default.
+    /// `backend.list`. `None` for one it left to its backend, and for every
+    /// session created before Core recorded them (PROTO-CORE-API-R16).
     pub model: Option<String>,
     pub effort: Option<String>,
     pub permission_mode: Option<String>,
