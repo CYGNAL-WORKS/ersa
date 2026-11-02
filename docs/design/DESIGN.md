@@ -108,15 +108,12 @@ glow:
   # Custom group. Accent glows as box shadows, built from color roles like `material`.
   # In dark a glow is a soft blur; in light a wide blur reads as a shadow, so light draws a tight tinted ring.
   light:
-    # The one focused or waiting element, at rest.
+    # The one focused or waiting element.
     focal: "0 0 0 1px {colors.accent}, 0 0 0 4px color-mix(in oklab, {colors.accent} 16%, transparent), 0 0 12px 2px color-mix(in oklab, {colors.accent} 20%, transparent)"
-    # The focal glow at the top of a breath.
-    focal-peak: "0 0 0 1px {colors.accent}, 0 0 0 6px color-mix(in oklab, {colors.accent} 22%, transparent), 0 0 18px 4px color-mix(in oklab, {colors.accent} 26%, transparent)"
     # The needs-you glyph in the rail.
     attention: "0 0 5px color-mix(in oklab, {colors.accent} 45%, transparent)"
   dark:
     focal: "0 0 0 1px {colors.accent}, 0 0 16px -4px color-mix(in oklab, {colors.accent} 32%, transparent)"
-    focal-peak: "0 0 0 1px {colors.accent}, 0 0 24px -2px color-mix(in oklab, {colors.accent} 42%, transparent)"
     attention: "0 0 5px color-mix(in oklab, {colors.accent} 45%, transparent)"
 motion:
   # Custom group. Durations in ms, easings as CSS cubic-bezier.
@@ -196,7 +193,7 @@ Depth comes from tone and light, not from drop shadows:
 - **Focal glow.** The one focused or waiting element (an open permission request, the focused composer) glows in the accent and fades in as it arrives, over `motion-settle` with `motion-ease-out`. In dark it is a soft blur; in light a wide blur reads as a shadow, so it is a tight tinted ring instead.
 - **Not a halo.** No luminous backdrop or halo around the window: tried, and too strong.
 
-Each of these is a token, built from color roles so it follows the theme and the palette. `material-wash` is the canvas. `material-tile` lights tiles and cards from the top, `material-rail` settles the rail toward the canvas at its foot, `material-primary` is the primary button, and `material-composer` is the composer. The open session's tile is `material-open-session`, a quiet neutral highlight with no accent outline. `glow-focal` is the focal glow at rest and `glow-focal-peak` its brightest point when it breathes; `glow-attention` is the faint glow on the needs-you glyph. Light and dark set their own glows; the materials are the same in both. While a permission request is open it holds the focal glow, and the focused composer shows its focus by its edge alone, so the screen keeps one focal glow.
+Each of these is a token, built from color roles so it follows the theme and the palette. `material-wash` is the canvas. `material-tile` lights tiles and cards from the top, `material-rail` settles the rail toward the canvas at its foot, `material-primary` is the primary button, and `material-composer` is the composer. The open session's tile is `material-open-session`, a quiet neutral highlight with no accent outline. `glow-focal` is the focal glow; `glow-attention` is the faint glow on the needs-you glyph. Light and dark set their own glows; the materials are the same in both. While a permission request is open it holds the focal glow, and the focused composer shows its focus by its edge alone, so the screen keeps one focal glow.
 
 Shadows are kept for transient layers (menus, popovers, drag previews), soft and short.
 
