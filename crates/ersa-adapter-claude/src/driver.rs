@@ -22,10 +22,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, Direction, LineReader, LineWriter,
-    PermissionDecision, Process, ProcessExit, ProcessSpec, Projector, RecordEvent, RecordSummary,
-    SessionConfig, Transport, async_trait,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, LineReader,
+    LineWriter, PermissionDecision, Process, ProcessExit, ProcessSpec, Projector, RecordEvent,
+    RecordSummary, SessionConfig, Transport, async_trait,
 };
+use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::PermissionBehavior;
 use serde_json::{Value, json};
 use tokio::sync::{oneshot, watch};
@@ -131,11 +132,65 @@ pub fn invocation_args(config: &SessionConfig) -> Vec<String> {
     .into_iter()
     .map(String::from)
     .collect();
+    // Named by the session, or left out so the CLI's own defaults apply.
     if let Some(model) = &config.model {
         args.push("--model".into());
         args.push(model.clone());
     }
+    if let Some(effort) = &config.effort {
+        args.push("--effort".into());
+        args.push(effort.clone());
+    }
     args
+}
+
+/// The models, efforts and permission modes `backend.list` offers for
+/// Claude Code (PROTO-CLAUDE-CODE-STREAM, Invocation). The defaults are what
+/// the CLI starts with when no flag names one: 2.1.316 sessions started
+/// without `--model` or `--effort` ran Opus at medium effort (the 2.1.316
+/// session-record fixtures). `default` asks before every action outside the
+/// allow rules (FLOW-NEW-SESSION-R02). `bypassPermissions` is not offered.
+fn choices() -> BackendChoices {
+    let list = |items: &[(&str, &str)], default: &str| -> Vec<Choice> {
+        items
+            .iter()
+            .map(|&(id, label)| Choice {
+                id: id.into(),
+                label: label.into(),
+                default: id == default,
+            })
+            .collect()
+    };
+    BackendChoices {
+        models: list(
+            &[
+                ("fable", "Fable"),
+                ("opus", "Opus"),
+                ("sonnet", "Sonnet"),
+                ("haiku", "Haiku"),
+            ],
+            "opus",
+        ),
+        efforts: list(
+            &[
+                ("low", "Low"),
+                ("medium", "Medium"),
+                ("high", "High"),
+                ("xhigh", "Extra high"),
+                ("max", "Max"),
+            ],
+            "medium",
+        ),
+        permission_modes: list(
+            &[
+                ("default", "Ask before acting"),
+                ("acceptEdits", "Accept edits"),
+                ("plan", "Plan"),
+                ("auto", "Auto"),
+            ],
+            "default",
+        ),
+    }
 }
 
 /// The attestation `initialize` carries for a trusted project's session: the
@@ -257,8 +312,16 @@ impl Adapter for ClaudeAdapter {
         crate::BACKEND
     }
 
+    fn label(&self) -> &str {
+        "Claude Code"
+    }
+
     fn tested_versions(&self) -> Option<(&'static str, &'static str)> {
         Some((crate::MIN_TESTED_VERSION, crate::MAX_TESTED_VERSION))
+    }
+
+    fn choices(&self) -> BackendChoices {
+        choices()
     }
 
     fn set_environment(&self, spec: &mut ProcessSpec) {
