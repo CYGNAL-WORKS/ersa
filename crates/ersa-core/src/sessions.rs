@@ -44,12 +44,14 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, OpenElsewhere,
     PermissionDecision, ProcessExit, RawLine, RecordEvent, RecordSummary, SessionConfig, Transport,
 };
 use ersa_protocol::core_api::rpc::Notification;
 use ersa_protocol::core_api::{Session, SessionEventParams, SessionTileParams, Tile};
-use ersa_protocol::events::{Envelope, ErrorCode, ErrorEvent, Event, LifecycleState};
+use ersa_protocol::events::{
+    Envelope, ErrorCode, ErrorEvent, Event, LifecycleState, NoticeCode, NoticeLevel, SessionNotice,
+};
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::AbortHandle;
 
@@ -81,6 +83,11 @@ const START_WAIT: Duration = Duration::from_secs(120);
 /// Each writes one line to the backend; one still waiting after this has a
 /// backend that stopped reading.
 const ADAPTER_CALL: Duration = Duration::from_secs(30);
+
+/// How long asking an adapter whether another process has a session open
+/// may take. The answer only informs the user, so a registry that hangs
+/// makes it unknown rather than holding up what was asked for.
+const OPEN_ELSEWHERE_CHECK: Duration = Duration::from_secs(5);
 
 /// How many events a replay sends before it looks again for whether the
 /// subscription is still wanted.
@@ -177,6 +184,11 @@ struct Handle {
     /// a file system that hangs gathers one stuck read per session, not one
     /// per attempt.
     record_read: ReadSlot<RecordReadResult>,
+    /// The same for taking the record's version, to check whether a read an
+    /// open joined still holds: every open that needs the check joins the
+    /// one running, so on a disk that hangs for stats these checks hold one
+    /// thread per session, as each slot here does.
+    version_check: ReadSlot<Result<Option<String>, String>>,
     /// The same for reading the record's title and creation time.
     summary_read: ReadSlot<Result<Option<RecordSummary>, String>>,
     /// Set when the session is removed, for reads of its record that
@@ -494,6 +506,7 @@ impl Handle {
             ending: Mutex::new(None),
             start_failure: Mutex::new(None),
             record_read: tokio::sync::Mutex::new(None),
+            version_check: tokio::sync::Mutex::new(None),
             summary_read: tokio::sync::Mutex::new(None),
             removed: Arc::default(),
         }
@@ -947,6 +960,17 @@ impl SessionManager {
                     format!("host {} cannot be reached", row.host_id),
                 )))
             })?;
+            // Appended whatever the answer: the other process shows the new
+            // title once it reads its record again (PROTO-CLAUDE-CODE-STREAM,
+            // Renaming), so the user is told rather than refused.
+            notice_if_open_elsewhere(
+                &handle,
+                Arc::clone(&adapter),
+                Arc::clone(&transport),
+                &backend_id,
+                "may show the old title, and write it again, until it next reads the session",
+            )
+            .await;
             let (cwd, title) = (row.cwd, title.to_string());
             let renamed = bounded(async move {
                 adapter
@@ -1205,12 +1229,30 @@ impl SessionManager {
                             if read.is_err() {
                                 return true;
                             }
-                            match adapter
-                                .record_version(transport, &row.cwd, backend_id)
-                                .await
+                            let (adapter, cwd, id) =
+                                (Arc::clone(&adapter), row.cwd.clone(), backend_id.clone());
+                            let check = move || {
+                                tokio::spawn(async move {
+                                    adapter
+                                        .record_version(transport, &cwd, &id)
+                                        .await
+                                        .map_err(|e| e.to_string())
+                                })
+                            };
+                            // A check that began before this open may predate a
+                            // change, so a joiner takes the next one (`false`).
+                            // The open's own timeout around this check bounds it
+                            // and leaves the check running for the next open; one
+                            // here too could run out first and read again, to
+                            // stall on the same disk.
+                            let unbounded = Duration::MAX;
+                            match read_once(&handle.version_check, unbounded, check, async |_| {
+                                false
+                            })
+                            .await
                             {
-                                Ok(now) => still_holds(read, now.as_deref()),
-                                Err(_) => false,
+                                Some(Ok(now)) => still_holds(read, now.as_deref()),
+                                Some(Err(_)) | None => false,
                             }
                         };
                         read_once(&handle.record_read, RECORD_READ, start, still_current)
@@ -1359,6 +1401,54 @@ fn is_rfc3339(text: &str) -> bool {
         rest = &fraction[end..];
     }
     rest == "Z"
+}
+
+/// Asks the adapter whether a process other than this Core's has the
+/// session open, before Core resumes it or writes to its record, and when
+/// one has, or the adapter cannot tell, adds a `session.notice` saying so to
+/// the session's open view (PROTO-AGENT-EVENTS-R14). It never stops what
+/// follows. `consequence` says what the other process does meanwhile.
+///
+/// Notices are not part of the record, so one reaches the clients reading
+/// the session now; with none reading, there is nobody to tell.
+async fn notice_if_open_elsewhere(
+    handle: &Handle,
+    adapter: Arc<dyn Adapter>,
+    transport: Arc<dyn Transport>,
+    backend_id: &str,
+    consequence: &str,
+) {
+    let id = backend_id.to_string();
+    let check = tokio::spawn(async move { adapter.open_elsewhere(transport, &id).await });
+    let answer = match tokio::time::timeout(OPEN_ELSEWHERE_CHECK, check).await {
+        Ok(Ok(answer)) => answer,
+        // A check that panicked or hung could not tell.
+        Ok(Err(_)) | Err(_) => OpenElsewhere::Unknown,
+    };
+    let notice = match answer {
+        OpenElsewhere::No => return,
+        OpenElsewhere::Yes { pid } => SessionNotice {
+            level: NoticeLevel::Warning,
+            code: NoticeCode::SessionOpenElsewhere,
+            message: format!(
+                "Another process (pid {pid}) has this session open, and {consequence}."
+            ),
+            pid: Some(pid),
+        },
+        OpenElsewhere::Unknown => SessionNotice {
+            level: NoticeLevel::Info,
+            code: NoticeCode::SessionOpenCheckFailed,
+            message: "Ersa could not tell whether another process has this session open.".into(),
+            pid: None,
+        },
+    };
+    let mut hub = lock(&handle.hub);
+    let Some(view) = hub.view.as_mut() else {
+        tracing::info!(session = %handle.id, code = ?notice.code, "no one is reading the session to tell");
+        return;
+    };
+    let event = view.notice(notice, &now_rfc3339());
+    publish(&mut hub, &handle.id, &[event]);
 }
 
 /// Runs one adapter call, answering after at most [`ADAPTER_CALL`]: a
@@ -2183,12 +2273,17 @@ mod tests {
     }
 
     /// An adapter whose record and summary reads wait on gates, as reads on
-    /// a disk that stopped answering do, and which counts its forgets.
+    /// a disk that stopped answering do, and which counts its forgets. While
+    /// `stats_hang` is set, taking the record's version never returns, as a
+    /// stat on such a disk does; `hung_stats` counts those calls, each of
+    /// which would hold a blocking thread for ever.
     #[derive(Default)]
     struct GatedReads {
         record: Notify,
         summary: Notify,
         forgets: std::sync::atomic::AtomicUsize,
+        stats_hang: AtomicBool,
+        hung_stats: std::sync::atomic::AtomicUsize,
     }
 
     #[ersa_adapter::async_trait]
@@ -2225,21 +2320,31 @@ mod tests {
             self.summary.notified().await;
             Ok(None)
         }
+        async fn record_version(
+            &self,
+            _transport: Arc<dyn Transport>,
+            _cwd: &str,
+            _backend_session_id: &str,
+        ) -> Result<Option<String>, AdapterError> {
+            if self.stats_hang.load(Ordering::SeqCst) {
+                self.hung_stats.fetch_add(1, Ordering::SeqCst);
+                std::future::pending::<()>().await;
+            }
+            Ok(None)
+        }
         fn forget_record(&self, _cwd: &str, _backend_session_id: &str) {
             self.forgets.fetch_add(1, Ordering::SeqCst);
         }
     }
 
-    // Paused time: the reads' timeouts run out as soon as nothing else can.
-    #[tokio::test(start_paused = true)]
-    async fn reads_that_outlive_a_removed_session_have_the_adapter_forget_its_record() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = Store::open(&dir.path().join("ersa.db")).unwrap();
-        let (app_log, _) = AppLog::open(dir.path()).unwrap();
-        let adapter = Arc::new(GatedReads::default());
+    /// A manager with one session, `s-gated`, of the [`GatedReads`]
+    /// adapter, which it never started.
+    fn gated_manager(dir: &std::path::Path, adapter: &Arc<GatedReads>) -> SessionManager {
+        let store = Store::open(&dir.join("ersa.db")).unwrap();
+        let (app_log, _) = AppLog::open(dir).unwrap();
         let manager = SessionManager::new(
             store,
-            vec![Arc::clone(&adapter) as Arc<dyn Adapter>],
+            vec![Arc::clone(adapter) as Arc<dyn Adapter>],
             Arc::new(app_log),
         );
         let row = SessionRow {
@@ -2256,9 +2361,12 @@ mod tests {
         };
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&manager.sessions).insert(handle.id.clone(), handle);
+        manager
+    }
 
-        // Opening it: the record read and then the summary read time out and
-        // are left running.
+    /// Opens `s-gated`'s view from the start, as a client that subscribes
+    /// with nobody else reading does, and lets the subscription go.
+    async fn open_gated(manager: &SessionManager) {
         let transport: Arc<dyn Transport> = Arc::new(ersa_adapter::LocalTransport);
         let opened = manager
             .subscribe(
@@ -2270,6 +2378,44 @@ mod tests {
             )
             .await;
         assert!(opened.is_ok());
+    }
+
+    // Paused time: the reads' timeouts run out as soon as nothing else can.
+    #[tokio::test(start_paused = true)]
+    async fn opens_on_a_disk_whose_stats_hang_leave_one_version_check_not_one_each() {
+        let dir = tempfile::tempdir().unwrap();
+        let adapter = Arc::new(GatedReads::default());
+        let manager = Arc::new(gated_manager(dir.path(), &adapter));
+        for _ in 0..3 {
+            adapter.stats_hang.store(false, Ordering::SeqCst);
+            // An open starts a read of the record, which outlasts it.
+            open_gated(&manager).await;
+            // The next open joins that read...
+            let joiner = tokio::spawn({
+                let manager = Arc::clone(&manager);
+                async move { open_gated(&manager).await }
+            });
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            // ...which finishes; then the disk stops answering stats, so
+            // checking whether the record changed since never ends.
+            adapter.stats_hang.store(true, Ordering::SeqCst);
+            adapter.record.notify_one();
+            joiner.await.unwrap();
+        }
+        // Every later open joined the check still running.
+        assert_eq!(adapter.hung_stats.load(Ordering::SeqCst), 1);
+    }
+
+    // Paused time: the reads' timeouts run out as soon as nothing else can.
+    #[tokio::test(start_paused = true)]
+    async fn reads_that_outlive_a_removed_session_have_the_adapter_forget_its_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let adapter = Arc::new(GatedReads::default());
+        let manager = gated_manager(dir.path(), &adapter);
+
+        // Opening it: the record read and then the summary read time out and
+        // are left running.
+        open_gated(&manager).await;
 
         manager.remove("s-gated").await.unwrap();
         assert_eq!(adapter.forgets.load(Ordering::SeqCst), 1);
