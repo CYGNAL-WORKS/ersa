@@ -49,6 +49,7 @@ use tokio::sync::Mutex;
 
 use bridge::{BridgeError, CoreLink, LinkEvent, LinkOptions};
 use launch::CoreLocation;
+use process::CoreProcess;
 
 /// Where the Interface's events go: the channel of the latest `core_attach`.
 type Sink = Arc<std::sync::Mutex<Option<Channel<Value>>>>;
@@ -71,6 +72,9 @@ struct Shell {
     /// when the Interface last said it heard one.
     quit_asked: AtomicU64,
     quit_heard: AtomicU64,
+    /// The Core this Shell launched, if it did, for Quit to end when that
+    /// Core wedges where its endpoint cannot say which process it is.
+    launched: std::sync::Mutex<Option<CoreProcess>>,
 }
 
 /// How long the Interface has to say it heard a Quit before the Shell
@@ -112,9 +116,12 @@ async fn core_attach(
         return Ok(reply("attached", open.hello()));
     }
     let location = shell.location.as_ref().map_err(BridgeError::unavailable)?;
-    let (stream, how) = launch::attach_or_launch(location)
+    let (stream, how, pid) = launch::attach_or_launch_tracked(location)
         .await
         .map_err(|e| BridgeError::unavailable(e.to_string()))?;
+    if let Some(core) = pid.and_then(|pid| CoreProcess::open(pid).ok()) {
+        *shell.launched.lock().expect("launched lock") = Some(core);
+    }
     let sink = Arc::clone(&shell.sink);
     let options = LinkOptions {
         probe_endpoint: Some(location.endpoint.clone()),
@@ -196,18 +203,13 @@ fn show_window(app: &AppHandle) {
     }
 }
 
-/// Quit from the tray icon's menu. An Interface attached to Core decides
-/// whether to confirm first (FLOW-CLOSE-AND-QUIT-R04); without one there is
-/// no session the window could name, and the Shell quits at once.
+/// Quit from the tray icon's menu. The window decides whether to confirm
+/// first (FLOW-CLOSE-AND-QUIT-R04), and asks also when it cannot count the
+/// sessions. A window attached to a labelled endpoint stops no session, so
+/// it quits at once.
 async fn quit_requested(app: AppHandle) {
     let shell = app.state::<Shell>();
-    // Requests hold the lock only for a moment; an attach still in progress
-    // holds it for longer, maybe for a launch, and then the window cannot
-    // have counted sessions yet, so that counts as none.
-    let attached = tokio::time::timeout(Duration::from_secs(2), shell.link.lock())
-        .await
-        .is_ok_and(|link| link.as_ref().is_some_and(|link| !link.is_closed()));
-    if !attached {
+    if shell.label.is_some() {
         return quit_now(&app).await;
     }
     let mine = shell.quit_asked.fetch_add(1, Ordering::SeqCst) + 1;
@@ -235,7 +237,8 @@ async fn quit_now(app: &AppHandle) {
     // Let go of the Interface's connection first: Core closes it anyway. An
     // attach in progress, perhaps launching Core, is let finish, so the Core
     // it launches is the one shut down below; later attaches are refused.
-    let attach_limit = launch::START_TIMEOUT + bridge::PROBE_TIMEOUT;
+    // As long as an attach can take: the launch, then the handshake.
+    let attach_limit = launch::START_TIMEOUT + bridge::REQUEST_TIMEOUT + bridge::PROBE_TIMEOUT;
     if let Ok(mut link) = tokio::time::timeout(attach_limit, shell.link.lock()).await {
         link.take();
     }
@@ -244,7 +247,9 @@ async fn quit_now(app: &AppHandle) {
     {
         // Bounded as a whole, so nothing in it can keep the app from exiting.
         let limit = quit::QUIT_LIMIT + quit::KILL_WAIT * 2;
-        match tokio::time::timeout(limit, quit::shut_down(endpoint, quit::QUIT_LIMIT)).await {
+        let launched = shell.launched.lock().expect("launched lock").take();
+        let stopping = quit::shut_down(endpoint, quit::QUIT_LIMIT, launched);
+        match tokio::time::timeout(limit, stopping).await {
             Ok(Ok(stopped)) => eprintln!("ersa: quit: {stopped:?}"),
             Ok(Err(e)) => eprintln!("ersa: quit: {e}"),
             Err(_) => eprintln!("ersa: quit: Core did not stop within {limit:?}"),
@@ -370,6 +375,7 @@ pub fn run() {
         quitting: AtomicBool::new(false),
         quit_asked: AtomicU64::new(0),
         quit_heard: AtomicU64::new(0),
+        launched: std::sync::Mutex::new(None),
     };
     tauri::Builder::default()
         .manage(shell)
