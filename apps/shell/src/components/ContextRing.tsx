@@ -12,7 +12,8 @@ const RADIUS = 7;
 
 /** The context ring (GLOSSARY): a gauge of context consumed, with its readout beside it once there is one. */
 export function ContextRing({ used }: ContextRingProps) {
-  const percent = used === undefined ? undefined : Math.round(Math.min(Math.max(used, 0), 1) * 100);
+  // A value Core could not measure reads as none, not as NaN.
+  const percent = used === undefined || !Number.isFinite(used) ? undefined : Math.round(Math.min(Math.max(used, 0), 1) * 100);
   return (
     <span
       className="context-ring"

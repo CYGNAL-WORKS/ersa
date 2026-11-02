@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Project } from "../protocol/core-api.gen";
 import type { BackendChoices, Choice } from "../session/controls";
+import { ContextRing } from "./ContextRing";
 import { NewSessionScreen } from "./NewSessionScreen";
 
 const host = { id: "local", name: "WORKSTATION", platform: "windows" as const };
@@ -111,5 +112,25 @@ describe("the new-session screen", () => {
     expect(html).toContain('aria-label="Add a project"');
     expect(html).not.toContain("<textarea");
     expect(chips(html)).toEqual([]);
+  });
+
+  it("leaves out the chip for a choice the backend does not offer", () => {
+    const html = render({ backends: { local: [{ ...claude(), efforts: [] }] } });
+    expect(chips(html).some((c) => c.startsWith("Effort"))).toBe(false);
+    expect(chips(html)).toContain("Model: Opus");
+  });
+
+  it("lists a host without projects as one that has nothing to start", () => {
+    const remote = { id: "box", name: "BUILDBOX", platform: "linux" as const };
+    const html = render({ hosts: [host, remote], open: "host" });
+    expect(html).toMatch(/aria-disabled="true"[^>]*>.*BUILDBOX.*No projects/);
+  });
+});
+
+describe("the context ring", () => {
+  it("reads a value it cannot measure as none used", () => {
+    const html = renderToStaticMarkup(createElement(ContextRing, { used: Number.NaN }));
+    expect(html).toContain("Context: none used yet");
+    expect(html).not.toContain("NaN");
   });
 });

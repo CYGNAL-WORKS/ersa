@@ -109,3 +109,18 @@ test("every session control is reachable and works from the keyboard", async ({ 
   const root = screen.getByRole("button", { name: "Workspace: Root workspace" });
   await expect(root).toBeFocused();
 });
+
+// verifies: FLOW-NEW-SESSION-R10
+test("with no project, the new-session screen asks whether the user trusts a folder before adding it", async ({ page }) => {
+  await page.goto("/gallery.html");
+  const screen = page
+    .locator('[data-theme="light"] [data-component="NewSessionScreen"] figure')
+    .filter({ has: page.locator("figcaption", { hasText: /^No project$/ }) });
+  const folder = screen.getByRole("textbox", { name: "Project folder" });
+  await folder.fill("/home/me/clones/stranger");
+  await folder.press("Enter");
+  const question = screen.getByRole("region", { name: "Trust stranger?" });
+  await expect(question).toBeVisible();
+  await expect(question.getByRole("button", { name: "Add, trusted" })).toBeVisible();
+  await expect(question.getByRole("button", { name: "Add, not trusted" })).toBeVisible();
+});

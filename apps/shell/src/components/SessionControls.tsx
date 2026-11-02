@@ -58,7 +58,17 @@ export function SessionControls({ hosts, projects, backends, values, onChoose, d
   return (
     <div className="session-controls" role="group" aria-label="Session controls">
       <div className="session-controls-chips">
-        <Chip name="Host" value={values.host_id} options={hosts.map((h) => ({ id: h.id, label: h.name }))} {...chip("host")} />
+        <Chip
+          name="Host"
+          value={values.host_id}
+          // A session runs in a project, so a host with none has nothing to start yet.
+          options={hosts.map((h) =>
+            projects.some((p) => p.host_id === h.id)
+              ? { id: h.id, label: h.name }
+              : { id: h.id, label: h.name, status: "No projects", unavailable: true },
+          )}
+          {...chip("host")}
+        />
         <Chip
           name="Project"
           value={values.project_id}
@@ -74,7 +84,7 @@ export function SessionControls({ hosts, projects, backends, values, onChoose, d
           />
         )}
         {backends === undefined ? (
-          <Chip name="Backend" placeholder="Detecting backends…" options={[]} onChoose={() => {}} disabled />
+          <Chip name="Backend" placeholder="Detecting backends…" pending options={[]} onChoose={() => {}} disabled />
         ) : (
           <>
             {showsBackend(backends) && (
@@ -85,19 +95,24 @@ export function SessionControls({ hosts, projects, backends, values, onChoose, d
                 problem={available(backends).length === 0}
                 options={backends.map(backendOption)}
                 {...chip("backend")}
+                // A host with no backend at all has nothing to list; the chip says so itself.
+                disabled={disabled || backends.length === 0}
               />
             )}
-            {backend && (
-              <>
-                <Chip name="Model" value={values.model} options={choiceOptions(backend.models)} {...chip("model")} />
-                <Chip name="Effort" prefix="Effort" value={values.effort} options={choiceOptions(backend.efforts)} {...chip("effort")} />
-                <Chip
-                  name="Permission mode"
-                  value={values.permission_mode}
-                  options={choiceOptions(backend.permission_modes)}
-                  {...chip("permission_mode")}
-                />
-              </>
+            {/* A backend that offers no choice of one has no chip for it: the backend decides. */}
+            {backend && backend.models.length > 0 && (
+              <Chip name="Model" value={values.model} options={choiceOptions(backend.models)} {...chip("model")} />
+            )}
+            {backend && backend.efforts.length > 0 && (
+              <Chip name="Effort" prefix="Effort" value={values.effort} options={choiceOptions(backend.efforts)} {...chip("effort")} />
+            )}
+            {backend && backend.permission_modes.length > 0 && (
+              <Chip
+                name="Permission mode"
+                value={values.permission_mode}
+                options={choiceOptions(backend.permission_modes)}
+                {...chip("permission_mode")}
+              />
             )}
           </>
         )}

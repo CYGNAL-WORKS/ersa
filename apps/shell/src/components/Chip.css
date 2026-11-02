@@ -33,8 +33,13 @@
   border-color: var(--color-ink-faint);
 }
 
+/* Pressed sinks to the canvas, as a button does; open stands on the surface with the stronger edge. */
 .chip:active:not(:disabled),
-.chip[data-force="pressed"],
+.chip[data-force="pressed"] {
+  background: var(--color-canvas);
+  border-color: var(--color-ink-muted);
+}
+
 .chip[data-open] {
   background: var(--color-surface);
   border-color: var(--color-ink-muted);
@@ -55,6 +60,11 @@
 
 .chip:disabled .chip-prefix {
   color: var(--color-ink-faint);
+}
+
+/* Still being found out, not refused: muted rather than faint, with the pending glyph. */
+.chip[data-pending]:disabled {
+  color: var(--color-ink-muted);
 }
 
 /* The choices: a transient layer beneath the chip, which it unfolds from. */
@@ -102,7 +112,7 @@
 }
 
 .chip-option:hover:where(:not(:focus-visible)) {
-  background: var(--color-canvas);
+  background: var(--color-surface-raised);
 }
 
 .chip-option:focus-visible {
@@ -136,8 +146,9 @@
   cursor: default;
 }
 
+/* Muted, not faint: that it is there but cannot run is something the user needs to read. */
 .chip-option[aria-disabled="true"] .chip-option-label {
-  color: var(--color-ink-faint);
+  color: var(--color-ink-muted);
 }
 
 .chip-option[aria-disabled="true"]:hover {

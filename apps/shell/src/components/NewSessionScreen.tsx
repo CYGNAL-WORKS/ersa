@@ -39,7 +39,14 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   const { hosts, projects, backends, lastUsed = {}, onStart, starting, onAddProject, adding } = props;
   const first = projects.find((p) => p.id === props.projectId) ?? projects[0];
   // What the user has chosen on this screen; the controls show it where the project and its host offer it.
-  const [wanted, setWanted] = useState<Partial<SessionValues>>(() => (first ? (lastUsed[first.id] ?? {}) : {}));
+  const startFrom = () => (first ? { ...lastUsed[first.id], project_id: first.id } : {});
+  const [wanted, setWanted] = useState<Partial<SessionValues>>(startFrom);
+  // New session chosen for another project while the screen shows: start over at that project's values.
+  const [shownFor, setShownFor] = useState(props.projectId);
+  if (shownFor !== props.projectId) {
+    setShownFor(props.projectId);
+    setWanted(startFrom());
+  }
   const project = projects.find((p) => p.id === wanted.project_id) ?? first;
 
   if (!project) {
