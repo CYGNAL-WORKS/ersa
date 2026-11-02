@@ -146,6 +146,21 @@ describe("starting a session from the new-session screen", () => {
     expect(methods()).not.toContain("session.remove");
   });
 
+  // verifies: FLOW-NEW-SESSION-R08
+  it("keeps a session whose backend has the first message even when it has exited since", async () => {
+    const { client, methods } = fakeClient({
+      ...working,
+      "session.send": () => {
+        throw refusal("session.send: the message was sent, but Core could not project it in time", "internal");
+      },
+      "session.list": () => [{ ...session, state: "error" }],
+    });
+    const outcome = await startSession(client, values("isolated"), "Fix the build");
+    expect(outcome).toMatchObject({ ok: true, firstSend: { giveBack: false } });
+    expect(methods()).not.toContain("session.remove");
+    expect(methods()).not.toContain("workspace.remove");
+  });
+
   it("keeps the session when Core cannot say whether it ran", async () => {
     const { client, methods } = fakeClient({
       ...working,

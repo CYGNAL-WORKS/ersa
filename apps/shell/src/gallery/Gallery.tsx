@@ -395,6 +395,10 @@ const entries: Entry[] = [
         <SessionList view={{ state: "ready", sessions: byWorkspaceSessions }} activeId="s2" onSelect={() => {}} workspaces={workspaceNames} />,
       ],
       [
+        "By workspace, names still being read",
+        <SessionList view={{ state: "ready", sessions: byWorkspaceSessions }} activeId="s2" onSelect={() => {}} workspaces={{}} />,
+      ],
+      [
         "Hover",
         <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} force={{ id: "s3", state: "hover" }} />,
       ],
