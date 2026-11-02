@@ -17,7 +17,7 @@ import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit }
 import type { Project, Session, Workspace } from "./protocol/core-api.gen";
 import { type BackendChoices, type SessionValues, sessionShown } from "./session/controls";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
-import { initialStage, stage } from "./session/stage";
+import { initialStage, showsScreen, stage } from "./session/stage";
 import { readChoices, rememberPatch, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
 
@@ -292,7 +292,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const knownProjects = useRef<Project[] | undefined>(undefined);
   if (projectList) knownProjects.current = projectList;
   const hello = view.phase === "connected" || view.phase === "lost" ? view.hello : undefined;
-  const screenProjects = projectList ?? (composing ? knownProjects.current : undefined);
+  const screenProjects = projectList ?? (showsScreen({ composing, starting, activeId }, false) ? knownProjects.current : undefined);
 
   // The rail's name for each workspace: its project, and its branch or the root (LAY-SHELL).
   const projectById = new Map(projectList?.map((p) => [p.id, p]));
@@ -381,7 +381,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             )}
           </ErrorBoundary>
         </main>
-      ) : hello && screenProjects && (composing || (view.phase === "connected" && activeId === undefined)) ? (
+      ) : hello && screenProjects && showsScreen({ composing, starting, activeId }, view.phase === "connected") ? (
         <main className="stage">
           <ErrorBoundary what="The new-session screen" resetKey={composing?.projectId ?? ""}>
             <NewSessionScreen
