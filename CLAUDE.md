@@ -24,6 +24,10 @@ Ersa must be beautiful, and every session that touches the interface is responsi
 - Nothing that signals "AI": no gradients, no glow, no sparkle iconography, no purple. If it would look at home on a model vendor's landing page, choose differently.
 - Hover, focus, pressed, disabled, loading, empty, and error states each get a deliberate appearance, and the rail's attention state is an edge or glyph, never a filled row.
 
+## Content
+
+Every word Ersa shows and every document here follows `docs/design/CONTENT.md`: US English, rules taken from the Microsoft Writing Style Guide and checked by Vale in CI. Read it before writing interface copy or user-facing docs. Interface copy lives in the string catalog, never in a component.
+
 ## Stack
 
 Rust core running as its own process; Tauri 2 shell; TypeScript interface speaking two schema-defined protocols to the core. Windows first, with nothing in the core that would block macOS. The architecture is `docs/briefs/ARCH-CORE.md`; the reasons are in the ADRs.
