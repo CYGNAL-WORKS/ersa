@@ -5,7 +5,7 @@ title: Ersa
 status: ready
 verified-by: review
 references: [FLOW-NEW-SESSION, FLOW-APPROVE-PERMISSION, FLOW-RESUME-SESSION, FLOW-REMOTE-SESSION, FLOW-APPLY-PACK, FLOW-SHOW-ME]
-adrs: [0002, 0004, 0006, 0007, 0009, 0011, 0012, 0017]
+adrs: [0002, 0004, 0006, 0007, 0009, 0011, 0012, 0017, 0019]
 ---
 
 # Ersa
@@ -43,7 +43,7 @@ Ersa exposes its own tool server to every session, so agents can message other s
 - **Isolation by default, whatever the VCS.** A session cannot accidentally work in another session's checkout, in git or otherwise.
 - **Local and remote feel the same.** A remote session has the same tiles, panes, and shelf as a local one; only latency differs.
 - **The harness is yours.** Ersa's own tools are extensible by the user, and nothing about a backend is hard-wired into the interface.
-- **Beautiful and calm.** The interface is an instrument, not a chat toy. See `docs/design/DESIGN.md`.
+- **Beautiful and calm.** The interface feels like the agentic harnesses people already use, and is more beautiful than they are. See `docs/design/DESIGN.md`.
 - **Dogfood first.** The first usable version is the one its author switches to daily.
 
 ## Flows
@@ -89,12 +89,14 @@ Verified by review at this level; testable requirements live in the flow and pro
 ## Open questions
 
 - Which local-inference harness to target first as proof that backends are pluggable beyond the two vendors.
-- How much of each vendor's native permission vocabulary to surface versus normalise.
+- How much of each vendor's native permission vocabulary to surface versus normalize.
 - Whether modes are per session, per workspace, or per project by default.
 - Perforce isolation model: per-session workspace with its own client spec, or shared workspace with changelists.
 
 ## Changes
 
+- 2026-11-02: the "Beautiful and calm" principle follows ADR 0019's visual direction, and ADR 0019 joins the front matter. No requirement IDs changed.
+- 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-01: ADR 0017 replaces ADR 0010 in the front matter. No requirement IDs changed.
-- 2026-10-31: rewritten after adversarial review: problem statement centred on the three real differentiators (extensible harness, vendor-agnostic, non-git VCS); shelf-based attention from the rail; rail tile contents specified; structured-events principle; packs as neutral definition; content mode deferred.
+- 2026-10-31: rewritten after adversarial review: problem statement centered on the three real differentiators (extensible harness, vendor-agnostic, non-git VCS); shelf-based attention from the rail; rail tile contents specified; structured-events principle; packs as neutral definition; content mode deferred.
 - 2026-10-31: created.
