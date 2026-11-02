@@ -21,6 +21,10 @@ use crate::state::Core;
 pub const RAW_LOG_LIMIT: usize = 1000;
 pub const RAW_LOG_BYTES: usize = 8 * 1024 * 1024;
 
+/// The longest title `session.set_title` takes: as much as Claude Code's
+/// own session list shows.
+pub const MAX_TITLE_CHARS: usize = 200;
+
 pub(super) async fn list(core: &Core, _: Empty) -> Result<Vec<Session>, ApiError> {
     Ok(core.sessions.list())
 }
@@ -224,17 +228,43 @@ pub(super) async fn answer_question(
     )))
 }
 
-/// Refused: a session's title is its backend's to keep, in the session
-/// record, where the backend's own tools show it too (ADR 0017).
+/// Renames the session in its backend, which keeps the title where its own
+/// tools show it too (ADR 0017, PROTO-CORE-API-R12).
 pub(super) async fn set_title(core: &Core, params: SetTitleParams) -> Result<Session, ApiError> {
-    find(core, &params.id).await?;
-    Err(title_refused())
-}
-
-fn title_refused() -> ApiError {
-    ApiError::invalid_state(
-        "a session's title comes from its backend's session record; rename it there (in Claude Code, /rename)",
-    )
+    // The title goes into the backend's record for good and shows in its own
+    // tools, which list one line of at most 200 characters with every run of
+    // spaces as one (PROTO-CLAUDE-CODE-STREAM, Listing). The title is taken
+    // in that form, so Ersa shows what the backend's list will: a longer
+    // title, or one holding a control character, would read differently
+    // there. A line break or a tab is spacing, and collapses like any other.
+    if params
+        .title
+        .chars()
+        .any(|c| c.is_control() && !c.is_whitespace())
+    {
+        return Err(ApiError::invalid_params(
+            "a session's title is one line, without control characters",
+        ));
+    }
+    let title = params
+        .title
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if title.is_empty() {
+        return Err(ApiError::invalid_params(
+            "a session's title cannot be empty",
+        ));
+    }
+    if title.chars().count() > MAX_TITLE_CHARS {
+        return Err(ApiError::invalid_params(format!(
+            "a session's title is at most {MAX_TITLE_CHARS} characters"
+        )));
+    }
+    Ok(core
+        .sessions
+        .set_title(&params.id, &title, |host| core.session_transport_for(host))
+        .await?)
 }
 
 /// Takes effect on the session's next start.

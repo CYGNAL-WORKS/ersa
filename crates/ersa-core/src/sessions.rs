@@ -889,6 +889,77 @@ impl SessionManager {
         Ok(session)
     }
 
+    /// Renames the session in its backend (PROTO-CORE-API-R12): through the
+    /// running backend when Core has it live, else in the backend's session
+    /// record on the session's host, reached by `transport_for`. The title
+    /// is then the backend's, so Core shows it without reading the record
+    /// again and stores none of its own.
+    pub async fn set_title(
+        &self,
+        id: &str,
+        title: &str,
+        transport_for: impl FnOnce(&str) -> Option<Arc<dyn Transport>>,
+    ) -> Result<Session, SessionError> {
+        let handle = self.handle(id)?;
+        let unnamed = || {
+            SessionError::InvalidState(
+                "the session's backend has not named it yet, so there is nothing to rename".into(),
+            )
+        };
+        if let Some(live) = handle.live() {
+            let session = live.wait_ready().await?;
+            // Read once ready: the backend names the session as it starts.
+            let backend_id = lock(&handle.row)
+                .backend_session_id
+                .clone()
+                .ok_or_else(unnamed)?;
+            let title = title.to_string();
+            // A backend that is stopping refuses (not running) while it may
+            // still be writing its record, so a refusal never falls back to
+            // writing the record beside it: the user renames again once the
+            // session has ended.
+            bounded(async move { session.rename(&backend_id, &title).await }).await?;
+        } else {
+            let row = lock(&handle.row).clone();
+            let backend_id = row.backend_session_id.ok_or_else(unnamed)?;
+            let adapter = self.adapters.get(&row.backend).cloned().ok_or_else(|| {
+                SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
+            })?;
+            let transport = transport_for(&row.host_id).ok_or_else(|| {
+                SessionError::Adapter(AdapterError::Io(io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    format!("host {} cannot be reached", row.host_id),
+                )))
+            })?;
+            let (cwd, title) = (row.cwd, title.to_string());
+            let renamed = bounded(async move {
+                adapter
+                    .rename_record(transport, &cwd, &backend_id, &title)
+                    .await
+            })
+            .await;
+            match renamed {
+                Err(SessionError::Adapter(AdapterError::Io(e)))
+                    if e.kind() == io::ErrorKind::NotFound =>
+                {
+                    // Never written, or deleted by the backend's retention.
+                    return Err(SessionError::InvalidState(
+                        "the backend has no record of this session to rename".into(),
+                    ));
+                }
+                Err(SessionError::Adapter(AdapterError::Io(e)))
+                    if e.kind() == io::ErrorKind::ResourceBusy =>
+                {
+                    // Something is writing the record right now.
+                    return Err(SessionError::InvalidState(e.to_string()));
+                }
+                renamed => renamed?,
+            }
+        }
+        lock(&handle.presented).title = Some(title.to_string());
+        Ok(handle.describe())
+    }
+
     /// Takes effect on the session's next start.
     pub async fn set_mode(&self, id: &str, mode: String) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;

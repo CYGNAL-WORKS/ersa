@@ -450,16 +450,11 @@ async fn a_stopped_session_has_ended_and_can_then_be_removed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_running_session_cannot_be_removed_and_titles_and_modes_change() {
+async fn a_running_session_cannot_be_removed_and_modes_change() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
     let error = client.error("session.remove", json!({ "id": id })).await;
-    assert_eq!(kind(&error), "invalid_state");
-    // A title is the backend's to keep, in its record.
-    let error = client
-        .error("session.set_title", json!({ "id": id, "title": "renamed" }))
-        .await;
     assert_eq!(kind(&error), "invalid_state");
     let moded = client
         .result("session.set_mode", json!({ "id": id, "mode": "review" }))
@@ -929,6 +924,134 @@ async fn a_sessions_title_and_start_come_from_its_record_and_its_mode_from_ersa(
     assert_eq!(row["title"], "hello");
     assert_eq!(row["created_at"], "2026-11-01T00:00:00.000Z");
     assert_eq!(row["mode"], "review");
+}
+
+// verifies: PROTO-CORE-API-R12
+#[tokio::test(flavor = "multi_thread")]
+async fn a_running_session_is_renamed_through_its_backend() {
+    let records = Records::default();
+    let (core, stats) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    let renamed = client
+        .result("session.set_title", json!({ "id": id, "title": "Renamed" }))
+        .await;
+    assert_eq!(renamed["title"], "Renamed");
+    assert_eq!(session_row(&mut client, &id).await["title"], "Renamed");
+    // The running backend took it; nothing was written beside it.
+    assert_eq!(stats.live_renames.load(Ordering::SeqCst), 1);
+    assert_eq!(stats.record_renames.load(Ordering::SeqCst), 0);
+    let raw = client.result("session.raw_log", json!({ "id": id })).await;
+    assert!(
+        raw.as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l["dir"] == "host" && l["line"].as_str().unwrap().contains("rename")),
+        "{raw:#}"
+    );
+    // And a later message does not undo it: the backend keeps the title.
+    client
+        .result("session.send", json!({ "id": id, "text": "again" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    assert_eq!(session_row(&mut client, &id).await["title"], "Renamed");
+}
+
+// verifies: PROTO-CORE-API-R12
+#[tokio::test(flavor = "multi_thread")]
+async fn a_stopped_session_is_renamed_in_its_record_which_a_later_core_reads() {
+    let records = Records::default();
+    let (core, stats) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    assert_eq!(session_row(&mut client, &id).await["title"], "hello");
+
+    let renamed = client
+        .result("session.set_title", json!({ "id": id, "title": "Renamed" }))
+        .await;
+    assert_eq!(renamed["title"], "Renamed");
+    assert_eq!(session_row(&mut client, &id).await["title"], "Renamed");
+    assert_eq!(stats.record_renames.load(Ordering::SeqCst), 1);
+    assert_eq!(stats.live_renames.load(Ordering::SeqCst), 0);
+    // The title is in the record, not in the conversation.
+    let events = all_events(&mut client, &id).await;
+    assert!(
+        !events.iter().any(|e| e.to_string().contains("Renamed")),
+        "{events:#?}"
+    );
+    client.result("core.shutdown", json!({})).await;
+    let TestCore { dir, task, .. } = core;
+    task.await.unwrap().unwrap();
+
+    // Ersa keeps no title of its own: a later Core finds it in the record.
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(records))];
+    let core = start_with_adapters(dir, |_| {}, adapters).await;
+    let mut client = core.client().await;
+    assert_eq!(session_row(&mut client, &id).await["title"], "Renamed");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_its_backend_never_named_cannot_be_renamed() {
+    let (core, _) = start_fake(FakeAdapter::failing()).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.ended").await;
+    let error = client
+        .error("session.set_title", json!({ "id": id, "title": "Renamed" }))
+        .await;
+    assert_eq!(kind(&error), "invalid_state", "{error:#}");
+    let error = client
+        .error(
+            "session.set_title",
+            json!({ "id": "s-missing", "title": "x" }),
+        )
+        .await;
+    assert_eq!(kind(&error), "not_found");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_blank_long_or_multi_line_title_is_refused() {
+    let (core, stats) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    let long = "x".repeat(201);
+    for title in ["", " \n ", "bell\u{7}", "nul\u{0}", long.as_str()] {
+        let error = client
+            .error("session.set_title", json!({ "id": id, "title": title }))
+            .await;
+        assert_eq!(error["code"], -32602, "{title:?}: {error:#}");
+    }
+    assert_eq!(stats.live_renames.load(Ordering::SeqCst), 0);
+    // As long as the backend's own list shows, and trimmed.
+    let longest = "é".repeat(200);
+    let renamed = client
+        .result(
+            "session.set_title",
+            json!({ "id": id, "title": format!(" {longest} ") }),
+        )
+        .await;
+    assert_eq!(renamed["title"], longest.as_str());
+    // Spaced as the backend's own list will show it.
+    let renamed = client
+        .result(
+            "session.set_title",
+            json!({ "id": id, "title": "Fix  the \t bug\non Windows\n" }),
+        )
+        .await;
+    assert_eq!(renamed["title"], "Fix the bug on Windows");
 }
 
 #[tokio::test(flavor = "multi_thread")]

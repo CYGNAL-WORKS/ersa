@@ -55,7 +55,7 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 - `session.interrupt { id }`.
 - `session.decide_permission { id, request_id, behavior (allow | deny), message (optional), updated_input (optional), apply_suggestions (optional array of indices) }`.
 - `session.answer_question { id, request_id, answers }`.
-- `session.set_title { id, title }`: renames the session in its backend, so the new title shows in the backend's own tools too (for Claude Code, `PROTO-CLAUDE-CODE-STREAM`, Session record). Ersa keeps no title of its own.
+- `session.set_title { id, title }`: renames the session in its backend, so the new title shows in the backend's own tools too (for Claude Code, `PROTO-CLAUDE-CODE-STREAM`, Session record). Ersa keeps no title of its own. Core trims the title, takes each run of spacing as one space, and refuses with `invalid_params` a title that is then blank, longer than 200 characters, or holding another control character; it answers `invalid_state` for a session its backend has not named yet (no backend session id, so no record) or whose record is gone. The single line of at most 200 characters is Claude Code's bound; it stays in Core until a second backend needs its own.
 - `session.set_mode { id, mode }` (takes effect on next start).
 - `session.subscribe { id, from_seq }`: Core sends every event with `seq >= from_seq` as `session.event` notifications, then continues live. Returns `{ view, last_seq, first_seq }`; `last_seq` is absent when the view has no events yet. A view holds a bounded amount of events (64 MiB); once it has let go of its earliest ones, `first_seq` is the first event it still holds, a subscription from before it starts there, and the Interface says that earlier events are no longer shown. `first_seq` is absent while the view holds every event from 0. `view` identifies the projection Core is serving (when Core rebuilds one: `PROTO-AGENT-EVENTS`, Opening a session), and changes whenever Core rebuilds it. Sequence numbers count within a view, so a client holding events from a different view discards them and subscribes again from 0, or from `first_seq`.
 - `session.unsubscribe { id }`.
@@ -127,6 +127,7 @@ The replay server answers read-only requests exactly as Core does. It never chan
 
 ## Changes
 
+- 2026-11-02: from #43 inbox: `session.set_title`'s title bounds and its answers for a blank title, an unnamed session and a missing record. No requirement IDs changed.
 - 2026-11-02: R16 reworded before it shipped: the permission mode is always stated to the backend, so an unnamed one is the backend's default, stored and reported; model and effort stay absent when not named.
 - 2026-11-02: from #52 inbox: the root workspace's `vcs_ref` is empty; Core stores and reports only the named `model`, `effort` and `permission_mode`, leaving the rest to the backend (PROTO-CORE-API-R15 retired, R16 added); `backend.list`'s `tested { min, max }` replaces two fields, a removal, so `api_version` becomes 3 with this change.
 - 2026-11-02: from #53 inbox: `backend.list` carries each backend's `label`. No requirement IDs changed.
