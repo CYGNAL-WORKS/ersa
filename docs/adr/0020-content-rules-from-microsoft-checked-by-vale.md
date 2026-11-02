@@ -6,7 +6,7 @@
 
 ## Context
 
-Ersa's content rules were one paragraph of prose ("plain, short, sentence-case English") with nothing that checked them, and the interface's copy is written inline in its components, where no tool can read it. The repository mixes British and US spelling. Ersa is Windows first, so its users read Microsoft's wording all day. Translation is a likely later need.
+Ersa had no written content rules and nothing that checked its wording, and the interface's copy is written inline in its components, where no tool can read it. The repository mixes British and US spelling. Ersa is Windows first, so its users read Microsoft's wording all day. Translation is a likely later need.
 
 ## Options considered
 
