@@ -31,6 +31,8 @@ interface ChipProps {
   /** For the gallery: the choices shown open, and a pointer or keyboard state shown without one. */
   initialOpen?: boolean;
   force?: "hover" | "focus" | "pressed";
+  /** For the gallery: one option of an open list shown hovered or pressed. */
+  forceOption?: { id: string; state: "hover" | "pressed" };
 }
 
 /**
@@ -38,7 +40,7 @@ interface ChipProps {
  * with Enter, Space or the arrows, moves with the arrows, chooses with Enter or Space, and Escape closes it with
  * focus back on the chip.
  */
-export function Chip({ name, prefix, value, placeholder, problem, pending, options, onChoose, disabled, initialOpen = false, force }: ChipProps) {
+export function Chip({ name, prefix, value, placeholder, problem, pending, options, onChoose, disabled, initialOpen = false, force, forceOption }: ChipProps) {
   const [open, setOpen] = useState(initialOpen);
   const chip = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -76,6 +78,11 @@ export function Chip({ name, prefix, value, placeholder, problem, pending, optio
     focusOnOpen.current = true;
     setOpen(true);
   };
+  // An arrow on the chip while its list is already open goes into the list at once.
+  const enter = () => {
+    const items = optionsIn(list.current);
+    (items.find((el) => el.dataset.id === value) ?? items[0])?.focus({ preventScroll: true });
+  };
   const close = () => {
     setOpen(false);
     chip.current?.focus({ preventScroll: true });
@@ -89,7 +96,8 @@ export function Chip({ name, prefix, value, placeholder, problem, pending, optio
   const onChipKey = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      show();
+      if (open) enter();
+      else show();
     } else if (event.key === "Escape" && open) {
       event.preventDefault();
       event.stopPropagation();
@@ -162,6 +170,7 @@ export function Chip({ name, prefix, value, placeholder, problem, pending, optio
               tabIndex={-1}
               className="chip-option"
               data-id={option.id}
+              data-force={forceOption?.id === option.id ? forceOption.state : undefined}
               aria-selected={option.id === value}
               aria-disabled={option.unavailable || undefined}
               onClick={() => choose(option)}
