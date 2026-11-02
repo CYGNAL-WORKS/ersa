@@ -15,7 +15,10 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 
 - **Project**: a repository or root folder the user has added to Ersa, on a particular host.
 - **Trusted project**: a project whose own configuration (settings, hooks, MCP servers, permission rules) the user has agreed may run in its sessions. Asked when the project is added; an untrusted project's sessions run with the user's own configuration only.
-- **Workspace**: an isolated checkout belonging to a project where one or more sessions do their work. A git worktree is one kind; a Perforce workspace is another.
+- **Workspace**: a checkout belonging to a project where one or more sessions do their work: an isolated workspace (a git worktree is one kind; a Perforce workspace is another) or the project's root workspace.
+- **Root workspace**: a project's own folder as a workspace. Every project has one. It is not isolated: its sessions share its files with each other and with the user. A session runs there when the user turns the worktree off.
+- **Effort**: how much reasoning a backend spends per turn, in the backend's own levels. Chosen when a session starts.
+- **Permission mode**: a backend's rule for which of the agent's actions ask the user first, in the backend's own names. Chosen when a session starts.
 - **Session**: one conversation with one agent, in one workspace, on one host. An ordinary backend session: its history is the backend's session record, and Ersa stores only what finds it again (host, project, workspace, backend, and the backend's session id) and its mode. Its title is the backend's.
 - **Session record**: the backend's own record of a session, which the backend resumes from and its own tools list. The history of a session, whether its turns were taken in Ersa or elsewhere. Retention is the backend's.
 - **Live stream**: what a running backend sends Ersa as it happens. Carries details the session record omits (text as it arrives, permission prompts, turn ends, cost, rate limits), which are shown and not stored.
@@ -48,6 +51,8 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Context ring**: the circular gauge on a tile showing context consumed.
 - **Transcript**: the main area rendering the active session's projection as a document with cards.
 - **Composer**: the input area beneath the transcript where the user writes to the agent.
+- **Session controls**: the row of chips beneath the composer naming where and how a session runs: host, project, workspace, backend, model, effort and permission mode, with the context ring. Set before the first message; shown during the session.
+- **New-session screen**: what the transcript area shows while no session is active: the composer and the session controls, ready for the first message, which starts the session.
 - **Workbench**: the right-hand area holding panes.
 - **Pane**: a purpose-built area in the workbench: Files, Diff, Terminal, Browser, Developer.
 - **Terminal pane**: a full hosted terminal (a real shell in a pseudo-terminal) opened in the session's workspace, for the user. Backends are never driven through it; the agent's own commands appear as cards in the transcript.
