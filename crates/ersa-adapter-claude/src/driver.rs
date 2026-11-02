@@ -23,8 +23,8 @@ use std::time::Duration;
 
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, LineReader,
-    LineWriter, PermissionDecision, Process, ProcessExit, ProcessSpec, Projector, RecordEvent,
-    RecordSummary, SessionConfig, Transport, async_trait,
+    LineWriter, OpenElsewhere, PermissionDecision, Process, ProcessExit, ProcessSpec, Projector,
+    RecordEvent, RecordSummary, SessionConfig, Transport, async_trait,
 };
 use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::PermissionBehavior;
@@ -32,7 +32,7 @@ use serde_json::{Value, json};
 use tokio::sync::{oneshot, watch};
 
 use crate::projector::ClaudeProjector;
-use crate::record;
+use crate::record::{self, LiveCheck};
 use crate::suggestions;
 use crate::wire::{
     HostControlResponse, HostMessage, HostRequest, HostResponse, InitializeRequest, RenameSource,
@@ -539,6 +539,28 @@ impl Adapter for ClaudeAdapter {
             title.to_string(),
         );
         blocking(move || record::append_title(&home, &cwd, &id, &title)).await
+    }
+
+    /// Reads the live-session registry on this machine
+    /// (PROTO-CLAUDE-CODE-STREAM-R17): like the record, a remote host's is
+    /// not read yet (M4). With no registry at all no CLI has run, so nothing
+    /// is open; one that cannot be read, or no home to find it in, makes the
+    /// answer unknown, never "not open".
+    async fn open_elsewhere(
+        &self,
+        _transport: Arc<dyn Transport>,
+        backend_session_id: &str,
+    ) -> OpenElsewhere {
+        let Ok(home) = self.claude_home() else {
+            return OpenElsewhere::Unknown;
+        };
+        let id = backend_session_id.to_string();
+        let check = tokio::task::spawn_blocking(move || record::live_session(&home, &id)).await;
+        match check {
+            Ok(LiveCheck::NotOpen) => OpenElsewhere::No,
+            Ok(LiveCheck::Open(live)) => OpenElsewhere::Yes { pid: live.pid },
+            Ok(LiveCheck::Unknown { .. }) | Err(_) => OpenElsewhere::Unknown,
+        }
     }
 }
 
