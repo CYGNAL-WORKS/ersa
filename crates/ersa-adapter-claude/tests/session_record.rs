@@ -10,7 +10,7 @@
 
 mod common;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -77,10 +77,12 @@ fn live_only(event: &Event) -> bool {
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R15
+// verifies: PROTO-CLAUDE-CODE-STREAM-R21
 #[test]
 fn record_messages_project_to_the_same_events_as_the_stream_messages() {
     let records = record_fixtures();
     let mut compared = 0;
+    let mut local_commands = 0;
     let mut kinds = BTreeSet::new();
     for stream in fixtures() {
         let Some(record) = records.iter().find(|r| r.name == stream.name) else {
@@ -123,19 +125,45 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
             .filter_map(|l| serde_json::from_str::<Value>(l).ok())
             .filter_map(|e| Some((e["uuid"].as_str()?.into(), e["type"].as_str()?.into())))
             .collect();
+        let elided: HashSet<String> = record
+            .text
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|e| e["ersa_elided"] == true)
+            .filter_map(|e| e["uuid"].as_str().map(String::from))
+            .collect();
         for (uuid, events) in live {
-            // A local command's output is a synthetic `assistant` message on
-            // the stream and a `system` entry in the record, which R15 does
-            // not cover; it is still in the record.
             let kind = record_kinds
                 .get(&uuid)
                 .unwrap_or_else(|| panic!("{}: {uuid} is not in the record", stream.name));
-            if kind == "system" {
+            // An older fixture trimmed its local command's entry to its links.
+            if elided.contains(&uuid) {
                 continue;
             }
             let recorded = from_record
                 .get(&uuid)
                 .unwrap_or_else(|| panic!("{}: {uuid} is not in the record", stream.name));
+            if kind == "system" {
+                // A local command's output: a synthetic `assistant` message on
+                // the stream, a `system/local_command` entry in the record
+                // (R21). The record lacks the synthetic message's own id, so
+                // its blocks are numbered under the uuid instead.
+                let events: Vec<Event> = events
+                    .into_iter()
+                    .map(|event| match event {
+                        Event::AssistantText(mut text) => {
+                            let index = text.block_id.rsplit('/').next().unwrap().to_string();
+                            text.block_id = format!("{uuid}/{index}");
+                            Event::AssistantText(text)
+                        }
+                        other => other,
+                    })
+                    .collect();
+                assert!(!events.is_empty(), "{}: {uuid}", stream.name);
+                assert_eq!(recorded, &events, "{}: {uuid}", stream.name);
+                local_commands += 1;
+                continue;
+            }
             assert_eq!(recorded, &events, "{}: {uuid}", stream.name);
             for event in events {
                 let kind = serde_json::to_value(&event).unwrap()["type"].clone();
@@ -145,6 +173,7 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
         }
     }
     assert!(compared > 0, "no stream fixture has a record");
+    assert!(local_commands > 0, "no local command's output was compared");
     // Every kind of message content the record carries was compared. The
     // model thinks only sometimes, so a thinking block is compared when a
     // recording has one.
@@ -999,4 +1028,33 @@ fn a_records_version_changes_when_it_grows() {
     );
     let other = "00000000-0000-4000-8000-000000000000";
     assert_eq!(record_version(home.path(), "C:/work", other).unwrap(), None);
+}
+
+// A `local_command` entry that is the command's echo rather than its output
+// (older versions wrote both) yields nothing; the output yields its text.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R21
+#[test]
+fn only_a_local_commands_output_is_projected() {
+    let entry = |uuid: &str, parent: Option<&str>, content: &str| {
+        serde_json::json!({
+            "type": "system", "subtype": "local_command", "uuid": uuid,
+            "parentUuid": parent, "isSidechain": false, "content": content,
+        })
+    };
+    let events = events_of(&[
+        entry("a", None, "/allow"),
+        entry(
+            "b",
+            Some("a"),
+            "<local-command-stderr>Unknown command: /allow</local-command-stderr>",
+        ),
+    ]);
+    let texts: Vec<&str> = events
+        .iter()
+        .map(|e| match e {
+            Event::AssistantText(t) => t.text.as_str(),
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect();
+    assert_eq!(texts, ["Unknown command: /allow"]);
 }

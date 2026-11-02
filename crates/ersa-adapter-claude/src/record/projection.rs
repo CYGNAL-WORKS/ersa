@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Read, Seek, SeekFrom};
 
 use ersa_protocol::events::{
-    BackendPassthrough, ErrorCode, ErrorEvent, Event, MessageOrigin, UserMessage,
+    AssistantText, BackendPassthrough, ErrorCode, ErrorEvent, Event, MessageOrigin, UserMessage,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -242,6 +242,7 @@ fn chain_fields(value: &Value) -> Value {
         "isSidechain",
         "teamName",
         "type",
+        "subtype",
     ] {
         if let Some(field) = value.get(key) {
             kept.insert(key.to_string(), field.clone());
@@ -304,7 +305,10 @@ fn conversation(entries: &[&Value]) -> Conversation {
             index,
             parent: text("parentUuid").or_else(|| text("logicalParentUuid")),
             main: is_main_thread(entry),
-            message: matches!(kind, Some("user" | "assistant")),
+            // A local command's output shows in the transcript as a message
+            // does (PROTO-CLAUDE-CODE-STREAM-R21), so a chain may end on it.
+            message: matches!(kind, Some("user" | "assistant"))
+                || (kind == Some("system") && text("subtype") == Some("local_command")),
         });
     }
 
@@ -420,6 +424,20 @@ impl RecordProjector {
                 None,
             ),
             RecordEntry::User(user) => user_events(user),
+            // A local command's output, projected as the stream projects the
+            // synthetic message it carried (PROTO-CLAUDE-CODE-STREAM-R21).
+            // That message's own id is not in the record, so its one block is
+            // numbered under the entry's `uuid`.
+            RecordEntry::System(system) => {
+                let (Some(id), Some(text)) = (&id, system.local_command_output()) else {
+                    return Vec::new();
+                };
+                vec![Event::AssistantText(AssistantText {
+                    block_id: format!("{id}/0"),
+                    text: text.to_string(),
+                    is_final: true,
+                })]
+            }
             RecordEntry::Other(_) => {
                 let kind = value.get("type").and_then(Value::as_str);
                 if matches!(kind, Some("user" | "assistant")) {

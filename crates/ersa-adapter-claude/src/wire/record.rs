@@ -31,6 +31,8 @@ pub enum RecordEntry {
     AiTitle(AiTitle),
     /// The latest prompt, which the CLI appends after each one.
     LastPrompt(LastPrompt),
+    /// Something the CLI noted itself; only `local_command` is read.
+    System(RecordSystem),
     #[serde(untagged)]
     Other(Value),
 }
@@ -177,4 +179,38 @@ pub struct LastPrompt {
     pub session_id: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+/// A `system` entry. With subtype `local_command`, `content` is a local
+/// command's output (from `/rename`, say) wrapped in
+/// `<local-command-stdout>`, which the stream carried as a synthetic
+/// `assistant` message with the same `uuid`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecordSystem {
+    #[serde(default)]
+    pub uuid: Option<String>,
+    #[serde(default)]
+    pub subtype: Option<String>,
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl RecordSystem {
+    /// The text a local command printed, as the stream's synthetic message
+    /// carries it: the content without its output tag. `None` for any other
+    /// subtype, and for content that is not a command's output (the echo of
+    /// the command itself, which older versions also wrote here).
+    pub fn local_command_output(&self) -> Option<&str> {
+        if self.subtype.as_deref() != Some("local_command") {
+            return None;
+        }
+        let content = self.content.as_deref()?;
+        ["stdout", "stderr"].into_iter().find_map(|stream| {
+            content
+                .strip_prefix(&format!("<local-command-{stream}>"))?
+                .strip_suffix(&format!("</local-command-{stream}>"))
+        })
+    }
 }
