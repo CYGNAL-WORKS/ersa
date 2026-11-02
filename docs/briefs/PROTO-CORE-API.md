@@ -96,6 +96,8 @@ A conforming Core passes a request/response test suite driven over the socket, a
 
 The replay server answers read-only requests exactly as Core does. It never changes anything outside its own data: every request that would change a session, a project, a workspace or a setting answers `invalid_state` saying the session is a replay, so a replay cannot create worktrees in the user's repositories or alter their settings. A replayed session stays open and idle after its last recorded line until `core.shutdown`. Pacing defaults to the recorded timing; an instant pace is for tests. The replay server never serves the user's own endpoint: with no explicit endpoint it serves the label `replay`, so an Interface reaches a replay only when told to, and a replay never stands in for, or blocks, the user's Core. It applies Core's own limits to the recording, line size included, and a recording it cannot read faithfully is refused at start with the reason, never played with a default in its place.
 
+A replay capture is what the replay server sent for one fixture, kept so the Interface's tests can replay it without running Core. It is a JSON object: `sessions` (`session.list` on attach), `sessions_after` (`session.list` once the replay has played out), `notifications` (every notification, in the order it arrived), and `ersa_commit` (the Ersa commit the capture was written from, ending `-dirty` when the tree had uncommitted changes outside the captures). A capture is checked against a fresh run of the replay server, which fails when the capture is stale. The check ignores `ersa_commit`, which says where a capture came from, not what it holds. Rewriting the captures builds Core first, so a capture never records a stale build.
+
 ## Requirements
 
 - **PROTO-CORE-API-R01**: The first request on a connection shall be `core.hello`, and Core shall reject any other method before it with `invalid_state`.
@@ -113,6 +115,7 @@ The replay server answers read-only requests exactly as Core does. It never chan
 - **PROTO-CORE-API-R13**: `session.subscribe` shall return the `view` it serves, the same `view` for as long as Core keeps that projection and a different one whenever Core rebuilds it.
 - ~~**PROTO-CORE-API-R15**~~: retired 2026-11-02 (a value not named is the backend's to choose, and Core does not know it), replaced by R16.
 - **PROTO-CORE-API-R16**: `session.create` shall start the backend with the `model` and `effort` it was given, passing nothing for one left out, and with the `permission_mode` given or else the backend's default permission mode, which is always stated to the backend; `session.list` shall report the `model` and `effort` that were given, absent otherwise, and the `permission_mode` the session started with.
+- **PROTO-CORE-API-R17**: Each replay capture shall equal what the replay server sends for its fixture, apart from `ersa_commit`.
 - **PROTO-CORE-API-R14**: `session.subscribe` with `from_seq` shall deliver every event from that sequence number onward, or from `first_seq` when the view no longer holds events before it, in order, with no gaps or duplicates, then continue live.
 
 ## Out of scope
@@ -126,6 +129,8 @@ The replay server answers read-only requests exactly as Core does. It never chan
 - Whether Core notifies an Interface when a project or session is created, and pushes `core.status` when its counts change; until then the window rereads `session.list` on a `session.tile` for an unknown session and reads the counts at attach.
 
 ## Changes
+
+- 2026-11-02: from #64 inbox: the replay capture format described under Conformance; the commit stamp is `ersa_commit`, since Core names the process, not a commit (PROTO-CORE-API-R17 added).
 
 - 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: from #43 inbox: `session.set_title`'s title bounds and its answers for a blank title, an unnamed session and a missing record. No requirement IDs changed.
