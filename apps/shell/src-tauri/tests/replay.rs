@@ -9,7 +9,7 @@
 //!
 //! Needs the `ersa-core` executable, as the bridge tests do. Updating the
 //! captures builds it first, so a capture never comes from a stale binary,
-//! and each capture names the Core commit it came from (`core`), which the
+//! and each capture names the Core commit it came from (`ersa_commit`), which the
 //! comparison ignores.
 
 mod common;
@@ -245,21 +245,27 @@ fn build_core() -> &'static (PathBuf, String) {
                 "--locked",
                 "-p",
                 "ersa-cli",
-                "--message-format=json",
+                "--message-format=json-render-diagnostics",
             ])
             .current_dir(repo_root())
             .stderr(Stdio::inherit())
             .output()
             .expect("run cargo build");
         assert!(output.status.success(), "cargo build -p ersa-cli failed");
-        let program = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-            .filter(|m| m["reason"] == "compiler-artifact" && m["target"]["name"] == "ersa-core")
-            .find_map(|m| m["executable"].as_str().map(PathBuf::from))
+        let program = ersa_core_executable(&String::from_utf8_lossy(&output.stdout))
             .expect("cargo build names the ersa-core executable");
         (program, core_commit())
     })
+}
+
+/// The `ersa-core` executable named in Cargo's JSON build messages: the bin
+/// target's artifact, not the `ersa_core` library or a build script.
+fn ersa_core_executable(stdout: &str) -> Option<PathBuf> {
+    stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|m| m["reason"] == "compiler-artifact" && m["target"]["name"] == "ersa-core")
+        .find_map(|m| m["executable"].as_str().map(PathBuf::from))
 }
 
 /// The commit a capture comes from, marked `-dirty` when the working tree
@@ -298,7 +304,7 @@ async fn check(name: &str) {
     let pretty = serde_json::to_string_pretty(&actual).expect("serializes") + "\n";
     if let Some((_, stamp)) = built {
         let mut written = actual.clone();
-        written["core"] = json!(stamp);
+        written["ersa_commit"] = json!(stamp);
         let written = serde_json::to_string_pretty(&written).expect("serializes") + "\n";
         std::fs::create_dir_all(path.parent().expect("a parent")).expect("create the folder");
         std::fs::write(&path, written).expect("write the capture");
@@ -308,7 +314,7 @@ async fn check(name: &str) {
     let mut committed: Value = serde_json::from_str(&committed).unwrap_or(Value::Null);
     // Where the capture came from is provenance, not part of the stream.
     if let Some(map) = committed.as_object_mut() {
-        map.remove("core");
+        map.remove("ersa_commit");
     }
     assert!(
         committed == actual,
@@ -318,13 +324,39 @@ async fn check(name: &str) {
 }
 
 // verifies: ARCH-CORE-R11
+// verifies: PROTO-CORE-API-R17
 #[tokio::test]
 async fn streamed_text_capture_is_current() {
     check("02-partial-messages").await;
 }
 
 // verifies: ARCH-CORE-R11
+// verifies: PROTO-CORE-API-R17
 #[tokio::test]
 async fn permission_capture_is_current() {
     check("11-stream-permission-prompt-tool-stdio").await;
+}
+
+#[test]
+fn picks_the_ersa_core_executable_from_cargo_messages() {
+    let stdout = [
+        r#"{"reason":"compiler-artifact","target":{"name":"ersa_core","kind":["lib"]},"executable":null}"#,
+        r#"{"reason":"compiler-artifact","target":{"name":"build-script-build","kind":["custom-build"]},"executable":null}"#,
+        "Compiling ersa-cli v0.1.0",
+        r#"{"reason":"compiler-artifact","target":{"name":"ersa-core","kind":["bin"]},"executable":"C:/t/debug/ersa-core.exe"}"#,
+        r#"{"reason":"build-finished","success":true}"#,
+    ]
+    .join("
+");
+    assert_eq!(
+        ersa_core_executable(&stdout),
+        Some(PathBuf::from("C:/t/debug/ersa-core.exe"))
+    );
+    assert_eq!(
+        ersa_core_executable(&stdout.lines().take(3).collect::<Vec<_>>().join(
+            "
+"
+        )),
+        None
+    );
 }
