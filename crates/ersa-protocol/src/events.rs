@@ -232,6 +232,9 @@ pub struct SessionNotice {
     pub level: NoticeLevel,
     pub code: NoticeCode,
     pub message: String,
+    /// With `session_open_elsewhere`: the process that has the session open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pid: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -248,6 +251,11 @@ pub enum NoticeLevel {
 pub enum NoticeCode {
     /// The backend is newer than the newest version its adapter was tested with.
     BackendVersionUntested,
+    /// Another process has the session open, so resuming or renaming it
+    /// here writes to a record that process writes too.
+    SessionOpenElsewhere,
+    /// Whether another process has the session open could not be told.
+    SessionOpenCheckFailed,
 }
 
 // ---------------------------------------------------------------------------
