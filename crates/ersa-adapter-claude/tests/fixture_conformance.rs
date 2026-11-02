@@ -616,6 +616,7 @@ const MODELLED_RECORD: &[&str] = &[
     "custom-title",
     "ai-title",
     "last-prompt",
+    "system",
 ];
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R11
