@@ -31,7 +31,8 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Turn**: one message to the agent and everything the agent does in answer to it, up to the next. Most turns start with the user's message; a turn can also start when a session resumes or from the system.
 - **Permission request**: the agent asking the user to approve an action before it runs.
 - **Question**: the agent asking the user to choose or answer something that is not a permission.
-- **Replay server**: a stand-in Core that serves recorded fixtures over the Interface protocols, used for interface development and tests.
+- **Replay capture**: what the replay server sent for one fixture, kept as a file the Interface's tests replay without running Core.
+- **Replay server**: a stand-in Core that serves recorded fixtures over the Interface protocols, used for interface development and tests. It is read-only: it refuses every request that would create or change a session, project, workspace or setting.
 
 ## System
 
@@ -58,6 +59,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Pane**: a purpose-built area in the workbench: Files, Diff, Terminal, Browser, Developer.
 - **Terminal pane**: a full hosted terminal (a real shell in a pseudo-terminal) opened in the session's workspace, for the user. Backends are never driven through it; the agent's own commands appear as cards in the transcript.
 - **Card**: a rich block rendered inline in the transcript for a single event, such as a tool call or a diff.
+- **Working mark**: the animated mark at the foot of a turn, beside the elapsed time and tokens, shown while the agent works on that turn.
 - **Theme**: light or dark. Follows the system unless the user chooses one. Every palette has both.
 - **Palette**: a named, complete set of color tokens for both themes, such as Midnight, the default. The user chooses one; components name color roles, never a palette's values.
 - **String catalog**: the one place every string the Interface shows is kept, keyed by area and purpose, with named values and plural forms; components refer to keys. US English is its source locale. *Not: string table, resource file.*

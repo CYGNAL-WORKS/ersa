@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Project } from "../protocol/core-api.gen";
-import { type BackendChoices, type Choice, showsBackend, valuesFor, workspaceKinds } from "./controls";
+import { type BackendChoices, type Choice, sessionShown, showsBackend, valuesFor, workspaceKinds } from "./controls";
 
 const project = (vcs: Project["vcs"]): Project => ({ id: "p1", host_id: "local", path: "D:\\Projects\\p", name: "p", vcs, trusted: true });
 
@@ -83,5 +83,42 @@ describe("the backend chip", () => {
   it("shows a lone backend that is missing, so its status is not hidden", () => {
     expect(showsBackend([backend("claude-code", "missing")])).toBe(true);
     expect(showsBackend([backend("claude-code", "error")])).toBe(true);
+  });
+});
+
+describe("the session controls under a running session", () => {
+  const running = { host_id: "local", backend: "claude", model: "claude-small", effort: "low", permission_mode: "edits" };
+  const branch = { project_id: "p1", kind: "isolated" as const, vcs_ref: "ersa/fix-build" };
+
+  // verifies: FLOW-NEW-SESSION-R09
+  it("show the session's own values and its branch, not the host's defaults", () => {
+    const shown = sessionShown(running, branch, [backend("claude"), backend("copilot")]);
+    expect(shown.values).toEqual({
+      host_id: "local",
+      project_id: "p1",
+      workspace: "isolated",
+      backend: "claude",
+      model: "claude-small",
+      effort: "low",
+      permission_mode: "edits",
+    });
+    expect(shown.workspaceLabel).toBe("ersa/fix-build");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R09
+  it("keep the session's values when the host lists no backend, or no longer offers them", () => {
+    const none = sessionShown(running, branch, []);
+    expect(none.values.backend).toBe("claude");
+    expect(none.values.model).toBe("claude-small");
+    expect(none.backend.models.map((c) => c.id)).toEqual(["claude-small"]);
+    const changed = sessionShown({ ...running, model: "retired" }, branch, [backend("claude")]);
+    expect(changed.values.model).toBe("retired");
+    expect(changed.backend.models.map((c) => c.id)).toContain("retired");
+  });
+
+  it("show a value left to the backend as the backend's default, and the root workspace by name", () => {
+    const shown = sessionShown({ ...running, model: undefined }, { ...branch, kind: "root", vcs_ref: "" }, [backend("claude")]);
+    expect(shown.values.model).toBe("claude-large");
+    expect(shown.workspaceLabel).toBe("Root workspace");
   });
 });

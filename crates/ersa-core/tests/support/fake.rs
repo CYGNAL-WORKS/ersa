@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, OpenElsewhere,
     PermissionDecision, ProcessExit, Projected, Projector, RawLine, RecordEvent, RecordSummary,
     SessionConfig, Transport, async_trait,
 };
@@ -47,6 +47,10 @@ pub struct Stats {
     /// Renames sent to a running backend, and renames written to a record.
     pub live_renames: AtomicUsize,
     pub record_renames: AtomicUsize,
+    /// For every time Core asked whether another process has a session
+    /// open: the backend's id for it, and how many record renames had
+    /// been written by then.
+    pub open_checks: Mutex<Vec<(String, usize)>>,
 }
 
 /// The kind of the record entry a rename adds.
@@ -120,6 +124,8 @@ pub struct FakeAdapter {
     start_delay: std::time::Duration,
     pub stats: Arc<Stats>,
     pub records: Records,
+    /// What the fake's registry of open sessions answers.
+    pub open_elsewhere: Arc<Mutex<OpenElsewhere>>,
 }
 
 impl FakeAdapter {
@@ -131,6 +137,7 @@ impl FakeAdapter {
             start_delay: std::time::Duration::ZERO,
             stats: Arc::default(),
             records: Arc::default(),
+            open_elsewhere: Arc::new(Mutex::new(OpenElsewhere::No)),
         }
     }
 
@@ -278,6 +285,20 @@ impl Adapter for FakeAdapter {
         record.push(recorded_title(title));
         self.stats.record_renames.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+
+    async fn open_elsewhere(
+        &self,
+        _transport: Arc<dyn Transport>,
+        backend_session_id: &str,
+    ) -> OpenElsewhere {
+        let renames = self.stats.record_renames.load(Ordering::SeqCst);
+        self.stats
+            .open_checks
+            .lock()
+            .unwrap()
+            .push((backend_session_id.to_string(), renames));
+        *self.open_elsewhere.lock().unwrap()
     }
 
     /// Titled by its latest rename, else its last prompt, as Claude Code
