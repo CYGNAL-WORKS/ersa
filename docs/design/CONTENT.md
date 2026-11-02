@@ -56,7 +56,14 @@ Each rule names the Vale rule that enforces it. `Microsoft.*` rules come from th
 
 ## The string catalog
 
-Every string the Interface shows lives in the string catalog, keyed by area and purpose. Components refer to keys and never hold copy. A string with values names them as placeholders (`{count}`) and gives its plural forms. US English is the source locale; other locales are added beside it.
+Every string the Interface shows lives in the string catalog, including labels only a screen reader hears. Components refer to keys and never hold copy. US English is the source locale; other locales are added beside it.
+
+- **Module.** `apps/shell/src/catalog/en-US.ts`, a typed TypeScript module declared `as const`. Another locale is a sibling file with the same keys.
+- **Keys.** Nested by area, then purpose, in camelCase: `quit.title`, `rail.core.connecting`. An area is a part of the interface the glossary names. A key names a purpose, never the wording, so copy changes without a rename.
+- **Placeholders.** A value is named in braces: `{count}`, `{host}`. The lookup types each string's values from its text, so a missing or misspelled value fails the typecheck. A value may be an element, such as a readout, so styling never splits a sentence.
+- **Plurals.** A string with a count is an object of whole messages keyed by `Intl.PluralRules` category (`one` and `other` in US English) and chosen by `{count}`. Each form is a complete message, so words that agree with the count change with it: "keeps it running", "keeps them running".
+- **No library yet.** The format maps onto ICU MessageFormat, and a translation library is adopted only when a second locale arrives.
+- **Text export.** A script writes the catalog to `apps/shell/src/catalog/en-US.gen.md`: each key as a heading, then its text, with every plural form. The file is committed and kept current by a `--check` in CI, like the design tokens, so a copy change reads as prose in review. Vale lints this file, because it never reads string literals in code, and it ignores placeholders.
 
 The catalog's test fails on copy written into a component, and on a string that starts lowercase, ends a button with punctuation, uses `!` or `...`, or is an error without a closing period. Vale reads the catalog for everything else.
 
