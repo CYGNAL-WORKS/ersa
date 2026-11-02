@@ -91,6 +91,14 @@ describe("quitting", () => {
   });
 
   // verifies: FLOW-CLOSE-AND-QUIT-R04
+  it("asks anyway when the sessions cannot be counted at all", async () => {
+    const { client, shell } = fakes(new Error("not attached to Core"));
+    expect(await answerQuit(client, shell, undefined)).toEqual({ busy: undefined, wasHidden: true });
+    expect(shell.quit).not.toHaveBeenCalled();
+    expect(shell.show).toHaveBeenCalledTimes(1);
+  });
+
+  // verifies: FLOW-CLOSE-AND-QUIT-R04
   it("counts the rail's last list when Core is slow to answer", async () => {
     vi.useFakeTimers();
     const { client, shell } = fakes("never");

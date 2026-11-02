@@ -225,6 +225,7 @@ const entries: Entry[] = [
     name: "QuitQuestion",
     states: [
       ["One session busy", <QuitQuestion busy={1} onQuit={() => {}} onCancel={() => {}} takeFocus={false} />],
+      ["Sessions not counted", <QuitQuestion busy={undefined} onQuit={() => {}} onCancel={() => {}} takeFocus={false} />],
       [
         "Several, as it opens",
         <QuitQuestion busy={3} onQuit={() => {}} onCancel={() => {}} takeFocus={false} forceCancelFocus />,

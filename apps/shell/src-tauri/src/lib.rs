@@ -20,10 +20,10 @@
 //!   it to the tray icon. Quit, from the tray icon's menu, emits
 //!   `quit-requested` to the window, whose Interface calls
 //!   `shell_quit_heard` at once, asks the user to confirm when sessions are
-//!   busy, and then calls `shell_quit`. With no Interface attached to Core,
-//!   or one that does not say it heard within [`QUIT_HEARD_LIMIT`], the
-//!   Shell quits at once. `shell_show` shows the window for the
-//!   confirmation and returns whether it was hidden; `shell_hide` puts it
+//!   busy (or when it cannot count them), and then calls `shell_quit`. A
+//!   label-attached window, or one that does not say it heard within
+//!   [`QUIT_HEARD_LIMIT`], quits at once. `shell_show` shows the window for
+//!   the confirmation and returns whether it was hidden; `shell_hide` puts it
 //!   back when the user cancels.
 //!   - [`quit`]: shutting Core down, and ending it when it will not stop.
 //!   - [`instance`]: one Shell per user; a second launch shows the first's
