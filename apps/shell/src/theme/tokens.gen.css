@@ -31,6 +31,8 @@
   --line-hairline: 1px;
   --size-rail: 224px;
   --size-tile-min: 224px;
+  --size-measure: 672px;
+  --size-card-max: 224px;
   --motion-instant: 80ms;
   --motion-quick: 160ms;
   --motion-settle: 260ms;

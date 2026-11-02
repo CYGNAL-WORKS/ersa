@@ -30,22 +30,42 @@ const RAW = [
   { what: "a font weight", pattern: /font-weight\s*:(?!\s*var\()\s*[^;]+/gi },
 ];
 
+// A token scaled by a bare number is a new size in disguise; it needs its own
+// token. It reads whole declarations, so a calc wrapped across lines still
+// counts, and only declarations with a calc() count, so `/` as a grid or font
+// separator is left alone. A factor of 1 or -1 makes no new size (negation only flips a
+// direction), so it stays allowed.
+const TOKEN = String.raw`\(?\s*var\(--[\w-]+(?:\s*,[^)]*)?\)\s*\)?`;
+const NUMBER = String.raw`\(?\s*(-?\d*\.?\d+)\s*\)?`;
+const SCALED = new RegExp(
+  String.raw`${TOKEN}\s*[*/]\s*${NUMBER}(?![\w.%(-])|(?<![\w.)-])${NUMBER}\s*\*\s*${TOKEN}`,
+  "gi",
+);
+const scaled = (text: string) =>
+  text
+    .split(/[;{}]/)
+    .filter((declaration) => declaration.toLowerCase().includes("calc("))
+    .flatMap((declaration) => [...declaration.matchAll(SCALED)])
+    .filter((m) => Math.abs(Number(m[1] ?? m[2])) !== 1)
+    .map((m) => m[0].trim().replace(/\s+/g, " "));
+
 // The file that declares the bundled fonts: its weights and ranges describe
 // the font files, not the interface.
 const FONT_FILES = join("theme", "fonts.css");
 
-const flagged = (line: string) => RAW.flatMap(({ pattern }) => [...line.matchAll(pattern)].map((m) => m[0]));
+const raw = (line: string) => RAW.flatMap(({ pattern }) => [...line.matchAll(pattern)].map((m) => m[0]));
+const flagged = (text: string) => [...raw(text), ...scaled(text)];
 
 describe("interface source", () => {
   it("uses tokens for every colour, size, radius, weight and duration", () => {
     const found: string[] = [];
     for (const file of sourceFiles(SRC)) {
       if (relative(SRC, file) === FONT_FILES) continue;
-      readFileSync(file, "utf8")
-        .split("\n")
-        .forEach((line, i) => {
-          for (const match of flagged(line)) found.push(`${relative(SRC, file)}:${i + 1}: ${match}`);
-        });
+      const text = readFileSync(file, "utf8");
+      text.split("\n").forEach((line, i) => {
+        for (const match of raw(line)) found.push(`${relative(SRC, file)}:${i + 1}: ${match}`);
+      });
+      for (const match of scaled(text)) found.push(`${relative(SRC, file)}: ${match}`);
     }
     expect(found).toEqual([]);
   });
@@ -65,6 +85,23 @@ describe("the raw-value check", () => {
     expect(flagged("  font-weight: normal;")).toEqual(["font-weight: normal"]);
     expect(flagged("  font-weight: var(--type-heading-weight);")).toEqual([]);
     expect(flagged("  transition: opacity 160ms;")).toEqual(["160ms"]);
+  });
+
+  it("catches a token scaled by a bare number", () => {
+    expect(flagged("  width: calc(var(--space-xxl) * 7);")).toHaveLength(1);
+    expect(flagged("  width: calc(var(--size-rail) / 2);")).toHaveLength(1);
+    expect(flagged("  width: calc(3 * var(--size-rail));")).toHaveLength(1);
+    expect(flagged("  width: calc(0.5*var(--size-rail));")).toHaveLength(1);
+    expect(flagged("  width: calc(-2 * var(--size-rail));")).toHaveLength(1);
+    expect(flagged("  width: calc((var(--size-rail)) * (2));")).toHaveLength(1);
+    expect(flagged("  width: calc(var(--size-rail, var(--space-xs)) * 2);")).toHaveLength(1);
+    expect(flagged("  width: calc(var(--size-rail)*1.5);")).toHaveLength(1);
+    expect(flagged("  width: calc(var(--space-xxl)\n    * 7);")).toHaveLength(1);
+    expect(flagged("  width: Calc(var(--space-xxl) * 7);")).toHaveLength(1);
+    expect(flagged("  transform: translateY(calc(-1 * var(--space-xs)));")).toEqual([]);
+    expect(flagged("  transform: translateY(calc(var(--space-xs) * -1));")).toEqual([]);
+    expect(flagged("  grid-column: var(--start) / 3;")).toEqual([]);
+    expect(flagged("  width: calc(var(--size-rail) + var(--space-lg));")).toEqual([]);
   });
 });
 
