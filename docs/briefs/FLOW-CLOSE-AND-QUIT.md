@@ -25,7 +25,7 @@ Closing the window and quitting are different acts. Closing hides the window to 
 
 ## Development
 
-A debug build attached to a labelled endpoint (LAY-SHELL, Development) quits without shutting that Core down: it was started by someone else, such as a replay or a test.
+A debug build attached to a labeled endpoint (LAY-SHELL, Development) quits without shutting that Core down: it was started by someone else, such as a replay or a test.
 
 ## Open questions
 
@@ -36,5 +36,6 @@ A debug build attached to a labelled endpoint (LAY-SHELL, Development) quits wit
 
 ## Changes
 
+- 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: from #32 inbox: R04 says which sessions count (starting, running, waiting on the user; meaning unchanged); the limits of R06 on Linux and macOS recorded as an open question.
 - 2026-11-01: created ready, from the owner's decision that the window closes to the tray and Quit stops Core.
