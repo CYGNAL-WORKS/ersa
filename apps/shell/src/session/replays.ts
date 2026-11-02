@@ -12,7 +12,7 @@ export interface Capture {
   sessions: Session[];
   sessions_after: Session[];
   /** The commit the capture was written from, `-dirty` if uncommitted. */
-  core?: string;
+  ersa_commit?: string;
   notifications: { kind: "notification"; method: "session.event"; params: { session_id: string; event: Envelope } }[];
 }
 
