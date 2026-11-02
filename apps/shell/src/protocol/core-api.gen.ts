@@ -693,7 +693,7 @@ export interface Session {
    */
   effort?: string;
   /**
-   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
    */
   permission_mode?: string;
   mode?: string;
@@ -860,7 +860,7 @@ export interface Session1 {
    */
   effort?: string;
   /**
-   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
    */
   permission_mode?: string;
   mode?: string;
@@ -887,7 +887,7 @@ export interface Session2 {
    */
   effort?: string;
   /**
-   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
    */
   permission_mode?: string;
   mode?: string;
@@ -914,7 +914,7 @@ export interface Session3 {
    */
   effort?: string;
   /**
-   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
    */
   permission_mode?: string;
   mode?: string;
@@ -941,7 +941,7 @@ export interface Session4 {
    */
   effort?: string;
   /**
-   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
    */
   permission_mode?: string;
   mode?: string;
@@ -968,7 +968,7 @@ export interface Session5 {
    */
   effort?: string;
   /**
-   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
    */
   permission_mode?: string;
   mode?: string;
@@ -998,7 +998,7 @@ export interface Session6 {
    */
   effort?: string;
   /**
-   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
    */
   permission_mode?: string;
   mode?: string;
@@ -1025,7 +1025,7 @@ export interface Session7 {
    */
   effort?: string;
   /**
-   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
    */
   permission_mode?: string;
   mode?: string;
@@ -1052,7 +1052,7 @@ export interface Session8 {
    */
   effort?: string;
   /**
-   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
    */
   permission_mode?: string;
   mode?: string;
@@ -1079,7 +1079,7 @@ export interface Session9 {
    */
   effort?: string;
   /**
-   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
    */
   permission_mode?: string;
   mode?: string;
@@ -1106,7 +1106,7 @@ export interface Session10 {
    */
   effort?: string;
   /**
-   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it.
    */
   permission_mode?: string;
   mode?: string;
