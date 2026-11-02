@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type StageAction, type StageState, initialStage, stage } from "./stage";
+import { type StageAction, type StageState, initialStage, showsScreen, stage } from "./stage";
 
 const run = (actions: StageAction[], from: StageState = initialStage) => actions.reduce(stage, from);
 
@@ -90,5 +90,17 @@ describe("the stage", () => {
   it("shows the newest session only when none is chosen", () => {
     expect(run([{ type: "showNewest", id: "s1" }]).activeId).toBe("s1");
     expect(run([{ type: "select", id: "s2" }, { type: "showNewest", id: "s1" }]).activeId).toBe("s2");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R08
+  it("keeps the screen up through a lost connection while the first message is on its way or has failed", () => {
+    // The first session ever, from the screen shown with no session: nothing chosen, nothing active.
+    const sending = run([{ type: "sending" }]);
+    expect(showsScreen(sending, false)).toBe(true);
+    expect(showsScreen(stage(sending, { type: "failed", message: "Core is not connected." }), false)).toBe(true);
+    // Without a start, the screen shown for having no session waits for Core.
+    expect(showsScreen(initialStage, false)).toBe(false);
+    expect(showsScreen(initialStage, true)).toBe(true);
+    expect(showsScreen(run([{ type: "newSession" }]), false)).toBe(true);
   });
 });
