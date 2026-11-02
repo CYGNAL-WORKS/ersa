@@ -405,13 +405,58 @@ impl RecordCache {
     }
 }
 
-/// About how much memory `events` holds: their size as JSON, plus a little
-/// for each event's own fields.
+/// About how much memory `events` holds, erring high: each event's own
+/// size twice over (the vector holding them may have room for as many again),
+/// and what its strings, lists and JSON objects hold on the heap.
 fn approximate_bytes(events: &[RecordEvent]) -> usize {
     events
         .iter()
-        .map(|e| serde_json::to_vec(&e.event).map_or(0, |json| json.len()) + 128)
+        .map(|e| {
+            let strings = [&e.message_id, &e.ts, &e.backend_version]
+                .into_iter()
+                .flatten()
+                .map(String::len)
+                .sum::<usize>();
+            // The event's own fields are inside it, not in a map of their own.
+            let fields = match serde_json::to_value(&e.event) {
+                Ok(serde_json::Value::Object(fields)) => fields.values().map(heap_bytes).sum(),
+                Ok(other) => heap_bytes(&other),
+                Err(_) => 0,
+            };
+            2 * size_of::<RecordEvent>() + strings + fields
+        })
         .sum()
+}
+
+/// About how many bytes `value`'s parts hold on the heap. An event is
+/// counted as its JSON, where a struct becomes an object: that counts a
+/// struct, which holds nothing of its own on the heap, as a map, which does,
+/// so the count errs high.
+fn heap_bytes(value: &serde_json::Value) -> usize {
+    use serde_json::Value;
+    // An object is a B-tree whose nodes have room for eleven entries and are
+    // kept at least half full; even a small one takes a whole node.
+    const ENTRY: usize = size_of::<String>() + size_of::<Value>();
+    const NODE: usize = 11 * ENTRY + 64;
+    match value {
+        Value::Null | Value::Bool(_) | Value::Number(_) => 0,
+        Value::String(s) => s.len(),
+        // A list read in grows by doubling, from room for four, so it may
+        // have room for nearly twice what it holds. `value` is a copy made
+        // to the size it holds, so its own capacity does not say.
+        Value::Array(items) if items.is_empty() => 0,
+        Value::Array(items) => {
+            items.len().next_power_of_two().max(4) * size_of::<Value>()
+                + items.iter().map(heap_bytes).sum::<usize>()
+        }
+        Value::Object(map) => {
+            map.len().div_ceil(5).max(1) * NODE
+                + map
+                    .iter()
+                    .map(|(k, v)| k.len() + heap_bytes(v))
+                    .sum::<usize>()
+        }
+    }
 }
 
 /// Locks a mutex, carrying on if a panicking thread poisoned it: what it
@@ -433,9 +478,107 @@ pub fn is_session_id(id: &str) -> bool {
             .all(|(group, len)| group.len() == len && group.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
+/// Counts the bytes the current thread holds on the heap, so a test can tell
+/// how much memory a projection really takes. Test-only: it wraps the system
+/// allocator, which needs `unsafe`.
+#[cfg(test)]
+#[allow(unsafe_code)]
+mod counting {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::Cell;
+
+    pub struct Counting;
+
+    thread_local! {
+        static HELD: Cell<isize> = const { Cell::new(0) };
+    }
+
+    fn add(bytes: isize) {
+        // `try_with`: a thread being torn down still frees memory.
+        let _ = HELD.try_with(|held| held.set(held.get() + bytes));
+    }
+
+    /// Bytes allocated and not yet freed on this thread.
+    pub fn held() -> isize {
+        HELD.with(Cell::get)
+    }
+
+    // SAFETY: every call is passed straight to the system allocator.
+    unsafe impl GlobalAlloc for Counting {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            add(layout.size() as isize);
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            add(-(layout.size() as isize));
+            unsafe { System.dealloc(ptr, layout) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            add(new_size as isize - layout.size() as isize);
+            unsafe { System.realloc(ptr, layout, new_size) }
+        }
+    }
+
+    #[global_allocator]
+    static COUNTING: Counting = Counting;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The session-record fixtures, as text.
+    fn record_fixtures() -> Vec<String> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/briefs/protocol/fixtures/claude-code");
+        let mut found = Vec::new();
+        for version in fs::read_dir(root).unwrap() {
+            let Ok(files) = fs::read_dir(version.unwrap().path().join("record")) else {
+                continue;
+            };
+            for file in files {
+                found.push(fs::read_to_string(file.unwrap().path()).unwrap());
+            }
+        }
+        assert!(!found.is_empty(), "no session-record fixtures found");
+        found
+    }
+
+    #[test]
+    fn the_cache_budget_counts_what_a_projection_holds() {
+        // A large tool input: JSON objects take many times their text in
+        // memory.
+        let input: serde_json::Map<String, serde_json::Value> = (0..2000)
+            .map(|i| {
+                (
+                    format!("k{i}"),
+                    serde_json::json!({"a": [1, 2, true], "b": "x"}),
+                )
+            })
+            .collect();
+        let tool = serde_json::json!({"type": "assistant", "uuid": "a1", "parentUuid": null,
+            "message": {"id": "m1", "role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "Edit", "input": input}]}});
+        // A list just past a power of two: read in, it has room for twice
+        // as many items as it holds.
+        let list = serde_json::json!({"type": "assistant", "uuid": "a2", "parentUuid": null,
+            "message": {"id": "m2", "role": "assistant", "content": [
+                {"type": "tool_use", "id": "t2", "name": "Edit",
+                    "input": {"items": vec![0; 1025]}}]}});
+        let mut records = record_fixtures();
+        records.push(format!("{tool}\n"));
+        records.push(format!("{list}\n"));
+        for text in records {
+            let before = counting::held();
+            let events = projection::project_record(&text);
+            let held = (counting::held() - before) as usize;
+            let counted = approximate_bytes(&events);
+            // Never under what the events hold, so the cache keeps to its
+            // budget, and not far over, so it keeps what fits.
+            assert!(counted >= held, "counted {counted} bytes of {held}");
+            assert!(counted <= 2 * held, "counted {counted} bytes of {held}");
+        }
+    }
 
     #[test]
     fn encodes_like_the_cli() {
