@@ -27,20 +27,34 @@ const RAW = [
     what: "a length, duration or percentage",
     pattern: /(?<![\w.-])\d*\.?\d+(px|rem|em|vh|vw|dvh|svh|pt|ms|s|%)(?![\w-])/gi,
   },
-  // A token scaled by a bare number is a new size in disguise; it needs its own
-  // token. Negating one (`-1 *`) only flips its direction, so it stays allowed.
-  {
-    what: "a token scaled by a number",
-    pattern: /var\(--[\w-]+\)\s*[*/]\s*-?\d*\.?\d+(?![\w.%])|(?<![\w.-])(?!1\s*\*)\d*\.?\d+\s*\*\s*var\(--[\w-]+\)/gi,
-  },
   { what: "a font weight", pattern: /font-weight\s*:(?!\s*var\()\s*[^;]+/gi },
 ];
+
+// A token scaled by a bare number is a new size in disguise; it needs its own
+// token. Only lines with a calc() count, so `/` as a grid or font separator is
+// left alone. A factor of 1 or -1 makes no new size (negation only flips a
+// direction), so it stays allowed.
+const TOKEN = String.raw`\(?\s*var\(--[\w-]+(?:\s*,[^)]*)?\)\s*\)?`;
+const NUMBER = String.raw`\(?\s*(-?\d*\.?\d+)\s*\)?`;
+const SCALED = new RegExp(
+  String.raw`${TOKEN}\s*[*/]\s*${NUMBER}(?![\w.%(-])|(?<![\w.)-])${NUMBER}\s*\*\s*${TOKEN}`,
+  "gi",
+);
+const scaled = (line: string) =>
+  line.includes("calc(")
+    ? [...line.matchAll(SCALED)]
+        .filter((m) => Math.abs(Number(m[1] ?? m[2])) !== 1)
+        .map((m) => m[0].trim())
+    : [];
 
 // The file that declares the bundled fonts: its weights and ranges describe
 // the font files, not the interface.
 const FONT_FILES = join("theme", "fonts.css");
 
-const flagged = (line: string) => RAW.flatMap(({ pattern }) => [...line.matchAll(pattern)].map((m) => m[0]));
+const flagged = (line: string) => [
+  ...RAW.flatMap(({ pattern }) => [...line.matchAll(pattern)].map((m) => m[0])),
+  ...scaled(line),
+];
 
 describe("interface source", () => {
   it("uses tokens for every colour, size, radius, weight and duration", () => {
@@ -74,11 +88,17 @@ describe("the raw-value check", () => {
   });
 
   it("catches a token scaled by a bare number", () => {
-    expect(flagged("  width: calc(var(--space-xxl) * 7);")).toEqual(["var(--space-xxl) * 7"]);
-    expect(flagged("  width: calc(var(--size-rail) / 2);")).toEqual(["var(--size-rail) / 2"]);
-    expect(flagged("  width: calc(3 * var(--size-rail));")).toEqual(["3 * var(--size-rail)"]);
-    expect(flagged("  width: calc(0.5*var(--size-rail));")).toEqual(["0.5*var(--size-rail)"]);
+    expect(flagged("  width: calc(var(--space-xxl) * 7);")).toHaveLength(1);
+    expect(flagged("  width: calc(var(--size-rail) / 2);")).toHaveLength(1);
+    expect(flagged("  width: calc(3 * var(--size-rail));")).toHaveLength(1);
+    expect(flagged("  width: calc(0.5*var(--size-rail));")).toHaveLength(1);
+    expect(flagged("  width: calc(-2 * var(--size-rail));")).toHaveLength(1);
+    expect(flagged("  width: calc((var(--size-rail)) * (2));")).toHaveLength(1);
+    expect(flagged("  width: calc(var(--size-rail, 4px) * 2);")).toHaveLength(1);
+    expect(flagged("  width: calc(var(--size-rail)*1.5);")).toHaveLength(1);
     expect(flagged("  transform: translateY(calc(-1 * var(--space-xs)));")).toEqual([]);
+    expect(flagged("  transform: translateY(calc(var(--space-xs) * -1));")).toEqual([]);
+    expect(flagged("  grid-column: var(--start) / 3;")).toEqual([]);
     expect(flagged("  width: calc(var(--size-rail) + var(--space-lg));")).toEqual([]);
   });
 });
