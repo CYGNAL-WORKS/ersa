@@ -420,6 +420,7 @@ fn ignored_allow_rules(stderr: &[String]) -> bool {
 /// session applies the rule without the CLI's warning. Whether the rule
 /// applies already in the attesting session needs a tool call, so a model
 /// call, and is not checked here.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R24
 #[tokio::test]
 #[ignore = "drives the installed Claude Code CLI; run by hand"]
 async fn a_trusted_projects_worktrees_are_trusted_through_the_clis_own_record() {

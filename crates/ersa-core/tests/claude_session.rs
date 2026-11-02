@@ -141,6 +141,7 @@ async fn setting_sources(transport: &ersa_adapter::fake::FakeTransport, n: usize
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R12
 // verifies: PROTO-CLAUDE-CODE-STREAM-R18
+// verifies: PROTO-CLAUDE-CODE-STREAM-R24
 #[tokio::test(flavor = "multi_thread")]
 async fn a_projects_own_configuration_loads_only_once_the_user_trusts_it() {
     let (stdout, _) = fixture();

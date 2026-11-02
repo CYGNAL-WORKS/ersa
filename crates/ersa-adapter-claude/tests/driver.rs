@@ -336,6 +336,7 @@ fn init_answer_with_trust(recorded: bool) -> String {
 /// A trusted project's session attests the user's trust for the project's
 /// root, which the CLI records for the whole repository, linked worktrees
 /// included (observed on 2.1.316).
+// verifies: PROTO-CLAUDE-CODE-STREAM-R24
 #[tokio::test]
 async fn a_trusted_projects_initialize_attests_trust_in_the_projects_root() {
     let mut config = config();
@@ -349,6 +350,7 @@ async fn a_trusted_projects_initialize_attests_trust_in_the_projects_root() {
 }
 
 /// An untrusted project's paths are never trusted, whatever path is known.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R24
 #[tokio::test]
 async fn an_untrusted_projects_initialize_attests_nothing() {
     let mut config = config();
@@ -358,6 +360,7 @@ async fn an_untrusted_projects_initialize_attests_nothing() {
 }
 
 /// With no project root known there is nothing the user was asked about.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R24
 #[tokio::test]
 async fn a_trusted_session_without_a_project_root_attests_nothing() {
     let mut config = config();

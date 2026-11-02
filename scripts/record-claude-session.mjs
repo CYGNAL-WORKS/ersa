@@ -205,9 +205,6 @@ for (const key of ENV_REMOVED) delete env[key];
 Object.assign(env, ENV_SET);
 const configDir = trust ? mkdtempSync(join(tmpdir(), "ersa-rec-config-")) : null;
 if (configDir) env.CLAUDE_CONFIG_DIR = configDir;
-// However this script ends, the scratch configuration (and the trust it
-// records) does not outlive it.
-if (configDir) process.on("exit", () => rmSync(configDir, { recursive: true, force: true }));
 
 const started = Date.now();
 // On POSIX the CLI leads its own process group, so a kill reaches whatever
@@ -231,6 +228,9 @@ function killTree() {
 }
 // However this script ends (an exception included), the CLI does not outlive it.
 process.on("exit", killTree);
+// Nor does the scratch configuration (and the trust it records). Registered
+// after the kill, so the CLI no longer holds its files open.
+if (configDir) process.on("exit", () => rmSync(configDir, { recursive: true, force: true }));
 // A CLI that exits early closes its stdin; a write then fails here, not as a crash.
 child.stdin.on("error", () => {});
 
