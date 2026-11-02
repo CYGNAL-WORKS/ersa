@@ -2,10 +2,10 @@
 //! parsed params and returns the typed result or an [`ApiError`]; the work
 //! is the session manager's.
 
-use ersa_adapter::{Direction, PermissionDecision, SessionConfig};
+use ersa_adapter::{BackendChoices, Direction, PermissionDecision, SessionConfig};
 use ersa_protocol::core_api::{
-    AnswerQuestionParams, DecidePermissionParams, Empty, IdParams, RawDirection, RawLogEntry,
-    RawLogParams, Session, SessionCreateParams, SessionSendParams, SessionSendResult,
+    AnswerQuestionParams, Choice, DecidePermissionParams, Empty, IdParams, RawDirection,
+    RawLogEntry, RawLogParams, Session, SessionCreateParams, SessionSendParams, SessionSendResult,
     SetModeParams, SetTitleParams, SubscribeParams, SubscribeResult, WorkspaceState,
 };
 use serde_json::Value;
@@ -46,12 +46,29 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         .project(workspace.project_id.clone())
         .await?
         .ok_or_else(|| ApiError::not_found(format!("no project {}", workspace.project_id)))?;
-    if !core.sessions.has_backend(&params.backend) {
+    let Some(adapter) = core.sessions.adapter(&params.backend) else {
         return Err(ApiError::new(
             ersa_protocol::core_api::ErrorKind::BackendMissing,
             format!("Ersa has no adapter for backend {}", params.backend),
         ));
-    }
+    };
+    // Only what `backend.list` offers: anything else would reach the
+    // backend's command line.
+    let choices = adapter.choices();
+    check_choice("model", &params.model, &choices.models)?;
+    check_choice("effort", &params.effort, &choices.efforts)?;
+    check_choice(
+        "permission_mode",
+        &params.permission_mode,
+        &choices.permission_modes,
+    )?;
+    // The permission mode is always stated to the backend: the named one,
+    // else the backend's default, which the session then started with.
+    let permission_mode = params
+        .permission_mode
+        .clone()
+        .unwrap_or_else(|| BackendChoices::default_of(&choices.permission_modes));
+
     let transport = core
         .session_transport_for(&project.host_id)
         .ok_or_else(|| {
@@ -88,14 +105,21 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         backend_session_id: None,
         mode: params.mode,
         cwd: workspace.path.clone(),
+        // Only the model and effort named; one left out is the backend's to
+        // choose (PROTO-CORE-API-R16).
+        model: params.model.clone(),
+        effort: params.effort.clone(),
+        permission_mode: (!permission_mode.is_empty()).then(|| permission_mode.clone()),
     };
     let config = SessionConfig {
         cwd: workspace.path,
         // Modes are presets of their own (milestone M3), not the backend's
-        // permission mode; until then every session starts in the backend's
-        // default, passed explicitly by the adapter.
-        permission_mode: String::new(),
-        model: None,
+        // permission mode.
+        permission_mode,
+        // Passed only when named, so the backend's own defaults apply
+        // otherwise (PROTO-CLAUDE-CODE-STREAM, Invocation).
+        model: params.model,
+        effort: params.effort,
         // The project's own configuration loads only when the user trusts
         // it (ADR 0018).
         project_trusted: trusted,
@@ -108,6 +132,21 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         .sessions
         .create(session, transport, config, backend_version)
         .await?)
+}
+
+/// Refuses a `field` value that is not one of `offered`; absent is the
+/// backend's default.
+fn check_choice(field: &str, value: &Option<String>, offered: &[Choice]) -> Result<(), ApiError> {
+    match value {
+        Some(id) if !offered.iter().any(|c| &c.id == id) => {
+            let ids: Vec<&str> = offered.iter().map(|c| c.id.as_str()).collect();
+            Err(ApiError::invalid_params(format!(
+                "{field} {id:?} is not one this backend offers: [{}]",
+                ids.join(", ")
+            )))
+        }
+        _ => Ok(()),
+    }
 }
 
 pub(super) async fn start(core: &Core, params: IdParams) -> Result<Session, ApiError> {
