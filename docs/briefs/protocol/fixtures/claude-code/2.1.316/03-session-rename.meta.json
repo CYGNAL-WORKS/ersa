@@ -1,0 +1,121 @@
+{
+  "recorded_at": "2026-11-02T00:14:37.512Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "-p",
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "ab8b4cb0-cc56-48b2-b1c0-6da8044a801e",
+  "session_record": "record/03-session-rename.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 3620,
+  "stderr": "",
+  "stdout_lines": 24,
+  "stdout_timing_ms": [
+    709,
+    1028,
+    1032,
+    1985,
+    1985,
+    1986,
+    1989,
+    1989,
+    1991,
+    1991,
+    1992,
+    2008,
+    2013,
+    2013,
+    2038,
+    2040,
+    2930,
+    2930,
+    2930,
+    2934,
+    2934,
+    2935,
+    2935,
+    2940
+  ],
+  "sent": [
+    {
+      "t": 8,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 709,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with the single word: ok\"}]}}"
+    },
+    {
+      "t": 2009,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-rename_session-1\",\"request\":{\"subtype\":\"rename_session\",\"title\":\"Renamed live by Ersa\",\"source\":\"host\",\"session_id\":\"ab8b4cb0-cc56-48b2-b1c0-6da8044a801e\"}}"
+    },
+    {
+      "t": 2013,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with the single word: done\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Reply with the single word: ok",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    },
+    {
+      "turn": 2,
+      "control": "rename_session",
+      "got_response": true,
+      "subtype": "success"
+    },
+    {
+      "turn": 3,
+      "text": "Reply with the single word: done",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}

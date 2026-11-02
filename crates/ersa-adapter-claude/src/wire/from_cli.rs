@@ -517,12 +517,14 @@ pub enum CliResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ControlSuccess {
     pub request_id: String,
-    #[serde(default)]
+    /// Absent when the request is merely acknowledged (`rename_session`,
+    /// 2.1.316 fixture `03-session-rename`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response: Option<Value>,
     /// `can_use_tool` requests still unanswered, so a host joining a running
-    /// session learns about them.
-    #[serde(default)]
-    pub pending_permission_requests: Vec<CliControlRequest>,
+    /// session learns about them. Absent from a bare acknowledgement.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_permission_requests: Option<Vec<CliControlRequest>>,
     #[serde(flatten)]
     pub extra: Extra,
 }

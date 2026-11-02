@@ -1,0 +1,4 @@
+{"backend_version":"2.1.316","event":{"origin":"human","text":"Reply with the single word: ok","type":"user.message"},"message_id":"d585d629-df06-4260-9d66-13a7330429b5","ts":"2026-11-02T00:14:38.332Z"}
+{"backend_version":"2.1.316","event":{"block_id":"msg_011Cgd8tCHNxypRSncvgMM6Z/0","final":true,"text":"ok","type":"assistant.text"},"message_id":"bf2f003a-027f-435d-b447-66bb660fca33","ts":"2026-11-02T00:14:39.498Z"}
+{"backend_version":"2.1.316","event":{"origin":"human","text":"Reply with the single word: done","type":"user.message"},"message_id":"16375d8a-dccd-4e99-8059-5019bc007477","ts":"2026-11-02T00:14:39.535Z"}
+{"backend_version":"2.1.316","event":{"block_id":"msg_011Cgd8tGc5hSF1EYKFRm6Lb/0","final":true,"text":"done","type":"assistant.text"},"message_id":"45f22d71-6edb-4372-b80b-af974b7f6d78","ts":"2026-11-02T00:14:40.445Z"}
