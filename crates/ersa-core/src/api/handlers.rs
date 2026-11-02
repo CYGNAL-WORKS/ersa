@@ -5,9 +5,9 @@ use std::path::{Component, Path};
 
 use ersa_protocol::core_api::{
     BackendInfo, BackendListParams, Empty, HelloParams, HelloResult, Host, HostKind, HostStatus,
-    IdParams, Project, ProjectAddParams, SUPPORTED_API_VERSIONS, SettingsSetParams, StatusResult,
-    Vcs, Workspace, WorkspaceCreateParams, WorkspaceListParams, WorkspaceRemoveParams,
-    WorkspaceState,
+    IdParams, Project, ProjectAddParams, ProjectSetTrustParams, SUPPORTED_API_VERSIONS,
+    SettingsSetParams, StatusResult, Vcs, Workspace, WorkspaceCreateParams, WorkspaceListParams,
+    WorkspaceRemoveParams, WorkspaceState,
 };
 use ersa_protocol::events::PROJECTION_VERSION;
 use serde_json::{Map, Value};
@@ -176,6 +176,9 @@ pub(super) async fn project_add(
         path: folder.path,
         name: folder.name,
         vcs: folder.vcs,
+        // Only what the user answered: a project's own configuration loads
+        // in its sessions only once they have said they trust it (ADR 0018).
+        trusted: params.trusted,
     };
     core.store
         .insert_project(project.clone(), folder.key)
@@ -241,6 +244,18 @@ fn detect_vcs(path: &Path) -> Vcs {
     } else {
         Vcs::None
     }
+}
+
+/// Records whether the user trusts a project. Sessions already running keep
+/// the configuration they started with; the next start uses the new answer.
+pub(super) async fn project_set_trust(
+    core: &Core,
+    params: ProjectSetTrustParams,
+) -> Result<Project, ApiError> {
+    core.store
+        .set_project_trust(params.id.clone(), params.trusted)
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no project {}", params.id)))
 }
 
 pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Project, ApiError> {

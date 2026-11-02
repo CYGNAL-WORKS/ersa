@@ -29,7 +29,7 @@ async fn add_project(client: &mut Client, path: &Path) -> Value {
     client
         .result(
             "project.add",
-            json!({ "host_id": "local", "path": path.display().to_string() }),
+            json!({ "host_id": "local", "path": path.display().to_string(), "trusted": false }),
         )
         .await
 }
@@ -44,13 +44,14 @@ async fn project_lifecycle() {
     assert_eq!(project["name"], json!("repo"));
     assert_eq!(project["host_id"], json!("local"));
     assert_eq!(project["path"], json!(normalized(&repo)));
+    assert_eq!(project["trusted"], json!(false));
 
     // A trailing separator is the same directory, so the same project.
     let with_slash = format!("{}/", repo.display());
     let error = client
         .error(
             "project.add",
-            json!({ "host_id": "local", "path": with_slash }),
+            json!({ "host_id": "local", "path": with_slash, "trusted": false }),
         )
         .await;
     assert_eq!(kind(&error), "invalid_state");
@@ -69,7 +70,7 @@ async fn project_lifecycle() {
     let error = client
         .error(
             "project.add",
-            json!({ "host_id": "local", "path": missing.display().to_string() }),
+            json!({ "host_id": "local", "path": missing.display().to_string(), "trusted": false }),
         )
         .await;
     assert_eq!(kind(&error), "not_found");
@@ -77,7 +78,7 @@ async fn project_lifecycle() {
     let error = client
         .error(
             "project.add",
-            json!({ "host_id": "local", "path": "relative/dir" }),
+            json!({ "host_id": "local", "path": "relative/dir", "trusted": false }),
         )
         .await;
     assert_eq!(error["code"], json!(-32602));
@@ -85,7 +86,7 @@ async fn project_lifecycle() {
     let error = client
         .error(
             "project.add",
-            json!({ "host_id": "nowhere", "path": repo.display().to_string() }),
+            json!({ "host_id": "nowhere", "path": repo.display().to_string(), "trusted": false }),
         )
         .await;
     assert_eq!(kind(&error), "not_found");
@@ -102,6 +103,70 @@ async fn project_lifecycle() {
         client.result("project.list", json!({})).await,
         json!([plain_project])
     );
+}
+
+// verifies: PROTO-CORE-API-R11
+#[tokio::test(flavor = "multi_thread")]
+async fn a_project_is_trusted_only_when_said_and_stays_so_across_a_restart() {
+    let (core, mut client, repo) = setup().await;
+    let plain = core.dir.path().join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+
+    // No answer is no trust.
+    let untrusted = client
+        .result(
+            "project.add",
+            json!({ "host_id": "local", "path": repo.display().to_string() }),
+        )
+        .await;
+    assert_eq!(untrusted["trusted"], json!(false));
+    let trusted = client
+        .result(
+            "project.add",
+            json!({ "host_id": "local", "path": plain.display().to_string(), "trusted": true }),
+        )
+        .await;
+    assert_eq!(trusted["trusted"], json!(true));
+
+    // `project.set_trust` changes it and returns the project as it now is.
+    let changed = client
+        .result(
+            "project.set_trust",
+            json!({ "id": untrusted["id"], "trusted": true }),
+        )
+        .await;
+    assert_eq!(changed["trusted"], json!(true));
+    assert_eq!(changed["id"], untrusted["id"]);
+    let changed = client
+        .result(
+            "project.set_trust",
+            json!({ "id": trusted["id"], "trusted": false }),
+        )
+        .await;
+    assert_eq!(changed["trusted"], json!(false));
+    let error = client
+        .error(
+            "project.set_trust",
+            json!({ "id": "p-nowhere", "trusted": true }),
+        )
+        .await;
+    assert_eq!(kind(&error), "not_found");
+
+    let before = client.result("project.list", json!({})).await;
+    client.result("core.shutdown", json!({})).await;
+    core.task.await.expect("joined").expect("stopped cleanly");
+
+    let core = support::start_with(core.dir, |_| {}).await;
+    let mut client = core.client().await;
+    let after = client.result("project.list", json!({})).await;
+    assert_eq!(after, before);
+    let trust: Vec<&Value> = after
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| &p["trusted"])
+        .collect();
+    assert_eq!(trust, [&json!(true), &json!(false)]);
 }
 
 // verifies: PROTO-CORE-API-R06
@@ -290,7 +355,7 @@ async fn project_paths_are_canonical_and_unique_however_spelled() {
         let error = client
             .error(
                 "project.add",
-                json!({ "host_id": "local", "path": spelling }),
+                json!({ "host_id": "local", "path": spelling, "trusted": false }),
             )
             .await;
         assert_eq!(kind(&error), "invalid_state", "{spelling}");
@@ -308,7 +373,10 @@ async fn project_paths_are_canonical_and_unique_however_spelled() {
         .display()
         .to_string();
     let error = client
-        .error("project.add", json!({ "host_id": "local", "path": root }))
+        .error(
+            "project.add",
+            json!({ "host_id": "local", "path": root, "trusted": false }),
+        )
         .await;
     assert_eq!(error["code"], json!(-32602), "{root}: {error}");
 }

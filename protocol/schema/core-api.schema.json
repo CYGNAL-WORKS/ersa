@@ -272,6 +272,30 @@
               "$ref": "#/$defs/request_id"
             },
             "method": {
+              "const": "project.set_trust"
+            },
+            "params": {
+              "$ref": "#/$defs/project.set_trust.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
               "const": "project.remove"
             },
             "params": {
@@ -1299,7 +1323,8 @@
         "host_id",
         "path",
         "name",
-        "vcs"
+        "vcs",
+        "trusted"
       ],
       "properties": {
         "id": {
@@ -1321,6 +1346,10 @@
             "perforce",
             "none"
           ]
+        },
+        "trusted": {
+          "type": "boolean",
+          "description": "Whether the user trusts the project, so its own configuration loads in its sessions (ADR 0018). False unless project.add or project.set_trust said otherwise."
         }
       }
     },
@@ -1691,10 +1720,33 @@
         "path": {
           "type": "string",
           "minLength": 1
+        },
+        "trusted": {
+          "type": "boolean",
+          "description": "The user's answer when adding the project: whether its own configuration may load in its sessions. Untrusted when absent."
         }
       }
     },
     "project.add.result": {
+      "$ref": "#/$defs/project"
+    },
+    "project.set_trust.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "trusted"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "trusted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "project.set_trust.result": {
       "$ref": "#/$defs/project"
     },
     "project.remove.params": {

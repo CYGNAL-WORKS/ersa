@@ -1,6 +1,7 @@
 //! Windows-only behaviour of the platform module: the pipe's name and
 //! security descriptor, and path canonicalisation (`PROTO-CORE-API`,
-//! Transport and framing).
+//! Transport and framing); and environment names, which Windows compares
+//! without case.
 
 // The whole file compiles only on Windows; elsewhere it is an empty test crate.
 #![cfg(windows)]
@@ -9,6 +10,10 @@ mod support;
 
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
+
+use ersa_adapter::ProcessSpec;
+use ersa_core::transport::{LocalTreeTransport, run};
 
 use ersa_core::platform::{canonicalize, default_endpoint, labelled_endpoint, path_key};
 
@@ -93,4 +98,25 @@ fn canonical_paths_are_not_verbatim() {
 fn path_keys_ignore_case_and_separators() {
     assert_eq!(path_key(r"D:\Repo\"), path_key("d:/repo"));
     assert_ne!(path_key(r"D:\repo"), path_key(r"D:\repo2"));
+}
+
+/// Windows matches environment names without regard to case, so a removal
+/// list written in capitals also removes a variable a parent spelled
+/// otherwise, and the other way round: a lowercase name in the list removes
+/// the capitalised `OS` every Windows process inherits. (From the review of
+/// PR #36; the removal lists themselves are the adapter's to test.)
+#[tokio::test]
+async fn a_lowercase_name_in_the_removal_list_still_removes_the_variable() {
+    assert!(std::env::var_os("OS").is_some(), "OS unset here");
+    let spec = ProcessSpec {
+        program: "cmd".into(),
+        args: vec!["/C".into(), "echo [%OS%]".into()],
+        env_remove: vec!["os".into()],
+        ..ProcessSpec::default()
+    };
+    let output = run(&LocalTreeTransport::new(), spec, Duration::from_secs(30))
+        .await
+        .expect("cmd runs");
+    // cmd leaves an unset variable's reference as it was written.
+    assert_eq!(output.stdout[0].trim_end(), "[%OS%]");
 }

@@ -379,7 +379,7 @@ pub async fn workspace(client: &mut Client, dir: &Path) -> String {
     let project = client
         .result(
             "project.add",
-            json!({ "host_id": "local", "path": repo.display().to_string() }),
+            json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false }),
         )
         .await;
     let workspace = client

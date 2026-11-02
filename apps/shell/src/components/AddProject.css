@@ -49,6 +49,7 @@
   visibility: hidden;
 }
 
+.add-project-question,
 .add-project-problem {
   grid-column: 1 / -1;
 }

@@ -72,6 +72,7 @@ methods! {
     HostProbe => "host.probe",
     ProjectList => "project.list",
     ProjectAdd => "project.add",
+    ProjectSetTrust => "project.set_trust",
     ProjectRemove => "project.remove",
     WorkspaceList => "workspace.list",
     WorkspaceCreate => "workspace.create",
@@ -312,6 +313,10 @@ pub struct Project {
     pub path: String,
     pub name: String,
     pub vcs: Vcs,
+    /// Whether the user trusts the project, so that its own configuration
+    /// loads in its sessions (ADR 0018). False unless `project.add` or
+    /// `project.set_trust` said otherwise.
+    pub trusted: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -328,6 +333,20 @@ pub enum Vcs {
 pub struct ProjectAddParams {
     pub host_id: String,
     pub path: String,
+    /// The user's answer when adding the project: whether its own
+    /// configuration may load in its sessions. Absent is untrusted, so a
+    /// client that never asks trusts nothing (PROTO-CORE-API-R11), and the
+    /// field is an addition that keeps the API version.
+    #[serde(default)]
+    pub trusted: bool,
+}
+
+/// `project.set_trust` params.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectSetTrustParams {
+    pub id: String,
+    pub trusted: bool,
 }
 
 /// An isolated checkout belonging to a project.
