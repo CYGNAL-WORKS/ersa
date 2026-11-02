@@ -36,7 +36,7 @@ colors:
     wash-secondary: "#8FA6FF12"
 typography:
   ui:
-    fontFamily: "Inter, 'Segoe UI Variable', system-ui, sans-serif"
+    fontFamily: "'IBM Plex Sans', 'Segoe UI Variable', system-ui, sans-serif"
     fontSize: 13px
     lineHeight: 1.45
   ui-small:
@@ -44,7 +44,7 @@ typography:
     fontSize: 12px
     lineHeight: 1.4
   heading:
-    fontFamily: "{typography.ui.fontFamily}"
+    fontFamily: "Oxanium, {typography.ui.fontFamily}"
     fontSize: 15px
     fontWeight: 600
     lineHeight: 1.3
@@ -96,7 +96,7 @@ motion:
 
 Ersa is an agentic development harness for multi-agent work. The user runs several agents at once and moves between them; the interface makes state legible at a glance and stays out of the way while they read. It looks and behaves like the agentic harnesses people already use (Claude Desktop, Claude in VS Code, VS Code's agents view), so nothing about the conversation has to be learned, and it is more beautiful than they are.
 
-The colours in the front matter are Midnight, the default palette; the other values are placeholders while the faces, scale and icons are chosen. They are explored and reviewed in the Ersa design system (https://claude.ai/code/artifact/9be37025-1765-426d-89fa-0a47c8fa0f37); a choice agreed there is written back here before code uses it. ADR 0019 records why the direction changed.
+The colors in the front matter are Midnight, the default palette, and the faces are chosen; the other values are placeholders while the scale and icons are chosen. They are explored and reviewed in the Ersa design system (https://claude.ai/code/artifact/9be37025-1765-426d-89fa-0a47c8fa0f37); a choice agreed there is written back here before code uses it. ADR 0019 records why the direction changed.
 
 Principles that resolve trade-offs:
 
@@ -125,7 +125,7 @@ Type is assigned by role, never by face: `ui` for controls, the rail and tiles; 
 
 Numeric readouts (context, cost, counts, durations) are set in the UI face with tabular figures, so digits do not jitter as values change. `mono` is for code and what the user may copy, not for numbers on their own.
 
-Open: the faces. The lean is Oxanium for the wordmark and titles only, with a neutral face for everything scanned and read; the neutral and mono faces are open. Inter and JetBrains Mono are placeholders.
+The faces: Oxanium for the wordmark and titles (`heading`), IBM Plex Sans for everything scanned and read (`ui`, `ui-small`, `prose`), and JetBrains Mono for code (`mono`). Code is set with ligatures off, so it shows the characters that were typed. All three are bundled with the interface, so every machine renders them rather than a fallback.
 
 ## Layout
 

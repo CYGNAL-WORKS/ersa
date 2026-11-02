@@ -29,6 +29,7 @@
 
 .gallery-name {
   margin: 0;
+  font-family: var(--type-heading-family);
   font-size: var(--type-heading-size);
   line-height: var(--type-heading-leading);
   font-weight: var(--type-heading-weight);

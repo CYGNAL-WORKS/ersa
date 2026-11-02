@@ -14,9 +14,10 @@
   padding: var(--space-xxl) var(--space-lg);
 }
 
-/* Set in the UI face's heading weight, muted: a mark that says where you are, not a headline. */
+/* Set in the heading face, muted: a mark that says where you are, not a headline. */
 .new-session-wordmark {
   margin: 0;
+  font-family: var(--type-heading-family);
   font-size: var(--type-heading-size);
   line-height: var(--type-heading-leading);
   font-weight: var(--type-heading-weight);
