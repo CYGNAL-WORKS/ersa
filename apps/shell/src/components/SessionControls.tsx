@@ -10,10 +10,10 @@ export type Host = CoreHelloResult["host"];
 export type ControlKey = "host" | "project" | "workspace" | "backend" | "model" | "effort" | "permission_mode";
 
 interface SessionControlsProps {
-  hosts: Host[];
-  projects: Project[];
+  hosts: readonly Host[];
+  projects: readonly Project[];
   /** The backends on the values' host, from `backend.list`; absent while Core is still detecting them. */
-  backends?: BackendChoices[];
+  backends?: readonly BackendChoices[];
   values: SessionValues;
   onChoose: (key: ControlKey, id: string) => void;
   /** While the first message is on its way, nothing changes. */
@@ -38,7 +38,7 @@ const backendOption = (b: BackendChoices): ChipOption => ({
   unavailable: b.status !== "available",
 });
 
-const choiceOptions = (choices: Choice[]): ChipOption[] => choices.map(({ id, label }) => ({ id, label }));
+const choiceOptions = (choices: readonly Choice[]): ChipOption[] => choices.map(({ id, label }) => ({ id, label }));
 
 /**
  * The session controls (GLOSSARY): a chip for each of host, project, workspace, backend, model, effort and
