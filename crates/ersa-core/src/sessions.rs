@@ -873,9 +873,9 @@ impl SessionManager {
                     if e.kind() == io::ErrorKind::NotFound =>
                 {
                     // Never written, or deleted by the backend's retention.
-                    return Err(SessionError::InvalidState(format!(
-                        "the backend has no record of session {id} to rename"
-                    )));
+                    return Err(SessionError::InvalidState(
+                        "the backend has no record of this session to rename".into(),
+                    ));
                 }
                 renamed => renamed?,
             }

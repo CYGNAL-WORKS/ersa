@@ -80,7 +80,8 @@ impl ClaudeAdapter {
         self
     }
 
-    /// How long `start` waits for the CLI to answer `initialize`.
+    /// How long `start` waits for the CLI to answer `initialize`, and a
+    /// rename for its answer to `rename_session`.
     pub fn with_handshake_timeout(mut self, timeout: Duration) -> Self {
         self.handshake_timeout = timeout;
         self
@@ -305,6 +306,7 @@ impl Adapter for ClaudeAdapter {
             shared: shared.clone(),
             exited: exited_rx,
             stop_grace: self.stop_grace,
+            answer_timeout: self.handshake_timeout,
         };
 
         // Register for the answer before the request can be written, so the
@@ -750,6 +752,8 @@ struct ClaudeSession {
     /// Flips to true once the read loop has reported the exit.
     exited: watch::Receiver<bool>,
     stop_grace: Duration,
+    /// How long a host control request waits for the CLI's answer.
+    answer_timeout: Duration,
 }
 
 impl ClaudeSession {
@@ -881,14 +885,24 @@ impl AdapterSession for ClaudeSession {
             lock(&self.shared.awaiting).remove(&request_id);
             return Err(e);
         }
-        match answer_rx.await {
-            Ok(answer) if answer["subtype"] == "success" => Ok(()),
-            Ok(answer) => Err(AdapterError::Protocol(format!(
+        // A CLI that never answers (one too old to know the request, or
+        // wedged) must not keep the waiter for the rest of the session.
+        let answer = tokio::time::timeout(self.answer_timeout, answer_rx).await;
+        match answer {
+            Ok(Ok(answer)) if answer["subtype"] == "success" => Ok(()),
+            Ok(Ok(answer)) => Err(AdapterError::Protocol(format!(
                 "the CLI refused the rename: {}",
                 answer["error"].as_str().unwrap_or("no reason given")
             ))),
             // The read loop dropped the waiter: the CLI exited first.
-            Err(_) => Err(AdapterError::NotRunning),
+            Ok(Err(_)) => Err(AdapterError::NotRunning),
+            Err(_) => {
+                lock(&self.shared.awaiting).remove(&request_id);
+                Err(AdapterError::Protocol(format!(
+                    "the CLI did not answer the rename within {:?}",
+                    self.answer_timeout
+                )))
+            }
         }
     }
 

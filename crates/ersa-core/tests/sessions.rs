@@ -1020,20 +1020,30 @@ async fn a_session_its_backend_never_named_cannot_be_renamed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn an_empty_title_is_refused() {
+async fn a_blank_long_or_multi_line_title_is_refused() {
     let (core, stats) = start_fake(FakeAdapter::new(1)).await;
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
     client
         .result("session.send", json!({ "id": id, "text": "hello" }))
         .await;
-    for title in ["", "   ", "\n"] {
+    let long = "x".repeat(201);
+    for title in ["", "   ", "\n", "two\nlines", "bell\u{7}", long.as_str()] {
         let error = client
             .error("session.set_title", json!({ "id": id, "title": title }))
             .await;
         assert_eq!(error["code"], -32602, "{title:?}: {error:#}");
     }
     assert_eq!(stats.live_renames.load(Ordering::SeqCst), 0);
+    // As long as the backend's own list shows, and trimmed.
+    let longest = "é".repeat(200);
+    let renamed = client
+        .result(
+            "session.set_title",
+            json!({ "id": id, "title": format!(" {longest} ") }),
+        )
+        .await;
+    assert_eq!(renamed["title"], longest.as_str());
 }
 
 #[tokio::test(flavor = "multi_thread")]
