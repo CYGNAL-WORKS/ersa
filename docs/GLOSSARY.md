@@ -57,6 +57,8 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Pane**: a purpose-built area in the workbench: Files, Diff, Terminal, Browser, Developer.
 - **Terminal pane**: a full hosted terminal (a real shell in a pseudo-terminal) opened in the session's workspace, for the user. Backends are never driven through it; the agent's own commands appear as cards in the transcript.
 - **Card**: a rich block rendered inline in the transcript for a single event, such as a tool call or a diff.
+- **Theme**: light or dark. Follows the system unless the user chooses one. Every palette has both.
+- **Palette**: a named, complete set of colour tokens for both themes, such as Midnight, the default. The user chooses one; components name colour roles, never a palette's values.
 - **Show me**: a guided-help mode in which the agent, with the user's visible consent, drives the interface to demonstrate something. It can never operate permission controls.
 
 ## Process
