@@ -260,7 +260,13 @@ fn core_commit() -> String {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
     };
     let head = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".into());
-    match git(&["status", "--porcelain", "--", ".", ":!apps/shell/src/session/replays"]) {
+    match git(&[
+        "status",
+        "--porcelain",
+        "--",
+        ".",
+        ":!apps/shell/src/session/replays",
+    ]) {
         Some(changes) if !changes.is_empty() => format!("{head}-dirty"),
         _ => head,
     }
