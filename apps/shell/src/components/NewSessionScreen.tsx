@@ -8,12 +8,12 @@ import { type ControlKey, type Host, SessionControls } from "./SessionControls";
 import "./NewSessionScreen.css";
 
 interface NewSessionScreenProps {
-  hosts: Host[];
-  projects: Project[];
+  hosts: readonly Host[];
+  projects: readonly Project[];
   /** Each host's backends from `backend.list`, by host id; a host absent here is still being detected. */
-  backends: Record<string, BackendChoices[]>;
+  backends: Readonly<Record<string, readonly BackendChoices[]>>;
   /** The values the user last started a session with, by project id. */
-  lastUsed?: Record<string, SessionValues>;
+  lastUsed?: Readonly<Record<string, SessionValues>>;
   /** The project the user chose New session for; else the first. */
   projectId?: string;
   /** Starts the session with the first message; resolves true once it has started. */
