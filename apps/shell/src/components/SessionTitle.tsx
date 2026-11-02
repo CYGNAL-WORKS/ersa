@@ -8,8 +8,8 @@ interface SessionTitleProps {
   /** Renames the session in its backend; resolves true once Core has. Absent: the session cannot be renamed here. */
   onRename?: (title: string) => Promise<boolean>;
   renaming?: Sending;
-  /** Editing has ended, saved or not: a refusal from before is no longer the user's concern. */
-  onDone?: () => void;
+  /** Editing starts or ends: a refusal from an earlier attempt is no longer the user's concern. */
+  onReset?: () => void;
   /** Renaming is there but cannot be used now, such as while Core is away. */
   disabled?: boolean;
   /** What follows the title in the header, such as the session's state. */
@@ -29,7 +29,7 @@ export function titleToSave(draft: string, current: string): string | undefined 
 }
 
 /** The session's title in its header, and renaming it there: the backend keeps the title, so its own tools show it too. */
-export function SessionTitle({ title, onRename, renaming, onDone, disabled, children, initialDraft, force }: SessionTitleProps) {
+export function SessionTitle({ title, onRename, renaming, onReset, disabled, children, initialDraft, force }: SessionTitleProps) {
   // The text being edited; undefined while the title is only shown.
   const [draft, setDraft] = useState<string | undefined>(initialDraft);
   const busy = renaming?.state === "sending";
@@ -55,7 +55,7 @@ export function SessionTitle({ title, onRename, renaming, onDone, disabled, chil
   const close = () => {
     returnFocus.current = true;
     setDraft(undefined);
-    onDone?.();
+    onReset?.();
   };
 
   const save = async () => {
@@ -80,7 +80,10 @@ export function SessionTitle({ title, onRename, renaming, onDone, disabled, chil
             className="session-heading-rename"
             force={force}
             disabled={disabled}
-            onClick={() => setDraft(title)}
+            onClick={() => {
+              onReset?.();
+              setDraft(title);
+            }}
           >
             Rename
           </Button>

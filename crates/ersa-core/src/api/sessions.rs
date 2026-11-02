@@ -189,29 +189,35 @@ pub(super) async fn answer_question(
 /// Renames the session in its backend, which keeps the title where its own
 /// tools show it too (ADR 0017, PROTO-CORE-API-R12).
 pub(super) async fn set_title(core: &Core, params: SetTitleParams) -> Result<Session, ApiError> {
-    let title = params.title.trim();
+    // The title goes into the backend's record for good and shows in its own
+    // tools, which list one line of at most 200 characters with every run of
+    // spaces as one (PROTO-CLAUDE-CODE-STREAM, Listing). The title is taken
+    // in that form, so Ersa shows what the backend's list will: a longer
+    // title, or one holding a line break or another control character, would
+    // read differently there.
+    if params.title.chars().any(char::is_control) {
+        return Err(ApiError::invalid_params(
+            "a session's title is one line, without control characters",
+        ));
+    }
+    let title = params
+        .title
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     if title.is_empty() {
         return Err(ApiError::invalid_params(
             "a session's title cannot be empty",
         ));
     }
-    // The title goes into the backend's record for good and shows in its own
-    // tools, which list one line of at most 200 characters
-    // (PROTO-CLAUDE-CODE-STREAM, Listing): a longer title, or one holding a
-    // line break or another control character, would read differently there.
     if title.chars().count() > MAX_TITLE_CHARS {
         return Err(ApiError::invalid_params(format!(
             "a session's title is at most {MAX_TITLE_CHARS} characters"
         )));
     }
-    if title.chars().any(char::is_control) {
-        return Err(ApiError::invalid_params(
-            "a session's title is one line, without control characters",
-        ));
-    }
     Ok(core
         .sessions
-        .set_title(&params.id, title, |host| core.session_transport_for(host))
+        .set_title(&params.id, &title, |host| core.session_transport_for(host))
         .await?)
 }
 

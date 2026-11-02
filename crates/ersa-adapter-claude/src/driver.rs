@@ -54,6 +54,9 @@ const STDERR_TAIL: usize = 5;
 pub struct ClaudeAdapter {
     handshake_timeout: Duration,
     stop_grace: Duration,
+    /// How long a host control request other than `initialize` waits for
+    /// the CLI's answer.
+    answer_timeout: Duration,
     /// Where the CLI keeps session records; `None` for wherever the CLI
     /// itself would ([`record::default_claude_home`]).
     claude_home: Option<PathBuf>,
@@ -68,6 +71,9 @@ impl ClaudeAdapter {
             // this leaves plenty of room for a slow disk or a remote host.
             handshake_timeout: Duration::from_secs(60),
             stop_grace: Duration::from_secs(3),
+            // Well inside Core's own bound on an adapter call, so the CLI's
+            // silence is what the user is told, not Core's timeout.
+            answer_timeout: Duration::from_secs(10),
             claude_home: None,
             records: Arc::default(),
         }
@@ -80,10 +86,15 @@ impl ClaudeAdapter {
         self
     }
 
-    /// How long `start` waits for the CLI to answer `initialize`, and a
-    /// rename for its answer to `rename_session`.
+    /// How long `start` waits for the CLI to answer `initialize`.
     pub fn with_handshake_timeout(mut self, timeout: Duration) -> Self {
         self.handshake_timeout = timeout;
+        self
+    }
+
+    /// How long a rename waits for the CLI's answer.
+    pub fn with_answer_timeout(mut self, timeout: Duration) -> Self {
+        self.answer_timeout = timeout;
         self
     }
 
@@ -306,7 +317,7 @@ impl Adapter for ClaudeAdapter {
             shared: shared.clone(),
             exited: exited_rx,
             stop_grace: self.stop_grace,
-            answer_timeout: self.handshake_timeout,
+            answer_timeout: self.answer_timeout,
         };
 
         // Register for the answer before the request can be written, so the

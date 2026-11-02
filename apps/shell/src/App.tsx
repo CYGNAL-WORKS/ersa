@@ -137,7 +137,7 @@ export function App({ client }: { client: CoreClient }) {
     setRenaming((r) => ({ ...r, [id]: { state: "sending" } }));
     try {
       await client.call("session.set_title", { id, title });
-      titles.current[id] = title;
+      titles.current[id] = renamedTo.current[id] = title;
       setRenaming(({ [id]: _, ...rest }) => rest);
       connection.current?.reload("sessions");
       return true;
@@ -193,8 +193,18 @@ export function App({ client }: { client: CoreClient }) {
 
   // The title as last listed, so the header keeps it while the list reloads
   // or Core is away.
+  // A title just renamed holds until the list catches up with it, rather than the list from before putting the
+  // old one back.
   const titles = useRef<Record<string, string>>({});
-  if (sessions.state === "ready") for (const s of sessions.sessions) if (s.title) titles.current[s.id] = s.title;
+  const renamedTo = useRef<Record<string, string>>({});
+  if (sessions.state === "ready") {
+    for (const s of sessions.sessions) {
+      if (!s.title) continue;
+      if (renamedTo.current[s.id] !== undefined && s.title !== renamedTo.current[s.id]) continue;
+      delete renamedTo.current[s.id];
+      titles.current[s.id] = s.title;
+    }
+  }
   const shown = session && session.id === activeId ? session : undefined;
 
   return (
@@ -226,8 +236,10 @@ export function App({ client }: { client: CoreClient }) {
               onRetry={retrySubscribe}
               onRename={(title) => rename(shown.id, title)}
               renaming={renaming[shown.id]}
-              onRenameDone={() => setRenaming(({ [shown.id]: _, ...rest }) => rest)}
-              renameDisabled={view.phase !== "connected"}
+              onRenameReset={() => setRenaming(({ [shown.id]: _, ...rest }) => rest)}
+              // A session that has no title yet has had no turn: its backend has not named it, so there is nothing
+              // to rename.
+              renameDisabled={view.phase !== "connected" || !titles.current[shown.id]}
             />
           </ErrorBoundary>
           <ErrorBoundary what="The composer" resetKey={shown.id}>
