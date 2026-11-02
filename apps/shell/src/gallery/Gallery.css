@@ -41,7 +41,8 @@
 
 .gallery-states {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--size-tile-min), 1fr));
+  /* Specimens are as wide as the rail, so a rail component is seen at the width it lives at. */
+  grid-template-columns: repeat(auto-fill, var(--size-rail));
   gap: var(--space-lg);
   align-items: start;
 }

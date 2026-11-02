@@ -140,9 +140,9 @@ The wordmark has its own size, much larger than `heading`, and is drawn in `ink`
 
 ## Layout
 
-Every gap, padding and size is a named step on one scale, on a 4px grid; space shows grouping, and the gap grows with the distance between ideas. The transcript keeps a reading column of comfortable width (`measure`) however wide the window gets. The rail is `rail` wide (288px, as Claude Desktop's sidebar; VS Code's and Zed's default to 300px), and a tile fills it. The shell layout is specified in `LAY-SHELL`.
+Every gap, padding and size is a named step on one scale, on a 4px grid; space shows grouping, and the gap grows with the distance between ideas. The transcript keeps a reading column of comfortable width (`measure`) however wide the window gets. The rail is `rail` wide (288px, as Claude Desktop's session list; VS Code's and Zed's default to 300px), and a tile fills it. The shell layout is specified in `LAY-SHELL`.
 
-**Turns are grouped by space.** A turn is the user's message and everything the agent does in answer. Inside a turn, blocks (messages, tool cards, permission requests) sit `space-md` apart, so a turn reads dense and more of the conversation fits on screen. Between turns, before each user message except the first, the gap is `space-xxxl`, so each turn reads as one group without a divider. Claude Desktop uses about 11px inside a reply and 50 to 70px between turns.
+**Turns are grouped by space.** A turn is a message to the agent, usually the user's, and everything the agent does in answer. Inside a turn, blocks (messages, tool cards, permission requests) sit `space-md` apart, so a turn reads dense and more of the conversation fits on screen. Between turns, before each user message except the first, the gap is `space-xxxl`, so each turn reads as one group without a divider. Claude Desktop uses about 11px inside a reply and 50 to 70px between turns.
 
 The user's message bubble is padded `space-md` above and below and `space-lg` at the sides.
 
