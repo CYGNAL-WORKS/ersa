@@ -173,6 +173,14 @@ async fn replay_refuses_a_recording_without_a_version() {
     let fixture = write_recording(dir.path(), INIT, json!({ "stdout_timing_ms": [0] }));
     let stderr = refused_at_start(&fixture).await;
     assert!(stderr.contains("claude_code_version"), "{stderr}");
+    // An empty version is no version either.
+    let fixture = write_recording(
+        dir.path(),
+        INIT,
+        json!({ "claude_code_version": "", "stdout_timing_ms": [0] }),
+    );
+    let stderr = refused_at_start(&fixture).await;
+    assert!(stderr.contains("claude_code_version"), "{stderr}");
 }
 
 // Ctrl+C during start-up, before the server binds, still removes the
