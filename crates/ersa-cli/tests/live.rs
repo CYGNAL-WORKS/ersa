@@ -136,7 +136,7 @@ async fn a_prompt_with_a_permission_round_trip_through_the_core_process() {
     let project = client
         .call(
             "project.add",
-            json!({ "host_id": "local", "path": repo.display().to_string() }),
+            json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false }),
         )
         .await;
     let workspace = client

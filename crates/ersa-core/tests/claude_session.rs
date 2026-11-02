@@ -117,3 +117,71 @@ async fn a_claude_session_round_trips_a_permission_through_core() {
     assert!(position(&stdout[4]) < position(&sent[2]));
     assert_eq!(crossed.len(), stdout.len() + sent.len());
 }
+
+/// The `--setting-sources` value of the `n`th CLI the transport started,
+/// once it has started that many.
+async fn setting_sources(transport: &ersa_adapter::fake::FakeTransport, n: usize) -> String {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(spec) = transport.spawned().get(n) {
+            let at = spec
+                .args
+                .iter()
+                .position(|a| a == "--setting-sources")
+                .expect("--setting-sources passed");
+            return spec.args[at + 1].clone();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no CLI number {n} started"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R12
+// verifies: PROTO-CLAUDE-CODE-STREAM-R18
+#[tokio::test(flavor = "multi_thread")]
+async fn a_projects_own_configuration_loads_only_once_the_user_trusts_it() {
+    let (stdout, _) = fixture();
+    let transport = stub(&stdout);
+    let adapter = OnTransport {
+        adapter: isolated_claude().with_stop_grace(Duration::from_secs(1)),
+        transport: Arc::new(transport.clone()),
+    };
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
+    let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
+    let mut client = core.client().await;
+    let repo = core.dir.path().join("repo");
+    support::git_repo(&repo);
+    let project = client
+        .result(
+            "project.add",
+            json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false }),
+        )
+        .await;
+
+    let start_session = async |client: &mut Client| {
+        let workspace = client
+            .result("workspace.create", json!({ "project_id": project["id"] }))
+            .await;
+        client
+            .result(
+                "session.create",
+                json!({ "workspace_id": workspace["id"], "backend": "claude-code" }),
+            )
+            .await
+    };
+
+    start_session(&mut client).await;
+    assert_eq!(setting_sources(&transport, 0).await, "user");
+
+    client
+        .result(
+            "project.set_trust",
+            json!({ "id": project["id"], "trusted": true }),
+        )
+        .await;
+    start_session(&mut client).await;
+    assert_eq!(setting_sources(&transport, 1).await, "user,project,local");
+}

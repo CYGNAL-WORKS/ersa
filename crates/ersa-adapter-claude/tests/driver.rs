@@ -9,7 +9,9 @@ use std::time::Duration;
 
 use common::{RecordingSink, fixture, is_kind};
 use ersa_adapter::fake::FakeTransport;
-use ersa_adapter::{Adapter, AdapterError, Direction, PermissionDecision, SessionConfig};
+use ersa_adapter::{
+    Adapter, AdapterError, Direction, PermissionDecision, ProcessSpec, SessionConfig,
+};
 use ersa_adapter_claude::ClaudeAdapter;
 use ersa_protocol::events::PermissionBehavior;
 use serde_json::{Value, json};
@@ -18,13 +20,21 @@ const WAIT: Duration = Duration::from_secs(5);
 const PROMPT: &str = "Use the Bash tool to run exactly this command: echo probe > probe.txt. Then report whether it succeeded.";
 const PERMISSION_ID: &str = "1ddd13c0-dd2c-4061-a8a8-86574059182e";
 
+/// A session of a project the user has not said they trust.
 fn config() -> SessionConfig {
     SessionConfig {
         cwd: "C:/work".into(),
         permission_mode: "default".into(),
         model: None,
+        project_trusted: false,
         extra: Value::Null,
     }
+}
+
+/// The value the arguments give `flag`, if they name it.
+fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    let at = args.iter().position(|a| a == flag)?;
+    args.get(at + 1).map(String::as_str)
 }
 
 fn adapter() -> ClaudeAdapter {
@@ -86,6 +96,7 @@ async fn starts_the_cli_with_every_flag_explicit() {
     let sink = Arc::new(RecordingSink::new());
     let mut config = config();
     config.model = Some("haiku".into());
+    config.project_trusted = true;
     config.extra = json!({ "claude_path": "C:/tools/claude.exe" });
     let session = adapter()
         .start(Arc::new(transport.clone()), config, sink.clone())
@@ -122,14 +133,31 @@ async fn starts_the_cli_with_every_flag_explicit() {
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R12
 #[test]
-fn the_session_loads_the_users_settings_and_mcp_configuration() {
-    let args = ersa_adapter_claude::invocation_args(&config());
-    let sources = args.iter().position(|a| a == "--setting-sources");
+fn a_trusted_projects_session_loads_its_settings_and_mcp_configuration() {
+    let mut config = config();
+    config.project_trusted = true;
+    let args = ersa_adapter_claude::invocation_args(&config);
     assert_eq!(
-        sources.and_then(|i| args.get(i + 1)).map(String::as_str),
+        flag_value(&args, "--setting-sources"),
         Some("user,project,local")
     );
     assert!(!args.iter().any(|a| a == "--strict-mcp-config"), "{args:?}");
+}
+
+/// Observed on 2.1.316 against a scratch repository: with `user` alone the
+/// CLI loads no `.claude/settings*.json` (so none of their hooks or rules),
+/// no `.mcp.json` server even when the user's settings enable them, and no
+/// workspace skills, agents or commands, while the user's own settings,
+/// hooks and MCP servers still load. `--strict-mcp-config` would drop the
+/// user's MCP servers as well, so it stays off.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R18
+#[test]
+fn an_untrusted_projects_session_loads_only_the_users_own_settings() {
+    let args = ersa_adapter_claude::invocation_args(&config());
+    assert_eq!(flag_value(&args, "--setting-sources"), Some("user"));
+    for flag in ["--strict-mcp-config", "--mcp-config", "--settings"] {
+        assert!(!args.iter().any(|a| a == flag), "{flag} in {args:?}");
+    }
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R13
@@ -161,6 +189,59 @@ async fn the_cli_runs_as_entrypoint_ersa_with_inherited_claude_variables_removed
         assert!(!spec.env.contains_key(name), "{name} set");
     }
     session.stop().await.expect("stop");
+}
+
+/// The variables that tie a process to another host's session. The
+/// transports remove a listed name from whatever the parent passes on, which
+/// their own tests show against real processes.
+const HOST_SESSION_VARIABLES: [&str; 7] = [
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION",
+];
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R19
+#[tokio::test]
+async fn the_cli_runs_without_another_hosts_session_variables() {
+    let transport = ready_stub();
+    let session = adapter()
+        .start(
+            Arc::new(transport.clone()),
+            config(),
+            Arc::new(RecordingSink::new()),
+        )
+        .await
+        .expect("start");
+
+    let spec = &transport.spawned()[0];
+    for name in HOST_SESSION_VARIABLES {
+        assert!(spec.env_remove.iter().any(|n| n == name), "{name} kept");
+        assert!(!spec.env.contains_key(name), "{name} set");
+    }
+    // What configures Claude Code itself stays, as in the user's terminal.
+    for kept in ["CLAUDE_CONFIG_DIR", "ANTHROPIC_BASE_URL", "PATH"] {
+        assert!(!spec.env_remove.iter().any(|n| n == kept), "{kept} removed");
+    }
+    session.stop().await.expect("stop");
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R13
+// verifies: PROTO-CLAUDE-CODE-STREAM-R19
+#[test]
+fn the_version_check_gets_the_sessions_environment() {
+    let mut check = ProcessSpec::default();
+    adapter().set_environment(&mut check);
+    assert_eq!(
+        check.env.get("CLAUDE_CODE_ENTRYPOINT").map(String::as_str),
+        Some("ersa")
+    );
+    for name in HOST_SESSION_VARIABLES.into_iter().chain(["CLAUDECODE"]) {
+        assert!(check.env_remove.iter().any(|n| n == name), "{name} kept");
+    }
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R02
