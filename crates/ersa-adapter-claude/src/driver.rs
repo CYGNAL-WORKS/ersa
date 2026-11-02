@@ -910,7 +910,7 @@ impl AdapterSession for ClaudeSession {
             Err(_) => {
                 lock(&self.shared.awaiting).remove(&request_id);
                 Err(AdapterError::Protocol(format!(
-                    "the CLI did not answer the rename within {:?}",
+                    "the CLI did not answer the rename within {:?}; it may still take it",
                     self.answer_timeout
                 )))
             }
