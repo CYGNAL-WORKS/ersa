@@ -175,6 +175,9 @@ struct Handle {
     record_read: ReadSlot<RecordReadResult>,
     /// The same for reading the record's title and creation time.
     summary_read: ReadSlot<Result<Option<RecordSummary>, String>>,
+    /// Set when the session is removed, for reads of its record that
+    /// outlive it ([`read_unless_removed`]).
+    removed: Arc<AtomicBool>,
 }
 
 /// A read of a session's record: the record's version when the read began,
@@ -190,6 +193,24 @@ fn still_holds(read: &RecordReadResult, now: Option<&str>) -> bool {
         Ok((version, _)) => version.as_deref() == now,
         Err(_) => true,
     }
+}
+
+/// What `read`, a read of a session's record, returns; when the session was
+/// removed while it ran, `forget` then lets go of what the adapter kept of
+/// the record. A read that outlived its caller can end after `remove` had
+/// the adapter forget the record, and would otherwise keep it again.
+/// `remove` marks the session before it forgets, so either its forget comes
+/// after anything this read kept, or this sees the mark.
+async fn read_unless_removed<T>(
+    read: impl Future<Output = T>,
+    removed: &AtomicBool,
+    forget: impl FnOnce(),
+) -> T {
+    let value = read.await;
+    if removed.load(Ordering::SeqCst) {
+        forget();
+    }
+    value
 }
 
 /// One read of a session's record that may still be running.
@@ -469,6 +490,7 @@ impl Handle {
             ending: Mutex::new(None),
             record_read: tokio::sync::Mutex::new(None),
             summary_read: tokio::sync::Mutex::new(None),
+            removed: Arc::default(),
         }
     }
 
@@ -837,7 +859,9 @@ impl SessionManager {
         self.store.delete_session(id.to_string()).await?;
         lock(&self.sessions).remove(id);
         self.app_log.forget(id);
-        // What the adapter kept of its record goes too.
+        // What the adapter kept of its record goes too, and what a read
+        // still running keeps once it ends.
+        handle.removed.store(true, Ordering::SeqCst);
         let row = lock(&handle.row).clone();
         if let (Some(backend_id), Some(adapter)) =
             (&row.backend_session_id, self.adapters.get(&row.backend))
@@ -1035,32 +1059,45 @@ impl SessionManager {
                         let (reader, cwd, id) =
                             (Arc::clone(&adapter), row.cwd.clone(), backend_id.clone());
                         let at = Arc::clone(&transport);
+                        let removed = Arc::clone(&handle.removed);
                         // The record's version is taken before it is read, so
                         // events read are never newer than the version they
                         // are kept under.
                         let start = move || {
                             tokio::spawn(async move {
-                                let version = reader
-                                    .record_version(Arc::clone(&at), &cwd, &id)
-                                    .await
-                                    .ok()
-                                    .flatten();
-                                reader
-                                    .read_record(at, &cwd, &id)
-                                    .await
-                                    .map(|events| (version, events))
-                                    .map_err(|e| e.to_string())
+                                let read = async {
+                                    let version = reader
+                                        .record_version(Arc::clone(&at), &cwd, &id)
+                                        .await
+                                        .ok()
+                                        .flatten();
+                                    reader
+                                        .read_record(at, &cwd, &id)
+                                        .await
+                                        .map(|events| (version, events))
+                                        .map_err(|e| e.to_string())
+                                };
+                                read_unless_removed(read, &removed, || {
+                                    reader.forget_record(&cwd, &id)
+                                })
+                                .await
                             })
                         };
                         // A read this open joined still holds if the record's
-                        // version is the one it was read at.
+                        // version is the one it was read at. One that failed
+                        // is reported as it is, without looking again; a
+                        // version that cannot be taken now is a change.
                         let still_current = async |read: &RecordReadResult| {
-                            let now = adapter
+                            if read.is_err() {
+                                return true;
+                            }
+                            match adapter
                                 .record_version(transport, &row.cwd, backend_id)
                                 .await
-                                .ok()
-                                .flatten();
-                            still_holds(read, now.as_deref())
+                            {
+                                Ok(now) => still_holds(read, now.as_deref()),
+                                Err(_) => false,
+                            }
                         };
                         read_once(&handle.record_read, RECORD_READ, start, still_current)
                             .await
@@ -1135,10 +1172,11 @@ async fn apply_summary(
     cwd: String,
     backend_id: String,
 ) {
+    let removed = Arc::clone(&handle.removed);
     let start = move || {
         tokio::spawn(async move {
-            adapter
-                .summarize_record(transport, &cwd, &backend_id)
+            let read = adapter.summarize_record(transport, &cwd, &backend_id);
+            read_unless_removed(read, &removed, || adapter.forget_record(&cwd, &backend_id))
                 .await
                 .map_err(|e| e.to_string())
         })
@@ -2024,6 +2062,22 @@ mod tests {
                 .unwrap(),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn a_read_that_ends_after_its_session_is_removed_lets_go_of_what_it_kept() {
+        let removed = AtomicBool::new(false);
+        let forgot = AtomicBool::new(false);
+        let forget = || forgot.store(true, Ordering::SeqCst);
+        assert_eq!(read_unless_removed(async { 1 }, &removed, forget).await, 1);
+        assert!(!forgot.load(Ordering::SeqCst));
+        // The session is removed while the read runs: what it kept goes.
+        let read = async {
+            removed.store(true, Ordering::SeqCst);
+            2
+        };
+        assert_eq!(read_unless_removed(read, &removed, forget).await, 2);
+        assert!(forgot.load(Ordering::SeqCst));
     }
 
     #[test]
