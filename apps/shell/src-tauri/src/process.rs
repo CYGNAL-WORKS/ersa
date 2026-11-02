@@ -25,6 +25,10 @@ pub struct CoreProcess {
     pid: u32,
     #[cfg(windows)]
     handle: windows_sys::Win32::Foundation::HANDLE,
+    /// When the process started (Linux: field 22 of `/proc/<pid>/stat`), so
+    /// a process that later gets the same id is never taken for this one.
+    #[cfg(unix)]
+    started: Option<u64>,
 }
 
 // SAFETY: a process handle is a kernel handle, usable from any thread.
@@ -284,11 +288,35 @@ mod imp {
             Err(e) => return Err(e),
         };
         let pid = peer_pid(&stream)?;
-        Ok(Some(CoreProcess { pid }))
+        // `stream` is still open, so `pid` is still Core's.
+        let process = open(pid)?;
+        drop(stream);
+        Ok(Some(process))
     }
 
     pub fn open(pid: u32) -> io::Result<CoreProcess> {
-        Ok(CoreProcess { pid })
+        let started = start_time(pid);
+        if started.is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("process {pid} is not running"),
+            ));
+        }
+        Ok(CoreProcess { pid, started })
+    }
+
+    /// The fields of `/proc/<pid>/stat` after the command name, which is in
+    /// parentheses and may hold spaces; `None` when the process is gone.
+    fn stat_fields(pid: u32) -> Option<Vec<String>> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let rest = stat.rsplit_once(')')?.1;
+        Some(rest.split_whitespace().map(String::from).collect())
+    }
+
+    /// When process `pid` started, in clock ticks since boot (field 22; the
+    /// 20th after the name). `None` when it is gone or this is not Linux.
+    fn start_time(pid: u32) -> Option<u64> {
+        stat_fields(pid)?.get(19)?.parse().ok()
     }
 
     /// The process at the other end of `stream`, when it is this user's.
@@ -336,18 +364,22 @@ mod imp {
     }
 
     pub fn has_exited(process: &CoreProcess) -> bool {
-        // Gone, or a zombie waiting for its parent to reap it, has exited.
-        match std::fs::read_to_string(format!("/proc/{}/stat", process.pid)) {
-            Ok(stat) => stat
-                .rsplit(')')
-                .next()
-                .is_some_and(|rest| rest.trim_start().starts_with('Z')),
-            Err(_) => true,
-        }
+        // Gone, a zombie waiting for its parent to reap it, or another
+        // process that now has the id: Core has exited.
+        let Some(fields) = stat_fields(process.pid) else {
+            return true;
+        };
+        let zombie = fields.first().is_some_and(|state| state == "Z");
+        let reused = fields.get(19).and_then(|s| s.parse().ok()) != process.started;
+        zombie || reused
     }
 
     pub fn kill_tree(process: &CoreProcess) -> io::Result<()> {
         let pid = libc::pid_t::try_from(process.pid).map_err(io::Error::other)?;
+        // Never signal an id that is no longer Core's.
+        if has_exited(process) {
+            return Ok(());
+        }
         // The Shell starts Core as the leader of its own process group
         // (src/launch.rs), so the group is Core and what it started that did
         // not make a group of its own.

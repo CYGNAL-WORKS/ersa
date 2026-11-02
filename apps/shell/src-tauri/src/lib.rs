@@ -82,6 +82,10 @@ struct Shell {
 /// do nothing.
 pub const QUIT_HEARD_LIMIT: Duration = Duration::from_secs(5);
 
+/// How long Core's client (`ersa_core::connect`) waits for a busy pipe
+/// before it gives up; Core keeps the value private.
+const CORE_CONNECT_DEADLINE: Duration = Duration::from_secs(5);
+
 #[tauri::command]
 async fn core_attach(
     shell: State<'_, Shell>,
@@ -231,16 +235,21 @@ async fn quit_now(app: &AppHandle) {
     if shell.quitting.swap(true, Ordering::SeqCst) {
         return;
     }
-    if let Some(window) = app.get_webview_window(WINDOW) {
-        let _ = window.hide();
-    }
     // Let go of the Interface's connection first: Core closes it anyway. An
     // attach in progress, perhaps launching Core, is let finish, so the Core
     // it launches is the one shut down below; later attaches are refused.
-    // As long as an attach can take: the launch, then the handshake.
-    let attach_limit = launch::START_TIMEOUT + bridge::REQUEST_TIMEOUT + bridge::PROBE_TIMEOUT;
+    // As long as an attach can take: the launch, then the handshake, with
+    // each of its two connects waiting out a busy pipe. The window stays
+    // until then, so a Quit held up by a slow attach is not invisible.
+    let attach_limit = launch::START_TIMEOUT
+        + bridge::REQUEST_TIMEOUT
+        + bridge::PROBE_TIMEOUT
+        + CORE_CONNECT_DEADLINE * 2;
     if let Ok(mut link) = tokio::time::timeout(attach_limit, shell.link.lock()).await {
         link.take();
+    }
+    if let Some(window) = app.get_webview_window(WINDOW) {
+        let _ = window.hide();
     }
     if let Some(endpoint) =
         quit::endpoint_to_stop(shell.label.as_deref(), shell.location.as_ref().ok())

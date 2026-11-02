@@ -283,10 +283,11 @@ async fn helper_wedged_core() {
         .expect("bind");
     // Never waited on: the quit under test ends it, and this process with it.
     #[allow(clippy::zombie_processes)]
+    // It sleeps on its own, so only ending the tree ends it; on Windows the
+    // test run's job ends it if the test does not.
     let child = Command::new(stand_in_backend())
-        // It ends when this process does, which holds its input.
-        .env("ERSA_STAND_IN_SLEEP", "stdin")
-        .stdin(Stdio::piped())
+        .env("ERSA_STAND_IN_SLEEP", "1")
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .spawn()
         .expect("start a child");
