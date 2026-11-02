@@ -15,7 +15,7 @@ An agent asks to run a command, edit a file, or use a tool, or asks the user a q
 
 ## Open questions
 
-- How much of each backend's native permission vocabulary (allow once, allow always, deny, edit the command) is surfaced versus normalised.
+- How much of each backend's native permission vocabulary (allow once, allow always, deny, edit the command) is surfaced versus normalized.
 - Whether an "approve all for this session" option exists and how it is made deliberately hard to hit by accident.
 - Keyboard-only path: jump to the oldest pending shelf, answer, jump to the next.
 - What the shelf shows for a permission whose details (diff, command) are large.
@@ -23,6 +23,7 @@ An agent asks to run a command, edit a file, or use a tool, or asks the user a q
 
 ## Changes
 
+- 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-01: from #14 inbox: M0 answers in the transcript with Allow or Deny; which answer options the shelf offers is open.
 - 2026-10-31: reframed around the shelf; the transcript is a drill-down, not the place to answer.
 - 2026-10-31: created as draft.

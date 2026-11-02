@@ -3,55 +3,64 @@ version: alpha
 name: Ersa
 description: Design tokens and rationale for the Ersa desktop application. Follows the DESIGN.md format (google-labs-code/design.md); exported to W3C design tokens JSON for the interface build.
 colors:
-  # Values are first proposals, to be tuned in the component gallery. Both themes ship from day one.
+  # Midnight, the default palette (see Colors). Generated with Leonardo from contrast targets against the canvas. Both themes ship from day one.
   light:
-    canvas: "#F6F5F2"
-    surface: "#FFFFFF"
-    surface-raised: "#FBFAF8"
-    ink: "#1B1A17"
-    ink-muted: "#6B675F"
-    ink-faint: "#A39E94"
-    line: "#E6E2DA"
-    accent: "#2F6F8F"
+    canvas: "#F1F3F6"
+    surface: "#FBFCFD"
+    surface-raised: "#F6F7F9"
+    ink: "#212429"
+    ink-muted: "#505258"
+    ink-faint: "#6A6C72"
+    line: "#D4D7DB"
+    accent: "#2F61E0"
     accent-ink: "#FFFFFF"
-    positive: "#3B7F5C"
-    caution: "#B9802B"
-    danger: "#B04A3C"
+    positive: "#217D4C"
+    caution: "#966413"
+    danger: "#BE4539"
+    wash-primary: "#3D6BFF0F"
+    wash-secondary: "#8FA6FF0D"
   dark:
-    canvas: "#15161A"
-    surface: "#1C1E23"
-    surface-raised: "#23262C"
-    ink: "#ECEAE4"
-    ink-muted: "#A6A299"
-    ink-faint: "#6E6A62"
-    line: "#2E3138"
-    accent: "#6FA8C7"
-    accent-ink: "#0F1A21"
-    positive: "#6FB58F"
-    caution: "#D8A251"
-    danger: "#D9736A"
+    canvas: "#0B0D10"
+    surface: "#181A1F"
+    surface-raised: "#222429"
+    ink: "#D8DBDF"
+    ink-muted: "#A6A8AD"
+    ink-faint: "#8A8C91"
+    line: "#2F3137"
+    accent: "#739EFF"
+    accent-ink: "#0B0D10"
+    positive: "#32A166"
+    caution: "#BD8326"
+    danger: "#E66858"
+    wash-primary: "#3D6BFF14"
+    wash-secondary: "#8FA6FF12"
 typography:
   ui:
-    fontFamily: "Inter, 'Segoe UI Variable', system-ui, sans-serif"
-    fontSize: 13px
+    fontFamily: "'IBM Plex Sans', 'Segoe UI Variable', system-ui, sans-serif"
+    fontSize: 14px
     lineHeight: 1.45
   ui-small:
     fontFamily: "{typography.ui.fontFamily}"
     fontSize: 12px
     lineHeight: 1.4
   heading:
-    fontFamily: "{typography.ui.fontFamily}"
-    fontSize: 15px
+    fontFamily: "Oxanium, {typography.ui.fontFamily}"
+    fontSize: 17px
     fontWeight: 600
     lineHeight: 1.3
+  wordmark:
+    fontFamily: "{typography.heading.fontFamily}"
+    fontSize: 40px
+    fontWeight: 600
+    lineHeight: 1
   prose:
     fontFamily: "{typography.ui.fontFamily}"
-    fontSize: 14px
-    lineHeight: 1.6
+    fontSize: 15px
+    lineHeight: 1.5
   mono:
     fontFamily: "'JetBrains Mono', 'Cascadia Code', Consolas, monospace"
-    fontSize: 12.5px
-    lineHeight: 1.5
+    fontSize: 13px
+    lineHeight: 1.55
 rounded:
   sm: 4px
   md: 8px
@@ -65,15 +74,17 @@ spacing:
   lg: 16px
   xl: 24px
   xxl: 32px
+  xxxl: 48px
 line:
   # Custom group. Stroke widths for borders and rules.
   hairline: 1px
 size:
   # Custom group. Fixed layout sizes.
-  rail: 224px
-  tile-min: 224px
+  # The rail's width; a tile fills it, so a tile is never narrower.
+  rail: 288px
+  tile-min: 288px
   # The transcript's reading column.
-  measure: 672px
+  measure: 720px
   # The height past which a tool card's output or a long permission field scrolls.
   card-max: 224px
 motion:
@@ -82,52 +93,97 @@ motion:
   quick: 160
   settle: 260
   slow: 400
+  # A chunk of streaming prose fading in to full ink.
+  stream: 1000
+  # One turn of the ring for work of unknown length.
+  loop-ring: 1400
+  # The single swell and fade of the glyph of a session that needs the user.
+  breathe-once: 2400
+  # One breath of a working session's glyph in the rail.
+  breath: 3000
   ease-out: "cubic-bezier(0.2, 0.8, 0.2, 1)"
   ease-in-out: "cubic-bezier(0.4, 0, 0.2, 1)"
+  # Constant speed, for a loop that turns.
+  linear: "linear"
 ---
 
 # Ersa design
 
 ## Overview
 
-Ersa is an instrument, not a chat app. The user is running several agents at once and glancing between them; the interface's job is to make state legible at a glance and to stay out of the way while reading. The reference point is Claude Desktop's calm, document-like feel, pushed further toward a workbench: denser information in the rail and workbench, generous reading space in the transcript.
+Ersa is an agentic development harness for multi-agent work. The user runs several agents at once and moves between them; the interface makes state legible at a glance and stays out of the way while they read. It looks and behaves like the agentic harnesses people already use (Claude Desktop, Claude in VS Code, VS Code's agents view), so nothing about the conversation has to be learned, and it is more beautiful than they are.
+
+The colors in the front matter are Midnight, the default palette; the faces, type scale, spacing scale, sizes, radii and icons are chosen too. They are explored and reviewed in the Ersa design system (https://claude.ai/code/artifact/9be37025-1765-426d-89fa-0a47c8fa0f37); a choice agreed there is written back here before code uses it. ADR 0019 records why the direction changed.
 
 Principles that resolve trade-offs:
 
-- **Quiet surfaces, one accent.** Almost everything is warm neutral. Colour means something: accent for the thing you can act on, semantic colours for state. Never decorative.
-- **Agent output is a document, not a bubble.** The agent's words read like a page. The user's messages are visually distinct but equally plain. No speech bubbles, no avatars in the stream.
-- **Status lives in tiles.** Cost, context, permissions, and progress are compact, consistent tiles with the same anatomy everywhere, so the eye learns one shape.
-- **Motion explains.** Every animation shows where something came from or went to. Nothing animates for decoration. Durations come from the motion tokens; nothing is hand-timed.
+- **Quiet surfaces, one accent.** Almost everything is neutral. Colour means something: the accent for what you can act on and what is waiting for you, semantic colours for state.
+- **Familiar conversation, readable output.** The user's messages sit in chat bubbles. The agent's output has no bubble and reads as a document in `prose` at the `measure` column. No avatars.
+- **Status lives in tiles.** Cost, context, permissions and progress are compact tiles with the same anatomy everywhere, so the eye learns one shape.
+- **Calm and luminous.** One thing draws the eye at a time. Light and depth carry the design: soft tonal gradients give surfaces and primary controls a sense of material, a faint wash keeps the canvas from being flat, and a gentle accent glow marks the one thing that is focused or waiting for you. A screen has one focal glow; everything else rests.
+- **Nothing pops in.** Things fade, slide, or glow into place, and leave the same way. Motion shows where something came from or went to, stays calm, never delays input, and uses the motion tokens. With reduced motion on, everything appears at once and nothing loops: the ring and a working glyph hold still at full tone. Elevation & Depth gives each moving thing its motion.
 - **Both themes are first-class.** Light and dark are designed together. A component is not done until it is right in both.
-- **Not "AI-looking".** No gradients, no glow, no sparkle iconography, no purple. If a choice would look at home on a model vendor's landing page, choose differently.
-- **One distinctive move.** The principles above describe most good developer tools of this era; followed alone they produce a competent clone. Ersa's signature is the instrument readout: every number in the interface (context ring, cost, counts, durations) is set in tabular mono figures with a consistent gauge vocabulary, so the rail reads like a well-made panel of dials rather than a list of chats. A second candidate, a UI typeface other than Inter, is to be evaluated in the gallery before M1 ends.
-- **Attention is an edge, never a fill.** A tile that needs the user shows a coloured edge or glyph. Filled rows are forbidden: with ten sessions, filled attention rows become a wall of colour within a week and the principle above dies first.
+- **Light on dew.** Ersa is the Greek goddess of dew, a daughter of Selene, the moon. Dew forms under moonlight and catches the first light of morning: a cool, clear, quiet base with small points of brightness. That image is where the palette, the wash and the glow take their character from, and it is what keeps Ersa from looking like every other developer tool.
+- **Attention is an edge or a glyph, never a fill.** A session that needs the user is told by its status glyph; a failed one by the danger glyph. Filled attention rows are forbidden: with ten sessions they become a wall of colour within a week. The open session is visibly distinct from the others, quietly.
 
 ## Colors
 
-Two token sets, `light` and `dark`, with identical names so components reference roles, never values. `canvas` is the window background; `surface` is a pane or card; `surface-raised` is a hovered or focused card. `ink` levels carry text hierarchy. `line` is the only border colour. The accent is a muted blue chosen to sit quietly against warm neutrals; it marks interactive affordances and the active session. Semantic colours (`positive`, `caution`, `danger`) appear only in tiles and inline status, never as large fills.
+Two token sets, `light` and `dark`, with identical names, so components name a role and never a value. `canvas` is the window background; `surface` is a pane or card; `surface-raised` is a hovered or focused card. `ink` levels carry text hierarchy. `line` is the only border colour. `accent` marks what can be acted on and what is waiting for you. Semantic colours (`positive`, `caution`, `danger`) appear on glyphs and inline status, never as large fills.
 
-Open: the exact accent hue is a proposal. Tune in the gallery against real transcripts in both themes before building components.
+Text meets 4.5:1 against its background; a control's edge and a state glyph meet 3:1. Every `ink` level, `ink-faint` included, meets 4.5:1 against `canvas`, `surface`, and `surface-raised`, so `ink-faint` is safe for placeholders and disabled text, and `ink-muted` stays a clear step above it. Generate the palette from these targets (the Leonardo method: name each role's contrast against the canvas and derive both themes from it) rather than picking hex values by eye.
 
-Attention marks use `accent` for "needs you" (permission, question) and `danger` for "failed"; both appear as an edge or glyph on the tile, never as a row fill.
+`wash-primary` and `wash-secondary` are the two colours of the canvas wash, carrying their own low alpha, so a palette sets how faint its wash is.
+
+**Palettes.** A palette is one complete set of these tokens for both themes, and the user chooses theirs in Ersa's settings, as Slack users choose their colors. That choice is far off and needs its own brief before it is built. Midnight is the default and its values are the front matter above: near-black neutrals with a deep, saturated blue. Moonlit (blue-black night with a moonlight blue), Nocturne (deep indigo with periwinkle-lavender), Moonrise (blue-black with a soft champagne gold) and Selene (silver greys with the same gold) are offered too; all five come from "light on dew" and are compared in the design system's Palette card. Their values are written here when choosing a palette is built. Every palette meets the contrast targets above in both themes, and because components name roles, a palette changes no component. A gold accent sits close to `caution`, so Moonrise and Selene need their caution separated before they ship.
 
 ## Typography
 
-One UI face and one mono face. `ui` is the default for controls and the rail; `prose` is for agent and user text in the transcript, slightly larger and looser for sustained reading; `mono` is for code, paths, and anything the user may copy. Headings are rare and small: the transcript's hierarchy comes from spacing, not type size.
+Type is assigned by role, never by face: `ui` for controls, the rail and tiles; `ui-small` for captions and labels; `prose` for words in the transcript, slightly larger and looser for sustained reading; `heading` for titles; `wordmark` for the Ersa wordmark; `mono` for code, paths and command output. Headings are rare and small; the transcript's hierarchy comes from spacing.
 
-Every numeric readout (context, cost, counts, elapsed time) uses `mono` with tabular figures so digits align and do not jitter as values change. This is the instrument signature; do not set readouts in the UI face.
+Numeric readouts (context, cost, counts, durations) are set in the UI face with tabular figures, so digits do not jitter as values change. `mono` is for code and what the user may copy, not for numbers on their own.
+
+The faces: Oxanium for the wordmark and titles (`wordmark`, `heading`), IBM Plex Sans for everything scanned and read (`ui`, `ui-small`, `prose`), and JetBrains Mono for code (`mono`). Code is set with ligatures off, so it shows the characters that were typed. All three are bundled with the interface, so every machine renders them rather than a fallback.
+
+The agent's text stays in IBM Plex Sans: a serif for `prose` was tried and rejected as harder to read.
+
+The wordmark has its own size, much larger than `heading`, and is drawn in `ink`, not `ink-muted`: it is the one large mark on the new-session screen.
 
 ## Layout
 
-A 4px unit. Pane padding is `lg`; inline gaps between related controls are `sm`; separation between unrelated groups is `xl`. The shell layout itself is specified in `LAY-SHELL`. Fixed sizes, such as the rail and the narrowest a tile column may get, come from the `size` tokens.
+Every gap, padding and size is a named step on one scale, on a 4px grid; space shows grouping, and the gap grows with the distance between ideas. The transcript keeps a reading column of comfortable width (`measure`) however wide the window gets. The rail is `rail` wide (288px, as Claude Desktop's session list; VS Code's and Zed's default to 300px), and a tile fills it. The shell layout is specified in `LAY-SHELL`.
+
+**Turns are grouped by space.** A turn is a message to the agent, usually the user's, and everything the agent does in answer. Inside a turn, blocks (messages, tool cards, permission requests) sit `space-md` apart, so a turn reads dense and more of the conversation fits on screen. Between turns, before each user message except the first, the gap is `space-xxxl`, so each turn reads as one group without a divider. Claude Desktop uses about 11px inside a reply and 50 to 70px between turns.
+
+The user's message bubble is padded `space-md` above and below and `space-lg` at the sides.
 
 ## Elevation & Depth
 
-Flat by default. Depth is shown with `surface` steps and `line`, not shadows. The only shadows are on transient layers (menus, popovers, drag previews) and are soft and short.
+Depth comes from tone and light, not from drop shadows:
+
+- **Material.** Surfaces, cards and primary controls carry a soft top-lit tonal gradient between neighbouring surface steps. It should be felt more than seen.
+- **Wash.** The canvas carries a very faint wash of `wash-primary` from the top right and `wash-secondary` from the bottom left, so it is never purely flat. It is barely there; if it is noticed first, it is too strong.
+- **Focal glow.** The one focused or waiting element (an open permission request, the focused composer) glows in the accent and fades in as it arrives, over `motion-settle` with `motion-ease-out`. In dark it is a soft blur; in light a wide blur reads as a shadow, so it is a tight tinted ring instead.
+- **Not a halo.** No luminous backdrop or halo around the window: tried, and too strong.
+
+Shadows are kept for transient layers (menus, popovers, drag previews), soft and short.
+
+**Motion.** Each moving thing has one motion, reviewed live in the design system's Motion card:
+
+- **A sent message** fades in at the foot of the transcript: alpha only, over `motion-slow` with `motion-ease-out`, and no movement. A message flying in was tried and rejected.
+- **Streaming prose** fades in chunk by chunk, as Claude Desktop's does: each piece of the agent's text fades from transparent to full ink over `motion-stream` with `motion-ease-out` as it arrives, with no movement. Text read from the session record when a session opens appears at once; only text arriving live fades.
+- **Work in progress** loops only while it runs. Work of unknown length, such as a running tool call, shows a ring that turns once per `motion-loop-ring` at constant speed (`motion-linear`), a duration within Material's, MUI's, and Fluent's. Work whose progress can be measured shows a bar that fills to its value, easing each change over `motion-settle` with `motion-ease-out`; it doesn't loop. A text shimmer was tried and is not used: it is a skeleton-loading pattern, not a sign of work under way.
+- **A working session's glyph** in the rail breathes: its tone swells and softens on a `motion-breath` loop with `motion-ease-in-out` for as long as the session works. The breath is the glyph's own tone, not a glow, so the screen's one focal glow stays where it is. It never blinks or ripples outward; shimmering titles and pulse rings were rejected.
+- **Status never moves a tile.** Nothing reorders the rail on its own: a session that needs the user changes its glyph and breathes once where it is, one swell and fade of its tone over `motion-breathe-once` with `motion-ease-in-out`. If the rail can ever be reordered or re-sorted by the user (an open question in `LAY-SHELL`), each tile slides to its new position over `motion-settle` with `motion-ease-in-out`, so the eye can follow it. A new session's tile slides in at the top over `motion-slow` with `motion-ease-out`, while the others make room over the same duration and easing.
+- **The shelf** slides out from the tile it belongs to over `motion-settle` with `motion-ease-out`, and slides back the same way when answered.
+- **The working mark**, the animated mark at the foot of a turn beside the elapsed time and tokens, is open: it is to be designed as a family of marks.
 
 ## Shapes
 
-`md` radius for cards, tiles, and inputs; `sm` for small controls and code blocks; `pill` for status chips. Panes have no radius; they meet at lines. Every line is `hairline` wide; focus and state change a line's colour, never its width.
+Corners come from a small set of radii assigned by role, so things of one kind share one shape: `radius-sm` for small things inside a card or menu (an option, an output block), `radius-md` for controls and cards (buttons included, as Claude Desktop's are), `radius-lg` for floating layers and the user's message bubble, and `radius-pill` for pills. Panes have no radius; they meet at lines. Every line is `hairline` wide; focus and state change a line's colour, never its width.
+
+## Iconography
+
+Icons are Lucide, with even 2px strokes and round ends, each sized to the type beside it. Which Lucide package the interface takes is decided by the first ticket that draws an icon, under ADR 0015. An icon sits beside a label unless it is universally understood (close, copy, search), and then it has a tooltip and an accessible name. Icons take ink colours; state colour stays on the glyphs.
 
 ## Components
 
@@ -136,8 +192,10 @@ Component style tokens are added here as component briefs reach `ready`. Each co
 ## Do's and Don'ts
 
 - Do give every state (hover, focus, pressed, disabled, loading, empty, error) a deliberate appearance in both themes.
-- Do use the motion tokens for every transition.
-- Do keep the rail and workbench visually quieter than the transcript so attention lands on the conversation.
-- Don't introduce a new colour without adding a token and a reason.
-- Don't animate on a timer; animate on a change.
-- Don't use gradients, glows, or iconography that signals "AI".
+- Do use the motion tokens for every transition, and keep motion calm.
+- Do bring things in with a fade, a slide, or a glow, and take them out the same way; nothing pops in.
+- Do loop only while work runs, and stop every loop when reduced motion is on.
+- Do keep a tile in place when its status changes: the glyph changes and breathes, the tile stays. Move tiles only for a new session or a reorder the user asked for.
+- Do keep the rail and tiles visually quieter than the transcript, so attention lands on the conversation.
+- Do add a token and a reason for every new colour, gradient or glow.
+- Do keep one focal glow per screen.
