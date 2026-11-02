@@ -6,11 +6,13 @@ import { Composer } from "./components/Composer";
 import { CoreStatus } from "./components/CoreStatus";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProjectList } from "./components/ProjectList";
+import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionList, newestFirst } from "./components/SessionList";
 import { Transcript } from "./components/Transcript";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
-import type { Project } from "./protocol/core-api.gen";
+import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
+import type { Project, Session } from "./protocol/core-api.gen";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 
 /** The backend a new session runs. The only one until M3 (FLOW-NEW-SESSION leaves the choice open). */
@@ -53,7 +55,7 @@ function useVersion(value: unknown): string {
   return String(seen.current.version);
 }
 
-export function App({ client }: { client: CoreClient }) {
+export function App({ client, shell }: { client: CoreClient; shell?: ShellControl }) {
   const [view, setView] = useState<CoreView>({ phase: "connecting" });
   // Bumped to attach again; the effect below reconnects on each change.
   const [attempt, setAttempt] = useState(0);
@@ -71,6 +73,8 @@ export function App({ client }: { client: CoreClient }) {
   // in one of them keeps the configuration it started with.
   const [withdrawn, setWithdrawn] = useState<Record<string, string[]>>({});
   const [adding, setAdding] = useState<Sending>();
+  // The quit question, while it is open: how many sessions would stop, and whether Quit was chosen.
+  const [quitAsk, setQuitAsk] = useState<QuitAsk & { quitting: boolean; failed?: string }>();
   const [renaming, setRenaming] = useState<Record<string, Sending>>({});
 
   useEffect(() => {
@@ -108,6 +112,41 @@ export function App({ client }: { client: CoreClient }) {
     if (link !== undefined) follower.current?.attached();
     else follower.current?.detached();
   }, [link, activeId]);
+
+  // Quit from the tray icon: confirmed here first when sessions are busy (FLOW-CLOSE-AND-QUIT-R04). The
+  // sessions are read afresh then; the rail's list stands in when Core cannot be asked.
+  const knownSessions = useRef<Session[] | undefined>(undefined);
+  knownSessions.current = sessions.state === "ready" ? sessions.sessions : undefined;
+  useEffect(() => {
+    if (!shell) return;
+    return shell.onQuitRequested(() => {
+      answerQuit(client, shell, knownSessions.current).then(
+        // Asked again while open: the count is the fresh one, and Cancel puts the window back in the tray if it
+        // was there before either Quit.
+        (ask) => ask && setQuitAsk((open) => ({ ...ask, wasHidden: ask.wasHidden || (open?.wasHidden ?? false), quitting: false })),
+        // The Shell no longer quits by itself once the window has heard, so a failed answer is said, never dropped.
+        (error) => {
+          setQuitAsk((open) => ({
+            busy: open ? open.busy : knownSessions.current && busySessions(knownSessions.current),
+            wasHidden: open?.wasHidden ?? false,
+            quitting: false,
+            failed: `Ersa did not quit: ${describeError(error)}`,
+          }));
+          shell.show().catch(() => {});
+        },
+      );
+    });
+  }, [client, shell]);
+  const quit = () => {
+    setQuitAsk((open) => open && { ...open, quitting: true, failed: undefined });
+    shell
+      ?.quit()
+      .catch((error) => setQuitAsk((open) => open && { ...open, quitting: false, failed: `Ersa did not quit: ${describeError(error)}` }));
+  };
+  const cancel = () => {
+    if (quitAsk && shell) cancelQuit(shell, quitAsk).catch(() => {});
+    setQuitAsk(undefined);
+  };
 
   // Each list's error boundary tries again whenever the list changes.
   const projects = projectsOf(view);
@@ -210,9 +249,14 @@ export function App({ client }: { client: CoreClient }) {
             <SessionList view={sessions} activeId={activeId} onSelect={setActiveId} />
           </ErrorBoundary>
         </div>
-        <ErrorBoundary what="Core's status" resetKey={coreVersion} action={<Button onClick={retry}>Retry</Button>}>
-          <CoreStatus view={view} onRetry={retry} />
-        </ErrorBoundary>
+        <div className="rail-core">
+          {quitAsk && (
+            <QuitQuestion busy={quitAsk.busy} quitting={quitAsk.quitting} failed={quitAsk.failed} onQuit={quit} onCancel={cancel} />
+          )}
+          <ErrorBoundary what="Core's status" resetKey={coreVersion} action={<Button onClick={retry}>Retry</Button>}>
+            <CoreStatus view={view} onRetry={retry} />
+          </ErrorBoundary>
+        </div>
       </nav>
       {shown ? (
         <main className="stage">

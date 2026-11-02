@@ -1293,6 +1293,7 @@
       "host_id": "local",
       "id": "s-replay",
       "last_event_seq": 0,
+      "permission_mode": "default",
       "state": "starting",
       "tile": {
         "pending": [],
@@ -1309,6 +1310,7 @@
       "host_id": "local",
       "id": "s-replay",
       "last_event_seq": 21,
+      "permission_mode": "default",
       "state": "idle",
       "tile": {
         "context_tokens": 40244,

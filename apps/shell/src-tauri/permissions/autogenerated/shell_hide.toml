@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-shell-hide"
+description = "Enables the shell_hide command without any pre-configured scope."
+commands.allow = ["shell_hide"]
+
+[[permission]]
+identifier = "deny-shell-hide"
+description = "Denies the shell_hide command without any pre-configured scope."
+commands.deny = ["shell_hide"]
