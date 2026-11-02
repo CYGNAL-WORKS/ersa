@@ -85,6 +85,8 @@ size:
   tile-min: 288px
   # The transcript's reading column.
   measure: 720px
+  # The widest a user's message bubble grows, as a share of the reading column.
+  bubble-max: 80%
   # The height past which a tool card's output or a long permission field scrolls.
   card-max: 224px
 material:
@@ -173,7 +175,7 @@ Every gap, padding and size is a named step on one scale, on a 4px grid; space s
 
 **Turns are grouped by space.** A turn is a message to the agent, usually the user's, and everything the agent does in answer. Inside a turn, blocks (messages, tool cards, permission requests) sit `space-md` apart, so a turn reads dense and more of the conversation fits on screen. Between turns, before each user message except the first, the gap is `space-xxxl`, so each turn reads as one group without a divider. Claude Desktop uses about 11px inside a reply and 50 to 70px between turns.
 
-The user's message bubble is padded `space-md` above and below and `space-lg` at the sides.
+The user's message bubble sits at the right of the reading column, as wide as its words up to `bubble-max`, filled `surface-raised` with a `line` edge. It is padded `space-md` above and below and `space-lg` at the sides. It shows no label: its place says who wrote it, and assistive technology still hears "You".
 
 ## Elevation & Depth
 
@@ -184,7 +186,7 @@ Depth comes from tone and light, not from drop shadows:
 - **Focal glow.** The one focused or waiting element (an open permission request, the focused composer) glows in the accent and may breathe once as it arrives. In dark it is a soft blur; in light a wide blur reads as a shadow, so it is a tight tinted ring instead.
 - **Not a halo.** No luminous backdrop or halo around the window: tried, and too strong.
 
-Each of these is a token, built from color roles so it follows the theme and the palette. `material-wash` is the canvas. `material-tile` lights tiles and cards from the top, `material-rail` settles the rail toward the canvas at its foot, `material-primary` is the primary button, and `material-composer` is the composer. The open session's tile is `material-open-session`, a quiet neutral highlight with no accent outline. `glow-focal` is the focal glow at rest and `glow-focal-peak` its brightest point when it breathes; `glow-attention` is the faint glow on the needs-you glyph. Light and dark set their own glows; the materials are the same in both.
+Each of these is a token, built from color roles so it follows the theme and the palette. `material-wash` is the canvas. `material-tile` lights tiles and cards from the top, `material-rail` settles the rail toward the canvas at its foot, `material-primary` is the primary button, and `material-composer` is the composer. The open session's tile is `material-open-session`, a quiet neutral highlight with no accent outline. `glow-focal` is the focal glow at rest and `glow-focal-peak` its brightest point when it breathes; `glow-attention` is the faint glow on the needs-you glyph. Light and dark set their own glows; the materials are the same in both. While a permission request is open it holds the focal glow, and the focused composer shows its focus by its edge alone, so the screen keeps one focal glow.
 
 Shadows are kept for transient layers (menus, popovers, drag previews), soft and short.
 

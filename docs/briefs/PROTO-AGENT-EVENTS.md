@@ -72,7 +72,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 
 ### Usage
 
-- `usage.updated`: `context_tokens` (optional), `context_window` (optional), `cost_usd_total` (optional), `turns` (optional: the number of Ersa turns started in the session, not the backend's API round trips), `rate_limit` (optional: `{ status, resets_at (optional), detail (optional) }`). Any field absent means "no new information"; the Interface keeps the last known value per field. Projected from result usage, rate-limit events, and thinking-token estimates.
+- `usage.updated`: `context_tokens` (optional), `context_window` (optional), `cost_usd_total` (optional), `turns` (optional: the number of Ersa turns started in the session, not the backend's API round trips), `turn_output_tokens` (optional: the output tokens the backend has generated so far in the current turn, across all of its API calls in that turn; projected from live input only, so a turn read from the session record has none), `rate_limit` (optional: `{ status, resets_at (optional), detail (optional) }`). Any field absent means "no new information"; the Interface keeps the last known value per field. Projected from result usage, rate-limit events, and thinking-token estimates.
 
 ### Error
 
@@ -134,6 +134,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - **PROTO-AGENT-EVENTS-R12**: When a session is opened while its backend is live, a message present in both the session record and the live stream, identified by the backend's message id, shall yield its events once.
 - **PROTO-AGENT-EVENTS-R13**: Core shall emit `session.state` and `session.ended` for the backend process's lifecycle from its own knowledge of the process, never from the session record, and shall write the same facts to the app log.
 - **PROTO-AGENT-EVENTS-R14**: Before starting the backend to resume a session, Core shall emit a `session.notice` with code `session_open_elsewhere` and the process's `pid` when the adapter reports the session open in another process, and with code `session_open_check_failed` when the adapter cannot tell.
+- **PROTO-AGENT-EVENTS-R15**: While a turn runs, each Claude Code live line that reports output usage (a partial `message_delta`, or an `assistant` line) shall project to a `usage.updated` whose `turn_output_tokens` is the sum of the output tokens of every API message in the turn so far, counting each message id once, and that never decreases within the turn.
 
 ## Out of scope
 
@@ -149,6 +150,8 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - Whether a Claude Code record entry with a `peer` origin maps to `user.message` origin `peer_session`, and how its `peer` is filled.
 
 ## Changes
+
+- 2026-11-02: `usage.updated.turn_output_tokens` added for the working mark's token count beside the elapsed time; PROTO-AGENT-EVENTS-R15 added. A shape change, so `v` is bumped. Elapsed time needs no field: it is the `turn.started` envelope's `ts` while the turn runs and `turn.completed.duration_ms` after.
 
 - 2026-11-01: from #35 inbox: Opening a session added: when Core projects a session into a view, when it rebuilds one, and when it may drop one; `seq` counts within a view. Open question on what resume must settle for merging record and live input (R02's exception, matching prompts, partial text). No requirement IDs changed; R02 and R12 unchanged.
 
