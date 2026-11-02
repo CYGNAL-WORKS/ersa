@@ -84,6 +84,9 @@ export function App({ client }: { client: CoreClient }) {
   // With no session chosen, show the newest: reopening the window shows the
   // session that was running when it closed.
   const sessions = sessionsOf(view);
+  // The list as last rendered, for a rename that finishes later.
+  const latestSessions = useRef(sessions);
+  latestSessions.current = sessions;
   useEffect(() => {
     if (activeId === undefined && sessions.state === "ready") {
       const newest = newestFirst(sessions.sessions)[0];
@@ -137,7 +140,8 @@ export function App({ client }: { client: CoreClient }) {
     setRenaming((r) => ({ ...r, [id]: { state: "sending" } }));
     try {
       await client.call("session.set_title", { id, title });
-      titles.current[id] = renamedTo.current[id] = title;
+      titles.current[id] = title;
+      renamedTo.current[id] = { title, list: latestSessions.current };
       setRenaming(({ [id]: _, ...rest }) => rest);
       connection.current?.reload("sessions");
       return true;
@@ -193,14 +197,14 @@ export function App({ client }: { client: CoreClient }) {
 
   // The title as last listed, so the header keeps it while the list reloads
   // or Core is away.
-  // A title just renamed holds until the list catches up with it, rather than the list from before putting the
-  // old one back.
+  // A title just renamed holds while the list is the one from before the rename, rather than that list putting the
+  // old title back; any newer list says what the backend has now.
   const titles = useRef<Record<string, string>>({});
-  const renamedTo = useRef<Record<string, string>>({});
+  const renamedTo = useRef<Record<string, { title: string; list: SessionsView }>>({});
   if (sessions.state === "ready") {
     for (const s of sessions.sessions) {
       if (!s.title) continue;
-      if (renamedTo.current[s.id] !== undefined && s.title !== renamedTo.current[s.id]) continue;
+      if (renamedTo.current[s.id]?.list === sessions && s.title !== renamedTo.current[s.id]?.title) continue;
       delete renamedTo.current[s.id];
       titles.current[s.id] = s.title;
     }
