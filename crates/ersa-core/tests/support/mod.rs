@@ -117,6 +117,32 @@ impl TestCore {
     }
 }
 
+/// The `type` of each app log fact about session `id`, oldest first, once
+/// they are `expected`. Core hands facts to the log's writer thread without
+/// waiting for the disk, so a test polls the file, a bounded while, rather
+/// than reading it once and racing the writer.
+pub async fn app_log_facts(data_dir: &Path, id: &str, expected: &[&str]) {
+    let mut seen = Vec::new();
+    for _ in 0..100 {
+        seen = ersa_core::app_log::read_entries(data_dir)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.session_id == id)
+            .map(|e| {
+                serde_json::to_value(&e.fact).unwrap()["type"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect::<Vec<String>>();
+        if seen == expected {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(seen, expected, "the app log's facts about {id}");
+}
+
 pub struct Client {
     lines: Lines<BufReader<ReadHalf<BoxStream>>>,
     write: WriteHalf<BoxStream>,
