@@ -49,8 +49,13 @@ export async function answerQuit(
 ): Promise<QuitAsk | undefined> {
   await shell.quitHeard();
   // A Core slow to answer must not hold Quit up: the rail's last list stands in.
-  const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timed out")), QUIT_LIST_TIMEOUT_MS));
-  const sessions = await Promise.race([client.call("session.list"), timeout]).catch(() => known);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("timed out")), QUIT_LIST_TIMEOUT_MS);
+  });
+  const sessions = await Promise.race([client.call("session.list"), timeout])
+    .catch(() => known)
+    .finally(() => clearTimeout(timer));
   const busy = busySessions(sessions);
   if (busy === 0) {
     await shell.quit();
