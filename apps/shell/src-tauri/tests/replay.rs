@@ -225,8 +225,10 @@ fn normalise(mut value: Value, session_id: &str) -> Value {
 /// captures about to be rewritten come from this Core and not an older
 /// binary left in `target/`. An `ERSA_CORE_BIN` override names a binary this
 /// test cannot rebuild, so updating refuses it.
-fn build_core() {
-    static BUILT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+/// Returns the commit stamp for the captures, taken at the same moment, so
+/// both tests of a run name the same Core.
+fn build_core() -> &'static str {
+    static BUILT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     BUILT.get_or_init(|| {
         assert!(
             std::env::var_os("ERSA_CORE_BIN").is_none(),
@@ -240,11 +242,13 @@ fn build_core() {
             .status()
             .expect("run cargo build");
         assert!(status.success(), "cargo build -p ersa-cli failed");
-    });
+        core_commit()
+    })
 }
 
 /// The commit a capture comes from, marked `-dirty` when the working tree
-/// has uncommitted changes, so a stale capture can be traced.
+/// has uncommitted changes outside the captures themselves (which this run
+/// rewrites), so a stale capture can be traced.
 fn core_commit() -> String {
     let git = |args: &[&str]| {
         Command::new("git")
@@ -256,23 +260,20 @@ fn core_commit() -> String {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
     };
     let head = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".into());
-    match git(&["status", "--porcelain"]) {
+    match git(&["status", "--porcelain", "--", ".", ":!apps/shell/src/session/replays"]) {
         Some(changes) if !changes.is_empty() => format!("{head}-dirty"),
         _ => head,
     }
 }
 
 async fn check(name: &str) {
-    let update = std::env::var_os("ERSA_UPDATE_REPLAYS").is_some();
-    if update {
-        build_core();
-    }
+    let stamp = std::env::var_os("ERSA_UPDATE_REPLAYS").map(|_| build_core());
     let actual = received(name).await;
     let path = capture_path(name);
     let pretty = serde_json::to_string_pretty(&actual).expect("serializes") + "\n";
-    if update {
+    if let Some(stamp) = stamp {
         let mut written = actual.clone();
-        written["core"] = json!(core_commit());
+        written["core"] = json!(stamp);
         let written = serde_json::to_string_pretty(&written).expect("serializes") + "\n";
         std::fs::create_dir_all(path.parent().expect("a parent")).expect("create the folder");
         std::fs::write(&path, written).expect("write the capture");
