@@ -4,6 +4,12 @@
 //
 //   node scripts/record-claude-session.mjs <name> [--keep] [--cwd <dir>] [--resume <session id>] "<message 1>" ["<message 2>" ...]
 //
+// A message of the form `control:<json>` is sent as a host control request
+// instead, with `<json>` as its `request` object, and the recorder waits for
+// the CLI's `control_response` rather than a `result`. `$SESSION_ID` in it is
+// replaced by the session id once `system/init` has named one; for example
+// 'control:{"subtype":"rename_session","title":"x","session_id":"$SESSION_ID"}'.
+//
 // It auto-allows every tool call, and the CLI runs with the user's own
 // settings loaded (`--setting-sources user,project,local`, as Ersa runs it), so
 // whatever the model chooses to run, runs with the user's hooks and rules.
@@ -304,7 +310,27 @@ const initialized = !!(await initAnswer);
 
 const turns = [];
 if (initialized) {
+  let controls = 0;
   for (const [n, text] of messages.entries()) {
+    if (text.startsWith("control:")) {
+      const sessionId = stdoutLines
+        .map((l) => {
+          try {
+            return JSON.parse(l.line);
+          } catch {
+            return null;
+          }
+        })
+        .find((m) => m?.type === "system" && m?.subtype === "init")?.session_id;
+      const request = JSON.parse(text.slice("control:".length).replaceAll("$SESSION_ID", sessionId ?? ""));
+      const id = `ersa-${request.subtype ?? "control"}-${++controls}`;
+      const answer = waitFor((m) => m.type === "control_response" && m.response?.request_id === id, 60_000);
+      send({ type: "control_request", request_id: id, request });
+      const res = await answer;
+      turns.push({ turn: n + 1, control: request.subtype ?? null, got_response: !!res, subtype: res?.response?.subtype ?? null });
+      if (!res) break;
+      continue;
+    }
     const result = waitFor((m) => m.type === "result", 300_000);
     send({ type: "user", message: { role: "user", content: [{ type: "text", text }] } });
     const res = await result;
@@ -419,5 +445,8 @@ if (killed) {
 
 console.log(`recorded ${stem} (${version}) in ${cwd}${keep ? " (kept)" : " (cleaned up)"}`);
 console.log(`  session ${init?.session_id ?? "?"}: exit ${exit.code ?? exit.signal}, ${stdoutLines.length} lines out, ${sent.length} in, ${elapsed_ms} ms, record ${recordLines === null ? "NOT FOUND" : "copied"}`);
-for (const t of turns) console.log(`  turn ${t.turn}: ${t.got_result ? t.subtype : "NO RESULT"}${t.is_error ? " (error)" : ""}`);
+for (const t of turns) {
+  if (t.control) console.log(`  turn ${t.turn}: ${t.control} ${t.got_response ? t.subtype : "NO RESPONSE"}`);
+  else console.log(`  turn ${t.turn}: ${t.got_result ? t.subtype : "NO RESULT"}${t.is_error ? " (error)" : ""}`);
+}
 if (stderr) console.log("stderr:", stderr.trim().slice(0, 400));

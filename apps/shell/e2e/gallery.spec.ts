@@ -8,6 +8,7 @@ const components = [
   "AddProject",
   "SessionList",
   "Transcript",
+  "SessionTitle",
   "ErrorBoundary",
   "NewSessionScreen",
   "Chip",
@@ -60,7 +61,7 @@ test("a focused input's edge is the accent, in both themes", async ({ page }) =>
       probe.remove();
       return color;
     });
-    for (const input of [".add-project-input[data-force=focus]", ".composer-input[data-force=focus]"]) {
+    for (const input of [".add-project-input[data-force=focus]", ".composer-input[data-force=focus]", ".session-heading-input[data-force=focus]"]) {
       const edge = await column.locator(input).first().evaluate((el) => getComputedStyle(el).borderTopColor);
       expect(edge, `${input} in ${theme}`).toBe(accent);
     }

@@ -1,0 +1,101 @@
+/* The session's title in the transcript header, and the form that renames it in place. */
+
+.session-heading {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--type-heading-size);
+  line-height: var(--type-heading-leading);
+  font-weight: var(--type-heading-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The resting title wears the rename field's frame, in no colour, so starting to edit changes colours and moves
+   nothing. A title that can be renamed shows the frame when pointed at and takes the accent with keyboard focus;
+   the default cursor, since a double-click (the tooltip says so), not a click, opens it. A title that cannot be
+   renamed now (Core not connected, a rename on its way) deliberately looks like a resting one: the session is
+   the same, only the control is away. */
+.session-heading {
+  box-sizing: border-box;
+  padding: var(--space-xs) var(--space-sm);
+  border: var(--line-hairline) solid transparent;
+  border-radius: var(--radius-md);
+}
+
+.session-heading[data-editable]:hover:not(:focus-visible),
+.session-heading[data-force="hover"] {
+  border-color: var(--color-ink-faint);
+}
+
+.session-heading[data-editable]:focus-visible,
+.session-heading[data-force="focus"] {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* The state keeps one cell, at the far edge, whether the title rests or is being edited. */
+.session-heading-state {
+  margin-left: auto;
+  flex: none;
+}
+
+/* Editing takes the title's place and the room up to the state, which stays last. */
+.session-heading-form {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* The title as it will read: heading type, in an input's frame. */
+.session-heading-input {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-xs) var(--space-sm);
+  font: inherit;
+  font-size: var(--type-heading-size);
+  line-height: var(--type-heading-leading);
+  font-weight: var(--type-heading-weight);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.session-heading-input:hover:not(:read-only):not(:focus-visible),
+.session-heading-input[data-force="hover"] {
+  border-color: var(--color-ink-faint);
+}
+
+.session-heading-input:focus-visible,
+.session-heading-input[data-force="focus"] {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* While the backend takes the title, it reads as fixed, as the project path does while it is added. */
+.session-heading-input:read-only {
+  color: var(--color-ink-faint);
+  background: var(--color-canvas);
+}
+
+.session-heading-label {
+  display: inline-grid;
+}
+
+.session-heading-label > span {
+  grid-area: 1 / 1;
+  text-align: center;
+}
+
+.session-heading-label > span:not([data-shown]) {
+  visibility: hidden;
+}
+
+/* A refusal reads under the field, on a row of its own. */
+.session-heading-problem {
+  grid-column: 1 / -1;
+}
