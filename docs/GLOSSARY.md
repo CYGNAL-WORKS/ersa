@@ -31,7 +31,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Turn**: one message to the agent and everything the agent does in answer to it, up to the next. Most turns start with the user's message; a turn can also start when a session resumes or from the system.
 - **Permission request**: the agent asking the user to approve an action before it runs.
 - **Question**: the agent asking the user to choose or answer something that is not a permission.
-- **Replay server**: a stand-in Core that serves recorded fixtures over the Interface protocols, used for interface development and tests.
+- **Replay server**: a stand-in Core that serves recorded fixtures over the Interface protocols, used for interface development and tests. It is read-only: it refuses every request that would create or change a session, project, workspace or setting.
 
 ## System
 
