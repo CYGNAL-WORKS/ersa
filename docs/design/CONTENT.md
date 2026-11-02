@@ -17,7 +17,7 @@ Plain, calm and brief. Name the thing and what happens. Address the person as "y
 
 ## Rules
 
-Each rule names the Vale rule that enforces it. `Microsoft.*` rules come from the Microsoft package; `Ersa.*` rules are ours.
+Each rule names the check that enforces it, and says so when the check covers only part of the rule. `Microsoft.*` rules come from the Microsoft package; `Ersa.*` rules are Ersa's own.
 
 **Words**
 
@@ -26,27 +26,27 @@ Each rule names the Vale rule that enforces it. `Microsoft.*` rules come from th
 - Use "you". Avoid "we" and "I" in the interface. (`Microsoft.We`, `Microsoft.FirstPerson`)
 - Use contractions: don't, can't, isn't, it's. (`Microsoft.Contractions`)
 - Prefer the active voice and the present tense. (`Microsoft.Passive`, as a suggestion)
-- Keep sentences short: under 25 words in the interface and under 30 in docs. (`Microsoft.SentenceLength`, `Ersa.InterfaceLength`)
-- In instructions, say "select", not "click" or "tap". (`Microsoft.UIVerbs`)
+- Keep sentences short: at most 25 words in the interface and 30 in docs. (`Ersa.InterfaceLength`, `Microsoft.SentenceLength`)
+- In instructions, say "select", not "click" or "tap". (`Microsoft.UIVerbs`, which catches "click" and "swipe" only)
 - Cut filler and hedging adverbs. (`Microsoft.Wordiness`, `Microsoft.Adverbs`)
-- Use bias-free words, and use "stop" rather than "kill" or "abort". (`Microsoft.BiasFree`, `Microsoft.GenderBias`, `Microsoft.Militaristic`)
+- Use bias-free words, and use "stop" rather than "kill" or "abort". (`Microsoft.BiasFree`, `Microsoft.GenderBias`; "kill" and "abort" aren't checked)
 - Write "for example" and "that is", not "e.g." and "i.e.". (`Microsoft.Foreign`)
 
 **Capitals and punctuation**
 
-- Use sentence case for headings, titles, labels and buttons: "Add project", not "Add Project". (`Microsoft.Headings`, the catalog test)
+- Use sentence case for headings, titles, labels and buttons: "Add project", not "Add Project". (`Microsoft.Headings` for headings; the catalog test checks only a string's first letter)
 - Use the serial comma: "host, project, and workspace". (`Microsoft.OxfordComma`)
 - Write em dashes without spaces, and prefer a colon or parentheses. Use an en dash for ranges. (`Microsoft.Dashes`)
 - Put a period or comma inside closing quotation marks. (`Microsoft.Quotes`)
 - Use the ellipsis character (…) only for something in progress or a command that asks for more before it acts. Never type three periods. (`Microsoft.Ellipses`, the catalog test)
-- Write numbers as numerals, and units with them: 4 sessions, 12 MB. (`Microsoft.Units`, `Microsoft.Ordinal`)
-- Name keys as the keyboard shows them, joined with a plus sign: Ctrl+Enter, Shift+Enter.
+- Write numbers as numerals, and units with them: 4 sessions, 12 MB. (`Microsoft.Units`, which catches a spelled-out number before a unit of measure only)
+- Name keys as the keyboard shows them, joined with a plus sign: Ctrl+Enter, Shift+Enter. (Not checked)
 
 **Not adopted from Microsoft.** `Microsoft.Avoid` and `Microsoft.Terms` are left out: they ban "backend" and rename "agent", which are Ersa's own terms. `Microsoft.Vocab` and the Microsoft product names are replaced by our glossary.
 
 ## Interface patterns
 
-- **Buttons and commands.** Lead with a verb, use sentence case, and end without punctuation. Name the action: "Quit", "Allow", "Add project". Never use "OK" or "Yes" for a choice with consequences.
+- **Buttons and commands.** Lead with a verb, use sentence case, and end without punctuation, except the ellipsis of a command that asks for more before it acts. Name the action: "Quit", "Allow", "Add project". Never use "OK" or "Yes" for a choice with consequences.
 - **Errors.** Say what failed, then what to do, as sentences ending with a period: "Core isn't connected. Ersa is trying again." Don't blame the person, and don't prefix "Error:".
 - **Empty states.** Say what will appear here and how to make it appear: "Sessions appear once Core is connected."
 - **Progress.** Use a present participle with an ellipsis: "Saving…", "Reconnecting to Core…".
@@ -58,8 +58,8 @@ Each rule names the Vale rule that enforces it. `Microsoft.*` rules come from th
 
 Every string the Interface shows lives in the string catalog, keyed by area and purpose. Components refer to keys and never hold copy. A string with values names them as placeholders (`{count}`) and gives its plural forms. US English is the source locale; other locales are added beside it.
 
-The catalog's test fails on copy written into a component, and on a string that starts lowercase, ends a button with punctuation, uses `!` or `...`, or is an error without a closing period. Vale reads the catalog for everything else.
+The catalog's test fails on copy written into a component, and on a string that starts lowercase, ends a button with punctuation other than the ellipsis character, uses `!` or `...`, or is an error without a closing period. Vale reads the catalog for everything else.
 
 ## Checks
 
-Vale runs in CI over the catalog and the docs in scope, with the Microsoft package pinned to one release and the `Ersa` style beside it. An error fails the build; a warning is reported; a suggestion shows only in the editor. A rule that misfires is fixed in the `Ersa` style or turned down, never silenced line by line.
+Vale runs in CI over the catalog and the docs in scope, with the Microsoft package pinned to one release and the `Ersa` style beside it. An error fails the build; a warning is reported; a suggestion shows only in the editor. Every rule this page names runs as a warning or an error, even where the Microsoft package ships it as a suggestion; `Microsoft.Passive` stays a suggestion. A rule that misfires is fixed in the `Ersa` style or turned down, never silenced line by line.
