@@ -14,6 +14,8 @@ ersa-protocol = { path = "../ersa-protocol" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+# Warnings for Core's log, where nothing else reports them.
+tracing.workspace = true
 
 # Whether a process named in the CLI's live-session registry is running, used
 # only by src/platform.rs.
@@ -33,6 +35,8 @@ ersa-adapter = { path = "../ersa-adapter", features = ["test-support"] }
 ersa-protocol = { path = "../ersa-protocol", features = ["schema-validation"] }
 # Scratch Claude homes for the session-record listing and registry tests.
 tempfile.workspace = true
+# Captures the adapter's warnings, to check they are logged.
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

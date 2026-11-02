@@ -571,6 +571,11 @@ pub struct InitializeResponse {
     /// from `system/init`'s. Feature detection reads `system/init`.
     #[serde(default)]
     pub capabilities: Vec<String>,
+    /// Whether the CLI recorded the request's `workspaceTrust` attestation.
+    /// Absent when none was sent (observed on 2.1.316; the CLI marks it
+    /// internal).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_trust_recorded: Option<bool>,
     #[serde(flatten)]
     pub extra: Extra,
 }

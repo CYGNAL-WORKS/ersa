@@ -46,6 +46,9 @@ export function TrustQuestion({ name, path, purpose, onAnswer, onDismiss, takeFo
         A trusted project’s own configuration runs in its sessions: hooks and MCP servers that start programs on this computer, and
         settings that change what the agent may do without asking.
       </p>
+      <p className="trust-question-detail">
+        Claude Code records the trust for the whole repository the project is in, and applies it outside Ersa too.
+      </p>
       <p className="trust-question-detail">Untrusted, its sessions use only your own settings.</p>
       <div className="trust-question-actions">
         {/* Neither answer is the primary one: Ersa does not lean towards trust. */}
