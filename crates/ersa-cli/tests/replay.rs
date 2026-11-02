@@ -6,7 +6,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 const WAIT: Duration = Duration::from_secs(60);
 
@@ -190,6 +190,7 @@ async fn replay_refuses_a_recording_without_a_version() {
 #[cfg(unix)]
 #[tokio::test]
 async fn ctrl_c_during_start_up_removes_the_data_directory() {
+    use tokio::io::AsyncReadExt;
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)
@@ -198,7 +199,12 @@ async fn ctrl_c_during_start_up_removes_the_data_directory() {
     let tmp = tempfile::tempdir().unwrap();
     // The endpoint's directory goes under TMPDIR when XDG_RUNTIME_DIR is
     // unset, and outlives the replay; keep it out of the watched directory.
+    // Core accepts only a runtime directory private to the user.
     let runtime = tempfile::tempdir().unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(runtime.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
     let label = format!("replay-ctrlc-{}", std::process::id());
     let mut core = tokio::process::Command::new(env!("CARGO_BIN_EXE_ersa-core"))
         .args([
