@@ -82,7 +82,7 @@ async fn a_session_running_at_quit_ends_user_stopped_and_leaves_no_process() {
     let checks = tokio::spawn({
         let location = location.clone();
         async move {
-            let (link, _how, mut events) = open(&location).await;
+            let (link, _how, events) = open(&location).await;
             let host = link.hello()["host"]["id"].clone();
             let project = request(
                 &link,
@@ -255,6 +255,8 @@ async fn helper_wedged_core() {
     let mut listener = ersa_core::platform::Listener::bind(&endpoint)
         .await
         .expect("bind");
+    // Never waited on: the quit under test ends it, and this process with it.
+    #[allow(clippy::zombie_processes)]
     let child = Command::new(stand_in_backend())
         .env("ERSA_STAND_IN_SLEEP", "1")
         .stdin(Stdio::null())

@@ -26,6 +26,8 @@ fn main() {
         return;
     }
     let me = std::env::current_exe().expect("the stand-in's own path");
+    // Never waited on: it outlives this process until Core ends it.
+    #[allow(clippy::zombie_processes)]
     let grandchild = Command::new(me)
         .env("ERSA_STAND_IN_SLEEP", "1")
         .stdin(Stdio::null())
