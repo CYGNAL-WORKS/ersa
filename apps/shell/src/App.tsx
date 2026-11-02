@@ -72,6 +72,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // to show, the stage shows it too (LAY-SHELL). Nothing is created until its first message (FLOW-NEW-SESSION-R03).
   const [composing, setComposing] = useState<{ projectId?: string }>();
   const [starting, setStarting] = useState<Sending>();
+  // The session just started, until its transcript is there to show: the screen stays, sending, so the stage
+  // never passes through an empty state between the two.
+  const [opening, setOpening] = useState<string>();
   // What the screen offers: each host's backends, and the values each project last started a session with.
   const [backends, setBackends] = useState<Record<string, BackendChoices[]>>({});
   const [lastUsed, setLastUsed] = useState<Record<string, SessionValues>>({});
@@ -167,7 +170,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     readChoices(client, hostId).then((choices) => {
       if (!live) return;
       // A host whose backends could not be read offers none; the screen says no backend is available.
-      setBackends((b) => ({ ...b, [hostId]: choices.backends ?? [] }));
+      setBackends((b) => ({ ...b, [hostId]: choices.backends }));
       setLastUsed(choices.lastUsed);
     });
     return () => {
@@ -181,9 +184,17 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   useEffect(() => {
     if (!projectList) return;
     let live = true;
-    // One project's failed read leaves its sessions in the rail without their workspace's name.
-    Promise.all(projectList.map((p) => client.call("workspace.list", { project_id: p.id }).catch(() => [] as Workspace[]))).then(
-      (lists) => live && setWorkspaces(Object.fromEntries(lists.flat().map((w) => [w.id, w]))),
+    // A project whose read fails keeps the workspaces last read for it, so its sessions keep their names and
+    // controls; a project never read leaves its sessions in the rail without them.
+    Promise.all(projectList.map((p) => client.call("workspace.list", { project_id: p.id }).then((list) => [p.id, list] as const, () => undefined))).then(
+      (reads) => {
+        if (!live) return;
+        setWorkspaces((known) => {
+          const kept = Object.values(known).filter((w) => reads.every((r) => r === undefined || r[0] !== w.project_id));
+          const read = reads.flatMap((r) => (r ? r[1] : []));
+          return Object.fromEntries([...kept, ...read].map((w) => [w.id, w]));
+        });
+      },
     );
     return () => {
       live = false;
@@ -218,16 +229,22 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       setStarting({ state: "failed", message: outcome.message });
       return false;
     }
-    setStarting(undefined);
     setLastUsed((l) => ({ ...l, [values.project_id]: values }));
     // Best effort: a failure only means the screen starts at these values in this window alone.
     client.call("settings.set", { patch: rememberPatch(values) }).catch(() => {});
     connection.current?.reload("sessions");
     if (values.workspace === "isolated") setWorkspacesRead((n) => n + 1);
-    setComposing(undefined);
+    setOpening(outcome.session.id);
     setActiveId(outcome.session.id);
     return true;
   };
+  useEffect(() => {
+    if (opening !== undefined && session?.id === opening) {
+      setOpening(undefined);
+      setComposing(undefined);
+      setStarting(undefined);
+    }
+  }, [opening, session]);
 
   // The backend keeps the title (PROTO-CORE-API-R12); the list is read again to show it, in the rail and here.
   const rename = async (id: string, title: string) => {
@@ -293,6 +310,13 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const titles = useRef<Record<string, string>>({});
   if (sessions.state === "ready") for (const s of sessions.sessions) if (s.title) titles.current[s.id] = s.title;
   const shown = !composing && session && session.id === activeId ? session : undefined;
+
+  // The projects as last read, so a screen with a message being written stays while Core is away; sending then
+  // fails with the reason, and the message stays in the composer.
+  const knownProjects = useRef<Project[] | undefined>(undefined);
+  if (projectList) knownProjects.current = projectList;
+  const hello = view.phase === "connected" || view.phase === "lost" ? view.hello : undefined;
+  const screenProjects = projectList ?? (composing ? knownProjects.current : undefined);
 
   // The rail's name for each workspace: its project, and its branch or the root (LAY-SHELL).
   const projectById = new Map(projectList?.map((p) => [p.id, p]));
@@ -383,12 +407,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             )}
           </ErrorBoundary>
         </main>
-      ) : view.phase === "connected" && projectList && (composing || activeId === undefined) ? (
+      ) : hello && screenProjects && (composing || (view.phase === "connected" && activeId === undefined)) ? (
         <main className="stage">
           <ErrorBoundary what="The new-session screen" resetKey={composing?.projectId ?? ""}>
             <NewSessionScreen
-              hosts={[view.hello.host]}
-              projects={projectList}
+              hosts={[hello.host]}
+              projects={screenProjects}
               backends={backends}
               lastUsed={lastUsed}
               projectId={composing?.projectId}
