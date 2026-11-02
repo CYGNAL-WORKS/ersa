@@ -72,8 +72,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // to show, the stage shows it too (LAY-SHELL). Nothing is created until its first message (FLOW-NEW-SESSION-R03).
   const [composing, setComposing] = useState<{ projectId?: string }>();
   const [starting, setStarting] = useState<Sending>();
-  // The session just started, until its transcript is there to show: the screen stays, sending, so the stage
-  // never passes through an empty state between the two.
+  // The session just started, until the window follows it: the screen stays, sending, so the stage never passes
+  // through the empty state between the screen and the session's transcript.
   const [opening, setOpening] = useState<string>();
   // What the screen offers: each host's backends, and the values each project last started a session with.
   const [backends, setBackends] = useState<Record<string, BackendChoices[]>>({});
@@ -190,7 +190,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       (reads) => {
         if (!live) return;
         setWorkspaces((known) => {
-          const kept = Object.values(known).filter((w) => reads.every((r) => r === undefined || r[0] !== w.project_id));
+          // Kept: the workspaces of a listed project whose read failed; a project no longer listed takes its own.
+          const failed = new Set(projectList.filter((_, i) => reads[i] === undefined).map((p) => p.id));
+          const kept = Object.values(known).filter((w) => failed.has(w.project_id));
           const read = reads.flatMap((r) => (r ? r[1] : []));
           return Object.fromEntries([...kept, ...read].map((w) => [w.id, w]));
         });
