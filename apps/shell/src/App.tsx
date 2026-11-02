@@ -221,15 +221,17 @@ export function App({ client }: { client: CoreClient }) {
             <Transcript
               key={shown.id}
               title={(activeId && titles.current[activeId]) || "Untitled session"}
+              untitled={!(activeId && titles.current[activeId])}
               view={shown}
               onDecide={decide}
               onRetry={retrySubscribe}
               onRename={(title) => rename(shown.id, title)}
               renaming={renaming[shown.id]}
-              onRenameReset={() => setRenaming(({ [shown.id]: _, ...rest }) => rest)}
-              // A session that has no title yet has had no turn: its backend has not named it, so there is nothing
-              // to rename.
-              renameDisabled={view.phase !== "connected" || !titles.current[shown.id]}
+              // A refusal goes; a rename still on its way stays, so its answer is shown.
+              onRenameReset={() =>
+                setRenaming(({ [shown.id]: was, ...rest }) => (was?.state === "sending" ? { ...rest, [shown.id]: was } : rest))
+              }
+              renameDisabled={view.phase !== "connected"}
             />
           </ErrorBoundary>
           <ErrorBoundary what="The composer" resetKey={shown.id}>

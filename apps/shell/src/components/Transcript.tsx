@@ -11,6 +11,8 @@ type Decide = (requestId: string, behavior: "allow" | "deny") => void;
 
 interface TranscriptProps {
   title: string;
+  /** The title is a placeholder; see SessionTitle. */
+  untitled?: boolean;
   view: SessionView;
   /** Kept stable across renders, so streaming text does not re-render every block. */
   onDecide: Decide;
@@ -24,7 +26,7 @@ interface TranscriptProps {
 }
 
 /** The active session as a document: the user's and the agent's words, tool cards, and permission requests to answer. */
-export function Transcript({ title, view, onDecide, onRetry, onRename, renaming, onRenameReset, renameDisabled }: TranscriptProps) {
+export function Transcript({ title, untitled, view, onDecide, onRetry, onRename, renaming, onRenameReset, renameDisabled }: TranscriptProps) {
   const { transcript, stream, answers } = view;
   const scroller = useRef<HTMLDivElement>(null);
   // Whether the reader is at the end; new content keeps them there, and
@@ -52,7 +54,7 @@ export function Transcript({ title, view, onDecide, onRetry, onRename, renaming,
   return (
     <section className="transcript" aria-label="Transcript">
       <header className="transcript-header">
-        <SessionTitle title={title} onRename={onRename} renaming={renaming} onReset={onRenameReset} disabled={renameDisabled}>
+        <SessionTitle title={title} untitled={untitled} onRename={onRename} renaming={renaming} onReset={onRenameReset} disabled={renameDisabled}>
           <span className="transcript-state" data-needs-you={transcript.state === "waiting_user" || undefined}>
             {stateText(transcript.state)}
           </span>
