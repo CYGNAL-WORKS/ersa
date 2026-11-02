@@ -150,17 +150,27 @@ async fn the_first_message_creates_the_workspace_the_session_and_its_first_turn(
             );
             assert_eq!(workspaces(&link, &project).await.len(), 2);
 
-            // The values are remembered for the project in Core's settings.
+            // The values are remembered for the project in Core's settings,
+            // as the Interface patches them: every field named, a value the
+            // next start leaves out as null, which Core's merge removes.
             let id = project["id"].as_str().expect("an id");
-            let remembered = json!({ "host_id": host, "project_id": id, "workspace": "isolated", "backend": "claude-code" });
-            request(
-                &link,
-                "settings.set",
-                json!({ "patch": { "new_session": { "last_used": { id: remembered } } } }),
-            )
-            .await;
+            let entry = |model: Value| {
+                json!({ "patch": { "new_session": { "last_used": { id: {
+                    "host_id": host, "project_id": id, "workspace": "isolated",
+                    "backend": "claude-code", "model": model,
+                } } } } })
+            };
+            request(&link, "settings.set", entry(model.clone())).await;
             let settings = request(&link, "settings.get", json!({})).await;
-            assert_eq!(settings["new_session"]["last_used"][id], remembered);
+            assert_eq!(settings["new_session"]["last_used"][id]["model"], model);
+            request(&link, "settings.set", entry(Value::Null)).await;
+            let settings = request(&link, "settings.get", json!({})).await;
+            let remembered = &settings["new_session"]["last_used"][id];
+            assert_eq!(remembered["workspace"], "isolated");
+            assert!(
+                remembered.get("model").is_none(),
+                "the earlier model stays: {remembered}"
+            );
         }
     });
     finish(checks, &location).await;
