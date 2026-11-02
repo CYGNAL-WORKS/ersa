@@ -14,13 +14,14 @@
   padding: var(--space-xxl) var(--space-lg);
 }
 
-/* Set in the UI face's heading weight, muted: a mark that says where you are, not a headline. */
+/* The wordmark at its own size, in ink: the one large mark on the screen. */
 .new-session-wordmark {
   margin: 0;
-  font-size: var(--type-heading-size);
-  line-height: var(--type-heading-leading);
-  font-weight: var(--type-heading-weight);
-  color: var(--color-ink-muted);
+  font-family: var(--type-wordmark-family);
+  font-size: var(--type-wordmark-size);
+  line-height: var(--type-wordmark-leading);
+  font-weight: var(--type-wordmark-weight);
+  color: var(--color-ink);
   text-align: center;
 }
 
