@@ -367,6 +367,7 @@ async fn start_and_stop(
         cwd: cwd.to_string_lossy().into_owned(),
         permission_mode: "default".into(),
         model: None,
+        effort: None,
         project_trusted: trusted,
         project_path: project_path.to_string_lossy().into_owned(),
         extra: json!({ "claude_path": claude_path() }),
