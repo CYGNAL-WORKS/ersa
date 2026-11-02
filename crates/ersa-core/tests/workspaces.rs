@@ -25,6 +25,12 @@ async fn setup() -> (TestCore, Client, std::path::PathBuf) {
     (core, client, repo)
 }
 
+/// A `workspace.list` result without its root workspace, which comes first.
+fn isolated(listed: &Value) -> Value {
+    assert_eq!(listed[0]["kind"], json!("root"), "{listed}");
+    Value::Array(listed.as_array().unwrap()[1..].to_vec())
+}
+
 async fn add_project(client: &mut Client, path: &Path) -> Value {
     client
         .result(
@@ -175,18 +181,22 @@ async fn workspace_lifecycle() {
     let (core, mut client, repo) = setup().await;
     let project = add_project(&mut client, &repo).await;
     let project_id = project["id"].clone();
-    assert_eq!(
-        client
-            .result("workspace.list", json!({ "project_id": project_id }))
-            .await,
-        json!([])
-    );
+    // A new project has its root workspace, its own folder, and nothing else.
+    let listed = client
+        .result("workspace.list", json!({ "project_id": project_id }))
+        .await;
+    let root = listed[0].clone();
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(root["kind"], json!("root"));
+    assert_eq!(root["path"], project["path"]);
+    assert_eq!(root["state"], json!("ready"));
 
     // Default name: a branch Core picks, in a folder under the root.
     let first = client
         .result("workspace.create", json!({ "project_id": project_id }))
         .await;
     assert_eq!(first["state"], json!("ready"));
+    assert_eq!(first["kind"], json!("isolated"));
     let id = first["id"].as_str().unwrap();
     assert_eq!(first["vcs_ref"], json!(format!("ersa/{id}")));
     let first_path = Path::new(first["path"].as_str().unwrap()).to_path_buf();
@@ -222,7 +232,8 @@ async fn workspace_lifecycle() {
     let listed = client
         .result("workspace.list", json!({ "project_id": project_id }))
         .await;
-    assert_eq!(listed, json!([first, named]));
+    // The root workspace first.
+    assert_eq!(listed, json!([root, first, named]));
 
     // The same branch twice is git's refusal, reported as a VCS error, and
     // leaves no workspace behind.
@@ -237,9 +248,15 @@ async fn workspace_lifecycle() {
     let listed = client
         .result("workspace.list", json!({ "project_id": project_id }))
         .await;
-    assert_eq!(listed.as_array().unwrap().len(), 2);
+    assert_eq!(listed.as_array().unwrap().len(), 3);
 
-    // A project with workspaces cannot be removed.
+    // The root workspace is removed only with its project.
+    let error = client
+        .error("workspace.remove", json!({ "id": root["id"] }))
+        .await;
+    assert_eq!(kind(&error), "invalid_state");
+
+    // A project with isolated workspaces cannot be removed.
     let error = client
         .error("project.remove", json!({ "id": project_id }))
         .await;
@@ -262,7 +279,7 @@ async fn workspace_lifecycle() {
     let listed = client
         .result("workspace.list", json!({ "project_id": project_id }))
         .await;
-    assert_eq!(listed, json!([named]));
+    assert_eq!(listed, json!([root, named]));
     client
         .result(
             "workspace.remove",
@@ -276,10 +293,16 @@ async fn workspace_lifecycle() {
         .await;
     assert_eq!(kind(&error), "not_found");
 
-    // With no workspaces left, the project can go.
+    // With no isolated workspaces left, the project can go, and its root
+    // workspace with it, leaving its folder as it was.
     client
         .result("project.remove", json!({ "id": project_id }))
         .await;
+    let error = client
+        .error("workspace.list", json!({ "project_id": project_id }))
+        .await;
+    assert_eq!(kind(&error), "not_found");
+    assert!(repo.join("README.md").is_file());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -301,6 +324,8 @@ async fn a_worktree_deleted_by_hand_is_still_removable() {
     );
 }
 
+/// A project whose version control has no workspace adapter has its root
+/// workspace, and no isolated one.
 #[tokio::test(flavor = "multi_thread")]
 async fn workspaces_need_a_git_project_and_safe_names() {
     let (core, mut client, repo) = setup().await;
@@ -314,6 +339,15 @@ async fn workspaces_need_a_git_project_and_safe_names() {
         )
         .await;
     assert_eq!(kind(&error), "invalid_state");
+    let listed = client
+        .result(
+            "workspace.list",
+            json!({ "project_id": plain_project["id"] }),
+        )
+        .await;
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert_eq!(listed[0]["kind"], json!("root"));
+    assert_eq!(listed[0]["path"], plain_project["path"]);
 
     let project = add_project(&mut client, &repo).await;
     for params in [
@@ -410,7 +444,7 @@ async fn a_locked_worktree_is_refused_even_with_force() {
     let listed = client
         .result("workspace.list", json!({ "project_id": project["id"] }))
         .await;
-    assert_eq!(listed, json!([workspace]));
+    assert_eq!(isolated(&listed), json!([workspace]));
     assert!(Path::new(path).exists());
 
     git(&repo, &["worktree", "unlock", path]);
@@ -461,6 +495,7 @@ async fn interrupted_workspaces_become_error_at_startup() {
     let listed = client
         .result("workspace.list", json!({ "project_id": project["id"] }))
         .await;
+    let listed = isolated(&listed);
     let states: Vec<&Value> = listed
         .as_array()
         .unwrap()
@@ -625,5 +660,9 @@ async fn a_folder_git_does_not_list_is_refused_not_reported_removed() {
     let listed = client
         .result("workspace.list", json!({ "project_id": project["id"] }))
         .await;
-    assert_eq!(listed, json!([workspace]), "kept, in the state it had");
+    assert_eq!(
+        isolated(&listed),
+        json!([workspace]),
+        "kept, in the state it had"
+    );
 }

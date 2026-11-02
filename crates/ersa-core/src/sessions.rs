@@ -44,8 +44,8 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, Direction, PermissionDecision, ProcessExit,
-    RawLine, RecordEvent, RecordSummary, SessionConfig, Transport,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction,
+    PermissionDecision, ProcessExit, RawLine, RecordEvent, RecordSummary, SessionConfig, Transport,
 };
 use ersa_protocol::core_api::rpc::Notification;
 use ersa_protocol::core_api::{Session, SessionEventParams, SessionTileParams, Tile};
@@ -467,6 +467,23 @@ impl Live {
     }
 }
 
+/// Fills in the model, effort and permission mode a session names none of
+/// with its backend's defaults. A backend that offers no choice leaves
+/// them unnamed.
+fn fill_defaults(row: &mut SessionRow, choices: &BackendChoices) {
+    let fields = [
+        (&mut row.model, &choices.models),
+        (&mut row.effort, &choices.efforts),
+        (&mut row.permission_mode, &choices.permission_modes),
+    ];
+    for (field, list) in fields {
+        if field.is_none() {
+            let default = BackendChoices::default_of(list);
+            *field = (!default.is_empty()).then_some(default);
+        }
+    }
+}
+
 fn not_running() -> SessionError {
     SessionError::InvalidState("the session is not running".into())
 }
@@ -537,6 +554,9 @@ impl Handle {
             workspace_id: row.workspace_id,
             host_id: row.host_id,
             backend: row.backend,
+            model: row.model.unwrap_or_default(),
+            effort: row.effort.unwrap_or_default(),
+            permission_mode: row.permission_mode.unwrap_or_default(),
             mode: row.mode,
             title: presented.title,
             state,
@@ -584,7 +604,12 @@ impl SessionManager {
         // Facts of sessions removed in an earlier run are not carried on.
         self.app_log
             .retain_only(rows.iter().map(|row| row.id.clone()).collect());
-        for row in rows {
+        for mut row in rows {
+            // Sessions from before Core recorded these started with their
+            // backend's defaults.
+            if let Some(adapter) = self.adapters.get(&row.backend) {
+                fill_defaults(&mut row, &adapter.choices());
+            }
             let known = facts.get(&row.id);
             let started = known.map_or(UNKNOWN_TIME.to_string(), |f| f.first.ts.clone());
             let handle = Arc::new(Handle::new(row, started));
@@ -727,6 +752,10 @@ impl SessionManager {
         if self.closing.load(Ordering::SeqCst) {
             return Err(shutting_down());
         }
+        // What the session starts with is recorded, the backend's defaults
+        // where none was named (PROTO-CORE-API-R15).
+        let mut row = row;
+        fill_defaults(&mut row, &adapter.choices());
         self.store.insert_session(row.clone()).await?;
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&handle.presented).title = title;
@@ -2134,6 +2163,9 @@ mod tests {
             backend_session_id: Some("b-gated".into()),
             mode: None,
             cwd: "C:/work".into(),
+            model: None,
+            effort: None,
+            permission_mode: None,
         };
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&manager.sessions).insert(handle.id.clone(), handle);
