@@ -171,6 +171,12 @@ const answered: Event[] = [
   },
   { type: "session.state", state: "idle" },
 ];
+// A second turn after the first, so the gap between turns is seen.
+const twoTurns: Event[] = [
+  ...answered,
+  { type: "user.message", origin: "human", text: "Now delete probe.txt." },
+  { type: "assistant.text", block_id: "m3/0", text: "Deleted. probe.txt no longer exists.", final: true },
+];
 const streaming: Event[] = [
   { type: "session.state", state: "running" },
   { type: "user.message", origin: "human", text: "Say ready." },
@@ -208,6 +214,7 @@ const transcriptStates: [string, SessionView][] = [
   ["Permission while Core is away", sessionView(asked, { stream: { state: "offline" } })],
   ["Hidden characters", sessionView(hiding)],
   ["Answered", sessionView(answered)],
+  ["Two turns", sessionView(twoTurns)],
   ["Failed", sessionView(failing)],
   ["Not receiving events", sessionView([], { stream: { state: "failed", message: "Core closed the connection" } })],
 ];

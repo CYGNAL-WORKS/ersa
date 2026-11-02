@@ -9,13 +9,13 @@ adrs: []
 
 # Title
 
-A component brief exists only for a component with non-trivial behaviour. Appearance, states, variants, and tokens live in the component gallery and `docs/design/DESIGN.md`; do not restate them here.
+A component brief exists only for a component with non-trivial behavior. Appearance, states, variants, and tokens live in the component gallery and `docs/design/DESIGN.md`; do not restate them here.
 
 ## Purpose
 
-What the component is for and when to use it rather than a neighbour.
+What the component is for and when to use it rather than a neighbor.
 
-## Behaviour
+## Behavior
 
 What the component does on each input: click, keyboard, drag, external data change. Include timing where it matters, and what happens at the edges: empty, overflow, error, disconnected.
 
