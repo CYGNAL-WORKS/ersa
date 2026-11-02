@@ -206,11 +206,12 @@ impl RecordSystem {
         if self.subtype.as_deref() != Some("local_command") {
             return None;
         }
-        let content = self.content.as_deref()?;
+        let content = self.content.as_deref()?.trim();
         ["stdout", "stderr"].into_iter().find_map(|stream| {
             content
                 .strip_prefix(&format!("<local-command-{stream}>"))?
                 .strip_suffix(&format!("</local-command-{stream}>"))
+                .map(str::trim)
         })
     }
 }
