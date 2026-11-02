@@ -1467,6 +1467,7 @@
         "workspace_id",
         "host_id",
         "backend",
+        "permission_mode",
         "state",
         "created_at",
         "tile"
@@ -1494,7 +1495,7 @@
         },
         "permission_mode": {
           "type": "string",
-          "description": "The permission mode the session started with: the one session.create was given, else the backend's default. Absent for a replayed session and one created before Core recorded it."
+          "description": "The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it."
         },
         "mode": {
           "type": "string"

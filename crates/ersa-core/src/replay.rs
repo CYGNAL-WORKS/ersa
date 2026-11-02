@@ -160,7 +160,12 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         cwd: path.clone(),
         model: None,
         effort: None,
-        permission_mode: None,
+        // A replayed session names none, so it reports what Core states to
+        // the backend then: its default permission mode.
+        permission_mode: Some(ersa_adapter::BackendChoices::default_of(
+            &adapter.choices().permission_modes,
+        ))
+        .filter(|mode| !mode.is_empty()),
     };
     let transport = core
         .session_transport_for(LOCAL_HOST_ID)
@@ -246,6 +251,14 @@ impl Adapter for Recordless {
 
     fn tested_versions(&self) -> Option<(&'static str, &'static str)> {
         self.0.tested_versions()
+    }
+
+    fn label(&self) -> &str {
+        self.0.label()
+    }
+
+    fn choices(&self) -> ersa_adapter::BackendChoices {
+        self.0.choices()
     }
 
     fn projector(&self) -> Box<dyn Projector> {
