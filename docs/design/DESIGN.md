@@ -69,9 +69,13 @@ line:
   # Custom group. Stroke widths for borders and rules.
   hairline: 1px
 size:
-  # Custom group. Fixed layout widths.
+  # Custom group. Fixed layout sizes.
   rail: 224px
   tile-min: 224px
+  # The transcript's reading column.
+  measure: 672px
+  # The height past which a tool card's output or a long permission field scrolls.
+  card-max: 224px
 motion:
   # Custom group. Durations in ms, easings as CSS cubic-bezier.
   instant: 80
