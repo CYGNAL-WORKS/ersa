@@ -10,7 +10,7 @@
 
 mod common;
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -77,10 +77,13 @@ fn live_only(event: &Event) -> bool {
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R15
+// verifies: PROTO-CLAUDE-CODE-STREAM-R23
+// verifies: PROTO-CLAUDE-CODE-STREAM-R20
 #[test]
 fn record_messages_project_to_the_same_events_as_the_stream_messages() {
     let records = record_fixtures();
     let mut compared = 0;
+    let mut local_commands = 0;
     let mut kinds = BTreeSet::new();
     for stream in fixtures() {
         let Some(record) = records.iter().find(|r| r.name == stream.name) else {
@@ -123,19 +126,47 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
             .filter_map(|l| serde_json::from_str::<Value>(l).ok())
             .filter_map(|e| Some((e["uuid"].as_str()?.into(), e["type"].as_str()?.into())))
             .collect();
+        let elided: HashSet<String> = record
+            .text
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .filter(|e| e["ersa_elided"] == true)
+            .filter_map(|e| e["uuid"].as_str().map(String::from))
+            .collect();
         for (uuid, events) in live {
-            // A local command's output is a synthetic `assistant` message on
-            // the stream and a `system` entry in the record, which R15 does
-            // not cover; it is still in the record.
             let kind = record_kinds
                 .get(&uuid)
                 .unwrap_or_else(|| panic!("{}: {uuid} is not in the record", stream.name));
-            if kind == "system" {
+            // An older fixture trimmed its local command's entry to its links.
+            if elided.contains(&uuid) {
                 continue;
             }
             let recorded = from_record
                 .get(&uuid)
                 .unwrap_or_else(|| panic!("{}: {uuid} is not in the record", stream.name));
+            if kind == "system" {
+                // A local command's output: a synthetic `assistant` message on
+                // the stream, a `system/local_command` entry in the record.
+                // R23: the same events, each block id being the entry's uuid
+                // and the block's index, since the record lacks the synthetic
+                // message's own id.
+                let events: Vec<Event> = events
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, event)| match event {
+                        Event::AssistantText(text) => Event::AssistantText(AssistantText {
+                            block_id: format!("{uuid}/{index}"),
+                            text: text.text,
+                            is_final: text.is_final,
+                        }),
+                        other => panic!("{}: {uuid}: unexpected {other:?}", stream.name),
+                    })
+                    .collect();
+                assert!(!events.is_empty(), "{}: {uuid}", stream.name);
+                assert_eq!(recorded, &events, "{}: {uuid}", stream.name);
+                local_commands += 1;
+                continue;
+            }
             assert_eq!(recorded, &events, "{}: {uuid}", stream.name);
             for event in events {
                 let kind = serde_json::to_value(&event).unwrap()["type"].clone();
@@ -145,6 +176,7 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
         }
     }
     assert!(compared > 0, "no stream fixture has a record");
+    assert!(local_commands > 0, "no local command's output was compared");
     // Every kind of message content the record carries was compared. The
     // model thinks only sometimes, so a thinking block is compared when a
     // recording has one.
@@ -999,4 +1031,73 @@ fn a_records_version_changes_when_it_grows() {
     );
     let other = "00000000-0000-4000-8000-000000000000";
     assert_eq!(record_version(home.path(), "C:/work", other).unwrap(), None);
+}
+
+fn local_command(uuid: &str, parent: Option<&str>, content: Value) -> Value {
+    serde_json::json!({
+        "type": "system", "subtype": "local_command", "uuid": uuid,
+        "parentUuid": parent, "isSidechain": false, "content": content,
+    })
+}
+
+fn blocks(events: &[Event]) -> Vec<(&str, &str)> {
+    events
+        .iter()
+        .map(|e| match e {
+            Event::AssistantText(t) => (t.block_id.as_str(), t.text.as_str()),
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect()
+}
+
+// The echo of the command (no output tag, as older versions wrote beside the
+// output) yields nothing; each output tag yields its text, kept exactly,
+// numbered under the entry's uuid.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R23
+#[test]
+fn only_a_local_commands_output_is_projected() {
+    let events = events_of(&[
+        local_command("a", None, "/allow".into()),
+        local_command(
+            "b",
+            Some("a"),
+            "<local-command-stdout>  name  size
+  a.txt  3 </local-command-stdout>
+             <local-command-stderr>Unknown command: /allow</local-command-stderr>
+"
+            .into(),
+        ),
+    ]);
+    assert_eq!(
+        blocks(&events),
+        [
+            (
+                "b/0",
+                "  name  size
+  a.txt  3 "
+            ),
+            ("b/1", "Unknown command: /allow"),
+        ]
+    );
+}
+
+// A tag that is not closed, a changed wrapper, or content that is not a string
+// is a drifted entry: an error and the entry kept as it came.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R23
+#[test]
+fn a_drifted_local_command_entry_is_reported_and_kept() {
+    for content in [
+        Value::from("<local-command-stdout>never closed"),
+        Value::from("<local-command-output>x</local-command-output>"),
+        serde_json::json!([{"type": "text", "text": "x"}]),
+    ] {
+        let events = events_of(&[local_command("a", None, content.clone())]);
+        assert!(
+            matches!(
+                events.as_slice(),
+                [Event::Error(_), Event::BackendPassthrough(p)] if p.payload["content"] == content
+            ),
+            "{content}: {events:?}"
+        );
+    }
 }

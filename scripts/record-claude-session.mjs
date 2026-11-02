@@ -38,6 +38,13 @@
 // marked `"ersa_elided": true`, because those bodies are internal to the CLI
 // and carry its system prompt and the recording machine's configuration.
 // Set ERSA_CLAUDE to the claude executable if it is not on PATH.
+//
+// With --trust, `initialize` attests the user's trust in the working
+// directory (`workspaceTrust`), as Ersa does for a trusted project's session,
+// and the CLI runs against a new scratch configuration folder
+// (CLAUDE_CONFIG_DIR), so the trust it records never reaches the real one.
+// That folder is logged in nowhere, so give no messages: the recording is the
+// `initialize` exchange alone. The folder is deleted afterwards.
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -84,7 +91,8 @@ const ENV_REMOVED = [
 ];
 
 // The session record entries the adapter reads (PROTO-CLAUDE-CODE-STREAM, Session record).
-const READ_ENTRIES = new Set(["user", "assistant", "custom-title", "ai-title", "last-prompt"]);
+// A `system` entry is read only for the subtypes named here, as "system/<subtype>".
+const READ_ENTRIES = new Set(["user", "assistant", "custom-title", "ai-title", "last-prompt", "system/local_command"]);
 
 const USER_NAME = userInfo().username;
 function scrub(text) {
@@ -110,7 +118,7 @@ function elide(recordText) {
       if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
         return JSON.stringify({ type: "not-an-object", ersa_elided: true });
       }
-      if (READ_ENTRIES.has(entry.type)) return line;
+      if (READ_ENTRIES.has(entry.type) || READ_ENTRIES.has(`${entry.type}/${entry.subtype}`)) return line;
       const kept = { type: entry.type };
       if (entry.subtype !== undefined) kept.subtype = entry.subtype;
       // The links that make the conversation's chain, which runs through
@@ -132,14 +140,19 @@ const option = (flag) => {
   const [, value] = argv.splice(i, 2);
   return value;
 };
-const keepIndex = argv.indexOf("--keep");
-const keep = keepIndex !== -1;
-if (keep) argv.splice(keepIndex, 1);
+const flag = (name) => {
+  const i = argv.indexOf(name);
+  if (i !== -1) argv.splice(i, 1);
+  return i !== -1;
+};
+const keep = flag("--keep");
+const trust = flag("--trust");
 const givenCwd = option("--cwd");
 const resume = option("--resume");
 const [name, ...messages] = argv;
-if (!name || messages.length === 0 || !/^[a-z0-9-]+$/.test(name)) {
+if (!name || (messages.length === 0) !== trust || !/^[a-z0-9-]+$/.test(name)) {
   console.error('usage: node scripts/record-claude-session.mjs <name> [--cwd <dir>] [--resume <id>] "<message>" [...]');
+  console.error("       node scripts/record-claude-session.mjs <name> --trust");
   process.exit(1);
 }
 
@@ -191,6 +204,8 @@ const args = [...ERSA_ARGS, ...(resume ? ["--resume", resume] : [])];
 const env = { ...process.env };
 for (const key of ENV_REMOVED) delete env[key];
 Object.assign(env, ENV_SET);
+const configDir = trust ? mkdtempSync(join(tmpdir(), "ersa-rec-config-")) : null;
+if (configDir) env.CLAUDE_CONFIG_DIR = configDir;
 
 const started = Date.now();
 // On POSIX the CLI leads its own process group, so a kill reaches whatever
@@ -214,6 +229,9 @@ function killTree() {
 }
 // However this script ends (an exception included), the CLI does not outlive it.
 process.on("exit", killTree);
+// Nor does the scratch configuration (and the trust it records). Registered
+// after the kill, so the CLI no longer holds its files open.
+if (configDir) process.on("exit", () => rmSync(configDir, { recursive: true, force: true }));
 // A CLI that exits early closes its stdin; a write then fails here, not as a crash.
 child.stdin.on("error", () => {});
 
@@ -279,7 +297,9 @@ child.stdout.on("data", (d) => {
 const exited = new Promise((resolve) => child.on("exit", (code, signal) => resolve({ code, signal })));
 
 const initAnswer = waitFor((m) => m.type === "control_response" && m.response?.request_id === "ersa-init-1", 60_000);
-send({ type: "control_request", request_id: "ersa-init-1", request: { subtype: "initialize", hooks: {} } });
+const initialize = { subtype: "initialize", hooks: {} };
+if (trust) initialize.workspaceTrust = { accepted: true, directory: cwd };
+send({ type: "control_request", request_id: "ersa-init-1", request: initialize });
 const initialized = !!(await initAnswer);
 
 const turns = [];
@@ -342,6 +362,7 @@ writeFileSync(
       env_set: ENV_SET,
       env_removed: ENV_REMOVED,
       bidirectional: true,
+      scratch_config_dir: trust,
       cwd_was_scratch_git_repo: givenCwd === undefined,
       session_id: init?.session_id ?? null,
       session_record: recordLines === null ? null : `record/${stem}.jsonl`,

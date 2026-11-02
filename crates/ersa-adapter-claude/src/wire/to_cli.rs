@@ -92,7 +92,8 @@ pub struct HostControlRequest {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "subtype", rename_all = "snake_case")]
 pub enum HostRequest {
-    Initialize(InitializeRequest),
+    // Boxed: far larger than every other request.
+    Initialize(Box<InitializeRequest>),
     Interrupt {
         /// Also cancel queued user messages. Honoured only when `system/init`
         /// advertises `interrupt_cancel_queued_v1`.
@@ -153,6 +154,24 @@ pub struct InitializeRequest {
     pub supported_dialog_kinds: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub per_task_stop_affordance: Option<bool>,
+    /// That the user trusts `directory`, so the CLI records the workspace as
+    /// trusted in its own configuration (ADR 0018). Sent only for a trusted
+    /// project's session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_trust: Option<WorkspaceTrust>,
+}
+
+/// The host's attestation that the user accepted a trust question for
+/// `directory`. The CLI honours it only when `directory` is an absolute path
+/// with the same trust key as the session's working directory (its git root,
+/// shared by the repository and its linked worktrees), and answers with
+/// `workspace_trust_recorded` in the `initialize` response.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct WorkspaceTrust {
+    /// Only ever true: the CLI asks that the host sends this only after
+    /// showing the user a trust question for `directory`.
+    pub accepted: bool,
+    pub directory: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
