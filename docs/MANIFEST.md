@@ -39,4 +39,4 @@ Empty.
 
 ## Problems
 
-None.
+- vendored file .claude/skills/to-tickets/SKILL.md changed without updating .claude/skills/VENDORED.sha256

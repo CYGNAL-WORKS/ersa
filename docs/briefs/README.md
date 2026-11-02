@@ -69,7 +69,7 @@ One testable statement per requirement, written in the form "When X, Ersa shall 
 
 - `draft` briefs may be rewritten freely by planning sessions.
 - `ready` and `built` briefs change in a planning pass that lists the requirement IDs added, retired, or reworded, and updates the tests that cite retired IDs in the same change.
-- Each brief ends with a `## Changes` section, newest first, one line per change.
+- Each brief ends with a `## Changes` section, newest first, one line per change. Briefs merge with git's union driver (`.gitattributes`), so two branches that each add a Changes line or a requirement merge by keeping both lines; after such a merge, read the section and run the manifest check, which reports a requirement defined twice.
 
 ## Manifest
 
