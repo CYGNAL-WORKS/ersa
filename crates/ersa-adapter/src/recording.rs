@@ -82,17 +82,21 @@ impl Recording {
         let sent = notes.remove("sent");
 
         let stdout: Vec<&str> = stdout.lines().filter(|l| !l.trim().is_empty()).collect();
-        let stdout_times: Vec<u64> = match timings {
-            Some(Value::Array(times)) => times
-                .iter()
-                .map(|t| {
-                    t.as_u64()
-                        .ok_or_else(|| invalid("a stdout timing is not a whole number"))
-                        .and_then(checked_time)
-                })
-                .collect::<io::Result<_>>()?,
+        // `None` only when the key is absent: an empty array is a list of
+        // timings like any other and must match the stdout line count.
+        let stdout_times: Option<Vec<u64>> = match timings {
+            Some(Value::Array(times)) => Some(
+                times
+                    .iter()
+                    .map(|t| {
+                        t.as_u64()
+                            .ok_or_else(|| invalid("a stdout timing is not a whole number"))
+                            .and_then(checked_time)
+                    })
+                    .collect::<io::Result<_>>()?,
+            ),
             Some(_) => return Err(invalid("`stdout_timing_ms` is not an array")),
-            None => Vec::new(),
+            None => None,
         };
         let sent: Vec<(u64, String)> = match sent {
             Some(Value::Array(sent)) => sent
@@ -110,15 +114,14 @@ impl Recording {
 
         // Without timings the stdout lines all count as at 0, which is
         // faithful only when nothing was written to stdin between them.
-        let stdout_times = if stdout_times.is_empty() && !stdout.is_empty() {
-            if !sent.is_empty() {
+        let stdout_times = match stdout_times {
+            Some(times) => times,
+            None if !sent.is_empty() && !stdout.is_empty() => {
                 return Err(invalid(
                     "stdin lines without stdout timings cannot be put in order",
                 ));
             }
-            vec![0; stdout.len()]
-        } else {
-            stdout_times
+            None => vec![0; stdout.len()],
         };
         if stdout_times.len() != stdout.len() {
             return Err(invalid(&format!(
@@ -288,6 +291,8 @@ mod tests {
     #[test]
     fn a_recording_that_cannot_be_read_faithfully_is_refused() {
         refused(&["a", "b"], json!({ "stdout_timing_ms": [1] }));
+        // Only an absent key means "no timings"; an empty list is a count.
+        refused(&["a"], json!({ "stdout_timing_ms": [] }));
         refused(&["a"], json!({ "stdout_timing_ms": "fast" }));
         refused(&["a"], json!({ "stdout_timing_ms": [1.5] }));
         refused(&["a"], json!({ "stdout_timing_ms": [1], "sent": "x" }));

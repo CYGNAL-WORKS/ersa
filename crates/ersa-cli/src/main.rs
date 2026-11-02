@@ -182,6 +182,19 @@ async fn replay(fixture: PathBuf, pace: PaceArg, endpoint: EndpointArg) -> ExitC
             return ExitCode::FAILURE;
         }
     };
+    // Only Claude Code recordings exist so far, and they note the CLI's
+    // version under this key. Without it the replay would report an empty
+    // version, a default in place of the recording, so it is refused.
+    let backend_version = match recording.meta["claude_code_version"].as_str() {
+        Some(version) if !version.trim().is_empty() => version.to_string(),
+        _ => {
+            eprintln!(
+                "ersa-core: cannot replay {}: the recording does not say which Claude Code version made it (`claude_code_version`)",
+                fixture.display()
+            );
+            return ExitCode::FAILURE;
+        }
+    };
     let endpoint = match endpoint.endpoint.as_deref() {
         Some(label) => ersa_core::platform::labelled_endpoint(label),
         None => ersa_core::platform::labelled_endpoint(REPLAY_LABEL),
@@ -193,6 +206,22 @@ async fn replay(fixture: PathBuf, pace: PaceArg, endpoint: EndpointArg) -> ExitC
             return ExitCode::FAILURE;
         }
     };
+    // Listen for Ctrl+C before anything needs cleaning up, so a Ctrl+C at
+    // any point from here on removes the data directory below instead of
+    // killing the process. The listener is registered when first polled,
+    // which the biased select does now; `ready` lets it fall through.
+    let mut ctrl_c = Box::pin(tokio::signal::ctrl_c());
+    tokio::select! {
+        biased;
+        signal = &mut ctrl_c => {
+            // Done already: either Ctrl+C came, or it cannot be listened for.
+            if let Err(e) = signal {
+                eprintln!("ersa-core: cannot listen for Ctrl+C: {e}");
+            }
+            return ExitCode::FAILURE;
+        }
+        () = std::future::ready(()) => {}
+    }
     // A fresh data directory per run: the replay records its session in a
     // database of its own, never the user's. `tempfile` makes it private to
     // the user (0700 on Unix) under an unguessable name, and removes it when
@@ -216,15 +245,6 @@ async fn replay(fixture: PathBuf, pace: PaceArg, endpoint: EndpointArg) -> ExitC
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_else(|| "replay".into());
-    // Only Claude Code recordings exist so far, and they note the CLI's
-    // version under this key.
-    let backend_version = match recording.meta["claude_code_version"].as_str() {
-        Some(version) => version.to_string(),
-        None => {
-            tracing::warn!("the recording does not say which Claude Code version made it");
-            String::new()
-        }
-    };
     let replay = Replay {
         adapter: Arc::new(ersa_adapter_claude::ClaudeAdapter::new()),
         recording,
@@ -235,21 +255,40 @@ async fn replay(fixture: PathBuf, pace: PaceArg, endpoint: EndpointArg) -> ExitC
             PaceArg::Instant => Pace::Instant,
         },
     };
-    let code = match Server::bind_replay(config, replay).await {
+    // A Ctrl+C during start-up is remembered, not acted on at once: a bind
+    // cancelled part way through can leave sessions it already launched
+    // holding the database and log open, and on Windows those keep the data
+    // directory. So binding finishes, then the server shuts down the way
+    // `core.shutdown` does, which releases them before the clean-up below.
+    let bind = Server::bind_replay(config, replay);
+    tokio::pin!(bind);
+    let mut interrupted = false;
+    let bound = tokio::select! {
+        bound = &mut bind => bound,
+        _ = &mut ctrl_c => {
+            interrupted = true;
+            bind.await
+        }
+    };
+    let code = match bound {
         Ok(server) => {
-            tracing::info!("replaying {}", fixture.display());
-            // Ctrl+C is how a replay is usually stopped: shut down as
-            // core.shutdown does, so the data directory is removed below.
             // Held weakly: a strong hold would keep the database open, and
             // the directory with it, after the server has stopped.
             let core = Arc::downgrade(&server.core());
-            tokio::spawn(async move {
-                if tokio::signal::ctrl_c().await.is_ok()
-                    && let Some(core) = core.upgrade()
-                {
-                    core.request_shutdown();
-                }
-            });
+            if interrupted {
+                server.core().request_shutdown();
+            } else {
+                tracing::info!("replaying {}", fixture.display());
+                // Ctrl+C is how a replay is usually stopped: shut down as
+                // core.shutdown does, so the data directory is removed below.
+                tokio::spawn(async move {
+                    if ctrl_c.await.is_ok()
+                        && let Some(core) = core.upgrade()
+                    {
+                        core.request_shutdown();
+                    }
+                });
+            }
             match server.run().await {
                 Ok(()) => ExitCode::SUCCESS,
                 Err(e) => {
