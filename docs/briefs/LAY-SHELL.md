@@ -28,7 +28,7 @@ The fixed structure of the Ersa window: a rail on the left, the transcript in th
 
 The rail lists projects, each project's workspaces, and each workspace's sessions as tiles. A tile shows title, backend icon, activity state, a context ring, and cost as reported. When a session needs the user, its tile marks that (an edge or glyph, never a filled row) and a shelf pulls out from it holding the request with its controls, so permissions and questions are handled without changing the active session. The transcript shows the active session; the workbench holds Files, Diff, Terminal, Browser, and Developer panes.
 
-With no active session, or when the user chooses New session, the transcript area shows the new-session screen: the Ersa wordmark above the composer and nothing else, so the first message is the first act. Beneath the composer, on the new-session screen and on every session, sit the session controls: a row of chips for host, project, workspace (a new isolated workspace or the project's root workspace), backend, model, effort and permission mode, with the context ring at the row's end. Before a session starts the chips set it up; during a session they show its values. The backend chip appears only when the host has more than one backend. There is no setup card or form before the composer. The reference is the owner's sketch of 2026-11-02 (FLOW-NEW-SESSION).
+With no active session, or when the user chooses New session, the transcript area shows the new-session screen: the Ersa wordmark above the composer and nothing else, so the first message is the first act. Beneath the composer, on the new-session screen and on every session, sit the session controls: a row of chips for host, project, workspace (a new isolated workspace or the project's root workspace), backend, model, effort and permission mode, with the context ring at the row's end. Before a session starts the chips set it up; during a session they show its values. The backend chip appears when the host has more than one backend, and also when its only backend is missing or failed, so that status is seen (FLOW-NEW-SESSION-R07); with one available backend it is hidden. There is no setup card or form before the composer. The reference is the owner's sketch of 2026-11-02 (FLOW-NEW-SESSION).
 
 ## Development
 
@@ -44,6 +44,7 @@ A debug build attaches to a labelled Core endpoint, such as a replay, only when 
 
 ## Changes
 
+- 2026-11-02: from #53 inbox: the backend chip also shows a lone backend that is missing or failed.
 - 2026-11-02: the new-session screen and the session controls beneath the composer, from the owner's sketch (FLOW-NEW-SESSION).
 - 2026-11-01: from #14 inbox: a debug build attaches to a labelled endpoint when told to (Development).
 
