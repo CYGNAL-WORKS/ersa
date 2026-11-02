@@ -85,14 +85,16 @@ impl Recording {
         // `None` only when the key is absent: an empty array is a list of
         // timings like any other and must match the stdout line count.
         let stdout_times: Option<Vec<u64>> = match timings {
-            Some(Value::Array(times)) => Some(times
-                .iter()
-                .map(|t| {
-                    t.as_u64()
-                        .ok_or_else(|| invalid("a stdout timing is not a whole number"))
-                        .and_then(checked_time)
-                })
-                .collect::<io::Result<_>>()?),
+            Some(Value::Array(times)) => Some(
+                times
+                    .iter()
+                    .map(|t| {
+                        t.as_u64()
+                            .ok_or_else(|| invalid("a stdout timing is not a whole number"))
+                            .and_then(checked_time)
+                    })
+                    .collect::<io::Result<_>>()?,
+            ),
             Some(_) => return Err(invalid("`stdout_timing_ms` is not an array")),
             None => None,
         };
