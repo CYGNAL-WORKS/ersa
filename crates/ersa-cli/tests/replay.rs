@@ -74,7 +74,7 @@ async fn replay_serves_a_recorded_session_to_list_and_subscribe_to() {
 
     let id = call(
         "core.hello",
-        json!({ "client": "replay-test", "client_version": "0", "api_versions": [2] }),
+        json!({ "client": "replay-test", "client_version": "0", "api_versions": [3] }),
     )
     .await;
     read_until(&mut lines, id, &mut events).await;

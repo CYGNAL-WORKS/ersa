@@ -130,7 +130,7 @@ async fn a_prompt_with_a_permission_round_trip_through_the_core_process() {
     client
         .call(
             "core.hello",
-            json!({ "client": "live-test", "client_version": "0", "api_versions": [2] }),
+            json!({ "client": "live-test", "client_version": "0", "api_versions": [3] }),
         )
         .await;
     let project = client

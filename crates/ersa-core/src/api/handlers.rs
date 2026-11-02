@@ -6,8 +6,8 @@ use std::path::{Component, Path};
 use ersa_protocol::core_api::{
     BackendInfo, BackendListParams, Empty, HelloParams, HelloResult, Host, HostKind, HostStatus,
     IdParams, Project, ProjectAddParams, ProjectSetTrustParams, SUPPORTED_API_VERSIONS,
-    SettingsSetParams, StatusResult, Vcs, Workspace, WorkspaceCreateParams, WorkspaceListParams,
-    WorkspaceRemoveParams, WorkspaceState,
+    SettingsSetParams, StatusResult, Vcs, Workspace, WorkspaceCreateParams, WorkspaceKind,
+    WorkspaceListParams, WorkspaceRemoveParams, WorkspaceState,
 };
 use ersa_protocol::events::PROJECTION_VERSION;
 use serde_json::{Map, Value};
@@ -180,6 +180,7 @@ pub(super) async fn project_add(
         // in its sessions only once they have said they trust it (ADR 0018).
         trusted: params.trusted,
     };
+    // Its root workspace, the project's own folder, is made with it.
     core.store
         .insert_project(project.clone(), folder.key)
         .await?;
@@ -258,14 +259,29 @@ pub(super) async fn project_set_trust(
         .ok_or_else(|| ApiError::not_found(format!("no project {}", params.id)))
 }
 
+/// Refused while the project has an isolated workspace or a session in its
+/// root workspace; it never cascades. Its root workspace goes with it.
 pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Project, ApiError> {
     let project = find_project(core, &params.id).await?;
-    if !core.store.workspaces(project.id.clone()).await?.is_empty() {
-        return Err(ApiError::invalid_state(format!(
-            "project {} still has workspaces; remove them first",
-            project.id
-        )));
+    for workspace in core.store.workspaces(project.id.clone()).await? {
+        match workspace.kind {
+            WorkspaceKind::Isolated => {
+                return Err(ApiError::invalid_state(format!(
+                    "project {} still has workspaces; remove them first",
+                    project.id
+                )));
+            }
+            WorkspaceKind::Root => {
+                if core.store.sessions_in_workspace(workspace.id).await? > 0 {
+                    return Err(ApiError::invalid_state(format!(
+                        "project {} has sessions in its own folder; stop and remove them first",
+                        project.id
+                    )));
+                }
+            }
+        }
     }
+    // Anything created since the checks above makes the delete a conflict.
     core.store.delete_project(project.id.clone()).await?;
     Ok(project)
 }
@@ -292,9 +308,12 @@ pub(super) async fn workspace_create(
     params: WorkspaceCreateParams,
 ) -> Result<Workspace, ApiError> {
     let project = find_project(core, &params.project_id).await?;
+    // Git is the only version control with a workspace adapter so far; a
+    // session of any other project runs in its root workspace.
     if project.vcs != Vcs::Git {
         return Err(ApiError::invalid_state(format!(
-            "project {} is not a git repository; only git worktrees are supported",
+            "project {} has no workspace adapter for its version control; \
+             only git projects get isolated workspaces, so run the session in the project's own folder",
             project.id
         )));
     }
@@ -336,6 +355,7 @@ pub(super) async fn workspace_create(
     let mut workspace = Workspace {
         id: id.clone(),
         project_id: project.id.clone(),
+        kind: WorkspaceKind::Isolated,
         path: path.clone(),
         vcs_ref: branch.clone(),
         state: WorkspaceState::Creating,
@@ -386,6 +406,14 @@ pub(super) async fn workspace_remove(
         .workspace(params.id.clone())
         .await?
         .ok_or_else(|| ApiError::not_found(format!("no workspace {}", params.id)))?;
+    // The root workspace is the project's own folder: it goes only with the
+    // project, and nothing of it is ever deleted.
+    if workspace.kind == WorkspaceKind::Root {
+        return Err(ApiError::invalid_state(format!(
+            "workspace {} is the project's own folder; it is removed only with the project",
+            workspace.id
+        )));
+    }
     let project = find_project(core, &workspace.project_id).await?;
     let transport = core
         .transport_for(&project.host_id)

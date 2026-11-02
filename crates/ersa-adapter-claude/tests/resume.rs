@@ -23,6 +23,7 @@ fn config(extra: Value) -> SessionConfig {
         cwd: "C:/work".into(),
         permission_mode: "default".into(),
         model: None,
+        effort: None,
         project_trusted: false,
         project_path: String::new(),
         extra,

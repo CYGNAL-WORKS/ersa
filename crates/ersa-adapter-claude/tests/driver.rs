@@ -26,6 +26,7 @@ fn config() -> SessionConfig {
         cwd: "C:/work".into(),
         permission_mode: "default".into(),
         model: None,
+        effort: None,
         project_trusted: false,
         project_path: String::new(),
         extra: Value::Null,
@@ -130,6 +131,59 @@ async fn starts_the_cli_with_every_flag_explicit() {
         ]
     );
     session.stop().await.expect("stop");
+}
+
+/// `--model` and `--effort` are passed when the session names them and left
+/// out otherwise, so the CLI's own defaults apply
+/// (PROTO-CLAUDE-CODE-STREAM, Invocation).
+// verifies: PROTO-CORE-API-R16
+#[test]
+fn model_and_effort_are_passed_only_when_named() {
+    let mut named = config();
+    named.model = Some("opus".into());
+    named.effort = Some("high".into());
+    named.permission_mode = "acceptEdits".into();
+    let args = ersa_adapter_claude::invocation_args(&named);
+    assert_eq!(flag_value(&args, "--model"), Some("opus"));
+    assert_eq!(flag_value(&args, "--effort"), Some("high"));
+    assert_eq!(flag_value(&args, "--permission-mode"), Some("acceptEdits"));
+
+    let args = ersa_adapter_claude::invocation_args(&config());
+    for flag in ["--model", "--effort"] {
+        assert!(!args.iter().any(|a| a == flag), "{flag} in {args:?}");
+    }
+    assert_eq!(flag_value(&args, "--permission-mode"), Some("default"));
+}
+
+/// What `backend.list` offers for Claude Code: the brief's model aliases,
+/// effort levels and permission modes, each list with one default, and
+/// never `bypassPermissions`.
+// verifies: PROTO-CORE-API-R16
+#[test]
+fn the_choices_are_the_briefs_with_one_default_each() {
+    let choices = adapter().choices();
+    let ids = |list: &[ersa_protocol::core_api::Choice]| -> Vec<String> {
+        list.iter().map(|c| c.id.clone()).collect()
+    };
+    assert_eq!(ids(&choices.models), ["fable", "opus", "sonnet", "haiku"]);
+    assert_eq!(
+        ids(&choices.efforts),
+        ["low", "medium", "high", "xhigh", "max"]
+    );
+    assert_eq!(
+        ids(&choices.permission_modes),
+        ["default", "acceptEdits", "plan", "auto"]
+    );
+    for list in [&choices.models, &choices.efforts, &choices.permission_modes] {
+        assert_eq!(list.iter().filter(|c| c.default).count(), 1, "{list:?}");
+        assert!(list.iter().all(|c| !c.label.is_empty()), "{list:?}");
+    }
+    // The session's permission mode when none is named is the one that asks
+    // before every action outside the allow rules (FLOW-NEW-SESSION-R02).
+    assert_eq!(
+        ersa_adapter::BackendChoices::default_of(&choices.permission_modes),
+        "default"
+    );
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R12
