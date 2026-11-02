@@ -6,6 +6,9 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
+
+use ersa_shell::launch::CoreLocation;
 
 /// The `ersa-core` executable: `ERSA_CORE_BIN`, or the root workspace's
 /// debug build (`cargo build -p ersa-cli` at the repository root).
@@ -39,4 +42,26 @@ pub fn unique_label(prefix: &str) -> String {
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     )
+}
+
+/// A Core location private to a test: the user's endpoint labelled with the
+/// process id and a counter (`serve --endpoint <label>`), and a data
+/// directory and log in `dir`.
+pub fn private_location(dir: &Path) -> CoreLocation {
+    let label = unique_label("shell-test");
+    let endpoint = ersa_core::platform::labelled_endpoint(&label).expect("an endpoint");
+    CoreLocation {
+        program: core_program(),
+        endpoint,
+        serve_args: vec![
+            "--endpoint".into(),
+            label.into(),
+            "--data-dir".into(),
+            dir.join("data").into_os_string(),
+        ],
+        env: Vec::new(),
+        log_file: Some(dir.join("core.log")),
+        start_timeout: Duration::from_secs(60),
+        launch: true,
+    }
 }

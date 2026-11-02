@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-shell-quit"
+description = "Enables the shell_quit command without any pre-configured scope."
+commands.allow = ["shell_quit"]
+
+[[permission]]
+identifier = "deny-shell-quit"
+description = "Denies the shell_quit command without any pre-configured scope."
+commands.deny = ["shell_quit"]
