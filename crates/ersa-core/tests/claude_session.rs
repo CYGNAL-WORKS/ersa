@@ -141,6 +141,7 @@ async fn setting_sources(transport: &ersa_adapter::fake::FakeTransport, n: usize
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R12
 // verifies: PROTO-CLAUDE-CODE-STREAM-R18
+// verifies: PROTO-CLAUDE-CODE-STREAM-R24
 #[tokio::test(flavor = "multi_thread")]
 async fn a_projects_own_configuration_loads_only_once_the_user_trusts_it() {
     let (stdout, _) = fixture();
@@ -175,6 +176,11 @@ async fn a_projects_own_configuration_loads_only_once_the_user_trusts_it() {
 
     start_session(&mut client).await;
     assert_eq!(setting_sources(&transport, 0).await, "user");
+    // An untrusted project's paths are never trusted in the CLI's own record.
+    assert_eq!(
+        initialize(&transport, 0).await["request"].get("workspaceTrust"),
+        None
+    );
 
     client
         .result(
@@ -184,4 +190,30 @@ async fn a_projects_own_configuration_loads_only_once_the_user_trusts_it() {
         .await;
     start_session(&mut client).await;
     assert_eq!(setting_sources(&transport, 1).await, "user,project,local");
+    // A trusted one's are, for the root the user answered the question for.
+    assert_eq!(
+        initialize(&transport, 1).await["request"]["workspaceTrust"],
+        json!({ "accepted": true, "directory": project["path"] })
+    );
+}
+
+/// The `initialize` request the `n`th CLI was sent, once it has been sent.
+async fn initialize(transport: &ersa_adapter::fake::FakeTransport, n: usize) -> Value {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let sent: Vec<Value> = transport
+            .stdin_lines()
+            .iter()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|line| line["request"]["subtype"] == "initialize")
+            .collect();
+        if let Some(request) = sent.get(n) {
+            return request.clone();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "no initialize number {n} sent"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }

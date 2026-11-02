@@ -173,6 +173,7 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         permission_mode: String::new(),
         model: None,
         project_trusted: false,
+        project_path: String::new(),
         extra: Value::Null,
     };
     core.sessions
