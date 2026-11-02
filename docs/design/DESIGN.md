@@ -69,9 +69,13 @@ line:
   # Custom group. Stroke widths for borders and rules.
   hairline: 1px
 size:
-  # Custom group. Fixed layout widths.
+  # Custom group. Fixed layout sizes.
   rail: 224px
   tile-min: 224px
+  # The transcript's reading column.
+  measure: 672px
+  # The height past which a tool card's output or a long permission field scrolls.
+  card-max: 224px
 motion:
   # Custom group. Durations in ms, easings as CSS cubic-bezier.
   instant: 80
@@ -115,7 +119,7 @@ Every numeric readout (context, cost, counts, elapsed time) uses `mono` with tab
 
 ## Layout
 
-A 4px unit. Pane padding is `lg`; inline gaps between related controls are `sm`; separation between unrelated groups is `xl`. The shell layout itself is specified in `LAY-SHELL`. Fixed widths, such as the rail and the narrowest a tile column may get, come from the `size` tokens.
+A 4px unit. Pane padding is `lg`; inline gaps between related controls are `sm`; separation between unrelated groups is `xl`. The shell layout itself is specified in `LAY-SHELL`. Fixed sizes, such as the rail and the narrowest a tile column may get, come from the `size` tokens.
 
 ## Elevation & Depth
 
