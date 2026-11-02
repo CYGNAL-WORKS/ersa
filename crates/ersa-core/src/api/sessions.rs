@@ -104,7 +104,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         mode: params.mode,
         cwd: workspace.path.clone(),
         // The session manager records the backend's defaults for those not
-        // named (PROTO-CORE-API-R15).
+        // named (PROTO-CORE-API-R16).
         model: params.model.clone(),
         effort: params.effort.clone(),
         permission_mode: Some(permission_mode.clone()),

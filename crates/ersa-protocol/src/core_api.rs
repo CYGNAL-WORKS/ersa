@@ -455,7 +455,7 @@ pub struct Session {
     pub host_id: String,
     pub backend: String,
     /// The model, effort and permission mode the session started with: ids
-    /// from `backend.list` (PROTO-CORE-API-R15).
+    /// from `backend.list` (PROTO-CORE-API-R16).
     pub model: String,
     pub effort: String,
     pub permission_mode: String,
