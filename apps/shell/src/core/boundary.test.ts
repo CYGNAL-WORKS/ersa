@@ -21,6 +21,14 @@ function sourceFiles(dir: string): string[] {
 const files = sourceFiles(SRC).map((path) => ({ path: relative(SRC, path), text: readFileSync(path, "utf8") }));
 
 describe("the Interface's boundary", () => {
+  // verifies: FLOW-NEW-SESSION-R03
+  it("creates workspaces and sessions only in the start sequence, which runs on the first message", () => {
+    const found = files
+      .filter(({ path, text }) => path !== join("session", "start.ts") && !path.startsWith("protocol") && /["'](workspace|session)\.create["']/.test(text))
+      .map(({ path }) => path);
+    expect(found).toEqual([]);
+  });
+
   // verifies: ARCH-CORE-R02
   it("uses Tauri only for the bridge's invoke and listen, in one module", () => {
     const found: string[] = [];
