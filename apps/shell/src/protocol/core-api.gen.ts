@@ -3,7 +3,7 @@
 import type * as AgentEvents from "./agent-events.gen";
 
 /** The Core API version these types describe (the schema's `x-api-version`). */
-export const CORE_API_VERSION = 2;
+export const CORE_API_VERSION = 3;
 
 /**
  * Any line on the socket.
@@ -402,15 +402,15 @@ export interface SessionCreateParams {
   workspace_id: Id;
   backend: string;
   /**
-   * An id from backend.list; the backend's default when absent.
+   * An id from backend.list; left to the backend when absent.
    */
   model?: string;
   /**
-   * An id from backend.list; the backend's default when absent.
+   * An id from backend.list; left to the backend when absent.
    */
   effort?: string;
   /**
-   * An id from backend.list; the backend's default when absent.
+   * An id from backend.list; left to the backend when absent.
    */
   permission_mode?: string;
   mode?: string;
@@ -685,17 +685,17 @@ export interface Session {
   host_id: Id;
   backend: string;
   /**
-   * The model the session started with, an id from backend.list.
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  model: string;
+  model?: string;
   /**
-   * The effort the session started with, an id from backend.list.
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  effort: string;
+  effort?: string;
   /**
-   * The permission mode the session started with, an id from backend.list.
+   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  permission_mode: string;
+  permission_mode?: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -852,17 +852,17 @@ export interface Session1 {
   host_id: Id;
   backend: string;
   /**
-   * The model the session started with, an id from backend.list.
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  model: string;
+  model?: string;
   /**
-   * The effort the session started with, an id from backend.list.
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  effort: string;
+  effort?: string;
   /**
-   * The permission mode the session started with, an id from backend.list.
+   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  permission_mode: string;
+  permission_mode?: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -879,17 +879,17 @@ export interface Session2 {
   host_id: Id;
   backend: string;
   /**
-   * The model the session started with, an id from backend.list.
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  model: string;
+  model?: string;
   /**
-   * The effort the session started with, an id from backend.list.
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  effort: string;
+  effort?: string;
   /**
-   * The permission mode the session started with, an id from backend.list.
+   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  permission_mode: string;
+  permission_mode?: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -906,17 +906,17 @@ export interface Session3 {
   host_id: Id;
   backend: string;
   /**
-   * The model the session started with, an id from backend.list.
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  model: string;
+  model?: string;
   /**
-   * The effort the session started with, an id from backend.list.
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  effort: string;
+  effort?: string;
   /**
-   * The permission mode the session started with, an id from backend.list.
+   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  permission_mode: string;
+  permission_mode?: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -933,17 +933,17 @@ export interface Session4 {
   host_id: Id;
   backend: string;
   /**
-   * The model the session started with, an id from backend.list.
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  model: string;
+  model?: string;
   /**
-   * The effort the session started with, an id from backend.list.
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  effort: string;
+  effort?: string;
   /**
-   * The permission mode the session started with, an id from backend.list.
+   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  permission_mode: string;
+  permission_mode?: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -960,17 +960,17 @@ export interface Session5 {
   host_id: Id;
   backend: string;
   /**
-   * The model the session started with, an id from backend.list.
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  model: string;
+  model?: string;
   /**
-   * The effort the session started with, an id from backend.list.
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  effort: string;
+  effort?: string;
   /**
-   * The permission mode the session started with, an id from backend.list.
+   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  permission_mode: string;
+  permission_mode?: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -990,17 +990,17 @@ export interface Session6 {
   host_id: Id;
   backend: string;
   /**
-   * The model the session started with, an id from backend.list.
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  model: string;
+  model?: string;
   /**
-   * The effort the session started with, an id from backend.list.
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  effort: string;
+  effort?: string;
   /**
-   * The permission mode the session started with, an id from backend.list.
+   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  permission_mode: string;
+  permission_mode?: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -1017,17 +1017,17 @@ export interface Session7 {
   host_id: Id;
   backend: string;
   /**
-   * The model the session started with, an id from backend.list.
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  model: string;
+  model?: string;
   /**
-   * The effort the session started with, an id from backend.list.
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  effort: string;
+  effort?: string;
   /**
-   * The permission mode the session started with, an id from backend.list.
+   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  permission_mode: string;
+  permission_mode?: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -1044,17 +1044,17 @@ export interface Session8 {
   host_id: Id;
   backend: string;
   /**
-   * The model the session started with, an id from backend.list.
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  model: string;
+  model?: string;
   /**
-   * The effort the session started with, an id from backend.list.
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  effort: string;
+  effort?: string;
   /**
-   * The permission mode the session started with, an id from backend.list.
+   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  permission_mode: string;
+  permission_mode?: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -1071,17 +1071,17 @@ export interface Session9 {
   host_id: Id;
   backend: string;
   /**
-   * The model the session started with, an id from backend.list.
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  model: string;
+  model?: string;
   /**
-   * The effort the session started with, an id from backend.list.
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  effort: string;
+  effort?: string;
   /**
-   * The permission mode the session started with, an id from backend.list.
+   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  permission_mode: string;
+  permission_mode?: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -1098,17 +1098,17 @@ export interface Session10 {
   host_id: Id;
   backend: string;
   /**
-   * The model the session started with, an id from backend.list.
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  model: string;
+  model?: string;
   /**
-   * The effort the session started with, an id from backend.list.
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  effort: string;
+  effort?: string;
   /**
-   * The permission mode the session started with, an id from backend.list.
+   * The permission mode session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
-  permission_mode: string;
+  permission_mode?: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
