@@ -2017,7 +2017,9 @@ mod tests {
         assert_eq!(starts.load(Ordering::SeqCst), 1);
     }
 
-    #[tokio::test]
+    // Paused time on one thread: a sleep lets every other task run until it
+    // waits, and no timeout runs out early on a busy machine.
+    #[tokio::test(start_paused = true)]
     async fn a_joined_read_whose_record_cannot_be_checked_fails_the_open_and_holds_nothing() {
         let slot: Arc<ReadSlot<u32>> = Arc::default();
         let gate = Arc::new(Notify::new());
