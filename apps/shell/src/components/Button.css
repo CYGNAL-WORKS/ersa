@@ -6,7 +6,7 @@
   color: var(--color-ink);
   background: var(--color-surface);
   border: var(--line-hairline) solid var(--color-line);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   padding: var(--space-xs) var(--space-sm);
   cursor: pointer;
 }
