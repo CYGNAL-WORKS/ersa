@@ -46,6 +46,13 @@ impl CoreProcess {
         imp::serving(endpoint).await
     }
 
+    /// The process `pid`, which this Shell launched as Core and which is
+    /// still running: held now, so its id cannot pass to another process
+    /// while we hold it (on Windows).
+    pub fn open(pid: u32) -> io::Result<CoreProcess> {
+        imp::open(pid)
+    }
+
     pub fn pid(&self) -> u32 {
         self.pid
     }
@@ -138,6 +145,18 @@ mod imp {
             return Err(io::Error::last_os_error());
         }
         // `pipe` is still open, so the server, and with it `pid`, is alive.
+        let process = open(pid).map_err(|e| match e.kind() {
+            io::ErrorKind::PermissionDenied => io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("{endpoint} is served by another user's process"),
+            ),
+            _ => e,
+        })?;
+        drop(pipe);
+        Ok(Some(process))
+    }
+
+    pub fn open(pid: u32) -> io::Result<CoreProcess> {
         // SAFETY: a plain open by id; a null result is checked below.
         let handle = unsafe {
             OpenProcess(
@@ -149,16 +168,15 @@ mod imp {
         if handle.is_null() {
             return Err(io::Error::last_os_error());
         }
-        drop(pipe);
         // Owned from here on, so an early return closes the handle.
         let process = CoreProcess { pid, handle };
         if !same_user(handle)? {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
-                format!("{endpoint} is served by another user's process"),
+                format!("process {pid} is another user's"),
             ));
         }
-        Ok(Some(process))
+        Ok(process)
     }
 
     /// Whether `process` runs as the same user as this process.
@@ -267,6 +285,10 @@ mod imp {
         };
         let pid = peer_pid(&stream)?;
         Ok(Some(CoreProcess { pid }))
+    }
+
+    pub fn open(pid: u32) -> io::Result<CoreProcess> {
+        Ok(CoreProcess { pid })
     }
 
     /// The process at the other end of `stream`, when it is this user's.
