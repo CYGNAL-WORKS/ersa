@@ -840,7 +840,6 @@ impl SessionManager {
                 "the session's backend has not named it yet, so there is nothing to rename".into(),
             )
         };
-        let mut renamed_live = false;
         if let Some(live) = handle.live() {
             let session = live.wait_ready().await?;
             // Read once ready: the backend names the session as it starts.
@@ -849,14 +848,12 @@ impl SessionManager {
                 .clone()
                 .ok_or_else(unnamed)?;
             let title = title.to_string();
-            match bounded(async move { session.rename(&backend_id, &title).await }).await {
-                Ok(()) => renamed_live = true,
-                // The backend ended after the check: rename it in its record.
-                Err(SessionError::Adapter(AdapterError::NotRunning)) => {}
-                Err(e) => return Err(e),
-            }
-        }
-        if !renamed_live {
+            // A backend that is stopping refuses (not running) while it may
+            // still be writing its record, so a refusal never falls back to
+            // writing the record beside it: the user renames again once the
+            // session has ended.
+            bounded(async move { session.rename(&backend_id, &title).await }).await?;
+        } else {
             let row = lock(&handle.row).clone();
             let backend_id = row.backend_session_id.ok_or_else(unnamed)?;
             let adapter = self.adapters.get(&row.backend).cloned().ok_or_else(|| {
