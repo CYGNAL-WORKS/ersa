@@ -5,7 +5,7 @@ title: Ersa
 status: ready
 verified-by: review
 references: [FLOW-NEW-SESSION, FLOW-APPROVE-PERMISSION, FLOW-RESUME-SESSION, FLOW-REMOTE-SESSION, FLOW-APPLY-PACK, FLOW-SHOW-ME]
-adrs: [0002, 0004, 0006, 0007, 0009, 0011, 0012, 0017]
+adrs: [0002, 0004, 0006, 0007, 0009, 0011, 0012, 0017, 0019]
 ---
 
 # Ersa
@@ -95,6 +95,7 @@ Verified by review at this level; testable requirements live in the flow and pro
 
 ## Changes
 
+- 2026-11-02: the "Beautiful and calm" principle follows ADR 0019's visual direction, and ADR 0019 joins the front matter. No requirement IDs changed.
 - 2026-11-01: ADR 0017 replaces ADR 0010 in the front matter. No requirement IDs changed.
 - 2026-10-31: rewritten after adversarial review: problem statement centred on the three real differentiators (extensible harness, vendor-agnostic, non-git VCS); shelf-based attention from the rail; rail tile contents specified; structured-events principle; packs as neutral definition; content mode deferred.
 - 2026-10-31: created.
