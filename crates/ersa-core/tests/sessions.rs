@@ -1039,6 +1039,8 @@ async fn rename_while_open_elsewhere(answer: OpenElsewhere) -> (Vec<Value>, Arc<
     (after, stats)
 }
 
+// verifies: PROTO-AGENT-EVENTS-R15
+// verifies: PROTO-AGENT-EVENTS-R16
 #[tokio::test(flavor = "multi_thread")]
 async fn renaming_a_session_another_process_has_open_says_so_and_renames_it() {
     let (after, _) = rename_while_open_elsewhere(OpenElsewhere::Yes { pid: 4242 }).await;
@@ -1057,21 +1059,26 @@ async fn renaming_a_session_another_process_has_open_says_so_and_renames_it() {
     assert_eq!(notice["source"]["input"], "core");
 }
 
+// verifies: PROTO-AGENT-EVENTS-R15
+// verifies: PROTO-AGENT-EVENTS-R16
 #[tokio::test(flavor = "multi_thread")]
 async fn renaming_a_session_when_the_check_cannot_tell_says_so_and_renames_it() {
     let (after, _) = rename_while_open_elsewhere(OpenElsewhere::Unknown).await;
     assert_eq!(types(&after), ["session.notice"], "{after:#?}");
     let notice = &after[0]["event"];
     assert_eq!(notice["code"], "session_open_check_failed");
+    assert_eq!(notice["level"], "info");
     assert!(notice.get("pid").is_none(), "{notice:#}");
 }
 
+// verifies: PROTO-AGENT-EVENTS-R15
 #[tokio::test(flavor = "multi_thread")]
 async fn renaming_a_session_no_other_process_has_open_gives_no_notice() {
     let (after, _) = rename_while_open_elsewhere(OpenElsewhere::No).await;
     assert!(after.is_empty(), "{after:#?}");
 }
 
+// verifies: PROTO-AGENT-EVENTS-R15
 #[tokio::test(flavor = "multi_thread")]
 async fn renaming_a_running_session_asks_no_registry() {
     // Ersa's own process has it open: the rename goes through it.
