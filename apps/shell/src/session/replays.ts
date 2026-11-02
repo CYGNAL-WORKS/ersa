@@ -11,6 +11,8 @@ export interface Capture {
   /** `session.list` on attach, and once the replay has played out. */
   sessions: Session[];
   sessions_after: Session[];
+  /** The commit the capture was written from, `-dirty` if uncommitted. */
+  ersa_commit?: string;
   notifications: { kind: "notification"; method: "session.event"; params: { session_id: string; event: Envelope } }[];
 }
 
