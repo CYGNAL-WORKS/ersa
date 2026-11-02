@@ -33,6 +33,8 @@ export const tauriShell: ShellControl = {
       unlisten?.();
     };
   },
-  show: () => invoke("shell_show"),
+  quitHeard: () => invoke("shell_quit_heard"),
+  show: () => invoke<boolean>("shell_show"),
+  hide: () => invoke("shell_hide"),
   quit: () => invoke("shell_quit"),
 };

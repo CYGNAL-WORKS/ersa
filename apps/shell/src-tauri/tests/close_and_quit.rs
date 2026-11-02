@@ -163,10 +163,10 @@ async fn a_core_that_does_not_stop_in_time_is_ended_with_what_it_started() {
         .env(HELPER_PIDS, &pids_file)
         .spawn()
         .expect("start the wedged Core");
+    let (core, child) = read_pids(&pids_file).await;
     let outcome = tokio::spawn({
         let endpoint = endpoint.clone();
         async move {
-            let (core, child) = read_pids(&pids_file).await;
             let limit = Duration::from_secs(2);
             let started = std::time::Instant::now();
             let stopped = quit::shut_down(&endpoint, limit).await.expect("quit");
@@ -181,8 +181,10 @@ async fn a_core_that_does_not_stop_in_time_is_ended_with_what_it_started() {
         }
     })
     .await;
+    // However the checks ended, nothing the wedged Core started outlives them.
     let _ = wedged.kill();
     let _ = wedged.wait();
+    kill(child);
     if let Err(failed) = outcome {
         std::panic::resume_unwind(failed.into_panic());
     }
@@ -224,17 +226,23 @@ async fn a_shell_that_exits_without_quit_leaves_core_serving() {
 async fn a_second_launch_shows_the_first_window_instead_of_opening_one() {
     let label = instance::label_for(Some(&unique_label("t")));
     let endpoint = ersa_core::platform::labelled_endpoint(&label).expect("an endpoint");
-    let Instance::First(mut listener) = instance::claim(&endpoint).await.expect("claim") else {
+    let Instance::First(listener) = instance::claim(&endpoint).await.expect("claim") else {
         panic!("nothing else serves {endpoint}");
     };
-    let asked = tokio::spawn(async move { instance::next_request(&mut listener).await });
-    let second = instance::claim(&endpoint).await.expect("second claim");
-    assert!(matches!(second, Instance::Running));
-    tokio::time::timeout(Duration::from_secs(10), asked)
-        .await
-        .expect("the first Shell is asked to show its window")
-        .expect("task")
-        .expect("request");
+    let (shown, mut shows) = mpsc::unbounded_channel();
+    let first = tokio::spawn(instance::serve_requests(listener, move || {
+        let _ = shown.send(());
+    }));
+    // Every later launch finds the first and asks it, not only the next one:
+    // a launch that lets go at once must not cost the first its endpoint.
+    for launch in 0..3 {
+        let later = instance::claim(&endpoint).await.expect("a later claim");
+        assert!(matches!(later, Instance::Running), "launch {launch}");
+        tokio::time::timeout(Duration::from_secs(10), shows.recv())
+            .await
+            .expect("the first Shell is asked to show its window");
+    }
+    first.abort();
 }
 
 #[test]
@@ -468,6 +476,20 @@ fn running(pid: u32) -> bool {
             Err(_) => false,
         }
     }
+}
+
+/// Ends process `pid` if it still runs; for cleaning up after a failed test.
+fn kill(pid: u32) {
+    if !running(pid) {
+        return;
+    }
+    let _ = if cfg!(windows) {
+        Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .output()
+    } else {
+        Command::new("kill").args(["-9", &pid.to_string()]).output()
+    };
 }
 
 /// Waits up to ten seconds for process `pid` to stop running.

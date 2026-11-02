@@ -6,6 +6,7 @@ use std::io;
 use std::time::Duration;
 
 use crate::bridge::{CoreLink, LinkOptions};
+use crate::launch::CoreLocation;
 use crate::process::CoreProcess;
 
 /// How long Core has to stop after a quit before the Shell ends it
@@ -24,6 +25,9 @@ pub enum Stopped {
     Exited { pid: u32 },
     /// Core had not stopped within the limit, and was ended.
     Killed { pid: u32 },
+    /// Core stopped serving when asked; its process could not be found to
+    /// watch (FLOW-CLOSE-AND-QUIT, inbox: macOS).
+    Unwatched,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -39,22 +43,33 @@ pub enum QuitError {
     StillRunning { pid: u32 },
 }
 
+/// The endpoint whose Core a quit stops: the user's own. A window attached
+/// to a labelled endpoint (`attach_label`, from `ERSA_ATTACH`) quits without
+/// stopping that Core, which someone else started (FLOW-CLOSE-AND-QUIT,
+/// Development); `None` too when Core could not be located.
+pub fn endpoint_to_stop<'a>(
+    attach_label: Option<&str>,
+    location: Option<&'a CoreLocation>,
+) -> Option<&'a str> {
+    match attach_label {
+        Some(_) => None,
+        None => location.map(|l| l.endpoint.as_str()),
+    }
+}
+
 /// Asks the Core serving `endpoint` to shut down (`core.shutdown`) and
 /// returns once its process has exited (FLOW-CLOSE-AND-QUIT-R03). A Core
 /// still running `limit` after the call is ended with everything it started
 /// (R06). Core stops its sessions itself as part of shutting down (R05).
 pub async fn shut_down(endpoint: &str, limit: Duration) -> Result<Stopped, QuitError> {
     let deadline = tokio::time::Instant::now() + limit;
-    let core = CoreProcess::serving(endpoint)
-        .await
-        .map_err(|source| QuitError::Find {
-            endpoint: endpoint.to_string(),
-            source,
-        })?;
-    let Some(core) = core else {
-        return Ok(Stopped::NotRunning);
+    // Core is asked to stop even when its process cannot be found (on macOS,
+    // say); then only the fallback of ending it is lost.
+    let (core, unfound) = match CoreProcess::serving(endpoint).await {
+        Ok(None) => return Ok(Stopped::NotRunning),
+        Ok(Some(core)) => (Some(core), None),
+        Err(e) => (None, Some(e)),
     };
-    let pid = core.pid();
 
     // The verified client checks that this user serves the endpoint; only
     // then may the process found above be ended. One that answers nothing
@@ -92,6 +107,18 @@ pub async fn shut_down(endpoint: &str, limit: Duration) -> Result<Stopped, QuitE
     }
 
     let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+    let Some(core) = core else {
+        // Without the process, stopping is seen as the endpoint going away.
+        return if unserved_within(endpoint, left).await {
+            Ok(Stopped::Unwatched)
+        } else {
+            Err(QuitError::Find {
+                endpoint: endpoint.to_string(),
+                source: unfound.unwrap_or_else(|| io::Error::other("no process")),
+            })
+        };
+    };
+    let pid = core.pid();
     if core.wait_exit(left).await {
         return Ok(Stopped::Exited { pid });
     }
@@ -110,5 +137,41 @@ pub async fn shut_down(endpoint: &str, limit: Duration) -> Result<Stopped, QuitE
         Ok(Stopped::Killed { pid })
     } else {
         Err(QuitError::StillRunning { pid })
+    }
+}
+
+/// Whether nothing serves `endpoint` any more, within `limit`.
+async fn unserved_within(endpoint: &str, limit: Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + limit;
+    loop {
+        match ersa_core::connect(endpoint).await {
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
+                ) =>
+            {
+                return true;
+            }
+            _ if tokio::time::Instant::now() >= deadline => return false,
+            _ => tokio::time::sleep(Duration::from_millis(100)).await,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // FLOW-CLOSE-AND-QUIT, Development.
+    #[test]
+    fn a_window_attached_by_label_quits_without_stopping_that_core() {
+        let location = CoreLocation::attach_only("replay").expect("a location");
+        assert_eq!(endpoint_to_stop(Some("replay"), Some(&location)), None);
+        assert_eq!(
+            endpoint_to_stop(None, Some(&location)),
+            Some(location.endpoint.as_str())
+        );
+        assert_eq!(endpoint_to_stop(None, None), None);
     }
 }

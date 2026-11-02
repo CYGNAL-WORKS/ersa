@@ -7,6 +7,8 @@ fn main() {
         "core_attach",
         "core_request",
         "shell_show",
+        "shell_hide",
+        "shell_quit_heard",
         "shell_quit",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands))

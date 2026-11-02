@@ -84,6 +84,7 @@ impl Drop for CoreProcess {
 #[cfg(windows)]
 mod imp {
     use super::*;
+    use std::os::windows::fs::OpenOptionsExt;
     use std::os::windows::io::AsRawHandle;
     use std::os::windows::process::CommandExt;
     use windows_sys::Win32::Foundation::{ERROR_PIPE_BUSY, HANDLE, WAIT_OBJECT_0};
@@ -92,6 +93,10 @@ mod imp {
         OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
         TerminateProcess, WaitForSingleObject,
     };
+
+    /// `SECURITY_IDENTIFICATION` (winbase.h): the server may identify the
+    /// client but not impersonate it.
+    const SECURITY_IDENTIFICATION: u32 = 0x0001_0000;
 
     /// How many times to try a pipe whose every instance is busy, a moment apart.
     const BUSY_TRIES: u32 = 100;
@@ -103,6 +108,9 @@ mod imp {
             match std::fs::OpenOptions::new()
                 .read(true)
                 .write(true)
+                // Identification only, as Core's own client asks: whoever
+                // serves the name may learn who connected, never act as them.
+                .security_qos_flags(SECURITY_IDENTIFICATION)
                 .open(endpoint)
             {
                 Ok(pipe) => break pipe,

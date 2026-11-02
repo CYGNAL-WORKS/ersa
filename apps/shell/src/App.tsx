@@ -11,7 +11,7 @@ import { SessionList, newestFirst } from "./components/SessionList";
 import { Transcript } from "./components/Transcript";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
-import { type ShellControl, answerQuit } from "./core/shell";
+import { type QuitAsk, type ShellControl, answerQuit, cancelQuit } from "./core/shell";
 import type { Project, Session } from "./protocol/core-api.gen";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 
@@ -74,7 +74,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const [withdrawn, setWithdrawn] = useState<Record<string, string[]>>({});
   const [adding, setAdding] = useState<Sending>();
   // The quit question, while it is open: how many sessions would stop, and whether Quit was chosen.
-  const [quitAsk, setQuitAsk] = useState<{ busy: number; quitting: boolean }>();
+  const [quitAsk, setQuitAsk] = useState<QuitAsk & { quitting: boolean; failed?: string }>();
 
   useEffect(() => {
     const running = connect(client, setView, undefined, (notification) => {
@@ -120,14 +120,21 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     if (!shell) return;
     return shell.onQuitRequested(() => {
       answerQuit(client, shell, knownSessions.current).then(
-        (busy) => busy > 0 && setQuitAsk((open) => open ?? { busy, quitting: false }),
-        () => {},
+        // Asked again while open: the count is the fresh one, and the window goes back where it first was.
+        (ask) => ask && setQuitAsk((open) => ({ ...ask, wasHidden: open?.wasHidden ?? ask.wasHidden, quitting: false })),
+        (error) => setQuitAsk((open) => open && { ...open, quitting: false, failed: describeError(error) }),
       );
     });
   }, [client, shell]);
   const quit = () => {
-    setQuitAsk((open) => open && { ...open, quitting: true });
-    shell?.quit().catch(() => setQuitAsk((open) => open && { ...open, quitting: false }));
+    setQuitAsk((open) => open && { ...open, quitting: true, failed: undefined });
+    shell
+      ?.quit()
+      .catch((error) => setQuitAsk((open) => open && { ...open, quitting: false, failed: `Ersa did not quit: ${describeError(error)}` }));
+  };
+  const cancel = () => {
+    if (quitAsk && shell) cancelQuit(shell, quitAsk).catch(() => {});
+    setQuitAsk(undefined);
   };
 
   // Each list's error boundary tries again whenever the list changes.
@@ -218,7 +225,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         </div>
         <div className="rail-core">
           {quitAsk && (
-            <QuitQuestion busy={quitAsk.busy} quitting={quitAsk.quitting} onQuit={quit} onCancel={() => setQuitAsk(undefined)} />
+            <QuitQuestion busy={quitAsk.busy} quitting={quitAsk.quitting} failed={quitAsk.failed} onQuit={quit} onCancel={cancel} />
           )}
           <ErrorBoundary what="Core's status" resetKey={coreVersion} action={<Button onClick={retry}>Retry</Button>}>
             <CoreStatus view={view} onRetry={retry} />
