@@ -333,7 +333,7 @@ async fn a_live_rename_the_cli_never_answers_gives_up() {
         .then_stdout([init_answer])
         .hold_open();
     let session = adapter(home.path())
-        .with_handshake_timeout(Duration::from_millis(300))
+        .with_answer_timeout(Duration::from_millis(300))
         .start(
             Arc::new(transport),
             config(),
