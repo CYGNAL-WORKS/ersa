@@ -40,16 +40,16 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 
 ### Projects
 
-- `project.list`, `project.add { host_id, path, trusted }`, `project.set_trust { id, trusted }`, `project.remove { id }`: `{ id, host_id, path, name, vcs (git | perforce | none), trusted }`. `trusted` is the user's answer when adding the project, and only a trusted project's own configuration loads in its sessions (ADR 0018). `project.remove` is refused with `invalid_state` while the project has workspaces; it never cascades.
+- `project.list`, `project.add { host_id, path, trusted }`, `project.set_trust { id, trusted }`, `project.remove { id }`: `{ id, host_id, path, name, vcs (git | perforce | none), trusted }`. `trusted` is the user's answer when adding the project, and only a trusted project's own configuration loads in its sessions (ADR 0018). `project.remove` is refused with `invalid_state` while the project has an isolated workspace or a session in its root workspace; it never cascades.
 
 ### Workspaces
 
-- `workspace.list { project_id }`, `workspace.create { project_id, name (optional), base (optional) }`, `workspace.remove { id, force (optional) }` (refused with `invalid_state` while the workspace has sessions; it never cascades): `{ id, project_id, path, vcs_ref, state (ready | creating | removing | error) }`. `workspace.remove` returns the workspace as it was claimed for removal, with `state: removing`.
+- `workspace.list { project_id }`, `workspace.create { project_id, name (optional), base (optional) }`, `workspace.remove { id, force (optional) }` (refused with `invalid_state` while the workspace has sessions; it never cascades): `{ id, project_id, kind (root | isolated), path, vcs_ref, state (ready | creating | removing | error) }`. Every project has one root workspace, its own folder, which exists from `project.add` and is listed first. `workspace.create` makes an isolated workspace (a git worktree for a git project) and is refused with `invalid_state` for a project whose version control has no workspace adapter. `workspace.remove` refuses the root workspace with `invalid_state`, and otherwise returns the workspace as it was claimed for removal, with `state: removing`.
 
 ### Sessions
 
-- `session.list`: `{ id, workspace_id, host_id, backend, mode, title, state, created_at, last_event_seq (absent before the first event), tile: { state, context_tokens, context_window, cost_usd_total, pending: [{ kind (permission | question), request_id }] } }`. The `tile` object is what the rail renders; Core keeps it current from events. A session's `title` is its backend's: the title the backend's own tools list for it, which Ersa never stores. Its `created_at` is the time of the first entry in its session record, else the time of the app log's first fact for it. Its `mode` is Ersa's.
-- `session.create { workspace_id, backend, mode (optional) }`: creates and starts; it takes no title, since the title is the backend's. `mode` is stored and shown; it takes effect from milestone M3, when modes exist.
+- `session.list`: `{ id, workspace_id, host_id, backend, model, effort, permission_mode, mode, title, state, created_at, last_event_seq (absent before the first event), tile: { state, context_tokens, context_window, cost_usd_total, pending: [{ kind (permission | question), request_id }] } }`. The `tile` object is what the rail renders; Core keeps it current from events. A session's `title` is its backend's: the title the backend's own tools list for it, which Ersa never stores. Its `created_at` is the time of the first entry in its session record, else the time of the app log's first fact for it. Its `mode` is Ersa's.
+- `session.create { workspace_id, backend, model (optional), effort (optional), permission_mode (optional), mode (optional) }`: creates and starts; it takes no title, since the title is the backend's. `model`, `effort` and `permission_mode` are ids from `backend.list`, that backend's defaults when absent, and the session reports them in `session.list`. `mode` is stored and shown; it takes effect from milestone M3, when modes exist.
 - `session.start { id }`, `session.stop { id }`, `session.resume { id }`, `session.remove { id }`. Restarting a stopped session is `session.resume` (milestone M1); until then `session.start` on a stopped session answers `invalid_state` naming M1. `session.remove` is refused while the session is live.
 - `session.send { id, text }`: sends a user message; returns `{ turn }`.
 - `session.interrupt { id }`.
@@ -63,7 +63,7 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 
 ### Backends and modes
 
-- `backend.list { host_id }`: installed backends with versions and min/max tested versions.
+- `backend.list { host_id }`: `{ name, version (optional, present when available), status (available | missing | error), tested { min, max }, models: [{ id, label, default }], efforts: [{ id, label, default }], permission_modes: [{ id, label, default }] }`. The choices are the adapter's knowledge of its tested versions, not detected on the host; `label` is what the Interface shows and `default` marks the one a new session starts with.
 - `mode.list`: `{ name, description }`; modes as presets are milestone M3; the method is reserved.
 
 ### Settings
@@ -111,6 +111,7 @@ The replay server answers read-only requests exactly as Core does. It never chan
 - **PROTO-CORE-API-R11**: A project shall be trusted only when `project.add` or `project.set_trust` said so, and its `trusted` value shall persist until `project.set_trust` changes it.
 - **PROTO-CORE-API-R12**: `session.set_title` shall rename the session in its backend, so that the backend's own session listing and `session.list` both show the new title.
 - **PROTO-CORE-API-R13**: `session.subscribe` shall return the `view` it serves, the same `view` for as long as Core keeps that projection and a different one whenever Core rebuilds it.
+- **PROTO-CORE-API-R15**: `session.create` shall start the backend with the given `model`, `effort` and `permission_mode`, or the backend's defaults where absent, and `session.list` shall report the values the session started with.
 - **PROTO-CORE-API-R14**: `session.subscribe` with `from_seq` shall deliver every event from that sequence number onward, or from `first_seq` when the view no longer holds events before it, in order, with no gaps or duplicates, then continue live.
 
 ## Out of scope
@@ -125,6 +126,7 @@ The replay server answers read-only requests exactly as Core does. It never chan
 
 ## Changes
 
+- 2026-11-02: for FLOW-NEW-SESSION: every project has a root workspace (`kind`); `workspace.create` refused without a workspace adapter; `session.create` takes `model`, `effort` and `permission_mode`, reported by `session.list`; `backend.list` lists each backend's models, efforts and permission modes with labels and defaults. PROTO-CORE-API-R15 added.
 - 2026-11-01: from #35 inbox: a view holds a bounded amount of events; `session.subscribe` returns `first_seq` once it has let go of its earliest. PROTO-CORE-API-R02 retired, R14 added.
 - 2026-11-01: from #35 inbox: a session's title is its backend's: `session.set_title` renames through the backend (PROTO-CORE-API-R12 added) and `session.create` takes no title; `created_at` is the record's first entry, else the app log's first fact; `session.subscribe` returns `view`, and a client holding events from another view starts over from 0 (PROTO-CORE-API-R13 added); `session.reproject` removed, which bumps `api_version`; the bump ships with the method's removal in code.
 - 2026-11-01: project trust (ADR 0018): `trusted` on projects, `project.add` takes it, `project.set_trust` added; PROTO-CORE-API-R11 added.
