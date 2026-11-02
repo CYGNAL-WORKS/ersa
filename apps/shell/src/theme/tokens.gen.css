@@ -76,7 +76,6 @@
   --material-composer: linear-gradient(to bottom, var(--color-surface), var(--color-surface-raised));
   --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
   --glow-focal: 0 0 0 1px var(--color-accent), 0 0 0 4px color-mix(in oklab, var(--color-accent) 16%, transparent), 0 0 12px 2px color-mix(in oklab, var(--color-accent) 20%, transparent);
-  --glow-focal-peak: 0 0 0 1px var(--color-accent), 0 0 0 6px color-mix(in oklab, var(--color-accent) 22%, transparent), 0 0 18px 4px color-mix(in oklab, var(--color-accent) 26%, transparent);
   --glow-attention: 0 0 5px color-mix(in oklab, var(--color-accent) 45%, transparent);
 }
 
@@ -104,7 +103,6 @@
     --material-composer: linear-gradient(to bottom, var(--color-surface), var(--color-surface-raised));
     --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
     --glow-focal: 0 0 0 1px var(--color-accent), 0 0 16px -4px color-mix(in oklab, var(--color-accent) 32%, transparent);
-    --glow-focal-peak: 0 0 0 1px var(--color-accent), 0 0 24px -2px color-mix(in oklab, var(--color-accent) 42%, transparent);
     --glow-attention: 0 0 5px color-mix(in oklab, var(--color-accent) 45%, transparent);
   }
 }
@@ -132,6 +130,5 @@
   --material-composer: linear-gradient(to bottom, var(--color-surface), var(--color-surface-raised));
   --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
   --glow-focal: 0 0 0 1px var(--color-accent), 0 0 16px -4px color-mix(in oklab, var(--color-accent) 32%, transparent);
-  --glow-focal-peak: 0 0 0 1px var(--color-accent), 0 0 24px -2px color-mix(in oklab, var(--color-accent) 42%, transparent);
   --glow-attention: 0 0 5px color-mix(in oklab, var(--color-accent) 45%, transparent);
 }
