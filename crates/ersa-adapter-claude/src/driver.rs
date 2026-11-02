@@ -33,7 +33,9 @@ use tokio::sync::{oneshot, watch};
 use crate::projector::ClaudeProjector;
 use crate::record;
 use crate::suggestions;
-use crate::wire::{HostControlResponse, HostMessage, HostRequest, HostResponse, InitializeRequest};
+use crate::wire::{
+    HostControlResponse, HostMessage, HostRequest, HostResponse, InitializeRequest, RenameSource,
+};
 
 /// After the process has exited, how long stdout may stay quiet before the
 /// read loop stops waiting for the rest of it. Lines the CLI wrote before
@@ -412,6 +414,25 @@ impl Adapter for ClaudeAdapter {
             title: summary.title,
             created_at: summary.created_at,
         }))
+    }
+
+    /// Appends one `custom-title` entry to the session's record on this
+    /// machine (PROTO-CLAUDE-CODE-STREAM-R22). The record cache needs no
+    /// telling: the file's new size is a new key.
+    async fn rename_record(
+        &self,
+        _transport: Arc<dyn Transport>,
+        cwd: &str,
+        backend_session_id: &str,
+        title: &str,
+    ) -> Result<(), AdapterError> {
+        let home = self.claude_home()?;
+        let (cwd, id, title) = (
+            cwd.to_string(),
+            backend_session_id.to_string(),
+            title.to_string(),
+        );
+        blocking(move || record::append_title(&home, &cwd, &id, &title)).await
     }
 }
 
@@ -833,6 +854,42 @@ impl AdapterSession for ClaudeSession {
         self.shared
             .write(&HostMessage::control_request(request_id, request))
             .await
+    }
+
+    /// Sends `rename_session` and waits for the CLI's answer. The CLI then
+    /// writes the `custom-title` entry itself, so Ersa writes nothing to the
+    /// record (PROTO-CLAUDE-CODE-STREAM-R22). `source: host` makes it count
+    /// as the user's own rename, and `session_id` makes a CLI that has moved
+    /// to another session refuse rather than name that one.
+    async fn rename(&self, backend_session_id: &str, title: &str) -> Result<(), AdapterError> {
+        let request_id = self.shared.request_id("rename");
+        // Registered before the write, so the read loop finds the waiter
+        // however soon the answer comes. An exit clears every waiter, which
+        // ends this wait too.
+        let (answer_tx, answer_rx) = oneshot::channel();
+        lock(&self.shared.awaiting).insert(request_id.clone(), answer_tx);
+        let request = HostRequest::RenameSession {
+            title: title.to_string(),
+            source: Some(RenameSource::Host),
+            session_id: Some(backend_session_id.to_string()),
+        };
+        let written = self
+            .shared
+            .write(&HostMessage::control_request(&request_id, request))
+            .await;
+        if let Err(e) = written {
+            lock(&self.shared.awaiting).remove(&request_id);
+            return Err(e);
+        }
+        match answer_rx.await {
+            Ok(answer) if answer["subtype"] == "success" => Ok(()),
+            Ok(answer) => Err(AdapterError::Protocol(format!(
+                "the CLI refused the rename: {}",
+                answer["error"].as_str().unwrap_or("no reason given")
+            ))),
+            // The read loop dropped the waiter: the CLI exited first.
+            Err(_) => Err(AdapterError::NotRunning),
+        }
     }
 
     async fn stop(&self) -> Result<(), AdapterError> {
