@@ -13,5 +13,10 @@ describe("titleToSave", () => {
 
   it("sends nothing when the title is unchanged", () => {
     expect(titleToSave("Old ", "Old")).toBeUndefined();
+    expect(titleToSave("Old  title", "Old title")).toBeUndefined();
+  });
+
+  it("spaces the title as Core takes it", () => {
+    expect(titleToSave("Fix  the\tbug\non Windows", "Old")).toBe("Fix the bug on Windows");
   });
 });

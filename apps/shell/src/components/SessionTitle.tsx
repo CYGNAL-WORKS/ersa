@@ -5,6 +5,8 @@ import "./SessionTitle.css";
 
 interface SessionTitleProps {
   title: string;
+  /** The title is a placeholder: the backend has given none yet, so editing starts from nothing. */
+  untitled?: boolean;
   /** Renames the session in its backend; resolves true once Core has. Absent: the session cannot be renamed here. */
   onRename?: (title: string) => Promise<boolean>;
   renaming?: Sending;
@@ -20,16 +22,17 @@ interface SessionTitleProps {
 }
 
 /**
- * The title to send for `draft`, or undefined when there is nothing to send: a blank title, which no backend
- * keeps, or the title the session already has.
+ * The title to send for `draft`, spaced as Core takes it (each run of spaces, tabs or line breaks as one), or
+ * undefined when there is nothing to send: a blank title, which no backend keeps, or the title the session
+ * already has.
  */
 export function titleToSave(draft: string, current: string): string | undefined {
-  const title = draft.trim();
+  const title = draft.split(/\s+/).filter(Boolean).join(" ");
   return title === "" || title === current ? undefined : title;
 }
 
 /** The session's title in its header, and renaming it there: the backend keeps the title, so its own tools show it too. */
-export function SessionTitle({ title, onRename, renaming, onReset, disabled, children, initialDraft, force }: SessionTitleProps) {
+export function SessionTitle({ title, untitled, onRename, renaming, onReset, disabled, children, initialDraft, force }: SessionTitleProps) {
   // The text being edited; undefined while the title is only shown.
   const [draft, setDraft] = useState<string | undefined>(initialDraft);
   const busy = renaming?.state === "sending";
@@ -37,6 +40,9 @@ export function SessionTitle({ title, onRename, renaming, onReset, disabled, chi
   const field = useRef<HTMLInputElement>(null);
   // Focus goes back to Rename once editing ends, where the user started it.
   const returnFocus = useRef(false);
+  // The old title is selected when the field first takes focus, to type over; not again, or a refusal's return
+  // to the field would select the draft being corrected.
+  const selected = useRef(false);
 
   useEffect(() => {
     if (draft === undefined && returnFocus.current) {
@@ -79,10 +85,12 @@ export function SessionTitle({ title, onRename, renaming, onReset, disabled, chi
             ref={rename}
             className="session-heading-rename"
             force={force}
-            disabled={disabled}
+            // While a rename is still on its way, a second waits for its answer.
+            disabled={disabled || busy}
             onClick={() => {
               onReset?.();
-              setDraft(title);
+              selected.current = false;
+              setDraft(untitled ? "" : title);
             }}
           >
             Rename
@@ -106,15 +114,16 @@ export function SessionTitle({ title, onRename, renaming, onReset, disabled, chi
           ref={field}
           className="session-heading-input"
           aria-label="Session title"
-          // As long as Core takes: as much as the backend's own session list shows.
-          maxLength={200}
           value={draft}
           readOnly={busy}
           data-force={force}
           // Opened by the user: they type the new title at once, over the old one.
           autoFocus={initialDraft === undefined}
           onFocus={(event) => {
-            if (initialDraft === undefined) event.target.select();
+            if (initialDraft === undefined && !selected.current) {
+              selected.current = true;
+              event.target.select();
+            }
           }}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
