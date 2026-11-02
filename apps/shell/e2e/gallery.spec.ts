@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 // Every component section in the gallery, photographed in both themes.
 const components = [
   "CoreStatus",
+  "QuitQuestion",
   "ProjectList",
   "AddProject",
   "SessionList",

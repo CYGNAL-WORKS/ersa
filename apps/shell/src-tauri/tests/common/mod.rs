@@ -6,6 +6,9 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
+
+use ersa_shell::launch::CoreLocation;
 
 /// The `ersa-core` executable: `ERSA_CORE_BIN`, or the root workspace's
 /// debug build (`cargo build -p ersa-cli` at the repository root).
@@ -40,3 +43,67 @@ pub fn unique_label(prefix: &str) -> String {
         NEXT.fetch_add(1, Ordering::Relaxed)
     )
 }
+
+/// A Core location private to a test: the user's endpoint labelled with the
+/// process id and a counter (`serve --endpoint <label>`), and a data
+/// directory and log in `dir`.
+pub fn private_location(dir: &Path) -> CoreLocation {
+    end_with_this_run();
+    let label = unique_label("shell-test");
+    let endpoint = ersa_core::platform::labelled_endpoint(&label).expect("an endpoint");
+    CoreLocation {
+        program: core_program(),
+        endpoint,
+        serve_args: vec![
+            "--endpoint".into(),
+            label.into(),
+            "--data-dir".into(),
+            dir.join("data").into_os_string(),
+        ],
+        env: Vec::new(),
+        log_file: Some(dir.join("core.log")),
+        start_timeout: Duration::from_secs(60),
+        launch: true,
+    }
+}
+
+/// Puts this test process in a job object that ends every process in it
+/// when the process ends, however it ends: a panic, a timeout, Ctrl+C. A
+/// Core the tests launch asks to leave the Shell's job; this job does not
+/// allow that, so Core starts inside it (the launcher's fallback for such a
+/// job) and cannot outlive the run. Unix has no such job; there, each test
+/// stops its own Core when it ends.
+#[cfg(windows)]
+#[allow(unsafe_code)]
+pub fn end_with_this_run() {
+    use std::sync::Once;
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        SetInformationJobObject,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        // SAFETY: plain calls with valid arguments; the job handle is left
+        // open on purpose, since closing it is what ends the job's processes.
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            assert!(!job.is_null(), "create a job object");
+            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let set = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&raw const limits).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            );
+            assert!(set != 0, "set the job's limits");
+            let joined = AssignProcessToJobObject(job, GetCurrentProcess());
+            assert!(joined != 0, "join the job");
+        }
+    });
+}
+
+#[cfg(unix)]
+pub fn end_with_this_run() {}

@@ -16,20 +16,40 @@
 //!     later attach's channel replaces it.
 //!   - `core_request { method, params }` sends one Core API request and
 //!     returns its result, or a [`bridge::BridgeError`].
+//! - Closing and quitting (FLOW-CLOSE-AND-QUIT): closing the window hides
+//!   it to the tray icon. Quit, from the tray icon's menu, emits
+//!   `quit-requested` to the window, whose Interface calls
+//!   `shell_quit_heard` at once, asks the user to confirm when sessions are
+//!   busy (or when it cannot count them), and then calls `shell_quit`. A
+//!   label-attached window, or one that does not say it heard within
+//!   [`QUIT_HEARD_LIMIT`], quits at once. `shell_show` shows the window for
+//!   the confirmation and returns whether it was hidden; `shell_hide` puts it
+//!   back when the user cancels.
+//!   - [`quit`]: shutting Core down, and ending it when it will not stop.
+//!   - [`instance`]: one Shell per user; a second launch shows the first's
+//!     window.
 
 pub mod bridge;
+pub mod instance;
 pub mod launch;
+pub mod process;
+pub mod quit;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use tauri::ipc::Channel;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::Url;
-use tauri::{State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tokio::sync::Mutex;
 
 use bridge::{BridgeError, CoreLink, LinkEvent, LinkOptions};
 use launch::CoreLocation;
+use process::CoreProcess;
 
 /// Where the Interface's events go: the channel of the latest `core_attach`.
 type Sink = Arc<std::sync::Mutex<Option<Channel<Value>>>>;
@@ -45,7 +65,26 @@ struct Shell {
     /// across the launch, so two attaches never launch two Cores.
     link: Mutex<Option<Arc<CoreLink>>>,
     sink: Sink,
+    /// Set once Quit has begun, so a second Quit does not start another,
+    /// and the Interface does not attach (and launch Core) again meanwhile.
+    quitting: AtomicBool,
+    /// How many Quits the tray has passed to the Interface, and the count
+    /// when the Interface last said it heard one.
+    quit_asked: AtomicU64,
+    quit_heard: AtomicU64,
+    /// The Core this Shell launched, if it did, for Quit to end when that
+    /// Core wedges where its endpoint cannot say which process it is.
+    launched: std::sync::Mutex<Option<CoreProcess>>,
 }
+
+/// How long the Interface has to say it heard a Quit before the Shell
+/// quits without it: a window whose script is stuck must not make Quit
+/// do nothing.
+pub const QUIT_HEARD_LIMIT: Duration = Duration::from_secs(5);
+
+/// How long Core's client (`ersa_core::connect`) waits for a busy pipe
+/// before it gives up; Core keeps the value private.
+const CORE_CONNECT_DEADLINE: Duration = Duration::from_secs(5);
 
 #[tauri::command]
 async fn core_attach(
@@ -55,7 +94,21 @@ async fn core_attach(
     // Replace the sink before anything else, so nothing Core sends from here
     // on is lost or delivered to an Interface that no longer listens.
     *shell.sink.lock().expect("sink lock") = Some(events);
+    let quitting = || {
+        shell
+            .quitting
+            .load(Ordering::SeqCst)
+            .then(|| BridgeError::unavailable("Ersa is quitting"))
+    };
+    // After Quit, the Interface sees its connection drop and attaches again;
+    // that must never launch a new Core behind the one shutting down.
+    if let Some(refused) = quitting() {
+        return Err(refused);
+    }
     let mut link = shell.link.lock().await;
+    if let Some(refused) = quitting() {
+        return Err(refused);
+    }
     let reply = |how: &str, hello: &Value| {
         let mut reply = json!({ "how": how, "hello": hello });
         if let Some(label) = &shell.label {
@@ -67,9 +120,12 @@ async fn core_attach(
         return Ok(reply("attached", open.hello()));
     }
     let location = shell.location.as_ref().map_err(BridgeError::unavailable)?;
-    let (stream, how) = launch::attach_or_launch(location)
+    let (stream, how, pid) = launch::attach_or_launch_tracked(location)
         .await
         .map_err(|e| BridgeError::unavailable(e.to_string()))?;
+    if let Some(core) = pid.and_then(|pid| CoreProcess::open(pid).ok()) {
+        *shell.launched.lock().expect("launched lock") = Some(core);
+    }
     let sink = Arc::clone(&shell.sink);
     let options = LinkOptions {
         probe_endpoint: Some(location.endpoint.clone()),
@@ -103,6 +159,147 @@ async fn core_request(
     let link = shell.link.lock().await.clone();
     let link = link.ok_or_else(|| BridgeError::unavailable("not attached to Core"))?;
     link.request(&method, params).await
+}
+
+/// Shows the window, for the Interface's quit confirmation; whether it was
+/// hidden before.
+#[tauri::command]
+fn shell_show(app: AppHandle) -> bool {
+    let hidden = app
+        .get_webview_window(WINDOW)
+        .is_some_and(|window| !window.is_visible().unwrap_or(true));
+    show_window(&app);
+    hidden
+}
+
+/// Hides the window again, when the user cancels a quit the window was
+/// shown for (FLOW-CLOSE-AND-QUIT-R04: everything stays as it was).
+#[tauri::command]
+fn shell_hide(app: AppHandle) {
+    if let Some(window) = app.get_webview_window(WINDOW) {
+        let _ = window.hide();
+    }
+}
+
+/// The Interface has received `quit-requested` and will answer it.
+#[tauri::command]
+fn shell_quit_heard(shell: State<'_, Shell>) {
+    let asked = shell.quit_asked.load(Ordering::SeqCst);
+    shell.quit_heard.fetch_max(asked, Ordering::SeqCst);
+}
+
+/// Quits: called by the Interface once the user has confirmed, or when
+/// there was nothing to confirm.
+#[tauri::command]
+async fn shell_quit(app: AppHandle) -> Result<(), ()> {
+    quit_now(&app).await;
+    Ok(())
+}
+
+/// The window's name, as built in [`run`].
+const WINDOW: &str = "main";
+
+fn show_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(WINDOW) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// Quit from the tray icon's menu. The window decides whether to confirm
+/// first (FLOW-CLOSE-AND-QUIT-R04), and asks also when it cannot count the
+/// sessions. A window attached to a labelled endpoint stops no session, so
+/// it quits at once.
+async fn quit_requested(app: AppHandle) {
+    let shell = app.state::<Shell>();
+    if shell.label.is_some() {
+        return quit_now(&app).await;
+    }
+    let mine = shell.quit_asked.fetch_add(1, Ordering::SeqCst) + 1;
+    if app.emit_to(WINDOW, "quit-requested", ()).is_err() {
+        return quit_now(&app).await;
+    }
+    tokio::time::sleep(QUIT_HEARD_LIMIT).await;
+    if shell.quit_heard.load(Ordering::SeqCst) < mine {
+        eprintln!("ersa: quit: the window did not answer; quitting without it");
+        quit_now(&app).await;
+    }
+}
+
+/// Shuts Core down and exits once it has stopped (FLOW-CLOSE-AND-QUIT-R03,
+/// R06). A window attached to a labelled endpoint leaves that Core running:
+/// someone else started it (FLOW-CLOSE-AND-QUIT, Development).
+async fn quit_now(app: &AppHandle) {
+    let shell = app.state::<Shell>();
+    if shell.quitting.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    // Let go of the Interface's connection first: Core closes it anyway. An
+    // attach in progress, perhaps launching Core, is let finish, so the Core
+    // it launches is the one shut down below; later attaches are refused.
+    // As long as an attach can take: the launch, then the handshake, with
+    // each of its two connects waiting out a busy pipe. The window stays
+    // until then, so a Quit held up by a slow attach is not invisible.
+    let attach_limit = launch::START_TIMEOUT
+        + bridge::REQUEST_TIMEOUT
+        + bridge::PROBE_TIMEOUT
+        + CORE_CONNECT_DEADLINE * 2;
+    if let Ok(mut link) = tokio::time::timeout(attach_limit, shell.link.lock()).await {
+        link.take();
+    }
+    if let Some(window) = app.get_webview_window(WINDOW) {
+        let _ = window.hide();
+    }
+    if let Some(endpoint) =
+        quit::endpoint_to_stop(shell.label.as_deref(), shell.location.as_ref().ok())
+    {
+        // Bounded as a whole, so nothing in it can keep the app from exiting.
+        let limit = quit::QUIT_LIMIT + quit::KILL_WAIT * 2;
+        let launched = shell.launched.lock().expect("launched lock").take();
+        let stopping = quit::shut_down(endpoint, quit::QUIT_LIMIT, launched);
+        match tokio::time::timeout(limit, stopping).await {
+            Ok(Ok(stopped)) => eprintln!("ersa: quit: {stopped:?}"),
+            Ok(Err(e)) => eprintln!("ersa: quit: {e}"),
+            Err(_) => eprintln!("ersa: quit: Core did not stop within {limit:?}"),
+        }
+    }
+    app.exit(0);
+}
+
+/// The tray icon: a click shows the window, and its menu shows the window
+/// or quits.
+fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "Show Ersa", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Ersa", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let mut tray = TrayIconBuilder::with_id("ersa")
+        .tooltip("Ersa")
+        .menu(&menu)
+        // The menu is for the right button; the left one shows the window.
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "show" => show_window(app),
+            "quit" => {
+                tauri::async_runtime::spawn(quit_requested(app.clone()));
+            }
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_window(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
 }
 
 /// Whether the window may show `url`: only the app's own pages. The bundled
@@ -159,9 +356,22 @@ fn attach_label() -> Option<String> {
         .filter(|label| !label.is_empty())
 }
 
-/// Opens the window. Called by `main`.
+/// Opens the window, or shows the window of the Shell already running.
+/// Called by `main`.
 pub fn run() {
     let label = attach_label();
+    // One Shell per user (FLOW-CLOSE-AND-QUIT-R02). An endpoint that cannot
+    // be claimed (another user's process holds its name) costs only that.
+    let claimed = ersa_core::platform::labelled_endpoint(&instance::label_for(label.as_deref()))
+        .and_then(|endpoint| tauri::async_runtime::block_on(instance::claim(&endpoint)));
+    let listener = match claimed {
+        Ok(instance::Instance::Running) => return,
+        Ok(instance::Instance::First(listener)) => Some(listener),
+        Err(e) => {
+            eprintln!("ersa: cannot make sure this is the only window: {e}");
+            None
+        }
+    };
     let location = match &label {
         Some(label) => CoreLocation::attach_only(label),
         None => CoreLocation::default_for_user(),
@@ -171,20 +381,46 @@ pub fn run() {
         label,
         link: Mutex::new(None),
         sink: Arc::new(std::sync::Mutex::new(None)),
+        quitting: AtomicBool::new(false),
+        quit_asked: AtomicU64::new(0),
+        quit_heard: AtomicU64::new(0),
+        launched: std::sync::Mutex::new(None),
     };
     tauri::Builder::default()
         .manage(shell)
-        .invoke_handler(tauri::generate_handler![core_attach, core_request])
+        .invoke_handler(tauri::generate_handler![
+            core_attach,
+            core_request,
+            shell_show,
+            shell_hide,
+            shell_quit_heard,
+            shell_quit
+        ])
         // The window is built here rather than in tauri.conf.json so it can
         // carry the navigation guard.
-        .setup(|app| {
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .setup(move |app| {
+            WebviewWindowBuilder::new(app, WINDOW, WebviewUrl::App("index.html".into()))
                 .title("Ersa")
                 .inner_size(1200.0, 800.0)
                 .min_inner_size(640.0, 400.0)
                 .on_navigation(guard_navigation)
                 .build()?;
+            build_tray(app.handle())?;
+            if let Some(listener) = listener {
+                let app = app.handle().clone();
+                tauri::async_runtime::spawn(instance::serve_requests(listener, move || {
+                    show_window(&app)
+                }));
+            }
             Ok(())
+        })
+        // Closing the window hides it; Core and the sessions keep running
+        // (FLOW-CLOSE-AND-QUIT-R01). Only Quit ends the app.
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
         })
         .run(tauri::generate_context!())
         .expect("the Tauri application failed to start");

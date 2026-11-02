@@ -3,7 +3,14 @@
 // declares the Shell's own commands, so capabilities/default.json must grant
 // each one by name to the windows that may call it.
 fn main() {
-    let commands = tauri_build::AppManifest::new().commands(&["core_attach", "core_request"]);
+    let commands = tauri_build::AppManifest::new().commands(&[
+        "core_attach",
+        "core_request",
+        "shell_show",
+        "shell_hide",
+        "shell_quit_heard",
+        "shell_quit",
+    ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands))
         .expect("the Tauri build step failed");
 }
