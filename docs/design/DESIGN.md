@@ -124,8 +124,18 @@ motion:
   quick: 160
   settle: 260
   slow: 400
+  # A chunk of streaming prose fading in to full ink.
+  stream: 1000
+  # One turn of the ring for work of unknown length.
+  loop-ring: 1400
+  # The single swell and fade of the glyph of a session that needs the user.
+  breathe-once: 2400
+  # One breath of a working session's glyph in the rail.
+  breath: 3000
   ease-out: "cubic-bezier(0.2, 0.8, 0.2, 1)"
   ease-in-out: "cubic-bezier(0.4, 0, 0.2, 1)"
+  # Constant speed, for a loop that turns.
+  linear: "linear"
 ---
 
 # Ersa design
@@ -142,7 +152,7 @@ Principles that resolve trade-offs:
 - **Familiar conversation, readable output.** The user's messages sit in chat bubbles. The agent's output has no bubble and reads as a document in `prose` at the `measure` column. No avatars.
 - **Status lives in tiles.** Cost, context, permissions and progress are compact tiles with the same anatomy everywhere, so the eye learns one shape.
 - **Calm and luminous.** One thing draws the eye at a time. Light and depth carry the design: soft tonal gradients give surfaces and primary controls a sense of material, a faint wash keeps the canvas from being flat, and a gentle accent glow marks the one thing that is focused or waiting for you. A screen has one focal glow; everything else rests.
-- **Motion is part of the feel.** Transitions show where something came from or went to, and motion may also be there for its own sake: a message settling in, a tile easing into place, a mark that breathes once. Keep it calm, never delay input, use the motion tokens, and honour reduced motion.
+- **Nothing pops in.** Things fade, slide, or glow into place, and leave the same way. Motion shows where something came from or went to, stays calm, never delays input, and uses the motion tokens. With reduced motion on, everything appears at once and nothing loops: the ring and a working glyph hold still at full tone. Elevation & Depth gives each moving thing its motion.
 - **Both themes are first-class.** Light and dark are designed together. A component is not done until it is right in both.
 - **Light on dew.** Ersa is the Greek goddess of dew, a daughter of Selene, the moon. Dew forms under moonlight and catches the first light of morning: a cool, clear, quiet base with small points of brightness. That image is where the palette, the wash and the glow take their character from, and it is what keeps Ersa from looking like every other developer tool.
 - **Attention is an edge or a glyph, never a fill.** A session that needs the user is told by its status glyph; a failed one by the danger glyph. Filled attention rows are forbidden: with ten sessions they become a wall of colour within a week. The open session is visibly distinct from the others, quietly.
@@ -183,12 +193,22 @@ Depth comes from tone and light, not from drop shadows:
 
 - **Material.** Surfaces, cards and primary controls carry a soft top-lit tonal gradient between neighbouring surface steps. It should be felt more than seen.
 - **Wash.** The canvas carries a very faint wash of `wash-primary` from the top right and `wash-secondary` from the bottom left, so it is never purely flat. It is barely there; if it is noticed first, it is too strong.
-- **Focal glow.** The one focused or waiting element (an open permission request, the focused composer) glows in the accent and may breathe once as it arrives. In dark it is a soft blur; in light a wide blur reads as a shadow, so it is a tight tinted ring instead.
+- **Focal glow.** The one focused or waiting element (an open permission request, the focused composer) glows in the accent and fades in as it arrives, over `motion-settle` with `motion-ease-out`. In dark it is a soft blur; in light a wide blur reads as a shadow, so it is a tight tinted ring instead.
 - **Not a halo.** No luminous backdrop or halo around the window: tried, and too strong.
 
 Each of these is a token, built from color roles so it follows the theme and the palette. `material-wash` is the canvas. `material-tile` lights tiles and cards from the top, `material-rail` settles the rail toward the canvas at its foot, `material-primary` is the primary button, and `material-composer` is the composer. The open session's tile is `material-open-session`, a quiet neutral highlight with no accent outline. `glow-focal` is the focal glow at rest and `glow-focal-peak` its brightest point when it breathes; `glow-attention` is the faint glow on the needs-you glyph. Light and dark set their own glows; the materials are the same in both. While a permission request is open it holds the focal glow, and the focused composer shows its focus by its edge alone, so the screen keeps one focal glow.
 
 Shadows are kept for transient layers (menus, popovers, drag previews), soft and short.
+
+**Motion.** Each moving thing has one motion, reviewed live in the design system's Motion card:
+
+- **A sent message** fades in at the foot of the transcript: alpha only, over `motion-slow` with `motion-ease-out`, and no movement. A message flying in was tried and rejected.
+- **Streaming prose** fades in chunk by chunk, as Claude Desktop's does: each piece of the agent's text fades from transparent to full ink over `motion-stream` with `motion-ease-out` as it arrives, with no movement. Text read from the session record when a session opens appears at once; only text arriving live fades.
+- **Work in progress** loops only while it runs. Work of unknown length, such as a running tool call, shows a ring that turns once per `motion-loop-ring` at constant speed (`motion-linear`), a duration within Material's, MUI's, and Fluent's. Work whose progress can be measured shows a bar that fills to its value, easing each change over `motion-settle` with `motion-ease-out`; it doesn't loop. A text shimmer was tried and is not used: it is a skeleton-loading pattern, not a sign of work under way.
+- **A working session's glyph** in the rail breathes: its tone swells and softens on a `motion-breath` loop with `motion-ease-in-out` for as long as the session works. The breath is the glyph's own tone, not a glow, so the screen's one focal glow stays where it is. It never blinks or ripples outward; shimmering titles and pulse rings were rejected.
+- **Status never moves a tile.** Nothing reorders the rail on its own: a session that needs the user changes its glyph and breathes once where it is, one swell and fade of its tone over `motion-breathe-once` with `motion-ease-in-out`. If the rail can ever be reordered or re-sorted by the user (an open question in `LAY-SHELL`), each tile slides to its new position over `motion-settle` with `motion-ease-in-out`, so the eye can follow it. A new session's tile slides in at the top over `motion-slow` with `motion-ease-out`, while the others make room over the same duration and easing.
+- **The shelf** slides out from the tile it belongs to over `motion-settle` with `motion-ease-out`, and slides back the same way when answered.
+- **The working mark**, the animated mark at the foot of a turn beside the elapsed time and tokens, is open: it is to be designed as a family of marks.
 
 ## Shapes
 
@@ -206,6 +226,9 @@ Component style tokens are added here as component briefs reach `ready`. Each co
 
 - Do give every state (hover, focus, pressed, disabled, loading, empty, error) a deliberate appearance in both themes.
 - Do use the motion tokens for every transition, and keep motion calm.
+- Do bring things in with a fade, a slide, or a glow, and take them out the same way; nothing pops in.
+- Do loop only while work runs, and stop every loop when reduced motion is on.
+- Do keep a tile in place when its status changes: the glyph changes and breathes, the tile stays. Move tiles only for a new session or a reorder the user asked for.
 - Do keep the rail and tiles visually quieter than the transcript, so attention lands on the conversation.
 - Do add a token and a reason for every new colour, gradient or glow.
 - Do keep one focal glow per screen.
