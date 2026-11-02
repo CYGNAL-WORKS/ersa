@@ -51,7 +51,7 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 - `session.list`: `{ id, workspace_id, host_id, backend, model, effort, permission_mode, mode, title, state, created_at, last_event_seq (absent before the first event), tile: { state, context_tokens, context_window, cost_usd_total, pending: [{ kind (permission | question), request_id }] } }`. The `tile` object is what the rail renders; Core keeps it current from events. A session's `title` is its backend's: the title the backend's own tools list for it, which Ersa never stores. Its `created_at` is the time of the first entry in its session record, else the time of the app log's first fact for it. Its `mode` is Ersa's.
 - `session.create { workspace_id, backend, model (optional), effort (optional), permission_mode (optional), mode (optional) }`: creates and starts; it takes no title, since the title is the backend's. `model`, `effort` and `permission_mode` are ids from `backend.list`; Core refuses any other id. A `model` or `effort` left out is left to the backend, and Core stores only what was named: `session.list` reports the named values and leaves the others absent, which means the backend's own default (a replayed session, and a session created before these fields existed, report none). The permission mode is the exception: the backend must always be told one (PROTO-CLAUDE-CODE-STREAM, Invocation), so a `permission_mode` left out becomes the backend's default mode, stored and reported as the mode the session started with. The backend's `default` marks in `backend.list` are the adapter's knowledge of what the backend chooses on its own, for the session controls to show, not a promise of what a given session ran with. `mode` is stored and shown; it takes effect from milestone M3, when modes exist.
 - `session.start { id }`, `session.stop { id }`, `session.resume { id }`, `session.remove { id }`. Restarting a stopped session is `session.resume` (milestone M1); until then `session.start` on a stopped session answers `invalid_state` naming M1. `session.remove` is refused while the session is live.
-- `session.send { id, text }`: sends a user message; returns `{ turn }`.
+- `session.send { id, text }`: sends a user message; returns `{ turn }`. To a session whose backend is still starting, Core sends once it has started. To one whose backend failed to start, Core answers `invalid_state` with "the backend could not be started:" and the adapter's reason, including the backend's own error output, so the new-session screen can show it (FLOW-NEW-SESSION-R08).
 - `session.interrupt { id }`.
 - `session.decide_permission { id, request_id, behavior (allow | deny), message (optional), updated_input (optional), apply_suggestions (optional array of indices) }`.
 - `session.answer_question { id, request_id, answers }`.
@@ -68,7 +68,7 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 
 ### Settings
 
-- `settings.get`, `settings.set { patch }`: user settings as a JSON object, patch-merged (RFC 7386). `settings.get` returns only what the user has set; defaults are Core's and are not echoed. Known keys so far: `workspaces.root` (where workspaces are created; default under Core's data directory).
+- `settings.get`, `settings.set { patch }`: user settings as a JSON object, patch-merged (RFC 7386). `settings.get` returns only what the user has set; defaults are Core's and are not echoed. Known keys so far: `workspaces.root` (where workspaces are created; default under Core's data directory); `new_session.last_used.<project id>` (`{ host_id, project_id, workspace, backend, model, effort, permission_mode }`, the values that project last started a session with, which the Interface writes after a start and reads to fill the session controls, FLOW-NEW-SESSION-R02; a value left out is sent as null, so the merge clears it).
 
 ### Workbench (milestone M2, reserved)
 
@@ -96,6 +96,8 @@ A conforming Core passes a request/response test suite driven over the socket, a
 
 The replay server answers read-only requests exactly as Core does. It never changes anything outside its own data: every request that would change a session, a project, a workspace or a setting answers `invalid_state` saying the session is a replay, so a replay cannot create worktrees in the user's repositories or alter their settings. A replayed session stays open and idle after its last recorded line until `core.shutdown`. Pacing defaults to the recorded timing; an instant pace is for tests. The replay server never serves the user's own endpoint: with no explicit endpoint it serves the label `replay`, so an Interface reaches a replay only when told to, and a replay never stands in for, or blocks, the user's Core. It applies Core's own limits to the recording, line size included, and a recording it cannot read faithfully is refused at start with the reason, never played with a default in its place.
 
+A replay capture is what the replay server sent for one fixture, kept so the Interface's tests can replay it without running Core. It is a JSON object: `sessions` (`session.list` on attach), `sessions_after` (`session.list` once the replay has played out), `notifications` (every notification, in the order it arrived), and `ersa_commit` (the Ersa commit the capture was written from, ending `-dirty` when the tree had uncommitted changes outside the captures). A capture is checked against a fresh run of the replay server, which fails when the capture is stale. The check ignores `ersa_commit`, which says where a capture came from, not what it holds. Rewriting the captures builds Core first, so a capture never records a stale build.
+
 ## Requirements
 
 - **PROTO-CORE-API-R01**: The first request on a connection shall be `core.hello`, and Core shall reject any other method before it with `invalid_state`.
@@ -113,6 +115,7 @@ The replay server answers read-only requests exactly as Core does. It never chan
 - **PROTO-CORE-API-R13**: `session.subscribe` shall return the `view` it serves, the same `view` for as long as Core keeps that projection and a different one whenever Core rebuilds it.
 - ~~**PROTO-CORE-API-R15**~~: retired 2026-11-02 (a value not named is the backend's to choose, and Core does not know it), replaced by R16.
 - **PROTO-CORE-API-R16**: `session.create` shall start the backend with the `model` and `effort` it was given, passing nothing for one left out, and with the `permission_mode` given or else the backend's default permission mode, which is always stated to the backend; `session.list` shall report the `model` and `effort` that were given, absent otherwise, and the `permission_mode` the session started with.
+- **PROTO-CORE-API-R17**: Each replay capture shall equal what the replay server sends for its fixture, apart from `ersa_commit`.
 - **PROTO-CORE-API-R14**: `session.subscribe` with `from_seq` shall deliver every event from that sequence number onward, or from `first_seq` when the view no longer holds events before it, in order, with no gaps or duplicates, then continue live.
 
 ## Out of scope
@@ -126,6 +129,9 @@ The replay server answers read-only requests exactly as Core does. It never chan
 - Whether Core notifies an Interface when a project or session is created, and pushes `core.status` when its counts change; until then the window rereads `session.list` on a `session.tile` for an unknown session and reads the counts at attach.
 
 ## Changes
+
+- 2026-11-02: from #55 inbox: `session.send` to a starting backend waits for it, and to one that failed to start answers `invalid_state` with the adapter's reason; settings key `new_session.last_used.<project id>` named. No requirement IDs changed.
+- 2026-11-02: from #64 inbox: the replay capture format described under Conformance; the commit stamp is `ersa_commit`, since Core names the process, not a commit (PROTO-CORE-API-R17 added).
 
 - 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: from #43 inbox: `session.set_title`'s title bounds and its answers for a blank title, an unnamed session and a missing record. No requirement IDs changed.

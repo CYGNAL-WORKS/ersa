@@ -44,9 +44,17 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 - Whether the shelf overlays the transcript or pushes it, and how several pending shelves queue.
 - Where global status (connected hosts, usage today) lives.
 - Keyboard model: which shortcuts the shell owns versus the active pane.
+- Whether the user can reorder the rail's tiles or change its sort order; today it lists sessions newest first. DESIGN.md says how tiles move if so.
+
+## Built so far
+
+The rail is one list of sessions grouped under a heading per workspace: the project's name, then the branch or "Root workspace". Projects are not yet a level of their own, so the projects, workspaces and sessions tree is still to build.
 
 ## Changes
 
+- 2026-11-02: from #55 inbox: Built so far added: sessions grouped by workspace, the tree still to build. No requirement IDs changed.
+
+- 2026-11-02: open question on reordering and sorting the rail, which DESIGN.md's motion rules anticipate. No requirement IDs changed.
 - 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: the title is renamed in place by double-click or keyboard, with no button (owner); open question on the context ring's tone near full.
 - 2026-11-02: from #53 inbox: the backend chip also shows a lone backend that is missing or failed.
