@@ -123,7 +123,35 @@ describe("generated tokens", () => {
   });
 
   it("resolve references between tokens", () => {
-    expect(generated).not.toMatch(/\{[\w.]+\}/);
+    expect(generated).not.toMatch(/\{[\w.-]+\}/);
     expect(generated).toContain(`--type-ui-small-family: ${tokens.typography.ui.fontFamily};`);
+  });
+
+  it("give light and dark the same glow names", () => {
+    expect(Object.keys(tokens.glow.dark)).toEqual(Object.keys(tokens.glow.light));
+  });
+
+  // Three theme blocks: light, dark by system preference, and forced dark.
+  // Each must declare every material and glow, or a dark subtree inherits
+  // values already substituted with the light colors.
+  it("declare every material and glow in each theme block", () => {
+    const names = [
+      ...Object.keys(tokens.material).map((name) => `--material-${name}:`),
+      ...Object.keys(tokens.glow.light).map((name) => `--glow-${name}:`),
+    ];
+    for (const name of names) expect(generated.split(name)).toHaveLength(4);
+  });
+
+  it("build materials and glows from color roles, not values", () => {
+    expect(generated).toContain(
+      "--material-tile: linear-gradient(to bottom, var(--color-surface-raised), var(--color-surface));",
+    );
+    const declarations = generated.split("\n").filter((line: string) => /--(material|glow)-/.test(line));
+    for (const line of declarations) expect(line).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+  });
+
+  it("refuse a color role that does not exist", () => {
+    const broken = { ...tokens, material: { tile: "linear-gradient({colors.nonesuch}, {colors.surface})" } };
+    expect(() => css(broken)).toThrow("{colors.nonesuch}");
   });
 });
