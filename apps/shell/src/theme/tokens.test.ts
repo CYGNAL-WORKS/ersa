@@ -27,6 +27,12 @@ const RAW = [
     what: "a length, duration or percentage",
     pattern: /(?<![\w.-])\d*\.?\d+(px|rem|em|vh|vw|dvh|svh|pt|ms|s|%)(?![\w-])/gi,
   },
+  // A token scaled by a bare number is a new size in disguise; it needs its own
+  // token. Negating one (`-1 *`) only flips its direction, so it stays allowed.
+  {
+    what: "a token scaled by a number",
+    pattern: /var\(--[\w-]+\)\s*[*/]\s*-?\d*\.?\d+(?![\w.%])|(?<![\w.-])(?!1\s*\*)\d*\.?\d+\s*\*\s*var\(--[\w-]+\)/gi,
+  },
   { what: "a font weight", pattern: /font-weight\s*:(?!\s*var\()\s*[^;]+/gi },
 ];
 
@@ -65,6 +71,15 @@ describe("the raw-value check", () => {
     expect(flagged("  font-weight: normal;")).toEqual(["font-weight: normal"]);
     expect(flagged("  font-weight: var(--type-heading-weight);")).toEqual([]);
     expect(flagged("  transition: opacity 160ms;")).toEqual(["160ms"]);
+  });
+
+  it("catches a token scaled by a bare number", () => {
+    expect(flagged("  width: calc(var(--space-xxl) * 7);")).toEqual(["var(--space-xxl) * 7"]);
+    expect(flagged("  width: calc(var(--size-rail) / 2);")).toEqual(["var(--size-rail) / 2"]);
+    expect(flagged("  width: calc(3 * var(--size-rail));")).toEqual(["3 * var(--size-rail)"]);
+    expect(flagged("  width: calc(0.5*var(--size-rail));")).toEqual(["0.5*var(--size-rail)"]);
+    expect(flagged("  transform: translateY(calc(-1 * var(--space-xs)));")).toEqual([]);
+    expect(flagged("  width: calc(var(--size-rail) + var(--space-lg));")).toEqual([]);
   });
 });
 
