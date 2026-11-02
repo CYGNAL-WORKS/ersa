@@ -8,10 +8,8 @@ import "./ProjectList.css";
 
 interface ProjectListProps {
   view: ProjectsView;
-  /** Starts a session in a new workspace of the project. Offered for git projects, whose workspaces are worktrees. */
+  /** Opens the new-session screen for the project; nothing is created until its first message (FLOW-NEW-SESSION-R03). */
   onNewSession?: (project: Project) => void;
-  /** Sessions being started, by project id, and why one could not be. */
-  starting?: Record<string, Sending>;
   /** Changes whether the user trusts the project. Trusting asks first, saying what trust lets run; withdrawing trust does not. */
   onSetTrust?: (project: Project, trusted: boolean) => void;
   /** Trust being changed, by project id, and why it could not be. */
@@ -28,7 +26,6 @@ interface ProjectListProps {
 export function ProjectList({
   view,
   onNewSession,
-  starting = {},
   onSetTrust,
   trusting = {},
   notes = {},
@@ -76,10 +73,8 @@ export function ProjectList({
       {view.state === "ready" && view.projects.length > 0 && (
         <ul className="projects-list">
           {view.projects.map((p) => {
-            const start = starting[p.id];
             const trust = trusting[p.id];
             const changingTrust = trust?.state === "sending";
-            const newSession = onNewSession && p.vcs === "git";
             return (
               <li key={p.id} className="project">
                 <span className="project-name">{p.name}</span>
@@ -88,13 +83,9 @@ export function ProjectList({
                   {p.path}
                 </span>
                 <span className="project-trust">{p.trusted ? "Trusted" : "Not trusted"}</span>
-                {(newSession || onSetTrust) && (
+                {(onNewSession || onSetTrust) && (
                   <div className="project-action">
-                    {newSession && (
-                      <Button onClick={() => onNewSession(p)} disabled={start?.state === "sending"}>
-                        {start?.state === "sending" ? "Starting…" : "New session"}
-                      </Button>
-                    )}
+                    {onNewSession && <Button onClick={() => onNewSession(p)}>New session</Button>}
                     {onSetTrust &&
                       (p.trusted ? (
                         <Button data-trust-for={p.id} onClick={() => onSetTrust(p, false)} disabled={changingTrust}>
@@ -125,11 +116,6 @@ export function ProjectList({
                 <p className="project-note" role="status">
                   {notes[p.id]}
                 </p>
-                {start?.state === "failed" && (
-                  <p className="problem project-problem" role="alert">
-                    {start.message}
-                  </p>
-                )}
                 {trust?.state === "failed" && (
                   <p className="problem project-problem" role="alert">
                     {trust.message}

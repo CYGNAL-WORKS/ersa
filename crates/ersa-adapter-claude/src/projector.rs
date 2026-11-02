@@ -608,6 +608,7 @@ impl ClaudeProjector {
                                 "Claude Code {version} is newer than the newest version \
                                  Ersa was tested with ({MAX_TESTED_VERSION})."
                             ),
+                            pid: None,
                         }),
                     )],
                     None => vec![passthrough(line, value)],

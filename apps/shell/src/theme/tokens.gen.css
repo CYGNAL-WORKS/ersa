@@ -42,8 +42,13 @@
   --motion-quick: 160ms;
   --motion-settle: 260ms;
   --motion-slow: 400ms;
+  --motion-stream: 1000ms;
+  --motion-loop-ring: 1400ms;
+  --motion-breathe-once: 2400ms;
+  --motion-breath: 3000ms;
   --motion-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --motion-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-linear: linear;
 }
 
 :root,
