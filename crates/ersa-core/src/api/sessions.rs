@@ -21,6 +21,10 @@ use crate::state::Core;
 pub const RAW_LOG_LIMIT: usize = 1000;
 pub const RAW_LOG_BYTES: usize = 8 * 1024 * 1024;
 
+/// The longest title `session.set_title` takes: as much as Claude Code's
+/// own session list shows.
+pub const MAX_TITLE_CHARS: usize = 200;
+
 pub(super) async fn list(core: &Core, _: Empty) -> Result<Vec<Session>, ApiError> {
     Ok(core.sessions.list())
 }
@@ -189,6 +193,20 @@ pub(super) async fn set_title(core: &Core, params: SetTitleParams) -> Result<Ses
     if title.is_empty() {
         return Err(ApiError::invalid_params(
             "a session's title cannot be empty",
+        ));
+    }
+    // The title goes into the backend's record for good and shows in its own
+    // tools, which list one line of at most 200 characters
+    // (PROTO-CLAUDE-CODE-STREAM, Listing): a longer title, or one holding a
+    // line break or another control character, would read differently there.
+    if title.chars().count() > MAX_TITLE_CHARS {
+        return Err(ApiError::invalid_params(format!(
+            "a session's title is at most {MAX_TITLE_CHARS} characters"
+        )));
+    }
+    if title.chars().any(char::is_control) {
+        return Err(ApiError::invalid_params(
+            "a session's title is one line, without control characters",
         ));
     }
     Ok(core

@@ -34,6 +34,7 @@ export function SessionTitle({ title, onRename, renaming, onDone, disabled, chil
   const [draft, setDraft] = useState<string | undefined>(initialDraft);
   const busy = renaming?.state === "sending";
   const rename = useRef<HTMLButtonElement>(null);
+  const field = useRef<HTMLInputElement>(null);
   // Focus goes back to Rename once editing ends, where the user started it.
   const returnFocus = useRef(false);
 
@@ -43,6 +44,13 @@ export function SessionTitle({ title, onRename, renaming, onDone, disabled, chil
       rename.current?.focus();
     }
   }, [draft]);
+
+  // A refusal puts the user back in the field to try again: a Save clicked with the pointer was disabled while
+  // saving, which dropped focus.
+  const refused = renaming?.state === "failed";
+  useEffect(() => {
+    if (refused && initialDraft === undefined) field.current?.focus();
+  }, [refused, initialDraft]);
 
   const close = () => {
     returnFocus.current = true;
@@ -92,8 +100,11 @@ export function SessionTitle({ title, onRename, renaming, onDone, disabled, chil
         }}
       >
         <input
+          ref={field}
           className="session-heading-input"
           aria-label="Session title"
+          // As long as Core takes: as much as the backend's own session list shows.
+          maxLength={200}
           value={draft}
           readOnly={busy}
           data-force={force}
@@ -110,7 +121,9 @@ export function SessionTitle({ title, onRename, renaming, onDone, disabled, chil
             }
           }}
         />
-        <Button type="submit" variant="primary" disabled={busy || disabled || draft.trim() === ""}>
+        {/* The state stays beside the title, and the actions at the far edge, where Rename was. */}
+        {children}
+        <Button type="submit" disabled={busy || disabled || draft.trim() === ""}>
           {/* Both labels share one cell, so the button keeps its width and nothing beside it moves. */}
           <span className="session-heading-label">
             <span data-shown={!busy || undefined}>Save</span>
@@ -126,7 +139,6 @@ export function SessionTitle({ title, onRename, renaming, onDone, disabled, chil
           </p>
         )}
       </form>
-      {children}
     </>
   );
 }

@@ -354,7 +354,7 @@ const entries: Entry[] = [
       ["Editing, focus", <Titled initialDraft={draft} force="focus" />],
       ["Blank", <Titled initialDraft="" force="focus" />],
       ["Saving", <Titled initialDraft={draft} renaming={{ state: "sending" }} />],
-      ["Refused", <Titled initialDraft={draft} renaming={{ state: "failed", message: "the backend has no record of session s1 to rename" }} />],
+      ["Refused", <Titled initialDraft={draft} renaming={{ state: "failed", message: "the backend has no record of this session to rename" }} />],
     ],
   },
   {
