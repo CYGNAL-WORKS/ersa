@@ -11,25 +11,36 @@
   white-space: nowrap;
 }
 
-/* A title that can be renamed is a control: its rule shows it is there when pointed at, and takes the accent with
-   keyboard focus. The rule is always drawn, in no colour at rest, so nothing moves when it shows. */
+/* The resting title wears the rename field's frame, in no colour, so starting to edit changes colours and moves
+   nothing. A title that can be renamed shows the frame when pointed at and takes the accent with keyboard focus;
+   the default cursor, since a double-click (the tooltip says so), not a click, opens it. A title that cannot be
+   renamed now (Core not connected, a rename on its way) deliberately looks like a resting one: the session is
+   the same, only the control is away. */
 .session-heading {
-  border-bottom: var(--line-hairline) solid transparent;
+  box-sizing: border-box;
+  padding: var(--space-xs) var(--space-sm);
+  border: var(--line-hairline) solid transparent;
+  border-radius: var(--radius-md);
 }
 
 .session-heading[data-editable]:hover:not(:focus-visible),
 .session-heading[data-force="hover"] {
-  border-bottom-color: var(--color-ink-faint);
-  cursor: text;
+  border-color: var(--color-ink-faint);
 }
 
 .session-heading[data-editable]:focus-visible,
 .session-heading[data-force="focus"] {
   outline: none;
-  border-bottom-color: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
-/* Editing takes the title's place and the room it had, up to the state. */
+/* The state keeps one cell, at the far edge, whether the title rests or is being edited. */
+.session-heading-state {
+  margin-left: auto;
+  flex: none;
+}
+
+/* Editing takes the title's place and the room up to the state, which stays last. */
 .session-heading-form {
   flex: 1;
   min-width: 0;

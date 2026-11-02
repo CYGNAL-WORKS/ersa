@@ -34,6 +34,11 @@ export function titleToSave(draft: string, current: string): string | undefined 
   return title === "" || title === current ? undefined : title;
 }
 
+/** What saving `draft` sends for a session showing `title`: an untitled session's placeholder is not its title. */
+export function renameTo(draft: string, title: string, untitled: boolean | undefined): string | undefined {
+  return titleToSave(draft, untitled ? "" : title);
+}
+
 /** The session's title in its header, and renaming it there: the backend keeps the title, so its own tools show it too. */
 export function SessionTitle({ title, untitled, onRename, renaming, onReset, disabled, children, initialDraft, force }: SessionTitleProps) {
   // The text being edited; undefined while the title is only shown.
@@ -69,8 +74,7 @@ export function SessionTitle({ title, untitled, onRename, renaming, onReset, dis
 
   const save = async () => {
     if (draft === undefined || busy) return;
-    // An untitled session shows a placeholder, which is not its title.
-    const next = titleToSave(draft, untitled ? "" : title);
+    const next = renameTo(draft, title, untitled);
     if (next === undefined) {
       // A blank title is not saved; an unchanged one needs no saving.
       if (draft.trim() !== "") close();
@@ -111,7 +115,7 @@ export function SessionTitle({ title, untitled, onRename, renaming, onReset, dis
         >
           {title}
         </h1>
-        {children}
+        <span className="session-heading-state">{children}</span>
       </>
     );
   }
@@ -149,8 +153,6 @@ export function SessionTitle({ title, untitled, onRename, renaming, onReset, dis
             }
           }}
         />
-        {/* The state stays beside the title, and the actions at the far edge, where Rename was. */}
-        {children}
         <Button type="submit" disabled={busy || disabled || draft.trim() === ""}>
           {/* Both labels share one cell, so the button keeps its width and nothing beside it moves. */}
           <span className="session-heading-label">
@@ -161,6 +163,7 @@ export function SessionTitle({ title, untitled, onRename, renaming, onReset, dis
         <Button disabled={busy} onClick={close}>
           Cancel
         </Button>
+        <span className="session-heading-state">{children}</span>
         {renaming?.state === "failed" && (
           <p className="problem session-heading-problem" role="alert">
             {renaming.message}
