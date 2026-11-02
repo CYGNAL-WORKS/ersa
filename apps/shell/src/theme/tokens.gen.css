@@ -32,9 +32,10 @@
   --space-lg: 16px;
   --space-xl: 24px;
   --space-xxl: 32px;
+  --space-xxxl: 48px;
   --line-hairline: 1px;
-  --size-rail: 224px;
-  --size-tile-min: 224px;
+  --size-rail: 288px;
+  --size-tile-min: 288px;
   --size-measure: 720px;
   --size-card-max: 224px;
   --motion-instant: 80ms;
