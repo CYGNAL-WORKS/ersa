@@ -182,17 +182,19 @@ pub(super) async fn answer_question(
     )))
 }
 
-/// Refused: a session's title is its backend's to keep, in the session
-/// record, where the backend's own tools show it too (ADR 0017).
+/// Renames the session in its backend, which keeps the title where its own
+/// tools show it too (ADR 0017, PROTO-CORE-API-R12).
 pub(super) async fn set_title(core: &Core, params: SetTitleParams) -> Result<Session, ApiError> {
-    find(core, &params.id).await?;
-    Err(title_refused())
-}
-
-fn title_refused() -> ApiError {
-    ApiError::invalid_state(
-        "a session's title comes from its backend's session record; rename it there (in Claude Code, /rename)",
-    )
+    let title = params.title.trim();
+    if title.is_empty() {
+        return Err(ApiError::invalid_params(
+            "a session's title cannot be empty",
+        ));
+    }
+    Ok(core
+        .sessions
+        .set_title(&params.id, title, |host| core.session_transport_for(host))
+        .await?)
 }
 
 /// Takes effect on the session's next start.

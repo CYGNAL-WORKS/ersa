@@ -11,6 +11,10 @@
 //! - `question`: a question for the user.
 //! - `burst <n>`: `n` replies at once, to flood subscribers.
 //!
+//! A rename keeps the new title in the record too, as a `custom-title`
+//! entry, which titles the session ahead of its last prompt, as Claude
+//! Code's does.
+//!
 //! Anything else gets a usage line and an echoed reply.
 
 use std::collections::{HashMap, HashSet};
@@ -37,6 +41,36 @@ pub const BACKEND: &str = "fake";
 pub struct Stats {
     pub starts: AtomicUsize,
     pub stops: AtomicUsize,
+    /// Renames sent to a running backend, and renames written to a record.
+    pub live_renames: AtomicUsize,
+    pub record_renames: AtomicUsize,
+}
+
+/// The kind of the record entry a rename adds.
+const CUSTOM_TITLE: &str = "custom-title";
+
+/// A title the user gave the session, as the fake's record keeps it.
+fn recorded_title(title: &str) -> RecordEvent {
+    RecordEvent {
+        message_id: None,
+        ts: None,
+        backend_version: Some("1.0".into()),
+        event: Event::BackendPassthrough(BackendPassthrough {
+            backend: BACKEND.into(),
+            kind: CUSTOM_TITLE.into(),
+            payload: json!({ "title": title }),
+        }),
+    }
+}
+
+/// The title a record entry gives, when it is a rename.
+fn title_of(event: &RecordEvent) -> Option<String> {
+    match &event.event {
+        Event::BackendPassthrough(p) if p.kind == CUSTOM_TITLE => {
+            p.payload["title"].as_str().map(String::from)
+        }
+        _ => None,
+    }
 }
 
 /// The fake backend's session records, by its own session id: what it
@@ -187,18 +221,45 @@ impl Adapter for FakeAdapter {
         _cwd: &str,
         backend_session_id: &str,
     ) -> Result<Arc<Vec<RecordEvent>>, AdapterError> {
+        // A title is not part of the conversation, as Claude Code's
+        // projection leaves its `custom-title` entries out.
         Ok(Arc::new(
             self.records
                 .lock()
                 .unwrap()
                 .get(backend_session_id)
-                .cloned()
+                .map(|record| {
+                    record
+                        .iter()
+                        .filter(|e| title_of(e).is_none())
+                        .cloned()
+                        .collect()
+                })
                 .unwrap_or_default(),
         ))
     }
 
-    /// Titled by its last prompt, as Claude Code titles a print-mode
-    /// session, and begun at its first entry.
+    async fn rename_record(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        backend_session_id: &str,
+        title: &str,
+    ) -> Result<(), AdapterError> {
+        let mut records = self.records.lock().unwrap();
+        let Some(record) = records.get_mut(backend_session_id) else {
+            return Err(AdapterError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "no record",
+            )));
+        };
+        record.push(recorded_title(title));
+        self.stats.record_renames.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    /// Titled by its latest rename, else its last prompt, as Claude Code
+    /// titles a print-mode session, and begun at its first entry.
     async fn summarize_record(
         &self,
         _transport: Arc<dyn Transport>,
@@ -209,13 +270,15 @@ impl Adapter for FakeAdapter {
         let Some(record) = records.get(backend_session_id) else {
             return Ok(None);
         };
-        let title = record.iter().rev().find_map(|e| match &e.event {
-            Event::UserMessage(user) => Some(user.text.clone()),
-            _ => None,
+        let title = record.iter().rev().find_map(title_of).or_else(|| {
+            record.iter().rev().find_map(|e| match &e.event {
+                Event::UserMessage(user) => Some(user.text.clone()),
+                _ => None,
+            })
         });
         Ok(Some(RecordSummary {
             title,
-            created_at: record.first().and_then(|e| e.ts.clone()),
+            created_at: record.iter().find_map(|e| e.ts.clone()),
         }))
     }
 }
@@ -341,6 +404,22 @@ impl AdapterSession for FakeSession {
         self.running()?;
         self.sink
             .record(Direction::Host, json!({ "t": "interrupt" }).to_string());
+        Ok(())
+    }
+
+    /// Takes the title and keeps it in the record, as Claude Code does.
+    async fn rename(&self, backend_session_id: &str, title: &str) -> Result<(), AdapterError> {
+        self.running()?;
+        assert_eq!(
+            backend_session_id, self.session_id,
+            "renamed the wrong session"
+        );
+        self.sink.record(
+            Direction::Host,
+            json!({ "t": "rename", "title": title }).to_string(),
+        );
+        self.keep(recorded_title(title));
+        self.stats.live_renames.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
