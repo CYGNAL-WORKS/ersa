@@ -14,7 +14,7 @@
 
 mod common;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -81,10 +81,10 @@ fn capture_path(name: &str) -> PathBuf {
 /// notifications are left out: Core sends them as the tile changes, and at
 /// instant pace how many it sends, and where they fall among the events,
 /// varies from run to run; the listing after shows the tile they led to.
-async fn received(name: &str) -> Value {
+async fn received(name: &str, program: &Path) -> Value {
     let label = unique_label("shell-replay");
     let _server = ReplayServer(
-        Command::new(core_program())
+        Command::new(program)
             .arg("replay")
             .arg("--fixture")
             .arg(fixture(name))
@@ -225,10 +225,11 @@ fn normalise(mut value: Value, session_id: &str) -> Value {
 /// captures about to be rewritten come from this Core and not an older
 /// binary left in `target/`. An `ERSA_CORE_BIN` override names a binary this
 /// test cannot rebuild, so updating refuses it.
-/// Returns the commit stamp for the captures, taken at the same moment, so
-/// both tests of a run name the same Core.
-fn build_core() -> &'static str {
-    static BUILT: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+/// Returns the executable Cargo reports it built (wherever a target-dir or
+/// target triple put it), and the commit stamp for the captures, taken at
+/// the same moment, so both tests of a run name the same Core.
+fn build_core() -> &'static (PathBuf, String) {
+    static BUILT: std::sync::OnceLock<(PathBuf, String)> = std::sync::OnceLock::new();
     BUILT.get_or_init(|| {
         assert!(
             std::env::var_os("ERSA_CORE_BIN").is_none(),
@@ -236,13 +237,28 @@ fn build_core() -> &'static str {
         );
         // Cargo sets CARGO for the tests it runs: the same toolchain.
         let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-        let status = Command::new(cargo)
-            .args(["build", "-p", "ersa-cli"])
+        // --locked: an update never rewrites Cargo.lock. The JSON messages
+        // name the executable actually built, which is the one to launch.
+        let output = Command::new(cargo)
+            .args([
+                "build",
+                "--locked",
+                "-p",
+                "ersa-cli",
+                "--message-format=json",
+            ])
             .current_dir(repo_root())
-            .status()
+            .stderr(Stdio::inherit())
+            .output()
             .expect("run cargo build");
-        assert!(status.success(), "cargo build -p ersa-cli failed");
-        core_commit()
+        assert!(output.status.success(), "cargo build -p ersa-cli failed");
+        let program = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|m| m["reason"] == "compiler-artifact" && m["target"]["name"] == "ersa-core")
+            .find_map(|m| m["executable"].as_str().map(PathBuf::from))
+            .expect("cargo build names the ersa-core executable");
+        (program, core_commit())
     })
 }
 
@@ -258,8 +274,10 @@ fn core_commit() -> String {
             .ok()
             .filter(|o| o.status.success())
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            // A stamp that cannot be trusted is worse than none: stop.
+            .unwrap_or_else(|| panic!("git {} failed; cannot stamp the captures", args.join(" ")))
     };
-    let head = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    let head = git(&["rev-parse", "HEAD"]);
     match git(&[
         "status",
         "--porcelain",
@@ -267,17 +285,18 @@ fn core_commit() -> String {
         ".",
         ":!apps/shell/src/session/replays",
     ]) {
-        Some(changes) if !changes.is_empty() => format!("{head}-dirty"),
+        changes if !changes.is_empty() => format!("{head}-dirty"),
         _ => head,
     }
 }
 
 async fn check(name: &str) {
-    let stamp = std::env::var_os("ERSA_UPDATE_REPLAYS").map(|_| build_core());
-    let actual = received(name).await;
+    let built = std::env::var_os("ERSA_UPDATE_REPLAYS").map(|_| build_core());
+    let program = built.map_or_else(core_program, |(program, _)| program.clone());
+    let actual = received(name, &program).await;
     let path = capture_path(name);
     let pretty = serde_json::to_string_pretty(&actual).expect("serializes") + "\n";
-    if let Some(stamp) = stamp {
+    if let Some((_, stamp)) = built {
         let mut written = actual.clone();
         written["core"] = json!(stamp);
         let written = serde_json::to_string_pretty(&written).expect("serializes") + "\n";
