@@ -391,8 +391,13 @@ fn heap_bytes(value: &serde_json::Value) -> usize {
     match value {
         Value::Null | Value::Bool(_) | Value::Number(_) => 0,
         Value::String(s) => s.len(),
+        // A list read in grows by doubling, from room for four, so it may
+        // have room for nearly twice what it holds. `value` is a copy made
+        // to the size it holds, so its own capacity does not say.
+        Value::Array(items) if items.is_empty() => 0,
         Value::Array(items) => {
-            items.len() * size_of::<Value>() + items.iter().map(heap_bytes).sum::<usize>()
+            items.len().next_power_of_two().max(4) * size_of::<Value>()
+                + items.iter().map(heap_bytes).sum::<usize>()
         }
         Value::Object(map) => {
             map.len().div_ceil(5).max(1) * NODE
@@ -504,8 +509,15 @@ mod tests {
         let tool = serde_json::json!({"type": "assistant", "uuid": "a1", "parentUuid": null,
             "message": {"id": "m1", "role": "assistant", "content": [
                 {"type": "tool_use", "id": "t1", "name": "Edit", "input": input}]}});
+        // A list just past a power of two: read in, it has room for twice
+        // as many items as it holds.
+        let list = serde_json::json!({"type": "assistant", "uuid": "a2", "parentUuid": null,
+            "message": {"id": "m2", "role": "assistant", "content": [
+                {"type": "tool_use", "id": "t2", "name": "Edit",
+                    "input": {"items": vec![0; 1025]}}]}});
         let mut records = record_fixtures();
         records.push(format!("{tool}\n"));
+        records.push(format!("{list}\n"));
         for text in records {
             let before = counting::held();
             let events = projection::project_record(&text);
