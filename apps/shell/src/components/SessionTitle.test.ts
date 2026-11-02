@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { titleToSave } from "./SessionTitle";
+import { renameTo, titleToSave } from "./SessionTitle";
 
 describe("titleToSave", () => {
   it("sends the new title without the space around it", () => {
@@ -19,7 +19,14 @@ describe("titleToSave", () => {
     expect(titleToSave(" Fix  the bug ", "Old")).toBe("Fix  the bug");
   });
 
-  it("sends the placeholder's words for a session with no title yet", () => {
-    expect(titleToSave("Untitled session", "")).toBe("Untitled session");
+});
+
+describe("renameTo, what Save sends", () => {
+  it("sends the placeholder's words typed on an untitled session", () => {
+    expect(renameTo("Untitled session", "Untitled session", true)).toBe("Untitled session");
+  });
+
+  it("sends nothing for a titled session's own title", () => {
+    expect(renameTo("Untitled session", "Untitled session", false)).toBeUndefined();
   });
 });
