@@ -28,6 +28,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Projection**: the versioned derivation of Ersa events from a session record and the live stream, merged on the backend's message ids. Made each time a session is opened, never stored. Transcript and rail state are projections.
 - **View**: one projection of a session that Core holds for the session's subscribers, with its own identity and sequence numbers. When Core rebuilds a session's projection it is a new view.
 - **Event**: one typed message in the agent event protocol, produced by projection and streamed to the Interface.
+- **Turn**: one message to the agent and everything the agent does in answer to it, up to the next. Most turns start with the user's message; a turn can also start when a session resumes or from the system.
 - **Permission request**: the agent asking the user to approve an action before it runs.
 - **Question**: the agent asking the user to choose or answer something that is not a permission.
 - **Replay server**: a stand-in Core that serves recorded fixtures over the Interface protocols, used for interface development and tests.

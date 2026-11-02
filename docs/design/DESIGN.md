@@ -74,13 +74,15 @@ spacing:
   lg: 16px
   xl: 24px
   xxl: 32px
+  xxxl: 48px
 line:
   # Custom group. Stroke widths for borders and rules.
   hairline: 1px
 size:
   # Custom group. Fixed layout sizes.
-  rail: 224px
-  tile-min: 224px
+  # The rail's width; a tile fills it, so a tile is never narrower.
+  rail: 288px
+  tile-min: 288px
   # The transcript's reading column.
   measure: 720px
   # The height past which a tool card's output or a long permission field scrolls.
@@ -101,7 +103,7 @@ motion:
 
 Ersa is an agentic development harness for multi-agent work. The user runs several agents at once and moves between them; the interface makes state legible at a glance and stays out of the way while they read. It looks and behaves like the agentic harnesses people already use (Claude Desktop, Claude in VS Code, VS Code's agents view), so nothing about the conversation has to be learned, and it is more beautiful than they are.
 
-The colors in the front matter are Midnight, the default palette, and the faces and type scale are chosen; the other values are placeholders while the spacing scale and icons are chosen. They are explored and reviewed in the Ersa design system (https://claude.ai/code/artifact/9be37025-1765-426d-89fa-0a47c8fa0f37); a choice agreed there is written back here before code uses it. ADR 0019 records why the direction changed.
+The colors in the front matter are Midnight, the default palette; the faces, type scale, spacing scale, sizes, radii and icons are chosen too. They are explored and reviewed in the Ersa design system (https://claude.ai/code/artifact/9be37025-1765-426d-89fa-0a47c8fa0f37); a choice agreed there is written back here before code uses it. ADR 0019 records why the direction changed.
 
 Principles that resolve trade-offs:
 
@@ -138,7 +140,11 @@ The wordmark has its own size, much larger than `heading`, and is drawn in `ink`
 
 ## Layout
 
-Every gap, padding and size is a named step on one scale; space shows grouping, and the gap grows with the distance between ideas. The transcript keeps a reading column of comfortable width (`measure`) however wide the window gets. Blocks in the transcript (messages, tool cards, permission requests) are separated by `space-md`, so the transcript is denser than before on purpose: more of the conversation fits on screen, and grouping comes from the blocks themselves. The shell layout is specified in `LAY-SHELL`. Apart from `measure`, the scale, grid and fixed sizes in the front matter are placeholders.
+Every gap, padding and size is a named step on one scale, on a 4px grid; space shows grouping, and the gap grows with the distance between ideas. The transcript keeps a reading column of comfortable width (`measure`) however wide the window gets. The rail is `rail` wide (288px, as Claude Desktop's session list; VS Code's and Zed's default to 300px), and a tile fills it. The shell layout is specified in `LAY-SHELL`.
+
+**Turns are grouped by space.** A turn is a message to the agent, usually the user's, and everything the agent does in answer. Inside a turn, blocks (messages, tool cards, permission requests) sit `space-md` apart, so a turn reads dense and more of the conversation fits on screen. Between turns, before each user message except the first, the gap is `space-xxxl`, so each turn reads as one group without a divider. Claude Desktop uses about 11px inside a reply and 50 to 70px between turns.
+
+The user's message bubble is padded `space-md` above and below and `space-lg` at the sides.
 
 ## Elevation & Depth
 
@@ -153,11 +159,11 @@ Shadows are kept for transient layers (menus, popovers, drag previews), soft and
 
 ## Shapes
 
-Corners come from a small set of radii assigned by role (control, card, floating layer, pill), so things of one kind share one shape; the user's message bubble takes the floating-layer radius. Panes have no radius; they meet at lines. Every line is `hairline` wide; focus and state change a line's colour, never its width.
+Corners come from a small set of radii assigned by role, so things of one kind share one shape: `radius-sm` for small things inside a card or menu (an option, an output block), `radius-md` for controls and cards (buttons included, as Claude Desktop's are), `radius-lg` for floating layers and the user's message bubble, and `radius-pill` for pills. Panes have no radius; they meet at lines. Every line is `hairline` wide; focus and state change a line's colour, never its width.
 
 ## Iconography
 
-One library at one stroke weight, sized to the type beside it; the candidates are Fluent UI System Icons, Lucide and Phosphor. An icon sits beside a label unless it is universally understood (close, copy, search), and then it has a tooltip and an accessible name. Icons take ink colours; state colour stays on the glyphs.
+Icons are Lucide, with even 2px strokes and round ends, each sized to the type beside it. Which Lucide package the interface takes is decided by the first ticket that draws an icon, under ADR 0015. An icon sits beside a label unless it is universally understood (close, copy, search), and then it has a tooltip and an accessible name. Icons take ink colours; state colour stays on the glyphs.
 
 ## Components
 
