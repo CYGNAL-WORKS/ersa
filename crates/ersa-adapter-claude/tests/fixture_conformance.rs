@@ -401,6 +401,17 @@ fn host_messages_serialise_to_the_recorded_stdin_lines() {
                     HostRequest::Initialize(InitializeRequest::default()),
                 )
             }
+            (Some("control_request"), Some(subtype)) if subtype == "rename_session" => {
+                let request = &line["request"];
+                HostMessage::control_request(
+                    line["request_id"].as_str().unwrap(),
+                    HostRequest::RenameSession {
+                        title: request["title"].as_str().unwrap().into(),
+                        source: Some(RenameSource::Host),
+                        session_id: request["session_id"].as_str().map(String::from),
+                    },
+                )
+            }
             (Some("control_response"), _) => HostMessage::permission_decision(
                 line.pointer("/response/request_id")
                     .unwrap()
@@ -506,7 +517,7 @@ fn the_initialize_response_and_permission_prompt_read_as_typed_payloads() {
         match CliMessage::from_line(&line).unwrap() {
             CliMessage::ControlResponse(CliControlResponse {
                 response: CliResponse::Success(success),
-            }) => {
+            }) if success.request_id.starts_with("ersa-init") => {
                 let init: InitializeResponse = success
                     .payload()
                     .unwrap_or_else(|e| panic!("{at}: initialize payload: {e}"));

@@ -13,6 +13,8 @@
 //! - [`list_sessions`] lists a directory's sessions, reading only the head and
 //!   tail of each record.
 //! - [`live_session`] says whether a running CLI has a session open.
+//! - [`append_title`] renames a session no CLI of Ersa's has open, the only
+//!   write Ersa makes to a record.
 //!
 //! These read local files. A remote host's record needs reading through its
 //! transport, which has no file access yet.
@@ -192,6 +194,54 @@ pub fn record_version(
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
     Ok(Some(format!("{}:{}", metadata.len(), since.as_nanos())))
+}
+
+/// Renames session `session_id` by appending one `custom-title` entry to its
+/// record, as the vendor's IDE extension does for a session no CLI has open
+/// (PROTO-CLAUDE-CODE-STREAM, Renaming). This is the only write Ersa makes to
+/// a session record: everything already in the file stays as it is.
+///
+/// The entry goes out in a single append, so it cannot interleave with a
+/// line a CLI appends at the same time; a record whose last line has no
+/// newline yet gets one first, so the entry is a line of its own. A session
+/// with no record is a `NotFound` error, and nothing is created.
+pub fn append_title(
+    claude_home: &Path,
+    cwd: &str,
+    session_id: &str,
+    title: &str,
+) -> io::Result<()> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    let Some(path) = find_record(claude_home, cwd, session_id)? else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("session {session_id} has no record to rename"),
+        ));
+    };
+    let entry = crate::wire::RecordEntry::CustomTitle(crate::wire::CustomTitle {
+        custom_title: title.to_string(),
+        session_id: Some(session_id.to_string()),
+        extra: Default::default(),
+    });
+    // JSON escapes any line break in the title, so the entry is one line.
+    let mut line = serde_json::to_string(&entry)?;
+    line.push('\n');
+
+    // Opened for reading too, to look at the last byte; appends always go
+    // to the end, wherever the cursor is.
+    let mut file = fs::OpenOptions::new().read(true).append(true).open(&path)?;
+    let len = file.metadata()?.len();
+    if len > 0 {
+        let mut last = [0u8];
+        file.seek(SeekFrom::Start(len - 1))?;
+        file.read_exact(&mut last)?;
+        if last[0] != b'\n' {
+            line.insert(0, '\n');
+        }
+    }
+    file.write_all(line.as_bytes())?;
+    file.flush()
 }
 
 /// A record's events, with the size and modified time of the file they were
