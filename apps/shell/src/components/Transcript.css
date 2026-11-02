@@ -29,7 +29,7 @@
   overflow: auto;
 }
 
-/* The reading column at the measure; blocks sit a space-md apart, so the transcript reads dense (DESIGN.md, Layout). */
+/* The reading column at the measure; blocks in a turn sit a space-md apart, so a turn reads dense (DESIGN.md, Layout). */
 .transcript-page {
   display: flex;
   flex-direction: column;
@@ -55,6 +55,11 @@
   gap: var(--space-xs);
   padding-left: var(--space-md);
   border-left: var(--line-hairline) solid var(--color-line);
+}
+
+/* A new turn: the gap before every user message but the first grows to space-xxxl, so turns read as groups (DESIGN.md, Layout). */
+.transcript-user ~ .transcript-user {
+  margin-top: calc(var(--space-xxxl) - var(--space-md));
 }
 
 .transcript-who,
