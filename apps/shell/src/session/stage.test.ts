@@ -34,9 +34,40 @@ describe("the stage", () => {
     // Still the screen, sending, until the transcript can show: never an empty stage between them.
     expect(started).toMatchObject({ activeId: "s-new", opening: "s-new", starting: { state: "sending" } });
     expect(started.composing).toBeDefined();
-    expect(stage(started, { type: "followed", id: "s-old" })).toBe(started);
+    expect(stage(started, { type: "followed", id: "s-old" })).toMatchObject({ opening: "s-new", starting: { state: "sending" } });
     const shown = stage(started, { type: "followed", id: "s-new" });
     expect(shown).toMatchObject({ activeId: "s-new", composing: undefined, starting: undefined, opening: undefined });
+  });
+
+  // verifies: FLOW-NEW-SESSION-R09
+  it("settles the first session ever started, whose tile arrives before its start does", () => {
+    // No session yet: the default screen. While the first message is on its way, Core's tile for the new session
+    // makes the window read the list again, which offers the newest session before the start has answered.
+    let state = run([{ type: "sending" }, { type: "showNewest", id: "s-new" }]);
+    expect(state.activeId).toBeUndefined();
+    state = stage(state, { type: "started", id: "s-new", text: "Fix the build" });
+    state = stage(state, { type: "followed", id: "s-new" });
+    expect(state).toMatchObject({ activeId: "s-new", starting: undefined, opening: undefined, composing: undefined });
+    // The stage is free again.
+    expect(stage(state, { type: "select", id: "s-other" }).activeId).toBe("s-other");
+  });
+
+  it("settles a start at once when the window already follows the session", () => {
+    const state = run([{ type: "followed", id: "s1" }, { type: "newSession" }, { type: "sending" }, { type: "started", id: "s1", text: "hi" }]);
+    expect(state).toMatchObject({ activeId: "s1", starting: undefined, opening: undefined, composing: undefined });
+  });
+
+  // verifies: FLOW-NEW-SESSION-R08
+  it("keeps the screen, its failure and its text when the first session ever started fails", () => {
+    // The failed start's tile reaches the window before the start answers.
+    const state = run([
+      { type: "sending" },
+      { type: "showNewest", id: "s-doomed" },
+      { type: "failed", message: "the backend could not be started: not logged in" },
+      { type: "showNewest", id: "s-doomed" },
+    ]);
+    expect(state.activeId).toBeUndefined();
+    expect(state.starting).toEqual({ state: "failed", message: "the backend could not be started: not logged in" });
   });
 
   it("opens a kept session with why its first message did not go through, and gives the text back when it should", () => {
