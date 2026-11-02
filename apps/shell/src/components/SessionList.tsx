@@ -8,10 +8,23 @@ interface SessionListProps {
   activeId?: string;
   onSelect: (id: string) => void;
   force?: ForcedTile;
+  /** Each workspace's name, by id: given, the tiles sit under their workspace (LAY-SHELL); else one list. */
+  workspaces?: Readonly<Record<string, WorkspaceName>>;
+}
+
+/** What the rail calls a workspace: its project, and the branch or "Root workspace". */
+export interface WorkspaceName {
+  project: string;
+  name: string;
 }
 
 /** The sessions Core runs, as tiles: newest first, the active one outlined, one that needs the user marked with a glyph. */
-export function SessionList({ view, activeId, onSelect, force }: SessionListProps) {
+export function SessionList({ view, activeId, onSelect, force, workspaces }: SessionListProps) {
+  const tile = (s: Session) => (
+    <li key={s.id}>
+      <SessionTile session={s} active={s.id === activeId} force={force?.id === s.id ? force.state : undefined} onSelect={onSelect} />
+    </li>
+  );
   return (
     <section className="sessions" aria-label="Sessions">
       <h2 className="sessions-header">
@@ -31,15 +44,23 @@ export function SessionList({ view, activeId, onSelect, force }: SessionListProp
           <span className="sessions-note-hint">Start one from a project above.</span>
         </p>
       )}
-      {view.state === "ready" && view.sessions.length > 0 && (
-        <ul className="sessions-list">
-          {newestFirst(view.sessions).map((s) => (
-            <li key={s.id}>
-              <SessionTile session={s} active={s.id === activeId} force={force?.id === s.id ? force.state : undefined} onSelect={onSelect} />
-            </li>
-          ))}
-        </ul>
-      )}
+      {view.state === "ready" && view.sessions.length > 0 && !workspaces && <ul className="sessions-list">{newestFirst(view.sessions).map(tile)}</ul>}
+      {view.state === "ready" &&
+        view.sessions.length > 0 &&
+        workspaces &&
+        byWorkspace(view.sessions).map(([id, sessions]) => {
+          const name = workspaces[id];
+          return (
+            <section key={id} className="sessions-workspace" aria-label={name ? `${name.project}, ${name.name}` : "Workspace"}>
+              {name && (
+                <h3 className="sessions-workspace-name">
+                  <span className="sessions-workspace-project">{name.project}</span> <span>{name.name}</span>
+                </h3>
+              )}
+              <ul className="sessions-list">{sessions.map(tile)}</ul>
+            </section>
+          );
+        })}
     </section>
   );
 }
@@ -95,6 +116,13 @@ const toneOf: Record<Session["tile"]["state"], "positive" | "pending" | "danger"
   ended: undefined,
   error: "danger",
 };
+
+/** The sessions by workspace, newest first within each, and the workspace with the newest session first. */
+export function byWorkspace(sessions: Session[]): [string, Session[]][] {
+  const groups = new Map<string, Session[]>();
+  for (const s of newestFirst(sessions)) groups.set(s.workspace_id, [...(groups.get(s.workspace_id) ?? []), s]);
+  return [...groups];
+}
 
 /** Core issues `created_at` as RFC 3339 in UTC, so the strings sort as times do. */
 export function newestFirst(sessions: Session[]): Session[] {
