@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-// Every component section in the gallery, photographed in both themes.
+// Every component section in the gallery, photographed in both themes. Each is
+// photographed on a page showing it alone, so its baseline depends only on it.
 const components = [
   "CoreStatus",
   "QuitQuestion",
@@ -20,7 +21,7 @@ const components = [
 for (const theme of ["light", "dark"]) {
   for (const component of components) {
     test(`${component} in ${theme}`, async ({ page }) => {
-      await page.goto("/gallery.html");
+      await page.goto(`/gallery.html?component=${component}&theme=${theme}`);
       const section = page.locator(`[data-theme="${theme}"] [data-component="${component}"]`);
       await expect(section).toHaveScreenshot(`${component}-${theme}.png`);
     });
