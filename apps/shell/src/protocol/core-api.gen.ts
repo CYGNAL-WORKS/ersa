@@ -401,6 +401,18 @@ export interface SessionListParams {}
 export interface SessionCreateParams {
   workspace_id: Id;
   backend: string;
+  /**
+   * An id from backend.list; the backend's default when absent.
+   */
+  model?: string;
+  /**
+   * An id from backend.list; the backend's default when absent.
+   */
+  effort?: string;
+  /**
+   * An id from backend.list; the backend's default when absent.
+   */
+  permission_mode?: string;
   mode?: string;
 }
 export interface SessionStartParams {
@@ -595,8 +607,42 @@ export interface BackendInfo {
    */
   version?: string;
   status: "available" | "missing" | "error";
-  min_tested_version: string;
-  max_tested_version: string;
+  /**
+   * The oldest and newest backend versions the adapter was tested with.
+   */
+  tested: {
+    min: string;
+    max: string;
+  };
+  /**
+   * The models a session can start with.
+   */
+  models: Choice[];
+  /**
+   * The efforts a session can start with.
+   */
+  efforts: Choice[];
+  /**
+   * The permission modes a session can start with.
+   */
+  permission_modes: Choice[];
+}
+/**
+ * One value a session can start with. The choices are the adapter's knowledge of its tested versions, not detected on the host.
+ */
+export interface Choice {
+  /**
+   * What session.create takes and session.list reports.
+   */
+  id: string;
+  /**
+   * What the Interface shows.
+   */
+  label: string;
+  /**
+   * Whether a new session starts with this one when none is named.
+   */
+  default: boolean;
 }
 export interface Project {
   id: Id;
@@ -616,11 +662,15 @@ export interface Workspace {
   id: Id;
   project_id: Id;
   /**
+   * root: the project's own folder, one per project, listed first. isolated: a checkout made for sessions.
+   */
+  kind: "root" | "isolated";
+  /**
    * The workspace's root, as a path on the project's host.
    */
   path: string;
   /**
-   * The branch (git) the workspace has checked out.
+   * The branch (git) an isolated workspace has checked out; empty for the root workspace.
    */
   vcs_ref: string;
   state: "ready" | "creating" | "removing" | "error";
@@ -630,6 +680,18 @@ export interface Session {
   workspace_id: Id;
   host_id: Id;
   backend: string;
+  /**
+   * The model the session started with, an id from backend.list.
+   */
+  model: string;
+  /**
+   * The effort the session started with, an id from backend.list.
+   */
+  effort: string;
+  /**
+   * The permission mode the session started with, an id from backend.list.
+   */
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -750,11 +812,15 @@ export interface Workspace1 {
   id: Id;
   project_id: Id;
   /**
+   * root: the project's own folder, one per project, listed first. isolated: a checkout made for sessions.
+   */
+  kind: "root" | "isolated";
+  /**
    * The workspace's root, as a path on the project's host.
    */
   path: string;
   /**
-   * The branch (git) the workspace has checked out.
+   * The branch (git) an isolated workspace has checked out; empty for the root workspace.
    */
   vcs_ref: string;
   state: "ready" | "creating" | "removing" | "error";
@@ -763,11 +829,15 @@ export interface Workspace2 {
   id: Id;
   project_id: Id;
   /**
+   * root: the project's own folder, one per project, listed first. isolated: a checkout made for sessions.
+   */
+  kind: "root" | "isolated";
+  /**
    * The workspace's root, as a path on the project's host.
    */
   path: string;
   /**
-   * The branch (git) the workspace has checked out.
+   * The branch (git) an isolated workspace has checked out; empty for the root workspace.
    */
   vcs_ref: string;
   state: "ready" | "creating" | "removing" | "error";
@@ -777,6 +847,18 @@ export interface Session1 {
   workspace_id: Id;
   host_id: Id;
   backend: string;
+  /**
+   * The model the session started with, an id from backend.list.
+   */
+  model: string;
+  /**
+   * The effort the session started with, an id from backend.list.
+   */
+  effort: string;
+  /**
+   * The permission mode the session started with, an id from backend.list.
+   */
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -792,6 +874,18 @@ export interface Session2 {
   workspace_id: Id;
   host_id: Id;
   backend: string;
+  /**
+   * The model the session started with, an id from backend.list.
+   */
+  model: string;
+  /**
+   * The effort the session started with, an id from backend.list.
+   */
+  effort: string;
+  /**
+   * The permission mode the session started with, an id from backend.list.
+   */
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -807,6 +901,18 @@ export interface Session3 {
   workspace_id: Id;
   host_id: Id;
   backend: string;
+  /**
+   * The model the session started with, an id from backend.list.
+   */
+  model: string;
+  /**
+   * The effort the session started with, an id from backend.list.
+   */
+  effort: string;
+  /**
+   * The permission mode the session started with, an id from backend.list.
+   */
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -822,6 +928,18 @@ export interface Session4 {
   workspace_id: Id;
   host_id: Id;
   backend: string;
+  /**
+   * The model the session started with, an id from backend.list.
+   */
+  model: string;
+  /**
+   * The effort the session started with, an id from backend.list.
+   */
+  effort: string;
+  /**
+   * The permission mode the session started with, an id from backend.list.
+   */
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -837,6 +955,18 @@ export interface Session5 {
   workspace_id: Id;
   host_id: Id;
   backend: string;
+  /**
+   * The model the session started with, an id from backend.list.
+   */
+  model: string;
+  /**
+   * The effort the session started with, an id from backend.list.
+   */
+  effort: string;
+  /**
+   * The permission mode the session started with, an id from backend.list.
+   */
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -855,6 +985,18 @@ export interface Session6 {
   workspace_id: Id;
   host_id: Id;
   backend: string;
+  /**
+   * The model the session started with, an id from backend.list.
+   */
+  model: string;
+  /**
+   * The effort the session started with, an id from backend.list.
+   */
+  effort: string;
+  /**
+   * The permission mode the session started with, an id from backend.list.
+   */
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -870,6 +1012,18 @@ export interface Session7 {
   workspace_id: Id;
   host_id: Id;
   backend: string;
+  /**
+   * The model the session started with, an id from backend.list.
+   */
+  model: string;
+  /**
+   * The effort the session started with, an id from backend.list.
+   */
+  effort: string;
+  /**
+   * The permission mode the session started with, an id from backend.list.
+   */
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -885,6 +1039,18 @@ export interface Session8 {
   workspace_id: Id;
   host_id: Id;
   backend: string;
+  /**
+   * The model the session started with, an id from backend.list.
+   */
+  model: string;
+  /**
+   * The effort the session started with, an id from backend.list.
+   */
+  effort: string;
+  /**
+   * The permission mode the session started with, an id from backend.list.
+   */
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -900,6 +1066,18 @@ export interface Session9 {
   workspace_id: Id;
   host_id: Id;
   backend: string;
+  /**
+   * The model the session started with, an id from backend.list.
+   */
+  model: string;
+  /**
+   * The effort the session started with, an id from backend.list.
+   */
+  effort: string;
+  /**
+   * The permission mode the session started with, an id from backend.list.
+   */
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
@@ -915,6 +1093,18 @@ export interface Session10 {
   workspace_id: Id;
   host_id: Id;
   backend: string;
+  /**
+   * The model the session started with, an id from backend.list.
+   */
+  model: string;
+  /**
+   * The effort the session started with, an id from backend.list.
+   */
+  effort: string;
+  /**
+   * The permission mode the session started with, an id from backend.list.
+   */
+  permission_mode: string;
   mode?: string;
   title?: string;
   state: AgentEvents.SessionState["state"];
