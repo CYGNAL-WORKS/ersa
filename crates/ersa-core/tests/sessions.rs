@@ -12,7 +12,7 @@ use std::sync::atomic::Ordering;
 use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Records, Stats};
-use support::{Client, TestCore, kind, start_with_adapters, tempdir, workspace};
+use support::{Client, TestCore, app_log_facts, kind, start_with_adapters, tempdir, workspace};
 
 async fn start_fake(adapter: FakeAdapter) -> (TestCore, Arc<Stats>) {
     let stats = Arc::clone(&adapter.stats);
@@ -349,18 +349,12 @@ async fn the_raw_log_holds_every_line_exactly_as_it_crossed() {
     );
     // Nothing but what crossed: Core's lifecycle facts are in the app log.
     assert_eq!(lines.len(), 5);
-    let facts: Vec<String> = ersa_core::app_log::read_entries(&core.data_dir())
-        .unwrap()
-        .into_iter()
-        .filter(|e| e.session_id == id)
-        .map(|e| {
-            serde_json::to_value(&e.fact).unwrap()["type"]
-                .as_str()
-                .unwrap()
-                .to_string()
-        })
-        .collect();
-    assert_eq!(facts, ["process_started", "process_exited"]);
+    app_log_facts(
+        &core.data_dir(),
+        &id,
+        &["process_started", "process_exited"],
+    )
+    .await;
     let indices: Vec<u64> = log.iter().map(|e| e["index"].as_u64().unwrap()).collect();
     assert_eq!(indices, (0..log.len() as u64).collect::<Vec<_>>());
 
@@ -882,18 +876,12 @@ async fn a_session_left_running_by_a_core_that_died_is_ended_on_restart() {
     let log = client.result("session.raw_log", json!({ "id": id })).await;
     assert_eq!(log, json!([]));
     // And the app log says what happened.
-    let facts: Vec<String> = ersa_core::app_log::read_entries(&core.data_dir())
-        .unwrap()
-        .into_iter()
-        .filter(|e| e.session_id == id)
-        .map(|e| {
-            serde_json::to_value(&e.fact).unwrap()["type"]
-                .as_str()
-                .unwrap()
-                .to_string()
-        })
-        .collect();
-    assert_eq!(facts, ["process_started", "core_restarted"]);
+    app_log_facts(
+        &core.data_dir(),
+        &id,
+        &["process_started", "core_restarted"],
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

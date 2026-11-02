@@ -171,6 +171,12 @@ const answered: Event[] = [
   },
   { type: "session.state", state: "idle" },
 ];
+// A second turn after the first, so the gap between turns is seen.
+const twoTurns: Event[] = [
+  ...answered,
+  { type: "user.message", origin: "human", text: "Now delete probe.txt." },
+  { type: "assistant.text", block_id: "m3/0", text: "Deleted. probe.txt no longer exists.", final: true },
+];
 const streaming: Event[] = [
   { type: "session.state", state: "running" },
   { type: "user.message", origin: "human", text: "Say ready." },
@@ -208,6 +214,7 @@ const transcriptStates: [string, SessionView][] = [
   ["Permission while Core is away", sessionView(asked, { stream: { state: "offline" } })],
   ["Hidden characters", sessionView(hiding)],
   ["Answered", sessionView(answered)],
+  ["Two turns", sessionView(twoTurns)],
   ["Failed", sessionView(failing)],
   ["Not receiving events", sessionView([], { stream: { state: "failed", message: "Core closed the connection" } })],
 ];
@@ -548,12 +555,19 @@ const entries: Entry[] = [
   },
 ];
 
-export function Gallery() {
+// Narrows the gallery to one component and/or one theme. The screenshot tests
+// photograph each component on its own page, so a change in one component's
+// height cannot move another component's section and change its pixels.
+export type GalleryFilter = { component?: string | null; theme?: string | null };
+
+export function Gallery({ only = {} }: { only?: GalleryFilter }) {
+  const themes = (["light", "dark"] as const).filter((theme) => !only.theme || theme === only.theme);
+  const shown = entries.filter((entry) => !only.component || entry.name === only.component);
   return (
     <div className="gallery">
-      {(["light", "dark"] as const).map((theme) => (
+      {themes.map((theme) => (
         <div key={theme} className="gallery-theme" data-theme={theme}>
-          {entries.map((entry) => (
+          {shown.map((entry) => (
             <section key={entry.name} className="gallery-entry" data-component={entry.name}>
               <div className="gallery-heading">
                 <h2 className="gallery-name">{entry.name}</h2>
