@@ -1,7 +1,20 @@
 import { expect, test } from "@playwright/test";
 
 // Every component section in the gallery, photographed in both themes.
-const components = ["CoreStatus", "QuitQuestion", "ProjectList", "AddProject", "SessionList", "Transcript", "ErrorBoundary", "Composer", "Button"];
+const components = [
+  "CoreStatus",
+  "QuitQuestion",
+  "ProjectList",
+  "AddProject",
+  "SessionList",
+  "Transcript",
+  "ErrorBoundary",
+  "NewSessionScreen",
+  "Chip",
+  "ContextRing",
+  "Composer",
+  "Button",
+];
 
 for (const theme of ["light", "dark"]) {
   for (const component of components) {
@@ -52,4 +65,63 @@ test("a focused input's edge is the accent, in both themes", async ({ page }) =>
       expect(edge, `${input} in ${theme}`).toBe(accent);
     }
   }
+});
+
+// The session controls from the keyboard (FLOW-NEW-SESSION-R01): every chip on the way from the composer, each
+// opening its choices, Escape closing them with focus back on the chip, and a choice taking effect.
+test("every session control is reachable and works from the keyboard", async ({ page }) => {
+  await page.goto("/gallery.html");
+  const screen = page
+    .locator('[data-theme="light"] [data-component="NewSessionScreen"] figure')
+    .filter({ hasText: "Ready, at the defaults" });
+  const chips = screen.locator(".chip");
+  const names = await chips.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
+  expect(names.length).toBe(6);
+
+  // Tab from the composer reaches each chip in turn.
+  await screen.locator("textarea").focus();
+  const reached: (string | null)[] = [];
+  for (let i = 0; i < names.length; i++) {
+    await page.keyboard.press("Tab");
+    reached.push(await page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? null));
+  }
+  expect(reached).toEqual(names);
+
+  for (const name of names) {
+    const chip = screen.getByRole("button", { name: name ?? "" });
+    await chip.focus();
+    await page.keyboard.press("Enter");
+    const list = screen.getByRole("listbox");
+    await expect(list).toBeVisible();
+    // Focus starts on the chosen option.
+    await expect(list.locator('[aria-selected="true"]')).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(list).toHaveCount(0);
+    await expect(chip).toBeFocused();
+    await expect(chip).toHaveAttribute("aria-label", name ?? "");
+  }
+
+  // A choice from the keyboard changes the value and leaves focus on the chip.
+  const workspace = screen.getByRole("button", { name: "Workspace: New workspace" });
+  await workspace.focus();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  const root = screen.getByRole("button", { name: "Workspace: Root workspace" });
+  await expect(root).toBeFocused();
+});
+
+// verifies: FLOW-NEW-SESSION-R10
+test("with no project, the new-session screen asks whether the user trusts a folder before adding it", async ({ page }) => {
+  await page.goto("/gallery.html");
+  const screen = page
+    .locator('[data-theme="light"] [data-component="NewSessionScreen"] figure')
+    .filter({ has: page.locator("figcaption", { hasText: /^No project$/ }) });
+  const folder = screen.getByRole("textbox", { name: "Project folder" });
+  await folder.fill("/home/me/clones/stranger");
+  await folder.press("Enter");
+  const question = screen.getByRole("region", { name: "Trust stranger?" });
+  await expect(question).toBeVisible();
+  await expect(question.getByRole("button", { name: "Add, trusted" })).toBeVisible();
+  await expect(question.getByRole("button", { name: "Add, not trusted" })).toBeVisible();
 });

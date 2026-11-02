@@ -71,6 +71,7 @@ async fn a_tiny_prompt_with_a_permission_round_trip_against_the_real_cli() {
         permission_mode: "default".into(),
         model: Some(model),
         project_trusted: false,
+        project_path: String::new(),
         extra: json!({ "claude_path": claude_path() }),
     };
 
@@ -209,6 +210,7 @@ async fn workspace_configuration_loaded(
         permission_mode: "default".into(),
         model: None,
         project_trusted: trusted,
+        project_path: String::new(),
         extra: json!({ "claude_path": claude_path() }),
     };
     let sink = Arc::new(RecordingSink::new());
@@ -348,4 +350,130 @@ async fn only_a_trusted_projects_workspace_configuration_loads_in_the_real_cli()
     );
 
     let _ = fs::remove_dir_all(&dir);
+}
+
+/// Starts a session in `cwd` under `config_dir` and stops it at once: no
+/// message, so no model call. Returns the CLI's `initialize` answer and what
+/// it wrote to stderr, where it warns of always-allow rules it ignores.
+async fn start_and_stop(
+    config_dir: &std::path::Path,
+    cwd: &std::path::Path,
+    trusted: bool,
+    project_path: &std::path::Path,
+) -> (Value, Vec<String>) {
+    let config = SessionConfig {
+        cwd: cwd.to_string_lossy().into_owned(),
+        permission_mode: "default".into(),
+        model: None,
+        project_trusted: trusted,
+        project_path: project_path.to_string_lossy().into_owned(),
+        extra: json!({ "claude_path": claude_path() }),
+    };
+    let sink = Arc::new(RecordingSink::new());
+    let session = ClaudeAdapter::new()
+        .start(
+            Arc::new(ScratchConfig(config_dir.to_path_buf())),
+            config,
+            sink.clone(),
+        )
+        .await
+        .expect("start: is the CLI installed?");
+    session.stop().await.expect("stop");
+    sink.wait_for_exit(Duration::from_secs(10)).await;
+    let lines = sink.lines();
+    let sent: Value = serde_json::from_str(&lines[0].line).unwrap();
+    assert_eq!(
+        sent["request"].get("workspaceTrust").is_some(),
+        trusted,
+        "an attestation goes with a trusted project's session only: {sent}"
+    );
+    let answer: Value = serde_json::from_str(&lines[1].line).unwrap();
+    (answer["response"]["response"].clone(), sink.stderr())
+}
+
+/// Every folder the scratch configuration records as trusted.
+fn trusted_in(config_dir: &std::path::Path) -> Vec<String> {
+    let Ok(text) = fs::read_to_string(config_dir.join(".claude.json")) else {
+        return Vec::new();
+    };
+    let config: Value = serde_json::from_str(&text).unwrap();
+    config["projects"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter(|(_, project)| project["hasTrustDialogAccepted"] == true)
+        .map(|(path, _)| path.clone())
+        .collect()
+}
+
+/// Whether the CLI warned that it ignored the workspace's always-allow rule.
+/// The CLI's own words, matched only here, to observe it.
+fn ignored_allow_rules(stderr: &[String]) -> bool {
+    stderr.iter().any(|line| line.contains("permissions.allow"))
+}
+
+/// Against a scratch configuration and a scratch repository whose settings
+/// hold an always-allow rule, with sessions in a linked worktree as Ersa runs
+/// them: an untrusted project's session attests nothing and leaves no trust
+/// record; an attestation for a folder outside the repository is refused; one
+/// for the project's root is recorded, for the worktree too, so the next
+/// session applies the rule without the CLI's warning. Whether the rule
+/// applies already in the attesting session needs a tool call, so a model
+/// call, and is not checked here.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R24
+#[tokio::test]
+#[ignore = "drives the installed Claude Code CLI; run by hand"]
+async fn a_trusted_projects_worktrees_are_trusted_through_the_clis_own_record() {
+    // Removed when dropped, so a failed assertion leaves nothing behind.
+    let scratch = tempfile::tempdir().unwrap();
+    let dir = scratch.path();
+    let (config_dir, repo, worktree, elsewhere) = (
+        dir.join("config"),
+        dir.join("repo"),
+        dir.join("wt"),
+        dir.join("elsewhere"),
+    );
+    for folder in [&config_dir, &repo.join(".claude"), &elsewhere] {
+        fs::create_dir_all(folder).unwrap();
+    }
+    fs::write(
+        repo.join(".claude/settings.json"),
+        json!({ "permissions": { "allow": ["Bash(ls)"] } }).to_string(),
+    )
+    .unwrap();
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Ersa test",
+                "-c",
+                "user.email=user@example.com",
+            ])
+            .args(args)
+            .current_dir(&repo)
+            .status()
+            .expect("git");
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "--quiet"]);
+    git(&["add", "-A"]);
+    git(&["commit", "--quiet", "-m", "scratch"]);
+    git(&["worktree", "add", "--quiet", &worktree.to_string_lossy()]);
+
+    let (answer, _) = start_and_stop(&config_dir, &worktree, false, &repo).await;
+    assert_eq!(answer.get("workspace_trust_recorded"), None, "{answer}");
+    assert_eq!(trusted_in(&config_dir), Vec::<String>::new());
+
+    let (answer, stderr) = start_and_stop(&config_dir, &worktree, true, &elsewhere).await;
+    assert_eq!(answer["workspace_trust_recorded"], false, "{answer}");
+    assert_eq!(trusted_in(&config_dir), Vec::<String>::new());
+    // The check below means something only if the CLI does warn.
+    assert!(ignored_allow_rules(&stderr), "{stderr:?}");
+
+    let (answer, _) = start_and_stop(&config_dir, &worktree, true, &repo).await;
+    assert_eq!(answer["workspace_trust_recorded"], true, "{answer}");
+    assert_eq!(trusted_in(&config_dir).len(), 1);
+
+    let (_, stderr) = start_and_stop(&config_dir, &worktree, true, &repo).await;
+    assert!(!ignored_allow_rules(&stderr), "{stderr:?}");
 }
