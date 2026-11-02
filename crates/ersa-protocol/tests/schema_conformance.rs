@@ -45,6 +45,7 @@ fn examples() -> Vec<Event> {
             message:
                 "Claude Code 2.2.0 is newer than the newest version Ersa was tested with (2.1.302)."
                     .into(),
+            pid: None,
         }),
         Event::TurnStarted(TurnStarted {
             turn: 1,
@@ -285,6 +286,40 @@ fn minimal_examples_validate_with_every_optional_field_absent() {
         );
         validate_event(&payload).unwrap_or_else(|e| panic!("{e}\n{payload}"));
     }
+}
+
+// verifies: PROTO-AGENT-EVENTS-R09
+#[test]
+fn the_open_elsewhere_notices_validate_with_and_without_a_pid() {
+    let notices = [
+        SessionNotice {
+            level: NoticeLevel::Warning,
+            code: NoticeCode::SessionOpenElsewhere,
+            message: "Another process (pid 4242) has this session open.".into(),
+            pid: Some(4242),
+        },
+        SessionNotice {
+            level: NoticeLevel::Warning,
+            code: NoticeCode::SessionOpenCheckFailed,
+            message: "Ersa could not tell whether another process has this session open.".into(),
+            pid: None,
+        },
+    ];
+    let wire = notices.map(|notice| {
+        let payload = serde_json::to_value(Event::SessionNotice(notice)).expect("serialize");
+        validate_event(&payload).unwrap_or_else(|e| panic!("{e}
+{payload}"));
+        payload
+    });
+    assert_eq!(wire[0]["code"], "session_open_elsewhere");
+    assert_eq!(wire[0]["pid"], 4242);
+    assert_eq!(wire[1]["code"], "session_open_check_failed");
+    assert!(wire[1].get("pid").is_none(), "{}", wire[1]);
+
+    // An unknown code stays outside the schema.
+    let mut unknown = wire[1].clone();
+    unknown["code"] = json!("session_open_somewhere");
+    assert!(validate_event(&unknown).is_err());
 }
 
 #[test]
