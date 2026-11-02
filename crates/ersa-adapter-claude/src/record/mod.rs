@@ -204,10 +204,11 @@ pub fn record_version(
 /// The entry goes out in a single write. A record whose last line has no
 /// newline is being written by a CLI right now (the CLI ends every line it
 /// writes), or was left so by one that crashed: Ersa does not guess which,
-/// and refuses with `ResourceBusy`, so the rename can be tried again. A
-/// write the disk takes only part of is taken back, so no torn entry is left
-/// for the CLI's next line to be glued onto. A session with no record is a
-/// `NotFound` error, and nothing is created.
+/// and refuses with `ResourceBusy`. A write the disk takes only part of is
+/// ended with a newline, never cut back (cutting could take a CLI's line with
+/// it), so the CLI's next line is not glued onto it; the torn part reads as
+/// an unreadable line. A session with no record is a `NotFound` error, and
+/// nothing is created.
 pub fn append_title(
     claude_home: &Path,
     cwd: &str,
@@ -240,21 +241,18 @@ trait AppendTarget {
     fn last_byte(&mut self) -> io::Result<Option<u8>>;
     /// One write at the end of the file; how much of `bytes` it took.
     fn append(&mut self, bytes: &[u8]) -> io::Result<usize>;
-    /// Cuts the file back to `len`.
-    fn truncate(&mut self, len: u64) -> io::Result<()>;
 }
 
 /// Appends `line` (ending in a newline) to `target` as one write, refusing a
-/// target whose last line is unterminated, and taking a partial write back
-/// when nothing else has appended since.
+/// target whose last line is unterminated, and ending a partial write.
 fn append_line(target: &mut impl AppendTarget, line: &[u8]) -> io::Result<()> {
     if target.last_byte()?.is_some_and(|last| last != b'\n') {
         return Err(io::Error::new(
             io::ErrorKind::ResourceBusy,
-            "the session record is being written; try the rename again",
+            "Claude Code is still writing this session's record, or did not finish it; \
+             resuming the session once in Claude Code completes it, and the rename can be made then",
         ));
     }
-    let before = target.len()?;
     // One write, not a loop: a loop that fails halfway leaves its first part
     // behind with no way to tell it from a whole line.
     let written = match target.append(line) {
@@ -263,11 +261,10 @@ fn append_line(target: &mut impl AppendTarget, line: &[u8]) -> io::Result<()> {
         Err(e) if e.kind() == io::ErrorKind::Interrupted => 0,
         Err(e) => return Err(e),
     };
-    // Taken back only when the file holds exactly what was there plus this
-    // part: a CLI that appended meanwhile wrote after it, and cutting would
-    // lose its line.
-    if written > 0 && target.len()? == before + written as u64 {
-        target.truncate(before)?;
+    // Best effort: end the torn part, so it is a line of its own that
+    // readers skip as unreadable, and the CLI's next line stays whole.
+    if written > 0 {
+        let _ = target.append(b"\n");
     }
     Err(io::Error::new(
         io::ErrorKind::WriteZero,
@@ -280,7 +277,6 @@ fn append_line(target: &mut impl AppendTarget, line: &[u8]) -> io::Result<()> {
 
 /// A session record opened to append to.
 struct RecordFile {
-    path: PathBuf,
     file: fs::File,
 }
 
@@ -289,7 +285,7 @@ impl RecordFile {
         // Opened for reading too, to look at the last byte; appends always
         // go to the end, wherever the cursor is.
         let file = fs::OpenOptions::new().read(true).append(true).open(&path)?;
-        Ok(RecordFile { path, file })
+        Ok(RecordFile { file })
     }
 }
 
@@ -313,15 +309,6 @@ impl AppendTarget for RecordFile {
     fn append(&mut self, bytes: &[u8]) -> io::Result<usize> {
         use std::io::Write;
         self.file.write(bytes)
-    }
-
-    fn truncate(&mut self, len: u64) -> io::Result<()> {
-        // An append-only handle may not resize the file on every platform, so
-        // a writing one is opened for it.
-        fs::OpenOptions::new()
-            .write(true)
-            .open(&self.path)?
-            .set_len(len)
     }
 }
 
@@ -680,11 +667,10 @@ mod tests {
             let taken = self.take.min(bytes.len());
             self.bytes.extend_from_slice(&bytes[..taken]);
             self.bytes.extend_from_slice(self.meanwhile);
+            // Only the first write is short.
+            self.take = usize::MAX;
+            self.meanwhile = b"";
             Ok(taken)
-        }
-        fn truncate(&mut self, len: u64) -> io::Result<()> {
-            self.bytes.truncate(len as usize);
-            Ok(())
         }
     }
 
@@ -692,7 +678,7 @@ mod tests {
 
     // verifies: PROTO-CLAUDE-CODE-STREAM-R22
     #[test]
-    fn a_partial_write_is_taken_back_and_reported() {
+    fn a_partial_write_is_ended_never_cut_and_reported() {
         let mut file = ShortFile {
             bytes: b"{}\n".to_vec(),
             take: 7,
@@ -700,20 +686,15 @@ mod tests {
         };
         let error = append_line(&mut file, LINE).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::WriteZero);
-        assert_eq!(file.bytes, b"{}\n");
-    }
-
-    #[test]
-    fn a_partial_write_is_kept_when_another_writer_appended_after_it() {
+        assert_eq!(file.bytes, b"{}\n{\"type\"\n");
+        // A CLI line that landed after the torn part is kept whole.
         let mut file = ShortFile {
             bytes: b"{}\n".to_vec(),
             take: 7,
             meanwhile: b"{\"cli\":1}\n",
         };
-        let error = append_line(&mut file, LINE).unwrap_err();
-        assert_eq!(error.kind(), io::ErrorKind::WriteZero);
-        // Cutting would lose the other writer's line.
-        assert_eq!(file.bytes, b"{}\n{\"type\"{\"cli\":1}\n");
+        append_line(&mut file, LINE).unwrap_err();
+        assert_eq!(file.bytes, b"{}\n{\"type\"{\"cli\":1}\n\n");
     }
 
     // verifies: PROTO-CLAUDE-CODE-STREAM-R22
