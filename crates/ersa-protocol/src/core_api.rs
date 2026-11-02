@@ -25,7 +25,7 @@ use crate::events::{Answer, Envelope, LifecycleState, PermissionBehavior};
 /// The Core API version this build speaks. Negotiated in `core.hello`; bumped
 /// only for removals or changes of meaning, never for additions. The schema
 /// file records the same number as `x-api-version`; a test checks they agree.
-pub const API_VERSION: u32 = 2;
+pub const API_VERSION: u32 = 3;
 
 /// Every Core API version this build can speak, for the handshake.
 pub const SUPPORTED_API_VERSIONS: &[u32] = &[API_VERSION];
@@ -280,16 +280,45 @@ pub struct BackendListParams {
     pub host_id: String,
 }
 
-/// One backend on a host, with the range of its versions Ersa was tested against.
+/// One backend on a host, with the range of its versions Ersa was tested
+/// against and the choices a new session of it can start with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BackendInfo {
     pub name: String,
+    /// The backend's own display name, such as `Claude Code`.
+    pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     pub status: BackendState,
-    pub min_tested_version: String,
-    pub max_tested_version: String,
+    pub tested: TestedRange,
+    pub models: Vec<Choice>,
+    pub efforts: Vec<Choice>,
+    pub permission_modes: Vec<Choice>,
+}
+
+/// The oldest and newest backend versions an adapter was tested with.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TestedRange {
+    pub min: String,
+    pub max: String,
+}
+
+/// One value a session can start with: a model, an effort or a permission
+/// mode. The choices are the adapter's knowledge of its tested versions, not
+/// detected on the host.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Choice {
+    /// What `session.create` takes and `session.list` reports, in the
+    /// backend's own words (for Claude Code: `opus`, `high`, `acceptEdits`).
+    pub id: String,
+    /// What the Interface shows.
+    pub label: String,
+    /// Whether a new session starts with this one when none is named. One
+    /// per list.
+    pub default: bool,
 }
 
 /// One entry of `mode.list` (reserved for milestone M3).
@@ -349,17 +378,30 @@ pub struct ProjectSetTrustParams {
     pub trusted: bool,
 }
 
-/// An isolated checkout belonging to a project.
+/// A folder of a project that sessions run in: the project's own folder
+/// (its root workspace), or an isolated checkout of it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Workspace {
     pub id: String,
     pub project_id: String,
+    pub kind: WorkspaceKind,
     /// The workspace's root, as a path on the project's host.
     pub path: String,
-    /// The branch (git) the workspace has checked out.
+    /// The branch (git) an isolated workspace has checked out; empty for the
+    /// root workspace, whose checkout is the user's to change.
     pub vcs_ref: String,
     pub state: WorkspaceState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceKind {
+    /// The project's own folder. Every project has exactly one, from
+    /// `project.add`, and it is never removed on its own.
+    Root,
+    /// A checkout made for sessions (a git worktree for a git project).
+    Isolated,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -412,6 +454,17 @@ pub struct Session {
     pub workspace_id: String,
     pub host_id: String,
     pub backend: String,
+    /// The model and effort `session.create` was given, ids from
+    /// `backend.list`; absent when left out, which means the backend's own
+    /// default; both absent for a replayed session and one created before
+    /// Core recorded them. The permission mode the session started with: the
+    /// one given, else the backend's default, which is always stated to it
+    /// (PROTO-CORE-API-R16).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    pub permission_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -476,6 +529,13 @@ pub enum PendingKind {
 pub struct SessionCreateParams {
     pub workspace_id: String,
     pub backend: String,
+    /// Ids from `backend.list`; left to the backend when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
 }

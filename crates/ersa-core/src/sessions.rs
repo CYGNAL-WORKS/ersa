@@ -44,8 +44,8 @@ use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, Direction, PermissionDecision, ProcessExit,
-    RawLine, RecordEvent, RecordSummary, SessionConfig, Transport,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction,
+    PermissionDecision, ProcessExit, RawLine, RecordEvent, RecordSummary, SessionConfig, Transport,
 };
 use ersa_protocol::core_api::rpc::Notification;
 use ersa_protocol::core_api::{Session, SessionEventParams, SessionTileParams, Tile};
@@ -537,6 +537,9 @@ impl Handle {
             workspace_id: row.workspace_id,
             host_id: row.host_id,
             backend: row.backend,
+            model: row.model,
+            effort: row.effort,
+            permission_mode: row.permission_mode.unwrap_or_default(),
             mode: row.mode,
             title: presented.title,
             state,
@@ -584,7 +587,15 @@ impl SessionManager {
         // Facts of sessions removed in an earlier run are not carried on.
         self.app_log
             .retain_only(rows.iter().map(|row| row.id.clone()).collect());
-        for row in rows {
+        for mut row in rows {
+            // Sessions from before Core recorded the permission mode were
+            // all started stating their backend's default.
+            if row.permission_mode.is_none()
+                && let Some(adapter) = self.adapters.get(&row.backend)
+            {
+                let default = BackendChoices::default_of(&adapter.choices().permission_modes);
+                row.permission_mode = (!default.is_empty()).then_some(default);
+            }
             let known = facts.get(&row.id);
             let started = known.map_or(UNKNOWN_TIME.to_string(), |f| f.first.ts.clone());
             let handle = Arc::new(Handle::new(row, started));
@@ -727,6 +738,7 @@ impl SessionManager {
         if self.closing.load(Ordering::SeqCst) {
             return Err(shutting_down());
         }
+        // Only what was named is stored and reported (PROTO-CORE-API-R16).
         self.store.insert_session(row.clone()).await?;
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&handle.presented).title = title;
@@ -2205,6 +2217,9 @@ mod tests {
             backend_session_id: Some("b-gated".into()),
             mode: None,
             cwd: "C:/work".into(),
+            model: None,
+            effort: None,
+            permission_mode: None,
         };
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&manager.sessions).insert(handle.id.clone(), handle);

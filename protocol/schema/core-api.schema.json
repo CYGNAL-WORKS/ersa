@@ -3,7 +3,7 @@
   "$id": "https://github.com/KPandaK/ersa/protocol/schema/core-api.schema.json",
   "title": "Ersa Core API",
   "description": "The Core request/response API (PROTO-CORE-API): newline-delimited JSON-RPC 2.0 between the Interface and Core. Each method has a `<method>.params` and a `<method>.result` definition; each notification a `<method>.notification` definition. Objects are closed (additionalProperties: false) except settings and the shapes reserved for later milestones. Agent events are not copied here: session.event carries an envelope from agent-events.schema.json by reference.",
-  "x-api-version": 2,
+  "x-api-version": 3,
   "$ref": "#/$defs/message",
   "$defs": {
     "message": {
@@ -1288,13 +1288,20 @@
       "additionalProperties": false,
       "required": [
         "name",
+        "label",
         "status",
-        "min_tested_version",
-        "max_tested_version"
+        "tested",
+        "models",
+        "efforts",
+        "permission_modes"
       ],
       "properties": {
         "name": {
           "type": "string"
+        },
+        "label": {
+          "type": "string",
+          "description": "The backend's own display name, such as Claude Code."
         },
         "version": {
           "type": "string",
@@ -1307,11 +1314,67 @@
             "error"
           ]
         },
-        "min_tested_version": {
-          "type": "string"
+        "tested": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "min",
+            "max"
+          ],
+          "properties": {
+            "min": {
+              "type": "string"
+            },
+            "max": {
+              "type": "string"
+            }
+          },
+          "description": "The oldest and newest backend versions the adapter was tested with."
         },
-        "max_tested_version": {
-          "type": "string"
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/choice"
+          },
+          "description": "The models a session can start with."
+        },
+        "efforts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/choice"
+          },
+          "description": "The efforts a session can start with."
+        },
+        "permission_modes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/choice"
+          },
+          "description": "The permission modes a session can start with."
+        }
+      }
+    },
+    "choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "default"
+      ],
+      "description": "One value a session can start with. The choices are the adapter's knowledge of its tested versions, not detected on the host.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "What session.create takes and session.list reports."
+        },
+        "label": {
+          "type": "string",
+          "description": "What the Interface shows."
+        },
+        "default": {
+          "type": "boolean",
+          "description": "Whether a new session starts with this one when none is named."
         }
       }
     },
@@ -1359,6 +1422,7 @@
       "required": [
         "id",
         "project_id",
+        "kind",
         "path",
         "vcs_ref",
         "state"
@@ -1370,13 +1434,20 @@
         "project_id": {
           "$ref": "#/$defs/id"
         },
+        "kind": {
+          "enum": [
+            "root",
+            "isolated"
+          ],
+          "description": "root: the project's own folder, one per project, listed first. isolated: a checkout made for sessions."
+        },
         "path": {
           "type": "string",
           "description": "The workspace's root, as a path on the project's host."
         },
         "vcs_ref": {
           "type": "string",
-          "description": "The branch (git) the workspace has checked out."
+          "description": "The branch (git) an isolated workspace has checked out; empty for the root workspace."
         },
         "state": {
           "enum": [
@@ -1396,6 +1467,7 @@
         "workspace_id",
         "host_id",
         "backend",
+        "permission_mode",
         "state",
         "created_at",
         "tile"
@@ -1412,6 +1484,18 @@
         },
         "backend": {
           "type": "string"
+        },
+        "model": {
+          "type": "string",
+          "description": "The model session.create was given, an id from backend.list. Absent when left out: the backend's own default."
+        },
+        "effort": {
+          "type": "string",
+          "description": "The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default."
+        },
+        "permission_mode": {
+          "type": "string",
+          "description": "The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it."
         },
         "mode": {
           "type": "string"
@@ -1851,6 +1935,18 @@
         },
         "backend": {
           "type": "string"
+        },
+        "model": {
+          "type": "string",
+          "description": "An id from backend.list; left to the backend when absent."
+        },
+        "effort": {
+          "type": "string",
+          "description": "An id from backend.list; left to the backend when absent."
+        },
+        "permission_mode": {
+          "type": "string",
+          "description": "An id from backend.list; left to the backend when absent."
         },
         "mode": {
           "type": "string"

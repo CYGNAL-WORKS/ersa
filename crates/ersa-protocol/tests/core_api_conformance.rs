@@ -42,6 +42,7 @@ fn workspace() -> Workspace {
     Workspace {
         id: "w-5e6f7a8b".into(),
         project_id: "p-1a2b3c4d".into(),
+        kind: WorkspaceKind::Isolated,
         path: "C:/Users/me/AppData/Local/Ersa/worktrees/ersa/w-5e6f7a8b".into(),
         vcs_ref: "ersa/w-5e6f7a8b".into(),
         state: WorkspaceState::Ready,
@@ -88,6 +89,9 @@ fn session() -> Session {
         workspace_id: "w-5e6f7a8b".into(),
         host_id: "local".into(),
         backend: "claude-code".into(),
+        model: Some("opus".into()),
+        effort: Some("high".into()),
+        permission_mode: "acceptEdits".into(),
         mode: Some("default".into()),
         title: Some("Rename the module".into()),
         state: ersa_protocol::events::LifecycleState::WaitingUser,
@@ -193,10 +197,28 @@ fn result_examples() -> Vec<(Method, Value)> {
             Method::BackendList,
             to_value(&vec![BackendInfo {
                 name: "claude-code".into(),
+                label: "Claude Code".into(),
                 version: Some("2.1.302".into()),
                 status: BackendState::Available,
-                min_tested_version: "2.1.302".into(),
-                max_tested_version: "2.1.302".into(),
+                tested: TestedRange {
+                    min: "2.1.302".into(),
+                    max: "2.1.316".into(),
+                },
+                models: vec![Choice {
+                    id: "opus".into(),
+                    label: "Opus".into(),
+                    default: true,
+                }],
+                efforts: vec![Choice {
+                    id: "medium".into(),
+                    label: "Medium".into(),
+                    default: true,
+                }],
+                permission_modes: vec![Choice {
+                    id: "default".into(),
+                    label: "Ask before acting".into(),
+                    default: true,
+                }],
             }]),
         ),
         (
@@ -221,7 +243,7 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&HelloParams {
                 client: "ersa-shell".into(),
                 client_version: "0.1.0".into(),
-                api_versions: vec![2],
+                api_versions: vec![3],
             }),
         ),
         (Method::CoreStatus, to_value(&Empty {})),
@@ -270,6 +292,9 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&SessionCreateParams {
                 workspace_id: "w-1".into(),
                 backend: "claude-code".into(),
+                model: Some("opus".into()),
+                effort: Some("high".into()),
+                permission_mode: None,
                 mode: None,
             }),
         ),

@@ -5,6 +5,7 @@ use std::io;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::{Event, PermissionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -18,6 +19,12 @@ pub trait Adapter: Send + Sync {
     /// The backend's name, as used in `source.backend` and the Core API, such
     /// as `"claude-code"`.
     fn backend(&self) -> &str;
+
+    /// The backend's own display name, as `backend.list` reports it, such
+    /// as `"Claude Code"`. The default is [`Adapter::backend`].
+    fn label(&self) -> &str {
+        self.backend()
+    }
 
     /// Starts a backend session on `transport` and returns once the backend is
     /// ready for its first user message.
@@ -44,6 +51,14 @@ pub trait Adapter: Send + Sync {
     /// say.
     fn tested_versions(&self) -> Option<(&'static str, &'static str)> {
         None
+    }
+
+    /// The models, efforts and permission modes a session of this backend
+    /// can start with, as `backend.list` reports them: the adapter's
+    /// knowledge of its tested versions, not detected on the host. None, the
+    /// default, for a backend that offers no choice.
+    fn choices(&self) -> BackendChoices {
+        BackendChoices::default()
     }
 
     /// A fresh projector for one session's live stream. Core makes one each
@@ -116,6 +131,26 @@ pub trait Adapter: Send + Sync {
             "the {} backend cannot rename a session",
             self.backend()
         )))
+    }
+}
+
+/// What a session of a backend can start with. Each list marks the one a
+/// new session starts with when none is named.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BackendChoices {
+    pub models: Vec<Choice>,
+    pub efforts: Vec<Choice>,
+    pub permission_modes: Vec<Choice>,
+}
+
+impl BackendChoices {
+    /// The id the list marks as its default; empty when it marks none, as
+    /// for a backend that offers no choice.
+    pub fn default_of(list: &[Choice]) -> String {
+        list.iter()
+            .find(|c| c.default)
+            .map(|c| c.id.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -269,6 +304,9 @@ pub struct SessionConfig {
     pub permission_mode: String,
     /// The model to use; the backend's default when `None`.
     pub model: Option<String>,
+    /// The effort to spend per turn, in the backend's own levels; the
+    /// backend's default when `None`.
+    pub effort: Option<String>,
     /// Whether the user trusts the session's project, so that the
     /// configuration in its workspace (settings, hooks, MCP servers) may load.
     /// False, the default, loads the user's own configuration only (ADR 0018).

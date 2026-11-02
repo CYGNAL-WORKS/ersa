@@ -9,8 +9,8 @@ use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_adapter::{Adapter, ProcessSpec, Transport};
-use ersa_protocol::core_api::{BackendInfo, BackendState, BackendStatus};
+use ersa_adapter::{Adapter, BackendChoices, ProcessSpec, Transport};
+use ersa_protocol::core_api::{BackendInfo, BackendState, BackendStatus, TestedRange};
 
 use crate::transport::{self, RunError};
 
@@ -43,6 +43,12 @@ pub struct Detected {
     /// The oldest and newest versions its adapter was tested with; empty
     /// when no adapter for it is registered.
     pub tested: (String, String),
+    /// What a session of it can start with, from its adapter; none when no
+    /// adapter for it is registered.
+    pub choices: BackendChoices,
+    /// Its display name, from its adapter; its name when no adapter for it
+    /// is registered.
+    pub label: String,
 }
 
 impl Detected {
@@ -57,10 +63,16 @@ impl Detected {
     pub fn info(&self) -> BackendInfo {
         BackendInfo {
             name: self.backend.name.to_string(),
+            label: self.label.clone(),
             version: self.version.clone(),
             status: self.state,
-            min_tested_version: self.tested.0.clone(),
-            max_tested_version: self.tested.1.clone(),
+            tested: TestedRange {
+                min: self.tested.0.clone(),
+                max: self.tested.1.clone(),
+            },
+            models: self.choices.models.clone(),
+            efforts: self.choices.efforts.clone(),
+            permission_modes: self.choices.permission_modes.clone(),
         }
     }
 }
@@ -87,6 +99,11 @@ pub async fn detect(
         if let Some(adapter) = &adapter {
             adapter.set_environment(&mut spec);
         }
+        let choices = adapter.as_ref().map(|a| a.choices()).unwrap_or_default();
+        let label = adapter
+            .as_ref()
+            .map_or(backend.name, |a| a.label())
+            .to_string();
         let tested = adapter
             .and_then(|a| a.tested_versions())
             .map(|(min, max)| (min.to_string(), max.to_string()))
@@ -107,6 +124,8 @@ pub async fn detect(
             version,
             state,
             tested,
+            choices,
+            label,
         });
     }
     found
@@ -169,18 +188,17 @@ mod tests {
         })
         .await;
         assert_eq!(found[0].version.as_deref(), Some("2.1.316"));
-        // The tested range is the adapter's own.
+        // The tested range and the choices are the adapter's own.
         let info = found[0].info();
         assert_eq!(
-            (
-                info.min_tested_version.as_str(),
-                info.max_tested_version.as_str()
-            ),
+            (info.tested.min.as_str(), info.tested.max.as_str()),
             (
                 ersa_adapter_claude::MIN_TESTED_VERSION,
                 ersa_adapter_claude::MAX_TESTED_VERSION
             )
         );
+        assert_eq!(info.models, claude.choices().models);
+        assert_eq!(info.label, "Claude Code");
 
         let mut session = ProcessSpec::default();
         claude.set_environment(&mut session);

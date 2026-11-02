@@ -4,3 +4,8 @@
 *.png binary
 *.jpg binary
 *.ico binary
+
+# Planning commits on parallel branches add lines to the same places; keep both sides.
+docs/briefs/*.md merge=union
+docs/MANIFEST.md merge=union
+docs/adr/README.md merge=union

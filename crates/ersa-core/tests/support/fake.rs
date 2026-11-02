@@ -22,10 +22,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, Direction, PermissionDecision, ProcessExit,
-    Projected, Projector, RawLine, RecordEvent, RecordSummary, SessionConfig, Transport,
-    async_trait,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction,
+    PermissionDecision, ProcessExit, Projected, Projector, RawLine, RecordEvent, RecordSummary,
+    SessionConfig, Transport, async_trait,
 };
+use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::{
     AssistantText, BackendPassthrough, DecidedBy, Event, LifecycleState, MessageOrigin,
     PermissionBehavior, PermissionDecided, PermissionFlags, PermissionRequested, Question,
@@ -41,6 +42,8 @@ pub const BACKEND: &str = "fake";
 pub struct Stats {
     pub starts: AtomicUsize,
     pub stops: AtomicUsize,
+    /// The configuration of every session started, in order.
+    pub configs: Mutex<Vec<SessionConfig>>,
     /// Renames sent to a running backend, and renames written to a record.
     pub live_renames: AtomicUsize,
     pub record_renames: AtomicUsize,
@@ -170,6 +173,24 @@ impl Adapter for FakeAdapter {
         BACKEND
     }
 
+    /// Two of each, with a default marked in each list as Claude Code's are.
+    fn choices(&self) -> BackendChoices {
+        let list = |ids: [&str; 2], default: &str| -> Vec<Choice> {
+            ids.iter()
+                .map(|&id| Choice {
+                    id: id.into(),
+                    label: id.to_uppercase(),
+                    default: id == default,
+                })
+                .collect()
+        };
+        BackendChoices {
+            models: list(["model-a", "model-b"], "model-a"),
+            efforts: list(["low", "high"], "high"),
+            permission_modes: list(["ask", "auto"], "ask"),
+        }
+    }
+
     async fn start(
         &self,
         _transport: Arc<dyn Transport>,
@@ -177,6 +198,7 @@ impl Adapter for FakeAdapter {
         sink: Arc<dyn AdapterSink>,
     ) -> Result<Box<dyn AdapterSession>, AdapterError> {
         self.stats.starts.fetch_add(1, Ordering::SeqCst);
+        self.stats.configs.lock().unwrap().push(config.clone());
         sink.record(
             Direction::Host,
             json!({ "t": "hello", "cwd": config.cwd }).to_string(),

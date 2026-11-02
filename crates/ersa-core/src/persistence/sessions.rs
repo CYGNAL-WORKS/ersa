@@ -21,13 +21,20 @@ pub struct SessionRow {
     pub backend_session_id: Option<String>,
     /// Ersa's mode for the session (milestone M3).
     pub mode: Option<String>,
+    /// The model and effort the session named and the permission mode it
+    /// started with, ids from `backend.list`. `None` for a model or effort
+    /// left to its backend, and for every session created before Core
+    /// recorded them (PROTO-CORE-API-R16).
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub permission_mode: Option<String>,
     /// The workspace's path on the session's host, where the backend runs:
     /// the directory its record is filed under. Read from the workspace.
     pub cwd: String,
 }
 
-const SESSION_COLUMNS: &str =
-    "s.id, s.workspace_id, s.host_id, s.backend, s.backend_session_id, s.mode, w.path";
+const SESSION_COLUMNS: &str = "s.id, s.workspace_id, s.host_id, s.backend, s.backend_session_id, \
+     s.mode, w.path, s.model, s.effort, s.permission_mode";
 
 impl Store {
     /// Records a new session, but only while its workspace is `ready`, in
@@ -39,8 +46,9 @@ impl Store {
             let inserted = conn
                 .execute(
                     "INSERT INTO sessions
-                     (id, workspace_id, host_id, backend, backend_session_id, mode)
-                 SELECT ?1, ?2, ?3, ?4, ?5, ?6
+                     (id, workspace_id, host_id, backend, backend_session_id, mode,
+                      model, effort, permission_mode)
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
                  WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ?2 AND state = 'ready')",
                     params![
                         session.id,
@@ -49,6 +57,9 @@ impl Store {
                         session.backend,
                         session.backend_session_id,
                         session.mode,
+                        session.model,
+                        session.effort,
+                        session.permission_mode,
                     ],
                 )
                 .map_err(|e| conflict(e, "the workspace changed meanwhile"))?;
@@ -150,5 +161,8 @@ fn session_row(row: &Row) -> rusqlite::Result<SessionRow> {
         backend_session_id: row.get(4)?,
         mode: row.get(5)?,
         cwd: row.get(6)?,
+        model: row.get(7)?,
+        effort: row.get(8)?,
+        permission_mode: row.get(9)?,
     })
 }
