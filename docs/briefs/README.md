@@ -9,11 +9,11 @@ A brief is the source of truth for one capability of Ersa, written from the user
 | product | what Ersa is, for whom, and the principles that resolve trade-offs | `PRD-` | verified by review |
 | flow | what a user does across screens and systems to reach an outcome | `FLOW-` | yes, tested |
 | layout | which elements a screen or region contains and how they relate | `LAY-` | none until after M1 |
-| component | one behaviour-heavy interface piece: purpose, behaviour, accessibility | `CMP-` | none until after M1 |
+| component | one behavior-heavy interface piece: purpose, behavior, accessibility | `CMP-` | none until after M1 |
 | protocol | how two parts of the system talk: messages, schemas, sequencing | `PROTO-` | yes, tested |
 | architecture | how the system is built: parts, boundaries, responsibilities | `ARCH-` | verified by review |
 
-Component briefs exist only for components with non-trivial behaviour (the shelf, the composer, the tile). Appearance, states, variants, and tokens are owned by the component gallery and `docs/design/DESIGN.md`, not by briefs.
+Component briefs exist only for components with non-trivial behavior (the shelf, the composer, the tile). Appearance, states, variants, and tokens are owned by the component gallery and `docs/design/DESIGN.md`, not by briefs.
 
 ## Referencing
 
