@@ -27,6 +27,7 @@ fn config() -> SessionConfig {
         permission_mode: "default".into(),
         model: None,
         project_trusted: false,
+        project_path: String::new(),
         extra: Value::Null,
     }
 }
@@ -307,6 +308,110 @@ async fn a_refused_or_missing_initialize_answer_fails_start() {
         .await;
     assert!(matches!(result, Err(AdapterError::Protocol(ref m)) if m.contains("did not answer")));
     assert_eq!(sink.exit_codes(), [None], "killed");
+}
+
+/// The `initialize` line the stub received from a session of `config`.
+async fn sent_initialize(config: SessionConfig, answer: String) -> Value {
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(expect("initialize", is_initialize))
+        .then_stdout([answer])
+        .hold_open();
+    let sink = Arc::new(RecordingSink::new());
+    let session = adapter()
+        .start(Arc::new(transport.clone()), config, sink.clone())
+        .await
+        .expect("start");
+    session.stop().await.expect("stop");
+    sink.wait_for_exit(WAIT).await;
+    parse(&transport.stdin_lines()[0])
+}
+
+/// `init_answer()` with the CLI's verdict on a trust attestation added.
+fn init_answer_with_trust(recorded: bool) -> String {
+    let mut answer = parse(&init_answer());
+    answer["response"]["response"]["workspace_trust_recorded"] = json!(recorded);
+    answer.to_string()
+}
+
+/// A trusted project's session attests the user's trust for the project's
+/// root, which the CLI records for the whole repository, linked worktrees
+/// included (observed on 2.1.316).
+#[tokio::test]
+async fn a_trusted_projects_initialize_attests_trust_in_the_projects_root() {
+    let mut config = config();
+    config.project_trusted = true;
+    config.project_path = "C:/projects/app".into();
+    let sent = sent_initialize(config, init_answer_with_trust(true)).await;
+    assert_eq!(
+        sent["request"]["workspaceTrust"],
+        json!({ "accepted": true, "directory": "C:/projects/app" })
+    );
+}
+
+/// An untrusted project's paths are never trusted, whatever path is known.
+#[tokio::test]
+async fn an_untrusted_projects_initialize_attests_nothing() {
+    let mut config = config();
+    config.project_path = "C:/projects/app".into();
+    let sent = sent_initialize(config, init_answer()).await;
+    assert!(sent["request"].get("workspaceTrust").is_none(), "{sent}");
+}
+
+/// With no project root known there is nothing the user was asked about.
+#[tokio::test]
+async fn a_trusted_session_without_a_project_root_attests_nothing() {
+    let mut config = config();
+    config.project_trusted = true;
+    let sent = sent_initialize(config, init_answer()).await;
+    assert!(sent["request"].get("workspaceTrust").is_none(), "{sent}");
+}
+
+/// A CLI that declines to record the trust, or says nothing of it, still
+/// runs the session; the workspace's always-allow rules just do not apply
+/// yet, and Core's log says so.
+#[tokio::test]
+async fn a_trust_the_cli_did_not_record_is_logged_not_a_failed_start() {
+    for (answer, warned) in [
+        (init_answer_with_trust(true), false),
+        (init_answer_with_trust(false), true),
+        (init_answer(), true),
+    ] {
+        let mut config = config();
+        config.project_trusted = true;
+        config.project_path = "C:/projects/app".into();
+        let log = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+        let writer = {
+            let log = log.clone();
+            move || LogWriter(log.clone())
+        };
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(writer)
+            .with_ansi(false)
+            .finish();
+        // The test's runtime has one thread, so the start's handshake logs
+        // through this subscriber.
+        let _guard = tracing::subscriber::set_default(subscriber);
+        sent_initialize(config, answer).await;
+        let log = String::from_utf8(log.lock().unwrap().clone()).unwrap();
+        assert_eq!(
+            log.contains("did not record") && log.contains("C:/projects/app"),
+            warned,
+            "{log}"
+        );
+    }
+}
+
+/// Collects what the subscriber writes.
+struct LogWriter(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for LogWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 /// The round trip the brief's conformance section asks for: a stub CLI built
