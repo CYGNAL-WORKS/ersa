@@ -23,7 +23,9 @@ use tokio::task::AbortHandle;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long requests that run git, start a backend or probe a host may
-/// wait: those can legitimately take minutes on a large repository.
+/// wait: those can legitimately take minutes on a large repository. A
+/// session's first message waits for its backend to start, so
+/// `session.send` is one of them.
 pub const LONG_REQUEST_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 
 /// How long the liveness probe may take to connect and complete a handshake.
@@ -39,9 +41,8 @@ const MAX_LINE_BYTES: usize = ersa_core::state::MAX_LINE_BYTES;
 pub fn timeout_for(method: &str) -> Duration {
     match method {
         "workspace.create" | "workspace.remove" | "session.create" | "session.start"
-        | "session.resume" | "session.stop" | "session.remove" | "host.probe" | "core.shutdown" => {
-            LONG_REQUEST_TIMEOUT
-        }
+        | "session.resume" | "session.stop" | "session.remove" | "session.send" | "host.probe"
+        | "core.shutdown" => LONG_REQUEST_TIMEOUT,
         _ => REQUEST_TIMEOUT,
     }
 }
@@ -495,6 +496,7 @@ mod link_tests {
     fn long_methods_get_long_timeouts() {
         assert_eq!(timeout_for("workspace.create"), LONG_REQUEST_TIMEOUT);
         assert_eq!(timeout_for("session.create"), LONG_REQUEST_TIMEOUT);
+        assert_eq!(timeout_for("session.send"), LONG_REQUEST_TIMEOUT);
         assert_eq!(timeout_for("host.probe"), LONG_REQUEST_TIMEOUT);
         assert_eq!(timeout_for("project.list"), REQUEST_TIMEOUT);
     }
