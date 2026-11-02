@@ -231,6 +231,7 @@ fn config() -> SessionConfig {
         permission_mode: "default".into(),
         model: None,
         project_trusted: false,
+        project_path: String::new(),
         extra: Value::Null,
     }
 }
