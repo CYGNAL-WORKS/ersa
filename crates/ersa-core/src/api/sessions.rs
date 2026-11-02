@@ -193,9 +193,13 @@ pub(super) async fn set_title(core: &Core, params: SetTitleParams) -> Result<Ses
     // tools, which list one line of at most 200 characters with every run of
     // spaces as one (PROTO-CLAUDE-CODE-STREAM, Listing). The title is taken
     // in that form, so Ersa shows what the backend's list will: a longer
-    // title, or one holding a line break or another control character, would
-    // read differently there.
-    if params.title.chars().any(char::is_control) {
+    // title, or one holding a control character, would read differently
+    // there. A line break or a tab is spacing, and collapses like any other.
+    if params
+        .title
+        .chars()
+        .any(|c| c.is_control() && !c.is_whitespace())
+    {
         return Err(ApiError::invalid_params(
             "a session's title is one line, without control characters",
         ));
