@@ -35,6 +35,8 @@ describe("the Interface's boundary", () => {
     expect([...bridge.matchAll(/invoke(?:<[^>]*>)?\(\s*"([^"]+)"/g)].map((m) => m[1]).sort()).toEqual([
       "core_attach",
       "core_request",
+      "shell_quit",
+      "shell_show",
     ]);
   });
 
