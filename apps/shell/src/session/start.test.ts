@@ -21,7 +21,7 @@ function fakeClient(answers: Partial<Record<Method, (params: never) => unknown>>
   return { client, calls, methods: () => calls.map((c) => c.method) };
 }
 
-const refusal = (message: string): BridgeError => ({ kind: "rpc", error: { code: -32000, message, data: { kind: "invalid_state" } } });
+const refusal = (message: string, kind = "invalid_state"): BridgeError => ({ kind: "rpc", error: { code: -32000, message, data: { kind } } as never });
 
 const values = (workspace: SessionValues["workspace"]): SessionValues => ({
   host_id: "local",
@@ -84,6 +84,7 @@ describe("starting a session from the new-session screen", () => {
       "session.send": () => {
         throw refusal("session.send: the backend could not be started: claude: not logged in");
       },
+      "session.list": () => [{ ...session, state: "error" }],
       "session.stop": () => session,
       "session.remove": () => session,
       "workspace.remove": () => ({ ...isolated, state: "removing" }),
@@ -91,7 +92,7 @@ describe("starting a session from the new-session screen", () => {
     const outcome = await startSession(client, values("isolated"), "Fix the build");
     expect(outcome).toEqual({ ok: false, message: "the backend could not be started: claude: not logged in" });
     // The session goes before its workspace: Core refuses to remove a workspace that has one.
-    expect(methods()).toEqual(["workspace.create", "session.create", "session.send", "session.stop", "session.remove", "workspace.remove"]);
+    expect(methods()).toEqual(["workspace.create", "session.create", "session.send", "session.list", "session.stop", "session.remove", "workspace.remove"]);
     expect(calls.at(-1)?.params).toEqual({ id: "w-new" });
   });
 
@@ -102,12 +103,59 @@ describe("starting a session from the new-session screen", () => {
       "session.send": () => {
         throw refusal("session.send: the backend could not be started: exited");
       },
+      "session.list": () => [{ ...session, state: "error" }],
       "session.stop": () => session,
       "session.remove": () => session,
     });
     const outcome = await startSession(client, values("root"), "hello");
     expect(outcome.ok).toBe(false);
     expect(methods()).not.toContain("workspace.remove");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R08
+  it("keeps a session still starting when the first message timed out, and gives the text back", async () => {
+    const { client, methods } = fakeClient({
+      ...working,
+      "session.send": () => {
+        throw refusal("session.send: the session is still starting; try again shortly");
+      },
+      "session.list": () => [{ ...session, state: "starting" }],
+    });
+    const outcome = await startSession(client, values("isolated"), "Fix the build");
+    expect(outcome).toMatchObject({
+      ok: true,
+      session: { id: "s1", state: "starting" },
+      workspace: { id: "w-new" },
+      firstSend: { message: "the session is still starting; try again shortly", giveBack: true },
+    });
+    expect(methods()).not.toContain("session.stop");
+    expect(methods()).not.toContain("workspace.remove");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R08
+  it("keeps a running session whose first message Core already passed on, and keeps the text there", async () => {
+    const { client, methods } = fakeClient({
+      ...working,
+      "session.send": () => {
+        throw refusal("session.send: the message was sent, but Core could not project it in time", "internal");
+      },
+      "session.list": () => [{ ...session, state: "running" }],
+    });
+    const outcome = await startSession(client, values("isolated"), "Fix the build");
+    expect(outcome).toMatchObject({ ok: true, firstSend: { giveBack: false } });
+    expect(methods()).not.toContain("session.remove");
+  });
+
+  it("keeps the session when Core cannot say whether it ran", async () => {
+    const { client, methods } = fakeClient({
+      ...working,
+      "session.send": () => {
+        throw { kind: "unavailable", message: "Core is not connected." };
+      },
+    });
+    const outcome = await startSession(client, values("isolated"), "Fix the build");
+    expect(outcome).toMatchObject({ ok: true, firstSend: { message: "Core is not connected.", giveBack: true } });
+    expect(methods()).not.toContain("session.remove");
   });
 
   // verifies: FLOW-NEW-SESSION-R08
