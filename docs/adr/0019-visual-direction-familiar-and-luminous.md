@@ -16,7 +16,7 @@
 
 ## Decision
 
-Option 3. `DESIGN.md` states what Ersa looks like rather than what it avoids. The colours are a palette, Midnight (near-black with a deep blue), generated from contrast targets; four more palettes from the same idea are offered for the user to choose. Faces, scale, radii and icons stay placeholders until chosen in the Ersa design system. A glowing halo around the window was tried and rejected as too strong, a flat surface as lifeless, and a green dawn palette as not right.
+Option 3. `DESIGN.md` states what Ersa looks like rather than what it avoids. The colours are a palette, Midnight (near-black with a deep blue), generated from contrast targets; four more palettes from the same idea are offered for the user to choose. The faces (IBM Plex Sans, Oxanium for titles, JetBrains Mono for code) and the Balanced type scale are chosen in the Ersa design system; radii and icons stay placeholders until chosen there. A glowing halo around the window was tried and rejected as too strong, a flat surface as lifeless, and a green dawn palette as not right.
 
 ## Consequences
 
