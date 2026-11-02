@@ -6,7 +6,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 const WAIT: Duration = Duration::from_secs(60);
 
@@ -213,6 +213,7 @@ async fn ctrl_c_during_start_up_removes_the_data_directory() {
         .env("TMPDIR", tmp.path())
         .env("XDG_RUNTIME_DIR", runtime.path())
         .stdin(Stdio::null())
+        .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .expect("ersa-core starts");
@@ -220,6 +221,17 @@ async fn ctrl_c_during_start_up_removes_the_data_directory() {
     // at most part way through binding.
     let created = async {
         while std::fs::read_dir(tmp.path()).unwrap().next().is_none() {
+            // A replay that stops by itself never gets the Ctrl+C: say why.
+            if let Some(status) = core.try_wait().unwrap() {
+                let mut stderr = String::new();
+                core.stderr
+                    .take()
+                    .unwrap()
+                    .read_to_string(&mut stderr)
+                    .await
+                    .unwrap();
+                panic!("the replay stopped by itself ({status}): {stderr}");
+            }
             tokio::time::sleep(Duration::from_millis(1)).await;
         }
     };
