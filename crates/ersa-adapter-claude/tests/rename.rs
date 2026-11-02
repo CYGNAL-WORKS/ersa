@@ -230,6 +230,7 @@ fn config() -> SessionConfig {
         cwd: CWD.into(),
         permission_mode: "default".into(),
         model: None,
+        effort: None,
         project_trusted: false,
         project_path: String::new(),
         extra: Value::Null,
