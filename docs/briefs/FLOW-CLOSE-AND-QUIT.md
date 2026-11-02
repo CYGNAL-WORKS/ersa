@@ -18,7 +18,7 @@ Closing the window and quitting are different acts. Closing hides the window to 
 - **FLOW-CLOSE-AND-QUIT-R01**: When the user closes the window, Ersa shall hide it, keep the tray icon, and leave Core and every session running.
 - **FLOW-CLOSE-AND-QUIT-R02**: When the user opens Ersa from the tray icon, or launches Ersa while it is already running, Ersa shall show the existing window, attached to the same Core, and shall not start a second Shell.
 - **FLOW-CLOSE-AND-QUIT-R03**: When the user chooses Quit from the tray icon's menu, Ersa shall ask Core to shut down (`core.shutdown`) and exit only after Core has stopped.
-- **FLOW-CLOSE-AND-QUIT-R04**: When the user chooses Quit while any session is working or waiting on the user, Ersa shall first ask the user to confirm, saying how many sessions will stop; when the user cancels, Ersa shall leave the window, Core and every session as they were.
+- **FLOW-CLOSE-AND-QUIT-R04**: When the user chooses Quit while any session is working or waiting on the user (a tile state of starting, running or waiting on the user; an idle session is not counted), Ersa shall first ask the user to confirm, saying how many sessions will stop; when the user cancels, Ersa shall leave the window, Core and every session as they were.
 - **FLOW-CLOSE-AND-QUIT-R05**: When Core shuts down for a quit, every session that was running shall end with reason `user_stopped`, and no backend process it started shall remain.
 - **FLOW-CLOSE-AND-QUIT-R06**: When Core has not stopped within 10 seconds of a quit, Ersa shall end Core's process tree and exit.
 - **FLOW-CLOSE-AND-QUIT-R07**: When the Shell exits without a quit, Core and every session shall keep running, and the next launch shall attach to that Core.
@@ -29,10 +29,12 @@ A debug build attached to a labelled endpoint (LAY-SHELL, Development) quits wit
 
 ## Open questions
 
+- R06 beyond Windows: on Linux, ending Core's process group leaves each backend's own process group running, so a backend's tree outlives a Core ended that way (on Windows, job objects end the backends with Core); on macOS the Shell cannot yet find the process behind Core's socket, so Quit asks Core to stop but cannot end it. Windows first (ADR 0006); the other platforms need a rule before they are built.
 - Whether the first close tells the user once that Ersa is still running in the tray.
 - The macOS equivalent: menu bar icon, and whether the Dock icon stays.
 - Whether Ersa starts at login, hidden in the tray.
 
 ## Changes
 
+- 2026-11-02: from #32 inbox: R04 says which sessions count (starting, running, waiting on the user; meaning unchanged); the limits of R06 on Linux and macOS recorded as an open question.
 - 2026-11-01: created ready, from the owner's decision that the window closes to the tray and Quit stops Core.
