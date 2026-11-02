@@ -37,6 +37,7 @@
   --size-rail: 288px;
   --size-tile-min: 288px;
   --size-measure: 720px;
+  --size-bubble-max: 80%;
   --size-card-max: 224px;
   --motion-instant: 80ms;
   --motion-quick: 160ms;

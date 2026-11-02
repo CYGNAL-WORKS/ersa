@@ -38,7 +38,7 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 
 ## Open questions
 
-- Whether the context ring takes a caution or danger tone near full, as the gauge vocabulary in DESIGN.md suggests, or stays one tone with the arc alone saying how much.
+- Whether the context ring takes a caution or danger tone near full, or stays one tone with the arc alone saying how much.
 - Minimum window size, and which region collapses first when narrow.
 - Whether the workbench shows one pane at a time (tabs) or allows splits.
 - Whether the shelf overlays the transcript or pushes it, and how several pending shelves queue.
@@ -47,6 +47,7 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 
 ## Changes
 
+- 2026-11-02: the context-ring open question no longer points at DESIGN.md's gauge vocabulary, which ADR 0019 removed. Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: the title is renamed in place by double-click or keyboard, with no button (owner); open question on the context ring's tone near full.
 - 2026-11-02: from #53 inbox: the backend chip also shows a lone backend that is missing or failed.
