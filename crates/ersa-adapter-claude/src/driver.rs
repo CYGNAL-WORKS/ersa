@@ -124,7 +124,6 @@ pub fn invocation_args(config: &SessionConfig) -> Vec<String> {
         &config.permission_mode
     };
     let mut args: Vec<String> = [
-        "-p",
         "--input-format",
         "stream-json",
         "--output-format",
