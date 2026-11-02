@@ -23,6 +23,8 @@ interface ChipProps {
   placeholder?: string;
   /** The value reads as a problem: the danger glyph before it. */
   problem?: boolean;
+  /** The value is still being found out: the pending glyph before it. */
+  pending?: boolean;
   options: ChipOption[];
   onChoose: (id: string) => void;
   disabled?: boolean;
@@ -36,7 +38,7 @@ interface ChipProps {
  * with Enter, Space or the arrows, moves with the arrows, chooses with Enter or Space, and Escape closes it with
  * focus back on the chip.
  */
-export function Chip({ name, prefix, value, placeholder, problem, options, onChoose, disabled, initialOpen = false, force }: ChipProps) {
+export function Chip({ name, prefix, value, placeholder, problem, pending, options, onChoose, disabled, initialOpen = false, force }: ChipProps) {
   const [open, setOpen] = useState(initialOpen);
   const chip = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -65,6 +67,11 @@ export function Chip({ name, prefix, value, placeholder, problem, options, onCho
     return () => document.removeEventListener("pointerdown", outside);
   }, [open]);
 
+  // Disabled while open, as when the first message is sent: the list goes too, so nothing changes after.
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
   const show = () => {
     focusOnOpen.current = true;
     setOpen(true);
@@ -74,7 +81,7 @@ export function Chip({ name, prefix, value, placeholder, problem, options, onCho
     chip.current?.focus({ preventScroll: true });
   };
   const choose = (option: ChipOption) => {
-    if (option.unavailable) return;
+    if (option.unavailable || disabled) return;
     if (option.id !== value) onChoose(option.id);
     close();
   };
@@ -136,11 +143,13 @@ export function Chip({ name, prefix, value, placeholder, problem, options, onCho
         aria-controls={open ? listId : undefined}
         data-force={force}
         data-open={open || undefined}
+        data-pending={pending || undefined}
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={onChipKey}
       >
         {problem && <span className="glyph" data-tone="danger" aria-hidden="true" />}
+        {pending && <span className="glyph" data-tone="pending" aria-hidden="true" />}
         {prefix && <span className="chip-prefix">{prefix}</span>}
         <span className="chip-value">{shown}</span>
       </button>
