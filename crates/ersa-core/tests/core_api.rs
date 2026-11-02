@@ -133,6 +133,7 @@ async fn backend_list_offers_claude_codes_choices_with_their_defaults() {
         .result("backend.list", json!({ "host_id": "local" }))
         .await;
     let claude = &infos[0];
+    assert_eq!(claude["label"], json!("Claude Code"));
     let offered = |list: &str| -> Vec<(String, bool)> {
         claude[list]
             .as_array()

@@ -603,6 +603,10 @@ export interface BackendStatus {
 export interface BackendInfo {
   name: string;
   /**
+   * The backend's own display name, such as Claude Code.
+   */
+  label: string;
+  /**
    * Absent when the backend is not installed or its version could not be read.
    */
   version?: string;
