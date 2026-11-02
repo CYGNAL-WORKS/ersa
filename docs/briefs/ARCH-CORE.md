@@ -64,7 +64,7 @@ A Rust library wrapped in a thin binary, running as its own process (ADR 0011). 
 - **Session manager**: the lifecycle of every session (created, starting, running, waiting on user, idle, disconnected, ended). Routes user input and permission decisions to adapters and backend output to the projection. Emits each session's lifecycle events itself and writes Core's operational records (process started, exited, failed to start, Core restarted) to the app log.
 - **Projection**: a session's history is the backend's own session record (ADR 0017). When a session is opened (`PROTO-AGENT-EVENTS`, Opening a session), Core projects the record through the adapter into Ersa events, then appends events projected from the live stream, merged on the backend's message ids. Details only the live stream carries (text as it arrives, permission prompts, turn ends, cost, rate limits) are shown and not stored. Nothing projected is stored. The raw log, the lines exchanged with a live backend since Core opened it, is held in memory for the developer pane.
 - **Adapter registry**: which backends are installed on which hosts, their versions and capabilities, and how to start them.
-- **Transport layer**: starts processes and carries their stdio on a host, and reads files there: local spawn, or SSH. It sets the variables a process is given and removes inherited ones it must not see, and every transport honours both. Adapters and the VCS layer run through it without knowing which one they got, so a remote host's session record and live-session registry are read on that host, as M4's remote sessions need.
+- **Transport layer**: starts processes and carries their stdio on a host, and reads files there: local spawn, or SSH. It sets the variables a process is given and removes inherited ones it must not see, and every transport honors both. Adapters and the VCS layer run through it without knowing which one they got, so a remote host's session record and live-session registry are read on that host, as M4's remote sessions need.
 - **Workspace and VCS**: creates and destroys isolated workspaces for a project behind a VCS interface. Git worktrees first; Perforce second. Executes through the transport so remote hosts work the same way.
 - **Pack client**: fetches packs from a pack source, verifies and caches them, and renders the neutral pack definition into each installed backend's native configuration.
 - **Mode engine**: resolves a session's mode into the base instructions, allowed tools, and tool-server list handed to the adapter at start.
@@ -76,7 +76,7 @@ A Rust library wrapped in a thin binary, running as its own process (ADR 0011). 
 
 One per backend, behind one interface: start or resume a session on a transport with a configuration, send user input and permission decisions, receive the live stream, list the backend's sessions for a directory, read a session's record, stop. Adapters provide the projection from both the live stream and the session record to `PROTO-AGENT-EVENTS`.
 
-- **Claude Code adapter**: drives the CLI in its streaming JSON mode, launched as an ordinary Claude Code session with the user's settings, with every behaviour-affecting flag passed explicitly, reads the session record from the CLI's session files, reads capabilities from the CLI's initial message, and receives permission requests over the CLI's stdio control channel (`PROTO-CLAUDE-CODE-STREAM`, ADR 0014).
+- **Claude Code adapter**: drives the CLI in its streaming JSON mode, launched as an ordinary Claude Code session with the user's settings, with every behavior-affecting flag passed explicitly, reads the session record from the CLI's session files, reads capabilities from the CLI's initial message, and receives permission requests over the CLI's stdio control channel (`PROTO-CLAUDE-CODE-STREAM`, ADR 0014).
 - **Copilot adapter**: uses the official Copilot Rust SDK, including its session listing and history, and maps its types to Ersa events (`PROTO-COPILOT-SDK`, ADR 0009).
 
 ## Boundaries
@@ -150,6 +150,7 @@ Verified by review at this level; testable requirements live in the protocol bri
 
 ## Changes
 
+- 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-01: from #35 inbox: Core keeps its SQLite database, holding projects, workspaces with lifecycle state that survives a crash mid-create or mid-remove, settings, and per-session pointers including mode; titles and creation times are not stored. The app log is read back at startup (interrupted sessions, last facts of ended sessions, creation times) and rotation keeps each session's first and last facts. No requirement IDs changed.
 - 2026-11-01: from #34 inbox: the transport reads files on its host as well as running processes, so a remote session's record and live-session registry are read there. No requirement IDs changed.
 - 2026-11-01: from #33 inbox: every transport removes inherited variables as well as setting them. No requirement IDs changed.

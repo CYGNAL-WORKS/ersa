@@ -15,7 +15,7 @@ What this screen or region is for, in one or two sentences.
 
 ## Regions
 
-An ASCII sketch of the layout at the default size, with each region labelled. Then one line per region: its name (a glossary term), what it contains (components by ID), and how it sizes (fixed, fills, collapsible, resizable).
+An ASCII sketch of the layout at the default size, with each region labeled. Then one line per region: its name (a glossary term), what it contains (components by ID), and how it sizes (fixed, fills, collapsible, resizable).
 
 ```
 +--------+----------------------------+-----------+
@@ -29,7 +29,7 @@ An ASCII sketch of the layout at the default size, with each region labelled. Th
 
 - **rail**: contains `CMP-...`. Fixed width, collapsible.
 
-## Responsive behaviour
+## Responsive behavior
 
 What changes when the window is narrow, short, or very wide. Which regions collapse first.
 
