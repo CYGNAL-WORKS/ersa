@@ -307,8 +307,12 @@ fn the_open_elsewhere_notices_validate_with_and_without_a_pid() {
     ];
     let wire = notices.map(|notice| {
         let payload = serde_json::to_value(Event::SessionNotice(notice)).expect("serialize");
-        validate_event(&payload).unwrap_or_else(|e| panic!("{e}
-{payload}"));
+        validate_event(&payload).unwrap_or_else(|e| {
+            panic!(
+                "{e}
+{payload}"
+            )
+        });
         payload
     });
     assert_eq!(wire[0]["code"], "session_open_elsewhere");
