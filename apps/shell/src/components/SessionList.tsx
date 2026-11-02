@@ -16,6 +16,8 @@ interface SessionListProps {
 export interface WorkspaceName {
   project: string;
   name: string;
+  /** The name is a path, and is set as one. */
+  path?: boolean;
 }
 
 /** The sessions Core runs, as tiles: newest first, the active one outlined, one that needs the user marked with a glyph. */
@@ -52,11 +54,17 @@ export function SessionList({ view, activeId, onSelect, force, workspaces }: Ses
           const name = workspaces[id];
           return (
             <section key={id} className="sessions-workspace" aria-label={name ? `${name.project}, ${name.name}` : "Workspace"}>
-              {name && (
-                <h3 className="sessions-workspace-name">
-                  <span className="sessions-workspace-project">{name.project}</span> <span>{name.name}</span>
-                </h3>
-              )}
+              {/* Its line is kept while the name is still being read, so the tiles never move when it arrives. */}
+              <h3 className="sessions-workspace-name" aria-hidden={name ? undefined : true}>
+                {name ? (
+                  <>
+                    <span className="sessions-workspace-project">{name.project}</span>{" "}
+                    <span className={name.path ? "mono" : undefined}>{name.name}</span>
+                  </>
+                ) : (
+                  " "
+                )}
+              </h3>
               <ul className="sessions-list">{sessions.map(tile)}</ul>
             </section>
           );

@@ -3,7 +3,7 @@
 // its first turn. A start that fails takes back what it made and says why in the backend's own words.
 // Kept free of React so the tests drive it with a fake client.
 
-import { type CoreClient, describeError } from "../core/client";
+import { type BridgeError, type CoreClient, describeError } from "../core/client";
 import type { Session, SessionCreateParams, Workspace } from "../protocol/core-api.gen";
 import type { BackendChoices, SessionValues, WorkspaceKind } from "./controls";
 
@@ -26,12 +26,26 @@ export async function readChoices(client: Pick<CoreClient, "call">, hostId: stri
   };
 }
 
-export type StartOutcome = { ok: true; session: Session } | { ok: false; message: string };
+/** Why the first message did not go through to a session that is still alive; the session stays and opens. */
+export interface FirstSendFailure {
+  message: string;
+  /** Whether to give the text back to write again: not when Core says the backend already has it. */
+  giveBack: boolean;
+}
+
+export type StartOutcome =
+  | { ok: true; session: Session; workspace: Workspace; firstSend?: FirstSendFailure }
+  | { ok: false; message: string };
+
+/** The states a session that never ran ends in: its backend failed to start, or it was stopped while starting. */
+const NEVER_RAN: readonly Session["state"][] = ["error", "ended"];
 
 /**
- * Starts a session with `values` and sends `text` as its first turn (FLOW-NEW-SESSION-R04, R05). On a failure it
- * stops and removes the session it created and removes the workspace it created, never the root, and reports the
- * first failure's message, which for a backend that did not start is the backend's own (R08).
+ * Starts a session with `values` and sends `text` as its first turn (FLOW-NEW-SESSION-R04, R05). When the session
+ * could not be created, or Core says it never ran, it stops and removes the session and removes the workspace it
+ * created, never the root, and reports the first failure's message, which for a backend that did not start is the
+ * backend's own (R08). A session that is alive is kept whatever the first message's answer was: a slow start or a
+ * message the backend already has is not a failed start, and the session opens with the error.
  */
 export async function startSession(client: Pick<CoreClient, "call">, values: SessionValues, text: string): Promise<StartOutcome> {
   const { backend } = values;
@@ -54,8 +68,23 @@ export async function startSession(client: Pick<CoreClient, "call">, values: Ses
     if (values.effort) params.effort = values.effort;
     if (values.permission_mode) params.permission_mode = values.permission_mode;
     session = await client.call("session.create", params);
-    await client.call("session.send", { id: session.id, text });
-    return { ok: true, session };
+    const created = session;
+    try {
+      await client.call("session.send", { id: created.id, text });
+      return { ok: true, session: created, workspace };
+    } catch (error) {
+      // Core answers a message to a backend that failed to start once the session's run has ended, so its state
+      // already says so. A session Core cannot be asked about is kept: removing a live one loses its work.
+      const listed = await client.call("session.list").then(
+        (all) => all.find((s) => s.id === created.id),
+        () => undefined,
+      );
+      if (!listed || !NEVER_RAN.includes(listed.state)) {
+        const internal = (error as BridgeError | undefined)?.kind === "rpc" && (error as Extract<BridgeError, { kind: "rpc" }>).error.data?.kind === "internal";
+        return { ok: true, session: listed ?? created, workspace, firstSend: { message: describeError(error), giveBack: !internal } };
+      }
+      throw error;
+    }
   } catch (error) {
     // Best effort, in order: Core refuses to remove a running session, or a workspace that still has one.
     if (session) {
