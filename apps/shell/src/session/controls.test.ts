@@ -8,6 +8,7 @@ const choices = (ids: string[], dflt: string): Choice[] => ids.map((id) => ({ id
 
 const backend = (name: string, status: BackendChoices["status"] = "available"): BackendChoices => ({
   name,
+  label: name,
   status,
   tested: { min: "1.0.0", max: "2.0.0" },
   models: choices([`${name}-small`, `${name}-large`], `${name}-large`),

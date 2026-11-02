@@ -18,6 +18,7 @@ const choices = (pairs: [string, string][], dflt: string): Choice[] =>
 
 const claude = (status: BackendChoices["status"] = "available"): BackendChoices => ({
   name: "claude-code",
+  label: "Claude Code",
   version: "2.1.302",
   status,
   tested: { min: "2.1.0", max: "2.1.400" },
@@ -28,6 +29,7 @@ const claude = (status: BackendChoices["status"] = "available"): BackendChoices 
 const copilot = (status: BackendChoices["status"]): BackendChoices => ({
   ...claude(),
   name: "copilot",
+  label: "GitHub Copilot",
   version: undefined,
   status,
 });

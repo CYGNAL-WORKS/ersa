@@ -212,6 +212,7 @@ const choices = (pairs: [string, string][], dflt: string): Choice[] =>
   pairs.map(([id, label]) => ({ id, label, default: id === dflt }));
 const claudeCode: BackendChoices = {
   name: "claude-code",
+  label: "Claude Code",
   version: "2.1.302",
   status: "available",
   tested: { min: "2.1.0", max: "2.1.400" },
@@ -224,6 +225,7 @@ const claudeCode: BackendChoices = {
 };
 const copilot = (status: BackendChoices["status"]): BackendChoices => ({
   name: "copilot",
+  label: "GitHub Copilot",
   status,
   tested: { min: "1.0.0", max: "1.2.0" },
   models: [],
@@ -419,6 +421,8 @@ const entries: Entry[] = [
   },
   {
     name: "Chip",
+    // On the canvas, as the session controls stand, so the hover fill shows as it does on the screen.
+    wide: true,
     states: [
       ["Default", <Chip {...chip} />],
       ["Hover", <Chip {...chip} force="hover" />],
@@ -428,6 +432,8 @@ const entries: Entry[] = [
       ["With a prefix", <Chip name="Effort" prefix="Effort" value="high" options={[{ id: "high", label: "High" }]} onChoose={() => {}} />],
       ["A problem", <Chip name="Backend" placeholder="No backend" problem options={[]} onChoose={() => {}} />],
       ["Open", room(<Chip {...chip} initialOpen />)],
+      ["Open, an option hovered", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "hover" }} />)],
+      ["Open, an option pressed", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "pressed" }} />)],
       [
         "Open, with statuses",
         room(

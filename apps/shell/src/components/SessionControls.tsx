@@ -27,12 +27,9 @@ interface SessionControlsProps {
 
 const WORKSPACE_LABELS: Record<WorkspaceKind, string> = { isolated: "New workspace", root: "Root workspace" };
 
-/** The backends Ersa knows by name; another shows as Core names it. */
-const BACKEND_LABELS: Record<string, string> = { "claude-code": "Claude Code", copilot: "GitHub Copilot" };
-
 const backendOption = (b: BackendChoices): ChipOption => ({
   id: b.name,
-  label: BACKEND_LABELS[b.name] ?? b.name,
+  label: b.label,
   status: b.status === "missing" ? "Not installed" : b.status === "error" ? "Detection failed" : b.version,
   failed: b.status === "error",
   unavailable: b.status !== "available",

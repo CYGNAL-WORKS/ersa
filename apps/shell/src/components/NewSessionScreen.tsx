@@ -43,8 +43,17 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   const [wanted, setWanted] = useState<Partial<SessionValues>>(startFrom);
   // New session chosen for another project while the screen shows: start over at that project's values.
   const [shownFor, setShownFor] = useState(props.projectId);
+  // The last-used values the screen started from, and whether the user has chosen since: values that arrive
+  // after the screen opened still apply, until the user makes a choice of their own (FLOW-NEW-SESSION-R02).
+  const [seededWith, setSeededWith] = useState(first && lastUsed[first.id]);
+  const [touched, setTouched] = useState(false);
   if (shownFor !== props.projectId) {
     setShownFor(props.projectId);
+    setSeededWith(first && lastUsed[first.id]);
+    setTouched(false);
+    setWanted(startFrom());
+  } else if (!touched && first && lastUsed[first.id] !== seededWith) {
+    setSeededWith(lastUsed[first.id]);
     setWanted(startFrom());
   }
   const project = projects.find((p) => p.id === wanted.project_id) ?? first;
@@ -66,6 +75,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   const busy = starting?.state === "sending";
 
   const choose = (key: ControlKey, id: string) => {
+    setTouched(true);
     if (key === "host") {
       // A host's own projects follow it; its first one, at what was last used there.
       const next = projects.find((p) => p.host_id === id);
