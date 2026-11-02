@@ -1,0 +1,78 @@
+/* The session's title in the transcript header, and the form that renames it in place. */
+
+.session-heading {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--type-heading-size);
+  line-height: var(--type-heading-leading);
+  font-weight: var(--type-heading-weight);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An action on the session, at the header's far edge, away from what describes it. */
+.session-heading-rename {
+  margin-left: auto;
+  flex: none;
+}
+
+/* Editing takes the title's place and the room it had, up to the state. */
+.session-heading-form {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* The title as it will read: heading type, in an input's frame. */
+.session-heading-input {
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--space-xs) var(--space-sm);
+  font: inherit;
+  font-size: var(--type-heading-size);
+  line-height: var(--type-heading-leading);
+  font-weight: var(--type-heading-weight);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.session-heading-input:hover:not(:read-only):not(:focus-visible),
+.session-heading-input[data-force="hover"] {
+  border-color: var(--color-ink-faint);
+}
+
+.session-heading-input:focus-visible,
+.session-heading-input[data-force="focus"] {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* While the backend takes the title, it reads as fixed, as the project path does while it is added. */
+.session-heading-input:read-only {
+  color: var(--color-ink-faint);
+  background: var(--color-canvas);
+}
+
+.session-heading-label {
+  display: inline-grid;
+}
+
+.session-heading-label > span {
+  grid-area: 1 / 1;
+  text-align: center;
+}
+
+.session-heading-label > span:not([data-shown]) {
+  visibility: hidden;
+}
+
+/* A refusal reads under the field, on a row of its own. */
+.session-heading-problem {
+  grid-column: 1 / -1;
+}
