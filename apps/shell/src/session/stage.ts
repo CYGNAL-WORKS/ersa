@@ -42,6 +42,16 @@ export const initialStage: StageState = { keys: 0 };
 /** Whether a first message is on its way, during which the stage stays where it is. */
 export const isStarting = (state: StageState) => state.starting?.state === "sending";
 
+/**
+ * Whether the stage shows the new-session screen when no session's transcript is shown: while the user has chosen
+ * New session, while a first message is on its way or has just failed, and otherwise with no session while Core is
+ * connected. The first two hold through a lost connection, so the screen, and the message in its composer, stay
+ * (FLOW-NEW-SESSION-R08).
+ */
+export function showsScreen(state: Pick<StageState, "composing" | "starting" | "activeId">, connected: boolean): boolean {
+  return state.composing !== undefined || state.starting !== undefined || (connected && state.activeId === undefined);
+}
+
 export function stage(state: StageState, action: StageAction): StageState {
   switch (action.type) {
     case "newSession":
