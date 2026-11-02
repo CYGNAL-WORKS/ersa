@@ -1,0 +1,43 @@
+/* The new-session screen: the wordmark, then the composer with the session controls, in the reading column at
+   the stage's centre. Nothing else, so the first message is the first act. */
+
+.new-session {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--space-xl);
+  /* It fills the stage it is placed in, and centres within it. */
+  flex: 1;
+  max-width: var(--size-measure);
+  margin: 0 auto;
+  padding: var(--space-xxl) var(--space-lg);
+}
+
+/* Set in the UI face's heading weight, muted: a mark that says where you are, not a headline. */
+.new-session-wordmark {
+  margin: 0;
+  font-size: var(--type-heading-size);
+  line-height: var(--type-heading-leading);
+  font-weight: var(--type-heading-weight);
+  color: var(--color-ink-muted);
+  text-align: center;
+}
+
+.new-session-start,
+.new-session-add {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+/* Here the composer stands on its own, not at the foot of a transcript, so it has no rule above it. */
+.new-session-start .composer {
+  padding: 0;
+  border-top: none;
+}
+
+.new-session-lead {
+  margin: 0;
+  color: var(--color-ink-muted);
+}
