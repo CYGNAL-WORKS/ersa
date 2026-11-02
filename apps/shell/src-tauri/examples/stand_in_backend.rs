@@ -3,9 +3,7 @@
 //! without a real CLI or a model call.
 //!
 //! - With `--version`, it prints a version the way the CLI does, and exits.
-//! - With `ERSA_STAND_IN_SLEEP` set, it sleeps: the grandchild below. Set
-//!   to `stdin`, it sleeps until its input closes instead, so it ends with
-//!   whoever holds that input.
+//! - With `ERSA_STAND_IN_SLEEP` set, it sleeps: the grandchild below.
 //! - Otherwise it starts that grandchild, writes `<own pid> <grandchild pid>`
 //!   to the file named by `ERSA_STAND_IN_PIDS`, and reads its input until
 //!   the input closes, which is how Core tells the CLI to stop. Its
@@ -23,16 +21,9 @@ fn main() {
         println!("2.1.302 (Claude Code)");
         return;
     }
-    match std::env::var("ERSA_STAND_IN_SLEEP").as_deref() {
-        Ok("stdin") => {
-            let _ = std::io::stdin().lock().read_to_end(&mut Vec::new());
-            return;
-        }
-        Ok(_) => {
-            std::thread::sleep(Duration::from_secs(600));
-            return;
-        }
-        Err(_) => {}
+    if std::env::var_os("ERSA_STAND_IN_SLEEP").is_some() {
+        std::thread::sleep(Duration::from_secs(600));
+        return;
     }
     let me = std::env::current_exe().expect("the stand-in's own path");
     // Never waited on: it outlives this process until Core ends it.
