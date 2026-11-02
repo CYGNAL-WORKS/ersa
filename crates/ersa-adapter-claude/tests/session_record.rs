@@ -146,18 +146,20 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
                 .unwrap_or_else(|| panic!("{}: {uuid} is not in the record", stream.name));
             if kind == "system" {
                 // A local command's output: a synthetic `assistant` message on
-                // the stream, a `system/local_command` entry in the record
-                // (R21). The record lacks the synthetic message's own id, so
-                // its blocks are numbered under the uuid instead.
+                // the stream, a `system/local_command` entry in the record.
+                // R23: the same events, each block id being the entry's uuid
+                // and the block's index, since the record lacks the synthetic
+                // message's own id.
                 let events: Vec<Event> = events
                     .into_iter()
-                    .map(|event| match event {
-                        Event::AssistantText(mut text) => {
-                            let index = text.block_id.rsplit('/').next().unwrap().to_string();
-                            text.block_id = format!("{uuid}/{index}");
-                            Event::AssistantText(text)
-                        }
-                        other => other,
+                    .enumerate()
+                    .map(|(index, event)| match event {
+                        Event::AssistantText(text) => Event::AssistantText(AssistantText {
+                            block_id: format!("{uuid}/{index}"),
+                            text: text.text,
+                            is_final: text.is_final,
+                        }),
+                        other => panic!("{}: {uuid}: unexpected {other:?}", stream.name),
                     })
                     .collect();
                 assert!(!events.is_empty(), "{}: {uuid}", stream.name);
@@ -1031,32 +1033,71 @@ fn a_records_version_changes_when_it_grows() {
     assert_eq!(record_version(home.path(), "C:/work", other).unwrap(), None);
 }
 
-// A `local_command` entry that is the command's echo rather than its output
-// (older versions wrote both) yields nothing; the output yields its text.
+fn local_command(uuid: &str, parent: Option<&str>, content: Value) -> Value {
+    serde_json::json!({
+        "type": "system", "subtype": "local_command", "uuid": uuid,
+        "parentUuid": parent, "isSidechain": false, "content": content,
+    })
+}
+
+fn blocks(events: &[Event]) -> Vec<(&str, &str)> {
+    events
+        .iter()
+        .map(|e| match e {
+            Event::AssistantText(t) => (t.block_id.as_str(), t.text.as_str()),
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect()
+}
+
+// The echo of the command (no output tag, as older versions wrote beside the
+// output) yields nothing; each output tag yields its text, kept exactly,
+// numbered under the entry's uuid.
 // verifies: PROTO-CLAUDE-CODE-STREAM-R23
 #[test]
 fn only_a_local_commands_output_is_projected() {
-    let entry = |uuid: &str, parent: Option<&str>, content: &str| {
-        serde_json::json!({
-            "type": "system", "subtype": "local_command", "uuid": uuid,
-            "parentUuid": parent, "isSidechain": false, "content": content,
-        })
-    };
     let events = events_of(&[
-        entry("a", None, "/allow"),
-        entry(
+        local_command("a", None, "/allow".into()),
+        local_command(
             "b",
             Some("a"),
-            "<local-command-stderr>Unknown command: /allow</local-command-stderr>
-",
+            "<local-command-stdout>  name  size
+  a.txt  3 </local-command-stdout>
+             <local-command-stderr>Unknown command: /allow</local-command-stderr>
+"
+            .into(),
         ),
     ]);
-    let texts: Vec<&str> = events
-        .iter()
-        .map(|e| match e {
-            Event::AssistantText(t) => t.text.as_str(),
-            other => panic!("unexpected {other:?}"),
-        })
-        .collect();
-    assert_eq!(texts, ["Unknown command: /allow"]);
+    assert_eq!(
+        blocks(&events),
+        [
+            (
+                "b/0",
+                "  name  size
+  a.txt  3 "
+            ),
+            ("b/1", "Unknown command: /allow"),
+        ]
+    );
+}
+
+// A tag that is not closed, a changed wrapper, or content that is not a string
+// is a drifted entry: an error and the entry kept as it came.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R23
+#[test]
+fn a_drifted_local_command_entry_is_reported_and_kept() {
+    for content in [
+        Value::from("<local-command-stdout>never closed"),
+        Value::from("<local-command-output>x</local-command-output>"),
+        serde_json::json!([{"type": "text", "text": "x"}]),
+    ] {
+        let events = events_of(&[local_command("a", None, content.clone())]);
+        assert!(
+            matches!(
+                events.as_slice(),
+                [Event::Error(_), Event::BackendPassthrough(p)] if p.payload["content"] == content
+            ),
+            "{content}: {events:?}"
+        );
+    }
 }

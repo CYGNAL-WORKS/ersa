@@ -26,7 +26,7 @@ use serde_json::Value;
 
 use crate::BACKEND;
 use crate::projector::{kind_of, plain_text, reply_events, tool_result_events};
-use crate::wire::{MessageContent, RecordEntry, RecordUser};
+use crate::wire::{LocalCommandOutput, MessageContent, RecordEntry, RecordUser};
 
 /// The longest record line read as an entry. A tool result can run to
 /// megabytes (an image, a large file); anything far beyond is not an entry
@@ -426,18 +426,35 @@ impl RecordProjector {
             RecordEntry::User(user) => user_events(user),
             // A local command's output, projected as the stream projects the
             // synthetic message it carried (PROTO-CLAUDE-CODE-STREAM-R23).
-            // That message's own id is not in the record, so its one block is
-            // numbered under the entry's `uuid`.
-            RecordEntry::System(system) => {
-                let (Some(id), Some(text)) = (&id, system.local_command_output()) else {
+            // That message's own id is not in the record, so each block is
+            // numbered under the entry's `uuid` and its index.
+            RecordEntry::System(system) => match system.local_command_output() {
+                LocalCommandOutput::NotLocalCommand | LocalCommandOutput::Echo => {
                     return Vec::new();
-                };
-                vec![Event::AssistantText(AssistantText {
-                    block_id: format!("{id}/0"),
-                    text: text.to_string(),
-                    is_final: true,
-                })]
-            }
+                }
+                LocalCommandOutput::Drifted => {
+                    return vec![
+                        attribute(protocol_error(
+                            "a local_command record entry did not have the expected shape".into(),
+                        )),
+                        attribute(passthrough(value)),
+                    ];
+                }
+                LocalCommandOutput::Output(texts) => {
+                    let id = id.clone().unwrap_or_default();
+                    texts
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, text)| {
+                            Event::AssistantText(AssistantText {
+                                block_id: format!("{id}/{index}"),
+                                text: text.to_string(),
+                                is_final: true,
+                            })
+                        })
+                        .collect()
+                }
+            },
             RecordEntry::Other(_) => {
                 let kind = value.get("type").and_then(Value::as_str);
                 if matches!(kind, Some("user" | "assistant")) {
