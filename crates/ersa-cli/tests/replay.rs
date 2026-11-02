@@ -196,6 +196,9 @@ async fn ctrl_c_during_start_up_removes_the_data_directory() {
         .unwrap()
         .join("docs/briefs/protocol/fixtures/claude-code/2.1.302/11-stream-permission-prompt-tool-stdio.jsonl");
     let tmp = tempfile::tempdir().unwrap();
+    // The endpoint's directory goes under TMPDIR when XDG_RUNTIME_DIR is
+    // unset, and outlives the replay; keep it out of the watched directory.
+    let runtime = tempfile::tempdir().unwrap();
     let label = format!("replay-ctrlc-{}", std::process::id());
     let mut core = tokio::process::Command::new(env!("CARGO_BIN_EXE_ersa-core"))
         .args([
@@ -208,6 +211,7 @@ async fn ctrl_c_during_start_up_removes_the_data_directory() {
         ])
         .arg(&fixture)
         .env("TMPDIR", tmp.path())
+        .env("XDG_RUNTIME_DIR", runtime.path())
         .stdin(Stdio::null())
         .kill_on_drop(true)
         .spawn()
