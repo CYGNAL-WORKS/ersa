@@ -175,8 +175,8 @@ struct Handle {
     record_read: ReadSlot<RecordReadResult>,
     /// The same for taking the record's version, to check whether a read an
     /// open joined still holds: every open that needs the check joins the
-    /// one running, so a disk that hangs only for stats also holds one
-    /// thread per session.
+    /// one running, so on a disk that hangs for stats these checks hold one
+    /// thread per session, as each slot here does.
     version_check: ReadSlot<Result<Option<String>, String>>,
     /// The same for reading the record's title and creation time.
     summary_read: ReadSlot<Result<Option<RecordSummary>, String>>,
