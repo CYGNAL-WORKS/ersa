@@ -11,6 +11,7 @@ import { CoreStatus } from "../components/CoreStatus";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { ProjectList } from "../components/ProjectList";
 import { SessionList } from "../components/SessionList";
+import { SessionTitle } from "../components/SessionTitle";
 import { Transcript } from "../components/Transcript";
 import type { CoreView } from "../core/connection";
 import type { Envelope, Event } from "../protocol/agent-events.gen";
@@ -203,6 +204,19 @@ const transcriptStates: [string, SessionView][] = [
   ["Not receiving events", sessionView([], { stream: { state: "failed", message: "Core closed the connection" } })],
 ];
 
+/** The session title as the transcript header holds it, beside the session's state. */
+function Titled(props: Omit<Parameters<typeof SessionTitle>[0], "title" | "onRename" | "children">) {
+  return (
+    <header className="transcript-header">
+      <SessionTitle title="Fix the flaky reconnect test" onRename={async () => false} {...props}>
+        <span className="transcript-state">Idle</span>
+      </SessionTitle>
+    </header>
+  );
+}
+
+const draft = "Fix the flaky reconnect test on Windows";
+
 /** Throws while rendering, as a component given data it cannot read would. */
 function Unreadable(): never {
   throw new Error("Cannot read properties of undefined (reading 'toFixed')");
@@ -326,6 +340,22 @@ const entries: Entry[] = [
       label,
       <Transcript title="Fix the flaky reconnect test" view={view} onDecide={() => {}} onRetry={() => {}} />,
     ]),
+  },
+  {
+    name: "SessionTitle",
+    wide: true,
+    states: [
+      ["Default", <Titled />],
+      ["Rename hover", <Titled force="hover" />],
+      ["Rename focus", <Titled force="focus" />],
+      ["Core not connected", <Titled disabled />],
+      ["Editing", <Titled initialDraft={draft} />],
+      ["Editing, hover", <Titled initialDraft={draft} force="hover" />],
+      ["Editing, focus", <Titled initialDraft={draft} force="focus" />],
+      ["Blank", <Titled initialDraft="" force="focus" />],
+      ["Saving", <Titled initialDraft={draft} renaming={{ state: "sending" }} />],
+      ["Refused", <Titled initialDraft={draft} renaming={{ state: "failed", message: "the backend has no record of session s1 to rename" }} />],
+    ],
   },
   {
     name: "ErrorBoundary",
