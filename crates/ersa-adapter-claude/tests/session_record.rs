@@ -78,6 +78,7 @@ fn live_only(event: &Event) -> bool {
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R15
 // verifies: PROTO-CLAUDE-CODE-STREAM-R21
+// verifies: PROTO-CLAUDE-CODE-STREAM-R20
 #[test]
 fn record_messages_project_to_the_same_events_as_the_stream_messages() {
     let records = record_fixtures();
@@ -1046,7 +1047,8 @@ fn only_a_local_commands_output_is_projected() {
         entry(
             "b",
             Some("a"),
-            "<local-command-stderr>Unknown command: /allow</local-command-stderr>",
+            "<local-command-stderr>Unknown command: /allow</local-command-stderr>
+",
         ),
     ]);
     let texts: Vec<&str> = events
