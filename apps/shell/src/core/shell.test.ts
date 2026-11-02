@@ -8,6 +8,7 @@ const inState = (id: string, state: Session["tile"]["state"]): Session => ({
   workspace_id: "w",
   host_id: "local",
   backend: "claude-code",
+  permission_mode: "default",
   state,
   created_at: "2026-11-01T09:00:00.000Z",
   tile: { state, pending: [] },
