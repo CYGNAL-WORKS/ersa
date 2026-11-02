@@ -175,11 +175,43 @@ struct Handle {
     record_read: ReadSlot<RecordReadResult>,
     /// The same for reading the record's title and creation time.
     summary_read: ReadSlot<Result<Option<RecordSummary>, String>>,
+    /// Set when the session is removed, for reads of its record that
+    /// outlive it ([`read_unless_removed`]).
+    removed: Arc<AtomicBool>,
 }
 
 /// A read of a session's record: the record's version when the read began,
 /// and its events.
 type RecordReadResult = Result<(Option<String>, Arc<Vec<RecordEvent>>), String>;
+
+/// Whether `read` still describes its record, whose version is `now`: the
+/// version it was read at is the same. A read from before the record existed
+/// (no version) does not hold once it does. A read that failed is reported
+/// as it is.
+fn still_holds(read: &RecordReadResult, now: Option<&str>) -> bool {
+    match read {
+        Ok((version, _)) => version.as_deref() == now,
+        Err(_) => true,
+    }
+}
+
+/// What `read`, a read of a session's record, returns; when the session was
+/// removed while it ran, `forget` then lets go of what the adapter kept of
+/// the record. A read that outlived its caller can end after `remove` had
+/// the adapter forget the record, and would otherwise keep it again.
+/// `remove` marks the session before it forgets, so either its forget comes
+/// after anything this read kept, or this sees the mark.
+async fn read_unless_removed<T>(
+    read: impl Future<Output = T>,
+    removed: &AtomicBool,
+    forget: impl FnOnce(),
+) -> T {
+    let value = read.await;
+    if removed.load(Ordering::SeqCst) {
+        forget();
+    }
+    value
+}
 
 /// One read of a session's record that may still be running.
 type ReadSlot<T> = tokio::sync::Mutex<Option<tokio::task::JoinHandle<T>>>;
@@ -195,33 +227,52 @@ type ReadSlot<T> = tokio::sync::Mutex<Option<tokio::task::JoinHandle<T>>>;
 /// `still_current` says the record has not changed since that read began,
 /// and reads again otherwise. A read that finished after its caller gave up
 /// is not handed on: nothing says when it was taken.
+///
+/// `still_current` looks at the record too, so it is bounded by `timeout` as
+/// a read is, and runs without `slot` locked: a disk that stops answering
+/// fails this open, and holds no other behind it.
 async fn read_once<T: Send + 'static>(
     slot: &ReadSlot<T>,
     timeout: Duration,
     start: impl FnOnce() -> tokio::task::JoinHandle<T>,
     still_current: impl AsyncFnOnce(&T) -> bool,
 ) -> Option<T> {
+    let mut start = Some(start);
+    let first = {
+        let mut slot = slot.lock().await;
+        join_or_start(&mut slot, &mut start);
+        wait(&mut slot, timeout).await?
+    };
+    // Started here: what it read is current.
+    if start.is_none() {
+        return Some(first);
+    }
+    // Joined a read already running: the record may have grown since that
+    // read began.
+    match tokio::time::timeout(timeout, still_current(&first)).await {
+        Ok(true) => return Some(first),
+        Ok(false) => {}
+        Err(_) => return None,
+    }
     let mut slot = slot.lock().await;
+    // A read there now was started after this open began, so is current
+    // for it.
+    join_or_start(&mut slot, &mut start);
+    wait(&mut slot, timeout).await
+}
+
+/// Leaves a read still running in `slot` to be joined, or puts one started
+/// with `start` there. One that finished after its caller gave up is
+/// dropped.
+fn join_or_start<T>(
+    slot: &mut Option<tokio::task::JoinHandle<T>>,
+    start: &mut Option<impl FnOnce() -> tokio::task::JoinHandle<T>>,
+) {
     if slot.as_ref().is_some_and(|task| task.is_finished()) {
         *slot = None;
     }
-    let mut start = Some(start);
     if slot.is_none() {
         *slot = start.take().map(|start| start());
-    }
-    let first = wait(&mut slot, timeout).await?;
-    match start {
-        // Joined a read already running: the record may have grown since
-        // that read began.
-        Some(start) => {
-            if still_current(&first).await {
-                return Some(first);
-            }
-            *slot = Some(start());
-            wait(&mut slot, timeout).await
-        }
-        // Started here: what it read is current.
-        None => Some(first),
     }
 }
 
@@ -439,6 +490,7 @@ impl Handle {
             ending: Mutex::new(None),
             record_read: tokio::sync::Mutex::new(None),
             summary_read: tokio::sync::Mutex::new(None),
+            removed: Arc::default(),
         }
     }
 
@@ -807,7 +859,9 @@ impl SessionManager {
         self.store.delete_session(id.to_string()).await?;
         lock(&self.sessions).remove(id);
         self.app_log.forget(id);
-        // What the adapter kept of its record goes too.
+        // What the adapter kept of its record goes too, and what a read
+        // still running keeps once it ends.
+        handle.removed.store(true, Ordering::SeqCst);
         let row = lock(&handle.row).clone();
         if let (Some(backend_id), Some(adapter)) =
             (&row.backend_session_id, self.adapters.get(&row.backend))
@@ -1005,36 +1059,45 @@ impl SessionManager {
                         let (reader, cwd, id) =
                             (Arc::clone(&adapter), row.cwd.clone(), backend_id.clone());
                         let at = Arc::clone(&transport);
+                        let removed = Arc::clone(&handle.removed);
                         // The record's version is taken before it is read, so
                         // events read are never newer than the version they
                         // are kept under.
                         let start = move || {
                             tokio::spawn(async move {
-                                let version = reader
-                                    .record_version(Arc::clone(&at), &cwd, &id)
-                                    .await
-                                    .ok()
-                                    .flatten();
-                                reader
-                                    .read_record(at, &cwd, &id)
-                                    .await
-                                    .map(|events| (version, events))
-                                    .map_err(|e| e.to_string())
+                                let read = async {
+                                    let version = reader
+                                        .record_version(Arc::clone(&at), &cwd, &id)
+                                        .await
+                                        .ok()
+                                        .flatten();
+                                    reader
+                                        .read_record(at, &cwd, &id)
+                                        .await
+                                        .map(|events| (version, events))
+                                        .map_err(|e| e.to_string())
+                                };
+                                read_unless_removed(read, &removed, || {
+                                    reader.forget_record(&cwd, &id)
+                                })
+                                .await
                             })
                         };
                         // A read this open joined still holds if the record's
-                        // version is the one it was read at; one whose version
-                        // nobody can tell is taken as it is.
-                        let still_current = async |read: &RecordReadResult| match read {
-                            Ok((Some(version), _)) => {
-                                let now = adapter
-                                    .record_version(transport, &row.cwd, backend_id)
-                                    .await
-                                    .ok()
-                                    .flatten();
-                                now.as_ref() == Some(version)
+                        // version is the one it was read at. One that failed
+                        // is reported as it is, without looking again; a
+                        // version that cannot be taken now is a change.
+                        let still_current = async |read: &RecordReadResult| {
+                            if read.is_err() {
+                                return true;
                             }
-                            _ => true,
+                            match adapter
+                                .record_version(transport, &row.cwd, backend_id)
+                                .await
+                            {
+                                Ok(now) => still_holds(read, now.as_deref()),
+                                Err(_) => false,
+                            }
                         };
                         read_once(&handle.record_read, RECORD_READ, start, still_current)
                             .await
@@ -1109,10 +1172,11 @@ async fn apply_summary(
     cwd: String,
     backend_id: String,
 ) {
+    let removed = Arc::clone(&handle.removed);
     let start = move || {
         tokio::spawn(async move {
-            adapter
-                .summarize_record(transport, &cwd, &backend_id)
+            let read = adapter.summarize_record(transport, &cwd, &backend_id);
+            read_unless_removed(read, &removed, || adapter.forget_record(&cwd, &backend_id))
                 .await
                 .map_err(|e| e.to_string())
         })
@@ -1951,6 +2015,181 @@ mod tests {
             Some(7)
         );
         assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    // Paused time on one thread: a sleep lets every other task run until it
+    // waits, and no timeout runs out early on a busy machine.
+    #[tokio::test(start_paused = true)]
+    async fn a_joined_read_whose_record_cannot_be_checked_fails_the_open_and_holds_nothing() {
+        let slot: Arc<ReadSlot<u32>> = Arc::default();
+        let gate = Arc::new(Notify::new());
+        let slow = || {
+            let gate = Arc::clone(&gate);
+            tokio::spawn(async move {
+                gate.notified().await;
+                7
+            })
+        };
+        let short = Duration::from_millis(20);
+        assert_eq!(read_once(&slot, short, slow, async |_| true).await, None);
+        // An open joins the read still running...
+        let stuck = tokio::spawn({
+            let slot = Arc::clone(&slot);
+            async move {
+                read_once(
+                    &slot,
+                    Duration::from_millis(500),
+                    || tokio::spawn(async { 0 }),
+                    async |_| std::future::pending::<bool>().await,
+                )
+                .await
+            }
+        });
+        tokio::time::sleep(short).await;
+        // ...which finishes, then the disk stops answering: checking whether
+        // the record changed never ends.
+        gate.notify_one();
+        tokio::time::sleep(short).await;
+        // Meanwhile another open is not held behind that check.
+        let other = read_once(&slot, short, || tokio::spawn(async { 9 }), async |_| true);
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(100), other).await,
+            Ok(Some(9))
+        );
+        // And the stuck one gives up as a read that takes too long does.
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), stuck)
+                .await
+                .unwrap()
+                .unwrap(),
+            None
+        );
+    }
+
+    /// An adapter whose record and summary reads wait on gates, as reads on
+    /// a disk that stopped answering do, and which counts its forgets.
+    #[derive(Default)]
+    struct GatedReads {
+        record: Notify,
+        summary: Notify,
+        forgets: std::sync::atomic::AtomicUsize,
+    }
+
+    #[ersa_adapter::async_trait]
+    impl Adapter for GatedReads {
+        fn backend(&self) -> &str {
+            "gated"
+        }
+        async fn start(
+            &self,
+            _transport: Arc<dyn Transport>,
+            _config: SessionConfig,
+            _sink: Arc<dyn AdapterSink>,
+        ) -> Result<Box<dyn AdapterSession>, AdapterError> {
+            Err(AdapterError::Protocol("never started".into()))
+        }
+        fn projector(&self) -> Box<dyn ersa_adapter::Projector> {
+            unreachable!("never started")
+        }
+        async fn read_record(
+            &self,
+            _transport: Arc<dyn Transport>,
+            _cwd: &str,
+            _backend_session_id: &str,
+        ) -> Result<Arc<Vec<RecordEvent>>, AdapterError> {
+            self.record.notified().await;
+            Ok(Arc::default())
+        }
+        async fn summarize_record(
+            &self,
+            _transport: Arc<dyn Transport>,
+            _cwd: &str,
+            _backend_session_id: &str,
+        ) -> Result<Option<RecordSummary>, AdapterError> {
+            self.summary.notified().await;
+            Ok(None)
+        }
+        fn forget_record(&self, _cwd: &str, _backend_session_id: &str) {
+            self.forgets.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    // Paused time: the reads' timeouts run out as soon as nothing else can.
+    #[tokio::test(start_paused = true)]
+    async fn reads_that_outlive_a_removed_session_have_the_adapter_forget_its_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("ersa.db")).unwrap();
+        let (app_log, _) = AppLog::open(dir.path()).unwrap();
+        let adapter = Arc::new(GatedReads::default());
+        let manager = SessionManager::new(
+            store,
+            vec![Arc::clone(&adapter) as Arc<dyn Adapter>],
+            Arc::new(app_log),
+        );
+        let row = SessionRow {
+            id: "s-gated".into(),
+            workspace_id: "w".into(),
+            host_id: "local".into(),
+            backend: "gated".into(),
+            backend_session_id: Some("b-gated".into()),
+            mode: None,
+            cwd: "C:/work".into(),
+        };
+        let handle = Arc::new(Handle::new(row, now_rfc3339()));
+        lock(&manager.sessions).insert(handle.id.clone(), handle);
+
+        // Opening it: the record read and then the summary read time out and
+        // are left running.
+        let transport: Arc<dyn Transport> = Arc::new(ersa_adapter::LocalTransport);
+        let opened = manager
+            .subscribe(
+                "s-gated",
+                0,
+                |_| Some(Arc::clone(&transport)),
+                mpsc::channel(16).0,
+                Arc::new(watch::Sender::new(false)),
+            )
+            .await;
+        assert!(opened.is_ok());
+
+        manager.remove("s-gated").await.unwrap();
+        assert_eq!(adapter.forgets.load(Ordering::SeqCst), 1);
+        // Each read that ends after the removal forgets what it kept.
+        adapter.record.notify_one();
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        assert_eq!(adapter.forgets.load(Ordering::SeqCst), 2);
+        adapter.summary.notify_one();
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        assert_eq!(adapter.forgets.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn a_read_that_ends_after_its_session_is_removed_lets_go_of_what_it_kept() {
+        let removed = AtomicBool::new(false);
+        let forgot = AtomicBool::new(false);
+        let forget = || forgot.store(true, Ordering::SeqCst);
+        assert_eq!(read_unless_removed(async { 1 }, &removed, forget).await, 1);
+        assert!(!forgot.load(Ordering::SeqCst));
+        // The session is removed while the read runs: what it kept goes.
+        let read = async {
+            removed.store(true, Ordering::SeqCst);
+            2
+        };
+        assert_eq!(read_unless_removed(read, &removed, forget).await, 2);
+        assert!(forgot.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_read_from_before_its_record_existed_does_not_hold_once_it_does() {
+        let empty: RecordReadResult = Ok((None, Arc::default()));
+        assert!(still_holds(&empty, None));
+        assert!(!still_holds(&empty, Some("10:1")));
+        let read: RecordReadResult = Ok((Some("10:1".into()), Arc::default()));
+        assert!(still_holds(&read, Some("10:1")));
+        assert!(!still_holds(&read, Some("20:2")));
+        assert!(!still_holds(&read, None));
+        // A read that failed is reported as it is.
+        assert!(still_holds(&Err("denied".into()), Some("10:1")));
     }
 
     #[test]
