@@ -26,6 +26,11 @@
   }
 }
 
+/* Focused only while Ersa stops, to keep the keyboard here; its accent edge already marks it. */
+.quit-question:focus {
+  outline: none;
+}
+
 .quit-question-title {
   margin: 0;
   font-weight: var(--type-heading-weight);

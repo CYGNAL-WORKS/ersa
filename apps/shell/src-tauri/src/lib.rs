@@ -18,10 +18,13 @@
 //!     returns its result, or a [`bridge::BridgeError`].
 //! - Closing and quitting (FLOW-CLOSE-AND-QUIT): closing the window hides
 //!   it to the tray icon. Quit, from the tray icon's menu, emits
-//!   `quit-requested` to the window, whose Interface asks the user to
-//!   confirm when sessions are busy and then calls `shell_quit`; with no
-//!   Interface attached to Core, the Shell quits at once. `shell_show` shows
-//!   the window, for that confirmation.
+//!   `quit-requested` to the window, whose Interface calls
+//!   `shell_quit_heard` at once, asks the user to confirm when sessions are
+//!   busy, and then calls `shell_quit`. With no Interface attached to Core,
+//!   or one that does not say it heard within [`QUIT_HEARD_LIMIT`], the
+//!   Shell quits at once. `shell_show` shows the window for the
+//!   confirmation and returns whether it was hidden; `shell_hide` puts it
+//!   back when the user cancels.
 //!   - [`quit`]: shutting Core down, and ending it when it will not stop.
 //!   - [`instance`]: one Shell per user; a second launch shows the first's
 //!     window.
@@ -33,7 +36,8 @@ pub mod process;
 pub mod quit;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use tauri::ipc::Channel;
@@ -60,9 +64,19 @@ struct Shell {
     /// across the launch, so two attaches never launch two Cores.
     link: Mutex<Option<Arc<CoreLink>>>,
     sink: Sink,
-    /// Set once Quit has begun, so a second Quit does not start another.
+    /// Set once Quit has begun, so a second Quit does not start another,
+    /// and the Interface does not attach (and launch Core) again meanwhile.
     quitting: AtomicBool,
+    /// How many Quits the tray has passed to the Interface, and the count
+    /// when the Interface last said it heard one.
+    quit_asked: AtomicU64,
+    quit_heard: AtomicU64,
 }
+
+/// How long the Interface has to say it heard a Quit before the Shell
+/// quits without it: a window whose script is stuck must not make Quit
+/// do nothing.
+pub const QUIT_HEARD_LIMIT: Duration = Duration::from_secs(5);
 
 #[tauri::command]
 async fn core_attach(
@@ -72,7 +86,21 @@ async fn core_attach(
     // Replace the sink before anything else, so nothing Core sends from here
     // on is lost or delivered to an Interface that no longer listens.
     *shell.sink.lock().expect("sink lock") = Some(events);
+    let quitting = || {
+        shell
+            .quitting
+            .load(Ordering::SeqCst)
+            .then(|| BridgeError::unavailable("Ersa is quitting"))
+    };
+    // After Quit, the Interface sees its connection drop and attaches again;
+    // that must never launch a new Core behind the one shutting down.
+    if let Some(refused) = quitting() {
+        return Err(refused);
+    }
     let mut link = shell.link.lock().await;
+    if let Some(refused) = quitting() {
+        return Err(refused);
+    }
     let reply = |how: &str, hello: &Value| {
         let mut reply = json!({ "how": how, "hello": hello });
         if let Some(label) = &shell.label {
@@ -122,10 +150,31 @@ async fn core_request(
     link.request(&method, params).await
 }
 
-/// Shows the window, for the Interface's quit confirmation.
+/// Shows the window, for the Interface's quit confirmation; whether it was
+/// hidden before.
 #[tauri::command]
-fn shell_show(app: AppHandle) {
+fn shell_show(app: AppHandle) -> bool {
+    let hidden = app
+        .get_webview_window(WINDOW)
+        .is_some_and(|window| !window.is_visible().unwrap_or(true));
     show_window(&app);
+    hidden
+}
+
+/// Hides the window again, when the user cancels a quit the window was
+/// shown for (FLOW-CLOSE-AND-QUIT-R04: everything stays as it was).
+#[tauri::command]
+fn shell_hide(app: AppHandle) {
+    if let Some(window) = app.get_webview_window(WINDOW) {
+        let _ = window.hide();
+    }
+}
+
+/// The Interface has received `quit-requested` and will answer it.
+#[tauri::command]
+fn shell_quit_heard(shell: State<'_, Shell>) {
+    let asked = shell.quit_asked.load(Ordering::SeqCst);
+    shell.quit_heard.fetch_max(asked, Ordering::SeqCst);
 }
 
 /// Quits: called by the Interface once the user has confirmed, or when
@@ -152,16 +201,24 @@ fn show_window(app: &AppHandle) {
 /// no session the window could name, and the Shell quits at once.
 async fn quit_requested(app: AppHandle) {
     let shell = app.state::<Shell>();
+    // An attach still in progress holds the lock, maybe for a launch; the
+    // window cannot have counted sessions yet, so that counts as none.
     let attached = shell
         .link
-        .lock()
-        .await
-        .as_ref()
-        .is_some_and(|link| !link.is_closed());
-    if attached && app.emit_to(WINDOW, "quit-requested", ()).is_ok() {
-        return;
+        .try_lock()
+        .is_ok_and(|link| link.as_ref().is_some_and(|link| !link.is_closed()));
+    if !attached {
+        return quit_now(&app).await;
     }
-    quit_now(&app).await;
+    let mine = shell.quit_asked.fetch_add(1, Ordering::SeqCst) + 1;
+    if app.emit_to(WINDOW, "quit-requested", ()).is_err() {
+        return quit_now(&app).await;
+    }
+    tokio::time::sleep(QUIT_HEARD_LIMIT).await;
+    if shell.quit_heard.load(Ordering::SeqCst) < mine {
+        eprintln!("ersa: quit: the window did not answer; quitting without it");
+        quit_now(&app).await;
+    }
 }
 
 /// Shuts Core down and exits once it has stopped (FLOW-CLOSE-AND-QUIT-R03,
@@ -175,12 +232,15 @@ async fn quit_now(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(WINDOW) {
         let _ = window.hide();
     }
-    // Let go of the Interface's connection first: Core closes it anyway.
-    shell.link.lock().await.take();
-    if shell.label.is_none()
-        && let Ok(location) = &shell.location
+    // Let go of the Interface's connection first: Core closes it anyway. An
+    // attach in progress keeps it, and is refused once it finishes.
+    if let Ok(mut link) = shell.link.try_lock() {
+        link.take();
+    }
+    if let Some(endpoint) =
+        quit::endpoint_to_stop(shell.label.as_deref(), shell.location.as_ref().ok())
     {
-        match quit::shut_down(&location.endpoint, quit::QUIT_LIMIT).await {
+        match quit::shut_down(endpoint, quit::QUIT_LIMIT).await {
             Ok(stopped) => eprintln!("ersa: quit: {stopped:?}"),
             Err(e) => eprintln!("ersa: quit: {e}"),
         }
@@ -303,6 +363,8 @@ pub fn run() {
         link: Mutex::new(None),
         sink: Arc::new(std::sync::Mutex::new(None)),
         quitting: AtomicBool::new(false),
+        quit_asked: AtomicU64::new(0),
+        quit_heard: AtomicU64::new(0),
     };
     tauri::Builder::default()
         .manage(shell)
@@ -310,6 +372,8 @@ pub fn run() {
             core_attach,
             core_request,
             shell_show,
+            shell_hide,
+            shell_quit_heard,
             shell_quit
         ])
         // The window is built here rather than in tauri.conf.json so it can
@@ -322,13 +386,11 @@ pub fn run() {
                 .on_navigation(guard_navigation)
                 .build()?;
             build_tray(app.handle())?;
-            if let Some(mut listener) = listener {
+            if let Some(listener) = listener {
                 let app = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    while instance::next_request(&mut listener).await.is_ok() {
-                        show_window(&app);
-                    }
-                });
+                tauri::async_runtime::spawn(instance::serve_requests(listener, move || {
+                    show_window(&app)
+                }));
             }
             Ok(())
         })

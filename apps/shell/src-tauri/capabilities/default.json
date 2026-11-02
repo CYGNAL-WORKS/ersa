@@ -8,6 +8,8 @@
     "allow-core-attach",
     "allow-core-request",
     "allow-shell-show",
+    "allow-shell-hide",
+    "allow-shell-quit-heard",
     "allow-shell-quit",
     "core:event:allow-listen",
     "core:event:allow-unlisten"

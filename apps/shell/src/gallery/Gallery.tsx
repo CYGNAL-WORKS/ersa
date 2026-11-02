@@ -230,6 +230,10 @@ const entries: Entry[] = [
         <QuitQuestion busy={3} onQuit={() => {}} onCancel={() => {}} takeFocus={false} forceCancelFocus />,
       ],
       ["Quitting", <QuitQuestion busy={3} onQuit={() => {}} onCancel={() => {}} takeFocus={false} quitting />],
+      [
+        "Quit failed",
+        <QuitQuestion busy={2} onQuit={() => {}} onCancel={() => {}} takeFocus={false} failed="Ersa did not quit: not attached to Core" />,
+      ],
     ],
   },
   {
