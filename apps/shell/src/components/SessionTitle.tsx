@@ -1,6 +1,9 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { Sending } from "../session/follow";
 import { Button } from "./Button";
+
+/** Says how to rename, to a pointer's tooltip and to a screen reader. */
+const RENAME_HINT = "Double-click, or press Enter or F2, to rename";
 import "./SessionTitle.css";
 
 interface SessionTitleProps {
@@ -36,9 +39,9 @@ export function SessionTitle({ title, untitled, onRename, renaming, onReset, dis
   // The text being edited; undefined while the title is only shown.
   const [draft, setDraft] = useState<string | undefined>(initialDraft);
   const busy = renaming?.state === "sending";
-  const rename = useRef<HTMLButtonElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
   const field = useRef<HTMLInputElement>(null);
-  // Focus goes back to Rename once editing ends, where the user started it.
+  // Focus goes back to the title once editing ends, where the user started it.
   const returnFocus = useRef(false);
   // The old title is selected when the field first takes focus, to type over; not again, or a refusal's return
   // to the field would select the draft being corrected.
@@ -47,7 +50,7 @@ export function SessionTitle({ title, untitled, onRename, renaming, onReset, dis
   useEffect(() => {
     if (draft === undefined && returnFocus.current) {
       returnFocus.current = false;
-      rename.current?.focus();
+      heading.current?.focus();
     }
   }, [draft]);
 
@@ -75,27 +78,39 @@ export function SessionTitle({ title, untitled, onRename, renaming, onReset, dis
     if (await onRename?.(next)) close();
   };
 
+  // While a rename is still on its way, a second waits for its answer.
+  const editable = !!onRename && !disabled && !busy;
+  const edit = () => {
+    if (!editable) return;
+    onReset?.();
+    selected.current = false;
+    setDraft(untitled ? "" : title);
+  };
+
   if (draft === undefined || !onRename) {
+    // The title itself is the control: no button beside it. A pointer double-clicks it; the keyboard focuses it and
+    // presses Enter or F2, as in a file list.
     return (
       <>
-        <h1 className="session-heading">{title}</h1>
+        <h1
+          ref={heading}
+          className="session-heading"
+          data-editable={editable || undefined}
+          data-force={editable ? force : undefined}
+          tabIndex={editable ? 0 : undefined}
+          title={editable ? RENAME_HINT : undefined}
+          aria-description={editable ? RENAME_HINT : undefined}
+          onDoubleClick={edit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === "F2") {
+              event.preventDefault();
+              edit();
+            }
+          }}
+        >
+          {title}
+        </h1>
         {children}
-        {onRename && (
-          <Button
-            ref={rename}
-            className="session-heading-rename"
-            force={force}
-            // While a rename is still on its way, a second waits for its answer.
-            disabled={disabled || busy}
-            onClick={() => {
-              onReset?.();
-              selected.current = false;
-              setDraft(untitled ? "" : title);
-            }}
-          >
-            Rename
-          </Button>
-        )}
       </>
     );
   }

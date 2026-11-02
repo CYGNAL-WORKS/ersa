@@ -346,8 +346,8 @@ const entries: Entry[] = [
     wide: true,
     states: [
       ["Default", <Titled />],
-      ["Rename hover", <Titled force="hover" />],
-      ["Rename focus", <Titled force="focus" />],
+      ["Hover", <Titled force="hover" />],
+      ["Focus", <Titled force="focus" />],
       ["Core not connected", <Titled disabled />],
       ["Editing", <Titled initialDraft={draft} />],
       ["Editing, hover", <Titled initialDraft={draft} force="hover" />],
