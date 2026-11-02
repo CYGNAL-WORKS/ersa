@@ -181,6 +181,17 @@ struct Handle {
 /// and its events.
 type RecordReadResult = Result<(Option<String>, Arc<Vec<RecordEvent>>), String>;
 
+/// Whether `read` still describes its record, whose version is `now`: the
+/// version it was read at is the same. A read from before the record existed
+/// (no version) does not hold once it does. A read that failed is reported
+/// as it is.
+fn still_holds(read: &RecordReadResult, now: Option<&str>) -> bool {
+    match read {
+        Ok((version, _)) => version.as_deref() == now,
+        Err(_) => true,
+    }
+}
+
 /// One read of a session's record that may still be running.
 type ReadSlot<T> = tokio::sync::Mutex<Option<tokio::task::JoinHandle<T>>>;
 
@@ -195,33 +206,52 @@ type ReadSlot<T> = tokio::sync::Mutex<Option<tokio::task::JoinHandle<T>>>;
 /// `still_current` says the record has not changed since that read began,
 /// and reads again otherwise. A read that finished after its caller gave up
 /// is not handed on: nothing says when it was taken.
+///
+/// `still_current` looks at the record too, so it is bounded by `timeout` as
+/// a read is, and runs without `slot` locked: a disk that stops answering
+/// fails this open, and holds no other behind it.
 async fn read_once<T: Send + 'static>(
     slot: &ReadSlot<T>,
     timeout: Duration,
     start: impl FnOnce() -> tokio::task::JoinHandle<T>,
     still_current: impl AsyncFnOnce(&T) -> bool,
 ) -> Option<T> {
+    let mut start = Some(start);
+    let first = {
+        let mut slot = slot.lock().await;
+        join_or_start(&mut slot, &mut start);
+        wait(&mut slot, timeout).await?
+    };
+    // Started here: what it read is current.
+    if start.is_none() {
+        return Some(first);
+    }
+    // Joined a read already running: the record may have grown since that
+    // read began.
+    match tokio::time::timeout(timeout, still_current(&first)).await {
+        Ok(true) => return Some(first),
+        Ok(false) => {}
+        Err(_) => return None,
+    }
     let mut slot = slot.lock().await;
+    // A read there now was started after this open began, so is current
+    // for it.
+    join_or_start(&mut slot, &mut start);
+    wait(&mut slot, timeout).await
+}
+
+/// Leaves a read still running in `slot` to be joined, or puts one started
+/// with `start` there. One that finished after its caller gave up is
+/// dropped.
+fn join_or_start<T>(
+    slot: &mut Option<tokio::task::JoinHandle<T>>,
+    start: &mut Option<impl FnOnce() -> tokio::task::JoinHandle<T>>,
+) {
     if slot.as_ref().is_some_and(|task| task.is_finished()) {
         *slot = None;
     }
-    let mut start = Some(start);
     if slot.is_none() {
         *slot = start.take().map(|start| start());
-    }
-    let first = wait(&mut slot, timeout).await?;
-    match start {
-        // Joined a read already running: the record may have grown since
-        // that read began.
-        Some(start) => {
-            if still_current(&first).await {
-                return Some(first);
-            }
-            *slot = Some(start());
-            wait(&mut slot, timeout).await
-        }
-        // Started here: what it read is current.
-        None => Some(first),
     }
 }
 
@@ -1023,18 +1053,14 @@ impl SessionManager {
                             })
                         };
                         // A read this open joined still holds if the record's
-                        // version is the one it was read at; one whose version
-                        // nobody can tell is taken as it is.
-                        let still_current = async |read: &RecordReadResult| match read {
-                            Ok((Some(version), _)) => {
-                                let now = adapter
-                                    .record_version(transport, &row.cwd, backend_id)
-                                    .await
-                                    .ok()
-                                    .flatten();
-                                now.as_ref() == Some(version)
-                            }
-                            _ => true,
+                        // version is the one it was read at.
+                        let still_current = async |read: &RecordReadResult| {
+                            let now = adapter
+                                .record_version(transport, &row.cwd, backend_id)
+                                .await
+                                .ok()
+                                .flatten();
+                            still_holds(read, now.as_deref())
                         };
                         read_once(&handle.record_read, RECORD_READ, start, still_current)
                             .await
@@ -1951,6 +1977,66 @@ mod tests {
             Some(7)
         );
         assert_eq!(starts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_joined_read_whose_record_cannot_be_checked_fails_the_open_and_holds_nothing() {
+        let slot: Arc<ReadSlot<u32>> = Arc::default();
+        let gate = Arc::new(Notify::new());
+        let slow = || {
+            let gate = Arc::clone(&gate);
+            tokio::spawn(async move {
+                gate.notified().await;
+                7
+            })
+        };
+        let short = Duration::from_millis(20);
+        assert_eq!(read_once(&slot, short, slow, async |_| true).await, None);
+        // An open joins the read still running...
+        let stuck = tokio::spawn({
+            let slot = Arc::clone(&slot);
+            async move {
+                read_once(
+                    &slot,
+                    Duration::from_millis(500),
+                    || tokio::spawn(async { 0 }),
+                    async |_| std::future::pending::<bool>().await,
+                )
+                .await
+            }
+        });
+        tokio::time::sleep(short).await;
+        // ...which finishes, then the disk stops answering: checking whether
+        // the record changed never ends.
+        gate.notify_one();
+        tokio::time::sleep(short).await;
+        // Meanwhile another open is not held behind that check.
+        let other = read_once(&slot, short, || tokio::spawn(async { 9 }), async |_| true);
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(100), other).await,
+            Ok(Some(9))
+        );
+        // And the stuck one gives up as a read that takes too long does.
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), stuck)
+                .await
+                .unwrap()
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_read_from_before_its_record_existed_does_not_hold_once_it_does() {
+        let empty: RecordReadResult = Ok((None, Arc::default()));
+        assert!(still_holds(&empty, None));
+        assert!(!still_holds(&empty, Some("10:1")));
+        let read: RecordReadResult = Ok((Some("10:1".into()), Arc::default()));
+        assert!(still_holds(&read, Some("10:1")));
+        assert!(!still_holds(&read, Some("20:2")));
+        assert!(!still_holds(&read, None));
+        // A read that failed is reported as it is.
+        assert!(still_holds(&Err("denied".into()), Some("10:1")));
     }
 
     #[test]
