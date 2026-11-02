@@ -16,12 +16,12 @@ Ersa is a desktop harness for running many coding-agent sessions at once, each i
 
 Ersa must be beautiful, and every session that touches the interface is responsible for that, not a later polish pass. Before writing or changing interface code, read `docs/design/DESIGN.md`. The rules that apply to every change:
 
-- Ersa is an instrument, not a chat app. Quiet warm-neutral surfaces, one accent color, color only where it means something.
-- Agent output reads as a document, never as speech bubbles. Status lives in tiles with one shared anatomy.
+- Ersa looks and behaves like the agentic harnesses people already use, and is more beautiful than they are. Quiet neutral surfaces, one accent color, color only where it means something.
+- The user's messages sit in chat bubbles; the agent's output has no bubble and reads as a document. Status lives in tiles with one shared anatomy.
 - Every color, size, radius, and duration comes from a token in `DESIGN.md`. A raw value in interface code is a defect.
-- Every transition uses a motion token and explains where something came from or went to. Nothing animates for decoration.
+- Every transition uses a motion token. Motion is calm, never delays input, and honors reduced motion.
 - Light and dark are designed together. A component is not done until it is right in both.
-- Nothing that signals "AI": no gradients, no glow, no sparkle iconography, no purple. If it would look at home on a model vendor's landing page, choose differently.
+- Calm and luminous: soft tonal gradients for material, a faint wash on the canvas, and one focal accent glow per screen. Nothing busy.
 - Hover, focus, pressed, disabled, loading, empty, and error states each get a deliberate appearance, and the rail's attention state is an edge or glyph, never a filled row.
 
 ## Content

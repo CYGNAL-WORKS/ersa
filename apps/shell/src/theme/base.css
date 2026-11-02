@@ -18,13 +18,15 @@ body {
   font-size: var(--type-mono-size);
   line-height: var(--type-mono-leading);
   font-variant-numeric: tabular-nums;
+  font-variant-ligatures: none;
 }
 
-/* Paths and anything else the user may copy. */
+/* Paths and anything else the user may copy. Ligatures off, so code shows the characters that were typed. */
 .mono {
   font-family: var(--type-mono-family);
   font-size: var(--type-mono-size);
   line-height: var(--type-mono-leading);
+  font-variant-ligatures: none;
 }
 
 /* A problem stated inline: muted text after the status tile's danger glyph, never a filled row. */
