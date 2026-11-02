@@ -14,7 +14,7 @@ use crate::process::CoreProcess;
 pub const QUIT_LIMIT: Duration = Duration::from_secs(10);
 
 /// How long a process that was ended may take to be gone.
-const KILL_WAIT: Duration = Duration::from_secs(5);
+pub const KILL_WAIT: Duration = Duration::from_secs(5);
 
 /// How Core stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,13 +68,18 @@ pub async fn shut_down(endpoint: &str, limit: Duration) -> Result<Stopped, QuitE
     let (core, unfound) = match CoreProcess::serving(endpoint).await {
         Ok(None) => return Ok(Stopped::NotRunning),
         Ok(Some(core)) => (Some(core), None),
+        // Another user's process: never asked, never ended.
+        Err(source) if source.kind() == io::ErrorKind::PermissionDenied => {
+            return Err(QuitError::NotOurs {
+                endpoint: endpoint.to_string(),
+                source,
+            });
+        }
         Err(e) => (None, Some(e)),
     };
 
-    // The verified client checks that this user serves the endpoint; only
-    // then may the process found above be ended. One that answers nothing
-    // runs out the limit here and is ended below.
-    let mut verified = false;
+    // A Core that answers nothing, or takes no client, runs out the limit
+    // here and is ended below.
     let ask = async {
         let stream = match ersa_core::connect(endpoint).await {
             Ok(stream) => stream,
@@ -83,7 +88,6 @@ pub async fn shut_down(endpoint: &str, limit: Duration) -> Result<Stopped, QuitE
             // below tells which.
             Err(_) => return Ok(()),
         };
-        verified = true;
         let options = LinkOptions {
             probe_endpoint: None,
             timeout: Some(limit),
@@ -121,15 +125,6 @@ pub async fn shut_down(endpoint: &str, limit: Duration) -> Result<Stopped, QuitE
     let pid = core.pid();
     if core.wait_exit(left).await {
         return Ok(Stopped::Exited { pid });
-    }
-    if !verified {
-        return Err(QuitError::NotOurs {
-            endpoint: endpoint.to_string(),
-            source: io::Error::new(
-                io::ErrorKind::TimedOut,
-                "it did not take a client to check whose it is",
-            ),
-        });
     }
     core.kill_tree()
         .map_err(|source| QuitError::Kill { pid, source })?;

@@ -233,16 +233,21 @@ async fn quit_now(app: &AppHandle) {
         let _ = window.hide();
     }
     // Let go of the Interface's connection first: Core closes it anyway. An
-    // attach in progress keeps it, and is refused once it finishes.
-    if let Ok(mut link) = shell.link.try_lock() {
+    // attach in progress, perhaps launching Core, is let finish, so the Core
+    // it launches is the one shut down below; later attaches are refused.
+    let attach_limit = launch::START_TIMEOUT + bridge::PROBE_TIMEOUT;
+    if let Ok(mut link) = tokio::time::timeout(attach_limit, shell.link.lock()).await {
         link.take();
     }
     if let Some(endpoint) =
         quit::endpoint_to_stop(shell.label.as_deref(), shell.location.as_ref().ok())
     {
-        match quit::shut_down(endpoint, quit::QUIT_LIMIT).await {
-            Ok(stopped) => eprintln!("ersa: quit: {stopped:?}"),
-            Err(e) => eprintln!("ersa: quit: {e}"),
+        // Bounded as a whole, so nothing in it can keep the app from exiting.
+        let limit = quit::QUIT_LIMIT + quit::KILL_WAIT * 2;
+        match tokio::time::timeout(limit, quit::shut_down(endpoint, quit::QUIT_LIMIT)).await {
+            Ok(Ok(stopped)) => eprintln!("ersa: quit: {stopped:?}"),
+            Ok(Err(e)) => eprintln!("ersa: quit: {e}"),
+            Err(_) => eprintln!("ersa: quit: Core did not stop within {limit:?}"),
         }
     }
     app.exit(0);
