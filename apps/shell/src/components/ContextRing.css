@@ -1,0 +1,35 @@
+/* The context ring: a hairline track and the consumed arc in ink, read like a dial. */
+
+.context-ring {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--color-ink-muted);
+}
+
+.context-ring-gauge {
+  flex: none;
+  width: var(--space-lg);
+  height: var(--space-lg);
+}
+
+.context-ring-track,
+.context-ring-used {
+  fill: none;
+  stroke-width: var(--line-hairline);
+}
+
+.context-ring-track {
+  stroke: var(--color-line);
+}
+
+.context-ring-used {
+  stroke: var(--color-ink-muted);
+  transition: stroke-dasharray var(--motion-settle) var(--motion-ease-out);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-ring-used {
+    transition: none;
+  }
+}
