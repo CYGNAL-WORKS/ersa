@@ -5,10 +5,19 @@
 #![allow(dead_code)] // each test file uses only some of these
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use ersa_shell::launch::CoreLocation;
+use ersa_shell::bridge::{CoreLink, LinkEvent, LinkOptions};
+use ersa_shell::launch::{self, CoreLocation, How};
+use ersa_shell::quit::{self, QUIT_LIMIT};
+use serde_json::Value;
+use tokio::sync::mpsc;
+
+/// Bounds on what a test waits for, well above what each takes.
+pub const OPEN: Duration = Duration::from_secs(90);
+pub const CLEANUP: Duration = Duration::from_secs(30);
 
 /// The `ersa-core` executable: `ERSA_CORE_BIN`, or the root workspace's
 /// debug build (`cargo build -p ersa-cli` at the repository root).
@@ -107,3 +116,82 @@ pub fn end_with_this_run() {
 
 #[cfg(unix)]
 pub fn end_with_this_run() {}
+
+/// The stand-in backend CLI (examples/stand_in_backend.rs), which `cargo
+/// test` builds beside this test: tests live in `target/<profile>/deps/`.
+pub fn stand_in_backend() -> PathBuf {
+    let exe = std::env::current_exe().expect("this test binary");
+    let path = exe
+        .parent()
+        .and_then(Path::parent)
+        .expect("target/<profile>")
+        .join("examples")
+        .join(format!("stand_in_backend{}", std::env::consts::EXE_SUFFIX));
+    assert!(path.exists(), "no stand-in backend at {}", path.display());
+    path
+}
+
+pub async fn open(location: &CoreLocation) -> (CoreLink, How, mpsc::UnboundedReceiver<LinkEvent>) {
+    let opening = async {
+        let (stream, how) = launch::attach_or_launch(location)
+            .await
+            .unwrap_or_else(|e| panic!("attach or launch: {e}"));
+        let (events, received) = mpsc::unbounded_channel();
+        let link = CoreLink::open(stream, LinkOptions::default(), move |event| {
+            let _ = events.send(event);
+        })
+        .await
+        .unwrap_or_else(|e| panic!("handshake: {e}"));
+        (link, how, received)
+    };
+    tokio::time::timeout(OPEN, opening)
+        .await
+        .unwrap_or_else(|_| panic!("no Core answered at {}", location.endpoint))
+}
+
+pub async fn request(link: &CoreLink, method: &str, params: Value) -> Value {
+    link.request(method, Some(params))
+        .await
+        .unwrap_or_else(|e| panic!("{method}: {e}"))
+}
+
+/// Waits for `checks`, then stops whatever Core still serves the location,
+/// however the checks ended: a launched Core is detached, so nothing else
+/// would stop it.
+pub async fn finish(checks: tokio::task::JoinHandle<()>, location: &CoreLocation) {
+    let outcome = checks.await;
+    if tokio::time::timeout(
+        CLEANUP,
+        quit::shut_down(&location.endpoint, QUIT_LIMIT, None),
+    )
+    .await
+    .is_err()
+    {
+        eprintln!("could not stop the Core at {}", location.endpoint);
+    }
+    if let Err(failed) = outcome {
+        std::panic::resume_unwind(failed.into_panic());
+    }
+}
+
+/// A git repository with one commit, for a project whose workspace is a
+/// worktree.
+pub fn git_repo(dir: &Path) {
+    std::fs::create_dir_all(dir).expect("create the repository");
+    let git = |args: &[&str]| {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "Ersa test")
+            .env("GIT_AUTHOR_EMAIL", "test@ersa.invalid")
+            .env("GIT_COMMITTER_NAME", "Ersa test")
+            .env("GIT_COMMITTER_EMAIL", "test@ersa.invalid")
+            .status()
+            .expect("git runs");
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "--quiet", "--initial-branch=main"]);
+    std::fs::write(dir.join("README.md"), "test repository\n").expect("write a file");
+    git(&["add", "README.md"]);
+    git(&["commit", "--quiet", "-m", "initial"]);
+}

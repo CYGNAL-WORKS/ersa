@@ -107,6 +107,13 @@ const sessions: Session[] = [
   session("s5", "A session whose backend exited with an error", "2026-11-01T06:00:00Z", { state: "error", pending: [] }),
 ];
 
+/** The same sessions in two workspaces of one project, as the rail shows them once it knows the workspaces. */
+const byWorkspaceSessions = sessions.map((s) => ({ ...s, workspace_id: s.id === "s1" || s.id === "s3" ? "w-root" : "w-fix" }));
+const workspaceNames = {
+  "w-root": { project: "ersa", name: "Root workspace" },
+  "w-fix": { project: "ersa", name: "ersa/fix-reconnect" },
+};
+
 /** A transcript built the way the window builds one: by applying events. */
 function transcriptOf(events: Event[]) {
   return events
@@ -311,10 +318,7 @@ const entries: Entry[] = [
       ["Projects", <ProjectList view={{ state: "ready", projects }} />],
       ["Error", <ProjectList view={{ state: "error", message: "Core could not read its database." }} />],
       ["Core unavailable", <ProjectList view={{ state: "unavailable" }} />],
-      [
-        "Starting a session",
-        <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} starting={{ p1: { state: "sending" } }} />,
-      ],
+      ["New session", <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} />],
       ["Trust controls", <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} onSetTrust={() => {}} />],
       [
         "Asking to trust",
@@ -345,14 +349,6 @@ const entries: Entry[] = [
           onNewSession={() => {}}
           onSetTrust={() => {}}
           trusting={{ p4: { state: "failed", message: "no project p4" } }}
-        />,
-      ],
-      [
-        "Session refused",
-        <ProjectList
-          view={{ state: "ready", projects }}
-          onNewSession={() => {}}
-          starting={{ p1: { state: "failed", message: "this Core is a replay server and changes nothing" } }}
         />,
       ],
     ],
@@ -386,6 +382,10 @@ const entries: Entry[] = [
       ["Loading", <SessionList view={{ state: "loading" }} onSelect={() => {}} />],
       ["Empty", <SessionList view={{ state: "ready", sessions: [] }} onSelect={() => {}} />],
       ["Sessions", <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} />],
+      [
+        "By workspace",
+        <SessionList view={{ state: "ready", sessions: byWorkspaceSessions }} activeId="s2" onSelect={() => {}} workspaces={workspaceNames} />,
+      ],
       [
         "Hover",
         <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} force={{ id: "s3", state: "hover" }} />,
