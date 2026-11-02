@@ -584,6 +584,11 @@ impl SessionManager {
         self.adapters.contains_key(backend)
     }
 
+    /// The adapter registered for `backend`.
+    pub fn adapter(&self, backend: &str) -> Option<Arc<dyn Adapter>> {
+        self.adapters.get(backend).cloned()
+    }
+
     /// Receives `session.tile` notifications from now on, the latest per
     /// session.
     pub fn tile_feed(&self) -> TileFeed {

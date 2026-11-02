@@ -66,6 +66,10 @@ export function App({ client }: { client: CoreClient }) {
   const follower = useRef<Follower | null>(null);
 
   const [starting, setStarting] = useState<Record<string, Sending>>({});
+  const [trusting, setTrusting] = useState<Record<string, Sending>>({});
+  // The workspaces of each project whose trust the user withdrew here, as they were then. A session running
+  // in one of them keeps the configuration it started with.
+  const [withdrawn, setWithdrawn] = useState<Record<string, string[]>>({});
   const [adding, setAdding] = useState<Sending>();
 
   useEffect(() => {
@@ -127,11 +131,11 @@ export function App({ client }: { client: CoreClient }) {
     }
   };
 
-  const addProject = async (path: string) => {
+  const addProject = async (path: string, trusted: boolean) => {
     if (view.phase !== "connected") return false;
     setAdding({ state: "sending" });
     try {
-      await client.call("project.add", { host_id: view.hello.host.id, path });
+      await client.call("project.add", { host_id: view.hello.host.id, path, trusted });
       setAdding(undefined);
       connection.current?.reload("projects");
       return true;
@@ -140,6 +144,36 @@ export function App({ client }: { client: CoreClient }) {
       return false;
     }
   };
+
+  const setTrust = async (project: Project, trusted: boolean) => {
+    setTrusting((s) => ({ ...s, [project.id]: { state: "sending" } }));
+    try {
+      await client.call("project.set_trust", { id: project.id, trusted });
+      setTrusting(({ [project.id]: _, ...rest }) => rest);
+      connection.current?.reload("projects");
+      // Trust is read when a session starts, so withdrawing it leaves running sessions as they are. Best
+      // effort: trust is already withdrawn, so a failed lookup only leaves the note out.
+      if (!trusted) {
+        const listed = await client.call("workspace.list", { project_id: project.id }).catch(() => []);
+        setWithdrawn((w) => ({ ...w, [project.id]: listed.map((ws) => ws.id) }));
+      }
+    } catch (error) {
+      setTrusting((s) => ({ ...s, [project.id]: { state: "failed", message: describeError(error) } }));
+    }
+  };
+
+  // Said beneath an untrusted project while a session from before the withdrawal still runs; derived on each
+  // render, so it goes once those sessions stop or the project is trusted again. A session's state arrives
+  // with its tile (`session.tile`), so that is the state read.
+  const trustNotes: Record<string, string> = {};
+  if (projects.state === "ready" && sessions.state === "ready") {
+    const live = sessions.sessions.filter((s) => s.tile.state !== "ended" && s.tile.state !== "error");
+    for (const p of projects.projects) {
+      if (!p.trusted && live.some((s) => withdrawn[p.id]?.includes(s.workspace_id))) {
+        trustNotes[p.id] = "Running sessions keep their current settings until they are stopped.";
+      }
+    }
+  }
 
   // The title as last listed, so the header keeps it while the list reloads
   // or Core is away.
@@ -152,7 +186,7 @@ export function App({ client }: { client: CoreClient }) {
       <nav className="rail" aria-label="Rail">
         <div className="rail-lists">
           <ErrorBoundary what="The projects" resetKey={projectsVersion}>
-            <ProjectList view={projects} onNewSession={newSession} starting={starting}>
+            <ProjectList view={projects} onNewSession={newSession} starting={starting} onSetTrust={setTrust} trusting={trusting} notes={trustNotes}>
               {view.phase === "connected" && <AddProject onAdd={addProject} adding={adding} />}
             </ProjectList>
           </ErrorBoundary>

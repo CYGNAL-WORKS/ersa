@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import type { ProjectsView } from "../core/connection";
 import type { Project } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
 import { Button } from "./Button";
+import { TrustQuestion } from "./TrustQuestion";
 import "./ProjectList.css";
 
 interface ProjectListProps {
@@ -11,14 +12,50 @@ interface ProjectListProps {
   onNewSession?: (project: Project) => void;
   /** Sessions being started, by project id, and why one could not be. */
   starting?: Record<string, Sending>;
+  /** Changes whether the user trusts the project. Trusting asks first, saying what trust lets run; withdrawing trust does not. */
+  onSetTrust?: (project: Project, trusted: boolean) => void;
+  /** Trust being changed, by project id, and why it could not be. */
+  trusting?: Record<string, Sending>;
+  /** A line to show under a project, by project id: that its running sessions keep the trust they started with. */
+  notes?: Record<string, string>;
+  /** For the gallery: the project whose trust question is showing. */
+  initialAsking?: string;
   /** Shown beneath the list: the way to add a project. */
   children?: ReactNode;
 }
 
 /** The projects Core knows, with their loading, empty and error states. */
-export function ProjectList({ view, onNewSession, starting = {}, children }: ProjectListProps) {
+export function ProjectList({
+  view,
+  onNewSession,
+  starting = {},
+  onSetTrust,
+  trusting = {},
+  notes = {},
+  initialAsking,
+  children,
+}: ProjectListProps) {
+  // The project whose trust question is showing, if any.
+  const [asking, setAsking] = useState(initialAsking);
+  // Once a question closes, focus returns to the button that opened it. After "Trust" that button is
+  // disabled while the answer is saved, so focus waits for it, unless the user has moved focus meanwhile.
+  const list = useRef<HTMLElement>(null);
+  const closedFor = useRef<string>(undefined);
+  const close = (id: string) => {
+    closedFor.current = id;
+    setAsking(undefined);
+  };
+  useEffect(() => {
+    const id = closedFor.current;
+    if (!id) return;
+    const button = list.current?.querySelector<HTMLButtonElement>(`[data-trust-for="${CSS.escape(id)}"]`);
+    if (button?.disabled) return;
+    closedFor.current = undefined;
+    const lost = document.activeElement === null || document.activeElement === document.body;
+    if (lost) button?.focus();
+  }, [asking, trusting]);
   return (
-    <section className="projects" aria-label="Projects">
+    <section ref={list} className="projects" aria-label="Projects">
       <h2 className="projects-header">
         <span>Projects</span>
         {view.state === "ready" && <span className="readout">{view.projects.length}</span>}
@@ -40,6 +77,9 @@ export function ProjectList({ view, onNewSession, starting = {}, children }: Pro
         <ul className="projects-list">
           {view.projects.map((p) => {
             const start = starting[p.id];
+            const trust = trusting[p.id];
+            const changingTrust = trust?.state === "sending";
+            const newSession = onNewSession && p.vcs === "git";
             return (
               <li key={p.id} className="project">
                 <span className="project-name">{p.name}</span>
@@ -47,16 +87,52 @@ export function ProjectList({ view, onNewSession, starting = {}, children }: Pro
                 <span className="project-path mono" title={p.path}>
                   {p.path}
                 </span>
-                {onNewSession && p.vcs === "git" && (
+                <span className="project-trust">{p.trusted ? "Trusted" : "Not trusted"}</span>
+                {(newSession || onSetTrust) && (
                   <div className="project-action">
-                    <Button onClick={() => onNewSession(p)} disabled={start?.state === "sending"}>
-                      {start?.state === "sending" ? "Starting…" : "New session"}
-                    </Button>
+                    {newSession && (
+                      <Button onClick={() => onNewSession(p)} disabled={start?.state === "sending"}>
+                        {start?.state === "sending" ? "Starting…" : "New session"}
+                      </Button>
+                    )}
+                    {onSetTrust &&
+                      (p.trusted ? (
+                        <Button data-trust-for={p.id} onClick={() => onSetTrust(p, false)} disabled={changingTrust}>
+                          {changingTrust ? "Saving…" : "Don’t trust"}
+                        </Button>
+                      ) : (
+                        <Button data-trust-for={p.id} onClick={() => setAsking(p.id)} disabled={changingTrust || asking === p.id}>
+                          {changingTrust ? "Saving…" : "Trust…"}
+                        </Button>
+                      ))}
                   </div>
                 )}
+                {asking === p.id && onSetTrust && (
+                  <div className="project-question">
+                    <TrustQuestion
+                      name={p.name}
+                      purpose="change"
+                      takeFocus={p.id !== initialAsking}
+                      onAnswer={(trusted) => {
+                        close(p.id);
+                        if (trusted) onSetTrust(p, true);
+                      }}
+                      onDismiss={() => close(p.id)}
+                    />
+                  </div>
+                )}
+                {/* Always there, so a screen reader announces the text when it appears. */}
+                <p className="project-note" role="status">
+                  {notes[p.id]}
+                </p>
                 {start?.state === "failed" && (
                   <p className="problem project-problem" role="alert">
                     {start.message}
+                  </p>
+                )}
+                {trust?.state === "failed" && (
+                  <p className="problem project-problem" role="alert">
+                    {trust.message}
                   </p>
                 )}
               </li>
