@@ -110,3 +110,16 @@ test("git -C names the repository checked", () => {
   assert.equal(hook(`git -C "${dir}" commit -m x`, elsewhere).status, 0);
   assert.ok(existsSync(join(dir, "ran")));
 });
+
+test("a failing check that reports no problem blocks with its stderr", () => {
+  const dir = repo({ status: 1 });
+  const run = hook('git commit -m "x"', dir);
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /manifest check failed/);
+});
+
+test("a failing check with only open inbox entries allows the commit", () => {
+  const manifest = ["## Problems", "", "- 1 open inbox entry need a planning pass", ""].join("\n");
+  const dir = repo({ manifest, status: 1 });
+  assert.equal(hook('git commit -m "x"', dir).status, 0);
+});
