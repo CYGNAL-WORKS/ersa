@@ -1,7 +1,8 @@
 // Holds the design rule "every colour, size, radius and duration comes from a
 // token in DESIGN.md" (CLAUDE.md, Design) as a check rather than a review.
 
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 // @ts-expect-error: a plain script without type declarations.
@@ -57,7 +58,33 @@ const FONT_FILES = join("theme", "fonts.css");
 const raw = (line: string) => RAW.flatMap(({ pattern }) => [...line.matchAll(pattern)].map((m) => m[0]));
 const flagged = (text: string) => [...raw(text), ...scaled(text)];
 
+// A var() naming a property nothing declares falls back silently, so a token
+// renamed or deleted in DESIGN.md would leave the interface green. Each name
+// must be a generated token or a property the same file declares itself.
+const declared = (text: string) => new Set([...text.matchAll(/["']?(--[\w-]+)["']?\s*:/g)].map((m) => m[1] as string));
+const undeclared = (text: string, tokens: Set<string>) => {
+  const local = declared(text);
+  return [...text.matchAll(/var\(\s*(--[\w-]+)/g)]
+    .map((m) => m[1] as string)
+    .filter((name) => !tokens.has(name) && !local.has(name));
+};
+
 describe("interface source", () => {
+  it("names only declared properties in var()", () => {
+    const tokens = declared(css(designTokens()));
+    const found = sourceFiles(SRC).flatMap((file) =>
+      undeclared(readFileSync(file, "utf8"), tokens).map((name) => `${relative(SRC, file)}: ${name}`),
+    );
+    expect(found).toEqual([]);
+  });
+
+  it("catches a var() naming a token that does not exist", () => {
+    const tokens = new Set(["--stack-menu"]);
+    expect(undeclared("  z-index: var(--stack-nonesuch);", tokens)).toEqual(["--stack-nonesuch"]);
+    expect(undeclared("  z-index: var(--stack-menu);", tokens)).toEqual([]);
+    expect(undeclared("  --inset: 0;\n  top: var(--inset);", tokens)).toEqual([]);
+  });
+
   it("uses tokens for every colour, size, radius, weight and duration", () => {
     const found: string[] = [];
     for (const file of sourceFiles(SRC)) {
@@ -192,5 +219,27 @@ describe("generated tokens", () => {
     const design = { size: { rail: "288px" } };
     expect(withPending(design, { size: { glyph: "8px" } })).toEqual({ size: { rail: "288px", glyph: "8px" } });
     expect(() => withPending(design, { size: { rail: "300px" } })).toThrow("size.rail");
+  });
+
+  it("refuse a pending file whose shape is not DESIGN.md's", () => {
+    const design = { size: { rail: "288px" } };
+    for (const pending of [["8px"], "8px", 8]) expect(() => withPending(design, pending)).toThrow("malformed");
+    for (const group of [null, "8px", ["8px"]]) {
+      expect(() => withPending(design, { size: group })).toThrow("tokens.pending.yaml is malformed: size");
+    }
+    expect(() => withPending(design, { size: { rail: { a: "1px" } } })).toThrow("malformed: size.rail");
+    expect(withPending(design, { toString: "x" })).toHaveProperty("toString", "x");
+  });
+
+  it("read the pending file into the tokens", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ersa-tokens-"));
+    try {
+      const pending = join(dir, "tokens.pending.yaml");
+      writeFileSync(pending, "size:\n  nonesuch: 3px\n");
+      expect(designTokens(pending).size.nonesuch).toBe("3px");
+      expect(designTokens(join(dir, "absent.yaml")).size.nonesuch).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
