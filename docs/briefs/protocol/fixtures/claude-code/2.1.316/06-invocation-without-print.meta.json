@@ -1,0 +1,89 @@
+{
+  "recorded_at": "2026-11-02T22:35:38.854Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "a93dfe17-27fb-4aa9-9584-9f7260683158",
+  "session_record": "record/06-invocation-without-print.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 2554,
+  "stderr": "",
+  "stdout_lines": 12,
+  "stdout_timing_ms": [
+    683,
+    996,
+    1001,
+    2010,
+    2011,
+    2011,
+    2014,
+    2014,
+    2015,
+    2015,
+    2016,
+    2031
+  ],
+  "sent": [
+    {
+      "t": 8,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 683,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with the single word OK.\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Reply with the single word OK.",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}
