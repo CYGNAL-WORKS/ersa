@@ -50,10 +50,21 @@ export function signature(log) {
   return "failed, no error line in the log";
 }
 
+// The latest run of each check by name: a head can carry a run that a newer
+// one superseded and cancelled, and only the newer one counts.
+export function latestChecks(checks) {
+  const latest = new Map();
+  for (const c of checks) {
+    const seen = latest.get(c.name);
+    if (!seen || (c.startedAt ?? "") > (seen.startedAt ?? "")) latest.set(c.name, c);
+  }
+  return [...latest.values()];
+}
+
 // One state per pull request. `failures` maps a failed check's name to its
 // signature; `containsMain` says whether the head contains main's tip.
 export function classify(pr, { failures, containsMain }) {
-  const checks = pr.statusCheckRollup ?? [];
+  const checks = latestChecks(pr.statusCheckRollup ?? []);
   if (pr.isDraft) return { state: "draft" };
   if (pr.mergeable === "CONFLICTING") return { state: "conflicting" };
   if (checks.some((c) => c.status && c.status !== "COMPLETED")) return { state: "ci-running" };
@@ -124,7 +135,7 @@ function main() {
   };
   const rows = JSON.parse(list.out).map((pr) => {
     const failures = {};
-    for (const c of pr.statusCheckRollup ?? []) {
+    for (const c of latestChecks(pr.statusCheckRollup ?? [])) {
       if (!["FAILURE", "TIMED_OUT", "STARTUP_FAILURE"].includes(c.conclusion)) continue;
       const key = `${pr.headRefOid}:${c.name}`;
       if (!(key in last.logs)) {
