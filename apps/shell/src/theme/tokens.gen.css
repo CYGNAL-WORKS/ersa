@@ -37,6 +37,7 @@
   --size-rail: 288px;
   --size-tile-min: 288px;
   --size-measure: 720px;
+  --size-bubble-max: 80%;
   --size-card-max: 224px;
   --motion-instant: 80ms;
   --motion-quick: 160ms;
@@ -68,6 +69,14 @@
   --color-danger: #BE4539;
   --color-wash-primary: #3D6BFF0F;
   --color-wash-secondary: #8FA6FF0D;
+  --material-wash: radial-gradient(90% 70% at 100% 0%, var(--color-wash-primary), transparent 75%), radial-gradient(80% 70% at 20% 100%, var(--color-wash-secondary), transparent 75%), var(--color-canvas);
+  --material-tile: linear-gradient(to bottom, var(--color-surface-raised), var(--color-surface));
+  --material-rail: linear-gradient(to bottom, var(--color-surface), color-mix(in oklab, var(--color-surface) 55%, var(--color-canvas)));
+  --material-primary: linear-gradient(to bottom, color-mix(in oklab, var(--color-accent) 84%, white), var(--color-accent));
+  --material-composer: linear-gradient(to bottom, var(--color-surface), var(--color-surface-raised));
+  --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
+  --glow-focal: 0 0 0 1px var(--color-accent), 0 0 0 4px color-mix(in oklab, var(--color-accent) 16%, transparent), 0 0 12px 2px color-mix(in oklab, var(--color-accent) 20%, transparent);
+  --glow-attention: 0 0 5px color-mix(in oklab, var(--color-accent) 45%, transparent);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -87,6 +96,14 @@
     --color-danger: #E66858;
     --color-wash-primary: #3D6BFF14;
     --color-wash-secondary: #8FA6FF12;
+    --material-wash: radial-gradient(90% 70% at 100% 0%, var(--color-wash-primary), transparent 75%), radial-gradient(80% 70% at 20% 100%, var(--color-wash-secondary), transparent 75%), var(--color-canvas);
+    --material-tile: linear-gradient(to bottom, var(--color-surface-raised), var(--color-surface));
+    --material-rail: linear-gradient(to bottom, var(--color-surface), color-mix(in oklab, var(--color-surface) 55%, var(--color-canvas)));
+    --material-primary: linear-gradient(to bottom, color-mix(in oklab, var(--color-accent) 84%, white), var(--color-accent));
+    --material-composer: linear-gradient(to bottom, var(--color-surface), var(--color-surface-raised));
+    --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
+    --glow-focal: 0 0 0 1px var(--color-accent), 0 0 16px -4px color-mix(in oklab, var(--color-accent) 32%, transparent);
+    --glow-attention: 0 0 5px color-mix(in oklab, var(--color-accent) 45%, transparent);
   }
 }
 
@@ -106,4 +123,12 @@
   --color-danger: #E66858;
   --color-wash-primary: #3D6BFF14;
   --color-wash-secondary: #8FA6FF12;
+  --material-wash: radial-gradient(90% 70% at 100% 0%, var(--color-wash-primary), transparent 75%), radial-gradient(80% 70% at 20% 100%, var(--color-wash-secondary), transparent 75%), var(--color-canvas);
+  --material-tile: linear-gradient(to bottom, var(--color-surface-raised), var(--color-surface));
+  --material-rail: linear-gradient(to bottom, var(--color-surface), color-mix(in oklab, var(--color-surface) 55%, var(--color-canvas)));
+  --material-primary: linear-gradient(to bottom, color-mix(in oklab, var(--color-accent) 84%, white), var(--color-accent));
+  --material-composer: linear-gradient(to bottom, var(--color-surface), var(--color-surface-raised));
+  --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
+  --glow-focal: 0 0 0 1px var(--color-accent), 0 0 16px -4px color-mix(in oklab, var(--color-accent) 32%, transparent);
+  --glow-attention: 0 0 5px color-mix(in oklab, var(--color-accent) 45%, transparent);
 }
