@@ -5,12 +5,12 @@ description: Review a diff adversarially with parallel reviewers, verify their f
 
 # Review a diff
 
-One protocol for both layers. The **author** runs it on `git diff origin/main...HEAD` before opening the pull request. The **orchestrator** runs it on `git diff origin/main...origin/<branch>` at merge time, and again on each fix round's commits. Reviewers get the diff, the branch's files, the issue number and the brief paths, never the author's summary or reasoning.
+One protocol for both layers. The **author** runs it on `git diff origin/main...HEAD` before opening the pull request. The **orchestrator** runs it on `git diff origin/main...origin/<branch>` at merge time, and again on each fix round's commits. Reviewers get the diff, the branch's files, the issue text and the brief paths, never the author's summary or reasoning.
 
 ## Steps
 
 1. **Pin the diff.** `git fetch origin`, then pick the checkout the reviewers read the branch's files from: the author's own worktree, or for the orchestrator a detached worktree under the scratchpad (`git worktree add --detach <dir> origin/<branch>`), removed when the review is done. Write the diff command above to `.scratch/review.diff` in that checkout, where every reviewer can read it, and confirm it is non-empty. Never check out a branch in a shared checkout.
-2. **Start the reviewers in parallel**, each in a fresh context. Give each the diff file, the checkout's path, the issue number, the brief paths, and the report rule below.
+2. **Start the reviewers in parallel**, each in a fresh context. Write the issue text (`gh issue view <n>`) to `.scratch/issue.md` in the checkout; the reviewers are read-only and cannot fetch it. Give each the diff file, the checkout's path, the issue file's path, the brief paths, and the report rule below.
    - **Correctness**, always: Claude Code's `/code-review` at `high`, or the `code-review:correctness-reviewer` agent.
    - **Spec**, always: the `spec-reviewer` agent.
    - **Surface**, always: the `surface-reviewer` agent.
