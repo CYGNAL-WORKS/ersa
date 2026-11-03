@@ -125,8 +125,8 @@ glow:
     focal: "0 0 0 1px {colors.accent}, 0 0 16px -4px color-mix(in oklab, {colors.accent} 32%, transparent)"
     attention: "0 0 5px color-mix(in oklab, {colors.accent} 45%, transparent)"
 shadow:
-  # Custom group. The soft, short shadow of a transient layer (menus, popovers, drag previews), built from color roles like `glow`.
-  # Light draws it from ink; dark from black, since its canvas is already near black and a shadow drawn from it would not show.
+  # Custom group. The soft, short shadow of a transient layer (menus, popovers, drag previews). Light builds it from the ink role, as `glow` builds from accent.
+  # Dark uses a fixed black on purpose: its canvas is already near black, so a shadow drawn from a role would not show, and it need not follow the palette.
   light:
     transient: "0 4px 12px -4px color-mix(in oklab, {colors.ink} 14%, transparent)"
   dark:
