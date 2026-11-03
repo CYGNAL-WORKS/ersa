@@ -49,7 +49,7 @@ The gallery's baselines are rendered in the Playwright container (`apps/shell/sc
 ## Keeping them running
 
 - **Runners offline.** Run `start-runners.cmd`. If GitHub says "A session for this runner already exists", the distro stopped while the runners were connected: they retry and connect within a few minutes.
-- **Restart the runners.** Close their window and run `start-runners.cmd` again.
+- **Restart the runners.** Close their window and run `start-runners.cmd` again. Jobs they were running stay "in progress" on GitHub and hold the runners busy, so newer runs wait. Stop such a run with `gh api -X POST repos/KPandaK/ersa/actions/runs/<run id>/force-cancel`.
 - **Re-register.** A runner that GitHub removed, for example after 14 days offline, needs registering again. Delete its `.runner` file, then rerun the setup line with the token:
 
   ```powershell
