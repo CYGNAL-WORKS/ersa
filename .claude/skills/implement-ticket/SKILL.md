@@ -18,14 +18,14 @@ You are an implementing session, usually unattended. The orchestration session r
 
 ## 2. Build
 
-- Work test-first with the `tdd` skill, at the ticket's **Test seams**. Tests cite requirement IDs with `verifies: <ID>` in test files. Reach for `codebase-design` when the shape of an interface is the question, and `diagnosing-bugs` when something fails and the cause is unclear.
+- Work test-first with the `tdd` skill, at the ticket's **Test seams**. Tests cite requirement IDs with `verifies: <ID>` in test files, and a test for a requirement asserts every value the requirement names (a level, a code, a default), not only that something happened. Reach for `codebase-design` when the shape of an interface is the question, and `diagnosing-bugs` when something fails and the cause is unclear.
 - Plain, idiomatic code with the why commented: the owner is learning Rust.
 - Where a brief is wrong, silent, or contradicts what you find, append one line to `docs/briefs/INBOX.md` and carry on. Briefs, ADRs, the glossary, `CLAUDE.md`, `.claude/` and `scripts/hooks/` are planning-only; propose changes to them as inbox lines.
 - Commit as you go; commits that implement requirements end with `Implements: <IDs>`. No attribution trailers.
 
 ## 3. Review adversarially
 
-When the ticket's scope is built, everything is committed, and `node scripts/check.mjs --quick` passes, run the `review-pr` skill as the author, on `git diff origin/main...HEAD`: the parallel reviewers, the mutation step, verified dismissals, the smallest fix per finding, and a re-review of substantial fixes. It is the same protocol the orchestration session runs at merge time, so a finding left here is a merge round later.
+When the ticket's scope is built, everything is committed, and `node scripts/check.mjs --quick` passes, run the `review-pr` skill as the author, on `git diff origin/main...HEAD`, however small the diff: the parallel reviewers, the mutation step, verified dismissals, the smallest fix per finding, and a re-review of substantial fixes. It is the same protocol the orchestration session runs at merge time, so a finding left here is a merge round later.
 
 ## 4. Check, push, open the pull request
 
