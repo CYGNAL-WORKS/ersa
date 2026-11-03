@@ -20,3 +20,9 @@
   flex: none;
   padding-block: var(--space-xs);
 }
+
+/* Under a running session's composer: in line with the composer's own inset, so the chips and the context ring sit
+   inside the stage rather than against its edges. */
+.stage-controls {
+  padding: 0 var(--space-lg) var(--space-lg);
+}

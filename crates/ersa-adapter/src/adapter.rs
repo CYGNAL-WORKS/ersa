@@ -132,6 +132,31 @@ pub trait Adapter: Send + Sync {
             self.backend()
         )))
     }
+
+    /// Whether a process other than Ersa's has session `backend_session_id`
+    /// open on the transport's host, asked before Core resumes the session
+    /// or writes to its record (PROTO-AGENT-EVENTS-R14). The answer only
+    /// informs the user: Core goes ahead whatever it is. The default, for a
+    /// backend that keeps no registry of open sessions: not open.
+    async fn open_elsewhere(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _backend_session_id: &str,
+    ) -> OpenElsewhere {
+        OpenElsewhere::No
+    }
+}
+
+/// Whether another process has a session open, as the backend's own
+/// registry of open sessions tells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenElsewhere {
+    /// No other process has it open.
+    No,
+    /// Process `pid` has it open, so both would write to one record.
+    Yes { pid: u32 },
+    /// The registry could not be read well enough to tell.
+    Unknown,
 }
 
 /// What a session of a backend can start with. Each list marks the one a

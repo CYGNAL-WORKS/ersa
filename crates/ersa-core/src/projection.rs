@@ -24,7 +24,7 @@ use ersa_adapter::{Projected, Projector, RawLine, RecordEvent};
 use ersa_protocol::core_api::{PendingKind, PendingRequest, Tile};
 use ersa_protocol::events::{
     BackendPassthrough, EndReason, Envelope, ErrorCode, ErrorEvent, Event, Input, LifecycleState,
-    PROJECTION_VERSION, SessionEnded, SessionState, Source,
+    PROJECTION_VERSION, SessionEnded, SessionNotice, SessionState, Source,
 };
 use serde_json::Value;
 
@@ -154,6 +154,18 @@ impl View {
                 self.wrap(ts.to_string(), source, event)
             })
             .collect()
+    }
+
+    /// A notice from Core itself, such as one that another process has the
+    /// session open, learnt at `ts`.
+    pub fn notice(&mut self, notice: SessionNotice, ts: &str) -> Envelope {
+        let source = Source {
+            backend: self.backend.clone(),
+            backend_version: self.backend_version.clone(),
+            input: Input::Core,
+            message_id: None,
+        };
+        self.wrap(ts.to_string(), source, Event::SessionNotice(notice))
     }
 
     /// Numbers `event`, keeps the tile and state in step, and wraps it.
