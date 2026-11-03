@@ -53,7 +53,6 @@ if (existsSync(join(dir, stem + ".jsonl"))) {
 }
 
 const args = [
-  "-p",
   "--input-format", "stream-json",
   "--output-format", "stream-json",
   "--verbose",
