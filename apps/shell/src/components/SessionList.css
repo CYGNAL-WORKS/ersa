@@ -28,6 +28,30 @@
   list-style: none;
 }
 
+/* A workspace's tiles under its name: the project in ink, the branch or root beside it, muted. */
+.sessions-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.sessions-workspace-name {
+  /* One line tall even before its name is read, so the tiles below never move when it arrives. */
+  min-height: calc(var(--type-ui-small-size) * var(--type-ui-small-leading));
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  font-weight: var(--type-heading-weight);
+}
+
+.sessions-workspace-project {
+  color: var(--color-ink);
+}
+
 /* Each tile is a grid item, so it stretches to the rail's width. */
 .sessions-list > li {
   display: grid;

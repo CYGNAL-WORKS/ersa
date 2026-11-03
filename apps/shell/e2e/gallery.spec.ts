@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
-// Every component section in the gallery, photographed in both themes.
+// Every component section in the gallery, photographed in both themes. Each is
+// photographed on a page showing it alone, so its baseline depends only on it.
 const components = [
   "CoreStatus",
   "QuitQuestion",
@@ -20,12 +21,20 @@ const components = [
 for (const theme of ["light", "dark"]) {
   for (const component of components) {
     test(`${component} in ${theme}`, async ({ page }) => {
-      await page.goto("/gallery.html");
+      await page.goto(`/gallery.html?component=${component}&theme=${theme}`);
       const section = page.locator(`[data-theme="${theme}"] [data-component="${component}"]`);
       await expect(section).toHaveScreenshot(`${component}-${theme}.png`);
     });
   }
 }
+
+// The screenshots above depend on this: a section photographed alone cannot be moved by its neighbours.
+test("a filtered gallery shows one component in one theme", async ({ page }) => {
+  await page.goto("/gallery.html?component=Chip&theme=dark");
+  await expect(page.locator("[data-theme]")).toHaveCount(1);
+  await expect(page.locator('[data-theme="dark"] [data-component="Chip"]')).toHaveCount(1);
+  await expect(page.locator("[data-component]")).toHaveCount(1);
+});
 
 test("the gallery shows every component", async ({ page }) => {
   await page.goto("/gallery.html");
@@ -66,6 +75,18 @@ test("a focused input's edge is the accent, in both themes", async ({ page }) =>
       expect(edge, `${input} in ${theme}`).toBe(accent);
     }
   }
+});
+
+// The rail's workspace headings hold their line before the names arrive, so the tiles never move when they do.
+test("a workspace heading is as tall before its name is read as after", async ({ page }) => {
+  await page.goto("/gallery.html");
+  const headings = page.locator('[data-theme="light"] [data-component="SessionList"] .sessions-workspace-name');
+  const heights = await headings.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+  // Two named headings, then the same two unnamed.
+  expect(heights).toHaveLength(4);
+  expect(heights[0]).toBeGreaterThan(0);
+  expect(heights[2]).toBeCloseTo(heights[0] ?? 0, 1);
+  expect(heights[3]).toBeCloseTo(heights[1] ?? 0, 1);
 });
 
 // The session controls from the keyboard (FLOW-NEW-SESSION-R01): every chip on the way from the composer, each
