@@ -17,7 +17,9 @@ env:
 jobs:
   scan:
     name: Daily dependency scan
-    runs-on: ubuntu-latest
+    # The Linux runners in WSL on the owner's machine, as in ci.yml.
+    # Only while the repository is private.
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -28,6 +30,12 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
+
+      # The job's Rust lives in the runner's tool cache, as in ci.yml.
+      - name: Rust homes of the runner's own
+        run: |
+          echo "CARGO_HOME=$RUNNER_TOOL_CACHE/ersa-cargo" >> "$GITHUB_ENV"
+          echo "RUSTUP_HOME=$RUNNER_TOOL_CACHE/ersa-rustup" >> "$GITHUB_ENV"
 
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable

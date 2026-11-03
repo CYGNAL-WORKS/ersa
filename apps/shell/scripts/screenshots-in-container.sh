@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Runs the gallery's screenshot tests in the same Playwright container CI uses,
-# so baselines rendered on any machine match CI's pixels.
+# Runs the gallery's screenshot tests in the Playwright container, whose pixels
+# CI's runner matches (.github/workflows/ci.yml, the interface job), so
+# baselines rendered on any machine match CI's.
 #
 #   scripts/screenshots-in-container.sh            check against the baselines
 #   scripts/screenshots-in-container.sh --update   rewrite the baselines
@@ -12,7 +13,8 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
 repo="$(cd "$here/../.." && pwd)"
-# Keep in step with @playwright/test in package.json and the CI job's container.
+# Keep in step with @playwright/test in package.json, and its Node major with
+# the interface job in .github/workflows/ci.yml.
 image="mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea"
 update="${1:-}"
 
