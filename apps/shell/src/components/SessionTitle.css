@@ -3,6 +3,7 @@
 .session-heading {
   margin: 0;
   min-width: 0;
+  font-family: var(--type-heading-family);
   font-size: var(--type-heading-size);
   line-height: var(--type-heading-leading);
   font-weight: var(--type-heading-weight);
@@ -56,6 +57,7 @@
   min-width: 0;
   padding: var(--space-xs) var(--space-sm);
   font: inherit;
+  font-family: var(--type-heading-family);
   font-size: var(--type-heading-size);
   line-height: var(--type-heading-leading);
   font-weight: var(--type-heading-weight);

@@ -2,7 +2,7 @@
 // project, workspace, backend, model, effort and permission mode. The choices come from Core's `project.list`
 // and `backend.list`; the starting values from what the user last chose for the project, else the brief's defaults.
 
-import type { Project } from "../protocol/core-api.gen";
+import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 
 /** One choice a backend offers: a model, an effort or a permission mode (PROTO-CORE-API, `backend.list`). */
 export interface Choice {
@@ -97,5 +97,53 @@ export function valuesFor(project: Project, backends: readonly BackendChoices[],
     model: backend && pick(backend.models, same ? wanted?.model : undefined),
     effort: backend && pick(backend.efforts, same ? wanted?.effort : undefined),
     permission_mode: backend && pick(backend.permission_modes, same ? wanted?.permission_mode : undefined),
+  };
+}
+
+/** What the session controls under a running session show: its own values, and the choices that name them. */
+export interface SessionShown {
+  values: SessionValues;
+  /** The session's backend as `backend.list` lists it, holding every value the session reports. */
+  backend: BackendChoices;
+  /** The workspace as the session runs in it: its branch, or the root. */
+  workspaceLabel: string;
+}
+
+/** `choices`, holding `id` too when the backend no longer offers it, under its id. */
+function holding(choices: readonly Choice[], id: string | undefined): Choice[] {
+  return id === undefined || choices.some((c) => c.id === id) ? [...choices] : [...choices, { id, label: id, default: false }];
+}
+
+/**
+ * The values a running session shows (FLOW-NEW-SESSION-R09): what `session.list` reports, never what the host offers
+ * now. A model or effort the session was not given is the backend's own, shown as the choice the backend marks as
+ * its default when the host lists it. A value the host no longer lists shows under its id.
+ */
+export function sessionShown(
+  session: Pick<Session, "host_id" | "backend" | "model" | "effort" | "permission_mode">,
+  workspace: Pick<Workspace, "project_id" | "kind" | "vcs_ref">,
+  hostBackends: readonly BackendChoices[],
+): SessionShown {
+  const listed = hostBackends.find((b) => b.name === session.backend);
+  const model = session.model ?? (listed && defaultOf(listed.models));
+  const effort = session.effort ?? (listed && defaultOf(listed.efforts));
+  const backend: BackendChoices = {
+    ...(listed ?? { name: session.backend, label: session.backend, status: "available", tested: { min: "", max: "" }, models: [], efforts: [], permission_modes: [] }),
+  };
+  backend.models = holding(backend.models, model);
+  backend.efforts = holding(backend.efforts, effort);
+  backend.permission_modes = holding(backend.permission_modes, session.permission_mode || undefined);
+  return {
+    values: {
+      host_id: session.host_id,
+      project_id: workspace.project_id,
+      workspace: workspace.kind,
+      backend: session.backend,
+      model,
+      effort,
+      permission_mode: session.permission_mode || undefined,
+    },
+    backend,
+    workspaceLabel: workspace.kind === "root" ? "Root workspace" : workspace.vcs_ref,
   };
 }

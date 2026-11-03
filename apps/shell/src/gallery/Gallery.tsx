@@ -14,6 +14,7 @@ import { ErrorBoundary } from "../components/ErrorBoundary";
 import { NewSessionScreen } from "../components/NewSessionScreen";
 import { ProjectList } from "../components/ProjectList";
 import { QuitQuestion } from "../components/QuitQuestion";
+import { SessionControls } from "../components/SessionControls";
 import { SessionList } from "../components/SessionList";
 import { SessionTitle } from "../components/SessionTitle";
 import { Transcript } from "../components/Transcript";
@@ -107,6 +108,13 @@ const sessions: Session[] = [
   session("s5", "A session whose backend exited with an error", "2026-11-01T06:00:00Z", { state: "error", pending: [] }),
 ];
 
+/** The same sessions in two workspaces of one project, as the rail shows them once it knows the workspaces. */
+const byWorkspaceSessions = sessions.map((s) => ({ ...s, workspace_id: s.id === "s1" || s.id === "s3" ? "w-root" : "w-fix" }));
+const workspaceNames = {
+  "w-root": { project: "ersa", name: "Root workspace" },
+  "w-fix": { project: "ersa", name: "ersa/fix-reconnect" },
+};
+
 /** A transcript built the way the window builds one: by applying events. */
 function transcriptOf(events: Event[]) {
   return events
@@ -171,6 +179,12 @@ const answered: Event[] = [
   },
   { type: "session.state", state: "idle" },
 ];
+// A second turn after the first, so the gap between turns is seen.
+const twoTurns: Event[] = [
+  ...answered,
+  { type: "user.message", origin: "human", text: "Now delete probe.txt." },
+  { type: "assistant.text", block_id: "m3/0", text: "Deleted. probe.txt no longer exists.", final: true },
+];
 const streaming: Event[] = [
   { type: "session.state", state: "running" },
   { type: "user.message", origin: "human", text: "Say ready." },
@@ -208,6 +222,7 @@ const transcriptStates: [string, SessionView][] = [
   ["Permission while Core is away", sessionView(asked, { stream: { state: "offline" } })],
   ["Hidden characters", sessionView(hiding)],
   ["Answered", sessionView(answered)],
+  ["Two turns", sessionView(twoTurns)],
   ["Failed", sessionView(failing)],
   ["Not receiving events", sessionView([], { stream: { state: "failed", message: "Core closed the connection" } })],
 ];
@@ -311,10 +326,7 @@ const entries: Entry[] = [
       ["Projects", <ProjectList view={{ state: "ready", projects }} />],
       ["Error", <ProjectList view={{ state: "error", message: "Core could not read its database." }} />],
       ["Core unavailable", <ProjectList view={{ state: "unavailable" }} />],
-      [
-        "Starting a session",
-        <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} starting={{ p1: { state: "sending" } }} />,
-      ],
+      ["New session", <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} />],
       ["Trust controls", <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} onSetTrust={() => {}} />],
       [
         "Asking to trust",
@@ -345,14 +357,6 @@ const entries: Entry[] = [
           onNewSession={() => {}}
           onSetTrust={() => {}}
           trusting={{ p4: { state: "failed", message: "no project p4" } }}
-        />,
-      ],
-      [
-        "Session refused",
-        <ProjectList
-          view={{ state: "ready", projects }}
-          onNewSession={() => {}}
-          starting={{ p1: { state: "failed", message: "this Core is a replay server and changes nothing" } }}
         />,
       ],
     ],
@@ -386,6 +390,14 @@ const entries: Entry[] = [
       ["Loading", <SessionList view={{ state: "loading" }} onSelect={() => {}} />],
       ["Empty", <SessionList view={{ state: "ready", sessions: [] }} onSelect={() => {}} />],
       ["Sessions", <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} />],
+      [
+        "By workspace",
+        <SessionList view={{ state: "ready", sessions: byWorkspaceSessions }} activeId="s2" onSelect={() => {}} workspaces={workspaceNames} />,
+      ],
+      [
+        "By workspace, names still being read",
+        <SessionList view={{ state: "ready", sessions: byWorkspaceSessions }} activeId="s2" onSelect={() => {}} workspaces={{}} />,
+      ],
       [
         "Hover",
         <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} force={{ id: "s3", state: "hover" }} />,
@@ -515,6 +527,24 @@ const entries: Entry[] = [
     wide: true,
     states: [
       ["Empty", <Composer autoFocus={false} onSend={async () => false} />],
+      [
+        "Under a session, with its values",
+        <>
+          <Composer autoFocus={false} onSend={async () => false} />
+          <div className="stage-controls">
+            <SessionControls
+              hosts={[hello.host]}
+              projects={projects}
+              backends={[claudeCode]}
+              values={{ host_id: hello.host.id, project_id: "p1", workspace: "isolated", backend: "claude-code", model: "opus", effort: "high", permission_mode: "default" }}
+              workspaceLabel="ersa/fix-reconnect"
+              onChoose={() => {}}
+              disabled
+              used={0.42}
+            />
+          </div>
+        </>,
+      ],
       ["Hover", <Composer autoFocus={false} onSend={async () => false} force="hover" />],
       ["Focus", <Composer autoFocus={false} onSend={async () => false} force="focus" />],
       ["Typed", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again, then summarise what failed." />],
@@ -548,12 +578,19 @@ const entries: Entry[] = [
   },
 ];
 
-export function Gallery() {
+// Narrows the gallery to one component and/or one theme. The screenshot tests
+// photograph each component on its own page, so a change in one component's
+// height cannot move another component's section and change its pixels.
+export type GalleryFilter = { component?: string | null; theme?: string | null };
+
+export function Gallery({ only = {} }: { only?: GalleryFilter }) {
+  const themes = (["light", "dark"] as const).filter((theme) => !only.theme || theme === only.theme);
+  const shown = entries.filter((entry) => !only.component || entry.name === only.component);
   return (
     <div className="gallery">
-      {(["light", "dark"] as const).map((theme) => (
+      {themes.map((theme) => (
         <div key={theme} className="gallery-theme" data-theme={theme}>
-          {entries.map((entry) => (
+          {shown.map((entry) => (
             <section key={entry.name} className="gallery-entry" data-component={entry.name}>
               <div className="gallery-heading">
                 <h2 className="gallery-name">{entry.name}</h2>

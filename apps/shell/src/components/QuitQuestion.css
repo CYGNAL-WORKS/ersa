@@ -35,6 +35,7 @@
 
 .quit-question-title {
   margin: 0;
+  font-family: var(--type-heading-family);
   font-weight: var(--type-heading-weight);
 }
 
