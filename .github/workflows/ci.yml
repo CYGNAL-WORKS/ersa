@@ -4,9 +4,12 @@
 # Windows, which compiles the `cfg(windows)` code Linux cannot.
 # Every job runs on the owner's own machine, registered as self-hosted runners:
 # Windows directly, Linux in a WSL Ubuntu 24.04 distro. Jobs wait while that
-# machine is offline. Every job's `if` runs it only while the repository is
-# private and never for a pull request from a fork, whose code would otherwise
-# run there; GitHub decides this before any runner takes the job.
+# machine is offline. A fork's pull request must never run there. The control
+# is the repository's Actions setting that runs no workflow for a fork's pull
+# request in a private repository (run_workflows_from_fork_pull_requests:
+# false); keep it off. Every job's `if`, which skips a fork's pull request and
+# any run once the repository is public, is only a backstop: a pull request's
+# workflow comes from its own branch, so it holds only for workflows we wrote.
 # The release-age check runs first, so no new dependency's build script or
 # install script runs before it passes.
 # Actions are pinned by commit SHA (ADR 0015); Dependabot proposes updates.
