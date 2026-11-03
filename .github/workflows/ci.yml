@@ -4,8 +4,11 @@
 # Windows, which compiles the `cfg(windows)` code Linux cannot.
 # Every job runs on the owner's own machine, registered as self-hosted runners:
 # Windows directly, Linux in a WSL Ubuntu 24.04 distro. Jobs wait while that
-# machine is offline. Only while the repository is private: never self-host
-# for a public one, since a fork's pull request would run its code there.
+# machine is offline. Every job's `if` runs it only while the repository is
+# private and never for a pull request from a fork, whose code would otherwise
+# run there; GitHub decides this before any runner takes the job.
+# The release-age check runs first, so no new dependency's build script or
+# install script runs before it passes.
 # Actions are pinned by commit SHA (ADR 0015); Dependabot proposes updates.
 name: CI
 
@@ -26,36 +29,70 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  linux:
-    name: Build, lint, test, dependencies (Linux)
+  # ADR 0015. Judges only what a pull request adds or changes in the
+  # lockfiles, reading them at the base branch, so it has nothing to do on a
+  # push. Every job that builds or installs needs it.
+  age:
+    name: Release age
+    if: github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, Linux, X64]
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
+      # A home of the job's own, so nothing a job writes under ~ (Cargo's
+      # registry, npm, pnpm, corepack) reaches a later one. Rust, Node and
+      # Chromium come with the runner, which jobs can't change.
+      - name: A home of the job's own
+        run: |
+          mkdir -p "$RUNNER_TEMP/home" "$RUNNER_TEMP/runtime"
+          chmod 0700 "$RUNNER_TEMP/runtime"
+          {
+            echo "HOME=$RUNNER_TEMP/home"
+            echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/runtime"
+            echo "NPM_CONFIG_PREFIX=$RUNNER_TEMP/home/.npm-global"
+          } >> "$GITHUB_ENV"
+
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          # The release-age check reads the lockfiles at the base branch.
           fetch-depth: 0
           persist-credentials: false
 
-      # As on Windows: the job's Rust lives in the runner's tool cache, kept
-      # between runs, so rust-cache's cleanup cannot delete it.
-      - name: Rust homes of the runner's own
-        run: |
-          echo "CARGO_HOME=$RUNNER_TOOL_CACHE/ersa-cargo" >> "$GITHUB_ENV"
-          echo "RUSTUP_HOME=$RUNNER_TOOL_CACHE/ersa-rustup" >> "$GITHUB_ENV"
-
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          toolchain: stable
-          components: rustfmt, clippy
+          node-version: 22
+
+      - name: Release age
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: node scripts/deps-check.mjs age --base "origin/$BASE_REF"
+
+  linux:
+    name: Build, lint, test, dependencies (Linux)
+    needs: age
+    if: github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, Linux, X64]
+    timeout-minutes: 30
+    steps:
+      # A home of the job's own, so nothing a job writes under ~ (Cargo's
+      # registry, npm, pnpm, corepack) reaches a later one. Rust, Node and
+      # Chromium come with the runner, which jobs can't change.
+      - name: A home of the job's own
+        run: |
+          mkdir -p "$RUNNER_TEMP/home" "$RUNNER_TEMP/runtime"
+          chmod 0700 "$RUNNER_TEMP/runtime"
+          {
+            echo "HOME=$RUNNER_TEMP/home"
+            echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/runtime"
+            echo "NPM_CONFIG_PREFIX=$RUNNER_TEMP/home/.npm-global"
+          } >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
       # Caches the Cargo registry and target/ keyed on Cargo.lock, so
-      # unchanged dependencies are not rebuilt on every run. Never the bin
-      # folder: it holds the toolchain.
+      # unchanged dependencies are not rebuilt on every run.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          cache-bin: false
 
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
@@ -88,15 +125,7 @@ jobs:
         run: node scripts/manifest.mjs --check
 
       # ADR 0015. These read the one Cargo.lock, which covers the Shell too.
-      # Release age judges only what a pull request adds or changes,
-      # so it has nothing to do on a push. dependencies.yml also runs the
-      # vulnerability and cargo-deny checks daily on main.
-      - name: Release age
-        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: node scripts/deps-check.mjs age --base "origin/$BASE_REF"
-
+      # dependencies.yml also runs them daily on main.
       - name: Vulnerabilities
         if: ${{ !cancelled() }}
         run: node scripts/deps-check.mjs vulns
@@ -109,15 +138,32 @@ jobs:
   # the gallery's screenshot tests. The runner is Ubuntu 24.04 with the Node,
   # Chromium, and fonts of the Playwright image the baselines come from
   # (apps/shell/playwright.config.ts), so its screenshots match them pixel for
-  # pixel without Docker.
+  # pixel without Docker. The runner has the Chromium of the @playwright/test
+  # version in package.json; a new version needs the runner updated first.
   interface:
     name: Interface (Linux)
+    needs: age
+    if: github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     defaults:
       run:
         working-directory: apps/shell
     steps:
+      # A home of the job's own, so nothing a job writes under ~ (Cargo's
+      # registry, npm, pnpm, corepack) reaches a later one. Rust, Node and
+      # Chromium come with the runner, which jobs can't change.
+      - name: A home of the job's own
+        working-directory: .
+        run: |
+          mkdir -p "$RUNNER_TEMP/home" "$RUNNER_TEMP/runtime"
+          chmod 0700 "$RUNNER_TEMP/runtime"
+          {
+            echo "HOME=$RUNNER_TEMP/home"
+            echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/runtime"
+            echo "NPM_CONFIG_PREFIX=$RUNNER_TEMP/home/.npm-global"
+          } >> "$GITHUB_ENV"
+
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
@@ -130,10 +176,13 @@ jobs:
 
       # Corepack runs the pnpm that apps/shell/package.json's packageManager
       # names, after checking it against the sha512 there. The corepack Node
-      # ships cannot run pnpm 12, so a pinned newer one comes first.
+      # ships cannot run pnpm 12, so a pinned newer one comes first: installed
+      # in the job's own npm prefix, which goes ahead of Node's on PATH.
       - name: Install pnpm
         run: |
           npm install --global corepack@0.36.0
+          export PATH="$NPM_CONFIG_PREFIX/bin:$PATH"
+          echo "$NPM_CONFIG_PREFIX/bin" >> "$GITHUB_PATH"
           corepack enable pnpm
           corepack install
 
@@ -149,11 +198,6 @@ jobs:
 
       - name: Unit tests
         run: pnpm test
-
-      # The Chromium @playwright/test names, and the system libraries and fonts
-      # it renders with. The lock keeps two runners out of apt at once.
-      - name: Install Chromium
-        run: flock /tmp/ersa-apt.lock pnpm exec playwright install --with-deps chromium
 
       # The gallery server listens on a fixed port (playwright.config.ts), and
       # both runners share the host's network, so one runner at a time.
@@ -175,44 +219,33 @@ jobs:
   # The Shell's Rust side (apps/shell/src-tauri): a workspace member, but not a
   # default one, so Tauri stays out of Core's build (ARCH-CORE-R01) and this
   # job names it with `-p`. Its bridge tests launch a real ersa-core, built
-  # first. Format and dependency checks cover it in the linux job.
+  # first. Format and dependency checks cover it in the linux job. The runner
+  # has the webview and windowing libraries Tauri links against.
   shell:
     name: Shell build, lint, test (Linux)
+    needs: age
+    if: github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
     steps:
+      # A home of the job's own, so nothing a job writes under ~ (Cargo's
+      # registry, npm, pnpm, corepack) reaches a later one. Rust, Node and
+      # Chromium come with the runner, which jobs can't change.
+      - name: A home of the job's own
+        run: |
+          mkdir -p "$RUNNER_TEMP/home" "$RUNNER_TEMP/runtime"
+          chmod 0700 "$RUNNER_TEMP/runtime"
+          {
+            echo "HOME=$RUNNER_TEMP/home"
+            echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/runtime"
+            echo "NPM_CONFIG_PREFIX=$RUNNER_TEMP/home/.npm-global"
+          } >> "$GITHUB_ENV"
+
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
 
-      # As on Windows: the job's Rust lives in the runner's tool cache, kept
-      # between runs, so rust-cache's cleanup cannot delete it.
-      - name: Rust homes of the runner's own
-        run: |
-          echo "CARGO_HOME=$RUNNER_TOOL_CACHE/ersa-cargo" >> "$GITHUB_ENV"
-          echo "RUSTUP_HOME=$RUNNER_TOOL_CACHE/ersa-rustup" >> "$GITHUB_ENV"
-
-      - name: Install stable Rust
-        uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
-
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          cache-bin: false
-
-      # The webview and windowing libraries Tauri links against on Linux. The
-      # runner has them already, so this installs only what is missing.
-      - name: Tauri system libraries
-        run: |
-          missing=
-          for p in libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev; do
-            dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q ' installed$' || missing="$missing $p"
-          done
-          if [ -n "$missing" ]; then
-            flock /tmp/ersa-apt.lock sh -c "sudo apt-get update && sudo apt-get install -y --no-install-recommends $missing"
-          fi
 
       # The Shell embeds the Interface's build output (apps/shell/dist) at
       # compile time; these checks need a page there, not the real build.
@@ -233,6 +266,7 @@ jobs:
   # status, so it can be required.
   changes:
     name: Rust changes
+    if: github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
     outputs:
@@ -270,8 +304,8 @@ jobs:
 
   windows:
     name: Build, lint, test (Windows)
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
+    needs: [age, changes]
+    if: github.event.repository.private && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && needs.changes.outputs.rust == 'true'
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 30
     steps:
