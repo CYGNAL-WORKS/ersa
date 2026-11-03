@@ -43,8 +43,8 @@ body {
 .problem::before {
   content: "";
   align-self: center;
-  width: var(--space-sm);
-  height: var(--space-sm);
+  width: var(--size-glyph);
+  height: var(--size-glyph);
   border-radius: var(--radius-pill);
   background: var(--color-danger);
 }
@@ -55,8 +55,8 @@ body {
   display: inline-block;
   flex: none;
   box-sizing: border-box;
-  width: var(--space-sm);
-  height: var(--space-sm);
+  width: var(--size-glyph);
+  height: var(--size-glyph);
   border-radius: var(--radius-pill);
   background: var(--color-ink-faint);
 }
