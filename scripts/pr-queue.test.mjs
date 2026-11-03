@@ -42,6 +42,15 @@ test("states, first match wins", () => {
   assert.deepEqual(classify(pr(), none), { state: "green" });
 });
 
+test("a check a newer run superseded does not count", () => {
+  const checks = [
+    check({ conclusion: "CANCELLED", startedAt: "2026-11-03T15:58:31Z" }),
+    check({ conclusion: "SUCCESS", startedAt: "2026-11-03T16:01:43Z" }),
+  ];
+  assert.deepEqual(classify(pr({ statusCheckRollup: checks }), none), { state: "green" });
+  assert.deepEqual(classify(pr({ statusCheckRollup: [...checks].reverse() }), none), { state: "green" });
+});
+
 test("a skipped check is not a failure", () => {
   assert.deepEqual(classify(pr({ statusCheckRollup: [check(), check({ name: "Windows", conclusion: "SKIPPED" })] }), none), { state: "green" });
 });
