@@ -49,21 +49,36 @@ export function tokensFrom(markdown) {
 }
 
 // Adds the pending tokens to DESIGN.md's, group by group (and theme by theme).
+// A group is a plain mapping; a token is a string or a number.
+const isGroup = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+const isToken = (v) => typeof v === "string" || typeof v === "number";
+
 export function withPending(design, pending, path = []) {
+  const malformed = (where) => new Error(`tokens.pending.yaml is malformed: ${where || "its top level"} is not a group of tokens`);
+  // An empty file parses to null: nothing pending.
+  if (pending == null && path.length === 0) return design;
+  if (!isGroup(pending)) throw malformed(path.join("."));
   const merged = { ...design };
-  for (const [key, value] of Object.entries(pending ?? {})) {
+  for (const [key, value] of Object.entries(pending)) {
     const here = [...path, key];
-    if (!(key in merged)) merged[key] = value;
-    else if (typeof value === "object" && typeof merged[key] === "object") merged[key] = withPending(merged[key], value, here);
-    else throw new Error(`tokens.pending.yaml: ${here.join(".")} is in DESIGN.md now; delete it here`);
+    if (!Object.hasOwn(merged, key)) {
+      if (!isGroup(value) && !isToken(value)) throw malformed(here.join("."));
+      merged[key] = value;
+    } else if (isGroup(merged[key])) {
+      merged[key] = withPending(merged[key], value, here);
+    } else if (isToken(value)) {
+      throw new Error(`tokens.pending.yaml: ${here.join(".")} is in DESIGN.md now; delete it here`);
+    } else {
+      throw malformed(here.join("."));
+    }
   }
   return merged;
 }
 
 // The tokens the interface builds from: DESIGN.md's, plus any still pending.
-export function designTokens() {
+export function designTokens(pending = PENDING) {
   const design = tokensFrom(readFileSync(DESIGN, "utf8"));
-  return existsSync(PENDING) ? withPending(design, parse(readFileSync(PENDING, "utf8"))) : design;
+  return existsSync(pending) ? withPending(design, parse(readFileSync(pending, "utf8"))) : design;
 }
 
 // Resolves `{typography.ui.fontFamily}` references against the whole token tree.
