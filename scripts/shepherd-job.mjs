@@ -55,7 +55,7 @@ const finding = {
 
 export const JOBS = {
   review: {
-    model: "fable",
+    model: "opus",
     effort: "high",
     never: [...NEVER, "Bash(git commit:*)"],
     schema: {
