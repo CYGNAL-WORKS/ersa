@@ -1,0 +1,29 @@
+{"type":"queue-operation","ersa_elided":true}
+{"type":"queue-operation","ersa_elided":true}
+{"parentUuid":null,"isSidechain":false,"promptId":"a07bfd8b-00cd-4055-9168-9f69198a8c9c","type":"user","message":{"role":"user","content":[{"type":"text","text":"Reply with the single word OK."}]},"uuid":"c83f2b93-ae17-4143-a361-38729ea50c4e","timestamp":"2026-11-02T22:35:39.667Z","permissionMode":"default","promptSource":"sdk","turnOrigin":"sdk","turnPosition":{"promptIndex":0,"turnIndex":1},"userType":"external","entrypoint":"ersa","cwd":"C:/Users/user\\AppData\\Local\\Temp\\ersa-rec-k9gbTD","sessionId":"a93dfe17-27fb-4aa9-9584-9f7260683158","version":"2.1.316","gitBranch":"master"}
+{"type":"attachment","uuid":"8f7691ef-ead3-4033-af55-f13502bfa605","parentUuid":"c83f2b93-ae17-4143-a361-38729ea50c4e","isSidechain":false,"attachment":{"type":"environment"},"ersa_elided":true}
+{"type":"attachment","uuid":"63d46b8c-3f16-4a01-94e4-d5614d320845","parentUuid":"8f7691ef-ead3-4033-af55-f13502bfa605","isSidechain":false,"attachment":{"type":"model"},"ersa_elided":true}
+{"type":"attachment","uuid":"dd022e19-c83f-4008-b13d-64a9fbede0fd","parentUuid":"63d46b8c-3f16-4a01-94e4-d5614d320845","isSidechain":false,"attachment":{"type":"output_style_instructions"},"ersa_elided":true}
+{"type":"attachment","uuid":"1bb799c6-27bd-4ccf-800a-cf0e7c678cc1","parentUuid":"dd022e19-c83f-4008-b13d-64a9fbede0fd","isSidechain":false,"attachment":{"type":"deferred_tools_delta"},"ersa_elided":true}
+{"type":"attachment","uuid":"96e336af-017a-4b7f-ac4e-03bdc6902069","parentUuid":"1bb799c6-27bd-4ccf-800a-cf0e7c678cc1","isSidechain":false,"attachment":{"type":"agent_listing_delta"},"ersa_elided":true}
+{"type":"attachment","uuid":"f3beee7b-ba9e-41c2-a45e-b85e09a21aff","parentUuid":"96e336af-017a-4b7f-ac4e-03bdc6902069","isSidechain":false,"attachment":{"type":"skill_listing"},"ersa_elided":true}
+{"type":"attachment","uuid":"d226b722-b688-4ec9-bfd8-944a278dcfa9","parentUuid":"f3beee7b-ba9e-41c2-a45e-b85e09a21aff","isSidechain":false,"attachment":{"type":"output_style"},"ersa_elided":true}
+{"type":"last-prompt","lastPrompt":"Reply with the single word OK.","leafUuid":"d226b722-b688-4ec9-bfd8-944a278dcfa9","sessionId":"a93dfe17-27fb-4aa9-9584-9f7260683158"}
+{"type":"file-history-snapshot","ersa_elided":true}
+{"type":"atis-latch","ersa_elided":true}
+{"type":"attachment","uuid":"895b5101-a446-49f3-bdd6-b9e0fd5923ad","parentUuid":"d226b722-b688-4ec9-bfd8-944a278dcfa9","isSidechain":false,"attachment":{"type":"session_context"},"ersa_elided":true}
+{"type":"attachment","uuid":"9d755617-60e2-44e6-a318-1c2f321d9eae","parentUuid":"895b5101-a446-49f3-bdd6-b9e0fd5923ad","isSidechain":false,"attachment":{"type":"date"},"ersa_elided":true}
+{"type":"attachment","uuid":"1f418a25-eddd-4d9a-8a75-0bcebca233b0","parentUuid":"9d755617-60e2-44e6-a318-1c2f321d9eae","isSidechain":false,"attachment":{"type":"credential_org"},"ersa_elided":true}
+{"type":"attachment","uuid":"7efe9ee1-8cfc-4520-9a67-c60acbafe4dd","parentUuid":"1f418a25-eddd-4d9a-8a75-0bcebca233b0","isSidechain":false,"attachment":{"type":"remote_session_change"},"ersa_elided":true}
+{"type":"attachment","uuid":"8cea0b73-d978-4301-be15-f9f3ec6155fc","parentUuid":"7efe9ee1-8cfc-4520-9a67-c60acbafe4dd","isSidechain":false,"attachment":{"type":"prompt_snapshot"},"ersa_elided":true}
+{"type":"api-request-shape","ersa_elided":true}
+{"type":"api-request-blob","ersa_elided":true}
+{"type":"api-request-blob","ersa_elided":true}
+{"type":"api-request","ersa_elided":true}
+{"type":"last-prompt","lastPrompt":"Reply with the single word OK.","leafUuid":"8cea0b73-d978-4301-be15-f9f3ec6155fc","sessionId":"a93dfe17-27fb-4aa9-9584-9f7260683158"}
+{"type":"atis-latch","ersa_elided":true}
+{"parentUuid":"8cea0b73-d978-4301-be15-f9f3ec6155fc","isSidechain":false,"message":{"model":"claude-opus-5-5","id":"msg_011Cgeu9Ltqdk2GuC6y9ifv5","type":"message","role":"assistant","content":[{"type":"text","text":"OK"}],"container":null,"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":44172,"cache_read_input_tokens":0,"output_tokens":4,"output_tokens_details":{"thinking_tokens":0},"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":44172,"ephemeral_5m_input_tokens":0},"inference_geo":"global","iterations":[{"input_tokens":2,"output_tokens":4,"cache_read_input_tokens":0,"cache_creation_input_tokens":44172,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":44172},"type":"message"}],"speed":"standard","fallback_credit":null},"input_transformations":[],"diagnostics":null,"context_management":null},"apiBlockIndex":0,"requestId":"req_011Cgeu9LfhdsAc2tWzZB9tV","requestRef":"706d9066-a40b-4ed9-bfcb-3038f8d80043","requestedModel":"claude-opus-5-5","type":"assistant","uuid":"164d74ee-c383-4614-948f-ecf93b38878d","timestamp":"2026-11-02T22:35:40.865Z","advisorModel":"claude-opus-5-5","effort":"medium","perTurnEffort":"medium","userType":"external","entrypoint":"ersa","cwd":"C:/Users/user\\AppData\\Local\\Temp\\ersa-rec-k9gbTD","sessionId":"a93dfe17-27fb-4aa9-9584-9f7260683158","version":"2.1.316","gitBranch":"master"}
+{"type":"attachment","uuid":"c13853b6-95e8-43dc-9f14-76f8084176ba","parentUuid":"164d74ee-c383-4614-948f-ecf93b38878d","isSidechain":false,"attachment":{"type":"prompt_snapshot"},"ersa_elided":true}
+{"type":"last-prompt","lastPrompt":"Reply with the single word OK.","leafUuid":"c13853b6-95e8-43dc-9f14-76f8084176ba","sessionId":"a93dfe17-27fb-4aa9-9584-9f7260683158"}
+{"type":"atis-latch","ersa_elided":true}
+{"type":"cost-state","ersa_elided":true}
