@@ -35,7 +35,7 @@ export function refusals({ pr, containsMain, reviewedInBranch, sinceReview }) {
 
   // A commit status (rather than a check run) carries `context` and `state`.
   const checks = latestChecks(
-    (pr.statusCheckRollup ?? []).map((c) => ({ ...c, name: c.name ?? c.context, status: c.status ?? (c.state === "PENDING" ? "PENDING" : "COMPLETED"), conclusion: c.conclusion ?? c.state }))
+    (pr.statusCheckRollup ?? []).map((c) => ({ ...c, name: c.name ?? c.context, status: c.status ?? (["PENDING", "EXPECTED"].includes(c.state) ? "PENDING" : "COMPLETED"), conclusion: c.conclusion ?? c.state }))
   );
   const running = checks.filter((c) => c.status !== "COMPLETED");
   const failed = checks.filter((c) => c.status === "COMPLETED" && !PASSED.includes(c.conclusion));
@@ -54,9 +54,36 @@ export function refusals({ pr, containsMain, reviewedInBranch, sinceReview }) {
   return out;
 }
 
-function run(cmd, args) {
-  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+function run(cmd, args, cwd = ROOT) {
+  const r = spawnSync(cmd, args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim() };
+}
+
+// The commits on `head` after `reviewed` that `main` does not have, each
+// classified for refusals(). `git` runs one git command and returns run()'s
+// shape. A git command that fails throws, so a failure never reads as an empty
+// list or a clean merge.
+export function commitsSinceReview({ reviewed, head, main = "origin/main", git = (args) => run("git", args) }) {
+  const must = (args) => {
+    const r = git(args);
+    if (!r.ok) throw new Error(`git ${args.join(" ")} failed: ${r.err}`);
+    return r.out;
+  };
+  // A failure here reads as "not from main", which refuses: safe as is.
+  const isMain = (p) => git(["merge-base", "--is-ancestor", p, main]).ok;
+  return must(["rev-list", "--parents", `${reviewed}..${head}`, "--not", main])
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => {
+      const [sha, , ...others] = line.split(" ");
+      const merge = others.length > 0;
+      return {
+        sha,
+        merge,
+        fromMain: merge && others.every(isMain),
+        clean: merge && must(["show", "--remerge-diff", "--format=", sha]) === "",
+      };
+    });
 }
 
 function fail(message) {
@@ -83,20 +110,12 @@ function main() {
 
   const isAncestor = (a, b) => run("git", ["merge-base", "--is-ancestor", a, b]).ok;
   const reviewedInBranch = isAncestor(reviewed.out, head);
-  const sinceReview = !reviewedInBranch
-    ? []
-    : run("git", ["rev-list", "--parents", `${reviewed.out}..${head}`, "--not", "origin/main"])
-        .out.split("\n")
-        .filter(Boolean)
-        .map((line) => {
-          const [sha, , ...others] = line.split(" ");
-          return {
-            sha,
-            merge: others.length > 0,
-            fromMain: others.length > 0 && others.every((p) => isAncestor(p, "origin/main")),
-            clean: others.length > 0 && run("git", ["show", "--remerge-diff", "--format=", sha]).out === "",
-          };
-        });
+  let sinceReview = [];
+  try {
+    if (reviewedInBranch) sinceReview = commitsSinceReview({ reviewed: reviewed.out, head });
+  } catch (e) {
+    fail(e.message);
+  }
 
   const reasons = refusals({ pr, containsMain: isAncestor("origin/main", head), reviewedInBranch, sinceReview });
   if (reasons.length) {
