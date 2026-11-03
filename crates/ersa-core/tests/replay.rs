@@ -7,7 +7,8 @@ mod support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_adapter::{Adapter, Direction};
+use ersa_adapter::{Adapter, Direction, RawLine};
+use ersa_core::projection::View;
 use ersa_core::replay::Pace;
 use serde_json::{Value, json};
 use support::claude::{
@@ -140,6 +141,38 @@ fn changes(tiles: &[Value]) -> Vec<&Value> {
     changes
 }
 
+/// Every tile fixture 11 passes through, projected one line at a time.
+/// Core projects the lines queued at once together and a connection gets
+/// only the newest tile, so a client sees some of these, in this order,
+/// and which ones depends on timing, not on the Core.
+fn tiles_line_by_line() -> Vec<Value> {
+    let projector = isolated_claude().projector();
+    let (mut view, _) = View::open("fixture", "claude-code", Some(projector), &[]);
+    let mut tiles = vec![serde_json::to_value(view.tile()).unwrap()];
+    for (index, recorded) in recording().into_lines().into_iter().enumerate() {
+        view.live(&RawLine {
+            index: index as u64,
+            ts: "2026-01-01T00:00:00.000Z".to_string(),
+            dir: recorded.dir,
+            line: recorded.line,
+        });
+        tiles.push(serde_json::to_value(view.tile()).unwrap());
+    }
+    tiles
+}
+
+/// Asserts that every tile a client was sent is one the session passed
+/// through, in the order it passed through them.
+fn assert_passed_through(client: &str, tiles: &[Value], passed: &[Value]) {
+    let mut rest = passed.iter();
+    for tile in changes(tiles) {
+        assert!(
+            rest.any(|p| p == tile),
+            "the {client} client was sent {tile:#}, which is not among the tiles              the session passes through, in order: {passed:#?}"
+        );
+    }
+}
+
 /// Waits until the replay has recorded every line of the recording: lines
 /// follow the end of the turn, so `turn.completed` alone does not say so.
 async fn played_through(client: &mut Client, id: &Value) {
@@ -188,18 +221,14 @@ async fn the_replay_server_sends_the_notifications_core_sends_for_the_same_sessi
     let live_events = through_turn(live.events);
     let replayed_events = through_turn(replayed.events);
     assert_eq!(replayed_events, live_events);
-    // The tiles the rail is sent: every one the replay sends is one the live
-    // Core sent, in the same order, ending on the same tile.
-    let live_tiles = changes(&live.tiles);
-    let replayed_tiles = changes(&replayed.tiles);
-    let mut rest = live_tiles.iter();
-    for tile in &replayed_tiles {
-        assert!(
-            rest.any(|live| live == tile),
-            "{tile:#} is not among the live tiles in order: {live_tiles:#?}"
-        );
-    }
-    assert_eq!(replayed_tiles.last(), live_tiles.last());
+    // The tiles the rail is sent: each Core sends tiles the session passes
+    // through, in order, and both end on the same tile. Which tiles between
+    // the first and the last a client sees depends on timing, so the two
+    // are not compared to each other.
+    let passed = tiles_line_by_line();
+    assert_passed_through("live", &live.tiles, &passed);
+    assert_passed_through("replay", &replayed.tiles, &passed);
+    assert_eq!(replayed.tiles.last(), live.tiles.last());
 }
 
 // verifies: PROTO-CORE-API-R09
