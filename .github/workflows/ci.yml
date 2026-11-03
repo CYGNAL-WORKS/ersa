@@ -155,8 +155,10 @@ jobs:
       - name: Install Chromium
         run: flock /tmp/ersa-apt.lock pnpm exec playwright install --with-deps chromium
 
+      # The gallery server listens on a fixed port (playwright.config.ts), and
+      # both runners share the host's network, so one runner at a time.
       - name: Screenshot tests
-        run: pnpm test:screenshots
+        run: flock /tmp/ersa-screenshots.lock pnpm test:screenshots
 
       # On a screenshot failure, the rendered images: the new baselines when
       # none existed, and the actual and diff images otherwise.
