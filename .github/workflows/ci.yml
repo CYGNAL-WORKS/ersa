@@ -122,7 +122,11 @@ jobs:
         run: cargo test --locked
 
       - name: Script tests
+<<<<<<< HEAD
         run: node --test scripts/deps-check.test.mjs scripts/check-manifest-hook.test.mjs
+=======
+        run: node --test scripts/deps-check.test.mjs scripts/pr-queue.test.mjs
+>>>>>>> origin/main
 
       - name: Manifest
         run: node scripts/manifest.mjs --check
