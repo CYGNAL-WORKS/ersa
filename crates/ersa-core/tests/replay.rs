@@ -168,7 +168,8 @@ fn assert_passed_through(client: &str, tiles: &[Value], passed: &[Value]) {
     for tile in changes(tiles) {
         assert!(
             rest.any(|p| p == tile),
-            "the {client} client was sent {tile:#}, which is not among the tiles              the session passes through, in order: {passed:#?}"
+            "the {client} client was sent {tile:#}, which is not among the tiles \
+             the session passes through, in order: {passed:#?}"
         );
     }
 }
@@ -228,6 +229,7 @@ async fn the_replay_server_sends_the_notifications_core_sends_for_the_same_sessi
     let passed = tiles_line_by_line();
     assert_passed_through("live", &live.tiles, &passed);
     assert_passed_through("replay", &replayed.tiles, &passed);
+    assert_eq!(live.tiles.last(), passed.last());
     assert_eq!(replayed.tiles.last(), live.tiles.last());
 }
 
