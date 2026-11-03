@@ -42,8 +42,8 @@ pub mod fake;
 // Re-exported at the crate root so users write `ersa_adapter::Transport`
 // rather than reaching into private module paths.
 pub use adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, PermissionDecision,
-    Projected, Projector, RecordEvent, RecordSummary, SessionConfig,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, OpenElsewhere,
+    PermissionDecision, Projected, Projector, RecordEvent, RecordSummary, SessionConfig,
 };
 pub use local::LocalTransport;
 pub use raw::{Direction, RawLine};
