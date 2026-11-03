@@ -19,9 +19,18 @@ You run in a session of your own, at low effort. `scripts/pr-queue.mjs` does the
 - **ci-red, shared** (two or more pull requests fail the same way, usually a runner or a flaky test): one cause, so one action.
   - If main has a fix for it since the pull requests' runs, merge main into each branch that is behind (see behind-main) or, where the branch already contains main, rerun its failed jobs once (`gh run rerun <run id> --failed`). Never rerun the same head commit twice.
   - Otherwise put the cause on the owner's list once, naming the pull requests it blocks.
-- **ci-red** with failed tests or a build error of its own: send the signature and the run's link to the session that owns the branch, in one message, and leave the fix to it. Find that session with the app's session list; if none is running, put it on the owner's list. A policy failure (a dependency too new, a license) goes on the owner's list.
-- **behind-main**, **conflicting**: if the owning session is running, ask it to merge main. Otherwise merge `origin/main` into the branch in a detached worktree under the scratchpad, as `docs/agents/orchestration.md` does for planning commits, and push. A conflict outside the union-merged files goes on the owner's list.
-- **green**: run the merge review in `docs/agents/orchestration.md` (the `review-pr` skill) in a subagent at the stronger model, and send confirmed findings to the owning session. When the review is clean, merge only if the owner said this run may merge; otherwise put it on the owner's list as ready.
+- **ci-red** with failed tests or a build error of its own: start a fix session (below) with the signature and the run's link. A policy failure (a dependency too new, a license) goes on the owner's list.
+- **new comments**: read them before anything else on that pull request, since a fix's push reruns CI anyway. Actionable feedback goes to a fix session; a question or a disagreement goes on the owner's list. Never reply on GitHub yourself.
+- **behind-main**, **conflicting**: merge `origin/main` into the branch in a detached worktree under the scratchpad, as `docs/agents/orchestration.md` does for planning commits, and push. A conflict outside the union-merged files goes to a fix session.
+- **green**: run the merge review in `docs/agents/orchestration.md` (the `review-pr` skill) in a subagent at the stronger model, and send confirmed findings to a fix session. When the review is clean, merge only if the owner said this run may merge; otherwise put it on the owner's list as ready.
+
+## Fix sessions
+
+A fix goes to a new session, not the one that wrote the branch: that session may be gone, and one idle for over an hour rereads its whole long context to take a message. The owner's start of a shepherd run is the request for these sessions.
+
+- Start it fresh, in its own worktree, at medium effort. Its brief: the pull request, the branch, the issue it fixes, and what to fix (the signature and run link, the review findings, or the comment), each in full. It works in a worktree detached at the branch's head, since the branch may still be checked out in its old worktree, runs `node scripts/check.mjs`, and pushes with `git push origin HEAD:<branch>`. It fixes only what the brief names, with the smallest change, and records anything else as an inbox line.
+- One fix session per pull request per head commit: if the head it was started on is still the head, do not start another, however many wakes pass. A new head (its push, or anyone's) re-arms one more.
+- Record each one in `.scratch/pr-queue/run.md` with the head it was started on.
 
 ## Sleep
 
