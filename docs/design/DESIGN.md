@@ -85,8 +85,52 @@ size:
   tile-min: 288px
   # The transcript's reading column.
   measure: 720px
+  # The widest a user's message bubble grows, as a share of the reading column.
+  bubble-max: 80%
   # The height past which a tool card's output or a long permission field scrolls.
   card-max: 224px
+  # The state glyph a tile carries, and the dot before an inline problem.
+  glyph: 8px
+  # The accent mark beside a chip's chosen option.
+  option-mark: 4px
+  # The context ring's dial.
+  ring: 16px
+stack:
+  # Custom group. Stacking orders, lowest first: a menu sits above the page it opens over.
+  menu: 10
+material:
+  # Custom group. Gradients and fills that give surfaces and controls their material (see Elevation & Depth).
+  # `{colors.<role>}` names a color role, so each value follows the theme and the palette.
+  # The canvas: the faint wash from the top right and the bottom left over `canvas`.
+  wash: "radial-gradient(90% 70% at 100% 0%, {colors.wash-primary}, transparent 75%), radial-gradient(80% 70% at 20% 100%, {colors.wash-secondary}, transparent 75%), {colors.canvas}"
+  # Tiles and cards, lit from the top.
+  tile: "linear-gradient(to bottom, {colors.surface-raised}, {colors.surface})"
+  # The rail, settling toward the canvas at its foot.
+  rail: "linear-gradient(to bottom, {colors.surface}, color-mix(in oklab, {colors.surface} 55%, {colors.canvas}))"
+  # The primary button.
+  primary: "linear-gradient(to bottom, color-mix(in oklab, {colors.accent} 84%, white), {colors.accent})"
+  # The composer, lit from below, toward the user's hands.
+  composer: "linear-gradient(to bottom, {colors.surface}, {colors.surface-raised})"
+  # The open session's tile in the rail: a quiet neutral highlight, no accent.
+  open-session: "color-mix(in oklab, {colors.ink} 6%, {colors.surface})"
+glow:
+  # Custom group. Accent glows as box shadows, built from color roles like `material`.
+  # In dark a glow is a soft blur; in light a wide blur reads as a shadow, so light draws a tight tinted ring.
+  light:
+    # The one focused or waiting element.
+    focal: "0 0 0 1px {colors.accent}, 0 0 0 4px color-mix(in oklab, {colors.accent} 16%, transparent), 0 0 12px 2px color-mix(in oklab, {colors.accent} 20%, transparent)"
+    # The needs-you glyph in the rail.
+    attention: "0 0 5px color-mix(in oklab, {colors.accent} 45%, transparent)"
+  dark:
+    focal: "0 0 0 1px {colors.accent}, 0 0 16px -4px color-mix(in oklab, {colors.accent} 32%, transparent)"
+    attention: "0 0 5px color-mix(in oklab, {colors.accent} 45%, transparent)"
+shadow:
+  # Custom group. The soft, short shadow of a transient layer (menus, popovers, drag previews). Light builds it from the ink role, as `glow` builds from accent.
+  # Dark uses a fixed black on purpose: its canvas is already near black, so a shadow drawn from a role would not show, and it need not follow the palette.
+  light:
+    transient: "0 4px 12px -4px color-mix(in oklab, {colors.ink} 14%, transparent)"
+  dark:
+    transient: "0 4px 12px -4px color-mix(in oklab, black 60%, transparent)"
 motion:
   # Custom group. Durations in ms, easings as CSS cubic-bezier.
   instant: 80
@@ -150,11 +194,11 @@ The wordmark has its own size, much larger than `heading`, and is drawn in `ink`
 
 ## Layout
 
-Every gap, padding and size is a named step on one scale, on a 4px grid; space shows grouping, and the gap grows with the distance between ideas. The transcript keeps a reading column of comfortable width (`measure`) however wide the window gets. The rail is `rail` wide (288px, as Claude Desktop's session list; VS Code's and Zed's default to 300px), and a tile fills it. The shell layout is specified in `LAY-SHELL`.
+Every gap, padding and size is a named step on one scale, on a 4px grid; space shows grouping, and the gap grows with the distance between ideas. The transcript keeps a reading column of comfortable width (`measure`) however wide the window gets. The rail is `rail` wide (288px, as Claude Desktop's session list; VS Code's and Zed's default to 300px), and a tile fills it. Small marks take a `size` token, not a spacing step: `size-glyph` for a tile's state glyph and the dot before an inline problem, `size-option-mark` for the mark beside a chip's chosen option, `size-ring` for the context ring. The shell layout is specified in `LAY-SHELL`.
 
 **Turns are grouped by space.** A turn is a message to the agent, usually the user's, and everything the agent does in answer. Inside a turn, blocks (messages, tool cards, permission requests) sit `space-md` apart, so a turn reads dense and more of the conversation fits on screen. Between turns, before each user message except the first, the gap is `space-xxxl`, so each turn reads as one group without a divider. Claude Desktop uses about 11px inside a reply and 50 to 70px between turns.
 
-The user's message bubble is padded `space-md` above and below and `space-lg` at the sides.
+The user's message bubble sits at the right of the reading column, as wide as its words up to `bubble-max`, filled `surface-raised` with a `line` edge. It is padded `space-md` above and below and `space-lg` at the sides. It shows no label: its place says who wrote it, and assistive technology still hears "You".
 
 ## Elevation & Depth
 
@@ -162,10 +206,12 @@ Depth comes from tone and light, not from drop shadows:
 
 - **Material.** Surfaces, cards and primary controls carry a soft top-lit tonal gradient between neighbouring surface steps. It should be felt more than seen.
 - **Wash.** The canvas carries a very faint wash of `wash-primary` from the top right and `wash-secondary` from the bottom left, so it is never purely flat. It is barely there; if it is noticed first, it is too strong.
-- **Focal glow.** The one focused or waiting element (an open permission request, the focused composer) glows in the accent and fades in as it arrives, over `motion-settle` with `motion-ease-out`. In dark it is a soft blur; in light a wide blur reads as a shadow, so it is a tight tinted ring instead.
+- **Focal glow.** The one focused or waiting element (an open permission request or, when none is open, the focused composer) glows in the accent and fades in as it arrives, over `motion-settle` with `motion-ease-out`. In dark it is a soft blur; in light a wide blur reads as a shadow, so it is a tight tinted ring instead.
 - **Not a halo.** No luminous backdrop or halo around the window: tried, and too strong.
 
-Shadows are kept for transient layers (menus, popovers, drag previews), soft and short.
+Each of these is a token, built from color roles so it follows the theme and the palette. `material-wash` is the canvas. `material-tile` lights tiles and cards from the top, `material-rail` settles the rail toward the canvas at its foot, `material-primary` is the primary button, and `material-composer` is the composer. The open session's tile is `material-open-session`, a quiet neutral highlight with no accent outline. `glow-focal` is the focal glow; `glow-attention` is the faint glow on the needs-you glyph. Light and dark set their own glows; the materials are the same in both. While a permission request is open it holds the focal glow, and the focused composer shows its focus by its edge alone, so the screen keeps one focal glow.
+
+Shadows are kept for transient layers (menus, popovers, drag previews), soft and short: `shadow-transient`, with `radius-lg` corners. A transient layer stacks above the page it opens over by a `stack` token (`stack-menu`), never a bare number.
 
 **Motion.** Each moving thing has one motion, reviewed live in the design system's Motion card:
 

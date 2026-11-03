@@ -9,8 +9,8 @@
 
 .context-ring-gauge {
   flex: none;
-  width: var(--space-lg);
-  height: var(--space-lg);
+  width: var(--size-ring);
+  height: var(--size-ring);
 }
 
 .context-ring-track,

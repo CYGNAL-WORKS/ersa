@@ -38,7 +38,7 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 
 ## Open questions
 
-- Whether the context ring takes a caution or danger tone near full, as the gauge vocabulary in DESIGN.md suggests, or stays one tone with the arc alone saying how much.
+- Whether the context ring takes a caution or danger tone near full, or stays one tone with the arc alone saying how much.
 - Minimum window size, and which region collapses first when narrow.
 - Whether the workbench shows one pane at a time (tabs) or allows splits.
 - Whether the shelf overlays the transcript or pushes it, and how several pending shelves queue.
@@ -52,6 +52,7 @@ The rail is one list of sessions grouped under a heading per workspace: the proj
 
 ## Changes
 
+- 2026-11-02: the context-ring open question no longer points at DESIGN.md's gauge vocabulary, which ADR 0019 removed. Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: from #55 inbox: Built so far added: sessions grouped by workspace, the tree still to build. No requirement IDs changed.
 
 - 2026-11-02: open question on reordering and sorting the rail, which DESIGN.md's motion rules anticipate. No requirement IDs changed.

@@ -10,13 +10,28 @@
 // names), `typography.ui.fontSize` -> `--type-ui-size`, `rounded.md` ->
 // `--radius-md`, `spacing.lg` -> `--space-lg`, `line.hairline` ->
 // `--line-hairline`, `size.rail` -> `--size-rail`, `motion.quick` ->
-// `--motion-quick` (milliseconds), `motion.ease-out` -> `--motion-ease-out`.
+// `--motion-quick` (milliseconds), `motion.ease-out` -> `--motion-ease-out`,
+// `material.tile` -> `--material-tile`, `glow.dark.focal` -> `--glow-focal`,
+// `shadow.dark.transient` -> `--shadow-transient`, `stack.menu` -> `--stack-menu`
+// (a bare stacking number).
+//
+// Pending tokens: src/theme/tokens.pending.yaml holds tokens an implementing
+// session needs before a planning commit adds them to DESIGN.md (they are
+// proposed in docs/briefs/INBOX.md). They are merged in, and a pending token
+// DESIGN.md already names is refused, so the local copy goes once planning
+// lands. Delete the file when it is empty.
+//
+// Color roles: in `material`, `glow` and `shadow`, `{colors.accent}` becomes
+// `var(--color-accent)`, so a gradient or glow follows the theme and the
+// palette. Those groups are declared again in every theme block: a custom
+// property substitutes its var()s where it is declared, so one declared only
+// on :root would keep the light colors inside a `data-theme="dark"` subtree.
 //
 // Themes: light by default; dark when the system asks for it, unless an
 // element (or an ancestor) sets `data-theme="light"`. `data-theme="dark"` forces
 // dark, which is how the gallery shows both themes side by side.
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
@@ -24,12 +39,46 @@ import { parse } from "yaml";
 const SHELL = join(dirname(fileURLToPath(import.meta.url)), "..");
 const DESIGN = join(SHELL, "..", "..", "docs", "design", "DESIGN.md");
 const OUT = join(SHELL, "src", "theme", "tokens.gen.css");
+const PENDING = join(SHELL, "src", "theme", "tokens.pending.yaml");
 const CHECK = process.argv.includes("--check");
 
 export function tokensFrom(markdown) {
   const match = markdown.replace(/\r\n/g, "\n").match(/^---\n([\s\S]*?)\n---\n/);
   if (!match) throw new Error("DESIGN.md has no front matter");
   return parse(match[1]);
+}
+
+// Adds the pending tokens to DESIGN.md's, group by group (and theme by theme).
+// A group is a plain mapping; a token is a string or a number.
+const isGroup = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+const isToken = (v) => typeof v === "string" || typeof v === "number";
+
+export function withPending(design, pending, path = []) {
+  const malformed = (where) => new Error(`tokens.pending.yaml is malformed: ${where || "its top level"} is not a group of tokens`);
+  // An empty file parses to null: nothing pending.
+  if (pending == null && path.length === 0) return design;
+  if (!isGroup(pending)) throw malformed(path.join("."));
+  const merged = { ...design };
+  for (const [key, value] of Object.entries(pending)) {
+    const here = [...path, key];
+    if (!Object.hasOwn(merged, key)) {
+      if (!isGroup(value) && !isToken(value)) throw malformed(here.join("."));
+      merged[key] = value;
+    } else if (isGroup(merged[key])) {
+      merged[key] = withPending(merged[key], value, here);
+    } else if (isToken(value)) {
+      throw new Error(`tokens.pending.yaml: ${here.join(".")} is in DESIGN.md now; delete it here`);
+    } else {
+      throw malformed(here.join("."));
+    }
+  }
+  return merged;
+}
+
+// The tokens the interface builds from: DESIGN.md's, plus any still pending.
+export function designTokens(pending = PENDING) {
+  const design = tokensFrom(readFileSync(DESIGN, "utf8"));
+  return existsSync(pending) ? withPending(design, parse(readFileSync(pending, "utf8"))) : design;
 }
 
 // Resolves `{typography.ui.fontFamily}` references against the whole token tree.
@@ -42,10 +91,26 @@ function resolve(value, root) {
   });
 }
 
+// `{colors.<role>}` names a role rather than a value: the theme's own variable.
+function roles(value, tokens) {
+  return value.replace(/\{colors\.([\w-]+)\}/g, (_, role) => {
+    if (!(role in tokens.colors.light)) throw new Error(`DESIGN.md: no color role {colors.${role}}`);
+    return `var(--color-${role})`;
+  });
+}
+
 const kebab = (s) => s.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
 
 export function css(tokens) {
   const colorLines = (set) => Object.entries(set).map(([name, v]) => `  --color-${name}: ${v};`);
+  const roleLines = (group, set) =>
+    Object.entries(set).map(([name, v]) => `  --${group}-${name}: ${resolve(roles(v, tokens), tokens)};`);
+  const themeLines = (theme) => [
+    ...colorLines(tokens.colors[theme]),
+    ...roleLines("material", tokens.material),
+    ...roleLines("glow", tokens.glow[theme]),
+    ...roleLines("shadow", tokens.shadow?.[theme] ?? {}),
+  ];
   const shared = [];
   for (const [style, props] of Object.entries(tokens.typography)) {
     for (const [prop, v] of Object.entries(props)) {
@@ -57,10 +122,11 @@ export function css(tokens) {
   for (const [name, v] of Object.entries(tokens.spacing)) shared.push(`  --space-${name}: ${v};`);
   for (const [name, v] of Object.entries(tokens.line)) shared.push(`  --line-${name}: ${v};`);
   for (const [name, v] of Object.entries(tokens.size)) shared.push(`  --size-${name}: ${v};`);
+  for (const [name, v] of Object.entries(tokens.stack ?? {})) shared.push(`  --stack-${name}: ${v};`);
   for (const [name, v] of Object.entries(tokens.motion)) {
     shared.push(`  --motion-${name}: ${typeof v === "number" ? `${v}ms` : v};`);
   }
-  const dark = colorLines(tokens.colors.dark).join("\n");
+  const dark = themeLines("dark").join("\n");
   return [
     "/* Generated by scripts/gen-tokens.mjs from docs/design/DESIGN.md. Do not edit; run `pnpm gen`. */",
     "",
@@ -70,7 +136,7 @@ export function css(tokens) {
     "",
     ":root,\n[data-theme=\"light\"] {",
     "  color-scheme: light;",
-    ...colorLines(tokens.colors.light),
+    ...themeLines("light"),
     "}",
     "",
     "@media (prefers-color-scheme: dark) {",
@@ -90,7 +156,7 @@ export function css(tokens) {
 
 // Run only as a script, so the test can import the functions above.
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const text = css(tokensFrom(readFileSync(DESIGN, "utf8")));
+  const text = css(designTokens());
   let current = null;
   try {
     current = readFileSync(OUT, "utf8").replace(/\r\n/g, "\n");
