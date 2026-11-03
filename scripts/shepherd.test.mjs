@@ -66,13 +66,12 @@ test("a conflict merges main in, then goes to a fix", () => {
   assert.equal(kind(row("conflicting"), facts({ mainMergedHere: true, fixes: 2 })), "owner");
 });
 
-test("red CI: a runner or shared failure reruns once; a failure of its own gets a fix", () => {
+test("red CI reruns once per head; then a shared failure is the owner's and one of its own gets a fix", () => {
   assert.equal(kind(row("ci-red", { signature: NEVER_STARTED })), "rerun");
-  assert.equal(kind(row("ci-red", { signature: "x", shared: true })), "rerun");
+  assert.equal(kind(row("ci-red", { signature: "tests failed: a" })), "rerun");
   assert.equal(kind(row("ci-red", { signature: "x", shared: true }), facts({ rerunHere: true })), "owner");
-  assert.deepEqual(decide(row("ci-red", { signature: NEVER_STARTED }), facts({ rerunHere: true }), opts), { kind: "fix", task: "ci" });
-  assert.deepEqual(decide(row("ci-red", { signature: "tests failed: a" }), facts(), opts), { kind: "fix", task: "ci" });
-  assert.equal(kind(row("ci-red", { signature: "tests failed: a" }), facts({ fixes: 2 })), "owner");
+  assert.deepEqual(decide(row("ci-red", { signature: "tests failed: a" }), facts({ rerunHere: true }), opts), { kind: "fix", task: "ci" });
+  assert.equal(kind(row("ci-red", { signature: "tests failed: a" }), facts({ rerunHere: true, fixes: 2 })), "owner");
 });
 
 test("a CI task names the signature and where the log is", () => {

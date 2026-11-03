@@ -29,7 +29,6 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { NEVER_STARTED } from "./pr-queue.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const STATE = join(ROOT, ".scratch", "pr-queue");
@@ -66,11 +65,12 @@ export function decide(row, f, { merge, maxFixes }) {
     return fixOr("conflict", `conflicts with main after ${f.fixes} fix rounds`);
   }
 
+  // A rerun costs CI time and no tokens, and the self-hosted runners drop jobs,
+  // so every red head gets one before a fix job reads its log.
   if (row.state === "ci-red") {
-    const flaky = row.shared || row.signature === NEVER_STARTED;
-    if (flaky && !f.rerunHere) return { kind: "rerun" };
+    if (!f.rerunHere) return { kind: "rerun" };
     if (row.shared) return owner(`CI fails the same way on several pull requests, after a rerun: ${row.signature}`);
-    return fixOr("ci", `CI still red after ${f.fixes} fix rounds: ${row.signature}`);
+    return fixOr("ci", `CI still red after a rerun and ${f.fixes} fix rounds: ${row.signature}`);
   }
 
   // green or behind-main
@@ -237,7 +237,14 @@ async function main() {
   const set = new Set(queue().filter((r) => r.state !== "draft" && !opts.skip.has(r.number)).map((r) => r.number));
   process.stdout.write(`${stamp()} set: ${[...set].map((n) => `#${n}`).join(" ") || "(empty)"}${opts.merge ? ", may merge" : ""}\n`);
   const ctx = { jobs: 0, merged: false };
-  let lastReport = "";
+  // Each pull request's line prints when it changes, and an action prints as
+  // it starts, so the log shows what is running now, not only finished passes.
+  const said = new Map();
+  const say = (row, what) => {
+    if (said.get(row.number) === what) return;
+    said.set(row.number, what);
+    process.stdout.write(`${stamp()} #${row.number}\t${row.state}\t${what}\n`);
+  };
 
   for (;;) {
     if (existsSync(STOP)) {
@@ -257,16 +264,19 @@ async function main() {
       let action = decide(row, gather(row), opts);
       if (action.kind === "merge" && ctx.merged) action = { kind: "wait", reason: "one merge per pass; main just moved" };
       if (JOB_KINDS.includes(action.kind) && ctx.jobs >= opts.maxJobs) action = { kind: "budget", reason: `would start a ${action.kind}, but the run's ${opts.maxJobs} jobs are used` };
-      const what = opts.dryRun || ["wait", "owner", "budget"].includes(action.kind) ? `${action.kind}${action.task ? ` (${action.task})` : ""}${action.reason ? `: ${action.reason}` : ""}` : act(row, action, ctx);
-      if (!opts.dryRun && !["wait", "owner", "budget"].includes(action.kind)) acted = true;
+      const label = `${action.kind}${action.task ? ` (${action.task})` : ""}${action.reason ? `: ${action.reason}` : ""}`;
+      const acts = !opts.dryRun && !["wait", "owner", "budget"].includes(action.kind);
+      if (acts) {
+        say(row, `${label}: starting${JOB_KINDS.includes(action.kind) ? ` (job ${ctx.jobs + 1} of ${opts.maxJobs})` : ""}`);
+        acted = true;
+      }
+      const what = acts ? act(row, action, ctx) : label;
+      say(row, what);
       lines.push({ row, action, what });
     }
 
-    const report = lines.map(({ row, what }) => `#${row.number}\t${row.state}\t${what}`).join("\n");
     mkdirSync(STATE, { recursive: true });
-    writeFileSync(join(STATE, "report.md"), `${report}\n`);
-    if (report !== lastReport) process.stdout.write(`\n${stamp()} jobs ${ctx.jobs}/${opts.maxJobs}\n${report}\n`);
-    lastReport = report;
+    writeFileSync(join(STATE, "report.md"), `${lines.map(({ row, what }) => `#${row.number}\t${row.state}\t${what}`).join("\n")}\n`);
 
     if (opts.dryRun) process.exit(0);
     // Nothing left that a pass could move: the rest is the owner's, or needs a job the budget has no room for.
