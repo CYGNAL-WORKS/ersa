@@ -1,11 +1,12 @@
 // Holds the design rule "every colour, size, radius and duration comes from a
 // token in DESIGN.md" (CLAUDE.md, Design) as a check rather than a review.
 
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 // @ts-expect-error: a plain script without type declarations.
-import { css, tokensFrom } from "../../scripts/gen-tokens.mjs";
+import { css, designTokens, withPending } from "../../scripts/gen-tokens.mjs";
 
 const SRC = join(import.meta.dirname, "..");
 
@@ -28,6 +29,7 @@ const RAW = [
     pattern: /(?<![\w.-])\d*\.?\d+(px|rem|em|vh|vw|dvh|svh|pt|ms|s|%)(?![\w-])/gi,
   },
   { what: "a font weight", pattern: /font-weight\s*:(?!\s*var\()\s*[^;]+/gi },
+  { what: "a stacking order", pattern: /z-index\s*:(?!\s*var\()\s*[^;]+/gi },
 ];
 
 // A token scaled by a bare number is a new size in disguise; it needs its own
@@ -56,7 +58,33 @@ const FONT_FILES = join("theme", "fonts.css");
 const raw = (line: string) => RAW.flatMap(({ pattern }) => [...line.matchAll(pattern)].map((m) => m[0]));
 const flagged = (text: string) => [...raw(text), ...scaled(text)];
 
+// A var() naming a property nothing declares falls back silently, so a token
+// renamed or deleted in DESIGN.md would leave the interface green. Each name
+// must be a generated token or a property the same file declares itself.
+const declared = (text: string) => new Set([...text.matchAll(/["']?(--[\w-]+)["']?\s*:/g)].map((m) => m[1] as string));
+const undeclared = (text: string, tokens: Set<string>) => {
+  const local = declared(text);
+  return [...text.matchAll(/var\(\s*(--[\w-]+)/g)]
+    .map((m) => m[1] as string)
+    .filter((name) => !tokens.has(name) && !local.has(name));
+};
+
 describe("interface source", () => {
+  it("names only declared properties in var()", () => {
+    const tokens = declared(css(designTokens()));
+    const found = sourceFiles(SRC).flatMap((file) =>
+      undeclared(readFileSync(file, "utf8"), tokens).map((name) => `${relative(SRC, file)}: ${name}`),
+    );
+    expect(found).toEqual([]);
+  });
+
+  it("catches a var() naming a token that does not exist", () => {
+    const tokens = new Set(["--stack-menu"]);
+    expect(undeclared("  z-index: var(--stack-nonesuch);", tokens)).toEqual(["--stack-nonesuch"]);
+    expect(undeclared("  z-index: var(--stack-menu);", tokens)).toEqual([]);
+    expect(undeclared("  --inset: 0;\n  top: var(--inset);", tokens)).toEqual([]);
+  });
+
   it("uses tokens for every colour, size, radius, weight and duration", () => {
     const found: string[] = [];
     for (const file of sourceFiles(SRC)) {
@@ -87,6 +115,12 @@ describe("the raw-value check", () => {
     expect(flagged("  transition: opacity 160ms;")).toEqual(["160ms"]);
   });
 
+  it("catches a stacking order that is not a token", () => {
+    expect(flagged("  z-index: 1;")).toEqual(["z-index: 1"]);
+    expect(flagged("  z-index: auto;")).toEqual(["z-index: auto"]);
+    expect(flagged("  z-index: var(--stack-menu);")).toEqual([]);
+  });
+
   it("catches a token scaled by a bare number", () => {
     expect(flagged("  width: calc(var(--space-xxl) * 7);")).toHaveLength(1);
     expect(flagged("  width: calc(var(--size-rail) / 2);")).toHaveLength(1);
@@ -106,7 +140,7 @@ describe("the raw-value check", () => {
 });
 
 describe("generated tokens", () => {
-  const tokens = tokensFrom(readFileSync(join(SRC, "..", "..", "..", "docs", "design", "DESIGN.md"), "utf8"));
+  const tokens = designTokens();
   const generated = css(tokens);
 
   it("give light and dark the same colour names", () => {
@@ -123,7 +157,89 @@ describe("generated tokens", () => {
   });
 
   it("resolve references between tokens", () => {
-    expect(generated).not.toMatch(/\{[\w.]+\}/);
+    expect(generated).not.toMatch(/\{[\w.-]+\}/);
     expect(generated).toContain(`--type-ui-small-family: ${tokens.typography.ui.fontFamily};`);
+  });
+
+  it("give light and dark the same glow and shadow names", () => {
+    expect(Object.keys(tokens.glow.dark)).toEqual(Object.keys(tokens.glow.light));
+    expect(Object.keys(tokens.shadow.dark)).toEqual(Object.keys(tokens.shadow.light));
+  });
+
+  // Three theme blocks: light, dark by system preference, and forced dark.
+  // Each must declare every material and glow, or a dark subtree inherits
+  // values already substituted with the light colors.
+  it("declare every material and glow in each theme block", () => {
+    const names = [
+      ...Object.keys(tokens.material).map((name) => `--material-${name}:`),
+      ...Object.keys(tokens.glow.light).map((name) => `--glow-${name}:`),
+      ...Object.keys(tokens.shadow.light).map((name) => `--shadow-${name}:`),
+    ];
+    for (const name of names) expect(generated.split(name)).toHaveLength(4);
+  });
+
+  it("give the light block the light glows and shadows and both dark blocks the dark ones", () => {
+    const asCss = (value: string) => value.replace(/\{colors\.([\w-]+)\}/g, "var(--color-$1)");
+    for (const group of ["glow", "shadow"]) {
+      for (const name of Object.keys(tokens[group].light)) {
+        const declared = generated
+          .split("\n")
+          .map((line: string) => line.trim())
+          .filter((line: string) => line.startsWith(`--${group}-${name}:`));
+        const light = `--${group}-${name}: ${asCss(tokens[group].light[name])};`;
+        const dark = `--${group}-${name}: ${asCss(tokens[group].dark[name])};`;
+        expect(declared).toEqual([light, dark, dark]);
+      }
+    }
+  });
+
+  it("give stacking orders as bare numbers", () => {
+    expect(Object.keys(tokens.stack).length).toBeGreaterThan(0);
+    for (const [name, value] of Object.entries(tokens.stack)) {
+      expect(generated).toContain(`--stack-${name}: ${value};`);
+    }
+  });
+
+  it("build materials and glows from color roles, not values", () => {
+    expect(generated).toContain(
+      "--material-tile: linear-gradient(to bottom, var(--color-surface-raised), var(--color-surface));",
+    );
+    const declarations = generated.split("\n").filter((line: string) => /--(material|glow)-/.test(line));
+    for (const line of declarations) expect(line).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+  });
+
+  it("refuse a color role that does not exist", () => {
+    const broken = { ...tokens, material: { tile: "linear-gradient({colors.nonesuch}, {colors.surface})" } };
+    expect(() => css(broken)).toThrow("{colors.nonesuch}");
+  });
+
+  // Tokens waiting for a planning commit are a local definition only: once DESIGN.md names one, the
+  // local copy must go, so the two never disagree.
+  it("refuse a pending token that DESIGN.md already defines", () => {
+    const design = { size: { rail: "288px" } };
+    expect(withPending(design, { size: { glyph: "8px" } })).toEqual({ size: { rail: "288px", glyph: "8px" } });
+    expect(() => withPending(design, { size: { rail: "300px" } })).toThrow("size.rail");
+  });
+
+  it("refuse a pending file whose shape is not DESIGN.md's", () => {
+    const design = { size: { rail: "288px" } };
+    for (const pending of [["8px"], "8px", 8]) expect(() => withPending(design, pending)).toThrow("malformed");
+    for (const group of [null, "8px", ["8px"]]) {
+      expect(() => withPending(design, { size: group })).toThrow("tokens.pending.yaml is malformed: size");
+    }
+    expect(() => withPending(design, { size: { rail: { a: "1px" } } })).toThrow("malformed: size.rail");
+    expect(withPending(design, { toString: "x" })).toHaveProperty("toString", "x");
+  });
+
+  it("read the pending file into the tokens", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ersa-tokens-"));
+    try {
+      const pending = join(dir, "tokens.pending.yaml");
+      writeFileSync(pending, "size:\n  nonesuch: 3px\n");
+      expect(designTokens(pending).size.nonesuch).toBe("3px");
+      expect(designTokens(join(dir, "absent.yaml")).size.nonesuch).toBeUndefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
