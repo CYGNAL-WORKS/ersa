@@ -10,7 +10,7 @@ You run in a session of your own, at low effort. `scripts/pr-queue.mjs` does the
 ## Start
 
 1. Run `node scripts/pr-queue.mjs --changed`. It prints every open pull request with its state and, for a red one, the failure's signature; this run sets the baseline.
-2. Name the run's **set**: the pull requests it printed, minus any the owner left out. Write the set, the done condition ("every pull request in the set is merged, closed, or on the owner's list") and the budget to `.scratch/pr-queue/run.md`. A pull request opened later is not in the set; mention it once in your report and leave it.
+2. Name the run's **set**: the pull requests it printed, minus any the owner left out, and minus any another running session says it is driving (an orchestration session, or one that said it will rerun or merge them); search the app's session transcripts for their numbers. Name those to the owner and leave them unless the owner gives them to you; two sessions moving one pull request push over each other. Write the set, the done condition ("every pull request in the set is merged, closed, or on the owner's list") and the budget to `.scratch/pr-queue/run.md`. A pull request opened later is not in the set; mention it once in your report and leave it.
 3. Act on every row of the set (below), then sleep.
 
 ## Act on a row
