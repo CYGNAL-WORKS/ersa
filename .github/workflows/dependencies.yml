@@ -17,7 +17,7 @@ env:
 jobs:
   scan:
     name: Daily dependency scan
-    # The Linux runners in WSL on the owner's machine (docs/ci-runners.md).
+    # The Linux runners in WSL on the owner's machine, as in ci.yml.
     # Only while the repository is private.
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 30
