@@ -151,16 +151,25 @@ describe("generated tokens", () => {
     for (const name of names) expect(generated.split(name)).toHaveLength(4);
   });
 
-  it("give the light block the light glows and both dark blocks the dark ones", () => {
+  it("give the light block the light glows and shadows and both dark blocks the dark ones", () => {
     const asCss = (value: string) => value.replace(/\{colors\.([\w-]+)\}/g, "var(--color-$1)");
-    for (const name of Object.keys(tokens.glow.light)) {
-      const declared = generated
-        .split("\n")
-        .map((line: string) => line.trim())
-        .filter((line: string) => line.startsWith(`--glow-${name}:`));
-      const light = `--glow-${name}: ${asCss(tokens.glow.light[name])};`;
-      const dark = `--glow-${name}: ${asCss(tokens.glow.dark[name])};`;
-      expect(declared).toEqual([light, dark, dark]);
+    for (const group of ["glow", "shadow"]) {
+      for (const name of Object.keys(tokens[group].light)) {
+        const declared = generated
+          .split("\n")
+          .map((line: string) => line.trim())
+          .filter((line: string) => line.startsWith(`--${group}-${name}:`));
+        const light = `--${group}-${name}: ${asCss(tokens[group].light[name])};`;
+        const dark = `--${group}-${name}: ${asCss(tokens[group].dark[name])};`;
+        expect(declared).toEqual([light, dark, dark]);
+      }
+    }
+  });
+
+  it("give layers as bare numbers", () => {
+    expect(Object.keys(tokens.layer).length).toBeGreaterThan(0);
+    for (const [name, value] of Object.entries(tokens.layer)) {
+      expect(generated).toContain(`--layer-${name}: ${value};`);
     }
   });
 
