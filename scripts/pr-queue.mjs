@@ -151,6 +151,12 @@ function main() {
     const feedback = (pr.comments?.length ?? 0) + (pr.reviews?.length ?? 0);
     return { number: pr.number, title: pr.title, head: pr.headRefOid.slice(0, 7), feedback, ...classify(pr, { failures, containsMain }) };
   });
+  // --json prints the rows for scripts/shepherd.mjs and keeps no state.
+  if (process.argv.includes("--json")) {
+    process.stdout.write(JSON.stringify(markShared(rows)));
+    process.exit(0);
+  }
+
   const marked = markShared(rows);
   const print = fingerprint(marked);
   const diff = changes(last.rows, marked);
