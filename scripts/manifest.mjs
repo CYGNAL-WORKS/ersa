@@ -22,8 +22,16 @@ const OUT = join(ROOT, "docs", "MANIFEST.md");
 const ADR_README = join(ADR_DIR, "README.md");
 const CHECK = process.argv.includes("--check");
 // The requirement IDs a ticket implements, each of which must be cited by a test.
+// Every argument after the flag up to the next flag counts, so an unquoted
+// "A, B" that the shell splits in two still lists both IDs.
 const flag = process.argv.indexOf("--verifies");
-const REQUIRED = flag < 0 ? [] : (process.argv[flag + 1] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+const after = flag < 0 ? [] : process.argv.slice(flag + 1);
+const end = after.findIndex((a) => a.startsWith("--"));
+const REQUIRED = after.slice(0, end < 0 ? after.length : end).join(",").split(",").map((s) => s.trim()).filter(Boolean);
+if ((flag >= 0 && !REQUIRED.length) || process.argv.some((a) => a.startsWith("--verifies="))) {
+  console.error("--verifies needs requirement IDs: --verifies FLOW-X-R01,FLOW-X-R02");
+  process.exit(2);
+}
 
 const PREFIXES = "PRD|FLOW|LAY|CMP|PROTO|ARCH";
 const BRIEF_ID = new RegExp(`^(?:${PREFIXES})-[A-Z0-9]+(?:-[A-Z0-9]+)*$`);
