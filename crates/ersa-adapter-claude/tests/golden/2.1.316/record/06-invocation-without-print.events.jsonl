@@ -1,0 +1,2 @@
+{"backend_version":"2.1.316","event":{"origin":"human","text":"Reply with the single word OK.","type":"user.message"},"message_id":"c83f2b93-ae17-4143-a361-38729ea50c4e","ts":"2026-11-02T22:35:39.667Z"}
+{"backend_version":"2.1.316","event":{"block_id":"msg_011Cgeu9Ltqdk2GuC6y9ifv5/0","final":true,"text":"OK","type":"assistant.text"},"message_id":"164d74ee-c383-4614-948f-ecf93b38878d","ts":"2026-11-02T22:35:40.865Z"}
