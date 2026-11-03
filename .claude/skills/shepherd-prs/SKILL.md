@@ -5,7 +5,7 @@ description: Move a set of open pull requests toward merge from a dedicated, low
 
 # Shepherd pull requests
 
-You run in a session of your own, at low effort. `scripts/pr-queue.mjs` does the watching and the triage, with no model; you wake only when it reports a change, act on the rows that changed, and sleep again. Keep every turn short: you hand work to whoever has the context, and you never read a full CI log yourself.
+You run in a session of your own, at low effort. `scripts/pr-queue.mjs` does the watching and the triage, with no model; you wake only when it reports a change, act on the rows that changed, and sleep again. Keep every turn short: you hand work to whoever has the context, and you never read a full CI log yourself. Message a session only when it must act now, with everything for it in one message: every message wakes it for a full turn, and one idle for over an hour rereads its whole context. A fact it needs only later goes on the pull request or in your report.
 
 ## Start
 
