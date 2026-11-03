@@ -12,7 +12,7 @@ RUNNER_SHA256=baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40
 RUNNERS=2
 REPO=KPandaK/ersa
 
-# systemd runs Docker; Windows PATH entries stay out of jobs.
+# Windows PATH entries stay out of jobs.
 cat > /etc/wsl.conf <<'EOF'
 [boot]
 systemd=true
@@ -21,30 +21,20 @@ systemd=true
 appendWindowsPath=false
 EOF
 
-# What the jobs expect an ubuntu-latest image to have, Docker for the
-# container job, and the Tauri libraries the shell job would otherwise install.
+# What the jobs expect an ubuntu-latest image to have, and the Tauri libraries
+# the shell job would otherwise install. The interface job installs Chromium
+# and its libraries itself.
 apt-get update -q
 apt-get install -yq --no-install-recommends \
   build-essential pkg-config libssl-dev git curl wget ca-certificates gnupg \
-  unzip zip xz-utils zstd jq sudo tar gzip file docker.io \
+  unzip zip xz-utils zstd jq sudo tar gzip file \
   libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
-systemctl enable --now docker
 
 # The runners run as their own user, with passwordless sudo as on a hosted
-# runner. The docker group is root-equivalent anyway.
+# runner.
 id runner >/dev/null 2>&1 || { useradd --create-home --shell /bin/bash runner; passwd -l runner; }
-usermod -aG docker runner
 echo 'runner ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/runner
 chmod 0440 /etc/sudoers.d/runner
-
-# The container job writes into the work folder as root. Before each job,
-# hand everything back to the runner so checkout can clean it.
-cat > /home/runner/job-started.sh <<'EOF'
-#!/bin/bash
-[ "$(id -un)" = runner ] || exit 0
-sudo -n chown -R runner:runner "$(dirname "$(dirname "$GITHUB_WORKSPACE")")"
-EOF
-chmod 0755 /home/runner/job-started.sh
 
 tgz=/home/runner/actions-runner-linux-x64-$RUNNER_VERSION.tar.gz
 [ -f "$tgz" ] || curl -fsSL -o "$tgz" \
@@ -68,9 +58,6 @@ for n in $(seq "$RUNNERS"); do
     (cd "$dir" && sudo -u runner ./config.sh --unattended --url "https://github.com/$REPO" \
       --token "$token" --name "$name" --labels self-hosted,Linux,X64 --work _work --replace >/dev/null)
   fi
-  grep -q '^ACTIONS_RUNNER_HOOK_JOB_STARTED=' "$dir/.env" 2>/dev/null ||
-    echo 'ACTIONS_RUNNER_HOOK_JOB_STARTED=/home/runner/job-started.sh' >> "$dir/.env"
-  chown runner:runner "$dir/.env"
   echo "$name: registered"
 done
 
