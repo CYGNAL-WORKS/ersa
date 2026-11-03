@@ -2,9 +2,14 @@
 // Run: node --test scripts/pr-queue.test.mjs
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { changes, classify, fingerprint, markShared, settle, signature } from "./pr-queue.mjs";
+import { HOLD_LIMIT_MS, changes, classify, fingerprint, markShared, settle, signature, step } from "./pr-queue.mjs";
 
 const job = "Build, lint, test, dependencies (Linux)\tTest\t2026-11-03T06:41:47.5718425Z ";
 
@@ -112,8 +117,59 @@ test("a comment on a pull request whose CI is running is still a change", () => 
   const before = [{ number: 1, head: "a", state: "green", feedback: 1 }];
   const running = [{ number: 1, head: "b", state: "ci-running", feedback: 2 }];
   assert.notEqual(fingerprint(settle(before, running)), fingerprint(before));
+  assert.deepEqual(changes(before, settle(before, running)), [{ number: 1, change: "new comments", from: "green", to: "ci-running" }]);
 });
 
 test("a new pull request counts once its CI ends", () => {
   assert.deepEqual(settle([], [{ number: 2, head: "c", state: "ci-running" }]), []);
+});
+
+// One --changed run after another, as main() chains them.
+const after = (last, rows, now) => {
+  const s = step(last, rows, now);
+  return { s, last: { fingerprint: s.print, rows: s.settled, since: s.since } };
+};
+
+test("a run whose CI started does not wake the shepherd", () => {
+  const before = [{ number: 1, head: "a", state: "behind-main", title: "t", feedback: 0 }];
+  const { s } = after({ fingerprint: fingerprint(before), rows: before }, [{ ...before[0], head: "b", state: "ci-running" }], 0);
+  assert.equal(s.changed, false);
+});
+
+test("a rerun that fails the same way wakes the shepherd when it ends", () => {
+  const red = [{ number: 1, head: "a", state: "ci-red", signature: "s", title: "t", feedback: 0 }];
+  let last = { fingerprint: fingerprint(red), rows: red };
+  let s;
+  ({ s, last } = after(last, [{ ...red[0], state: "ci-running", signature: undefined }], 0));
+  assert.equal(s.changed, false);
+  ({ s, last } = after(last, red, 1));
+  assert.equal(s.changed, true);
+  assert.deepEqual(s.diff, [{ number: 1, change: "CI ended", from: "ci-red", to: "ci-red" }]);
+  ({ s } = after(last, red, 2));
+  assert.equal(s.changed, false);
+});
+
+test("a run held past the limit surfaces as ci-running, once", () => {
+  const green = [{ number: 1, head: "a", state: "green", title: "t", feedback: 0 }];
+  const running = [{ number: 1, head: "b", state: "ci-running", title: "t", feedback: 0 }, { number: 2, head: "c", state: "ci-running", title: "u", feedback: 0 }];
+  let last = { fingerprint: fingerprint(green), rows: green };
+  let s;
+  ({ s, last } = after(last, running, 0));
+  assert.equal(s.changed, false);
+  ({ s, last } = after(last, running, HOLD_LIMIT_MS + 1));
+  assert.deepEqual(s.diff, [
+    { number: 1, change: "new commits", from: "green", to: "ci-running" },
+    { number: 2, change: "new", to: "ci-running" },
+  ]);
+  ({ s } = after(last, running, HOLD_LIMIT_MS + 2));
+  assert.equal(s.changed, false);
+});
+
+test("a stop file ends the wait", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pr-queue-"));
+  writeFileSync(join(dir, "stop"), "");
+  const script = fileURLToPath(new URL("./pr-queue.mjs", import.meta.url));
+  const r = spawnSync(process.execPath, [script, "--changed"], { env: { ...process.env, PR_QUEUE_DIR: dir }, encoding: "utf8" });
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /^Stop requested/);
 });
