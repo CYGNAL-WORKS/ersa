@@ -23,13 +23,24 @@ wsl --terminate Ubuntu-24.04
 
 The last line restarts the distro so its `/etc/wsl.conf` applies. Leave Docker Desktop's WSL integration off for this distro: CI doesn't use Docker.
 
-The runners run in a terminal, as the Windows runner does. Keep it open beside the Windows runner's:
+The runners run in a terminal, as the Windows runner does:
 
 ```powershell
 wsl -d Ubuntu-24.04 -u runner /home/runner/run.sh
 ```
 
 Each line is prefixed with its runner's number. Ctrl+C or closing the terminal stops both, and WSL then stops the distro a few seconds later.
+
+## Starting every runner
+
+`start-runners.cmd`, in the Windows runner's folder `D:\Projects\actions-runner`, opens one Windows Terminal window with a tab for each:
+
+```bat
+@echo off
+wt -w ci-runners new-tab --title "Windows runner" -d "D:\Projects\actions-runner" cmd /k run.cmd ; new-tab --title "Linux runners" wsl.exe -d Ubuntu-24.04 -u runner /home/runner/run.sh
+```
+
+The Windows job puts Git Bash first on its own PATH, so it doesn't matter where the Windows runner was started from.
 
 ## Screenshots without Docker
 
