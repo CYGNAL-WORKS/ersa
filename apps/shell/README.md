@@ -7,7 +7,7 @@ Run the window during development, from the repository root:
 1. `cargo build -p ersa-cli`, so the Shell finds `target/debug/ersa-core` (or set `ERSA_CORE_BIN`).
 2. Install the pnpm that `packageManager` in `package.json` names: `npm install -g pnpm@12.15.0` (no admin rights needed). Then `pnpm install`, then in `apps/shell`: `pnpm tauri dev`.
 
-   Corepack works too, as CI uses it, but only at 0.36 or later: older corepack, like the 0.33 that Node 22 bundles, cannot start pnpm 12. On Windows, `corepack enable pnpm` writes into Node's install folder, so it needs an administrator shell.
+   Corepack works too, as CI uses it, but only at 0.36 or later: older corepack, like the 0.33 that Node 22 bundles, can't start pnpm 12. On Windows, `corepack enable pnpm` writes into Node's install folder, so it needs an administrator shell.
 
 To develop against the replay server instead of your own Core: `ersa-core replay --fixture <path>.jsonl` (it serves the label `replay`), then start the window with `ERSA_ATTACH=replay`. A debug build with `ERSA_ATTACH=<label>` attaches to that labelled endpoint and never launches Core there; a release build ignores it.
 
