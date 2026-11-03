@@ -8,6 +8,7 @@ mod support;
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use ersa_adapter::OpenElsewhere;
 use ersa_core::Adapter;
@@ -57,6 +58,21 @@ async fn session_row(client: &mut Client, id: &str) -> Value {
         .find(|s| s["id"] == id)
         .cloned()
         .unwrap_or_else(|| panic!("session {id} listed"))
+}
+
+/// The session's row once Core has read its title from the record. Core
+/// reads it after `session.stop` has its answer, so that a record that is
+/// slow to read never holds up the stop, and announces nothing when the
+/// title lands: the row is read again until it has one.
+async fn titled_row(client: &mut Client, id: &str) -> Value {
+    for _ in 0..500 {
+        let row = session_row(client, id).await;
+        if !row["title"].is_null() {
+            return row;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("session {id} got no title from its record within 10 s");
 }
 
 // verifies: PROTO-AGENT-EVENTS-R01
@@ -948,7 +964,7 @@ async fn a_sessions_title_and_start_come_from_its_record_and_its_mode_from_ersa(
         .result("session.send", json!({ "id": id, "text": "hello" }))
         .await;
     client.result("session.stop", json!({ "id": id })).await;
-    let row = session_row(&mut client, &id).await;
+    let row = titled_row(&mut client, &id).await;
     assert_eq!(row["title"], "hello");
     assert_eq!(row["created_at"], "2026-11-01T00:00:00.000Z");
     client.result("core.shutdown", json!({})).await;
@@ -1010,7 +1026,7 @@ async fn a_stopped_session_is_renamed_in_its_record_which_a_later_core_reads() {
         .result("session.send", json!({ "id": id, "text": "hello" }))
         .await;
     client.result("session.stop", json!({ "id": id })).await;
-    assert_eq!(session_row(&mut client, &id).await["title"], "hello");
+    assert_eq!(titled_row(&mut client, &id).await["title"], "hello");
 
     let renamed = client
         .result("session.set_title", json!({ "id": id, "title": "Renamed" }))
