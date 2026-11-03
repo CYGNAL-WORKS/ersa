@@ -19,9 +19,10 @@ To set up the distro from nothing, from the repository root in PowerShell:
 wsl --install -d Ubuntu-24.04 --no-launch
 gh api -X POST repos/KPandaK/ersa/actions/runners/registration-token --jq .token | wsl -d Ubuntu-24.04 -u root --exec bash scripts/wsl-runner.sh
 wsl --terminate Ubuntu-24.04
+wsl --manage Ubuntu-24.04 --set-sparse true
 ```
 
-The last line restarts the distro so its `/etc/wsl.conf` applies. Leave Docker Desktop's WSL integration off for this distro: CI doesn't use Docker.
+The third line restarts the distro so its `/etc/wsl.conf` applies. The last makes the distro's disk file sparse, so it shrinks as builds and caches free space. If WSL refuses because sparse disks are marked unsafe, add `--allow-unsafe`: everything on this disk can be rebuilt from the script. Leave Docker Desktop's WSL integration off for this distro: CI doesn't use Docker.
 
 The runners run in a terminal, as the Windows runner does:
 
