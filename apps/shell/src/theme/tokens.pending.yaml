@@ -1,0 +1,20 @@
+# Tokens waiting for a planning commit to add them to docs/design/DESIGN.md (proposed in
+# docs/briefs/INBOX.md). Same groups and names as DESIGN.md's front matter; the generator merges
+# them in and refuses any DESIGN.md already has. Move each to DESIGN.md and delete it here.
+size:
+  # The state glyph a tile carries, and the dot before an inline problem.
+  glyph: 8px
+  # The accent mark beside a chip's chosen option.
+  option-mark: 4px
+  # The context ring's dial.
+  ring: 16px
+layer:
+  # Custom group. Stacking order, lowest first: a transient layer sits above the page it opens over.
+  popover: 10
+shadow:
+  # Custom group. Soft, short shadows for transient layers (menus, popovers, drag previews), built from
+  # color roles like `glow`. Dark draws it from the canvas, which is near black; light from ink.
+  light:
+    layer: "0 4px 12px -4px color-mix(in oklab, {colors.ink} 14%, transparent)"
+  dark:
+    layer: "0 4px 12px -4px color-mix(in oklab, {colors.canvas} 70%, transparent)"
