@@ -71,7 +71,7 @@
 .chip-list {
   position: absolute;
   left: 0;
-  z-index: 1;
+  z-index: var(--stack-menu);
   display: flex;
   flex-direction: column;
   min-width: max-content;
@@ -82,7 +82,8 @@
   line-height: var(--type-ui-small-leading);
   background: var(--color-surface);
   border: var(--line-hairline) solid var(--color-line);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-transient);
   animation: chip-list-in var(--motion-quick) var(--motion-ease-out);
 }
 
@@ -131,8 +132,8 @@
 
 .chip-option-mark {
   flex: none;
-  width: var(--space-xs);
-  height: var(--space-xs);
+  width: var(--size-option-mark);
+  height: var(--size-option-mark);
   border-radius: var(--radius-pill);
 }
 
