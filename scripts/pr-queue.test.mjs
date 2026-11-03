@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { changes, classify, fingerprint, markShared, signature } from "./pr-queue.mjs";
+import { changes, classify, fingerprint, markShared, settle, signature } from "./pr-queue.mjs";
 
 const job = "Build, lint, test, dependencies (Linux)\tTest\t2026-11-03T06:41:47.5718425Z ";
 
@@ -97,4 +97,23 @@ test("a signature takes the error line above the exit code, not the last line", 
     `${job}##[error]Process completed with exit code 1.`,
   ].join("\n");
   assert.equal(signature(log), "npm error code ENOENT");
+});
+
+test("a pull request whose CI started is not a change until its CI ends", () => {
+  const before = [{ number: 1, head: "a", state: "behind-main", title: "t", feedback: 0 }];
+  const running = [{ number: 1, head: "b", state: "ci-running", title: "t", feedback: 0 }];
+  assert.equal(fingerprint(settle(before, running)), fingerprint(before));
+  assert.deepEqual(changes(before, settle(before, running)), []);
+  const done = [{ number: 1, head: "b", state: "green", title: "t", feedback: 0 }];
+  assert.deepEqual(changes(settle(before, running), settle(before, done)), [{ number: 1, change: "new commits", from: "behind-main", to: "green" }]);
+});
+
+test("a comment on a pull request whose CI is running is still a change", () => {
+  const before = [{ number: 1, head: "a", state: "green", feedback: 1 }];
+  const running = [{ number: 1, head: "b", state: "ci-running", feedback: 2 }];
+  assert.notEqual(fingerprint(settle(before, running)), fingerprint(before));
+});
+
+test("a new pull request counts once its CI ends", () => {
+  assert.deepEqual(settle([], [{ number: 2, head: "c", state: "ci-running" }]), []);
 });
