@@ -3,7 +3,7 @@
 # (CLAUDE.md, Stack): changes to anything Rust builds or tests from also run on
 # Windows, which compiles the `cfg(windows)` code Linux cannot.
 # Every job runs on the owner's own machine, registered as self-hosted runners:
-# Windows directly, Linux in WSL (docs/ci-runners.md). Jobs wait while that
+# Windows directly, Linux in a WSL Ubuntu 24.04 distro. Jobs wait while that
 # machine is offline. Only while the repository is private: never self-host
 # for a public one, since a fork's pull request would run its code there.
 # Actions are pinned by commit SHA (ADR 0015); Dependabot proposes updates.

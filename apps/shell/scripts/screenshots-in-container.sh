@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs the gallery's screenshot tests in the Playwright container, whose pixels
-# CI's runner matches (docs/ci-runners.md), so baselines rendered on any
-# machine match CI's.
+# CI's runner matches (.github/workflows/ci.yml, the interface job), so
+# baselines rendered on any machine match CI's.
 #
 #   scripts/screenshots-in-container.sh            check against the baselines
 #   scripts/screenshots-in-container.sh --update   rewrite the baselines
