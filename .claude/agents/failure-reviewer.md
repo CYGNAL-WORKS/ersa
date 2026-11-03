@@ -19,5 +19,4 @@ Review the diff against peers Ersa does not control: child processes, pipes, soc
 
 A timeout around work that cannot be cancelled (`spawn_blocking`, a blocking system call, a child nobody kills) ends the wait, not the work: does each expiry leave a thread or process behind that repeats can pile up? That is medium at least. When a step fails or times out, what has already happened? A peer slower than the timeout is still working, and an error that arrives after a message was delivered leaves its effect in place: cleanup that can destroy something live is high. Does a child inherit environment (`CARGO_TARGET_DIR`, `PATH`, `ERSA_*`) that changes what it runs or where it writes, and do its errors still reach the log or the test output?
 
-
 Report hunk, trigger, consequence.
