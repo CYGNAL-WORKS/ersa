@@ -5,7 +5,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 // @ts-expect-error: a plain script without type declarations.
-import { css, tokensFrom } from "../../scripts/gen-tokens.mjs";
+import { css, designTokens, withPending } from "../../scripts/gen-tokens.mjs";
 
 const SRC = join(import.meta.dirname, "..");
 
@@ -28,6 +28,7 @@ const RAW = [
     pattern: /(?<![\w.-])\d*\.?\d+(px|rem|em|vh|vw|dvh|svh|pt|ms|s|%)(?![\w-])/gi,
   },
   { what: "a font weight", pattern: /font-weight\s*:(?!\s*var\()\s*[^;]+/gi },
+  { what: "a layer", pattern: /z-index\s*:(?!\s*var\()\s*[^;]+/gi },
 ];
 
 // A token scaled by a bare number is a new size in disguise; it needs its own
@@ -87,6 +88,12 @@ describe("the raw-value check", () => {
     expect(flagged("  transition: opacity 160ms;")).toEqual(["160ms"]);
   });
 
+  it("catches a layer that is not a token", () => {
+    expect(flagged("  z-index: 1;")).toEqual(["z-index: 1"]);
+    expect(flagged("  z-index: auto;")).toEqual(["z-index: auto"]);
+    expect(flagged("  z-index: var(--layer-popover);")).toEqual([]);
+  });
+
   it("catches a token scaled by a bare number", () => {
     expect(flagged("  width: calc(var(--space-xxl) * 7);")).toHaveLength(1);
     expect(flagged("  width: calc(var(--size-rail) / 2);")).toHaveLength(1);
@@ -106,7 +113,7 @@ describe("the raw-value check", () => {
 });
 
 describe("generated tokens", () => {
-  const tokens = tokensFrom(readFileSync(join(SRC, "..", "..", "..", "docs", "design", "DESIGN.md"), "utf8"));
+  const tokens = designTokens();
   const generated = css(tokens);
 
   it("give light and dark the same colour names", () => {
@@ -127,8 +134,9 @@ describe("generated tokens", () => {
     expect(generated).toContain(`--type-ui-small-family: ${tokens.typography.ui.fontFamily};`);
   });
 
-  it("give light and dark the same glow names", () => {
+  it("give light and dark the same glow and shadow names", () => {
     expect(Object.keys(tokens.glow.dark)).toEqual(Object.keys(tokens.glow.light));
+    expect(Object.keys(tokens.shadow.dark)).toEqual(Object.keys(tokens.shadow.light));
   });
 
   // Three theme blocks: light, dark by system preference, and forced dark.
@@ -138,6 +146,7 @@ describe("generated tokens", () => {
     const names = [
       ...Object.keys(tokens.material).map((name) => `--material-${name}:`),
       ...Object.keys(tokens.glow.light).map((name) => `--glow-${name}:`),
+      ...Object.keys(tokens.shadow.light).map((name) => `--shadow-${name}:`),
     ];
     for (const name of names) expect(generated.split(name)).toHaveLength(4);
   });
@@ -166,5 +175,13 @@ describe("generated tokens", () => {
   it("refuse a color role that does not exist", () => {
     const broken = { ...tokens, material: { tile: "linear-gradient({colors.nonesuch}, {colors.surface})" } };
     expect(() => css(broken)).toThrow("{colors.nonesuch}");
+  });
+
+  // Tokens waiting for a planning commit are a local definition only: once DESIGN.md names one, the
+  // local copy must go, so the two never disagree.
+  it("refuse a pending token that DESIGN.md already defines", () => {
+    const design = { size: { rail: "288px" } };
+    expect(withPending(design, { size: { glyph: "8px" } })).toEqual({ size: { rail: "288px", glyph: "8px" } });
+    expect(() => withPending(design, { size: { rail: "300px" } })).toThrow("size.rail");
   });
 });
