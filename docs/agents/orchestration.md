@@ -31,7 +31,7 @@ Planning commits for a pull request go onto its branch, which is checked out in 
 
 ## Merge
 
-- Merge only when CI is green on a head that contains main's current tip (`git merge-base --is-ancestor origin/main origin/<branch>`) and the review is clean: `gh pr merge <n> --merge` (merge commits keep `Implements:` trailers). GitHub deletes the branch. A branch behind main gets main merged in first and its CI run again: CI never tests the merge commit itself, and #61 landed red on main because its branch predated #56's test literal.
+- Merge only when CI is green on a head that contains main's current tip and the review is clean, through the gate: `node scripts/merge-pr.mjs <n> --reviewed <sha>`, naming the head the review read. It refuses, with its reasons, anything else, including a head that changed after the review other than by clean merges of main, and merges with `--merge` (merge commits keep `Implements:` trailers). GitHub deletes the branch. A branch behind main gets main merged in first and its CI run again: CI never tests the merge commit itself, and #61 landed red on main because its branch predated #56's test literal.
 - After the merge, `git pull` in the integration checkout and report to the owner in a few lines.
 
 ## Train the harness
