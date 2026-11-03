@@ -12,10 +12,11 @@ RUNNER_SHA256=baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40
 RUNNERS=2
 REPO=KPandaK/ersa
 
-# Windows PATH entries stay out of jobs.
+# Nothing runs in the background: no systemd, and the runners run in a
+# terminal. Windows PATH entries stay out of jobs.
 cat > /etc/wsl.conf <<'EOF'
 [boot]
-systemd=true
+systemd=false
 
 [interop]
 appendWindowsPath=false
