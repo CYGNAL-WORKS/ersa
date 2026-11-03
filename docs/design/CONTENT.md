@@ -41,7 +41,7 @@ Each rule names the check that enforces it, and says so when the check covers on
 - Put a period or comma inside closing quotation marks. (`Microsoft.Quotes`)
 - Use the ellipsis character (…) only for something in progress or a command that asks for more before it acts. Never type three periods. (`Microsoft.Ellipses`, the catalog test)
 - Write numbers as numerals, and units with them: 4 sessions, 12 MB. (`Microsoft.Units`, which catches a spelled-out number before a unit of measure only)
-- Write a duration beside a readout in its two largest units, abbreviated and without a space: 42s, 3m 5s, 1h 12m. Write a count of tokens of 1,000 or more in thousands with one decimal below 10k and none above, then in millions the same way: 1.2k tokens, 48k tokens, 1.3M tokens. (Not checked)
+- Write a duration beside a readout in its two largest units, abbreviated and without a space: 42s, 3m 5s, 1h 12m. Write a count of tokens of 1,000 or more in thousands with one decimal below 10k and none at 10k and above, then in millions the same way: 1.2k tokens, 48k tokens, 1.3M tokens. (Not checked)
 - Name keys as the keyboard shows them, joined with a plus sign: Ctrl+Enter, Shift+Enter. (Not checked)
 
 **Not adopted from Microsoft.** `Microsoft.Avoid` and `Microsoft.Terms` are left out: they ban "backend" and rename "agent", which are Ersa's own terms. `Microsoft.Vocab` and the Microsoft product names are replaced by our glossary.
