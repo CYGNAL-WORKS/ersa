@@ -72,7 +72,9 @@ function main() {
   if (run.status !== 0) {
     const manifest = join(root, "docs", "MANIFEST.md");
     const problems = existsSync(manifest) ? blockingProblems(readFileSync(manifest, "utf8")) : [];
-    if (problems.length || !existsSync(manifest)) {
+    const onlyInbox =
+      existsSync(manifest) && /open inbox entr(y|ies) need a planning pass/.test(readFileSync(manifest, "utf8"));
+    if (problems.length || !onlyInbox) {
       block(
         "Blocked: the manifest check failed, and CI runs the same check.\n" +
           (problems.length ? problems.join("\n") : (run.stdout + run.stderr).trim()) +
