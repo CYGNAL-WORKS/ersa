@@ -77,6 +77,25 @@ test("a focused input's edge is the accent, in both themes", async ({ page }) =>
   }
 });
 
+// The open list's shadow is soft enough to sit inside the screenshots' per-pixel threshold, so it is checked here.
+test("an open chip list floats: a shadow and the floating radius, in both themes", async ({ page }) => {
+  await page.goto("/gallery.html");
+  for (const theme of ["light", "dark"]) {
+    const list = page.locator(`[data-theme="${theme}"] [data-component="Chip"] .chip-list`).first();
+    const { shadow, radius, floating } = await list.evaluate((el) => {
+      const probe = document.createElement("span");
+      probe.style.borderRadius = "var(--radius-lg)";
+      el.appendChild(probe);
+      const floating = getComputedStyle(probe).borderTopLeftRadius;
+      probe.remove();
+      const style = getComputedStyle(el);
+      return { shadow: style.boxShadow, radius: style.borderTopLeftRadius, floating };
+    });
+    expect(shadow, theme).not.toBe("none");
+    expect(radius, theme).toBe(floating);
+  }
+});
+
 // The rail's workspace headings hold their line before the names arrive, so the tiles never move when they do.
 test("a workspace heading is as tall before its name is read as after", async ({ page }) => {
   await page.goto("/gallery.html");
