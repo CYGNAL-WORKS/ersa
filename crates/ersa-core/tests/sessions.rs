@@ -65,14 +65,18 @@ async fn session_row(client: &mut Client, id: &str) -> Value {
 /// slow to read never holds up the stop, and announces nothing when the
 /// title lands: the row is read again until it has one.
 async fn titled_row(client: &mut Client, id: &str) -> Value {
-    for _ in 0..500 {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
         let row = session_row(client, id).await;
         if !row["title"].is_null() {
             return row;
         }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "session {id} got no title from its record within 10 s"
+        );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    panic!("session {id} got no title from its record within 10 s");
 }
 
 // verifies: PROTO-AGENT-EVENTS-R01
