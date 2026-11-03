@@ -8,13 +8,14 @@ size:
   option-mark: 4px
   # The context ring's dial.
   ring: 16px
-layer:
-  # Custom group. Stacking order, lowest first: a transient layer sits above the page it opens over.
-  popover: 10
+stack:
+  # Custom group. Stacking order, lowest first: a menu sits above the page it opens over.
+  menu: 10
 shadow:
-  # Custom group. Soft, short shadows for transient layers (menus, popovers, drag previews), built from
-  # color roles like `glow`. Dark draws it from the canvas, which is near black; light from ink.
+  # Custom group. The soft, short shadow of a transient layer (menus, popovers, drag previews), built
+  # from color roles like `glow`. Light draws it from ink; dark from black, since its canvas is
+  # already near black and a shadow drawn from it would not show.
   light:
-    layer: "0 4px 12px -4px color-mix(in oklab, {colors.ink} 14%, transparent)"
+    transient: "0 4px 12px -4px color-mix(in oklab, {colors.ink} 14%, transparent)"
   dark:
-    layer: "0 4px 12px -4px color-mix(in oklab, {colors.canvas} 70%, transparent)"
+    transient: "0 4px 12px -4px color-mix(in oklab, black 60%, transparent)"
