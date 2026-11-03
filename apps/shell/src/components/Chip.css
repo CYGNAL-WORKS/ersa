@@ -71,7 +71,7 @@
 .chip-list {
   position: absolute;
   left: 0;
-  z-index: var(--layer-popover);
+  z-index: var(--stack-menu);
   display: flex;
   flex-direction: column;
   min-width: max-content;
@@ -82,8 +82,8 @@
   line-height: var(--type-ui-small-leading);
   background: var(--color-surface);
   border: var(--line-hairline) solid var(--color-line);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-layer);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-transient);
   animation: chip-list-in var(--motion-quick) var(--motion-ease-out);
 }
 

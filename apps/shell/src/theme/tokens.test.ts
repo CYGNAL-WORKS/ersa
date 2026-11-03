@@ -28,7 +28,7 @@ const RAW = [
     pattern: /(?<![\w.-])\d*\.?\d+(px|rem|em|vh|vw|dvh|svh|pt|ms|s|%)(?![\w-])/gi,
   },
   { what: "a font weight", pattern: /font-weight\s*:(?!\s*var\()\s*[^;]+/gi },
-  { what: "a layer", pattern: /z-index\s*:(?!\s*var\()\s*[^;]+/gi },
+  { what: "a stacking order", pattern: /z-index\s*:(?!\s*var\()\s*[^;]+/gi },
 ];
 
 // A token scaled by a bare number is a new size in disguise; it needs its own
@@ -88,10 +88,10 @@ describe("the raw-value check", () => {
     expect(flagged("  transition: opacity 160ms;")).toEqual(["160ms"]);
   });
 
-  it("catches a layer that is not a token", () => {
+  it("catches a stacking order that is not a token", () => {
     expect(flagged("  z-index: 1;")).toEqual(["z-index: 1"]);
     expect(flagged("  z-index: auto;")).toEqual(["z-index: auto"]);
-    expect(flagged("  z-index: var(--layer-popover);")).toEqual([]);
+    expect(flagged("  z-index: var(--stack-menu);")).toEqual([]);
   });
 
   it("catches a token scaled by a bare number", () => {
@@ -166,10 +166,10 @@ describe("generated tokens", () => {
     }
   });
 
-  it("give layers as bare numbers", () => {
-    expect(Object.keys(tokens.layer).length).toBeGreaterThan(0);
-    for (const [name, value] of Object.entries(tokens.layer)) {
-      expect(generated).toContain(`--layer-${name}: ${value};`);
+  it("give stacking orders as bare numbers", () => {
+    expect(Object.keys(tokens.stack).length).toBeGreaterThan(0);
+    for (const [name, value] of Object.entries(tokens.stack)) {
+      expect(generated).toContain(`--stack-${name}: ${value};`);
     }
   });
 
