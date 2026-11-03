@@ -61,6 +61,13 @@ test("the fingerprint ignores order and titles, and follows head, state and sign
   assert.equal(fingerprint(a), fingerprint(b));
   assert.notEqual(fingerprint(a), fingerprint([a[0], { ...a[1], signature: "t" }]));
   assert.notEqual(fingerprint(a), fingerprint([a[0], { ...a[1], head: "ccc" }]));
+  assert.notEqual(fingerprint(a), fingerprint([a[0], { ...a[1], feedback: 1 }]));
+});
+
+test("new comments are a change even when the state is not", () => {
+  const before = [{ number: 1, head: "a", state: "green", feedback: 2 }];
+  assert.deepEqual(changes(before, [{ ...before[0], feedback: 3 }]), [{ number: 1, change: "new comments", from: "green", to: "green" }]);
+  assert.deepEqual(changes(before, [{ ...before[0] }]), []);
 });
 
 test("changes lists new, moved and gone pull requests", () => {

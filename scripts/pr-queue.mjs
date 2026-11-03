@@ -12,9 +12,12 @@
 // requests is marked shared, since one cause (a runner, a flaky test) then
 // blocks them all. Failed logs are fetched once per head commit and cached.
 //
+// Each row also counts the comments and reviews on the pull request, so new
+// feedback is a change even when the state is not.
+//
 // The last run lives in .scratch/pr-queue/last.json (uncommitted). The
-// fingerprint covers number, head, state and signature, never timestamps, so
-// an unchanged queue stays unchanged.
+// fingerprint covers number, head, state, signature and feedback count, never
+// timestamps, so an unchanged queue stays unchanged.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -72,7 +75,7 @@ export function markShared(rows) {
 
 export function fingerprint(rows) {
   const key = rows
-    .map((r) => [r.number, r.head, r.state, r.signature ?? ""])
+    .map((r) => [r.number, r.head, r.state, r.signature ?? "", r.feedback ?? 0])
     .sort((a, b) => a[0] - b[0]);
   return createHash("sha256").update(JSON.stringify(key)).digest("hex").slice(0, 16);
 }
@@ -87,6 +90,8 @@ export function changes(previous, rows) {
     if (!p) out.push({ number: r.number, change: "new", to: r.state });
     else if (p.head !== r.head || p.state !== r.state || (p.signature ?? "") !== (r.signature ?? ""))
       out.push({ number: r.number, change: p.head !== r.head ? "new commits" : "state", from: p.state, to: r.state });
+    else if ((r.feedback ?? 0) > (p.feedback ?? 0))
+      out.push({ number: r.number, change: "new comments", from: p.state, to: r.state });
   }
   for (const [n, p] of before) if (!now.has(n)) out.push({ number: n, change: "closed or merged", from: p.state });
   return out.sort((a, b) => a.number - b.number);
@@ -104,7 +109,7 @@ function main() {
   run("git", ["fetch", "-q", "origin"]);
   const list = run("gh", [
     "pr", "list", "--state", "open", "--limit", "100",
-    "--json", "number,title,headRefName,headRefOid,isDraft,mergeable,statusCheckRollup",
+    "--json", "number,title,headRefName,headRefOid,isDraft,mergeable,statusCheckRollup,comments,reviews",
   ]);
   if (!list.ok) {
     process.stderr.write(`gh pr list failed: ${list.err}`);
@@ -132,7 +137,8 @@ function main() {
       logs[key] = failures[c.name] = last.logs[key];
     }
     const containsMain = run("git", ["merge-base", "--is-ancestor", "origin/main", pr.headRefOid]).ok;
-    return { number: pr.number, title: pr.title, head: pr.headRefOid.slice(0, 7), ...classify(pr, { failures, containsMain }) };
+    const feedback = (pr.comments?.length ?? 0) + (pr.reviews?.length ?? 0);
+    return { number: pr.number, title: pr.title, head: pr.headRefOid.slice(0, 7), feedback, ...classify(pr, { failures, containsMain }) };
   });
   const marked = markShared(rows);
   const print = fingerprint(marked);
