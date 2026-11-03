@@ -23,18 +23,17 @@ wsl --terminate Ubuntu-24.04
 
 The last line restarts the distro so its `/etc/wsl.conf` applies. Docker Desktop's WSL integration stays off for this distro, which has its own Docker Engine.
 
-WSL stops an idle distro, and its runners with it. A shortcut in the Startup folder keeps it running from sign-in:
+WSL stops a distro a few seconds after its last terminal closes, and the runners stop with it. Keep a terminal open beside the Windows runner's, following the runners' log:
 
 ```powershell
-$s = (New-Object -ComObject WScript.Shell).CreateShortcut("$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\Ersa WSL runners.lnk")
-$s.TargetPath = "$env:WINDIR\System32\conhost.exe"
-$s.Arguments = '--headless wsl.exe -d Ubuntu-24.04 --exec sleep infinity'
-$s.Save()
+wsl -d Ubuntu-24.04 -u root journalctl -f -u 'actions.runner.*'
 ```
+
+The runner services start with the distro, so this one command brings them online and shows each job they run.
 
 ## Keeping them running
 
-- **Runners offline.** Open the Startup shortcut. The runner services start with the distro.
+- **Runners offline.** Open the log terminal above. If GitHub says "A session for this runner already exists", the distro stopped while the runners were connected: they retry and connect within a few minutes.
 - **Restart a runner.** `wsl -d Ubuntu-24.04 -u root systemctl restart 'actions.runner.KPandaK-ersa.DESKTOP-2GEVM7K-wsl-1.service'`, and `-2` for the other.
 - **Re-register.** A runner that GitHub removed, for example after 14 days offline, needs registering again. Delete its `.runner` file, then rerun the setup line with the token:
 
