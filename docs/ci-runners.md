@@ -48,8 +48,8 @@ The gallery's baselines are rendered in the Playwright container (`apps/shell/sc
 
 ## Keeping them running
 
-- **Runners offline.** Open the runner terminal above. If GitHub says "A session for this runner already exists", the distro stopped while the runners were connected: they retry and connect within a few minutes.
-- **Restart the runners.** Press Ctrl+C in their terminal and run the command again.
+- **Runners offline.** Run `start-runners.cmd`. If GitHub says "A session for this runner already exists", the distro stopped while the runners were connected: they retry and connect within a few minutes.
+- **Restart the runners.** Close their window and run `start-runners.cmd` again.
 - **Re-register.** A runner that GitHub removed, for example after 14 days offline, needs registering again. Delete its `.runner` file, then rerun the setup line with the token:
 
   ```powershell
