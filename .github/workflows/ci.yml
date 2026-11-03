@@ -106,16 +106,14 @@ jobs:
         run: cargo deny --workspace --locked check bans licenses sources
 
   # The Interface (apps/shell): generated files current, types, unit tests, and
-  # the gallery's screenshot tests. Runs in the Playwright container so the
-  # screenshots match the baselines pixel for pixel (apps/shell/playwright.config.ts).
+  # the gallery's screenshot tests. The runner is Ubuntu 24.04 with the Node,
+  # Chromium, and fonts of the Playwright image the baselines come from
+  # (apps/shell/playwright.config.ts), so its screenshots match them pixel for
+  # pixel without Docker.
   interface:
     name: Interface (Linux)
     runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
-    container:
-      # Keep in step with @playwright/test in apps/shell/package.json.
-      # Pinned by digest, as actions are by SHA (ADR 0015).
-      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
     defaults:
       run:
         working-directory: apps/shell
@@ -123,6 +121,12 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+
+      # The Node major of the Playwright image in
+      # apps/shell/scripts/screenshots-in-container.sh.
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
 
       # Corepack runs the pnpm that apps/shell/package.json's packageManager
       # names, after checking it against the sha512 there. The corepack Node
@@ -145,6 +149,11 @@ jobs:
 
       - name: Unit tests
         run: pnpm test
+
+      # The Chromium @playwright/test names, and the system libraries and fonts
+      # it renders with. The lock keeps two runners out of apt at once.
+      - name: Install Chromium
+        run: flock /tmp/ersa-apt.lock pnpm exec playwright install --with-deps chromium
 
       - name: Screenshot tests
         run: pnpm test:screenshots
@@ -192,8 +201,7 @@ jobs:
           cache-bin: false
 
       # The webview and windowing libraries Tauri links against on Linux. The
-      # runner has them already; installing only what is missing keeps two
-      # runners off apt's lock.
+      # runner has them already, so this installs only what is missing.
       - name: Tauri system libraries
         run: |
           missing=
@@ -201,8 +209,7 @@ jobs:
             dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q ' installed$' || missing="$missing $p"
           done
           if [ -n "$missing" ]; then
-            sudo apt-get update
-            sudo apt-get install -y --no-install-recommends $missing
+            flock /tmp/ersa-apt.lock sh -c "sudo apt-get update && sudo apt-get install -y --no-install-recommends $missing"
           fi
 
       # The Shell embeds the Interface's build output (apps/shell/dist) at
