@@ -65,7 +65,6 @@ const CLAUDE = process.env.ERSA_CLAUDE || "claude";
 
 // Ersa's command line (PROTO-CLAUDE-CODE-STREAM, Invocation).
 const ERSA_ARGS = [
-  "-p",
   "--input-format", "stream-json",
   "--output-format", "stream-json",
   "--verbose",
