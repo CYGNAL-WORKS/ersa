@@ -54,9 +54,20 @@ export function refusals({ pr, containsMain, reviewedInBranch, sinceReview }) {
   return out;
 }
 
+// A git or gh command that stalls (a credential prompt, a network hang) is
+// killed after TIMEOUT_MS and reads as failed, so the gate never blocks.
+const TIMEOUT_MS = 2 * 60 * 1000;
+
 function run(cmd, args, cwd = ROOT) {
-  const r = spawnSync(cmd, args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim() };
+  const r = spawnSync(cmd, args, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: TIMEOUT_MS,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" },
+  });
+  const err = [(r.stderr ?? "").trim(), r.error?.message].filter(Boolean).join("; ");
+  return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err };
 }
 
 // The commits on `head` after `reviewed` that `main` does not have, each
@@ -81,27 +92,55 @@ export function commitsSinceReview({ reviewed, head, main = "origin/main", git =
         sha,
         merge,
         fromMain: merge && others.every(isMain),
-        clean: merge && must(["show", "--remerge-diff", "--format=", sha]) === "",
+        // git skips the remerge-diff of an octopus merge and prints nothing,
+        // so only a two-parent merge can read as clean.
+        clean: others.length === 1 && must(["show", "--remerge-diff", "--format=", sha]) === "",
       };
     });
 }
 
-function fail(message) {
-  process.stderr.write(`${message}\n`);
-  process.exit(2);
+class Refused extends Error {}
+class ToolError extends Error {}
+const fail = (message) => {
+  throw new ToolError(message);
+};
+
+const USAGE = "usage: node scripts/merge-pr.mjs <n> --reviewed <sha> [--dry-run]";
+
+// Runs the gate for argv and returns the exit code and what to print. `run`
+// runs one git or gh command, so a test can stand in for GitHub.
+export function main(argv, { run: r = run } = {}) {
+  try {
+    return { code: 0, ...gate(argv, r) };
+  } catch (e) {
+    if (e instanceof Refused) return { code: 1, stdout: e.message };
+    return { code: 2, stderr: `${e.message}\n` };
+  }
 }
 
-function main() {
-  const args = process.argv.slice(2);
-  const reviewedAt = args.indexOf("--reviewed") + 1;
-  const reviewedArg = reviewedAt > 0 ? args[reviewedAt] : undefined;
-  const n = args.find((a, i) => i !== reviewedAt && /^\d+$/.test(a));
-  if (!n || !args.includes("--reviewed") || !reviewedArg) fail("usage: node scripts/merge-pr.mjs <n> --reviewed <sha> [--dry-run]");
+function gate(args, run) {
+  let n;
+  let reviewedArg;
+  let dryRun = false;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--reviewed" && reviewedArg === undefined && i + 1 < args.length) reviewedArg = args[++i];
+    else if (a === "--dry-run") dryRun = true;
+    else if (/^\d+$/.test(a) && n === undefined) n = a;
+    else fail(`unrecognized argument ${a}\n${USAGE}`);
+  }
+  if (!n || !reviewedArg) fail(USAGE);
 
   const view = run("gh", ["pr", "view", n, "--json", "state,isDraft,mergeable,headRefOid,statusCheckRollup"]);
   if (!view.ok) fail(`gh pr view failed: ${view.err}`);
-  const pr = JSON.parse(view.out);
-  const head = pr.headRefOid;
+  let pr;
+  try {
+    pr = JSON.parse(view.out);
+  } catch (e) {
+    fail(`gh pr view printed no JSON: ${e.message}`);
+  }
+  const head = pr?.headRefOid;
+  if (typeof head !== "string" || typeof pr.state !== "string" || typeof pr.mergeable !== "string") fail("gh pr view left out state, mergeable or headRefOid");
 
   const fetch = run("git", ["fetch", "-q", "origin", "main", `pull/${n}/head`]);
   if (!fetch.ok) fail(`git fetch failed: ${fetch.err}`);
@@ -110,25 +149,19 @@ function main() {
 
   const isAncestor = (a, b) => run("git", ["merge-base", "--is-ancestor", a, b]).ok;
   const reviewedInBranch = isAncestor(reviewed.out, head);
-  let sinceReview = [];
-  try {
-    if (reviewedInBranch) sinceReview = commitsSinceReview({ reviewed: reviewed.out, head });
-  } catch (e) {
-    fail(e.message);
-  }
+  const sinceReview = reviewedInBranch ? commitsSinceReview({ reviewed: reviewed.out, head, git: (a) => run("git", a) }) : [];
 
   const reasons = refusals({ pr, containsMain: isAncestor("origin/main", head), reviewedInBranch, sinceReview });
-  if (reasons.length) {
-    process.stdout.write(`#${n} may not merge:\n${reasons.map((r) => `- ${r}\n`).join("")}`);
-    process.exit(1);
-  }
-  if (args.includes("--dry-run")) {
-    process.stdout.write(`#${n} may merge at ${head.slice(0, 7)}\n`);
-    process.exit(0);
-  }
+  if (reasons.length) throw new Refused(`#${n} may not merge:\n${reasons.map((x) => `- ${x}\n`).join("")}`);
+  if (dryRun) return { stdout: `#${n} may merge at ${head.slice(0, 7)}\n` };
   const merge = run("gh", ["pr", "merge", n, "--merge", "--match-head-commit", head]);
   if (!merge.ok) fail(`gh pr merge failed: ${merge.err}`);
-  process.stdout.write(`#${n} merged at ${head.slice(0, 7)}\n`);
+  return { stdout: `#${n} merged at ${head.slice(0, 7)}\n` };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const { code, stdout, stderr } = main(process.argv.slice(2));
+  if (stdout) process.stdout.write(stdout);
+  if (stderr) process.stderr.write(stderr);
+  process.exit(code);
+}
