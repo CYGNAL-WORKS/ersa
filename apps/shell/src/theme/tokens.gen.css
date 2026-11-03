@@ -39,6 +39,10 @@
   --size-measure: 720px;
   --size-bubble-max: 80%;
   --size-card-max: 224px;
+  --size-glyph: 8px;
+  --size-option-mark: 4px;
+  --size-ring: 16px;
+  --layer-popover: 10;
   --motion-instant: 80ms;
   --motion-quick: 160ms;
   --motion-settle: 260ms;
@@ -77,6 +81,7 @@
   --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
   --glow-focal: 0 0 0 1px var(--color-accent), 0 0 0 4px color-mix(in oklab, var(--color-accent) 16%, transparent), 0 0 12px 2px color-mix(in oklab, var(--color-accent) 20%, transparent);
   --glow-attention: 0 0 5px color-mix(in oklab, var(--color-accent) 45%, transparent);
+  --shadow-layer: 0 4px 12px -4px color-mix(in oklab, var(--color-ink) 14%, transparent);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -104,6 +109,7 @@
     --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
     --glow-focal: 0 0 0 1px var(--color-accent), 0 0 16px -4px color-mix(in oklab, var(--color-accent) 32%, transparent);
     --glow-attention: 0 0 5px color-mix(in oklab, var(--color-accent) 45%, transparent);
+    --shadow-layer: 0 4px 12px -4px color-mix(in oklab, var(--color-canvas) 70%, transparent);
   }
 }
 
@@ -131,4 +137,5 @@
   --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
   --glow-focal: 0 0 0 1px var(--color-accent), 0 0 16px -4px color-mix(in oklab, var(--color-accent) 32%, transparent);
   --glow-attention: 0 0 5px color-mix(in oklab, var(--color-accent) 45%, transparent);
+  --shadow-layer: 0 4px 12px -4px color-mix(in oklab, var(--color-canvas) 70%, transparent);
 }
