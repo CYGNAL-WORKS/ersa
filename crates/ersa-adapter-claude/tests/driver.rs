@@ -112,7 +112,6 @@ async fn starts_the_cli_with_every_flag_explicit() {
     assert_eq!(
         spawned[0].args,
         [
-            "-p",
             "--input-format",
             "stream-json",
             "--output-format",
