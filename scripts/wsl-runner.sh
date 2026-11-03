@@ -12,7 +12,7 @@ RUNNER_SHA256=baebf204307bac6193480852732f0aba2ae97b6c5597c244f4d5558390147c40
 RUNNERS=2
 REPO=KPandaK/ersa
 
-# systemd runs the runner services; Windows PATH entries stay out of jobs.
+# systemd runs Docker; Windows PATH entries stay out of jobs.
 cat > /etc/wsl.conf <<'EOF'
 [boot]
 systemd=true
@@ -71,8 +71,20 @@ for n in $(seq "$RUNNERS"); do
   grep -q '^ACTIONS_RUNNER_HOOK_JOB_STARTED=' "$dir/.env" 2>/dev/null ||
     echo 'ACTIONS_RUNNER_HOOK_JOB_STARTED=/home/runner/job-started.sh' >> "$dir/.env"
   chown runner:runner "$dir/.env"
-  unit=actions.runner.${REPO/\//-}.$name.service
-  [ -f "/etc/systemd/system/$unit" ] || (cd "$dir" && ./svc.sh install runner >/dev/null)
-  systemctl restart "$unit"
-  echo "$name: $(systemctl is-active "$unit")"
+  echo "$name: registered"
 done
+
+# The runners run in a terminal, as the Windows one does, which also keeps
+# the distro from stopping. Ctrl+C or closing the terminal stops them.
+cat > /home/runner/run.sh <<'EOF'
+#!/bin/bash
+cd /home/runner
+trap 'trap - INT TERM HUP; kill 0' INT TERM HUP
+for dir in runner-*/; do
+  n=${dir#runner-}; n=${n%/}
+  ("./$dir/run.sh" 2>&1 | sed -u "s/^/[$n] /") &
+done
+wait
+EOF
+chmod 0755 /home/runner/run.sh
+chown runner:runner /home/runner/run.sh
