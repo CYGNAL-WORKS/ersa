@@ -3,6 +3,8 @@
 //
 //   node scripts/manifest.mjs          write both files
 //   node scripts/manifest.mjs --check  also exit 1 if there are problems
+//   node scripts/manifest.mjs --verifies ID,ID  also exit 1 if a listed ID
+//                                     has no `verifies:` line in a test file
 //
 // Both outputs are generated. Edit briefs and ADRs, not the outputs.
 // Rules implemented here are those of ADR 0013 and docs/briefs/README.md.
@@ -19,6 +21,17 @@ const INBOX = join(BRIEFS_DIR, "INBOX.md");
 const OUT = join(ROOT, "docs", "MANIFEST.md");
 const ADR_README = join(ADR_DIR, "README.md");
 const CHECK = process.argv.includes("--check");
+// The requirement IDs a ticket implements, each of which must be cited by a test.
+// Every argument after the flag up to the next flag counts, so an unquoted
+// "A, B" that the shell splits in two still lists both IDs.
+const flag = process.argv.indexOf("--verifies");
+const after = flag < 0 ? [] : process.argv.slice(flag + 1);
+const end = after.findIndex((a) => a.startsWith("--"));
+const REQUIRED = after.slice(0, end < 0 ? after.length : end).join(",").split(",").map((s) => s.trim()).filter(Boolean);
+if ((flag >= 0 && !REQUIRED.length) || process.argv.some((a) => a.startsWith("--verifies="))) {
+  console.error("--verifies needs requirement IDs: --verifies FLOW-X-R01,FLOW-X-R02");
+  process.exit(2);
+}
 
 const PREFIXES = "PRD|FLOW|LAY|CMP|PROTO|ARCH";
 const BRIEF_ID = new RegExp(`^(?:${PREFIXES})-[A-Z0-9]+(?:-[A-Z0-9]+)*$`);
@@ -268,4 +281,6 @@ writeFileSync(OUT, lines.join("\n"));
 console.log(
   `wrote docs/MANIFEST.md and the ADR index: ${briefs.length} briefs, ${allActive.size} requirements, ${cited.size} cited, ${adrs.length} ADRs, ${openInbox} inbox, ${problems.length} problems`
 );
-if (CHECK && problems.length) process.exit(1);
+const uncited = REQUIRED.filter((id) => !cited.has(id));
+if (uncited.length) console.error(`no test file says verifies: for ${uncited.join(", ")}`);
+if ((CHECK && problems.length) || uncited.length) process.exit(1);
