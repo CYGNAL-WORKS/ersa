@@ -11,7 +11,7 @@ The repository's runner list is under **Settings > Actions > Runners**, or `gh a
 
 ## The Linux runners
 
-`scripts/wsl-runner.sh` sets up the distro: the packages the jobs expect, Docker Engine for the container job, the `runner` user with passwordless sudo, and 2 runners in `/home/runner/runner-1` and `runner-2`, each a systemd service. Before each job a hook hands the work folder back to `runner`, since the container job writes into it as root. The script is safe to run again, and it is the record of what the distro holds: change the distro by changing the script.
+`scripts/wsl-runner.sh` sets up the distro: the packages the jobs expect, Docker Engine for the container job, the `runner` user with passwordless sudo, 2 runners in `/home/runner/runner-1` and `runner-2`, and `/home/runner/run.sh`, which runs them both. Before each job a hook hands the work folder back to `runner`, since the container job writes into it as root. The script is safe to run again, and it is the record of what the distro holds: change the distro by changing the script.
 
 To set up the distro from nothing, from the repository root in PowerShell:
 
@@ -23,18 +23,18 @@ wsl --terminate Ubuntu-24.04
 
 The last line restarts the distro so its `/etc/wsl.conf` applies. Docker Desktop's WSL integration stays off for this distro, which has its own Docker Engine.
 
-WSL stops a distro a few seconds after its last terminal closes, and the runners stop with it. Keep a terminal open beside the Windows runner's, following the runners' log:
+The runners run in a terminal, as the Windows runner does. Keep it open beside the Windows runner's:
 
 ```powershell
-wsl -d Ubuntu-24.04 -u root journalctl -f -u 'actions.runner.*'
+wsl -d Ubuntu-24.04 -u runner /home/runner/run.sh
 ```
 
-The runner services start with the distro, so this one command brings them online and shows each job they run.
+Each line is prefixed with its runner's number. Ctrl+C or closing the terminal stops both, and WSL then stops the distro a few seconds later.
 
 ## Keeping them running
 
-- **Runners offline.** Open the log terminal above. If GitHub says "A session for this runner already exists", the distro stopped while the runners were connected: they retry and connect within a few minutes.
-- **Restart a runner.** `wsl -d Ubuntu-24.04 -u root systemctl restart 'actions.runner.KPandaK-ersa.DESKTOP-2GEVM7K-wsl-1.service'`, and `-2` for the other.
+- **Runners offline.** Open the runner terminal above. If GitHub says "A session for this runner already exists", the distro stopped while the runners were connected: they retry and connect within a few minutes.
+- **Restart the runners.** Press Ctrl+C in their terminal and run the command again.
 - **Re-register.** A runner that GitHub removed, for example after 14 days offline, needs registering again. Delete its `.runner` file, then rerun the setup line with the token:
 
   ```powershell
