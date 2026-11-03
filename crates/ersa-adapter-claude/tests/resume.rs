@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use common::{RecordingSink, fixture};
 use ersa_adapter::fake::FakeTransport;
-use ersa_adapter::{Adapter, AdapterError, SessionConfig};
+use ersa_adapter::{Adapter, AdapterError, OpenElsewhere, SessionConfig};
 use ersa_adapter_claude::record::{LiveCheck, live_session, record_path};
 use ersa_adapter_claude::{ClaudeAdapter, invocation_args, resume_args};
 use serde_json::{Value, json};
@@ -296,4 +296,26 @@ fn the_record_lives_under_the_encoded_working_directory() {
             .join("D--Projects-ersa")
             .join(format!("{SESSION_ID}.jsonl"))
     );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R17
+#[tokio::test]
+async fn the_adapter_answers_core_from_the_registry() {
+    let pid = std::process::id();
+    let transport: Arc<dyn ersa_adapter::Transport> =
+        Arc::new(FakeTransport::new(Vec::<String>::new()));
+    let ask = |home: &tempfile::TempDir| {
+        let adapter = ClaudeAdapter::new().with_claude_home(home.path().to_path_buf());
+        let transport = Arc::clone(&transport);
+        async move { adapter.open_elsewhere(transport, SESSION_ID).await }
+    };
+    let open = registry_with(pid, SESSION_ID);
+    assert_eq!(ask(&open).await, OpenElsewhere::Yes { pid });
+
+    let free = registry_with(DEAD_PID, SESSION_ID);
+    assert_eq!(ask(&free).await, OpenElsewhere::No);
+
+    let unreadable = registry_with(pid, "0989e382-5a8f-4fdf-9738-bf02b1f049e1");
+    fs::write(unreadable.path().join("sessions/other.json"), "not json").unwrap();
+    assert_eq!(ask(&unreadable).await, OpenElsewhere::Unknown);
 }

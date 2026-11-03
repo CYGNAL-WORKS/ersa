@@ -18,18 +18,17 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use common::{private_location, unique_label};
-use ersa_shell::bridge::{self, CoreLink, LinkEvent, LinkOptions};
+use common::{
+    CLEANUP, OPEN, finish, git_repo, open, private_location, request, stand_in_backend,
+    unique_label,
+};
+use ersa_shell::bridge::{self, LinkEvent};
 use ersa_shell::instance::{self, Instance};
 use ersa_shell::launch::{self, CoreLocation, How};
 use ersa_shell::process::CoreProcess;
 use ersa_shell::quit::{self, QUIT_LIMIT, Stopped};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
-
-/// Bounds on what a test waits for, well above what each takes.
-const OPEN: Duration = Duration::from_secs(90);
-const CLEANUP: Duration = Duration::from_secs(30);
 
 /// Which part a run of this binary plays, and where it reports.
 const HELPER: &str = "ERSA_QUIT_TEST_HELPER";
@@ -380,20 +379,6 @@ fn wait_for_line(child: &mut Child, line: &str) -> bool {
     result.recv_timeout(OPEN).unwrap_or(false)
 }
 
-/// The stand-in backend CLI (examples/stand_in_backend.rs), which `cargo
-/// test` builds beside this test: tests live in `target/<profile>/deps/`.
-fn stand_in_backend() -> PathBuf {
-    let exe = std::env::current_exe().expect("this test binary");
-    let path = exe
-        .parent()
-        .and_then(Path::parent)
-        .expect("target/<profile>")
-        .join("examples")
-        .join(format!("stand_in_backend{}", std::env::consts::EXE_SUFFIX));
-    assert!(path.exists(), "no stand-in backend at {}", path.display());
-    path
-}
-
 /// What a helper needs of a location, passed in the environment.
 fn location_json(location: &CoreLocation) -> String {
     let os = |s: &std::ffi::OsStr| s.to_string_lossy().into_owned();
@@ -423,71 +408,6 @@ fn location_from_json(text: &str) -> CoreLocation {
         start_timeout: Duration::from_secs(60),
         launch: true,
     }
-}
-
-async fn open(location: &CoreLocation) -> (CoreLink, How, mpsc::UnboundedReceiver<LinkEvent>) {
-    let opening = async {
-        let (stream, how) = launch::attach_or_launch(location)
-            .await
-            .unwrap_or_else(|e| panic!("attach or launch: {e}"));
-        let (events, received) = mpsc::unbounded_channel();
-        let link = CoreLink::open(stream, LinkOptions::default(), move |event| {
-            let _ = events.send(event);
-        })
-        .await
-        .unwrap_or_else(|e| panic!("handshake: {e}"));
-        (link, how, received)
-    };
-    tokio::time::timeout(OPEN, opening)
-        .await
-        .unwrap_or_else(|_| panic!("no Core answered at {}", location.endpoint))
-}
-
-async fn request(link: &CoreLink, method: &str, params: Value) -> Value {
-    link.request(method, Some(params))
-        .await
-        .unwrap_or_else(|e| panic!("{method}: {e}"))
-}
-
-/// Waits for `checks`, then stops whatever Core still serves the location,
-/// however the checks ended: a launched Core is detached, so nothing else
-/// would stop it.
-async fn finish(checks: tokio::task::JoinHandle<()>, location: &CoreLocation) {
-    let outcome = checks.await;
-    if tokio::time::timeout(
-        CLEANUP,
-        quit::shut_down(&location.endpoint, QUIT_LIMIT, None),
-    )
-    .await
-    .is_err()
-    {
-        eprintln!("could not stop the Core at {}", location.endpoint);
-    }
-    if let Err(failed) = outcome {
-        std::panic::resume_unwind(failed.into_panic());
-    }
-}
-
-/// A git repository with one commit, for a project whose workspace is a
-/// worktree.
-fn git_repo(dir: &Path) {
-    std::fs::create_dir_all(dir).expect("create the repository");
-    let git = |args: &[&str]| {
-        let status = Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env("GIT_AUTHOR_NAME", "Ersa test")
-            .env("GIT_AUTHOR_EMAIL", "test@ersa.invalid")
-            .env("GIT_COMMITTER_NAME", "Ersa test")
-            .env("GIT_COMMITTER_EMAIL", "test@ersa.invalid")
-            .status()
-            .expect("git runs");
-        assert!(status.success(), "git {args:?}");
-    };
-    git(&["init", "--quiet", "--initial-branch=main"]);
-    std::fs::write(dir.join("README.md"), "test repository\n").expect("write a file");
-    git(&["add", "README.md"]);
-    git(&["commit", "--quiet", "-m", "initial"]);
 }
 
 /// Whether process `pid` is still running.
