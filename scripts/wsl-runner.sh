@@ -67,6 +67,10 @@ done
 cat > /home/runner/run.sh <<'EOF'
 #!/bin/bash
 cd /home/runner
+# WSLg leaves /run/user/<uid> open to others, and Core refuses to listen in a
+# runtime folder anyone else can enter. A private one, as on a hosted runner.
+export XDG_RUNTIME_DIR=/tmp/runner-runtime
+mkdir -p "$XDG_RUNTIME_DIR" && chmod 0700 "$XDG_RUNTIME_DIR"
 trap 'trap - INT TERM HUP; kill 0' INT TERM HUP
 for dir in runner-*/; do
   n=${dir#runner-}; n=${n%/}
