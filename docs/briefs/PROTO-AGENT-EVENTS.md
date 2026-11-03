@@ -72,7 +72,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 
 ### Usage
 
-- `usage.updated`: `context_tokens` (optional), `context_window` (optional), `cost_usd_total` (optional), `turns` (optional: the number of Ersa turns started in the session, not the backend's API round trips), `turn_output_tokens` (optional: the output tokens the backend has generated so far in the current turn, across all of its API calls in that turn; projected from live input only, so a turn read from the session record has none), `rate_limit` (optional: `{ status, resets_at (optional), detail (optional) }`). Any field absent means "no new information"; the Interface keeps the last known value per field. Projected from result usage, rate-limit events, and thinking-token estimates.
+- `usage.updated`: `context_tokens` (optional), `context_window` (optional), `cost_usd_total` (optional), `turns` (optional: the number of Ersa turns started in the session, not the backend's API round trips), `turn_output_tokens` (optional: the output tokens the backend has generated so far in the current turn, across all of its API calls in that turn; projected from live input only, so a turn read from the session record has none; it belongs to one turn, so the Interface drops the last known value at `turn.started`), `rate_limit` (optional: `{ status, resets_at (optional), detail (optional) }`). Any field absent means "no new information"; the Interface keeps the last known value per field. Projected from result usage, rate-limit events, and thinking-token estimates.
 
 ### Error
 
@@ -137,7 +137,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - **PROTO-AGENT-EVENTS-R14**: Before starting the backend to resume a session, Core shall emit a `session.notice` with code `session_open_elsewhere` and the process's `pid` when the adapter reports the session open in another process, and with code `session_open_check_failed` when the adapter cannot tell.
 - **PROTO-AGENT-EVENTS-R15**: Before appending a title to the record of a session it is not running, Core shall emit a `session.notice` with code `session_open_elsewhere` and the process's `pid` when the adapter reports the session open in another process, and with code `session_open_check_failed` when the adapter cannot tell, and shall rename the session in every case.
 - **PROTO-AGENT-EVENTS-R16**: Core shall emit `session_open_elsewhere` notices at level `warning` and `session_open_check_failed` notices at level `info`.
-- **PROTO-AGENT-EVENTS-R17**: While a turn runs, each Claude Code live line that reports output usage (a partial `message_delta`, or an `assistant` line) shall project to a `usage.updated` whose `turn_output_tokens` is the sum of the output tokens of every API message in the turn so far, counting each message id once, and that never decreases within the turn.
+- **PROTO-AGENT-EVENTS-R17**: While a turn runs, each Claude Code live line that reports output usage (a partial `message_delta`, or an `assistant` line) shall project to a `usage.updated` whose `turn_output_tokens` is the sum of the output tokens of every API message in the turn so far, counting each message id once at the latest count reported for it, and that never decreases within the turn.
 
 ## Out of scope
 
@@ -154,7 +154,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 ## Changes
 
-- 2026-11-02: `usage.updated.turn_output_tokens` added for the working mark's token count beside the elapsed time; PROTO-AGENT-EVENTS-R17 added. A shape change, so `v` is bumped. Elapsed time needs no field: it is the `turn.started` envelope's `ts` while the turn runs and `turn.completed.duration_ms` after.
+- 2026-11-02: `usage.updated.turn_output_tokens` added for the working mark's token count beside the elapsed time; PROTO-AGENT-EVENTS-R17 added: the count belongs to one turn and takes each message's latest count. A shape change, so `v` is bumped. Elapsed time needs no field: it is the `turn.started` envelope's `ts` while the turn runs and `turn.completed.duration_ms` after.
 - 2026-11-02: from #54 inbox: the open-elsewhere notices also precede a title appended to the record of a session Core is not running (PROTO-AGENT-EVENTS-R15 added), at `warning` for `session_open_elsewhere` and `info` for `session_open_check_failed` (R16 added). A Core-made notice lives only in the view open when it is emitted, by design. PROTO-AGENT-EVENTS-R14 is unchanged and is verified with Core's resume (M1).
 
 - 2026-11-01: from #35 inbox: Opening a session added: when Core projects a session into a view, when it rebuilds one, and when it may drop one; `seq` counts within a view. Open question on what resume must settle for merging record and live input (R02's exception, matching prompts, partial text). No requirement IDs changed; R02 and R12 unchanged.

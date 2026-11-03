@@ -142,6 +142,19 @@ describe("generated tokens", () => {
     for (const name of names) expect(generated.split(name)).toHaveLength(4);
   });
 
+  it("give the light block the light glows and both dark blocks the dark ones", () => {
+    const asCss = (value: string) => value.replace(/\{colors\.([\w-]+)\}/g, "var(--color-$1)");
+    for (const name of Object.keys(tokens.glow.light)) {
+      const declared = generated
+        .split("\n")
+        .map((line: string) => line.trim())
+        .filter((line: string) => line.startsWith(`--glow-${name}:`));
+      const light = `--glow-${name}: ${asCss(tokens.glow.light[name])};`;
+      const dark = `--glow-${name}: ${asCss(tokens.glow.dark[name])};`;
+      expect(declared).toEqual([light, dark, dark]);
+    }
+  });
+
   it("build materials and glows from color roles, not values", () => {
     expect(generated).toContain(
       "--material-tile: linear-gradient(to bottom, var(--color-surface-raised), var(--color-surface));",
