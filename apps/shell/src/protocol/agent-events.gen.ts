@@ -83,8 +83,12 @@ export interface SessionEnded {
 export interface SessionNotice {
   type: "session.notice";
   level: "info" | "warning";
-  code: "backend_version_untested";
+  code: "backend_version_untested" | "session_open_elsewhere" | "session_open_check_failed";
   message: string;
+  /**
+   * With session_open_elsewhere: the process that has the session open.
+   */
+  pid?: number;
 }
 export interface TurnStarted {
   type: "turn.started";

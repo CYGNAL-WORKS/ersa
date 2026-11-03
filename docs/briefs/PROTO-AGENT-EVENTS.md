@@ -37,7 +37,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 - `session.started`: `backend`, `backend_version`, `model`, `cwd`, `capabilities` (string list), `backend_session_id` (optional). Projected from the backend's first announcement (Claude Code `system/init`).
 - `session.state`: `state` one of `starting`, `running`, `waiting_user`, `idle`, `disconnected`, `ended`, `error`; `reason` (optional short string). Emitted by Core from what it knows of the backend process, and projected from live lines (a pending permission request means `waiting_user`).
 - `session.ended`: `reason` one of `user_stopped`, `backend_exited`, `error`; `exit_code` (optional). Emitted by Core.
-- `session.notice`: `level` one of `info`, `warning`; `code` one of `backend_version_untested`, `session_open_elsewhere`, `session_open_check_failed`; `message`; `pid` (optional: with `session_open_elsewhere`, the process that has the session open). Something the user should know that is not an error, such as a backend newer than the newest version Ersa was tested against. Core's resume emits `session_open_elsewhere` when the adapter's live-session check finds another process with the session open, and `session_open_check_failed` when the check could not tell, both before it starts the backend.
+- `session.notice`: `level` one of `info`, `warning`; `code` one of `backend_version_untested`, `session_open_elsewhere`, `session_open_check_failed`; `message`; `pid` (optional: with `session_open_elsewhere`, the process that has the session open). Something the user should know that is not an error, such as a backend newer than the newest version Ersa was tested against. Core emits `session_open_elsewhere` at `warning` when the adapter's live-session check finds another process with the session open, and `session_open_check_failed` at `info` when the check could not tell. It asks before it starts the backend to resume a session, and before it appends a title to the record of a session it is not running. The first is a known risk that two processes write one record; the second is a doubt, not a known risk.
 
 ### Turn
 
@@ -101,6 +101,7 @@ Opening a session is projecting it into a view: the events Core holds for the se
 - A session Core runs is projected when its backend starts, and is not projected again while it is live.
 - A session Core does not run is projected when it is first subscribed. It is projected afresh, as a new view, on a subscribe from `seq` 0 while it has no other subscribers, so turns taken elsewhere show, and when it is first opened after Core restarts.
 - A view that has no subscribers and whose session is not running may be dropped; the next subscribe builds a new one.
+- A `session.notice` Core emits is in no record, so it lives only in the view open when Core emits it, where it takes a `seq`. A view built later does not contain it; with no view open, Core traces it and no client sees it. This is the contract, not a gap: a notice tells what was true when it was emitted, such as another process having the session open, and replayed later it could tell the user something no longer true. Nothing projected is stored (ADR 0017).
 
 ## Sequencing
 
@@ -135,6 +136,8 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - **PROTO-AGENT-EVENTS-R13**: Core shall emit `session.state` and `session.ended` for the backend process's lifecycle from its own knowledge of the process, never from the session record, and shall write the same facts to the app log.
 - **PROTO-AGENT-EVENTS-R14**: Before starting the backend to resume a session, Core shall emit a `session.notice` with code `session_open_elsewhere` and the process's `pid` when the adapter reports the session open in another process, and with code `session_open_check_failed` when the adapter cannot tell.
 - **PROTO-AGENT-EVENTS-R15**: While a turn runs, each Claude Code live line that reports output usage (a partial `message_delta`, or an `assistant` line) shall project to a `usage.updated` whose `turn_output_tokens` is the sum of the output tokens of every API message in the turn so far, counting each message id once, and that never decreases within the turn.
+- **PROTO-AGENT-EVENTS-R15**: Before appending a title to the record of a session it is not running, Core shall emit a `session.notice` with code `session_open_elsewhere` and the process's `pid` when the adapter reports the session open in another process, and with code `session_open_check_failed` when the adapter cannot tell, and shall rename the session in every case.
+- **PROTO-AGENT-EVENTS-R16**: Core shall emit `session_open_elsewhere` notices at level `warning` and `session_open_check_failed` notices at level `info`.
 
 ## Out of scope
 
@@ -152,6 +155,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 ## Changes
 
 - 2026-11-02: `usage.updated.turn_output_tokens` added for the working mark's token count beside the elapsed time; PROTO-AGENT-EVENTS-R15 added. A shape change, so `v` is bumped. Elapsed time needs no field: it is the `turn.started` envelope's `ts` while the turn runs and `turn.completed.duration_ms` after.
+- 2026-11-02: from #54 inbox: the open-elsewhere notices also precede a title appended to the record of a session Core is not running (PROTO-AGENT-EVENTS-R15 added), at `warning` for `session_open_elsewhere` and `info` for `session_open_check_failed` (R16 added). A Core-made notice lives only in the view open when it is emitted, by design. PROTO-AGENT-EVENTS-R14 is unchanged and is verified with Core's resume (M1).
 
 - 2026-11-01: from #35 inbox: Opening a session added: when Core projects a session into a view, when it rebuilds one, and when it may drop one; `seq` counts within a view. Open question on what resume must settle for merging record and live input (R02's exception, matching prompts, partial text). No requirement IDs changed; R02 and R12 unchanged.
 
