@@ -15,7 +15,7 @@ How the orchestration session runs the engineering loop: cut tickets, start impl
 ## Review a pull request
 
 1. Read the description, the review section, and the inbox entries.
-2. Run the `review-pr` skill on `git diff origin/main...origin/<branch>`: it names the reviewers, their briefs, the worktree rule (reviewers never check out a branch in the integration checkout), the mutation step and the dismissal rule. Give reviewers the diff and the briefs, not the implementer's conclusions.
+2. Run the `review-pr` skill on `git diff origin/main...origin/<branch>`: it names the reviewer agents in `.claude/agents/`, the worktree rule (reviewers never check out a branch in the integration checkout), the mutation step and the dismissal rule. Give reviewers the diff and the briefs, not the implementer's conclusions.
 3. Send every confirmed finding of a round to the implementing session in one message: a second message queues behind the session's turn and may never be read (#48's medium waited a round that way). Before merging, check the reply's fix list against the findings sent. Re-review the fix commits with the skill's step 6.
 4. For each finding, name the smallest change that removes the defect; the skill's step 5 says when a fix is a new mechanism and becomes its own ticket. A mechanism kept because the pull request is unsafe without it is re-reviewed whole (the skill's step 6): #71's round-one stage reducer drew a high and then a medium in the next two rounds.
 5. Stop after three fix rounds. If the third still finds a defect of medium severity or worse, take the choice to the owner (merge and follow up, or another round) rather than sending a fourth.
@@ -36,4 +36,4 @@ Planning commits for a pull request go onto its branch, which is checked out in 
 
 ## Train the harness
 
-After each merge, compare what the merge-time reviewers found with what the implementing session's own review caught. For each defect that got through, ask which part of the harness should have stopped it (a brief requirement, a skill's reviewer brief, a test convention, a check in `scripts/`, the hook) and change that part in a planning commit, so the lesson outlives the session. Prune at the same time: a rule nobody needs, a duplicated instruction, a stale note.
+After each merge, compare what the merge-time reviewers found with what the implementing session's own review caught. For each defect that got through, ask which part of the harness should have stopped it (a brief requirement, a reviewer agent's prompt, a test convention, a check in `scripts/`, the hook) and change that part in a planning commit, so the lesson outlives the session. Prune at the same time: a rule nobody needs, a duplicated instruction, a stale note.
