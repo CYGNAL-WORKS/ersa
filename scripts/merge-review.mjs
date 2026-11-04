@@ -153,12 +153,11 @@ export const claudeArgs = (text, resume) => [
   "--disallowedTools", ...NEVER, ...(resume ? ["--resume", resume] : []),
 ];
 
-// A stalled git or gh call ends after two minutes; the review itself gets 40,
-// inside the workflow's 45, so the check run is finished before the runner
-// kills the job, and a run by hand ends too.
-function run(cmd, args) {
-  const timeout = (cmd === "claude" ? 40 : 2) * 60 * 1000;
-  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" } });
+// A stalled git or gh call ends after two minutes; the review itself gets 38
+// and the ask for its result 4, inside the workflow's 45, so the check run is
+// finished before the runner kills the job, and a run by hand ends too.
+function run(cmd, args, minutes = 2) {
+  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: minutes * 60 * 1000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" } });
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: [(r.stderr ?? "").trim(), r.error?.message].filter(Boolean).join("; ") };
 }
 
@@ -237,7 +236,8 @@ function review(argv, run) {
     }
 
     // The check is the review's verdict, finished before the gate reads the
-    // head's checks: the gate would otherwise wait for it.
+    // head's checks (the gate would otherwise wait for it); anything that then
+    // fails the run turns it red.
     const block = blocking(findings);
     check(block.length ? "failure" : "success", block.length ? `${block.length} finding(s) block the merge; see the review.` : "Nothing blocks the merge.");
     const owner = ownerPaths(files);
@@ -260,22 +260,24 @@ function review(argv, run) {
       const g = gate([n, "--reviewed", head], { run });
       if (g.code !== 0) fail(`the merge failed after the review was posted: ${g.stdout ?? g.stderr}`);
     }
+    if (code) check("failure", outcome);
     return { code, stdout: `#${n} at ${head.slice(0, 7)}: ${block.length ? `${block.length} blocking finding(s)` : "clean"}${fresh ? "" : " (already reviewed)"}. ${outcome}\n` };
   }
 }
 
 // A "Merge review" check run on the head, in progress now and finished with
 // the review's verdict, so `gh pr checks --watch` waits for it and sees it
-// red when findings block. Only the workflow's token may create one; a run by
-// hand gets no check and says so.
+// red when findings block; a failure later in the run makes it red too, once.
+// Only the workflow's token may create one; a run by hand gets no check and
+// says so.
 function checkRun(run, head) {
   const url = process.env.GITHUB_RUN_ID ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : "";
   const made = run("gh", ["api", "repos/{owner}/{repo}/check-runs", "-f", "name=Merge review", "-f", `head_sha=${head}`, "-f", "status=in_progress", ...(url ? ["-f", `details_url=${url}`] : []), "--jq", ".id"]);
   if (!made.ok) process.stderr.write(`no check run on the head: ${made.err.split("\n")[0]}\n`);
-  let finished = false;
+  let state = "";
   return (conclusion, summary) => {
-    if (!made.ok || finished) return;
-    finished = true;
+    if (!made.ok || state === conclusion || state === "failure") return;
+    state = conclusion;
     const done = run("gh", ["api", "-X", "PATCH", `repos/{owner}/{repo}/check-runs/${made.out}`, "-f", "status=completed", "-f", `conclusion=${conclusion}`, "-f", "output[title]=Merge review", "-f", `output[summary]=${summary}`]);
     if (!done.ok) process.stderr.write(`the check run was not finished: ${done.err.split("\n")[0]}\n`);
   };
@@ -299,16 +301,16 @@ function instructionsFromMain(files, run) {
 // One claude -p run; a run that ends without its structured result is resumed
 // once and asked for it alone. Still none fails the run with claude's stderr.
 function ask(run, text) {
-  const once = (args) => {
-    const r = run("claude", args);
+  const once = (args, minutes) => {
+    const r = run("claude", args, minutes);
     try {
       return JSON.parse(r.out);
     } catch {
       return { is_error: true, subtype: `no JSON result: ${r.err.slice(-600)}` };
     }
   };
-  let result = once(claudeArgs(text));
-  if (!result.structured_output && result.session_id) result = once(claudeArgs("Return your structured result now. Do no more work.", result.session_id));
+  let result = once(claudeArgs(text), 38);
+  if (!result.structured_output && result.session_id) result = once(claudeArgs("Return your structured result now. Do no more work.", result.session_id), 4);
   if (!result.structured_output) fail(`claude returned no result: ${result.subtype ?? result.result ?? "error"}`);
   process.stdout.write(`review: ${result.num_turns ?? "?"} turns, $${(result.total_cost_usd ?? 0).toFixed(2)}\n`);
   return result.structured_output;
