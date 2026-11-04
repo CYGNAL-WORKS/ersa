@@ -37,6 +37,8 @@ test("a closed, draft or conflicting pull request may not merge", () => {
 
 test("CI must have run, finished and passed", () => {
   assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [] } })), ["it has no CI checks"]);
+  assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [check({ name: "Merge review" })] } })), ["it has no CI checks"]);
+  assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [check({ name: "Merge review" }), check()] } })), []);
   assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [check({ status: "IN_PROGRESS", conclusion: "" })] } })), ["CI is still running: CI"]);
   assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [check({ conclusion: "FAILURE" })] } })), ["CI did not pass: CI"]);
   assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [check({ conclusion: "CANCELLED" })] } })), ["CI did not pass: CI"]);
