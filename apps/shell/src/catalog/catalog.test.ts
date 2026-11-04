@@ -177,6 +177,12 @@ function propCopy(name: string, texts: string[]): string[] {
   return texts.filter(readsAsWords);
 }
 
+// Anywhere else in the source, a string counts when it reads as a sentence or
+// a label of several words: a capital first and a space between words. Code
+// strings ("Escape", "running", "--color-ink") don't; single-word copy kept in
+// a variable is the one kind this misses.
+const readsAsPhrase = (text: string) => /^\p{Lu}/u.test(text) && /\p{L}\s+\p{L}/u.test(text);
+
 // Text with a letter in it; spacing and punctuation alone aren't copy.
 const isCopy = (text: string) => /\p{L}/u.test(text);
 const tidy = (text: string) => text.replace(/\s+/g, " ").trim();
@@ -185,7 +191,9 @@ type Node = { type: string; [field: string]: unknown };
 const isNode = (value: unknown): value is Node => typeof value === "object" && value !== null && typeof (value as Node).type === "string";
 
 // The strings an expression in a JSX child or a prop would show: string
-// literals and template text, through conditionals and `&&`.
+// literals and template text, through conditionals, `&&` and `??`,
+// parentheses and type assertions.
+const WRAPPERS = new Set(["ParenthesizedExpression", "TSAsExpression", "TSSatisfiesExpression", "TSNonNullExpression"]);
 function shown(expression: unknown): string[] {
   if (!isNode(expression)) return [];
   if (expression.type === "Literal") return typeof expression.value === "string" ? [expression.value] : [];
@@ -194,11 +202,15 @@ function shown(expression: unknown): string[] {
   }
   if (expression.type === "ConditionalExpression") return [...shown(expression.consequent), ...shown(expression.alternate)];
   if (expression.type === "LogicalExpression") return [...shown(expression.left), ...shown(expression.right)];
-  if (expression.type === "JSXExpressionContainer") return shown(expression.expression);
+  if (expression.type === "JSXExpressionContainer" || WRAPPERS.has(expression.type)) return shown(expression.expression);
   return [];
 }
 
-/** The copy written inline in a component's source: JSX text, and string literals in props a person reads. */
+/**
+ * The copy written inline in interface source: JSX text, strings a JSX child or
+ * a prop a person reads would show, and strings elsewhere (a constant, an
+ * object, a handler, a .ts module) that read as a phrase.
+ */
 function inlineCopy(file: string, source: string): string[] {
   const { program, errors } = parseSync(file, source);
   if (errors.length > 0) throw new Error(`${file} doesn't parse: ${errors[0]?.message}`);
@@ -215,19 +227,30 @@ function inlineCopy(file: string, source: string): string[] {
       if (isNode(node.value) && node.value.type === "JSXExpressionContainer") visit({ ...node.value, parent: "attribute" });
       return;
     }
-    for (const [field, child] of Object.entries(node)) if (field !== "parent") visit(child);
+    if (node.type === "Literal" && typeof node.value === "string" && readsAsPhrase(node.value)) found.push(node.value);
+    if (node.type === "TemplateElement") {
+      const cooked = (node.value as { cooked: string | null }).cooked;
+      if (cooked !== null && readsAsPhrase(cooked)) found.push(cooked);
+    }
+    for (const [field, child] of Object.entries(node)) {
+      // A module path and a plain object key are names, not text.
+      const name = field === "source" || (field === "key" && node.type === "Property" && !node.computed);
+      if (field !== "parent" && !name) visit(child);
+    }
   };
   visit(program);
   return [...new Set(found.filter(isCopy).map(tidy))].sort();
 }
 
-// The interface's components, by path from src with forward slashes. The
-// gallery's own sample text is exempt ("The string catalog"); tests aren't shown.
-function componentFiles(dir: string): string[] {
+// The interface's source, by path from src with forward slashes. The
+// gallery's own sample text is exempt ("The string catalog"), the catalog is
+// where copy belongs, the protocol types are generated, and tests aren't shown.
+const EXEMPT_DIRS = new Set(["gallery", "catalog", "protocol"]);
+function interfaceFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
-    if (entry.isDirectory()) return entry.name === "gallery" ? [] : componentFiles(path);
-    return entry.name.endsWith(".tsx") && !entry.name.includes(".test.") ? [path] : [];
+    if (entry.isDirectory()) return EXEMPT_DIRS.has(entry.name) ? [] : interfaceFiles(path);
+    return /\.tsx?$/.test(entry.name) && !/\.(test|gen)\./.test(entry.name) ? [path] : [];
   });
 }
 const fromSrc = (path: string) => relative(SRC, path).split(sep).join("/");
@@ -247,7 +270,7 @@ function offList(found: CopyByFile, allowed: CopyByFile): string[] {
 describe("component source (The string catalog: no copy in components)", () => {
   it("holds only the inline copy on the allow-list, which the migration tickets empty", () => {
     const found: Record<string, string[]> = {};
-    for (const file of componentFiles(SRC)) {
+    for (const file of interfaceFiles(SRC)) {
       const copy = inlineCopy(file, readFileSync(file, "utf8"));
       if (copy.length > 0) found[fromSrc(file)] = copy;
     }
@@ -301,6 +324,8 @@ describe("the inline-copy scan", () => {
       "Connecting…",
       "The projects",
     ]);
+    // Lowercase words with a space read as words too.
+    expect(scan(`export const A = () => <Tile summary="two words" />;`)).toEqual(["two words"]);
     // A chip's `name` is its spoken label; a form field's `name` is a token.
     expect(scan(`export const A = () => <><Chip name="Branch" /><input name="branch" /></>;`)).toEqual(["Branch"]);
   });
@@ -311,6 +336,29 @@ describe("the inline-copy scan", () => {
 
   it("passes a component that renders only catalog keys", () => {
     expect(scan(`import { t } from "../catalog"; export const A = () => <p aria-label={t("quit.title")}>{t("quit.detail", { count: 2 })}</p>;`)).toEqual([]);
+  });
+
+  it("finds strings inside parentheses and type assertions", () => {
+    expect(scan(`export const A = ({ u, b }: P) => <p>{u ?? (b ? "Sending…" : ("Enter to send" as string))}</p>;`)).toEqual([
+      "Enter to send",
+      "Sending…",
+    ]);
+  });
+
+  it("finds a phrase kept in a constant, an object or a handler", () => {
+    expect(
+      scan(`const NOTE = "Running sessions keep their settings.";
+        const LABELS = { root: "Root workspace", key: "Escape" };
+        export function quit() { setError(\`Ersa did not quit: \${reason}\`); }`),
+    ).toEqual(["Ersa did not quit:", "Root workspace", "Running sessions keep their settings."]);
+  });
+
+  it("passes code strings outside JSX: names, keys, paths and tokens", () => {
+    expect(
+      scan(`import { x } from "./Some Module";
+        const MAP = { "Two Words": 1 };
+        if (event.key === "Escape") set("running", "--color-ink", "md");`),
+    ).toEqual([]);
   });
 
   it("finds copy in JSX passed as a prop", () => {
@@ -342,6 +390,9 @@ describe("the text export (The string catalog: Text export)", () => {
       writeFileSync(file, markdown(sample).replace("Quit\n", "Quit now\n"));
       expect(isCurrent(sample, file)).toBe(false);
       expect(isCurrent(sample, join(dir, "missing.md"))).toBe(false);
+      // A checkout with Windows line endings is still current.
+      writeFileSync(file, markdown(sample).replace(/\n/g, "\r\n"));
+      expect(isCurrent(sample, file)).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

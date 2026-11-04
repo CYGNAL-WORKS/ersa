@@ -2,9 +2,12 @@
   "App.tsx": [
     "Core is not connected.",
     "Core's status",
+    "Ersa did not quit:",
     "No session open. Start one from a project in the rail.",
     "Rail",
     "Retry",
+    "Root workspace",
+    "Running sessions keep their current settings until they are stopped.",
     "The composer",
     "The new-session screen",
     "The projects",
@@ -21,8 +24,10 @@
   ],
   "components/Composer.tsx": [
     "Composer",
+    "Enter to send, Shift+Enter for a new line",
     "Message",
     "Send",
+    "Sending…",
     "Write to the agent"
   ],
   "components/ContextRing.tsx": [
@@ -43,8 +48,10 @@
   ],
   "components/NewSessionScreen.tsx": [
     "Add a project to start a session: a folder on this computer.",
+    "Detecting the backends on this host…",
     "Ersa",
-    "New session"
+    "New session",
+    "No backend is available on this host."
   ],
   "components/ProjectList.tsx": [
     "Don’t trust",
@@ -75,12 +82,17 @@
   "components/SessionControls.tsx": [
     "Backend",
     "Detecting backends…",
+    "Detection failed",
     "Effort",
     "Host",
     "Model",
+    "New workspace",
     "No backend",
+    "No projects",
+    "Not installed",
     "Permission mode",
     "Project",
+    "Root workspace",
     "Session controls",
     "Workspace"
   ],
@@ -96,6 +108,7 @@
   ],
   "components/SessionTitle.tsx": [
     "Cancel",
+    "Double-click, or press Enter or F2, to rename",
     "Rename the session",
     "Save",
     "Saving…",
@@ -137,5 +150,32 @@
     "Claude Code records the trust for the whole repository the project is in, and applies it outside Ersa too.",
     "Trust",
     "Untrusted, its sessions use only your own settings."
+  ],
+  "core/connection.ts": [
+    "Core's handshake could not be read; this window may be older than Core."
+  ],
+  "session/controls.ts": [
+    "Root workspace"
+  ],
+  "session/follow.ts": [
+    "Earlier events of this session are no longer held."
+  ],
+  "session/start.ts": [
+    "No backend is available on this host.",
+    "This project has no root workspace in Core."
+  ],
+  "session/states.ts": [
+    "Needs you"
+  ],
+  "session/transcript.ts": [
+    "An event this window could not read:",
+    "An event this window does not show (",
+    "The agent exited.",
+    "The session ended with an error.",
+    "The turn ended early.",
+    "The turn ended with an error.",
+    "The turn stopped at its turn limit.",
+    "The turn was interrupted.",
+    "This window is older than Core and needs updating: this session's events use schema version"
   ]
 }
