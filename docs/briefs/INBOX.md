@@ -8,5 +8,7 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-03 none: shepherd jobs (scripts/shepherd-job.mjs) still load the pull request's own project settings (env, apiKeyHelper, permissions) and its CLAUDE.md and skills; hooks and MCP servers are now off, and `--setting-sources user` would also drop the review-pr skill the review needs. Decide whether jobs should run from trusted settings and skills instead; meanwhile jobs refuse fork pull requests.
+
 
 ## Resolved recently (optional, trimmed in planning passes)
