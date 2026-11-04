@@ -64,12 +64,15 @@ test("redacts the repository's path in every spelling, plain and munged, and lea
     [REPO.toLowerCase(), PLACEHOLDER_REPO],
     [`Temp\\claude\\${munged}\\00000000-0000-0000-0000-000000000000`, `Temp\\claude\\${PLACEHOLDER_MUNGED_REPO}\\00000000-0000-0000-0000-000000000000`],
     [`projects\\${munged}--claude-worktrees-w\\memory`, `projects\\${PLACEHOLDER_MUNGED_REPO}--claude-worktrees-w\\memory`],
-    [`${REPO}2/x ${REPO}-x ${munged}2`, `${REPO}2/x ${REPO}-x ${munged}2`],
     [`(${REPO}) ${REPO}. ${REPO}:12 ${REPO}.git`, `(${PLACEHOLDER_REPO}) ${PLACEHOLDER_REPO}. ${PLACEHOLDER_REPO}:12 ${PLACEHOLDER_REPO}.git`],
   ]) {
     assert.equal(redact(input), expected, input);
     assert.equal(redact(expected), expected, expected);
   }
+  // Neighbours are other folders: the repository rule leaves them alone (the
+  // home rule may still rewrite them on a runner whose checkout is under /home).
+  const neighbours = redact(`${REPO}2/x ${REPO}-x ${munged}2`);
+  assert.ok(!neighbours.includes(PLACEHOLDER_REPO) && !neighbours.includes(PLACEHOLDER_MUNGED_REPO), neighbours);
 });
 
 test("the repository rules hold for a Unix path, whose munged form starts with a dash", () => {
