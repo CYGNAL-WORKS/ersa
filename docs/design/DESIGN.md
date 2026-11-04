@@ -225,7 +225,7 @@ Shadows are kept for transient layers (menus, popovers, drag previews), soft and
 
 ## Shapes
 
-Corners come from a small set of radii assigned by role, so things of one kind share one shape: `radius-sm` for small things inside a card or menu (an option, an output block), `radius-md` for controls and cards (buttons included, as Claude Desktop's are), `radius-lg` for floating layers and the user's message bubble, and `radius-pill` for pills. Panes have no radius; they meet at lines. Every line is `hairline` wide; focus and state change a line's colour, never its width.
+Corners come from a small set of radii assigned by role, so things of one kind share one shape: `radius-sm` for small things inside a card (an output block), `radius-md` for controls and cards (buttons included, as Claude Desktop's are) and for an option inside a floating layer, so its corners nest within the layer's, `radius-lg` for floating layers and the user's message bubble, and `radius-pill` for pills. Panes have no radius; they meet at lines. Every line is `hairline` wide; focus and state change a line's colour, never its width.
 
 ## Iconography
 

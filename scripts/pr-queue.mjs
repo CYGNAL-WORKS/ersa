@@ -6,6 +6,14 @@
 //   node scripts/pr-queue.mjs --changed  print it and exit 0 only if it differs from
 //                                        the last --changed run; exit 1 otherwise
 //
+// A pull request whose CI is running has nothing to act on, so --changed
+// compares it as it last stood: the change shows when its CI ends, even when
+// it ends as it stood (a rerun that fails the same way). A run on one head
+// held for over HOLD_LIMIT_MS is let through as ci-running, so a stuck run
+// surfaces. A file at
+// .scratch/pr-queue/stop makes --changed exit 0 with "Stop requested", which
+// ends the shepherd's wait without killing anything.
+//
 // States, first match wins: draft, conflicting, ci-running, ci-red (with the
 // failure's signature), behind-main, green. A signature is the failing job's
 // first error line or its failed test names; one shared by two or more pull
@@ -21,14 +29,16 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
-const STATE_DIR = join(ROOT, ".scratch", "pr-queue");
+const STATE_DIR = process.env.PR_QUEUE_DIR ?? join(ROOT, ".scratch", "pr-queue");
 const LAST = join(STATE_DIR, "last.json");
+const STOP = join(STATE_DIR, "stop");
 
+export const HOLD_LIMIT_MS = 60 * 60 * 1000;
 export const NEVER_STARTED = "job ran no steps (no runner took it)";
 
 // The cause of a failed job, from its `gh run view --log-failed` output: the
@@ -84,6 +94,21 @@ export function markShared(rows) {
   return rows.map((r) => (r.signature && count.get(r.signature) > 1 ? { ...r, shared: true } : r));
 }
 
+// The rows --changed compares and keeps: a row whose CI is running stands as
+// it did last time, marked running, with its current feedback count, or is
+// left out until its CI ends if it is new. `since` maps "number:head" to when
+// that head was first seen running; past HOLD_LIMIT_MS the row is not held.
+export function settle(previous, rows, { since = {}, now = 0 } = {}) {
+  const before = new Map((previous ?? []).map((r) => [r.number, r]));
+  return rows.flatMap((r) => {
+    if (r.state !== "ci-running") return [r];
+    const started = since[`${r.number}:${r.head}`] ?? now;
+    if (now - started > HOLD_LIMIT_MS) return [r];
+    const p = before.get(r.number);
+    return p ? [{ ...p, title: r.title, feedback: r.feedback, running: true }] : [];
+  });
+}
+
 export function fingerprint(rows) {
   const key = rows
     .map((r) => [r.number, r.head, r.state, r.signature ?? "", r.feedback ?? 0])
@@ -99,13 +124,38 @@ export function changes(previous, rows) {
   for (const r of rows) {
     const p = before.get(r.number);
     if (!p) out.push({ number: r.number, change: "new", to: r.state });
-    else if (p.head !== r.head || p.state !== r.state || (p.signature ?? "") !== (r.signature ?? ""))
-      out.push({ number: r.number, change: p.head !== r.head ? "new commits" : "state", from: p.state, to: r.state });
-    else if ((r.feedback ?? 0) > (p.feedback ?? 0))
+    else if (r.running) {
+      // A held row: only feedback moves it, and it is still running.
+      if ((r.feedback ?? 0) > (p.feedback ?? 0)) out.push({ number: r.number, change: "new comments", from: p.state, to: "ci-running" });
+    } else if (p.head !== r.head || p.state !== r.state || (p.signature ?? "") !== (r.signature ?? "") || p.running) {
+      const change = p.head !== r.head ? "new commits" : p.state !== r.state || (p.signature ?? "") !== (r.signature ?? "") ? "state" : "CI ended";
+      out.push({ number: r.number, change, from: p.state, to: r.state });
+    } else if ((r.feedback ?? 0) > (p.feedback ?? 0))
       out.push({ number: r.number, change: "new comments", from: p.state, to: r.state });
   }
   for (const [n, p] of before) if (!now.has(n)) out.push({ number: n, change: "closed or merged", from: p.state });
   return out.sort((a, b) => a.number - b.number);
+}
+
+// One --changed run's decision, from the last run's state and this run's
+// classified rows: what to compare, what changed, and what to keep.
+export function step(last, rows, now) {
+  const marked = markShared(rows);
+  const since = {};
+  for (const r of marked) {
+    if (r.state !== "ci-running") continue;
+    const key = `${r.number}:${r.head}`;
+    since[key] = last.since?.[key] ?? now;
+  }
+  const settled = settle(last.rows, marked, { since, now });
+  const print = fingerprint(settled);
+  const diff = changes(last.rows, settled);
+  return { marked, settled, print, diff, since, changed: print !== last.fingerprint || diff.length > 0 };
+}
+
+// What a --changed run keeps for the next one, from its step and its logs.
+export function kept(s, logs) {
+  return { fingerprint: s.print, rows: s.settled, logs, since: s.since };
 }
 
 function run(cmd, args) {
@@ -115,6 +165,11 @@ function run(cmd, args) {
 
 function main() {
   const changedMode = process.argv.includes("--changed");
+  if (changedMode && existsSync(STOP)) {
+    process.stdout.write(`Stop requested: ${STOP}
+`);
+    process.exit(0);
+  }
   const last = existsSync(LAST) ? JSON.parse(readFileSync(LAST, "utf8")) : { rows: [], logs: {} };
 
   run("git", ["fetch", "-q", "origin"]);
@@ -151,11 +206,8 @@ function main() {
     const feedback = (pr.comments?.length ?? 0) + (pr.reviews?.length ?? 0);
     return { number: pr.number, title: pr.title, head: pr.headRefOid.slice(0, 7), feedback, ...classify(pr, { failures, containsMain }) };
   });
-  const marked = markShared(rows);
-  const print = fingerprint(marked);
-  const diff = changes(last.rows, marked);
-
-  const changed = print !== last.fingerprint;
+  const s = step(last, rows, Date.now());
+  const { marked, diff, changed } = s;
   // An unchanged run prints nothing in --changed mode: whatever waits on it
   // reads only the run that changed.
   if (!changedMode || changed) {
@@ -171,7 +223,9 @@ function main() {
 
   if (!changedMode) process.exit(0);
   mkdirSync(STATE_DIR, { recursive: true });
-  writeFileSync(LAST, JSON.stringify({ fingerprint: print, rows: marked, logs }, null, 2));
+  // Through a temporary file, so a run cut short never leaves a torn one.
+  writeFileSync(`${LAST}.tmp`, JSON.stringify(kept(s, logs), null, 2));
+  renameSync(`${LAST}.tmp`, LAST);
   process.exit(changed ? 0 : 1);
 }
 
