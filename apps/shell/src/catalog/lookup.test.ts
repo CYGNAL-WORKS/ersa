@@ -34,6 +34,16 @@ describe("the lookup (The string catalog: Values)", () => {
     // Cast past the types, as a key built at runtime would be.
     expect(() => (t as unknown as (key: string) => string)("rail.core")).toThrow(/no message at "rail.core"/);
   });
+
+  it("refuses a missing value rather than showing a gap", () => {
+    const loose = t as unknown as (key: string, values?: object) => string;
+    expect(() => loose("rail.core.unreachableError", {})).toThrow(/needs a value for \{host\}/);
+  });
+
+  it("refuses a plural without a count", () => {
+    const loose = t as unknown as (key: string, values?: object) => string;
+    expect(() => loose("quit.detail", {})).toThrow(/has plural forms and needs a count/);
+  });
 });
 
 describe("plural selection (The string catalog: Plurals)", () => {

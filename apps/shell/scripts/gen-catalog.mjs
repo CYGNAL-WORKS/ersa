@@ -13,7 +13,7 @@
 // It loads en-US.ts directly: Node strips its types, which is why that module
 // holds plain data and imports nothing at runtime.
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { enUS } from "../src/catalog/en-US.ts";
@@ -60,7 +60,10 @@ export function isCurrent(catalog, path) {
 }
 
 // Run only as a script, so the test can import the functions above.
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// The real path, because Node resolves junctions and symlinks in
+// import.meta.url but not in argv: through a linked folder the two would
+// differ and --check would pass without checking.
+if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
   if (!isCurrent(enUS, OUT)) {
     if (process.argv.includes("--check")) {
       console.error("Stale src/catalog/en-US.gen.md. Run `pnpm gen` in apps/shell and commit the result.");
