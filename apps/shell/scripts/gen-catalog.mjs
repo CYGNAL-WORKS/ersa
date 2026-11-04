@@ -60,10 +60,10 @@ export function isCurrent(catalog, path) {
 }
 
 // Run only as a script, so the test can import the functions above.
-// The real path, because Node resolves junctions and symlinks in
-// import.meta.url but not in argv: through a linked folder the two would
-// differ and --check would pass without checking.
-if (process.argv[1] && fileURLToPath(import.meta.url) === realpathSync(process.argv[1])) {
+// Both sides as the file system's own real path: argv keeps a junction, a
+// symlink and the case it was typed in, and import.meta.url need not match it,
+// so a plain comparison would skip --check and pass without checking.
+if (process.argv[1] && realpathSync.native(fileURLToPath(import.meta.url)) === realpathSync.native(process.argv[1])) {
   if (!isCurrent(enUS, OUT)) {
     if (process.argv.includes("--check")) {
       console.error("Stale src/catalog/en-US.gen.md. Run `pnpm gen` in apps/shell and commit the result.");
