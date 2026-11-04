@@ -28,6 +28,7 @@ use serde_json::{Map, Value};
 ///
 /// 2: `source` names the input and the backend's message id instead of a
 /// range of raw-log lines.
+///
 /// 3: `usage.updated` carries `turn_output_tokens`.
 pub const PROJECTION_VERSION: u32 = 3;
 
