@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { BridgeError, CoreClient, Method, Params } from "../core/client";
 import { type SessionView, follow } from "./follow";
 import { events } from "./replays";
+import { EVENT_VERSION } from "./transcript";
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
@@ -216,7 +217,7 @@ describe("follow", () => {
 
   it("survives an envelope without an event: a notice in its place, and the next event applies", () => {
     const { follower, last } = following();
-    const broken = { v: 2, session_id: "s-replay", seq: 0 } as unknown as (typeof replay)[number];
+    const broken = { v: EVENT_VERSION, session_id: "s-replay", seq: 0 } as unknown as (typeof replay)[number];
     follower.receive(broken);
     follower.receive(null as unknown as (typeof replay)[number]);
     follower.receive({ ...(replay[1] as (typeof replay)[number]) });

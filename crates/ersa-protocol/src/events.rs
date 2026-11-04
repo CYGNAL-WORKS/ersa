@@ -28,7 +28,9 @@ use serde_json::{Map, Value};
 ///
 /// 2: `source` names the input and the backend's message id instead of a
 /// range of raw-log lines.
-pub const PROJECTION_VERSION: u32 = 2;
+///
+/// 3: `usage.updated` carries `turn_output_tokens`.
+pub const PROJECTION_VERSION: u32 = 3;
 
 /// One event as Core streams it: a typed payload plus where it came from.
 ///
@@ -578,6 +580,11 @@ pub struct UsageUpdated {
     pub cost_usd_total: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turns: Option<u32>,
+    /// Output tokens generated so far in the current turn, across all of its
+    /// API calls (PROTO-AGENT-EVENTS-R17). Only live input carries it: a turn
+    /// read from the session record has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_output_tokens: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rate_limit: Option<RateLimit>,
 }

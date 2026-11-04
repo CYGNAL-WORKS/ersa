@@ -4,12 +4,12 @@ import { describe, expect, it } from "vitest";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { SessionList } from "../components/SessionList";
 import type { Envelope } from "../protocol/agent-events.gen";
-import { apply, emptyTranscript } from "../session/transcript";
+import { EVENT_VERSION, apply, emptyTranscript } from "../session/transcript";
 import { checkSessions, checkTile, eventProblem } from "./checks";
 
 const envelope = (seq: number, event: unknown) =>
   ({
-    v: 2,
+    v: EVENT_VERSION,
     session_id: "s1",
     seq,
     ts: "2026-01-01T00:00:00Z",

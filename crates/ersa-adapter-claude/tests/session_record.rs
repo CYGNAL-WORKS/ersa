@@ -70,10 +70,36 @@ fn events_of(entries: &[Value]) -> Vec<Event> {
         .collect()
 }
 
-/// Events only the live stream yields: the turn a message belongs to and the
-/// session's activity. The record has messages, not turns.
+/// Events only the live stream yields: the turn a message belongs to, the
+/// session's activity, and the running turn's output tokens. The record has
+/// messages, not turns.
 fn live_only(event: &Event) -> bool {
-    matches!(event, Event::TurnStarted(_) | Event::SessionState(_))
+    matches!(
+        event,
+        Event::TurnStarted(_)
+            | Event::SessionState(_)
+            | Event::UsageUpdated(UsageUpdated {
+                turn_output_tokens: Some(_),
+                ..
+            })
+    )
+}
+
+// verifies: PROTO-AGENT-EVENTS-R17
+#[test]
+fn events_read_from_a_session_record_carry_no_turn_output_tokens() {
+    let records = record_fixtures();
+    assert!(!records.is_empty());
+    for record in records {
+        for event in project_record(&record.text) {
+            let payload = serde_json::to_value(&event.event).unwrap();
+            assert!(
+                payload.get("turn_output_tokens").is_none(),
+                "{}: {payload}",
+                record.name
+            );
+        }
+    }
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R15
