@@ -122,7 +122,9 @@ jobs:
         run: cargo test --locked
 
       - name: Script tests
-        run: node --test scripts/deps-check.test.mjs scripts/check-manifest-hook.test.mjs scripts/pr-queue.test.mjs
+        # Every script test, found by the shell's glob, so a new test file runs
+        # in CI without anyone adding it here. scripts/check.mjs finds the same set.
+        run: node --test scripts/*.test.mjs
 
       - name: Manifest
         run: node scripts/manifest.mjs --check
