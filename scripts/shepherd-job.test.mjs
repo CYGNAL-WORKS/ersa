@@ -4,11 +4,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { JOBS, blocking, claudeArgs, instructionPaths, needsPlanning } from "./shepherd-job.mjs";
+import { descendants } from "./kill-tree.mjs";
+import { JOBS, blocking, claudeArgs, instructionPaths, jobRunning, needsPlanning, planningPaths } from "./shepherd-job.mjs";
 
 const data = "D:/x/118-386eca0-review.data";
 
-test("blocking: a review on high and medium, a verify on listed high or medium and new highs", () => {
+test("blocking: high and medium, listed or new", () => {
   const f = [
     { severity: "high", origin: "new" },
     { severity: "medium", origin: "new" },
@@ -16,9 +17,8 @@ test("blocking: a review on high and medium, a verify on listed high or medium a
     { severity: "medium", origin: "listed" },
     { severity: "low", origin: "new" },
   ];
-  assert.deepEqual(blocking(f, false), [f[0], f[1], f[3]]);
-  assert.deepEqual(blocking(f, true), [f[0], f[3]]);
-  assert.deepEqual(blocking(undefined, false), []);
+  assert.deepEqual(blocking(f), [f[0], f[1], f[3]]);
+  assert.deepEqual(blocking(undefined), []);
 });
 
 test("a fix to a planning file runs as planning; the inbox alone does not count", () => {
@@ -26,6 +26,7 @@ test("a fix to a planning file runs as planning; the inbox alone does not count"
   assert.equal(needsPlanning(["docs/briefs/FLOW-NEW-SESSION.md"]), true);
   assert.equal(needsPlanning(["CLAUDE.md"]), true);
   assert.equal(needsPlanning(["docs/briefs/INBOX.md", "crates/x/src/lib.rs"]), false);
+  assert.deepEqual(planningPaths(["docs/adr/0001-x.md", "crates/core/CLAUDE.md", "docs/briefs/protocol/fixtures/a.json", "scripts/shepherd.mjs"]), ["docs/adr/0001-x.md", "crates/core/CLAUDE.md"]);
 });
 
 test("a review takes every instruction file the pull request changed from main, in any folder", () => {
@@ -47,4 +48,23 @@ test("jobs run with hooks off, can read their data folder, and may not push, mer
     assert.equal(args[args.indexOf("--output-format") + 1], "json");
     assert.ok(JSON.parse(args[args.indexOf("--json-schema") + 1]).required.length);
   }
+});
+
+test("a job's lock holds while its process lives, and not past the longest a job can run", () => {
+  const now = 10_000_000;
+  assert.equal(jobRunning(null, now, () => true), false);
+  assert.equal(jobRunning({ pid: 1, at: now - 1000 }, now, () => true), true);
+  assert.equal(jobRunning({ pid: 1, at: now - 1000 }, now, () => false), false, "a killed job's lock");
+  assert.equal(jobRunning({ pid: 1, at: now - 3 * 60 * 60 * 1000 }, now, () => true), false, "a reused process id");
+});
+
+test("a process tree is walked by parent id, past exited parents, never into older processes", () => {
+  const since = new Date(1000_000);
+  const procs = [
+    { pid: 20, ppid: 10, created: 1000_500 }, // claude's shell; claude (10) has exited
+    { pid: 30, ppid: 20, created: 1001_000 }, // cargo under it
+    { pid: 40, ppid: 10, created: 500_000 }, // an older process whose parent id was reused
+    { pid: 50, ppid: 1, created: 1002_000 },
+  ];
+  assert.deepEqual(descendants(10, procs, since).sort(), [10, 20, 30]);
 });

@@ -31,9 +31,10 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { killTree } from "./kill-tree.mjs";
 import { commitsSinceReview } from "./merge-pr.mjs";
 import { SHEPHERD_MARK } from "./pr-queue.mjs";
-import { blocking } from "./shepherd-job.mjs";
+import { blocking, jobRunning, readLock } from "./shepherd-job.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const STATE = join(ROOT, ".scratch", "pr-queue");
@@ -44,9 +45,11 @@ const NEEDS_OWNER = "needs-owner";
 const HOLD = "hold";
 
 // Paths whose change the owner merges, so the loop never approves a change to
-// its own judgement: CI, the shepherd and its gate, and the instructions and
-// hooks every agent (its reviewers included) runs under.
-export const OWNER_MERGES = /^(\.github\/|\.claude\/|CLAUDE\.md$|scripts\/hooks\/|scripts\/(merge-pr|shepherd|shepherd-job|pr-queue)\.mjs$)/;
+// its own judgement: CI and the check it runs, the shepherd and its gate, and
+// the instructions, settings, MCP servers and hooks every agent (its reviewers
+// included) runs under, in any folder.
+export const OWNER_MERGES =
+  /(^|\/)(CLAUDE(\.local)?\.md$|AGENTS\.md$|\.claude\/|\.mcp\.json$)|^(\.github\/|docs\/agents\/|scripts\/hooks\/|scripts\/(check|manifest|merge-pr|shepherd|shepherd-job|pr-queue|kill-tree)\.mjs$)/i;
 
 // What the merge gate's dry run says: "merge" when it passes, "behind" when
 // only main's tip is missing, "wait" otherwise (CI, or GitHub still computing).
@@ -59,7 +62,7 @@ export function readiness(code, out) {
 // Whether a review record blocks the merge; records from the first loop kept a verdict.
 export function blocks(r) {
   if (r.output?.verdict) return r.output.verdict !== "clean";
-  return blocking(r.output?.findings, !!r.since).length > 0;
+  return blocking(r.output?.findings).length > 0;
 }
 
 // What kind of work a fix record did, from its task.
@@ -75,13 +78,13 @@ const byStart = (a, b) => a.startedAt.localeCompare(b.startedAt);
 // git questions: isAncestor(a, b), and onlyCleanMain(from, to), true when
 // every commit after `from` is a clean merge of main.
 //   none:   the latest review still covers the head
-//   verify: the loop's own fix landed on the reviewed head; check only that
-//   review: anything else (no review yet, or code no review or fix accounts for)
+//   verify: the loop's own fix of review findings landed on the reviewed head; check only that
+//   review: anything else (no review yet, a CI or conflict fix, or code no review or fix accounts for)
 export function route(oid, reviews, fixes, g) {
   const p = reviews.filter((r) => g.isAncestor(r.head, oid)).sort(byStart).at(-1);
   if (!p) return { need: "review" };
   if (g.onlyCleanMain(p.head, oid)) return { need: "none", review: p };
-  const f = fixes.filter((x) => x.head === p.head && x.pushedHead && g.isAncestor(x.pushedHead, oid)).sort(byStart).at(-1);
+  const f = fixes.filter((x) => x.head === p.head && x.fixKind === "review" && x.pushedHead && g.isAncestor(x.pushedHead, oid)).sort(byStart).at(-1);
   if (f && g.onlyCleanMain(f.pushedHead, oid)) return { need: "verify", review: p, fix: f };
   return { need: "review" };
 }
@@ -100,6 +103,7 @@ export function decide(row, f, { merge, maxFixes }) {
   if (row.state === "ci-running") return wait("CI is running");
   if (f.dependabot) return owner("This is an automatic update to a library the project uses. Taking a new version is a policy call, so merge or close it yourself.");
   if (f.fixPending) return wait("GitHub does not show the fix's push yet");
+  if (f.jobRunning) return wait("a job an earlier run started is still working on it");
 
   const mergeMain = () => {
     if (f.mainHere?.conflict) return f.fixHere("conflict") ? owner("This branch and main changed the same lines, and the fixer could not combine them. Someone needs to merge them by hand.") : fix("conflict");
@@ -129,7 +133,10 @@ export function decide(row, f, { merge, maxFixes }) {
   }
   if (f.ready === "behind") return mergeMain();
   if (f.ready !== "merge") return wait("the merge gate says not yet");
-  if (f.hold) return wait("labeled hold");
+  if (f.hold) return { kind: "ready", reason: "labeled hold" };
+  // A comment or review may ask for changes or say not to merge, and only a
+  // person can tell which.
+  if (row.feedback) return owner("People have commented on or reviewed this pull request, and the shepherd cannot tell whether they asked for changes or agree to the merge. Read the comments, then decide: merge it yourself, or ask for the changes they want.");
   if ((f.mergeRefused?.failures ?? 0) >= 2) return owner(`The merge checks pass, but GitHub refused the merge twice. A repository rule the shepherd does not check, such as a required approval, may need you. (${f.mergeRefused.error})`);
   if (f.ownerMerges) return owner("Ready to merge. It changes the automation's own rules (the test setup, the shepherd, or the instructions agents follow), so the shepherd will not approve it on its own: merge it yourself if you agree.");
   return merge ? { kind: "merge", review: r.review } : { kind: "ready", reason: "would merge (shadow run)" };
@@ -165,10 +172,13 @@ export function notesComment(review, ownerReason) {
 }
 
 // A command that stalls (a credential prompt, a network hang) is killed after
-// ten minutes and reads as failed, so the loop never blocks on it.
+// ten minutes, with everything it started (pr-queue's gh and git, git's
+// remote helpers), and reads as failed, so the loop never blocks on it.
 function run(cmd, args, opts = {}) {
   const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" };
+  const since = new Date();
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 10 * 60 * 1000, env, ...opts });
+  if (r.error?.code === "ETIMEDOUT") killTree(r.pid, since);
   return { code: r.status, ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim() || (r.error?.message ?? "") };
 }
 
@@ -221,6 +231,7 @@ function gather(row, crashes = new Map()) {
   const f = {
     dependabot: row.branch.startsWith("dependabot/"),
     hold: row.labels.includes(HOLD),
+    jobRunning: files.some((x) => x.startsWith(`${row.number}-`) && x.endsWith(".lock") && jobRunning(readLock(join(JOBS, x)))),
     fixHere: (kind) => fixes.some((x) => x.head === row.oid && x.fixKind === kind),
     // A fix pushed, but GitHub still reports the head it started from.
     fixPending: fixes.some((x) => x.head === row.oid && x.pushedHead && x.pushedHead !== row.oid),
@@ -337,14 +348,15 @@ export function isFailedRecord(file, n, kind) {
   return file.startsWith(`${n}-`) && new RegExp(`-${kind}(-ci|-conflict)?\\.`).test(file) && file.endsWith(".failed.json");
 }
 
-// Whether a job crashed: it failed (any exit but 0, or 3 for "already ran")
+// Whether a job crashed: it failed (any exit but 0, 3 for "already ran" or 4
+// for "running now")
 // and left no record of its own. Exit codes alone cannot tell: on Windows a
 // killed job and an uncaught error both exit 1, like a job that failed and
 // wrote its record. `before` and `after` list the jobs folder around the job.
 // The loop counts crashes for the current run only, so a passing network
 // blip never counts against a pull request for good.
 export function crashed(code, before, after, n) {
-  if (code === 0 || code === 3) return false;
+  if (code === 0 || code === 3 || code === 4) return false;
   const old = new Set(before);
   return !after.some((f) => !old.has(f) && f.startsWith(`${n}-`) && f.endsWith(".json"));
 }

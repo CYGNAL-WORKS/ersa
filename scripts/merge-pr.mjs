@@ -21,6 +21,7 @@ import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { killTree } from "./kill-tree.mjs";
 import { latestChecks } from "./pr-queue.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
@@ -56,10 +57,12 @@ export function refusals({ pr, containsMain, reviewedInBranch, sinceReview }) {
 }
 
 // A git or gh command that stalls (a credential prompt, a network hang) is
-// killed after TIMEOUT_MS and reads as failed, so the gate never blocks.
+// killed after TIMEOUT_MS, with everything it started, and reads as failed,
+// so the gate never blocks.
 const TIMEOUT_MS = 2 * 60 * 1000;
 
 function run(cmd, args, cwd = ROOT) {
+  const since = new Date();
   const r = spawnSync(cmd, args, {
     cwd,
     encoding: "utf8",
@@ -67,6 +70,7 @@ function run(cmd, args, cwd = ROOT) {
     timeout: TIMEOUT_MS,
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" },
   });
+  if (r.error?.code === "ETIMEDOUT") killTree(r.pid, since);
   const err = [(r.stderr ?? "").trim(), r.error?.message].filter(Boolean).join("; ");
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err };
 }

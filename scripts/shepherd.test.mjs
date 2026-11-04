@@ -30,11 +30,12 @@ ${refusals({ pr: green, containsMain: true, reviewedInBranch: true, sinceReview:
   assert.equal(readiness(2, "gh pr view failed"), "wait");
 });
 
-test("a full review blocks on high and medium; a verify on a listed high or medium, or a new high", () => {
+test("a full review and a verify both block on high and medium", () => {
   const f = (severity, origin = "new") => ({ severity, origin });
   assert.equal(blocks({ output: { findings: [f("low")] } }), false);
   assert.equal(blocks({ output: { findings: [f("medium")] } }), true);
-  assert.equal(blocks({ since: "x", output: { findings: [f("medium"), f("low")] } }), false);
+  assert.equal(blocks({ since: "x", output: { findings: [f("medium"), f("low")] } }), true, "a new medium a fix introduced blocks");
+  assert.equal(blocks({ since: "x", output: { findings: [f("low")] } }), false);
   assert.equal(blocks({ since: "x", output: { findings: [f("low", "listed")] } }), false);
   assert.equal(blocks({ since: "x", output: { findings: [f("medium", "listed")] } }), true);
   assert.equal(blocks({ since: "x", output: { findings: [f("high")] } }), true);
@@ -47,7 +48,7 @@ const g = {
   isAncestor: (a, b) => order.indexOf(a) <= order.indexOf(b),
   onlyCleanMain: (from, to) => order.slice(order.indexOf(from) + 1, order.indexOf(to) + 1).every((c) => c === "m1"),
 };
-const fixed = { kind: "fix", head: "r1", pushedHead: "f1", startedAt: "2" };
+const fixed = { kind: "fix", fixKind: "review", head: "r1", pushedHead: "f1", startedAt: "2" };
 
 test("which heads get a review, a verify, or nothing", () => {
   assert.deepEqual(route("r1", [], [], g), { need: "review" });
@@ -56,6 +57,9 @@ test("which heads get a review, a verify, or nothing", () => {
   assert.equal(route("m1", [dirty], [fixed], g).need, "verify", "a clean merge of main after the fix still gets a verify");
   assert.equal(route("x1", [dirty], [fixed], g).need, "review", "a commit nobody accounts for gets a full review");
   assert.equal(route("f1", [dirty], [], g).need, "review", "a push that is not the loop's own fix gets a full review");
+  assert.equal(route("f1", [dirty], [{ ...fixed, fixKind: "conflict" }], g).need, "review", "a conflict fix gets a full review");
+  assert.equal(route("f1", [dirty], [{ ...fixed, fixKind: "ci" }], g).need, "review", "a CI fix gets a full review");
+  assert.equal(route("f1", [dirty], [{ ...fixed, head: "r0" }], g).need, "review", "a fix that started from another head gets a full review");
   const verified = { ...clean, head: "f1", since: "r1", startedAt: "3" };
   assert.equal(route("m1", [dirty, verified], [fixed], g).review, verified, "the latest review covering the head applies");
 });
@@ -65,6 +69,7 @@ test("drafts and running CI wait; a dependency update is the owner's", () => {
   assert.equal(kind(row("ci-running")), "wait");
   assert.equal(kind(row("green"), facts({ dependabot: true })), "owner");
   assert.equal(kind(row("green"), facts({ fixPending: true })), "wait");
+  assert.equal(kind(row("green"), facts({ jobRunning: true })), "wait", "a job an earlier run left running");
 });
 
 test("green: review, then fix what blocks, then verify, then merge", () => {
@@ -84,9 +89,10 @@ test("the loop stops at the round limit and on a fix that changed nothing", () =
   assert.equal(kind(row("green"), facts({ ...blocked, failed: { review: 0, fix: 2 } })), "owner", "two crashes go to the owner");
 });
 
-test("ready: a hold label waits, owner paths and shadow runs do not merge", () => {
+test("ready: a hold label, comments, owner paths and shadow runs do not merge", () => {
   const ready = { route: { need: "none", review: clean }, ready: "merge" };
-  assert.equal(kind(row("green"), facts({ ...ready, hold: true })), "wait");
+  assert.equal(kind(row("green"), facts({ ...ready, hold: true })), "ready", "held, and done for this run");
+  assert.equal(kind(row("green", { feedback: 1 }), facts(ready)), "owner", "a comment may say not to merge");
   assert.equal(kind(row("green"), facts({ ...ready, ownerMerges: true })), "owner");
   assert.equal(kind(row("green"), facts(ready), { ...opts, merge: false }), "ready");
   assert.equal(kind(row("green"), facts({ ...ready, mergeRefused: { failures: 1, error: "x" } })), "merge", "one refusal is retried");
@@ -95,9 +101,10 @@ test("ready: a hold label waits, owner paths and shadow runs do not merge", () =
 });
 
 test("CI, the shepherd and agent instructions are the owner's to merge", () => {
-  for (const p of [".github/workflows/ci.yml", ".claude/skills/review-pr/SKILL.md", "CLAUDE.md", "scripts/hooks/guard-briefs.mjs", "scripts/merge-pr.mjs", "scripts/shepherd.mjs"])
+  for (const p of [".github/workflows/ci.yml", ".claude/skills/review-pr/SKILL.md", "CLAUDE.md", "scripts/hooks/guard-briefs.mjs", "scripts/merge-pr.mjs", "scripts/shepherd.mjs",
+    "crates/core/CLAUDE.md", "CLAUDE.local.md", "app/.claude/settings.json", ".mcp.json", "scripts/check.mjs", "scripts/kill-tree.mjs", "docs/agents/orchestration.md"])
     assert.ok(OWNER_MERGES.test(p), p);
-  for (const p of ["crates/ersa-core/src/lib.rs", "docs/briefs/FLOW-X.md", "scripts/check.mjs", "apps/shell/src/App.tsx"]) assert.ok(!OWNER_MERGES.test(p), p);
+  for (const p of ["crates/ersa-core/src/lib.rs", "docs/briefs/FLOW-X.md", "scripts/checkout.mjs", "apps/shell/src/App.tsx", "docs/NOTCLAUDE.md.txt"]) assert.ok(!OWNER_MERGES.test(p), p);
 });
 
 test("merging main in retries failures, and a conflict goes to one fix", () => {
@@ -127,4 +134,5 @@ test("a job that failed and left no record of its own crashed, whatever its exit
   assert.equal(crashed(1, before, [...before, "7-bcd2345-verify.notes.md"], 7), true, "a notes file is not a record");
   assert.equal(crashed(0, before, before, 7), false);
   assert.equal(crashed(3, before, before, 7), false, "already ran");
+  assert.equal(crashed(4, before, before, 7), false, "running now");
 });
