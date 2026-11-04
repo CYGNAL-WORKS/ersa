@@ -58,6 +58,107 @@ test("an open permission request shows its fields whole", async ({ page }) => {
   expect(clipped).toBe(0);
 });
 
+// DESIGN.md, Layout and Shapes: the user's message is a bubble at the right of the reading column, as wide as its
+// words up to bubble-max, surface-raised with a line edge and radius-lg, padded space-md by space-lg, with no label.
+test("the user's messages are bubbles, in both themes", async ({ page }) => {
+  await page.goto("/gallery.html?component=Transcript");
+  for (const theme of ["light", "dark"]) {
+    const transcript = page.locator(`[data-theme="${theme}"] [data-component="Transcript"]`);
+    const twoTurns = transcript.locator("figure").filter({ hasText: "Two turns" });
+    const bubbles = twoTurns.locator(".transcript-user");
+    await expect(bubbles).toHaveCount(2);
+
+    const tokens = await transcript.evaluate((el) => {
+      const probe = document.createElement("div");
+      probe.style.cssText =
+        "background: var(--color-surface-raised); border: var(--line-hairline) solid var(--color-line);" +
+        "border-radius: var(--radius-lg); padding: var(--space-md) var(--space-lg);";
+      el.appendChild(probe);
+      const s = getComputedStyle(probe);
+      const t = {
+        fill: s.backgroundColor,
+        edge: s.borderTopColor,
+        edgeWidth: s.borderTopWidth,
+        radius: s.borderTopLeftRadius,
+        padBlock: s.paddingTop,
+        padInline: s.paddingLeft,
+      };
+      probe.remove();
+      return t;
+    });
+
+    for (const bubble of await bubbles.all()) {
+      const got = await bubble.evaluate((el) => {
+        const s = getComputedStyle(el);
+        const page = el.parentElement!;
+        const ps = getComputedStyle(page);
+        const box = el.getBoundingClientRect();
+        const col = page.getBoundingClientRect();
+        return {
+          fill: s.backgroundColor,
+          edge: s.borderTopColor,
+          edgeWidth: s.borderTopWidth,
+          radius: s.borderTopLeftRadius,
+          padBlock: s.paddingTop,
+          padInline: s.paddingLeft,
+          // The column's content box, inside the page's own padding.
+          right: col.right - parseFloat(ps.paddingRight) - box.right,
+          share: box.width / (col.width - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight)),
+        };
+      });
+      expect(got.fill, theme).toBe(tokens.fill);
+      expect(got.edge, theme).toBe(tokens.edge);
+      expect(got.edgeWidth, theme).toBe(tokens.edgeWidth);
+      expect(got.radius, theme).toBe(tokens.radius);
+      expect(got.padBlock, theme).toBe(tokens.padBlock);
+      expect(got.padInline, theme).toBe(tokens.padInline);
+      expect(got.right, `${theme}: at the right of the column`).toBeCloseTo(0, 0);
+      expect(got.share, `${theme}: no wider than bubble-max`).toBeLessThanOrEqual(0.8 + 0.001);
+    }
+
+    // A short message is as wide as its words, well short of bubble-max.
+    const short = bubbles.filter({ hasText: "Now delete" });
+    const shortShare = await short.evaluate((el) => {
+      const page = el.parentElement!;
+      const ps = getComputedStyle(page);
+      const col = page.getBoundingClientRect().width - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight);
+      return el.getBoundingClientRect().width / col;
+    });
+    expect(shortShare, theme).toBeLessThan(0.8);
+
+    // A long word or path wraps inside the bubble rather than widening it.
+    const long = transcript.locator("figure").filter({ hasText: "Long path" }).locator(".transcript-user");
+    const fits = await long.evaluate((el) => {
+      const page = el.parentElement!;
+      const ps = getComputedStyle(page);
+      const col = page.getBoundingClientRect().width - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight);
+      return { share: el.getBoundingClientRect().width / col, overflow: el.scrollWidth - el.clientWidth };
+    });
+    expect(fits.share, theme).toBeLessThanOrEqual(0.8 + 0.001);
+    expect(fits.overflow, theme).toBeLessThanOrEqual(0);
+
+    // No label is seen, and assistive technology still hears the message as the user's.
+    await expect(bubbles.first().getByText("You", { exact: true })).toBeHidden();
+    await expect(twoTurns.getByRole("group", { name: "You" })).toHaveCount(2);
+  }
+});
+
+// The gap between turns stays space-xxxl after the label is gone (DESIGN.md, Layout).
+test("a new turn starts space-xxxl below the last", async ({ page }) => {
+  await page.goto("/gallery.html?component=Transcript&theme=light");
+  const twoTurns = page.locator('[data-component="Transcript"] figure').filter({ hasText: "Two turns" });
+  const { gap, xxxl } = await twoTurns.locator(".transcript-user").nth(1).evaluate((el) => {
+    const probe = document.createElement("div");
+    probe.style.height = "var(--space-xxxl)";
+    el.parentElement!.appendChild(probe);
+    const xxxl = probe.getBoundingClientRect().height;
+    probe.remove();
+    const prev = el.previousElementSibling!;
+    return { gap: el.getBoundingClientRect().top - prev.getBoundingClientRect().bottom, xxxl };
+  });
+  expect(gap).toBeCloseTo(xxxl, 0);
+});
+
 test("a focused input's edge is the accent, in both themes", async ({ page }) => {
   await page.goto("/gallery.html");
   for (const theme of ["light", "dark"]) {
