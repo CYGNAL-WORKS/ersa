@@ -3,13 +3,13 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { HOLD_LIMIT_MS, changes, classify, fingerprint, markShared, settle, signature, step } from "./pr-queue.mjs";
+import { changes, classify, fingerprint, kept, markShared, settle, signature, step } from "./pr-queue.mjs";
 
 const job = "Build, lint, test, dependencies (Linux)\tTest\t2026-11-03T06:41:47.5718425Z ";
 
@@ -124,11 +124,14 @@ test("a new pull request counts once its CI ends", () => {
   assert.deepEqual(settle([], [{ number: 2, head: "c", state: "ci-running" }]), []);
 });
 
-// One --changed run after another, as main() chains them.
+// One --changed run after another, as main() chains them, through the same
+// JSON round trip as last.json.
 const after = (last, rows, now) => {
   const s = step(last, rows, now);
-  return { s, last: { fingerprint: s.print, rows: s.settled, since: s.since } };
+  return { s, last: JSON.parse(JSON.stringify(kept(s, {}))) };
 };
+
+const HOUR = 60 * 60 * 1000;
 
 test("a run whose CI started does not wake the shepherd", () => {
   const before = [{ number: 1, head: "a", state: "behind-main", title: "t", feedback: 0 }];
@@ -156,12 +159,14 @@ test("a run held past the limit surfaces as ci-running, once", () => {
   let s;
   ({ s, last } = after(last, running, 0));
   assert.equal(s.changed, false);
-  ({ s, last } = after(last, running, HOLD_LIMIT_MS + 1));
+  ({ s, last } = after(last, running, HOUR));
+  assert.equal(s.changed, false);
+  ({ s, last } = after(last, running, HOUR + 1));
   assert.deepEqual(s.diff, [
     { number: 1, change: "new commits", from: "green", to: "ci-running" },
     { number: 2, change: "new", to: "ci-running" },
   ]);
-  ({ s } = after(last, running, HOLD_LIMIT_MS + 2));
+  ({ s } = after(last, running, HOUR + 2));
   assert.equal(s.changed, false);
 });
 
@@ -169,7 +174,10 @@ test("a stop file ends the wait", () => {
   const dir = mkdtempSync(join(tmpdir(), "pr-queue-"));
   writeFileSync(join(dir, "stop"), "");
   const script = fileURLToPath(new URL("./pr-queue.mjs", import.meta.url));
-  const r = spawnSync(process.execPath, [script, "--changed"], { env: { ...process.env, PR_QUEUE_DIR: dir }, encoding: "utf8" });
+  // No gh on the path, so a regressed stop check fails here instead of reaching the real repo.
+  const env = { ...process.env, PR_QUEUE_DIR: dir, PATH: dir, Path: dir };
+  const r = spawnSync(process.execPath, [script, "--changed"], { env, encoding: "utf8", timeout: 10_000 });
+  rmSync(dir, { recursive: true, force: true });
   assert.equal(r.status, 0);
   assert.match(r.stdout, /^Stop requested/);
 });
