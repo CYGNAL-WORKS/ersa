@@ -184,7 +184,7 @@ test("a head whose checkout cannot be prepared gives the tick to the next head; 
 });
 
 test("an hour of heads that cannot start ends the tick, so it stays inside the lock's age", () => {
-  // Each failing prepare takes 25 minutes of the clock; the third head finds the hour gone.
+  // Each failing prepare takes 25 minutes of the clock; the fourth head finds the hour gone.
   let t = NOW;
   const prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) }), pr({ number: 10, headRefOid: "e".repeat(40) })];
   const got = drive(["--once", "--checkout", join(tmp(), "r7")], {
@@ -233,6 +233,24 @@ test("without --once the poller ticks, waits five minutes, and ticks again, thro
   assert.match(got.logs.join("\n"), /gh pr list failed: gh: connection reset/);
   assert.ok(!existsSync(got.lockPath));
   assert.equal(INTERVAL_MS, 5 * 60 * 1000);
+});
+
+test("a loop whose lock was taken over stops rather than run beside the new tick, and leaves that tick's lock alone", () => {
+  const path = join(tmp(), "taken-lock");
+  let naps = 0;
+  const got = drive(["--checkout", join(tmp(), "r8")], {
+    lockPath: path,
+    // Another tick took the lock over while this loop slept; a loop that sleeps again did not notice.
+    sleep: () => {
+      if (++naps > 1) throw new Error("the loop went on beside the other tick");
+      writeFileSync(path, "999");
+    },
+  });
+  assert.equal(got.code, 2);
+  assert.match(got.stderr, /the lock at .*taken-lock is another tick's \(pid 999\), so this loop stops/);
+  assert.equal(got.reviews.length, 1, "no second tick ran");
+  assert.equal(readFileSync(path, "utf8"), "999", "the other tick's lock is not removed on the way out");
+  rmSync(path);
 });
 
 test("with --once a tool that is down ends the tick with exit 2", () => {
