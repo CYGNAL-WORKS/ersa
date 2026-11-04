@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { INTERVAL_MS, STALE_MS, lock, main, select } from "./merge-review-watch.mjs";
+import { INTERVAL_MS, LOCK_STALE_MS, STALE_MS, lock, main, select } from "./merge-review-watch.mjs";
 
 const HEAD = "b".repeat(40);
 const NOW = Date.parse("2026-11-04T12:00:00Z");
@@ -47,7 +47,7 @@ test("a head that carries a merge review is not reviewed again, whatever the ver
 test("a pending merge review older than an hour is a run that died, and the head is reviewed again", () => {
   assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: ago(STALE_MS + 1000) })] })], NOW).review, [{ number: 7, head: HEAD }]);
   assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: ago(STALE_MS - 1000) })] })], NOW).review, []);
-  assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: undefined })] })], NOW).review, [], "a pending status with no time is left alone");
+  assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: undefined })] })], NOW).review, [{ number: 7, head: HEAD }], "a pending status with no time is stale, not reviewed forever");
 });
 
 test("auto-merge on an unreviewed head is disarmed, reviewed or not yet reviewable; on a reviewed head it is the review's own", () => {
@@ -66,7 +66,7 @@ let home;
 const tmp = () => (home ??= mkdtempSync(join(tmpdir(), "merge-review-watch-")));
 after(() => home && rmSync(home, { recursive: true, force: true }));
 
-test("the lock is held by one tick at a time, survives a dead or hour-old holder, and is released", () => {
+test("the lock is held by one tick at a time, survives a dead or two-hour-old holder, and is released", () => {
   const path = join(tmp(), "a", "lock");
   const alive = (pid) => pid === 100;
   const release = lock(path, { alive, pid: 100 });
@@ -82,12 +82,34 @@ test("the lock is held by one tick at a time, survives a dead or hour-old holder
   taken();
   // A pid Windows gave to another process reads as live; the file's age settles it.
   writeFileSync(path, "100");
-  const old = lock(path, { alive, pid: 200, now: () => Date.now() + STALE_MS + 1000 });
-  assert.ok(old, "a live-looking lock older than an hour is taken over");
+  assert.equal(lock(path, { alive, pid: 200, now: () => Date.now() + LOCK_STALE_MS - 60_000 }), null, "a live lock under two hours old is held");
+  const old = lock(path, { alive, pid: 200, now: () => Date.now() + LOCK_STALE_MS + 1000 });
+  assert.ok(old, "a live-looking lock two hours old is taken over");
+  assert.equal(LOCK_STALE_MS, 2 * STALE_MS);
+  old();
+  // A release removes only its own lock: a tick taken over must not remove its successor's.
+  writeFileSync(path, "400");
+  old();
+  assert.equal(readFileSync(path, "utf8"), "400");
+  rmSync(path);
   old();
   writeFileSync(path, "");
   assert.equal(lock(path, { alive, pid: 200 }), null, "a lock that names no pid is left for a person");
   assert.ok(existsSync(path));
+});
+
+test("a dead lock another tick replaced between the read and the rename goes back, and the lock is theirs", () => {
+  const path = join(tmp(), "b", "lock");
+  mkdirSync(join(tmp(), "b"), { recursive: true });
+  writeFileSync(path, "300");
+  // The other tick wins the race in the instant before this one's rename: the liveness check is where this one stalls.
+  const alive = (pid) => {
+    if (pid === 300) writeFileSync(path, "500");
+    return pid === 500;
+  };
+  assert.equal(lock(path, { alive, pid: 200 }), null);
+  assert.equal(readFileSync(path, "utf8"), "500", "the live lock is back in place");
+  assert.deepEqual(readdirSync(join(tmp(), "b")), ["lock"]);
 });
 
 // The poller's own repository, where the worktree is added from.
@@ -104,7 +126,10 @@ function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list 
     if (cmd === "gh" && args[1] === "list") return list() ?? ok(JSON.stringify(prs));
     if (cmd === "gh") return ok();
     if (cmd === "git") return { ok: true, status: 0, out: "", err: "", ...git(args, cwd) };
-    if (cmd === "node") return { ok: exit === 0, status: exit, out: "", err: "" };
+    if (cmd === "node") {
+      const status = typeof exit === "function" ? exit(args[1]) : exit;
+      return { ok: status === 0, status, out: "", err: "" };
+    }
     throw new Error(`unexpected ${cmd}`);
   };
   const path = lockPath ?? join(tmp(), `lock-${Math.random().toString(36).slice(2)}`);
@@ -124,7 +149,7 @@ test("one tick prepares the review checkout at the head, with main's review logi
     [`reset -q --hard ${HEAD}`, dir],
     ["clean -q -fd", dir],
     // Ignored files under any .claude folder too: a settings.local.json the last review's tests wrote is not main's.
-    ["clean -q -fdx -- :(glob)**/.claude/**", dir],
+    ["clean -q -ffdx -- :(glob)**/.claude/**", dir],
     ["checkout -q origin/main -- scripts/merge-review.mjs scripts/merge-pr.mjs", dir],
   ]);
   assert.deepEqual(got.reviews.map((c) => [c.args.join(" "), c.cwd, c.live]), [[`scripts/merge-review.mjs 7 --head ${HEAD}`, dir, true]]);
@@ -140,18 +165,22 @@ test("an existing checkout is reused, one head is reviewed per tick, and a revie
   const got = drive(["--once", "--checkout", dir], { prs: [pr(), pr({ number: 8, headRefOid: "c".repeat(40) })], exit: 1 });
   assert.equal(got.code, 0, got.stderr);
   assert.ok(!got.calls.some((c) => c.cmd === "git" && c.args[0] === "worktree"));
-  // One head per tick, so a tick ends within the hour the task allows; the rest wait for the next.
+  // One review per tick, so a tick ends well within the two hours the task allows; the rest wait for the next.
   assert.deepEqual(got.reviews.map((c) => c.args[1]), ["7"]);
   assert.match(got.logs.join("\n"), /#7 at bbbbbbb: reviewing; #8 next\n#7 at bbbbbbb: the review exited 1/);
 });
 
-test("a checkout that cannot be prepared is reported, and the tick ends for the next to try again", () => {
+test("a head whose review could not start gives the tick to the next head, so one bad head does not hold the rest", () => {
+  // #7's checkout cannot be prepared; #8's review fails before it reviews (exit 2); #9 is reviewed; #10 waits.
+  const prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) }), pr({ number: 10, headRefOid: "e".repeat(40) })];
   const got = drive(["--once", "--checkout", join(tmp(), "r2")], {
-    git: (args) => (args[0] === "fetch" ? { ok: false, err: "network down" } : {}),
+    prs,
+    git: (args) => (args[0] === "fetch" && args.includes("pull/7/head") ? { ok: false, err: "network down" } : {}),
+    exit: (n) => (n === "8" ? 2 : 0),
   });
   assert.equal(got.code, 0, got.stderr);
-  assert.equal(got.reviews.length, 0);
-  assert.match(got.logs.join("\n"), /#7 at bbbbbbb: git fetch -q failed: network down/);
+  assert.deepEqual(got.reviews.map((c) => c.args[1]), ["8", "9"]);
+  assert.match(got.logs.join("\n"), /#7 at bbbbbbb: git fetch -q failed: network down\n#8 at ccccccc: reviewing; #9, #10 next\n#8 at ccccccc: the review exited 2\n#9 at ddddddd: reviewing; #10 next\n#9 at ddddddd: the review exited 0$/);
 });
 
 test("auto-merge on an unreviewed head is disabled before anything else", () => {
