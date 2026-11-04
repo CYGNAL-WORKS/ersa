@@ -21,8 +21,8 @@
 // when it finished without doing its work (an error, a blocked fix, a push
 // that failed or was refused); 2 on a usage or tool error.
 
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -167,7 +167,37 @@ function pushFix(dir, pr) {
   return push.ok ? { pushedHead: head, uncommitted } : { pushedHead: null, uncommitted, error: `push failed: ${push.err.slice(0, 300)}` };
 }
 
-function main() {
+// Removes a worktree, also one a crashed or interrupted job left at this path.
+function fresh(dir) {
+  run("git", ["worktree", "remove", "--force", dir]);
+  rmSync(dir, { recursive: true, force: true });
+  run("git", ["worktree", "prune"]);
+}
+
+// Runs claude and, past the time limit, kills its whole process tree: its
+// shells, test runs and builds would otherwise outlive it and hold the
+// worktree's files.
+function runClaude(args, opts, limit) {
+  return new Promise((done) => {
+    const child = spawn("claude", args, { ...opts, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (d) => (out += d));
+    child.stderr.on("data", (d) => (err += d));
+    const timer = setTimeout(() => {
+      err += `\nkilled after ${limit / 60000} minutes`;
+      if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"]);
+      else process.kill(-child.pid, "SIGKILL");
+    }, limit);
+    child.on("error", (e) => (err += e.message));
+    child.on("close", () => {
+      clearTimeout(timer);
+      done({ out: out.trim(), err: err.trim() });
+    });
+  });
+}
+
+async function main() {
   const [kind, n, ...rest] = process.argv.slice(2);
   const flag = (name) => (rest.includes(name) ? rest[rest.indexOf(name) + 1] ?? "" : undefined);
   const taskFile = flag("--task");
@@ -193,6 +223,7 @@ function main() {
   const files = run("git", ["diff", "--name-only", `origin/main...${pr.head}`]).out.split("\n").filter(Boolean);
   const dir = join(WORK_DIR, id);
   mkdirSync(WORK_DIR, { recursive: true });
+  fresh(dir);
   const add = run("git", ["worktree", "add", "--detach", dir, pr.head]);
   if (!add.ok) fail(`git worktree add failed: ${add.err}`);
 
@@ -205,7 +236,7 @@ function main() {
     // One build directory for every job, so each worktree does not rebuild Core.
     CARGO_TARGET_DIR: join(WORK_DIR, "target"),
   };
-  const claude = run("claude", claudeArgs(job, prompt), { cwd: dir, env, timeout: 2 * HOUR, stdio: ["ignore", "pipe", "pipe"] });
+  const claude = await runClaude(claudeArgs(job, prompt), { cwd: dir, env }, 2 * HOUR);
   let result = {};
   try {
     result = JSON.parse(claude.out);
@@ -214,7 +245,7 @@ function main() {
   }
   // Only a fix that finished and says it committed gets its commits pushed.
   const pushed = kind === "fix" && !result.is_error && result.structured_output?.outcome === "committed" ? pushFix(dir, pr) : {};
-  run("git", ["worktree", "remove", "--force", dir]);
+  fresh(dir);
 
   const record = {
     kind, pr: Number(n), head: pr.head, branch: pr.branch, issue: pr.issue ?? null,

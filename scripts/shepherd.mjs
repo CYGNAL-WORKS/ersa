@@ -25,7 +25,7 @@
 // tool error.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -60,10 +60,14 @@ export function decide(row, f, { merge, maxFixes }) {
   if (row.state === "ci-running") return wait("CI is running");
   if (f.dependabot) return owner("a dependency update: yours to take or close");
 
-  if (row.state === "conflicting") {
-    if (!f.mainMergedHere) return { kind: "merge-main" };
-    return fixOr("conflict", `conflicts with main after ${f.fixes} fix rounds`);
-  }
+  // Merging main in: a conflict git cannot resolve goes to a fix job; any other
+  // failure (a push GitHub rejected, say) is tried again, up to three times.
+  const mergeMain = () => {
+    if (f.mainHere?.conflict) return fixOr("conflict", `conflicts with main after ${f.fixes} fix rounds`);
+    if ((f.mainHere?.failures ?? 0) >= 3) return owner(`merging main in failed three times: ${f.mainHere.error}`);
+    return { kind: "merge-main" };
+  };
+  if (row.state === "conflicting") return mergeMain();
 
   // A rerun costs CI time and no tokens, and the self-hosted runners drop jobs,
   // so every red head gets one before a fix job reads its log.
@@ -75,10 +79,10 @@ export function decide(row, f, { merge, maxFixes }) {
 
   // green or behind-main
   if (f.ready === "merge") return merge ? { kind: "merge" } : owner("reviewed clean and ready: merge it, or run with --merge");
-  if (f.ready === "behind") return f.mainMergedHere ? owner("merging main in did not land") : { kind: "merge-main" };
+  if (f.ready === "behind") return mergeMain();
   if (f.ready === "wait") return wait("the merge gate says not yet");
   if (!f.reviewHere) return f.failed.review < 2 ? { kind: "review" } : owner("the review job failed twice on this head");
-  if (f.reviewHere.verdict === "clean") return wait("reviewed clean; the gate will decide next pass");
+  if (f.reviewHere.output?.verdict === "clean") return wait("reviewed clean; the gate will decide next pass");
   return fixOr("review", `review findings remain after ${f.fixes} fix rounds`);
 }
 
@@ -145,10 +149,18 @@ function gather(row) {
       review: files.filter((f) => f.startsWith(`${id("review")}.`) && f.endsWith(".failed.json")).length,
       fix: files.filter((f) => f.startsWith(`${id("fix")}.`) && f.endsWith(".failed.json")).length,
     },
-    mainMergedHere: files.includes(`${id("main")}.json`),
+    mainHere: files.includes(`${id("main")}.json`) ? readJson(join(JOBS, `${id("main")}.json`)) : null,
     rerunHere: files.includes(`${id("rerun")}.json`),
     ready,
   };
+}
+
+// Clears a worktree a crashed or interrupted run left at this path, so the
+// next `git worktree add` there does not fail for good.
+function fresh(dir) {
+  run("git", ["worktree", "remove", "--force", dir]);
+  rmSync(dir, { recursive: true, force: true });
+  run("git", ["worktree", "prune"]);
 }
 
 function mark(row, kind, data) {
@@ -176,21 +188,32 @@ function act(row, action, ctx) {
       return `fix (${action.task}) ${job(["fix", n, "--task", task])}`;
     }
     case "merge-main": {
+      const marker = join(JOBS, `${row.number}-${row.head}-main.json`);
+      const failures = ((existsSync(marker) ? readJson(marker) : {}).failures ?? 0) + 1;
+      const failed = (error) => (mark(row, "main", { failures, error: error.split("\n")[0].slice(0, 300) }), `merge-main failed (${failures} of 3): ${error.split("\n")[0]}`);
       const dir = join(WORK, `${row.number}-${row.head}-main`);
       mkdirSync(WORK, { recursive: true });
-      run("git", ["fetch", "-q", "origin", "main", `pull/${n}/head`]);
-      if (!run("git", ["worktree", "add", "--detach", dir, row.oid]).ok) return "merge-main: could not make a worktree";
+      fresh(dir);
+      const fetched = run("git", ["fetch", "-q", "origin", "main", `pull/${n}/head`]);
+      if (!fetched.ok) return failed(`fetch: ${fetched.err}`);
+      const added = run("git", ["worktree", "add", "--detach", dir, row.oid]);
+      if (!added.ok) return failed(`worktree: ${added.err}`);
       const merged = run("git", ["merge", "--no-edit", "origin/main"], { cwd: dir });
+      const conflicts = merged.ok ? "" : run("git", ["diff", "--name-only", "--diff-filter=U"], { cwd: dir }).out;
       if (!merged.ok) run("git", ["merge", "--abort"], { cwd: dir });
       const push = merged.ok ? run("git", ["push", "origin", `HEAD:${row.branch}`], { cwd: dir }) : null;
-      run("git", ["worktree", "remove", "--force", dir]);
-      mark(row, "main", { merged: merged.ok, pushed: !!push?.ok, error: push && !push.ok ? push.err.slice(0, 300) : null });
-      if (merged.ok) return push.ok ? "merged main in and pushed" : `merged main in, push failed: ${push.err.split("\n")[0]}`;
-      // A conflict git could not resolve goes straight to a fix job.
-      return `merging main conflicts; ${act(row, { kind: "fix", task: "conflict" }, ctx)}`;
+      fresh(dir);
+      if (push?.ok) return "merged main in and pushed";
+      if (!conflicts) return failed(push ? `push: ${push.err}` : `merge: ${merged.err || merged.out}`);
+      // A conflict git could not resolve goes to a fix job at the next pass,
+      // under the same limits and budget as any other.
+      mark(row, "main", { conflict: true, files: conflicts.split("\n") });
+      return `merging main conflicts in ${conflicts.split("\n").join(", ")}; a fix job resolves it next`;
     }
     case "rerun": {
-      const runs = JSON.parse(run("gh", ["run", "list", "--commit", row.oid, "--json", "databaseId,conclusion"]).out || "[]");
+      const list = run("gh", ["run", "list", "--commit", row.oid, "--json", "databaseId,conclusion"]);
+      if (!list.ok) return `rerun: gh run list failed: ${list.err.split("\n")[0]}`;
+      const runs = JSON.parse(list.out || "[]");
       const failed = runs.filter((r) => ["failure", "timed_out", "startup_failure", "cancelled"].includes(r.conclusion));
       const done = failed.filter((r) => run("gh", ["run", "rerun", String(r.databaseId), "--failed"]).ok).map((r) => r.databaseId);
       mark(row, "rerun", { runs: done });

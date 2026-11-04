@@ -10,7 +10,7 @@ import { ciTask, decide, readiness } from "./shepherd.mjs";
 const opts = { merge: true, maxFixes: 2 };
 const facts = (over = {}) => ({
   dependabot: false, reviewHere: null, fixHere: false, fixes: 0, failed: { review: 0, fix: 0 },
-  mainMergedHere: false, rerunHere: false, ready: null, ...over,
+  mainHere: null, rerunHere: false, ready: null, ...over,
 });
 const row = (state, over = {}) => ({ number: 1, head: "aaaaaaa", state, ...over });
 const kind = (r, f = facts(), o = opts) => decide(r, f, o).kind;
@@ -33,7 +33,7 @@ test("drafts and running CI wait; a dependency update is the owner's", () => {
 test("a green pull request with no review gets one, then a fix for findings", () => {
   assert.equal(kind(row("green")), "review");
   assert.equal(kind(row("behind-main")), "review");
-  const findings = facts({ reviewHere: { verdict: "findings" } });
+  const findings = facts({ reviewHere: { output: { verdict: "findings" } } });
   assert.deepEqual(decide(row("green"), findings, opts), { kind: "fix", task: "review" });
   assert.equal(kind(row("green"), { ...findings, fixHere: true }), "owner");
   assert.equal(kind(row("green"), { ...findings, fixes: 2 }), "owner");
@@ -51,9 +51,17 @@ test("a clean review merges through the gate, or waits on the owner without --me
   assert.equal(kind(row("green"), facts({ ready: "wait" })), "wait");
 });
 
-test("a reviewed pull request behind main gets main merged in once per head", () => {
+test("a reviewed pull request behind main gets main merged in, retried after a failure up to three times", () => {
   assert.equal(kind(row("behind-main"), facts({ ready: "behind" })), "merge-main");
-  assert.equal(kind(row("behind-main"), facts({ ready: "behind", mainMergedHere: true })), "owner");
+  assert.equal(kind(row("behind-main"), facts({ ready: "behind", mainHere: { failures: 2, error: "push: 500" } })), "merge-main");
+  assert.equal(kind(row("behind-main"), facts({ ready: "behind", mainHere: { merged: true, pushed: false } })), "merge-main");
+  assert.deepEqual(decide(row("behind-main"), facts({ ready: "behind", mainHere: { failures: 3, error: "push: 500" } }), opts), {
+    kind: "owner", reason: "merging main in failed three times: push: 500",
+  });
+});
+
+test("a clean review of the current head waits for the gate", () => {
+  assert.equal(kind(row("green"), facts({ reviewHere: { output: { verdict: "clean" } } })), "wait");
 });
 
 test("a head the reviewer never saw is reviewed again", () => {
@@ -62,8 +70,8 @@ test("a head the reviewer never saw is reviewed again", () => {
 
 test("a conflict merges main in, then goes to a fix", () => {
   assert.equal(kind(row("conflicting")), "merge-main");
-  assert.deepEqual(decide(row("conflicting"), facts({ mainMergedHere: true }), opts), { kind: "fix", task: "conflict" });
-  assert.equal(kind(row("conflicting"), facts({ mainMergedHere: true, fixes: 2 })), "owner");
+  assert.deepEqual(decide(row("conflicting"), facts({ mainHere: { conflict: true } }), opts), { kind: "fix", task: "conflict" });
+  assert.equal(kind(row("conflicting"), facts({ mainHere: { conflict: true }, fixes: 2 })), "owner");
 });
 
 test("red CI reruns once per head; then a shared failure is the owner's and one of its own gets a fix", () => {
