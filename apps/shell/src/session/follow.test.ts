@@ -216,7 +216,7 @@ describe("follow", () => {
 
   it("survives an envelope without an event: a notice in its place, and the next event applies", () => {
     const { follower, last } = following();
-    const broken = { v: 2, session_id: "s-replay", seq: 0 } as unknown as (typeof replay)[number];
+    const broken = { v: 3, session_id: "s-replay", seq: 0 } as unknown as (typeof replay)[number];
     follower.receive(broken);
     follower.receive(null as unknown as (typeof replay)[number]);
     follower.receive({ ...(replay[1] as (typeof replay)[number]) });

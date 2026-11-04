@@ -2,6 +2,7 @@
 {"raw":0,"event":{"type":"turn.started","turn":1,"trigger":"user"}}
 {"raw":0,"event":{"type":"session.state","state":"running"}}
 {"raw":1,"message_id":"4cb8194c-94cd-4629-8596-b08380653954","event":{"type":"error","code":"authentication_failed","message":"Not logged in · Please run /login","recoverable":true,"action":"log_in"}}
+{"raw":1,"event":{"type":"usage.updated","turn_output_tokens":0}}
 {"raw":2,"event":{"type":"turn.completed","turn":1,"outcome":"error","duration_ms":178,"is_error":true}}
 {"raw":2,"event":{"type":"usage.updated","cost_usd_total":0.0,"turns":1}}
 {"raw":2,"event":{"type":"session.state","state":"idle"}}
