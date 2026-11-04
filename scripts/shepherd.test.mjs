@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { refusals } from "./merge-pr.mjs";
-import { OWNER_MERGES, blocks, decide, readiness, route } from "./shepherd.mjs";
+import { OWNER_MERGES, blocks, crashRecordName, decide, isFailedRecord, readiness, route } from "./shepherd.mjs";
 
 const opts = { merge: true, maxFixes: 3 };
 const clean = { kind: "review", head: "r1", startedAt: "1", blocks: false, output: { findings: [] } };
@@ -117,3 +117,16 @@ test("red CI reruns once per head, then gets one fix", () => {
   assert.equal(kind(row("ci-red", { signature: "x" }), facts({ rerunHere: true, fixHere: (k) => k === "review" })), "fix", "a review fix on the head is not a CI fix");
 });
 
+
+test("a job that ends before it runs is counted as a failure of its own kind", () => {
+  const name = (action) => crashRecordName(7, "abc1234", action, 1);
+  for (const action of [{ kind: "review" }, { kind: "verify" }]) {
+    assert.ok(isFailedRecord(name(action), 7, "review"), action.kind);
+    assert.ok(!isFailedRecord(name(action), 7, "fix"), action.kind);
+  }
+  for (const task of ["review", "ci", "conflict"]) {
+    assert.ok(isFailedRecord(name({ kind: "fix", task }), 7, "fix"), task);
+    assert.ok(!isFailedRecord(name({ kind: "fix", task }), 7, "review"), task);
+  }
+  assert.ok(!isFailedRecord(name({ kind: "review" }), 77, "review"), "another pull request's record");
+});

@@ -210,7 +210,7 @@ function gather(row) {
   const fixes = mine
     .filter((r) => r.kind === "fix")
     .map((x) => ({ ...x, fixKind: x.task ? fixKind(x) : taskFile(x, "ci") ? "ci" : taskFile(x, "conflict") ? "conflict" : "review" }));
-  const failed = (kind) => files.filter((f) => f.startsWith(`${row.number}-`) && new RegExp(`-${kind}(-ci|-conflict)?\\.`).test(f) && f.endsWith(".failed.json")).length;
+  const failed = (kind) => files.filter((f) => isFailedRecord(f, row.number, kind)).length;
   const f = {
     dependabot: row.branch.startsWith("dependabot/"),
     hold: row.labels.includes(HOLD),
@@ -323,7 +323,21 @@ function act(row, action) {
   }
 }
 
-// Starts a job without waiting for it; `done` settles with its log line.
+// Whether a file in the jobs folder records a failed job of this kind ("review"
+// or "fix") on this pull request, on any head.
+export function isFailedRecord(file, n, kind) {
+  return file.startsWith(`${n}-`) && new RegExp(`-${kind}(-ci|-conflict)?\\.`).test(file) && file.endsWith(".failed.json");
+}
+
+// The record the loop writes for a job that ended before it ran (a usage or
+// tool error, or a crash), which leaves no record of its own. Without it the
+// crash is never counted, and the loop retries until the job budget is gone.
+export function crashRecordName(n, head, action, now) {
+  const kind = action.kind === "fix" ? `fix${["ci", "conflict"].includes(action.task) ? `-${action.task}` : ""}` : "review";
+  return `${n}-${head}-${kind}.${now}.failed.json`;
+}
+
+// Starts a job without waiting for it; `done` settles with its exit code and last line.
 function startJob(row, action) {
   const n = String(row.number);
   let args;
@@ -346,8 +360,7 @@ function startJob(row, action) {
   const child = spawn("node", ["scripts/shepherd-job.mjs", ...args], { cwd: ROOT, stdio: ["ignore", "ignore", "pipe"] });
   let err = "";
   child.stderr.on("data", (d) => (err += d));
-  const done = new Promise((settle) => child.on("close", (code) => settle(code === 0 ? "done" : `failed (${code}): ${err.trim().split("\n").at(-1) ?? ""}`)));
-  return done;
+  return new Promise((settle) => child.on("close", (code) => settle({ code, text: code === 0 ? "done" : `failed (${code}): ${err.trim().split("\n").at(-1) ?? ""}` })));
 }
 
 const JOB_KINDS = ["verify", "fix", "review"];
@@ -472,10 +485,16 @@ async function main() {
         ctx.started.add(key);
         const kind = labelOf(action);
         what = `${kind}: started (job ${ctx.jobs} of ${opts.maxJobs})`;
-        const done = startJob(row, action).then((result) => {
-          say(row.number, row.state, `${kind} ${result}`);
-          // A job that crashed may run again on this head; decide() counts its crashes.
-          if (result !== "done") ctx.started.delete(key);
+        const done = startJob(row, action).then(({ code, text }) => {
+          say(row.number, row.state, `${kind} ${text}`);
+          // Exit 1 leaves the job's own failed record; exit 2 or a crash leaves
+          // none, so the loop writes it, and decide() counts both.
+          if (code === 2 || code === null) {
+            mkdirSync(JOBS, { recursive: true });
+            writeFileSync(join(JOBS, crashRecordName(row.number, row.head, action, Date.now())), JSON.stringify({ kind: action.kind, pr: row.number, head: row.oid, error: text }, null, 2));
+          }
+          // A job that crashed may run again on this head; one that already ran (3) may not.
+          if (code !== 0 && code !== 3) ctx.started.delete(key);
           if (action.kind !== "fix") {
             const rv = latestReview(row.number);
             if (rv) upsertComment(row.number, notesComment(rv));
