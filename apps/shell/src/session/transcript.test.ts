@@ -121,11 +121,11 @@ describe("applying events", () => {
   });
 
   it("refuses a schema version it does not know, and applies nothing after it", () => {
-    const unknown = { ...envelope(0, { type: "user.message", text: "hi", origin: "human" }), v: 3 } as unknown as Envelope;
+    const unknown = { ...envelope(0, { type: "user.message", text: "hi", origin: "human" }), v: 4 } as unknown as Envelope;
     const refused = play([unknown, envelope(1, { type: "user.message", text: "later", origin: "human" })]);
     expect(refused.items).toEqual([]);
     expect(refused.refused).toMatch(/older than Core and needs updating/);
-    expect(refused.refused).toMatch(/version 3/);
+    expect(refused.refused).toMatch(/version 4/);
   });
 });
 
