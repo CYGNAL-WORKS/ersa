@@ -12,4 +12,4 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
-Adapted from `mattpocock/skills` (MIT; see `.claude/skills/THIRD-PARTY.md`). These labels exist in `KPandaK/ersa`.
+Adapted from `mattpocock/skills` (MIT; see `.claude/skills/THIRD-PARTY.md`). These labels exist in `CYGNAL-WORKS/ersa`.

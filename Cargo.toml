@@ -21,7 +21,7 @@ version = "0.1.0"
 edition = "2024"
 license = "UNLICENSED"
 publish = false
-repository = "https://github.com/KPandaK/ersa"
+repository = "https://github.com/CYGNAL-WORKS/ersa"
 
 # Shared dependency versions. A crate opts in with `name.workspace = true`;
 # nothing here is compiled unless some crate asks for it.
