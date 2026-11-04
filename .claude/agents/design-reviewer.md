@@ -15,4 +15,4 @@ Check the changes against `docs/design/DESIGN.md` and the Design section of `CLA
 - Every container has its padding token; compare each screen's PNG with its neighbors.
 - Motion uses a motion token and honors reduced motion.
 - Copy is plain, agrees in number, is true in the state it labels (no "New" on something that exists), and lives in the string catalog.
-- Gallery baselines exist for each state in both themes; open the PNGs and look.
+- Gallery baselines exist for each state in both themes, in every platform's set (ADR 0023); open the PNGs and look.
