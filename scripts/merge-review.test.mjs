@@ -8,6 +8,7 @@ import { MARK, blocking, claudeArgs, instructionPaths, main, ownerPaths, parseSt
 
 const HEAD = "b".repeat(40);
 const OLD = "a".repeat(40);
+const ME = "KPandaK";
 const finding = (over) => ({ severity: "medium", origin: "new", location: "scripts/x.mjs:3", defect: "drops the last line.", scenario: "a file without a trailing newline loses its last line", plain: "The last line of a file can go missing.", ...over });
 const body = (head, findings = []) => reviewBody({ head, findings, dismissed: [], outcome: "" });
 
@@ -17,9 +18,9 @@ test("a high or medium finding blocks, listed or new; lows do not", () => {
   assert.deepEqual(blocking(undefined), []);
 });
 
-test("the owner merges workflows, the review, the gate, the hooks and every instruction file", () => {
-  const owner = [".github/workflows/review.yml", "scripts/hooks/guard-briefs.mjs", "scripts/merge-pr.mjs", "scripts/merge-review.mjs", "CLAUDE.md", "crates/core/CLAUDE.md", "apps/CLAUDE.local.md", ".claude/skills/x/SKILL.md", "apps/shell/.claude/settings.json", ".mcp.json", "apps/.mcp.json"];
-  const others = ["scripts/check.mjs", "scripts/merge-pr.test.mjs", "docs/agents/orchestration.md", "docs/CLAUDE.md.txt", "crates/core/src/lib.rs", "github/x"];
+test("the owner merges workflows, the review, the gate, the poller, the hooks and every instruction file", () => {
+  const owner = [".github/workflows/ci.yml", "scripts/hooks/guard-briefs.mjs", "scripts/merge-pr.mjs", "scripts/merge-review.mjs", "scripts/merge-review-watch.mjs", "CLAUDE.md", "crates/core/CLAUDE.md", "apps/CLAUDE.local.md", ".claude/skills/x/SKILL.md", "apps/shell/.claude/settings.json", ".mcp.json", "apps/.mcp.json"];
+  const others = ["scripts/check.mjs", "scripts/merge-pr.test.mjs", "scripts/merge-review-watch.test.mjs", "docs/agents/orchestration.md", "docs/CLAUDE.md.txt", "crates/core/src/lib.rs", "github/x"];
   assert.deepEqual(ownerPaths([...owner, ...others]), owner);
 });
 
@@ -44,18 +45,19 @@ test("a review body starts with the marker and carries its state, which round-tr
   assert.equal(parseState("a comment that mentions <!-- merge-review -->"), null);
 });
 
-test("the previous review is the latest trusted one on this head or an ancestor", () => {
+test("the previous review is the latest one this account posted on this head or an ancestor", () => {
   const isAncestor = (a, b) => a === OLD && b === HEAD;
   const reviews = [
-    { author: "github-actions[bot]", body: body("c".repeat(40)) },
-    { author: "github-actions[bot]", body: body(OLD, [finding()]) },
+    { author: ME, body: body("c".repeat(40)) },
+    { author: ME, body: body(OLD, [finding()]) },
     { author: "someone", body: body(HEAD) },
-    { author: "github-actions[bot]", body: "Looks good." },
+    { author: "github-actions[bot]", body: body(HEAD) },
+    { author: ME, body: "Looks good." },
   ];
-  assert.deepEqual(previousReview(reviews, HEAD, isAncestor), { head: OLD, verdict: "blocked", findings: [finding()] });
-  assert.equal(previousReview(reviews, HEAD, isAncestor, ["github-actions[bot]", "someone"]).head, HEAD, "a run by hand finds its own review");
-  assert.equal(previousReview(reviews.slice(0, 1), HEAD, isAncestor), null);
-  assert.equal(previousReview([], HEAD, isAncestor), null);
+  assert.deepEqual(previousReview(reviews, HEAD, isAncestor, [ME]), { head: OLD, verdict: "blocked", findings: [finding()] }, "another account's review, the retired workflow's included, does not count");
+  assert.equal(previousReview(reviews, HEAD, isAncestor, [ME, "someone"]).head, HEAD);
+  assert.equal(previousReview(reviews.slice(0, 1), HEAD, isAncestor, [ME]), null);
+  assert.equal(previousReview([], HEAD, isAncestor, [ME]), null);
 });
 
 test("a first review reads the whole diff; a re-review reads the commits since the previous head", () => {
@@ -76,37 +78,39 @@ test("a first review reads the whole diff; a re-review reads the commits since t
 test("the review runs Opus with hooks on and may not commit, push or write on GitHub", () => {
   const args = claudeArgs("p");
   const denied = args.slice(args.indexOf("--disallowedTools") + 1);
-  for (const rule of ["Bash(git commit:*)", "Bash(git push:*)", "Bash(gh pr merge:*)", "Bash(gh api:*)", "PowerShell"]) assert.ok(denied.includes(rule), rule);
+  for (const rule of ["Bash(git commit:*)", "Bash(git push:*)", "Bash(gh pr merge:*)", "Bash(gh api:*)", "Bash(gh issue reopen:*)", "Bash(gh issue lock:*)", "Bash(gh issue transfer:*)", "PowerShell"]) assert.ok(denied.includes(rule), rule);
   assert.ok(!args.includes("--settings"));
   assert.equal(args[args.indexOf("--model") + 1], "opus");
   assert.ok(JSON.parse(args[args.indexOf("--json-schema") + 1]).required.includes("dismissed"));
   assert.deepEqual(claudeArgs("p", "sid").slice(-2), ["--resume", "sid"]);
 });
 
+const REVIEW_URL = "https://github.com/o/r/pull/7#pullrequestreview-1";
+
 // main() with every tool stood in for. `gh pr view` answers from `pr` for the
 // review and from `gate` for the gate (which asks for `mergeable`), the reviews
 // list from `reviews`, claude from `claude`, `git diff` from `files` (against
-// main) and `since` (against the previous head), and main's tip is an ancestor
-// of the head unless `behind`.
-function drive(argv, { pr = {}, reviews = [], claude, gate = {}, behind = false, reviewedMissing = false, ancestors = [], files = "scripts/x.mjs\0scripts/x.test.mjs\0", since = "", mainHas = [] } = {}) {
+// main) and `since` (against the previous head).
+function drive(argv, { pr = {}, reviews = [], claude, gate = {}, reviewedMissing = false, ancestors = [], files = "scripts/x.mjs\0scripts/x.test.mjs\0", since = "", mainHas = [], me = { ok: true, out: ME, err: "" }, statusOk = true } = {}) {
   const calls = [];
   const ok = (out = "") => ({ ok: true, out, err: "" });
   const no = (err = "no") => ({ ok: false, out: "", err });
   const run = (cmd, args) => {
     calls.push([cmd, ...args]);
     if (cmd === "gh" && args[1] === "view" && args.some((a) => a.includes("mergeable"))) {
-      // The head's checks as GitHub reports them at that moment: CI, and the review's own check run as this run last left it.
-      const own = calls.filter((c) => c[0] === "gh" && c.some((a) => /check-runs/.test(a))).at(-1);
-      const review = own ? [{ name: "Merge review", status: own.includes("status=completed") ? "COMPLETED" : "IN_PROGRESS", conclusion: own.find((a) => a.startsWith("conclusion="))?.slice(11).toUpperCase() ?? "" }] : [];
+      // The head's checks as GitHub reports them at that moment: CI, and the review's own status as this run last left it.
+      const own = calls.filter((c) => c[0] === "gh" && c.some((a) => /\/statuses\//.test(a))).at(-1);
+      const review = own ? [{ context: "Merge review", state: own.find((a) => a.startsWith("state=")).slice(6).toUpperCase() }] : [];
       return gate.view ?? ok(JSON.stringify({ state: "OPEN", isDraft: false, mergeable: "MERGEABLE", headRefOid: HEAD, statusCheckRollup: [{ name: "CI", status: "COMPLETED", conclusion: "SUCCESS" }, ...review], ...gate.pr }));
     }
-    if (cmd === "gh" && args[1] === "view") return ok(JSON.stringify({ state: "OPEN", isDraft: false, headRefOid: HEAD, headRefName: "claude/x", isCrossRepository: false, labels: [], title: "T", body: "Fixes #5", author: { login: "KPandaK", is_bot: false }, ...pr }));
+    if (cmd === "gh" && args[1] === "view") return ok(JSON.stringify({ state: "OPEN", isDraft: false, headRefOid: HEAD, headRefName: "claude/x", isCrossRepository: false, labels: [], title: "T", body: "Fixes #5", author: { login: ME, is_bot: false }, ...pr }));
     if (cmd === "gh" && args[0] === "api" && args[1] === "--paginate") return ok(reviews.map((r) => JSON.stringify(r)).join("\n"));
-    if (cmd === "gh" && args[1] === "user") return no();
-    if (cmd === "gh" && args[1] === "api" && args[2] === "repos/{owner}/{repo}/check-runs") return ok("77");
+    if (cmd === "gh" && args[1] === "user") return me;
+    if (cmd === "gh" && args[0] === "api" && /\/statuses\//.test(args[1])) return statusOk ? ok(JSON.stringify({ id: 1 })) : no("HTTP 403");
+    if (cmd === "gh" && args[0] === "api" && /\/reviews$/.test(args[1])) return ok(REVIEW_URL);
     if (cmd === "gh" && args[0] === "pr" && args[1] === "merge") return gate.merge ?? ok();
     if (cmd === "git" && args[0] === "rev-parse") return ok(HEAD);
-    if (cmd === "git" && args[0] === "merge-base") return args[2] === "origin/main" ? (behind ? no("") : ok()) : (args[2] === HEAD && !reviewedMissing) || ancestors.includes(args[2]) ? ok() : no("");
+    if (cmd === "git" && args[0] === "merge-base") return (args[2] === HEAD && !reviewedMissing) || ancestors.includes(args[2]) ? ok() : no("");
     if (cmd === "git" && args[0] === "diff") return ok(args.includes("origin/main...HEAD") ? files : since);
     if (cmd === "git" && args[0] === "cat-file") return mainHas.includes(args[2].replace("origin/main:", "")) ? ok() : no("");
     if (cmd === "git" && args[0] === "rev-list") return ok("");
@@ -120,36 +124,41 @@ function drive(argv, { pr = {}, reviews = [], claude, gate = {}, behind = false,
     calls,
     reviewed: of("claude", 0, "claude").length,
     posted: calls.filter((c) => c[0] === "gh" && c[1] === "api" && /\/reviews$/.test(c[2]) && c.includes("event=COMMENT")),
-    merged: of("gh", 2, "merge"),
+    queued: of("gh", 2, "merge"),
     labeled: of("gh", 2, "edit"),
-    checks: calls.filter((c) => c[0] === "gh" && c.some((a) => /check-runs/.test(a))).map((c) => c.find((a) => /^(status=in_progress|conclusion=)/.test(a))),
+    // Each status the run set on the head, as "state" or "state url".
+    statuses: calls.filter((c) => c[0] === "gh" && c[1] === "api" && /\/statuses\//.test(c[2])).map((c) => [c.find((a) => a.startsWith("state=")).slice(6), c.find((a) => a.startsWith("target_url="))?.slice(11)].filter(Boolean).join(" ")),
   };
 }
 
-test("a head that moved, a closed, draft or fork pull request gets no review", () => {
+test("a head that moved, a closed, draft or fork pull request gets no review and no status", () => {
   for (const pr of [{ headRefOid: OLD }, { state: "MERGED" }, { isDraft: true }, { isCrossRepository: true }]) {
     const got = drive(["7", "--head", HEAD], { pr });
     assert.equal(got.code, 0, JSON.stringify(pr));
     assert.match(got.stdout, /nothing to do/);
     assert.equal(got.reviewed, 0);
     assert.equal(got.posted.length, 0);
-    assert.equal(got.checks.length, 0);
+    assert.deepEqual(got.statuses, []);
   }
 });
 
-test("a clean review is posted on the head and the head merges through the gate, with a check run for the watcher", () => {
+test("a clean review is posted on the head, the status points at it, and the head enters the merge queue through the gate", () => {
   const got = drive(["7", "--head", HEAD]);
   assert.equal(got.code, 0, got.stderr);
   assert.equal(got.reviewed, 1);
   assert.equal(got.posted.length, 1);
   assert.ok(got.posted[0].includes(`commit_id=${HEAD}`));
-  assert.deepEqual(got.merged, [["gh", "pr", "merge", "7", "--merge", "--match-head-commit", HEAD]]);
+  assert.deepEqual(got.queued, [["gh", "pr", "merge", "7", "--auto", "--merge", "--match-head-commit", HEAD]]);
   assert.equal(got.labeled.length, 0);
-  assert.deepEqual(got.checks, ["status=in_progress", "conclusion=success"]);
+  assert.deepEqual(got.statuses, ["pending", `success ${REVIEW_URL}`]);
+  const status = got.calls.find((c) => c[0] === "gh" && c.includes("state=success"));
+  assert.ok(status.includes("context=Merge review") && status[2] === `repos/{owner}/{repo}/statuses/${HEAD}`, status.join(" "));
   // The instructions and hooks came from main before the review ran.
   assert.ok(got.calls.some((c) => c.join(" ") === "git checkout origin/main -- CLAUDE.md .claude scripts/hooks"));
   const order = got.calls.map((c) => c.join(" "));
   assert.ok(order.findIndex((c) => c.startsWith("git checkout")) < order.findIndex((c) => c.startsWith("claude")));
+  // The enqueue comes first: a run that dies between the two leaves a pending head the poller takes up again, not a green one that never queued.
+  assert.ok(order.findIndex((c) => c.startsWith("gh pr merge")) < order.findIndex((c) => c.includes("state=success")));
 });
 
 test("every instruction file the diff touched goes back to main's version, or away where main has none", () => {
@@ -162,105 +171,117 @@ test("every instruction file the diff touched goes back to main's version, or aw
   assert.ok(got.calls.some((c) => c[0] === "git" && c[1] === "cat-file" && c[3] === "origin/main:nope/apps/.mcp.json"));
 });
 
-test("a blocking finding is posted, fails the check and exits 1 without merging", () => {
+test("a blocking finding is posted, fails the status and exits 1 without enqueuing", () => {
   const got = drive(["7", "--head", HEAD], { claude: { structured_output: { findings: [finding()], dismissed: [{ finding: "x", evidence: "y" }] } } });
   assert.equal(got.code, 1);
   assert.equal(got.posted.length, 1);
-  assert.equal(got.merged.length, 0);
-  assert.deepEqual(got.checks, ["status=in_progress", "conclusion=failure"]);
+  assert.equal(got.queued.length, 0);
+  assert.deepEqual(got.statuses, ["pending", `failure ${REVIEW_URL}`]);
+  const status = got.calls.find((c) => c[0] === "gh" && c.includes("state=failure"));
+  assert.ok(status.some((a) => a === "description=1 finding(s) block the merge; see the review."), status.join(" "));
 });
 
-test("a head already reviewed is not reviewed or posted again, and a clean one still merges", () => {
-  const got = drive(["7", "--head", HEAD], { reviews: [{ author: "github-actions[bot]", body: body(HEAD) }] });
+test("a head already reviewed is not reviewed or posted again, and a clean one still enters the queue", () => {
+  const got = drive(["7", "--head", HEAD], { reviews: [{ author: ME, body: body(HEAD) }] });
   assert.equal(got.code, 0, got.stderr);
   assert.equal(got.reviewed, 0);
   assert.equal(got.posted.length, 0);
-  assert.equal(got.merged.length, 1);
-  const blocked = drive(["7", "--head", HEAD], { reviews: [{ author: "github-actions[bot]", body: body(HEAD, [finding()]) }] });
+  assert.equal(got.queued.length, 1);
+  assert.deepEqual(got.statuses, ["pending", "success"], "no review was posted this run, so the status has no address");
+  const blocked = drive(["7", "--head", HEAD], { reviews: [{ author: ME, body: body(HEAD, [finding()]) }] });
   assert.equal(blocked.code, 1);
   assert.equal(blocked.reviewed, 0);
+  // The retired workflow's review of the same head is another account's and does not count.
+  const bot = drive(["7", "--head", HEAD], { reviews: [{ author: "github-actions[bot]", body: body(HEAD) }] });
+  assert.equal(bot.reviewed, 1);
 });
 
-test("a previous review on an ancestor makes this a re-review, unless the commits since touched .github/", () => {
-  const reviews = [{ author: "github-actions[bot]", body: body(OLD, [finding()]) }];
+test("a previous review on an ancestor makes this a re-review", () => {
+  const reviews = [{ author: ME, body: body(OLD, [finding()]) }];
   const got = drive(["7", "--head", HEAD], { reviews, ancestors: [OLD], since: "scripts/x.mjs\0" });
   assert.equal(got.reviewed, 1);
-  const text = (r) => r.calls.find((c) => c[0] === "claude")[2];
-  assert.match(text(got), /step 6/);
-  assert.match(text(got), /drops the last line/);
-  assert.ok(got.calls.some((c) => c[0] === "git" && c[1] === "diff" && c.includes(OLD)));
-  // A workflow the pull request carried could have posted that review itself.
-  const forged = drive(["7", "--head", HEAD], { reviews, ancestors: [OLD], since: "scripts/x.mjs\0.github/workflows/fake.yml\0" });
-  assert.match(text(forged), /steps 1 to 4/);
-  assert.doesNotMatch(text(forged), /step 6/);
+  const text = got.calls.find((c) => c[0] === "claude")[2];
+  assert.match(text, /step 6/);
+  assert.match(text, /drops the last line/);
 });
 
-test("a clean head on owner paths or with a hold label is the owner's and not merged; a bot's pull request is the owner's unreviewed", () => {
-  const owner = drive(["7", "--head", HEAD], { files: "scripts/x.mjs\0.github/workflows/review.yml\0" });
+test("the account this runs as must be readable: its reviews are the only trusted ones", () => {
+  const got = drive(["7", "--head", HEAD], { me: { ok: false, out: "", err: "not logged in" } });
+  assert.equal(got.code, 2);
+  assert.match(got.stderr, /gh api user.*not logged in/);
+  assert.equal(got.reviewed, 0);
+  assert.deepEqual(got.statuses, ["pending", "error"]);
+});
+
+test("a clean head on owner paths or with a hold label is the owner's and not enqueued; a bot's pull request is the owner's unreviewed, with a status", () => {
+  const owner = drive(["7", "--head", HEAD], { files: "scripts/x.mjs\0.github/workflows/ci.yml\0" });
   assert.equal(owner.code, 0, owner.stderr);
-  assert.equal(owner.merged.length, 0);
+  assert.equal(owner.queued.length, 0);
   assert.deepEqual(owner.labeled, [["gh", "pr", "edit", "7", "--add-label", "needs-owner"]]);
-  assert.match(owner.stdout, /changes `\.github\/workflows\/review\.yml`, which the owner merges/);
+  assert.match(owner.stdout, /changes `\.github\/workflows\/ci\.yml`, which the owner merges/);
+  assert.deepEqual(owner.statuses, ["pending", `success ${REVIEW_URL}`]);
   const hold = drive(["7", "--head", HEAD], { pr: { labels: [{ name: "hold" }] }, files: "scripts/merge-pr.mjs\0" });
   assert.equal(hold.code, 0);
-  assert.equal(hold.merged.length, 0);
+  assert.equal(hold.queued.length, 0);
   assert.equal(hold.labeled.length, 0, "a held pull request is not labeled for the owner");
   assert.match(hold.stdout, /hold/);
-  for (const author of [{ login: "app/dependabot", is_bot: true }, { login: "dependabot[bot]" }, { login: "renovate", is_bot: true }]) {
+  for (const author of [{ login: "app/dependabot", is_bot: true }, { login: "dependabot[bot]" }]) {
     const bot = drive(["7", "--head", HEAD], { pr: { author } });
     assert.equal(bot.code, 0, author.login);
     assert.equal(bot.reviewed, 0, "a bot's code never runs under the review");
-    assert.equal(bot.merged.length, 0, author.login);
+    assert.equal(bot.queued.length, 0, author.login);
     assert.deepEqual(bot.labeled, [["gh", "pr", "edit", "7", "--add-label", "needs-owner"]]);
+    assert.deepEqual(bot.statuses, ["success"], "the status marks the head so the poller does not come back to it");
   }
   const already = drive(["7", "--head", HEAD], { pr: { author: { login: "app/dependabot", is_bot: true }, labels: [{ name: "needs-owner" }] } });
   assert.equal(already.labeled.length, 0);
 });
 
-test("a head behind main is told so and stays green; any other refusal or a gate error is surfaced and red", () => {
-  const behind = drive(["7", "--head", HEAD], { behind: true });
-  assert.equal(behind.code, 0, behind.stderr);
-  assert.match(behind.stdout, /Behind main/);
-  assert.equal(behind.merged.length, 0);
-  const refused = drive(["7", "--head", HEAD], { behind: true, gate: { pr: { mergeable: "CONFLICTING" } } });
-  assert.equal(refused.code, 1);
-  assert.match(refused.stdout, /The merge gate refused:[\s\S]*conflicting[\s\S]*main's tip/);
-  assert.equal(refused.merged.length, 0);
+test("a clean head the gate refuses stays pending for another try; a gate error or a failed enqueue is an error", () => {
+  const long = { name: "Build, lint, test, dependencies (Linux), and a check whose name goes on for a very long while", status: "COMPLETED", conclusion: "FAILURE" };
+  const refused = drive(["7", "--head", HEAD], { gate: { pr: { mergeable: "CONFLICTING", statusCheckRollup: [long, { ...long, name: `${long.name} too` }] } } });
+  assert.equal(refused.code, 0, refused.stderr);
+  assert.match(refused.stdout, /does not pass yet[\s\S]*conflicting/);
+  assert.equal(refused.queued.length, 0);
   assert.equal(refused.posted.length, 1, "the review is kept");
-  assert.deepEqual(behind.checks, ["status=in_progress", "conclusion=success"]);
-  assert.deepEqual(refused.checks, ["status=in_progress", "conclusion=success", "conclusion=failure"], "a refusal after a clean verdict turns the check red");
-  const both = drive(["7", "--head", HEAD], { behind: true, gate: { pr: { statusCheckRollup: [{ name: "CI", status: "COMPLETED", conclusion: "FAILURE" }] } } });
-  assert.equal(both.code, 1, "behind main and red CI is not merely behind main");
-  assert.match(both.stdout, /The merge gate refused:[\s\S]*CI did not pass/);
-  // Behind main first in the list, with another reason after it, is still not merely behind main.
-  const unreviewed = drive(["7", "--head", HEAD], { behind: true, reviewedMissing: true });
-  assert.equal(unreviewed.code, 1);
-  assert.match(unreviewed.stdout, /The merge gate refused:[\s\S]*main's tip[\s\S]*not in the branch's history/);
+  // Pending twice: once when the run started, once with the reason, so the poller's hour starts from the verdict.
+  assert.deepEqual(refused.statuses, ["pending", `pending ${REVIEW_URL}`]);
+  const description = refused.calls.filter((c) => c[0] === "gh" && c.includes("state=pending")).at(-1).find((a) => a.startsWith("description=")).slice("description=".length);
+  assert.match(description, /^Clean; the merge gate does not pass yet: GitHub reports it conflicting; CI did not pass: Build/);
+  assert.equal(description.length, 140, "GitHub keeps 140 characters of a description");
   const broken = drive(["7", "--head", HEAD], { gate: { view: { ok: false, out: "", err: "gh down" } } });
   assert.equal(broken.code, 2);
   assert.match(broken.stdout, /could not run:[\s\S]*gh down/);
-  assert.deepEqual(broken.checks, ["status=in_progress", "conclusion=success", "conclusion=failure"], "a gate error turns the check red");
-  const failedMerge = drive(["7", "--head", HEAD], { gate: { merge: { ok: false, out: "", err: "head moved" } } });
-  assert.equal(failedMerge.code, 2);
-  assert.match(failedMerge.stderr, /after the review was posted[\s\S]*head moved/);
-  assert.deepEqual(failedMerge.checks, ["status=in_progress", "conclusion=success", "conclusion=failure"], "a failed merge turns the check red");
+  assert.deepEqual(broken.statuses, ["pending", `error ${REVIEW_URL}`]);
+  const failedQueue = drive(["7", "--head", HEAD], { gate: { merge: { ok: false, out: "", err: "head moved" } } });
+  assert.equal(failedQueue.code, 2);
+  assert.match(failedQueue.stderr, /merge queue failed after the review was posted[\s\S]*head moved/);
+  assert.deepEqual(failedQueue.statuses, ["pending", "error"], "a failed enqueue is red, never green");
 });
 
-test("a run that returns no result is resumed once, briefly, then fails with nothing posted and the check run failed", () => {
+test("a status the token cannot set stops the run before the review spends anything", () => {
+  const got = drive(["7", "--head", HEAD], { statusOk: false });
+  assert.equal(got.code, 2);
+  assert.match(got.stderr, /"Merge review" status could not be set to pending: HTTP 403/);
+  assert.equal(got.reviewed, 0);
+  assert.equal(got.posted.length, 0);
+});
+
+test("a run that returns no result is resumed once, briefly, then fails with nothing posted and the status an error", () => {
   let n = 0;
-  const checks = [];
+  const statuses = [];
   const minutes = [];
   const run = (cmd, args, m) => {
-    if (cmd === "gh" && args.some((a) => /check-runs/.test(a))) {
-      checks.push(args.find((a) => /^(status=in_progress|conclusion=)/.test(a)));
-      return { ok: true, out: "77", err: "" };
+    if (cmd === "gh" && args[0] === "api" && /\/statuses\//.test(args[1])) {
+      statuses.push(args.find((a) => a.startsWith("state=")));
+      return { ok: true, out: "{}", err: "" };
     }
     if (cmd === "claude") {
       minutes.push(m);
       return { ok: true, out: JSON.stringify(++n === 1 ? { session_id: "s1", result: "ran out" } : { is_error: true, subtype: "error_max_turns" }), err: "" };
     }
     if (cmd === "gh" && args[1] === "view") return { ok: true, out: JSON.stringify({ state: "OPEN", isDraft: false, headRefOid: HEAD, headRefName: "b", isCrossRepository: false, labels: [], title: "T", body: "", author: {} }), err: "" };
-    if (cmd === "gh" && args[1] === "user") return { ok: false, out: "", err: "" };
+    if (cmd === "gh" && args[1] === "user") return { ok: true, out: ME, err: "" };
     if (cmd === "git" && args[0] === "rev-parse") return { ok: true, out: HEAD, err: "" };
     if (cmd === "gh" && args[0] === "api" && /reviews$/.test(args[1])) throw new Error("posted");
     return { ok: true, out: "", err: "" };
@@ -269,8 +290,8 @@ test("a run that returns no result is resumed once, briefly, then fails with not
   assert.equal(got.code, 2);
   assert.match(got.stderr, /no result: error_max_turns/);
   assert.equal(n, 2);
-  assert.ok(minutes[0] + minutes[1] < 45, `the two runs fit in the job's 45 minutes: ${minutes}`);
-  assert.deepEqual(checks, ["status=in_progress", "conclusion=failure"]);
+  assert.ok(minutes[0] + minutes[1] < 45, `the two runs end within the hour the poller allows: ${minutes}`);
+  assert.deepEqual(statuses, ["state=pending", "state=error"]);
 });
 
 test("a usage error or a checkout at another commit exits 2 before anything runs", () => {
