@@ -4,7 +4,8 @@ Ersa is a desktop harness for running many coding-agent sessions at once, each i
 
 ## How we work
 
-- **Ersa is built agentically.** Agents specify, implement, verify and review; the owner directs and makes the judgment calls. Verification is the bottleneck, so prefer a check a machine runs over a person reading a diff. When an agent gets something wrong, fix the harness (brief, skill, check, hook) as well as the code, so the next session gets it right.
+- **Ersa is built agentically.** Agents specify, implement, verify and review; the owner directs and makes the judgment calls. Verification is the bottleneck, so prefer a check a machine runs over a person reading a diff. When an agent gets something wrong, fix the harness (brief, skill, check, hook) as well as the code, so the next session gets it right. Auto-memory is off for this project: a lesson kept in one agent's memory is lost to every other agent, so it goes in the harness.
+- **Escalations are in plain English.** Anything handed to the owner to decide leads with plain English: what goes wrong, for whom, why it matters, and what to decide. Technical detail follows it and never replaces it.
 - **Briefs are the source of truth for behavior.** They live in `docs/briefs/`. Code and tests derive from briefs and cite them by requirement ID. Briefs never cite files, functions, or code. Read `docs/briefs/README.md` before writing or changing one.
 - **Decisions live in `docs/adr/`.** Before proposing a change of direction, read the ADR index. Record a decision when it would be costly to reverse or when a future reader could plausibly choose differently. Supersede, never edit.
 - **Words live in `docs/GLOSSARY.md`.** Use the glossary term everywhere: briefs, identifiers, UI copy. A new concept gets a term before it is used: planning sessions add it, implementing sessions propose it as an inbox line.
