@@ -3,9 +3,9 @@
     "ersa": {
       "type": "stdio",
       "command": "node",
-      "args": ["D:/Projects/ersa/scripts/fixtures/permission-server.mjs"],
+      "args": ["C:/Users/user/repo/scripts/fixtures/permission-server.mjs"],
       "env": {
-        "ERSA_PERMISSION_LOG": "D:/Projects/ersa/docs/briefs/protocol/fixtures/claude-code/2.1.302/permission-server.log"
+        "ERSA_PERMISSION_LOG": "C:/Users/user/repo/docs/briefs/protocol/fixtures/claude-code/2.1.302/permission-server.log"
       }
     }
   }

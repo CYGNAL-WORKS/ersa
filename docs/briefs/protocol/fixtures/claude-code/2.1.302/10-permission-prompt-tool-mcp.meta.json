@@ -15,7 +15,7 @@
     "--max-turns",
     "3",
     "--mcp-config",
-    "D:/Projects/ersa/scripts/fixtures/mcp-permission.json",
+    "C:/Users/user/repo/scripts/fixtures/mcp-permission.json",
     "--permission-prompt-tool",
     "mcp__ersa__approve",
     "Use the Bash tool to run exactly this command: echo probe > probe.txt. Then report whether it succeeded."

@@ -13,8 +13,8 @@ set -euo pipefail
 
 here="$(cd "$(dirname "$0")/.." && pwd)"
 repo="$(cd "$here/../.." && pwd)"
-# Keep in step with @playwright/test in package.json, and its Node major with
-# the interface job in .github/workflows/ci.yml.
+# Keep in step with @playwright/test in package.json, and identical to the
+# interface job's container in .github/workflows/ci.yml.
 image="mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea"
 update="${1:-}"
 
