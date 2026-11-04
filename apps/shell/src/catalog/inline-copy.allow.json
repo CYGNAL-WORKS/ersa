@@ -1,0 +1,181 @@
+{
+  "App.tsx": [
+    "Core is not connected.",
+    "Core's status",
+    "Ersa did not quit:",
+    "No session open. Start one from a project in the rail.",
+    "Rail",
+    "Retry",
+    "Root workspace",
+    "Running sessions keep their current settings until they are stopped.",
+    "The composer",
+    "The new-session screen",
+    "The projects",
+    "The sessions",
+    "This session",
+    "Untitled session"
+  ],
+  "components/AddProject.tsx": [
+    "Add",
+    "Add a project",
+    "Adding…",
+    "Folder path",
+    "Project folder"
+  ],
+  "components/Composer.tsx": [
+    "Composer",
+    "Enter to send, Shift+Enter for a new line",
+    "Message",
+    "Send",
+    "Sending…",
+    "Write to the agent"
+  ],
+  "components/ContextRing.tsx": [
+    "Context:",
+    "Context: none used yet",
+    "percent used"
+  ],
+  "components/CoreStatus.tsx": [
+    "Attached to",
+    "Connecting…",
+    "Core",
+    "Reconnecting…",
+    "Retry",
+    "Unavailable"
+  ],
+  "components/ErrorBoundary.tsx": [
+    "could not be shown:"
+  ],
+  "components/NewSessionScreen.tsx": [
+    "Add a project to start a session: a folder on this computer.",
+    "Detecting the backends on this host…",
+    "Ersa",
+    "New session",
+    "No backend is available on this host."
+  ],
+  "components/ProjectList.tsx": [
+    "Don’t trust",
+    "Loading…",
+    "New session",
+    "No projects yet.",
+    "Not trusted",
+    "Projects",
+    "Projects added to Core appear here.",
+    "Projects appear once Core is connected.",
+    "Saving…",
+    "Trusted",
+    "Trust…"
+  ],
+  "components/QuitQuestion.tsx": [
+    "Cancel",
+    "Ersa could not count the sessions. Any session working or waiting for you will stop. Closing the window instead keeps them running.",
+    "Quit",
+    "Quit Ersa?",
+    "Quitting…",
+    "it",
+    "running.",
+    "session is",
+    "sessions are",
+    "them",
+    "working or waiting for you, and will stop. Closing the window instead keeps"
+  ],
+  "components/SessionControls.tsx": [
+    "Backend",
+    "Detecting backends…",
+    "Detection failed",
+    "Effort",
+    "Host",
+    "Model",
+    "New workspace",
+    "No backend",
+    "No projects",
+    "Not installed",
+    "Permission mode",
+    "Project",
+    "Root workspace",
+    "Session controls",
+    "Workspace"
+  ],
+  "components/SessionList.tsx": [
+    "Loading…",
+    "Needs you ·",
+    "No sessions yet.",
+    "Sessions",
+    "Sessions appear once Core is connected.",
+    "Start one from a project above.",
+    "Untitled session",
+    "Workspace"
+  ],
+  "components/SessionTitle.tsx": [
+    "Cancel",
+    "Double-click, or press Enter or F2, to rename",
+    "Rename the session",
+    "Save",
+    "Saving…",
+    "Session title"
+  ],
+  "components/Transcript.tsx": [
+    "Allow",
+    "An invisible character",
+    "Answer once Core is connected",
+    "Deny",
+    "Done",
+    "Failed",
+    "Invisible characters",
+    "Loading…",
+    "Not answered",
+    "Not receiving this session's events:",
+    "Nothing yet. Write to the agent below.",
+    "Path:",
+    "Permission:",
+    "Question",
+    "Question, answered",
+    "Reconnecting to Core…",
+    "Retry",
+    "Running…",
+    "Sending…",
+    "Thinking…",
+    "Thought",
+    "Transcript",
+    "U+",
+    "Waiting for you",
+    "You",
+    "more invisible characters, each shown as"
+  ],
+  "components/TrustQuestion.tsx": [
+    "A trusted project’s own configuration runs in its sessions: hooks and MCP servers that start programs on this computer, and settings that change what the agent may do without asking.",
+    "Add, not trusted",
+    "Add, trusted",
+    "Cancel",
+    "Claude Code records the trust for the whole repository the project is in, and applies it outside Ersa too.",
+    "Trust",
+    "Untrusted, its sessions use only your own settings."
+  ],
+  "core/connection.ts": [
+    "Core's handshake could not be read; this window may be older than Core."
+  ],
+  "session/controls.ts": [
+    "Root workspace"
+  ],
+  "session/follow.ts": [
+    "Earlier events of this session are no longer held."
+  ],
+  "session/start.ts": [
+    "No backend is available on this host.",
+    "This project has no root workspace in Core."
+  ],
+  "session/states.ts": [
+    "Needs you"
+  ],
+  "session/transcript.ts": [
+    "An event this window could not read:",
+    "An event this window does not show (",
+    "The agent exited.",
+    "The session ended with an error.",
+    "The turn ended early.",
+    "The turn ended with an error.",
+    "The turn stopped at its turn limit.",
+    "The turn was interrupted.",
+    "This window is older than Core and needs updating: this session's events use schema version"
+  ]
+}
