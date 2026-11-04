@@ -1,4 +1,5 @@
 {
+  "autoMemoryEnabled": false,
   "attribution": {
     "commit": "",
     "pr": "",
@@ -12,6 +13,15 @@
           {
             "type": "command",
             "command": "node scripts/hooks/guard-briefs.mjs"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hooks/check-manifest.mjs"
           }
         ]
       }

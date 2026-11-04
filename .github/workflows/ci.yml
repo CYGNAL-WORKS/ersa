@@ -122,7 +122,7 @@ jobs:
         run: cargo test --locked
 
       - name: Script tests
-        run: node --test scripts/deps-check.test.mjs scripts/pr-queue.test.mjs scripts/merge-pr.test.mjs scripts/shepherd.test.mjs scripts/shepherd-job.test.mjs
+        run: node --test scripts/deps-check.test.mjs scripts/check-manifest-hook.test.mjs scripts/pr-queue.test.mjs scripts/merge-pr.test.mjs scripts/shepherd.test.mjs scripts/shepherd-job.test.mjs
 
       - name: Manifest
         run: node scripts/manifest.mjs --check
