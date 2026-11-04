@@ -227,10 +227,19 @@ async fn a_shell_that_exits_without_quit_leaves_core_serving() {
         let location = location.clone();
         async move {
             assert!(ready, "the Shell did not launch Core");
-            assert!(
-                bridge::alive(&location.endpoint).await,
-                "Core stopped with the Shell"
-            );
+            if !bridge::alive(&location.endpoint).await {
+                // Why: the connect error, and what Core itself wrote.
+                let connect = match ersa_core::connect(&location.endpoint).await {
+                    Ok(_) => "connects".to_string(),
+                    Err(e) => format!("{e} ({:?})", e.kind()),
+                };
+                let log = location
+                    .log_file
+                    .as_deref()
+                    .and_then(|p| std::fs::read_to_string(p).ok())
+                    .unwrap_or_default();
+                panic!("Core stopped with the Shell: {connect}; Core's log:\n{log}");
+            }
             let (_link, how, _events) = open(&location).await;
             assert_eq!(how, How::Attached, "the next launch attaches to that Core");
         }
