@@ -62,6 +62,28 @@ test("an open permission request shows its fields whole", async ({ page }) => {
 // words up to bubble-max, surface-raised with a line edge and radius-lg, padded space-md by space-lg, with no label.
 test("the user's messages are bubbles, in both themes", async ({ page }) => {
   await page.goto("/gallery.html?component=Transcript");
+  // A bubble's place and size in its reading column, whose content box sits inside the page's own padding.
+  const measure = (el: Element) => {
+    const s = getComputedStyle(el);
+    const page = el.parentElement!;
+    const ps = getComputedStyle(page);
+    const box = el.getBoundingClientRect();
+    const col = page.getBoundingClientRect();
+    return {
+      fill: s.backgroundColor,
+      edge: s.borderTopColor,
+      edgeWidth: s.borderTopWidth,
+      radius: s.borderTopLeftRadius,
+      padBlock: s.paddingTop,
+      padInline: s.paddingLeft,
+      right: col.right - parseFloat(ps.paddingRight) - box.right,
+      share: box.width / (col.width - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight)),
+      overflow: el.scrollWidth - el.clientWidth,
+      // Everything the bubble shows, which is its message and nothing else: no label.
+      shown: (el as HTMLElement).innerText,
+      words: el.querySelector(".transcript-text")?.textContent ?? "",
+    };
+  };
   for (const theme of ["light", "dark"]) {
     const transcript = page.locator(`[data-theme="${theme}"] [data-component="Transcript"]`);
     const twoTurns = transcript.locator("figure").filter({ hasText: "Two turns" });
@@ -72,7 +94,7 @@ test("the user's messages are bubbles, in both themes", async ({ page }) => {
       const probe = document.createElement("div");
       probe.style.cssText =
         "background: var(--color-surface-raised); border: var(--line-hairline) solid var(--color-line);" +
-        "border-radius: var(--radius-lg); padding: var(--space-md) var(--space-lg);";
+        "border-radius: var(--radius-lg); padding: var(--space-md) var(--space-lg); max-width: var(--size-bubble-max);";
       el.appendChild(probe);
       const s = getComputedStyle(probe);
       const t = {
@@ -82,30 +104,16 @@ test("the user's messages are bubbles, in both themes", async ({ page }) => {
         radius: s.borderTopLeftRadius,
         padBlock: s.paddingTop,
         padInline: s.paddingLeft,
+        // bubble-max is a share of the column, so it computes to a percentage.
+        max: parseFloat(s.maxWidth) / 100,
       };
       probe.remove();
       return t;
     });
+    expect(tokens.max, "bubble-max is a share of the column").toBeGreaterThan(0);
 
     for (const bubble of await bubbles.all()) {
-      const got = await bubble.evaluate((el) => {
-        const s = getComputedStyle(el);
-        const page = el.parentElement!;
-        const ps = getComputedStyle(page);
-        const box = el.getBoundingClientRect();
-        const col = page.getBoundingClientRect();
-        return {
-          fill: s.backgroundColor,
-          edge: s.borderTopColor,
-          edgeWidth: s.borderTopWidth,
-          radius: s.borderTopLeftRadius,
-          padBlock: s.paddingTop,
-          padInline: s.paddingLeft,
-          // The column's content box, inside the page's own padding.
-          right: col.right - parseFloat(ps.paddingRight) - box.right,
-          share: box.width / (col.width - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight)),
-        };
-      });
+      const got = await bubble.evaluate(measure);
       expect(got.fill, theme).toBe(tokens.fill);
       expect(got.edge, theme).toBe(tokens.edge);
       expect(got.edgeWidth, theme).toBe(tokens.edgeWidth);
@@ -113,32 +121,20 @@ test("the user's messages are bubbles, in both themes", async ({ page }) => {
       expect(got.padBlock, theme).toBe(tokens.padBlock);
       expect(got.padInline, theme).toBe(tokens.padInline);
       expect(got.right, `${theme}: at the right of the column`).toBeCloseTo(0, 0);
-      expect(got.share, `${theme}: no wider than bubble-max`).toBeLessThanOrEqual(0.8 + 0.001);
+      expect(got.share, `${theme}: no wider than bubble-max`).toBeLessThanOrEqual(tokens.max + 0.001);
+      expect(got.shown.trim(), `${theme}: no label`).toBe(got.words.trim());
     }
 
     // A short message is as wide as its words, well short of bubble-max.
-    const short = bubbles.filter({ hasText: "Now delete" });
-    const shortShare = await short.evaluate((el) => {
-      const page = el.parentElement!;
-      const ps = getComputedStyle(page);
-      const col = page.getBoundingClientRect().width - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight);
-      return el.getBoundingClientRect().width / col;
-    });
-    expect(shortShare, theme).toBeLessThan(0.8);
+    const short = await bubbles.filter({ hasText: "Now delete" }).evaluate(measure);
+    expect(short.share, theme).toBeLessThan(tokens.max);
 
     // A long word or path wraps inside the bubble rather than widening it.
-    const long = transcript.locator("figure").filter({ hasText: "Long path" }).locator(".transcript-user");
-    const fits = await long.evaluate((el) => {
-      const page = el.parentElement!;
-      const ps = getComputedStyle(page);
-      const col = page.getBoundingClientRect().width - parseFloat(ps.paddingLeft) - parseFloat(ps.paddingRight);
-      return { share: el.getBoundingClientRect().width / col, overflow: el.scrollWidth - el.clientWidth };
-    });
-    expect(fits.share, theme).toBeLessThanOrEqual(0.8 + 0.001);
-    expect(fits.overflow, theme).toBeLessThanOrEqual(0);
+    const long = await transcript.locator("figure").filter({ hasText: "Long path" }).locator(".transcript-user").evaluate(measure);
+    expect(long.share, theme).toBeLessThanOrEqual(tokens.max + 0.001);
+    expect(long.overflow, theme).toBeLessThanOrEqual(0);
 
-    // No label is seen, and assistive technology still hears the message as the user's.
-    await expect(bubbles.first().getByText("You", { exact: true })).toBeHidden();
+    // Assistive technology still hears each message as the user's.
     await expect(twoTurns.getByRole("group", { name: "You" })).toHaveCount(2);
   }
 });

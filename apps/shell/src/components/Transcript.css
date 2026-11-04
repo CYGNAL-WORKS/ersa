@@ -49,10 +49,9 @@
 }
 
 /* The user's words: a bubble at the right of the reading column, as wide as its words up to bubble-max
-   (DESIGN.md, Layout and Shapes). min-width: 0 lets a long word or path wrap inside it rather than widen it. */
+   (DESIGN.md, Layout and Shapes). A long word or path wraps inside it, by .transcript-text's overflow-wrap. */
 .transcript-user {
   align-self: flex-end;
-  min-width: 0;
   max-width: var(--size-bubble-max);
   /* bubble-max is the whole bubble, padding and edge included. */
   box-sizing: border-box;
