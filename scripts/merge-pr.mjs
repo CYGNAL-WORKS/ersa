@@ -68,6 +68,11 @@ export function refusals({ pr, reviewedInBranch, sinceReview }) {
   if (pr.isDraft) out.push("it is a draft");
   if (pr.mergeable !== "MERGEABLE") out.push(`GitHub reports it ${pr.mergeable.toLowerCase()}`);
   out.push(...ciRefusals(pr.statusCheckRollup));
+  // The review's own verdict on the head: red means findings or a failed run,
+  // and a run by hand must not enqueue past it. Pending is the review itself,
+  // which calls this gate before it finishes.
+  const review = normalizeChecks(pr.statusCheckRollup).find((c) => c.name === MERGE_REVIEW);
+  if (review && ["FAILURE", "ERROR"].includes(review.conclusion)) out.push("the merge review blocks the merge; see the review on the pull request");
 
   if (!reviewedInBranch) out.push("the reviewed commit is not in the branch's history; review the head");
   for (const c of sinceReview ?? []) {
@@ -137,19 +142,21 @@ const fail = (message) => {
 
 const USAGE = "usage: node scripts/merge-pr.mjs <n> --reviewed <sha> [--dry-run]";
 
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
 // Runs the gate for argv and returns the exit code, what to print and, when
-// the gate refuses, its reasons. `run` runs one git or gh command, so a test
-// can stand in for GitHub.
-export function main(argv, { run: r = run } = {}) {
+// the gate refuses, its reasons. `run` runs one git or gh command and `wait`
+// pauses, so a test can stand in for GitHub and the clock.
+export function main(argv, { run: r = run, wait = pause } = {}) {
   try {
-    return { code: 0, ...gate(argv, r) };
+    return { code: 0, ...gate(argv, r, wait) };
   } catch (e) {
     if (e instanceof Refused) return { code: 1, stdout: e.message, reasons: e.reasons };
     return { code: 2, stderr: `${e.message}\n` };
   }
 }
 
-function gate(args, run) {
+function gate(args, run, wait) {
   let n;
   let reviewedArg;
   let dryRun = false;
@@ -162,13 +169,21 @@ function gate(args, run) {
   }
   if (!n || !reviewedArg) fail(USAGE);
 
-  const view = run("gh", ["pr", "view", n, "--json", "state,isDraft,mergeable,headRefOid,statusCheckRollup"]);
-  if (!view.ok) fail(`gh pr view failed: ${view.err}`);
-  let pr;
-  try {
-    pr = JSON.parse(view.out);
-  } catch (e) {
-    fail(`gh pr view printed no JSON: ${e.message}`);
+  const view = () => {
+    const r = run("gh", ["pr", "view", n, "--json", "state,isDraft,mergeable,headRefOid,statusCheckRollup"]);
+    if (!r.ok) fail(`gh pr view failed: ${r.err}`);
+    try {
+      return JSON.parse(r.out);
+    } catch (e) {
+      fail(`gh pr view printed no JSON: ${e.message}`);
+    }
+  };
+  let pr = view();
+  // GitHub works out whether a fresh head merges cleanly when first asked and
+  // answers UNKNOWN meanwhile; one more read after a pause usually has it.
+  if (pr?.mergeable === "UNKNOWN") {
+    wait(5000);
+    pr = view();
   }
   const head = pr?.headRefOid;
   if (typeof head !== "string" || typeof pr.state !== "string" || typeof pr.mergeable !== "string") fail("gh pr view left out state, mergeable or headRefOid");

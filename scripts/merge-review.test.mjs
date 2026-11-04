@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { MARK, blocking, claudeArgs, instructionPaths, isBot, main, ownerPaths, parseState, previousReview, prompt, reviewBody } from "./merge-review.mjs";
+import { MARK, blocking, claudeArgs, instructionPaths, main, ownerPaths, parseState, previousReview, prompt, reviewBody } from "./merge-review.mjs";
 
 const HEAD = "b".repeat(40);
 const OLD = "a".repeat(40);
@@ -85,12 +85,6 @@ test("the review runs Opus with hooks on and may not commit, push or write on Gi
   assert.deepEqual(claudeArgs("p", "sid").slice(-2), ["--resume", "sid"]);
 });
 
-test("a bot is gh's app/ account, the API's [bot] suffix, or the is_bot flag", () => {
-  for (const author of [{ login: "app/dependabot", is_bot: true }, { login: "dependabot[bot]" }, { login: "renovate", is_bot: true }]) assert.ok(isBot({ author }), author.login);
-  assert.ok(!isBot({ author: { login: ME, is_bot: false } }));
-  assert.ok(!isBot({}));
-});
-
 const REVIEW_URL = "https://github.com/o/r/pull/7#pullrequestreview-1";
 
 // main() with every tool stood in for. `gh pr view` answers from `pr` for the
@@ -163,8 +157,8 @@ test("a clean review is posted on the head, the status points at it, and the hea
   assert.ok(got.calls.some((c) => c.join(" ") === "git checkout origin/main -- CLAUDE.md .claude scripts/hooks"));
   const order = got.calls.map((c) => c.join(" "));
   assert.ok(order.findIndex((c) => c.startsWith("git checkout")) < order.findIndex((c) => c.startsWith("claude")));
-  // The verdict is on the head before the enqueue, so the mark is there when the queue is.
-  assert.ok(order.findIndex((c) => c.includes("state=success")) < order.findIndex((c) => c.startsWith("gh pr merge")));
+  // The enqueue comes first: a run that dies between the two leaves a pending head the poller takes up again, not a green one that never queued.
+  assert.ok(order.findIndex((c) => c.startsWith("gh pr merge")) < order.findIndex((c) => c.includes("state=success")));
 });
 
 test("every instruction file the diff touched goes back to main's version, or away where main has none", () => {
@@ -243,16 +237,18 @@ test("a clean head on owner paths or with a hold label is the owner's and not en
   assert.equal(already.labeled.length, 0);
 });
 
-test("a gate refusal is surfaced and red; a gate error or a failed enqueue is surfaced and an error", () => {
-  const refused = drive(["7", "--head", HEAD], { gate: { pr: { mergeable: "CONFLICTING" } } });
-  assert.equal(refused.code, 1);
-  assert.match(refused.stdout, /The merge gate refused:[\s\S]*conflicting/);
+test("a clean head the gate refuses stays pending for another try; a gate error or a failed enqueue is an error", () => {
+  const long = { name: "Build, lint, test, dependencies (Linux), and a check whose name goes on for a very long while", status: "COMPLETED", conclusion: "FAILURE" };
+  const refused = drive(["7", "--head", HEAD], { gate: { pr: { mergeable: "CONFLICTING", statusCheckRollup: [long, { ...long, name: `${long.name} too` }] } } });
+  assert.equal(refused.code, 0, refused.stderr);
+  assert.match(refused.stdout, /does not pass yet[\s\S]*conflicting/);
   assert.equal(refused.queued.length, 0);
   assert.equal(refused.posted.length, 1, "the review is kept");
-  assert.deepEqual(refused.statuses, ["pending", `failure ${REVIEW_URL}`]);
-  const status = refused.calls.find((c) => c[0] === "gh" && c.includes("state=failure"));
-  assert.match(status.find((a) => a.startsWith("description=")), /^description=The merge gate refused: #7 may not merge: - GitHub reports it conflicting/);
-  assert.ok(status.find((a) => a.startsWith("description=")).length <= "description=".length + 140);
+  // Pending twice: once when the run started, once with the reason, so the poller's hour starts from the verdict.
+  assert.deepEqual(refused.statuses, ["pending", `pending ${REVIEW_URL}`]);
+  const description = refused.calls.filter((c) => c[0] === "gh" && c.includes("state=pending")).at(-1).find((a) => a.startsWith("description=")).slice("description=".length);
+  assert.match(description, /^Clean; the merge gate does not pass yet: GitHub reports it conflicting; CI did not pass: Build/);
+  assert.equal(description.length, 140, "GitHub keeps 140 characters of a description");
   const broken = drive(["7", "--head", HEAD], { gate: { view: { ok: false, out: "", err: "gh down" } } });
   assert.equal(broken.code, 2);
   assert.match(broken.stdout, /could not run:[\s\S]*gh down/);
@@ -260,7 +256,7 @@ test("a gate refusal is surfaced and red; a gate error or a failed enqueue is su
   const failedQueue = drive(["7", "--head", HEAD], { gate: { merge: { ok: false, out: "", err: "head moved" } } });
   assert.equal(failedQueue.code, 2);
   assert.match(failedQueue.stderr, /merge queue failed after the review was posted[\s\S]*head moved/);
-  assert.deepEqual(failedQueue.statuses, ["pending", `success ${REVIEW_URL}`, "error"], "a failed enqueue turns the status red");
+  assert.deepEqual(failedQueue.statuses, ["pending", "error"], "a failed enqueue is red, never green");
 });
 
 test("a status the token cannot set stops the run before the review spends anything", () => {

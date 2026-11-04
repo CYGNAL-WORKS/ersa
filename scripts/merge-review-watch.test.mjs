@@ -2,7 +2,7 @@
 // Run: node --test scripts/merge-review-watch.test.mjs
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -56,6 +56,9 @@ test("auto-merge on an unreviewed head is disarmed, reviewed or not yet reviewab
   assert.deepEqual(select([pr({ autoMergeRequest: armed, statusCheckRollup: [ci({ status: "IN_PROGRESS", conclusion: "" })] })], NOW), { review: [], disarm: [7] }, "disarmed before CI finishes, so the queue never gets it");
   assert.deepEqual(select([pr({ autoMergeRequest: armed, statusCheckRollup: [ci(), mark("SUCCESS")] })], NOW), { review: [], disarm: [] });
   assert.deepEqual(select([pr({ autoMergeRequest: armed, isCrossRepository: true })], NOW).disarm, [], "a fork's pull request is left to the owner");
+  // A hold put on after the head was enqueued still holds it.
+  assert.deepEqual(select([pr({ autoMergeRequest: armed, labels: [{ name: "hold" }], statusCheckRollup: [ci(), mark("SUCCESS")] })], NOW).disarm, [7]);
+  assert.deepEqual(select([pr({ labels: [{ name: "hold" }], statusCheckRollup: [ci(), mark("SUCCESS")] })], NOW).disarm, []);
 });
 
 // The lock in a temporary folder, with the liveness check stood in for.
@@ -63,7 +66,7 @@ let home;
 const tmp = () => (home ??= mkdtempSync(join(tmpdir(), "merge-review-watch-")));
 after(() => home && rmSync(home, { recursive: true, force: true }));
 
-test("the lock is held by one tick at a time, survives a dead holder, and is released", () => {
+test("the lock is held by one tick at a time, survives a dead or hour-old holder, and is released", () => {
   const path = join(tmp(), "a", "lock");
   const alive = (pid) => pid === 100;
   const release = lock(path, { alive, pid: 100 });
@@ -75,7 +78,13 @@ test("the lock is held by one tick at a time, survives a dead holder, and is rel
   const taken = lock(path, { alive, pid: 200 });
   assert.ok(taken, "a lock whose process is gone is taken over");
   assert.equal(readFileSync(path, "utf8"), "200");
+  assert.deepEqual(readdirSync(join(tmp(), "a")), ["lock"], "the dead lock is gone, not left beside the new one");
   taken();
+  // A pid Windows gave to another process reads as live; the file's age settles it.
+  writeFileSync(path, "100");
+  const old = lock(path, { alive, pid: 200, now: () => Date.now() + STALE_MS + 1000 });
+  assert.ok(old, "a live-looking lock older than an hour is taken over");
+  old();
   writeFileSync(path, "");
   assert.equal(lock(path, { alive, pid: 200 }), null, "a lock that names no pid is left for a person");
   assert.ok(existsSync(path));
@@ -86,13 +95,13 @@ const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 
 // main() with every tool stood in for: gh lists `prs`, git answers from
 // `git`, the review exits `exit`; `exists` says whether the checkout is there.
-function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), lockPath, alive, sleep } = {}) {
+function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list = () => null, lockPath, alive, sleep } = {}) {
   const calls = [];
   const logs = [];
   const ok = (out = "") => ({ ok: true, status: 0, out, err: "" });
   const run = (cmd, args, cwd, opts) => {
     calls.push({ cmd, args, cwd, live: opts?.live ?? false });
-    if (cmd === "gh" && args[1] === "list") return ok(JSON.stringify(prs));
+    if (cmd === "gh" && args[1] === "list") return list() ?? ok(JSON.stringify(prs));
     if (cmd === "gh") return ok();
     if (cmd === "git") return { ok: true, status: 0, out: "", err: "", ...git(args, cwd) };
     if (cmd === "node") return { ok: exit === 0, status: exit, out: "", err: "" };
@@ -109,37 +118,39 @@ test("one tick prepares the review checkout at the head, with main's review logi
   assert.equal(got.code, 0, got.stderr);
   const git = got.calls.filter((c) => c.cmd === "git").map((c) => [c.args.join(" "), c.cwd]);
   assert.deepEqual(git, [
+    ["worktree prune", ROOT],
     [`worktree add --detach ${dir} origin/main`, ROOT],
     ["fetch -q origin main pull/7/head", dir],
     [`reset -q --hard ${HEAD}`, dir],
     ["clean -q -fd", dir],
+    // Ignored files under any .claude folder too: a settings.local.json the last review's tests wrote is not main's.
+    ["clean -q -fdx -- :(glob)**/.claude/**", dir],
     ["checkout -q origin/main -- scripts/merge-review.mjs scripts/merge-pr.mjs", dir],
   ]);
   assert.deepEqual(got.reviews.map((c) => [c.args.join(" "), c.cwd, c.live]), [[`scripts/merge-review.mjs 7 --head ${HEAD}`, dir, true]]);
-  assert.deepEqual(got.gh, ["pr list --state open --limit 100 --json number,isDraft,isCrossRepository,headRefOid,autoMergeRequest,statusCheckRollup"]);
+  assert.deepEqual(got.gh, ["pr list --state open --limit 100 --json number,isDraft,isCrossRepository,headRefOid,labels,autoMergeRequest,statusCheckRollup"]);
   assert.match(got.logs.at(-1), /#7 at bbbbbbb: the review exited 0/);
   assert.ok(!existsSync(got.lockPath), "the lock is released");
 });
 
-test("an existing checkout is reused, and a review that blocks or fails is reported and the tick goes on", () => {
+test("an existing checkout is reused, one head is reviewed per tick, and a review that blocks or fails is reported", () => {
   const dir = join(tmp(), "existing");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, ".git"), "gitdir: elsewhere");
   const got = drive(["--once", "--checkout", dir], { prs: [pr(), pr({ number: 8, headRefOid: "c".repeat(40) })], exit: 1 });
   assert.equal(got.code, 0, got.stderr);
   assert.ok(!got.calls.some((c) => c.cmd === "git" && c.args[0] === "worktree"));
-  assert.equal(got.reviews.length, 2, "one at a time, in list order, each after the other finished");
-  assert.deepEqual(got.reviews.map((c) => c.args[1]), ["7", "8"]);
-  assert.match(got.logs.join("\n"), /#7 at bbbbbbb: the review exited 1\n[\s\S]*#8 at ccccccc: the review exited 1/);
+  // One head per tick, so a tick ends within the hour the task allows; the rest wait for the next.
+  assert.deepEqual(got.reviews.map((c) => c.args[1]), ["7"]);
+  assert.match(got.logs.join("\n"), /#7 at bbbbbbb: reviewing; #8 next\n#7 at bbbbbbb: the review exited 1/);
 });
 
-test("a checkout that cannot be prepared is reported and skipped; the next pull request still runs", () => {
+test("a checkout that cannot be prepared is reported, and the tick ends for the next to try again", () => {
   const got = drive(["--once", "--checkout", join(tmp(), "r2")], {
-    prs: [pr(), pr({ number: 8 })],
-    git: (args) => (args[0] === "fetch" && args.includes("pull/7/head") ? { ok: false, err: "network down" } : {}),
+    git: (args) => (args[0] === "fetch" ? { ok: false, err: "network down" } : {}),
   });
   assert.equal(got.code, 0, got.stderr);
-  assert.deepEqual(got.reviews.map((c) => c.args[1]), ["8"]);
+  assert.equal(got.reviews.length, 0);
   assert.match(got.logs.join("\n"), /#7 at bbbbbbb: git fetch -q failed: network down/);
 });
 
@@ -147,7 +158,7 @@ test("auto-merge on an unreviewed head is disabled before anything else", () => 
   const got = drive(["--once", "--checkout", join(tmp(), "r3")], { prs: [pr({ autoMergeRequest: { enabledAt: "x" }, statusCheckRollup: [ci({ status: "IN_PROGRESS", conclusion: "" })] })] });
   assert.deepEqual(got.gh.slice(1), ["pr merge 7 --disable-auto"]);
   assert.equal(got.reviews.length, 0);
-  assert.match(got.logs[0], /#7: auto-merge was on for an unreviewed head; disabled it/);
+  assert.match(got.logs[0], /#7: auto-merge was on for an unreviewed or held head; disabled it/);
 });
 
 test("two overlapping ticks: the second finds the lock held and does nothing", () => {
@@ -160,20 +171,31 @@ test("two overlapping ticks: the second finds the lock held and does nothing", (
   assert.equal(readFileSync(path, "utf8"), "4242", "the other tick's lock is untouched");
 });
 
-test("without --once the poller ticks, waits five minutes, and ticks again; a tool error exits 2 and releases the lock", () => {
+test("without --once the poller ticks, waits five minutes, and ticks again, through a tool that is down for one tick; stopped, it releases the lock", () => {
   const waits = [];
   const stop = new Error("stop");
+  let lists = 0;
   const got = drive(["--checkout", join(tmp(), "r5")], {
+    // gh is down on the second tick only.
+    list: () => (++lists === 2 ? { ok: false, status: 1, out: "", err: "gh: connection reset" } : null),
     sleep: (ms) => {
       waits.push(ms);
-      if (waits.length === 2) throw stop;
+      if (waits.length === 3) throw stop;
     },
   });
   assert.equal(got.code, 2);
-  assert.deepEqual(waits, [INTERVAL_MS, INTERVAL_MS]);
-  assert.equal(got.reviews.length, 2, "one review per tick");
+  assert.deepEqual(waits, [INTERVAL_MS, INTERVAL_MS, INTERVAL_MS]);
+  assert.equal(got.reviews.length, 2, "one review per tick, none on the tick gh was down");
+  assert.match(got.logs.join("\n"), /gh pr list failed: gh: connection reset/);
   assert.ok(!existsSync(got.lockPath));
   assert.equal(INTERVAL_MS, 5 * 60 * 1000);
+});
+
+test("with --once a tool that is down ends the tick with exit 2", () => {
+  const got = drive(["--once", "--checkout", join(tmp(), "r6")], { list: () => ({ ok: false, status: 1, out: "", err: "gh: connection reset" }) });
+  assert.equal(got.code, 2);
+  assert.match(got.stderr, /gh pr list failed: gh: connection reset/);
+  assert.ok(!existsSync(got.lockPath));
 });
 
 test("a usage error exits 2 before anything runs", () => {
