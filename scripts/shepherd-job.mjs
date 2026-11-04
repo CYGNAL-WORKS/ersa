@@ -23,7 +23,7 @@
 // record and may run again.
 //
 // Exit 0 when the job finished, 1 when it did not do its work, 2 on a usage or
-// tool error.
+// tool error, 3 when it already ran on this head.
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -94,10 +94,10 @@ export const JOBS = {
 
 // Whether a review's findings block the merge. A full review blocks on any
 // high or medium finding. A verify blocks only on a listed finding left
-// unresolved or a new high one: a fresh pass always finds new mediums, and
+// high or medium finding left unresolved, or a new high one: a fresh pass always finds new mediums, and
 // blocking on them is what kept the first loop from ever finishing.
 export function blocking(findings, verify) {
-  return (findings ?? []).filter((f) => (verify ? f.origin === "listed" || f.severity === "high" : f.severity !== "low"));
+  return (findings ?? []).filter((f) => (verify ? (f.origin === "listed" && f.severity !== "low") || f.severity === "high" : f.severity !== "low"));
 }
 
 export function issueOf(body) {
@@ -247,11 +247,12 @@ async function main() {
   if (v.state !== "OPEN") fail(`#${n} is ${v.state.toLowerCase()}`);
   const pr = { number: n, branch: v.headRefName, head: v.headRefOid, issue: issueOf(v.body) };
 
-  const id = `${n}-${pr.head.slice(0, 7)}-${kind}`;
+  // A CI or conflict fix keeps its own record, apart from a fix of review findings on the same head.
+  const id = `${n}-${pr.head.slice(0, 7)}-${kind}${/-(ci|conflict)\.task\.md$/.exec(taskFile ?? "")?.[0].replace(".task.md", "") ?? ""}`;
   const recordFile = join(JOBS_DIR, `${id}.json`);
   if (existsSync(recordFile)) {
     process.stdout.write(`#${n}: a ${kind} of ${pr.head.slice(0, 7)} already ran; its record is ${recordFile}\n`);
-    process.exit(0);
+    process.exit(3);
   }
 
   const fetch = run("git", ["fetch", "-q", "origin", "main", `pull/${n}/head`]);

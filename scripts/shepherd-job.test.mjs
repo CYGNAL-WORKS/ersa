@@ -8,15 +8,16 @@ import { JOBS, blocking, claudeArgs, needsPlanning } from "./shepherd-job.mjs";
 
 const data = "D:/x/118-386eca0-review.data";
 
-test("blocking: a review on high and medium, a verify on listed findings and new highs", () => {
+test("blocking: a review on high and medium, a verify on listed high or medium and new highs", () => {
   const f = [
     { severity: "high", origin: "new" },
     { severity: "medium", origin: "new" },
     { severity: "low", origin: "listed" },
+    { severity: "medium", origin: "listed" },
     { severity: "low", origin: "new" },
   ];
-  assert.deepEqual(blocking(f, false), [f[0], f[1]]);
-  assert.deepEqual(blocking(f, true), [f[0], f[2]]);
+  assert.deepEqual(blocking(f, false), [f[0], f[1], f[3]]);
+  assert.deepEqual(blocking(f, true), [f[0], f[3]]);
   assert.deepEqual(blocking(undefined, false), []);
 });
 

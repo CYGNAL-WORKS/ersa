@@ -58,7 +58,6 @@ export function readiness(code, out) {
 
 // Whether a review record blocks the merge; records from the first loop kept a verdict.
 export function blocks(r) {
-  if (typeof r.blocks === "boolean") return r.blocks;
   if (r.output?.verdict) return r.output.verdict !== "clean";
   return blocking(r.output?.findings, !!r.since).length > 0;
 }
@@ -195,7 +194,7 @@ function queue() {
 function gather(row) {
   const id = (kind) => `${row.number}-${row.head}-${kind}`;
   const files = jobFiles();
-  const mine = files.filter((f) => f.startsWith(`${row.number}-`) && /-(review|fix)\.json$/.test(f)).map((f) => readJson(join(JOBS, f)));
+  const mine = files.filter((f) => f.startsWith(`${row.number}-`) && /-(review|fix|fix-ci|fix-conflict)\.json$/.test(f)).map((f) => readJson(join(JOBS, f)));
   const reviews = mine.filter((r) => r.kind === "review");
   // A fix's kind comes from its task; first-loop records kept none, only a task file.
   const taskFile = (x, kind) => files.includes(`${row.number}-${x.head.slice(0, 7)}-${kind}.task.md`);
@@ -368,7 +367,7 @@ async function main() {
 
   const set = new Set(queue().filter((r) => r.state !== "draft" && !r.fork && !opts.skip.has(r.number)).map((r) => r.number));
   process.stdout.write(`${stamp()} set: ${[...set].map((n) => `#${n}`).join(" ") || "(empty)"}${opts.merge ? ", may merge" : ", shadow run"}\n`);
-  const ctx = { jobs: 0, running: null };
+  const ctx = { jobs: 0, running: null, started: new Set() };
   const said = new Map();
   const say = (n, state, what) => {
     if (said.get(n) === what) return;
@@ -428,12 +427,19 @@ async function main() {
     wanting.sort((a, b) => JOB_KINDS.indexOf(a.action.kind) - JOB_KINDS.indexOf(b.action.kind) || a.row.number - b.row.number);
     for (const { row, action } of wanting) {
       let what = labelOf(action);
-      if (ctx.jobs >= opts.maxJobs) {
+      const key = `${row.number}:${row.oid}:${what}`;
+      if (ctx.started.has(key)) {
+        // The same job on the same head twice in a run means its result did
+        // not change the decision: a defect in the loop, not more work.
+        what = `owner: a ${what} already ran on this head this run and changed nothing`;
+        action.kind = "owner";
+      } else if (ctx.jobs >= opts.maxJobs) {
         what = `budget: would start a ${what}, but the run's ${opts.maxJobs} jobs are used`;
         action.kind = "budget";
       } else if (opts.dryRun || ctx.running) what = `${what} (queued)`;
       else {
         ctx.jobs++;
+        ctx.started.add(key);
         const kind = labelOf(action);
         what = `${kind}: started (job ${ctx.jobs} of ${opts.maxJobs})`;
         const done = startJob(row, action).then((result) => {

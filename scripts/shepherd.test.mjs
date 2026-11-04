@@ -30,14 +30,14 @@ ${refusals({ pr: green, containsMain: true, reviewedInBranch: true, sinceReview:
   assert.equal(readiness(2, "gh pr view failed"), "wait");
 });
 
-test("a full review blocks on high and medium; a verify only on a listed finding or a new high", () => {
+test("a full review blocks on high and medium; a verify on a listed high or medium, or a new high", () => {
   const f = (severity, origin = "new") => ({ severity, origin });
   assert.equal(blocks({ output: { findings: [f("low")] } }), false);
   assert.equal(blocks({ output: { findings: [f("medium")] } }), true);
   assert.equal(blocks({ since: "x", output: { findings: [f("medium"), f("low")] } }), false);
-  assert.equal(blocks({ since: "x", output: { findings: [f("low", "listed")] } }), true);
+  assert.equal(blocks({ since: "x", output: { findings: [f("low", "listed")] } }), false);
+  assert.equal(blocks({ since: "x", output: { findings: [f("medium", "listed")] } }), true);
   assert.equal(blocks({ since: "x", output: { findings: [f("high")] } }), true);
-  assert.equal(blocks({ blocks: false, output: { findings: [f("high")] } }), false);
   assert.equal(blocks({ output: { verdict: "clean", findings: [f("medium")] } }), false);
 });
 
