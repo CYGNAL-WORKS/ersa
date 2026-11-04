@@ -23,7 +23,7 @@ import type { Envelope, Event } from "../protocol/agent-events.gen";
 import type { CoreHelloResult, Project, Session } from "../protocol/core-api.gen";
 import type { BackendChoices, Choice } from "../session/controls";
 import type { SessionView } from "../session/follow";
-import { apply, emptyTranscript } from "../session/transcript";
+import { EVENT_VERSION, apply, emptyTranscript } from "../session/transcript";
 import "./Gallery.css";
 
 const hello: CoreHelloResult = {
@@ -120,7 +120,7 @@ function transcriptOf(events: Event[]) {
   return events
     .map(
       (event, seq): Envelope => ({
-        v: 2,
+        v: EVENT_VERSION,
         session_id: "s1",
         seq,
         ts: "2026-11-01T09:00:00Z",

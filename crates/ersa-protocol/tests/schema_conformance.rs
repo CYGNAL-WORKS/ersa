@@ -166,6 +166,7 @@ fn examples() -> Vec<Event> {
             context_window: Some(200_000),
             cost_usd_total: Some(0.42),
             turns: Some(3),
+            turn_output_tokens: Some(1_250),
             rate_limit: Some(RateLimit {
                 status: "allowed_warning".into(),
                 resets_at: Some("2026-10-31T18:00:00Z".into()),
