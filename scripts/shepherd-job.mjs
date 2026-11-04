@@ -27,7 +27,7 @@
 // tool error, 3 when it already ran on this head.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -283,6 +283,8 @@ async function main() {
     process.exit(3);
   }
 
+  // Read once, before any work: nothing after a fix pushes may fail on it.
+  const taskText = kind === "fix" ? readFileSync(taskFile, "utf8") : null;
   const fetch = run("git", ["fetch", "-q", "origin", "main", `pull/${n}/head`]);
   if (!fetch.ok) fail(`git fetch failed: ${fetch.err}`);
   const files = run("git", ["diff", "--name-only", `origin/main...${pr.head}`]).out.split("\n").filter(Boolean);
@@ -313,7 +315,7 @@ async function main() {
       }
     }
     if (notesFile) writeFileSync(join(data, "notes.md"), readFileSync(notesFile, "utf8"));
-  } else writeFileSync(join(data, "task.md"), readFileSync(taskFile, "utf8"));
+  } else writeFileSync(join(data, "task.md"), taskText);
 
   const prompt = kind === "fix" ? fixPrompt(pr, data) : since ? verifyPrompt(pr, data, since) : reviewPrompt(pr, data);
   const started = Date.now();
@@ -347,7 +349,7 @@ async function main() {
     error: result.is_error ? result.subtype ?? "error" : null,
     costUsd: result.total_cost_usd ?? null, turns: result.num_turns ?? null, session: result.session_id ?? null,
     denied: (result.permission_denials ?? []).map((d) => `${d.tool_name}: ${d.tool_input?.command ?? ""}`.trim()),
-    ...(kind === "review" ? { blocks: block.length > 0 } : { task: readFileSync(taskFile, "utf8") }),
+    ...(kind === "review" ? { blocks: block.length > 0 } : { task: taskText }),
     output,
   };
   if (kind === "fix") {
@@ -358,7 +360,10 @@ async function main() {
   mkdirSync(JOBS_DIR, { recursive: true });
   // Only a job with a result and no error uses up its head; any other record
   // goes aside, so the next ask runs the job again.
-  writeFileSync(output && !record.error ? recordFile : join(JOBS_DIR, `${id}.${started}.failed.json`), JSON.stringify(record, null, 2));
+  // Written whole or not at all: a job killed mid-write leaves no torn record.
+  const target = output && !record.error ? recordFile : join(JOBS_DIR, `${id}.${started}.failed.json`);
+  writeFileSync(`${target}.tmp`, JSON.stringify(record, null, 2));
+  renameSync(`${target}.tmp`, target);
   if (block.length) writeFileSync(join(JOBS_DIR, `${id}.task.md`), findingsTask(output.findings, !!since, v.url));
   process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
 
@@ -366,8 +371,9 @@ async function main() {
   process.exit(worked ? 0 : 1);
 }
 
-// An unexpected error is a tool error (exit 2), never "did not do its work"
-// (exit 1, which always leaves a record): the loop counts exit 2 as a crash.
+// An unexpected error exits 2, never 1 ("did not do its work, see its record").
+// The loop does not rely on the code: a job that failed and left no record of
+// its own counts as a crash, which also covers errors this catch cannot see.
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
   main().catch((e) => {
     process.stderr.write(`${e?.stack ?? e}

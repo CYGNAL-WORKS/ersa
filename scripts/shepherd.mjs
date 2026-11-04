@@ -287,7 +287,7 @@ function act(row, action) {
   switch (action.kind) {
     case "merge-main": {
       const marker = join(JOBS, `${row.number}-${row.head}-main.json`);
-      const failures = ((existsSync(marker) ? readJson(marker) : {}).failures ?? 0) + 1;
+      const failures = ((existsSync(marker) ? readJson(marker) : null)?.failures ?? 0) + 1;
       const failed = (error) => (mark(row, "main", { failures, error: error.split("\n")[0].slice(0, 300) }), `merge-main failed (${failures} of 3): ${error.split("\n")[0]}`);
       const dir = join(WORK, `${row.number}-${row.head}-main`);
       mkdirSync(WORK, { recursive: true });
@@ -322,7 +322,7 @@ function act(row, action) {
       if (m.ok) return m.out;
       const error = (m.out || m.err).replace(/\n/g, " ");
       const marker = join(JOBS, `${row.number}-${row.head}-refused.json`);
-      const failures = ((existsSync(marker) ? readJson(marker) : {}).failures ?? 0) + 1;
+      const failures = ((existsSync(marker) ? readJson(marker) : null)?.failures ?? 0) + 1;
       mark(row, "refused", { failures, error: error.slice(0, 300) });
       return `merge refused (${failures} of 2): ${error}`;
     }
@@ -346,7 +346,7 @@ export function isFailedRecord(file, n, kind) {
 export function crashed(code, before, after, n) {
   if (code === 0 || code === 3) return false;
   const old = new Set(before);
-  return !after.some((f) => !old.has(f) && f.startsWith(`${n}-`) && f.endsWith(".json") && !f.endsWith(".notes.json"));
+  return !after.some((f) => !old.has(f) && f.startsWith(`${n}-`) && f.endsWith(".json"));
 }
 
 // Starts a job without waiting for it; `done` settles with its exit code and last line.
