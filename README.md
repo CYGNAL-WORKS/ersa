@@ -15,4 +15,4 @@ Status: pre-alpha. Nothing runs yet.
 
 ## License
 
-Ersa is free software under the GNU Affero General Public License, version 3 (`LICENSE`). A modified version you run for others, including over a network, must offer them its source. The vendored third-party skills under `.claude/skills/` keep their MIT license (`.claude/skills/THIRD-PARTY.md`).
+Ersa is licensed under the MIT license (`LICENSE`). The vendored third-party skills under `.claude/skills/` keep their own MIT license (`.claude/skills/THIRD-PARTY.md`).
