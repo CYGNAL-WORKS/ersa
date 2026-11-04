@@ -53,18 +53,21 @@ export function repoRules(repo) {
   };
 }
 export const { plain: REPO_RE, munged: MUNGED_REPO_RE } = repoRules(REPO);
+// A worktree outside the main checkout's folder is a second path to redact.
+const checkoutRules = CHECKOUT === REPO || CHECKOUT.startsWith(REPO + "/") ? [] : [repoRules(CHECKOUT)];
 
 export function redact(text) {
+  // The repository before the home rules, which would otherwise rewrite a
+  // repository under the home directory first.
+  for (const { plain, munged } of [{ plain: REPO_RE, munged: MUNGED_REPO_RE }, ...checkoutRules]) {
+    text = text.replace(plain, PLACEHOLDER_REPO).replace(munged, PLACEHOLDER_MUNGED_REPO);
+  }
   return text
     // Organization names often embed the email, so they go first.
     .replace(/("organization(?:Name)?"\s*:\s*)"(?:[^"\\]|\\.)*"/g, `$1"${PLACEHOLDER_ORG}"`)
     // The account's organization id, which session records carry.
     .replace(/("organizationUuid"\s*:\s*)"[^"]*"/g, `$1"${PLACEHOLDER_UUID}"`)
     .replace(EMAIL_RE, PLACEHOLDER_EMAIL)
-    // The repository before the home rules, which would otherwise rewrite a
-    // repository under the home directory first.
-    .replace(REPO_RE, PLACEHOLDER_REPO)
-    .replace(MUNGED_REPO_RE, PLACEHOLDER_MUNGED_REPO)
     // Windows homes become the placeholder; Unix ones keep their shape.
     .replace(HOME_RE, (_m, dir) => (dir === "home" ? "/home/user" : PLACEHOLDER_HOME))
     .replace(MUNGED_HOME_RE, (_m, drive, dir) => `${drive}--${dir}-user`);
