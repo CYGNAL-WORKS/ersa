@@ -43,7 +43,7 @@ const MAX_ENCODED_LEN: usize = 200;
 
 /// The name of the directory under `projects/` that holds the sessions of
 /// working directory `cwd`: every character other than an ASCII letter or
-/// digit becomes `-` (`D:\Projects\ersa` is `D--Projects-ersa`).
+/// digit becomes `-` (`C:\Users\user\ersa` is `C--Users-user-ersa`).
 ///
 /// The CLI is JavaScript and counts in UTF-16 code units, so a character
 /// outside the Basic Multilingual Plane (an emoji, say) becomes two dashes.
@@ -722,7 +722,7 @@ mod tests {
 
     #[test]
     fn encodes_like_the_cli() {
-        assert_eq!(encoded_cwd(r"D:\Projects\ersa"), "D--Projects-ersa");
+        assert_eq!(encoded_cwd(r"C:\Users\user\ersa"), "C--Users-user-ersa");
         assert_eq!(encoded_cwd("/home/jo/my repo"), "-home-jo-my-repo");
         assert_eq!(encoded_cwd("C:/é"), "C---");
         // One emoji is two UTF-16 code units, so two dashes.

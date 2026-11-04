@@ -17,26 +17,9 @@ env:
 jobs:
   scan:
     name: Daily dependency scan
-    # The Linux runners in WSL on the owner's machine, as in ci.yml, and only
-    # while the repository is private. A scheduled run's event may carry no
-    # repository; it runs main's own code, never a fork's.
-    if: ${{ !github.event.repository || github.event.repository.private }}
-    runs-on: [self-hosted, Linux, X64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      # A home of the job's own, so nothing a job writes under ~ (Cargo's
-      # registry, npm, pnpm, corepack) reaches a later one. Rust, Node and
-      # Chromium come with the runner, which jobs can't change.
-      - name: A home of the job's own
-        run: |
-          mkdir -p "$RUNNER_TEMP/home" "$RUNNER_TEMP/runtime"
-          chmod 0700 "$RUNNER_TEMP/runtime"
-          {
-            echo "HOME=$RUNNER_TEMP/home"
-            echo "XDG_RUNTIME_DIR=$RUNNER_TEMP/runtime"
-            echo "NPM_CONFIG_PREFIX=$RUNNER_TEMP/home/.npm-global"
-          } >> "$GITHUB_ENV"
-
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: main
