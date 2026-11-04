@@ -1,5 +1,5 @@
 {
-  "ersa_commit": "4f95adfd379ef7da905cb2b92d4c071d701ff669",
+  "ersa_commit": "5b3d878c9b634e49c8dcd940f8472e98adefd6f4",
   "notifications": [
     {
       "kind": "notification",
@@ -18,7 +18,7 @@
             "input": "core"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -49,7 +49,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -746,7 +746,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -769,7 +769,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -791,7 +791,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -814,7 +814,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -853,7 +853,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -878,7 +878,29 @@
             "message_id": "95ac093d-2c1f-4f14-a74b-c4b0acddfb7a"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
+        },
+        "session_id": "s-replay"
+      }
+    },
+    {
+      "kind": "notification",
+      "method": "session.event",
+      "params": {
+        "event": {
+          "event": {
+            "turn_output_tokens": 4,
+            "type": "usage.updated"
+          },
+          "seq": 8,
+          "session_id": "s-replay",
+          "source": {
+            "backend": "claude-code",
+            "backend_version": "2.1.302",
+            "input": "live"
+          },
+          "ts": "2026-01-01T00:00:00Z",
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -897,7 +919,7 @@
             "tool_use_id": "toolu_014GgKrCJ9rQgRzPv9jaW7rc",
             "type": "tool.requested"
           },
-          "seq": 8,
+          "seq": 9,
           "session_id": "s-replay",
           "source": {
             "backend": "claude-code",
@@ -906,7 +928,29 @@
             "message_id": "2422b170-cb59-4f7a-b35d-8e2dd95eecae"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
+        },
+        "session_id": "s-replay"
+      }
+    },
+    {
+      "kind": "notification",
+      "method": "session.event",
+      "params": {
+        "event": {
+          "event": {
+            "turn_output_tokens": 4,
+            "type": "usage.updated"
+          },
+          "seq": 10,
+          "session_id": "s-replay",
+          "source": {
+            "backend": "claude-code",
+            "backend_version": "2.1.302",
+            "input": "live"
+          },
+          "ts": "2026-01-01T00:00:00Z",
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -963,7 +1007,7 @@
             "tool_use_id": "toolu_014GgKrCJ9rQgRzPv9jaW7rc",
             "type": "permission.requested"
           },
-          "seq": 9,
+          "seq": 11,
           "session_id": "s-replay",
           "source": {
             "backend": "claude-code",
@@ -971,7 +1015,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -985,7 +1029,7 @@
             "state": "waiting_user",
             "type": "session.state"
           },
-          "seq": 10,
+          "seq": 12,
           "session_id": "s-replay",
           "source": {
             "backend": "claude-code",
@@ -993,7 +1037,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -1009,7 +1053,7 @@
             "request_id": "1ddd13c0-dd2c-4061-a8a8-86574059182e",
             "type": "permission.decided"
           },
-          "seq": 11,
+          "seq": 13,
           "session_id": "s-replay",
           "source": {
             "backend": "claude-code",
@@ -1017,7 +1061,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -1031,7 +1075,7 @@
             "state": "running",
             "type": "session.state"
           },
-          "seq": 12,
+          "seq": 14,
           "session_id": "s-replay",
           "source": {
             "backend": "claude-code",
@@ -1039,7 +1083,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -1057,7 +1101,7 @@
             },
             "type": "usage.updated"
           },
-          "seq": 13,
+          "seq": 15,
           "session_id": "s-replay",
           "source": {
             "backend": "claude-code",
@@ -1065,7 +1109,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -1087,7 +1131,7 @@
             },
             "type": "backend.passthrough"
           },
-          "seq": 14,
+          "seq": 16,
           "session_id": "s-replay",
           "source": {
             "backend": "claude-code",
@@ -1095,7 +1139,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -1111,7 +1155,7 @@
             "tool_use_id": "toolu_014GgKrCJ9rQgRzPv9jaW7rc",
             "type": "tool.result"
           },
-          "seq": 15,
+          "seq": 17,
           "session_id": "s-replay",
           "source": {
             "backend": "claude-code",
@@ -1120,7 +1164,7 @@
             "message_id": "bdfbcce7-1a52-4dce-b694-caf81f87b583"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -1136,7 +1180,7 @@
             "text": "The command succeeded. It exited cleanly with no output, and `probe.txt` now exists in `C:/Users/user\\AppData\\Local\\Temp\\ersa-rec-zww2Oe` containing the word \"probe\".",
             "type": "assistant.text"
           },
-          "seq": 16,
+          "seq": 18,
           "session_id": "s-replay",
           "source": {
             "backend": "claude-code",
@@ -1145,7 +1189,29 @@
             "message_id": "5e19ce3c-0df3-4dd3-ab2a-527b3045b9ae"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
+        },
+        "session_id": "s-replay"
+      }
+    },
+    {
+      "kind": "notification",
+      "method": "session.event",
+      "params": {
+        "event": {
+          "event": {
+            "turn_output_tokens": 79,
+            "type": "usage.updated"
+          },
+          "seq": 19,
+          "session_id": "s-replay",
+          "source": {
+            "backend": "claude-code",
+            "backend_version": "2.1.302",
+            "input": "live"
+          },
+          "ts": "2026-01-01T00:00:00Z",
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -1170,7 +1236,7 @@
             },
             "type": "backend.passthrough"
           },
-          "seq": 17,
+          "seq": 20,
           "session_id": "s-replay",
           "source": {
             "backend": "claude-code",
@@ -1178,7 +1244,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -1196,7 +1262,7 @@
             "turn": 1,
             "type": "turn.completed"
           },
-          "seq": 18,
+          "seq": 21,
           "session_id": "s-replay",
           "source": {
             "backend": "claude-code",
@@ -1204,7 +1270,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -1221,7 +1287,7 @@
             "turns": 1,
             "type": "usage.updated"
           },
-          "seq": 19,
+          "seq": 22,
           "session_id": "s-replay",
           "source": {
             "backend": "claude-code",
@@ -1229,7 +1295,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -1243,7 +1309,7 @@
             "state": "idle",
             "type": "session.state"
           },
-          "seq": 20,
+          "seq": 23,
           "session_id": "s-replay",
           "source": {
             "backend": "claude-code",
@@ -1251,7 +1317,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -1273,7 +1339,7 @@
             },
             "type": "backend.passthrough"
           },
-          "seq": 21,
+          "seq": 24,
           "session_id": "s-replay",
           "source": {
             "backend": "claude-code",
@@ -1281,7 +1347,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 2
+          "v": 3
         },
         "session_id": "s-replay"
       }
@@ -1310,7 +1376,7 @@
       "created_at": "2026-01-01T00:00:00Z",
       "host_id": "local",
       "id": "s-replay",
-      "last_event_seq": 21,
+      "last_event_seq": 24,
       "permission_mode": "default",
       "state": "idle",
       "tile": {
