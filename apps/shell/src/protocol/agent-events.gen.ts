@@ -33,7 +33,7 @@ export interface Envelope {
   /**
    * Event schema version. Bumped when any event's meaning or shape changes, including the lifecycle events Core emits itself.
    */
-  v: 2;
+  v: 3;
   session_id: string;
   /**
    * Gap-free and increasing within a session; assigned by Core.
@@ -232,6 +232,10 @@ export interface UsageUpdated {
   context_window?: number;
   cost_usd_total?: number;
   turns?: number;
+  /**
+   * Output tokens the backend has generated so far in the current turn, across all of its API calls. Projected from live input only; it belongs to one turn.
+   */
+  turn_output_tokens?: number;
   rate_limit?: {
     status: string;
     resets_at?: string;

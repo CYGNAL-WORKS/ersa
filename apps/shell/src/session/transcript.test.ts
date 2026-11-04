@@ -25,7 +25,7 @@ const steps = (list: Envelope[]) => {
 };
 
 const envelope = (seq: number, event: Event): Envelope => ({
-  v: 2,
+  v: 3,
   session_id: "s1",
   seq,
   ts: "2026-01-01T00:00:00Z",

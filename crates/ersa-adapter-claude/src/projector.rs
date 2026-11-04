@@ -27,13 +27,13 @@ use serde_json::Value;
 use crate::suggestions;
 use crate::wire::{
     ApiMessage, AssistantMessage, CliMessage, CliResponse, ContentBlock, Delta, InitializeResponse,
-    MessageContent, RateLimitInfo, StreamEvent, StreamEventMessage, SystemMessage,
+    MessageContent, RateLimitInfo, StreamEvent, StreamEventMessage, SystemMessage, Usage,
 };
 use crate::{BACKEND, MAX_TESTED_VERSION};
 
 /// The version of this projection. Bump it whenever the events produced for
 /// some raw log would change, so Core re-projects cached sessions.
-pub const PROJECTOR_VERSION: u32 = 3;
+pub const PROJECTOR_VERSION: u32 = 4;
 
 /// Projects one Claude Code session's raw log. Make a fresh one per pass.
 #[derive(Debug, Default)]
@@ -60,6 +60,10 @@ pub struct ClaudeProjector {
     /// The model of the latest main-thread reply; picks the context window
     /// out of `result.modelUsage`, which lists subagent models too.
     main_model: Option<String>,
+    /// The highest output-token count reported so far for each API message
+    /// of the current turn, by message id, for `turn_output_tokens`
+    /// (PROTO-AGENT-EVENTS-R17).
+    output_tokens: HashMap<String, u64>,
 }
 
 /// A `can_use_tool` request the CLI is waiting on.
@@ -250,6 +254,10 @@ impl ClaudeProjector {
         if reply.parent_tool_use_id.is_none() && reply.error.is_none() {
             self.main_model = Some(reply.message.model.clone());
         }
+        // Read before `reply_events` takes the message apart; projected after
+        // the message's own events.
+        let output = reply.message.usage.as_ref().and_then(|u| u.output_tokens);
+        let usage = output.map(|tokens| self.turn_output(line, reply.message.id.clone(), tokens));
         // The session record keeps this message under the same `uuid`, which
         // is how Core yields it once when it is in both (PROTO-AGENT-EVENTS-R12).
         let message_id = Some(reply.uuid.clone());
@@ -261,10 +269,9 @@ impl ClaudeProjector {
         );
         if events.is_empty() {
             out.push(Projected::of_message(
-                message_id,
+                message_id.clone(),
                 passthrough(line, value).event,
             ));
-            return out;
         }
         for event in events {
             // The complete block ends its stream.
@@ -273,6 +280,7 @@ impl ClaudeProjector {
             }
             out.push(Projected::of_message(message_id.clone(), event));
         }
+        out.extend(usage);
         out
     }
 
@@ -367,9 +375,41 @@ impl ClaudeProjector {
                     return out;
                 }
             }
+            StreamEvent::MessageDelta {
+                usage:
+                    Some(Usage {
+                        output_tokens: Some(tokens),
+                        ..
+                    }),
+                ..
+            } => {
+                if let Some(message_id) = message_id {
+                    let mut out = self.ensure_turn(line);
+                    out.push(self.turn_output(line, message_id, tokens));
+                    return out;
+                }
+            }
             _ => {}
         }
         vec![passthrough(line, value)]
+    }
+
+    /// A `usage.updated` with the turn's output tokens so far, after a line
+    /// reported `tokens` for the API message `message_id`
+    /// (PROTO-AGENT-EVENTS-R17). The CLI reports a message's count more than
+    /// once as it grows, and an `assistant` line can carry an earlier count
+    /// than a `message_delta` already gave, so each message counts once, at
+    /// the highest count seen for it; the sum then never decreases.
+    fn turn_output(&mut self, line: &RawLine, message_id: String, tokens: u64) -> Projected {
+        let seen = self.output_tokens.entry(message_id).or_insert(0);
+        *seen = (*seen).max(tokens);
+        at(
+            line,
+            Event::UsageUpdated(UsageUpdated {
+                turn_output_tokens: Some(self.output_tokens.values().sum()),
+                ..UsageUpdated::default()
+            }),
+        )
     }
 
     /// `result`: the turn ends. Read from the raw JSON, so a drifted line
@@ -422,7 +462,7 @@ impl ClaudeProjector {
                 context_window: window,
                 cost_usd_total: value["total_cost_usd"].as_f64(),
                 turns: Some(self.turn),
-                rate_limit: None,
+                ..UsageUpdated::default()
             }),
         ));
         out.push(state(line, LifecycleState::Idle));
@@ -431,6 +471,7 @@ impl ClaudeProjector {
         self.turn_open = false;
         self.blocks_seen.clear();
         self.stream_message.clear();
+        self.output_tokens.clear();
         if drifted.is_some() {
             out.push(passthrough(line, value));
         }
@@ -647,6 +688,8 @@ impl ClaudeProjector {
     fn open_turn(&mut self, line: &RawLine, trigger: TurnTrigger) -> Vec<Projected> {
         self.turn += 1;
         self.turn_open = true;
+        // The count belongs to one turn, even one that ended without a `result`.
+        self.output_tokens.clear();
         vec![
             at(
                 line,

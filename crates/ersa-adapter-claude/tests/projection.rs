@@ -323,6 +323,7 @@ fn result_projects_to_one_turn_completed_and_one_usage_update() {
                 context_window: Some(1_000_000),
                 cost_usd_total: Some(0.8216802500000001),
                 turns: Some(1),
+                turn_output_tokens: None,
                 rate_limit: None,
             }),
             &Event::SessionState(SessionState {
@@ -867,4 +868,118 @@ fn prompts_left_pending_when_a_turn_ends_are_settled_by_the_backend() {
         Event::PermissionDecided(d)
             if d.behavior == PermissionBehavior::Deny && d.decided_by == DecidedBy::Backend
     ));
+}
+
+/// The `turn_output_tokens` of each turn, in order: one list per turn.
+fn turn_output_tokens(events: &[Event]) -> Vec<Vec<u64>> {
+    let mut turns: Vec<Vec<u64>> = Vec::new();
+    for event in events {
+        match event {
+            Event::TurnStarted(_) => turns.push(Vec::new()),
+            Event::UsageUpdated(UsageUpdated {
+                turn_output_tokens: Some(tokens),
+                ..
+            }) => turns
+                .last_mut()
+                .expect("a count outside a turn")
+                .push(*tokens),
+            _ => {}
+        }
+    }
+    turns
+}
+
+// verifies: PROTO-AGENT-EVENTS-R17
+#[test]
+fn each_line_reporting_output_usage_projects_the_turns_output_tokens_so_far() {
+    // Three turns with partial messages. Turns 2 and 3 each make two API
+    // calls around a tool use, and each message's count arrives twice: an
+    // early one on its `assistant` line (16), the final one on the later
+    // `message_delta` (84).
+    let fixture = fixture("00-session-tools");
+    let events = events(&fixture.raw_log());
+    assert_eq!(
+        turn_output_tokens(&events),
+        [vec![4, 4], vec![16, 84, 87, 87], vec![16, 84, 90, 90]]
+    );
+
+    // Each turn's last count is what the CLI's own `result` says the turn
+    // generated, so no message was counted twice or missed.
+    let results: Vec<u64> = fixture
+        .stdout
+        .iter()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["type"] == "result")
+        .map(|v| v["usage"]["output_tokens"].as_u64().unwrap())
+        .collect();
+    let last: Vec<u64> = turn_output_tokens(&events)
+        .iter()
+        .map(|t| *t.last().unwrap())
+        .collect();
+    assert_eq!(last, results);
+
+    // Only the count rides on these events, and the `result` line's usage
+    // carries none: it belongs to the running turn.
+    for event in &events {
+        if let Event::UsageUpdated(usage) = event
+            && usage.turn_output_tokens.is_some()
+        {
+            assert_eq!(
+                usage,
+                &UsageUpdated {
+                    turn_output_tokens: usage.turn_output_tokens,
+                    ..UsageUpdated::default()
+                }
+            );
+        }
+    }
+}
+
+// verifies: PROTO-AGENT-EVENTS-R17
+#[test]
+fn the_turns_output_tokens_never_decrease_and_start_again_each_turn() {
+    let delta = |id: &str, tokens: u64| {
+        json!({
+            "type": "stream_event",
+            "session_id": "s",
+            "uuid": format!("d-{id}-{tokens}"),
+            "api_message_id": id,
+            "event": { "type": "message_delta", "delta": {}, "usage": { "output_tokens": tokens } }
+        })
+        .to_string()
+    };
+    let reply = |id: &str, tokens: u64| {
+        json!({
+            "type": "assistant",
+            "session_id": "s",
+            "uuid": format!("u-{id}-{tokens}"),
+            "message": {
+                "id": id, "model": "m", "role": "assistant",
+                "content": [{ "type": "text", "text": "x" }],
+                "usage": { "output_tokens": tokens }
+            }
+        })
+        .to_string()
+    };
+    let result = json!({
+        "type": "result", "subtype": "success", "is_error": false, "duration_ms": 1,
+        "usage": { "output_tokens": 0 }
+    })
+    .to_string();
+    let lines = [
+        (Host, USER_MESSAGE.to_string()),
+        (Backend, delta("m1", 50)),
+        // An earlier count for m1 arriving late lowers nothing.
+        (Backend, reply("m1", 10)),
+        (Backend, reply("m2", 5)),
+        (Backend, delta("m2", 7)),
+        (Backend, result.clone()),
+        (Host, USER_MESSAGE.to_string()),
+        // The same message id in a later turn is a new count.
+        (Backend, delta("m1", 3)),
+    ];
+    let entries: Vec<(ersa_adapter::Direction, &str)> =
+        lines.iter().map(|(d, l)| (*d, l.as_str())).collect();
+    let events = events(&log(&entries));
+    assert_eq!(turn_output_tokens(&events), [vec![50, 50, 55, 57], vec![3]]);
 }

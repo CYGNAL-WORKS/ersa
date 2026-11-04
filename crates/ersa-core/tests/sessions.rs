@@ -96,7 +96,7 @@ async fn events_are_numbered_from_zero_without_gaps() {
     let events = client.events_until("assistant.text").await;
     assert_eq!(seqs(&events), (0..events.len() as u64).collect::<Vec<_>>());
     for event in &events {
-        assert_eq!(event["v"], 2);
+        assert_eq!(event["v"], 3);
         assert_eq!(event["session_id"], id.as_str());
         assert_eq!(event["source"]["backend"], fake::BACKEND);
     }
