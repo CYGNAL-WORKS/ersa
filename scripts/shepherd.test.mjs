@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { refusals } from "./merge-pr.mjs";
-import { OWNER_MERGES, blocks, crashRecordName, decide, isFailedRecord, readiness, route } from "./shepherd.mjs";
+import { OWNER_MERGES, blocks, crashed, decide, readiness, route } from "./shepherd.mjs";
 
 const opts = { merge: true, maxFixes: 3 };
 const clean = { kind: "review", head: "r1", startedAt: "1", blocks: false, output: { findings: [] } };
@@ -118,15 +118,13 @@ test("red CI reruns once per head, then gets one fix", () => {
 });
 
 
-test("a job that ends before it runs is counted as a failure of its own kind", () => {
-  const name = (action) => crashRecordName(7, "abc1234", action, 1);
-  for (const action of [{ kind: "review" }, { kind: "verify" }]) {
-    assert.ok(isFailedRecord(name(action), 7, "review"), action.kind);
-    assert.ok(!isFailedRecord(name(action), 7, "fix"), action.kind);
-  }
-  for (const task of ["review", "ci", "conflict"]) {
-    assert.ok(isFailedRecord(name({ kind: "fix", task }), 7, "fix"), task);
-    assert.ok(!isFailedRecord(name({ kind: "fix", task }), 7, "review"), task);
-  }
-  assert.ok(!isFailedRecord(name({ kind: "review" }), 77, "review"), "another pull request's record");
+test("a job that failed and left no record of its own crashed, whatever its exit code", () => {
+  const before = ["7-abc1234-review.json", "8-def5678-fix.json"];
+  const wrote = [...before, "7-bcd2345-review.1.failed.json"];
+  for (const code of [1, 2, null, -2]) assert.equal(crashed(code, before, before, 7), true, `exit ${code}, no record`);
+  assert.equal(crashed(1, before, wrote, 7), false, "a failed job that wrote its record");
+  assert.equal(crashed(1, before, [...before, "8-x-review.1.failed.json"], 7), true, "another pull request's record does not count");
+  assert.equal(crashed(1, before, [...before, "7-bcd2345-verify.notes.md"], 7), true, "a notes file is not a record");
+  assert.equal(crashed(0, before, before, 7), false);
+  assert.equal(crashed(3, before, before, 7), false, "already ran");
 });

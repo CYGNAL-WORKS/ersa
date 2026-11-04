@@ -366,4 +366,11 @@ async function main() {
   process.exit(worked ? 0 : 1);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+// An unexpected error is a tool error (exit 2), never "did not do its work"
+// (exit 1, which always leaves a record): the loop counts exit 2 as a crash.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+  main().catch((e) => {
+    process.stderr.write(`${e?.stack ?? e}
+`);
+    process.exit(2);
+  });

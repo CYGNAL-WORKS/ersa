@@ -177,7 +177,14 @@ function fail(message) {
   process.exit(2);
 }
 
-const readJson = (f) => JSON.parse(readFileSync(f, "utf8"));
+// A record torn by a killed job reads as missing, never as a crash of the loop.
+const readJson = (f) => {
+  try {
+    return JSON.parse(readFileSync(f, "utf8"));
+  } catch {
+    return null;
+  }
+};
 const jobFiles = () => (existsSync(JOBS) ? readdirSync(JOBS) : []);
 const isAncestor = (a, b) => run("git", ["merge-base", "--is-ancestor", a, b]).ok;
 const onlyCleanMain = (from, to) => {
@@ -200,17 +207,17 @@ function queue() {
 }
 
 // What the job records say about this pull request and its current head.
-function gather(row) {
+function gather(row, crashes = new Map()) {
   const id = (kind) => `${row.number}-${row.head}-${kind}`;
   const files = jobFiles();
-  const mine = files.filter((f) => f.startsWith(`${row.number}-`) && /-(review|fix|fix-ci|fix-conflict)\.json$/.test(f)).map((f) => readJson(join(JOBS, f)));
+  const mine = files.filter((f) => f.startsWith(`${row.number}-`) && /-(review|fix|fix-ci|fix-conflict)\.json$/.test(f)).map((f) => readJson(join(JOBS, f))).filter(Boolean);
   const reviews = mine.filter((r) => r.kind === "review");
   // A fix's kind comes from its task; first-loop records kept none, only a task file.
   const taskFile = (x, kind) => files.includes(`${row.number}-${x.head.slice(0, 7)}-${kind}.task.md`);
   const fixes = mine
     .filter((r) => r.kind === "fix")
     .map((x) => ({ ...x, fixKind: x.task ? fixKind(x) : taskFile(x, "ci") ? "ci" : taskFile(x, "conflict") ? "conflict" : "review" }));
-  const failed = (kind) => files.filter((f) => isFailedRecord(f, row.number, kind)).length;
+  const failed = (kind) => files.filter((f) => isFailedRecord(f, row.number, kind)).length + (crashes.get(`${row.number}:${kind}`) ?? 0);
   const f = {
     dependabot: row.branch.startsWith("dependabot/"),
     hold: row.labels.includes(HOLD),
@@ -269,6 +276,7 @@ function latestReview(n) {
   return jobFiles()
     .filter((f) => f.startsWith(`${n}-`) && f.endsWith("-review.json"))
     .map((f) => readJson(join(JOBS, f)))
+    .filter(Boolean)
     .sort(byStart)
     .at(-1);
 }
@@ -329,12 +337,16 @@ export function isFailedRecord(file, n, kind) {
   return file.startsWith(`${n}-`) && new RegExp(`-${kind}(-ci|-conflict)?\\.`).test(file) && file.endsWith(".failed.json");
 }
 
-// The record the loop writes for a job that ended before it ran (a usage or
-// tool error, or a crash), which leaves no record of its own. Without it the
-// crash is never counted, and the loop retries until the job budget is gone.
-export function crashRecordName(n, head, action, now) {
-  const kind = action.kind === "fix" ? `fix${["ci", "conflict"].includes(action.task) ? `-${action.task}` : ""}` : "review";
-  return `${n}-${head}-${kind}.${now}.failed.json`;
+// Whether a job crashed: it failed (any exit but 0, or 3 for "already ran")
+// and left no record of its own. Exit codes alone cannot tell: on Windows a
+// killed job and an uncaught error both exit 1, like a job that failed and
+// wrote its record. `before` and `after` list the jobs folder around the job.
+// The loop counts crashes for the current run only, so a passing network
+// blip never counts against a pull request for good.
+export function crashed(code, before, after, n) {
+  if (code === 0 || code === 3) return false;
+  const old = new Set(before);
+  return !after.some((f) => !old.has(f) && f.startsWith(`${n}-`) && f.endsWith(".json") && !f.endsWith(".notes.json"));
 }
 
 // Starts a job without waiting for it; `done` settles with its exit code and last line.
@@ -360,7 +372,10 @@ function startJob(row, action) {
   const child = spawn("node", ["scripts/shepherd-job.mjs", ...args], { cwd: ROOT, stdio: ["ignore", "ignore", "pipe"] });
   let err = "";
   child.stderr.on("data", (d) => (err += d));
-  return new Promise((settle) => child.on("close", (code) => settle({ code, text: code === 0 ? "done" : `failed (${code}): ${err.trim().split("\n").at(-1) ?? ""}` })));
+  return new Promise((settle) => {
+    child.on("error", (e) => settle({ code: null, text: `failed to start: ${e.message}` }));
+    child.on("close", (code) => settle({ code, text: code === 0 ? "done" : `failed (${code}): ${err.trim().split("\n").at(-1) ?? ""}` }));
+  });
 }
 
 const JOB_KINDS = ["verify", "fix", "review"];
@@ -400,7 +415,7 @@ async function main() {
   if (!first) fail("could not read the pull requests");
   const set = new Set(first.filter((r) => r.state !== "draft" && !r.fork && !opts.skip.has(r.number)).map((r) => r.number));
   process.stdout.write(`${stamp()} set: ${[...set].map((n) => `#${n}`).join(" ") || "(empty)"}${opts.merge ? ", may merge" : ", shadow run"}\n`);
-  const ctx = { jobs: 0, running: null, started: new Set() };
+  const ctx = { jobs: 0, running: null, started: new Set(), crashes: new Map() };
   const said = new Map();
   const say = (n, state, what) => {
     if (said.get(n) === what) return;
@@ -447,7 +462,7 @@ async function main() {
         lines.push({ row, action: { kind: "running" }, what: `${ctx.running.kind} running` });
         continue;
       }
-      let action = decide(row, gather(row), opts);
+      let action = decide(row, gather(row, ctx.crashes), opts);
       if (action.kind === "merge" && merged) action = { kind: "wait", reason: "one merge per pass; main just moved" };
       if (JOB_KINDS.includes(action.kind)) {
         wanting.push({ row, action });
@@ -485,21 +500,26 @@ async function main() {
         ctx.started.add(key);
         const kind = labelOf(action);
         what = `${kind}: started (job ${ctx.jobs} of ${opts.maxJobs})`;
+        const before = jobFiles();
         const done = startJob(row, action).then(({ code, text }) => {
-          say(row.number, row.state, `${kind} ${text}`);
-          // Exit 1 leaves the job's own failed record; exit 2 or a crash leaves
-          // none, so the loop writes it, and decide() counts both.
-          if (code === 2 || code === null) {
-            mkdirSync(JOBS, { recursive: true });
-            writeFileSync(join(JOBS, crashRecordName(row.number, row.head, action, Date.now())), JSON.stringify({ kind: action.kind, pr: row.number, head: row.oid, error: text }, null, 2));
+          // Nothing here may stop the loop: an error is logged, and the slot is always freed.
+          try {
+            say(row.number, row.state, `${kind} ${text}`);
+            if (crashed(code, before, jobFiles(), row.number)) {
+              const c = `${row.number}:${action.kind === "fix" ? "fix" : "review"}`;
+              ctx.crashes.set(c, (ctx.crashes.get(c) ?? 0) + 1);
+            }
+            // A job that failed may run again on this head; one that already ran (3) may not.
+            if (code !== 0 && code !== 3) ctx.started.delete(key);
+            if (action.kind !== "fix") {
+              const rv = latestReview(row.number);
+              if (rv) upsertComment(row.number, notesComment(rv));
+            }
+          } catch (e) {
+            process.stderr.write(`${stamp()} after the ${kind} job on #${row.number}: ${e?.message ?? e}\n`);
+          } finally {
+            ctx.running = null;
           }
-          // A job that crashed may run again on this head; one that already ran (3) may not.
-          if (code !== 0 && code !== 3) ctx.started.delete(key);
-          if (action.kind !== "fix") {
-            const rv = latestReview(row.number);
-            if (rv) upsertComment(row.number, notesComment(rv));
-          }
-          ctx.running = null;
         });
         ctx.running = { n: row.number, kind, done };
         acted = true;
