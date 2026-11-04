@@ -153,10 +153,11 @@ export const claudeArgs = (text, resume) => [
   "--disallowedTools", ...NEVER, ...(resume ? ["--resume", resume] : []),
 ];
 
-// A stalled git or gh call ends after two minutes; the review itself gets
-// the workflow's 45, so a run by hand ends too.
+// A stalled git or gh call ends after two minutes; the review itself gets 40,
+// inside the workflow's 45, so the check run is finished before the runner
+// kills the job, and a run by hand ends too.
 function run(cmd, args) {
-  const timeout = (cmd === "claude" ? 45 : 2) * 60 * 1000;
+  const timeout = (cmd === "claude" ? 40 : 2) * 60 * 1000;
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" } });
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: [(r.stderr ?? "").trim(), r.error?.message].filter(Boolean).join("; ") };
 }
@@ -196,6 +197,13 @@ function review(argv, run) {
   if (pr.state !== "OPEN") return skip(`it is ${pr.state.toLowerCase()}`);
   if (pr.isDraft) return skip("it is a draft");
   if (pr.isCrossRepository) return skip("it is from a fork");
+  const labels = pr.labels.map((l) => l.name);
+  // A dependency bump is a policy call (ADR 0015), so a bot's pull request is
+  // the owner's to merge, and its third-party code never runs under the review.
+  if (isBot(pr)) {
+    if (!labels.includes("needs-owner")) must("gh", ["pr", "edit", n, "--add-label", "needs-owner"]);
+    return skip("an automated pull request is the owner's to merge");
+  }
   if (must("git", ["rev-parse", "HEAD"]) !== head) fail(`this checkout is not at ${head.slice(0, 7)}`);
 
   const reviews = must("gh", ["api", "--paginate", `repos/{owner}/{repo}/pulls/${n}/reviews?per_page=100`, "--jq", ".[] | {author: .user.login, body}"]).split("\n").filter(Boolean).map((l) => JSON.parse(l));
@@ -213,50 +221,61 @@ function review(argv, run) {
   const since = fresh && previous ? must("git", ["diff", "--name-only", "--no-renames", "-z", previous.head, "HEAD"]).split("\0").filter(Boolean) : [];
   const narrow = previous && !since.some((f) => f.startsWith(".github/")) ? previous : null;
   const check = checkRun(run, head);
-  let findings = previous?.findings ?? [];
-  let dismissed = [];
-  if (fresh) {
-    instructionsFromMain(files, run);
-    ({ findings, dismissed } = ask(run, prompt({ number: n, branch: pr.headRefName, title: pr.title, issue: issueOf(pr.body), head }, narrow)));
+  try {
+    return decide();
+  } catch (e) {
+    check("failure", `The run failed: ${e.message}`);
+    throw e;
   }
 
-  const block = blocking(findings);
-  const labels = pr.labels.map((l) => l.name);
-  const owner = ownerPaths(files);
-  const ownerMerges = !block.length && !labels.includes("hold") && (owner.length > 0 || isBot(pr));
-  let code = 0;
-  let outcome;
-  let merge = false;
-  if (block.length) [code, outcome] = [1, "Fix each blocking finding with the smallest change and push; CI and this review run again."];
-  else if (labels.includes("hold")) outcome = "Labeled `hold`, so not merged.";
-  // A dependency bump is a policy call (ADR 0015), so a bot's pull request is the owner's to merge.
-  else if (isBot(pr)) outcome = "Ready. An automated pull request is the owner's to merge.";
-  else if (owner.length) outcome = `Ready. It changes ${owner.map((p) => `\`${p}\``).join(", ")}, which the owner merges.`;
-  else {
-    const g = gate([n, "--reviewed", head, "--dry-run"], { run });
-    if (g.code === 0) [merge, outcome] = [true, "The merge gate passes; merging."];
-    else if (g.code === 1 && g.reasons.length === 1 && g.reasons[0] === BEHIND_MAIN) outcome = "Behind main: merge main into the branch and push; CI and this review run again, and then it merges.";
-    else [code, outcome] = [g.code, `The merge gate ${g.code === 1 ? "refused" : "could not run"}:\n\n${g.stdout ?? g.stderr}`];
+  function decide() {
+    let findings = previous?.findings ?? [];
+    let dismissed = [];
+    if (fresh) {
+      instructionsFromMain(files, run);
+      ({ findings, dismissed } = ask(run, prompt({ number: n, branch: pr.headRefName, title: pr.title, issue: issueOf(pr.body), head }, narrow)));
+    }
+
+    // The check is the review's verdict, finished before the gate reads the
+    // head's checks: the gate would otherwise wait for it.
+    const block = blocking(findings);
+    check(block.length ? "failure" : "success", block.length ? `${block.length} finding(s) block the merge; see the review.` : "Nothing blocks the merge.");
+    const owner = ownerPaths(files);
+    const ownerMerges = !block.length && !labels.includes("hold") && owner.length > 0;
+    let code = 0;
+    let outcome;
+    let merge = false;
+    if (block.length) [code, outcome] = [1, "Fix each blocking finding with the smallest change and push; CI and this review run again."];
+    else if (labels.includes("hold")) outcome = "Labeled `hold`, so not merged.";
+    else if (owner.length) outcome = `Ready. It changes ${owner.map((p) => `\`${p}\``).join(", ")}, which the owner merges.`;
+    else {
+      const g = gate([n, "--reviewed", head, "--dry-run"], { run });
+      if (g.code === 0) [merge, outcome] = [true, "The merge gate passes; merging."];
+      else if (g.code === 1 && g.reasons.length === 1 && g.reasons[0] === BEHIND_MAIN) outcome = "Behind main: merge main into the branch and push; CI and this review run again, and then it merges.";
+      else [code, outcome] = [g.code, `The merge gate ${g.code === 1 ? "refused" : "could not run"}:\n\n${g.stdout ?? g.stderr}`];
+    }
+    if (fresh) post(run, n, head, reviewBody({ head, findings, dismissed, outcome }));
+    if (ownerMerges && !labels.includes("needs-owner")) must("gh", ["pr", "edit", n, "--add-label", "needs-owner"]);
+    if (merge) {
+      const g = gate([n, "--reviewed", head], { run });
+      if (g.code !== 0) fail(`the merge failed after the review was posted: ${g.stdout ?? g.stderr}`);
+    }
+    return { code, stdout: `#${n} at ${head.slice(0, 7)}: ${block.length ? `${block.length} blocking finding(s)` : "clean"}${fresh ? "" : " (already reviewed)"}. ${outcome}\n` };
   }
-  if (fresh) post(run, n, head, reviewBody({ head, findings, dismissed, outcome }));
-  if (ownerMerges && !labels.includes("needs-owner")) must("gh", ["pr", "edit", n, "--add-label", "needs-owner"]);
-  if (merge) {
-    const g = gate([n, "--reviewed", head], { run });
-    if (g.code !== 0) fail(`the merge failed after the review was posted: ${g.stdout ?? g.stderr}`);
-  }
-  check(code === 0 ? "success" : "failure", outcome);
-  return { code, stdout: `#${n} at ${head.slice(0, 7)}: ${block.length ? `${block.length} blocking finding(s)` : "clean"}${fresh ? "" : " (already reviewed)"}. ${outcome}\n` };
 }
 
-// A "Merge review" check run on the head, in progress now and finished later,
-// so `gh pr checks --watch` waits for it and sees it red when it blocks. Only
-// the workflow's token may create one; a run by hand gets no check and says so.
+// A "Merge review" check run on the head, in progress now and finished with
+// the review's verdict, so `gh pr checks --watch` waits for it and sees it
+// red when findings block. Only the workflow's token may create one; a run by
+// hand gets no check and says so.
 function checkRun(run, head) {
   const url = process.env.GITHUB_RUN_ID ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : "";
   const made = run("gh", ["api", "repos/{owner}/{repo}/check-runs", "-f", "name=Merge review", "-f", `head_sha=${head}`, "-f", "status=in_progress", ...(url ? ["-f", `details_url=${url}`] : []), "--jq", ".id"]);
   if (!made.ok) process.stderr.write(`no check run on the head: ${made.err.split("\n")[0]}\n`);
+  let finished = false;
   return (conclusion, summary) => {
-    if (!made.ok) return;
+    if (!made.ok || finished) return;
+    finished = true;
     const done = run("gh", ["api", "-X", "PATCH", `repos/{owner}/{repo}/check-runs/${made.out}`, "-f", "status=completed", "-f", `conclusion=${conclusion}`, "-f", "output[title]=Merge review", "-f", `output[summary]=${summary}`]);
     if (!done.ok) process.stderr.write(`the check run was not finished: ${done.err.split("\n")[0]}\n`);
   };
@@ -272,7 +291,7 @@ function instructionsFromMain(files, run) {
   };
   must(["checkout", "origin/main", "--", "CLAUDE.md", ".claude", "scripts/hooks"]);
   for (const p of instructionPaths(files)) {
-    rmSync(join(ROOT, p), { recursive: true, force: true });
+    must(["rm", "-q", "-r", "-f", "--ignore-unmatch", "--", p]);
     if (run("git", ["cat-file", "-e", `origin/main:${p}`]).ok) must(["checkout", "origin/main", "--", p]);
   }
 }
