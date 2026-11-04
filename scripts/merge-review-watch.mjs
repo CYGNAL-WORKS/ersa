@@ -14,16 +14,16 @@
 // as it starts on a head. A head with the status is reviewed, being reviewed,
 // or clean and waiting for the gate; a pending status older than an hour is
 // one of the last two gone stale (a run that died with the machine, a gate
-// that may pass now), and the head is taken up again. One review per tick, so
-// a tick ends well within the two hours the task allows it; a head whose
-// review could not start (its checkout, a tool) is logged and the next head
-// gets the tick. A head without the status that
+// that may pass now), and the head is taken up again. One review per tick,
+// and an hour at most spent on heads whose checkout cannot be prepared (each
+// is logged and the next head gets the tick), so a tick ends within the two
+// hours the task allows it. A head without the status that
 // GitHub would merge on its own (auto-merge armed by a review of an earlier
 // head, which a push by the owner's account does not disarm), or any head of a
 // pull request labeled `hold`, gets auto-merge disabled first, so nothing
 // unreviewed or held enters the queue. A lock file in .scratch/ holds the pid
 // of the running tick, so two ticks never overlap; a lock whose process is gone
-// or that is two hours old is taken over.
+// or that is three hours old is taken over.
 //
 // Each review runs in its own checkout, a detached worktree of this repository
 // at <dir> (by default a sibling folder named after this one with "-review"
@@ -40,9 +40,10 @@
 // repository, with node, gh and claude on the user's PATH. It runs only while
 // the owner is logged on, since both logins are theirs, and appends the
 // poller's lines and each review's output to .scratch\merge-review-watch.log,
-// making the folder first on a fresh clone:
+// making the folder first on a fresh clone (cmd would bind the `&` inside an
+// `if`, so the mkdir runs unconditionally and its complaint is dropped):
 //
-//   $run = New-ScheduledTaskAction -Execute "cmd" -Argument "/c if not exist .scratch mkdir .scratch & node scripts\merge-review-watch.mjs --once >> .scratch\merge-review-watch.log 2>&1" -WorkingDirectory (Get-Location)
+//   $run = New-ScheduledTaskAction -Execute "cmd" -Argument "/c mkdir .scratch 2>nul & node scripts\merge-review-watch.mjs --once >> .scratch\merge-review-watch.log 2>&1" -WorkingDirectory (Get-Location)
 //   $every5 = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
 //   $limits = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 //   Register-ScheduledTask -TaskName "Ersa merge review" -Action $run -Trigger $every5 -Settings $limits
@@ -51,7 +52,7 @@
 // usage or tool error.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -63,11 +64,13 @@ const CHECKOUT = join(ROOT, "..", `${basename(ROOT)}-review`);
 export const INTERVAL_MS = 5 * 60 * 1000;
 // A pending status older than this belongs to a run that is over: longer than
 // the review's claude runs (38 and 4 minutes) and its tool calls at their
-// usual pace. A lock gets twice that, since its tick may be a review whose
-// every tool call stalled to its two-minute limit, and a live tick must never
-// be taken over: the same two hours the task allows a tick.
+// usual pace. A lock gets three times that, past the two hours the task
+// allows a tick: a tick is at most an hour of heads that cannot start plus one
+// review whose every tool call stalled to its two-minute limit, and the task's
+// stop may end only the shell while the review runs on, so a live tick must
+// never be taken over.
 export const STALE_MS = 60 * 60 * 1000;
-export const LOCK_STALE_MS = 2 * STALE_MS;
+export const LOCK_STALE_MS = 3 * STALE_MS;
 const FIELDS = "number,isDraft,isCrossRepository,headRefOid,labels,autoMergeRequest,statusCheckRollup";
 
 // Which pull requests a tick acts on: `review` the heads to review, in list
@@ -95,8 +98,11 @@ export function select(prs, now = Date.now()) {
 // reads as live, so age settles it). It is taken over by renaming it away,
 // which only one of two ticks reading the same dead lock can do; a renamed
 // file that no longer holds the pid that was read is a live lock another tick
-// wrote in between, and goes back. The release removes the lock only while it
-// still holds this pid. A lock that names no pid is left for a person.
+// wrote in between, and goes back by a hard link, which fails rather than
+// replace a lock a third tick wrote meanwhile (that tick then holds it, and
+// the second one's loop notices at its next refresh). The release removes the
+// lock only while it still holds this pid. A lock that names no pid is left
+// for a person.
 export function lock(path, { alive = isAlive, pid = process.pid, now = Date.now } = {}) {
   mkdirSync(dirname(path), { recursive: true });
   for (;;) {
@@ -131,7 +137,12 @@ export function lock(path, { alive = isAlive, pid = process.pid, now = Date.now 
       throw e;
     }
     if (readFileSync(gone, "utf8") !== String(holder)) {
-      renameSync(gone, path);
+      try {
+        linkSync(gone, path);
+      } catch (e) {
+        if (e.code !== "EEXIST") throw e;
+      }
+      rmSync(gone, { force: true });
       return null;
     }
     rmSync(gone, { force: true });
@@ -194,10 +205,9 @@ function prepare(run, dir, n, head) {
 }
 
 // One pass: disarm what must not merge, then review the first head due. A
-// head whose review could not start (its checkout cannot be prepared, the
-// review script fails before it reviews, exit 2) is reported and the next
-// head gets the tick, so one bad head does not hold the rest; a review that
-// ran (exit 0 or 1) ends the tick.
+// head whose checkout cannot be prepared is reported and the next head gets
+// the tick, so one bad head does not hold the rest, for an hour at most; the
+// first review run, whatever its exit code, ends the tick.
 function tick(run, dir, log, now) {
   const list = run("gh", ["pr", "list", "--state", "open", "--limit", "100", "--json", FIELDS]);
   if (!list.ok) fail(`gh pr list failed: ${list.err}`);
@@ -207,8 +217,10 @@ function tick(run, dir, log, now) {
     log(`#${n}: auto-merge was on for an unreviewed or held head; ${r.ok ? "disabled it" : `could not disable it: ${r.err}`}`);
   }
   if (!review.length) return log("nothing to review");
+  const started = now();
   for (const [i, { number: n, head }] of review.entries()) {
     const later = review.slice(i + 1);
+    if (now() - started > STALE_MS) return log(`the tick is an hour old; ${[n, ...later.map((p) => p.number)].map((x) => `#${x}`).join(", ")} wait for the next`);
     log(`#${n} at ${head.slice(0, 7)}: reviewing${later.length ? `; ${later.map((p) => `#${p.number}`).join(", ")} next` : ""}`);
     try {
       prepare(run, dir, n, head);
@@ -217,8 +229,7 @@ function tick(run, dir, log, now) {
       continue;
     }
     const r = run("node", ["scripts/merge-review.mjs", String(n), "--head", head], dir, { live: true });
-    log(`#${n} at ${head.slice(0, 7)}: the review exited ${r.status ?? r.err}`);
-    if (r.status === 0 || r.status === 1) return;
+    return log(`#${n} at ${head.slice(0, 7)}: the review exited ${r.status ?? r.err}`);
   }
 }
 
@@ -250,14 +261,17 @@ export function main(argv, { run: r = run, sleep = pause, now = Date.now, log = 
         }
         if (once) return { code: 0 };
         sleep(INTERVAL_MS);
-        // The lock's age says the loop is alive; a lock that is gone was taken
-        // over or removed by hand, and this loop stops rather than run beside it.
+        // The lock's age says the loop is alive; a lock that is gone or
+        // another tick's was taken over or removed by hand, and this loop
+        // stops rather than run beside it.
+        let holder = "";
         try {
-          utimesSync(lockPath, new Date(now()), new Date(now()));
+          holder = readFileSync(lockPath, "utf8");
         } catch (e) {
           if (e.code !== "ENOENT") throw e;
-          fail(`the lock at ${lockPath} is gone; another tick may run now, so this loop stops`);
         }
+        if (holder !== String(process.pid)) fail(`the lock at ${lockPath} is ${holder ? `another tick's (pid ${holder})` : "gone"}, so this loop stops`);
+        utimesSync(lockPath, new Date(now()), new Date(now()));
       }
     } finally {
       release();

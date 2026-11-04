@@ -66,7 +66,7 @@ let home;
 const tmp = () => (home ??= mkdtempSync(join(tmpdir(), "merge-review-watch-")));
 after(() => home && rmSync(home, { recursive: true, force: true }));
 
-test("the lock is held by one tick at a time, survives a dead or two-hour-old holder, and is released", () => {
+test("the lock is held by one tick at a time, survives a dead or three-hour-old holder, and is released", () => {
   const path = join(tmp(), "a", "lock");
   const alive = (pid) => pid === 100;
   const release = lock(path, { alive, pid: 100 });
@@ -82,10 +82,10 @@ test("the lock is held by one tick at a time, survives a dead or two-hour-old ho
   taken();
   // A pid Windows gave to another process reads as live; the file's age settles it.
   writeFileSync(path, "100");
-  assert.equal(lock(path, { alive, pid: 200, now: () => Date.now() + LOCK_STALE_MS - 60_000 }), null, "a live lock under two hours old is held");
+  assert.equal(lock(path, { alive, pid: 200, now: () => Date.now() + LOCK_STALE_MS - 60_000 }), null, "a live lock under three hours old is held");
   const old = lock(path, { alive, pid: 200, now: () => Date.now() + LOCK_STALE_MS + 1000 });
-  assert.ok(old, "a live-looking lock two hours old is taken over");
-  assert.equal(LOCK_STALE_MS, 2 * STALE_MS);
+  assert.ok(old, "a live-looking lock three hours old is taken over");
+  assert.equal(LOCK_STALE_MS, 3 * STALE_MS, "past the two hours the task allows a tick");
   old();
   // A release removes only its own lock: a tick taken over must not remove its successor's.
   writeFileSync(path, "400");
@@ -117,7 +117,7 @@ const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 
 // main() with every tool stood in for: gh lists `prs`, git answers from
 // `git`, the review exits `exit`; `exists` says whether the checkout is there.
-function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list = () => null, lockPath, alive, sleep } = {}) {
+function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list = () => null, lockPath, alive, sleep, now = () => NOW } = {}) {
   const calls = [];
   const logs = [];
   const ok = (out = "") => ({ ok: true, status: 0, out, err: "" });
@@ -133,7 +133,7 @@ function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list 
     throw new Error(`unexpected ${cmd}`);
   };
   const path = lockPath ?? join(tmp(), `lock-${Math.random().toString(36).slice(2)}`);
-  const got = main(argv, { run, now: () => NOW, log: (l) => logs.push(l), lockPath: path, alive, sleep });
+  const got = main(argv, { run, now, log: (l) => logs.push(l), lockPath: path, alive, sleep });
   return { ...got, calls, logs, lockPath: path, reviews: calls.filter((c) => c.cmd === "node"), gh: calls.filter((c) => c.cmd === "gh").map((c) => c.args.join(" ")) };
 }
 
@@ -170,17 +170,32 @@ test("an existing checkout is reused, one head is reviewed per tick, and a revie
   assert.match(got.logs.join("\n"), /#7 at bbbbbbb: reviewing; #8 next\n#7 at bbbbbbb: the review exited 1/);
 });
 
-test("a head whose review could not start gives the tick to the next head, so one bad head does not hold the rest", () => {
-  // #7's checkout cannot be prepared; #8's review fails before it reviews (exit 2); #9 is reviewed; #10 waits.
-  const prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) }), pr({ number: 10, headRefOid: "e".repeat(40) })];
+test("a head whose checkout cannot be prepared gives the tick to the next head; the first review run, whatever its exit, ends the tick", () => {
+  // #7's checkout cannot be prepared; #8's review runs and fails (exit 2, which can come after a whole claude run); #9 waits.
+  const prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) })];
   const got = drive(["--once", "--checkout", join(tmp(), "r2")], {
     prs,
     git: (args) => (args[0] === "fetch" && args.includes("pull/7/head") ? { ok: false, err: "network down" } : {}),
-    exit: (n) => (n === "8" ? 2 : 0),
+    exit: 2,
   });
   assert.equal(got.code, 0, got.stderr);
-  assert.deepEqual(got.reviews.map((c) => c.args[1]), ["8", "9"]);
-  assert.match(got.logs.join("\n"), /#7 at bbbbbbb: git fetch -q failed: network down\n#8 at ccccccc: reviewing; #9, #10 next\n#8 at ccccccc: the review exited 2\n#9 at ddddddd: reviewing; #10 next\n#9 at ddddddd: the review exited 0$/);
+  assert.deepEqual(got.reviews.map((c) => c.args[1]), ["8"]);
+  assert.match(got.logs.join("\n"), /#7 at bbbbbbb: git fetch -q failed: network down\n#8 at ccccccc: reviewing; #9 next\n#8 at ccccccc: the review exited 2$/);
+});
+
+test("an hour of heads that cannot start ends the tick, so it stays inside the lock's age", () => {
+  // Each failing prepare takes 25 minutes of the clock; the third head finds the hour gone.
+  let t = NOW;
+  const prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) }), pr({ number: 10, headRefOid: "e".repeat(40) })];
+  const got = drive(["--once", "--checkout", join(tmp(), "r7")], {
+    prs,
+    git: (args) => (args[0] === "fetch" ? ((t += 25 * 60 * 1000), { ok: false, err: "timed out" }) : {}),
+    now: () => t,
+  });
+  assert.equal(got.code, 0, got.stderr);
+  assert.equal(got.reviews.length, 0);
+  assert.equal(got.calls.filter((c) => c.cmd === "git" && c.args[0] === "fetch").length, 3, "the fourth head is not tried");
+  assert.match(got.logs.at(-1), /^the tick is an hour old; #10 wait for the next$/);
 });
 
 test("auto-merge on an unreviewed head is disabled before anything else", () => {
