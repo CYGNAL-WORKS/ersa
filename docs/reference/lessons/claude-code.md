@@ -16,7 +16,7 @@ Ersa's tested range was 2.1.316 when these were checked. Most were seen on older
 ## Listing and resuming
 
 - **Shared record directories.** PROTO-CLAUDE-CODE-STREAM-R16 lists a directory's sessions without checking each record's `cwd`, but distinct paths share a directory. Ersa's own encoding maps `a\b`, `a b`, and `a-b` to one name, and the CLI once resumed a session from a directory that differed only in `_`, `-`, or `.` (CLI release notes, 2.1.239). Record entries carry `cwd` (2.1.316 record fixtures), so listing can filter on it.
-- **Spawn directory.** Core spawns and resumes in the stored workspace path, but no brief requires it. The CLI's reported cwd is normalized (a `\\?\` path on Windows), and a fork spawned there fails with `ENOENT`.
+- **Spawn directory.** Core spawns and resumes in the stored workspace path; FLOW-NEW-SESSION-R04 requires it for a new session, no brief does for a resume. The CLI's reported cwd is normalized (a `\\?\` path on Windows), and a fork spawned there fails with `ENOENT`.
 - **Missing directory.** For FLOW-RESUME-SESSION's open question: the CLI's interactive `/resume` once ran in the current directory (2.1.239), and `-p --resume` resumed without the worktree after its git metadata was lost (2.1.260).
 
 ## Unfinished work
