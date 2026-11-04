@@ -16,12 +16,13 @@
 // already reviewed is not reviewed again; a clean one is still enqueued when
 // the gate lets it. The run keeps a "Merge review" commit status on the head
 // (a person's token may set a status but not create a check run): pending
-// while it works, then success, failure when findings or the gate block the
-// merge, or error when the run itself failed. The poller reads that status as
-// the mark that a head has been reviewed.
+// while it works or while a clean head waits for the gate, then success,
+// failure when findings block the merge, or error when the run itself failed.
+// The poller reads that status as the mark that a head has been reviewed, and
+// takes up a pending one again after an hour.
 //
-// Exit 0 when the head was added to the merge queue, is the owner's, or there
-// was nothing to do; 1 when the review blocks the merge or the gate refuses;
+// Exit 0 when the head was added to the merge queue, is the owner's, waits for
+// the gate, or there was nothing to do; 1 when the review blocks the merge;
 // 2 on a tool or usage error.
 
 import { spawnSync } from "node:child_process";
@@ -178,7 +179,7 @@ export function main(argv, { run: r = run } = {}) {
 }
 
 // gh names an app's account `app/<name>` and flags it; the API's own form is `<name>[bot]`.
-export const isBot = (pr) => pr.author?.is_bot === true || /^app\/|\[bot\]$/.test(pr.author?.login ?? "");
+const isBot = (pr) => pr.author?.is_bot === true || /^app\/|\[bot\]$/.test(pr.author?.login ?? "");
 
 function review(argv, run) {
   const at = argv.indexOf("--head");
@@ -241,41 +242,46 @@ function review(argv, run) {
     const owner = ownerPaths(files);
     let code = 0;
     let outcome;
+    // The status the verdict leaves on the head: failure when findings block,
+    // success when the head is ready or queued, pending when a clean head
+    // waits on something that may change by itself (GitHub still working the
+    // merge out, a CI rerun), so the poller tries again when it goes stale.
+    let verdict = "success";
+    let summary;
     let queue = false;
-    if (block.length) [code, outcome] = [1, "Fix each blocking finding with the smallest change and push; CI and this review run again."];
+    if (block.length) [code, verdict, outcome] = [1, "failure", "Fix each blocking finding with the smallest change and push; CI and this review run again."];
     else if (labels.includes("hold")) outcome = "Labeled `hold`, so not added to the merge queue.";
     else if (owner.length) outcome = `Ready. It changes ${owner.map((p) => `\`${p}\``).join(", ")}, which the owner merges.`;
     else {
       const g = gate([n, "--reviewed", head, "--dry-run"], { run });
       if (g.code === 0) [queue, outcome] = [true, "The merge gate passes; adding it to the merge queue."];
-      else [code, outcome] = [g.code, `The merge gate ${g.code === 1 ? "refused" : "could not run"}:\n\n${g.stdout ?? g.stderr}`];
+      else if (g.code === 1) [verdict, summary, outcome] = ["pending", `Clean; the merge gate does not pass yet: ${g.reasons.join("; ")}`, `The merge gate does not pass yet; the merge review tries again within the hour, or at once after a push:\n\n${g.stdout}`];
+      else [code, verdict, outcome] = [2, "error", `The merge gate could not run:\n\n${g.stderr}`];
     }
     const url = fresh ? post(run, n, head, reviewBody({ head, findings, dismissed, outcome })) : "";
     if (!block.length && !labels.includes("hold") && owner.length && !labels.includes("needs-owner")) must("gh", ["pr", "edit", n, "--add-label", "needs-owner"]);
-    // The verdict, before the enqueue: a status the owner's token could not set
-    // has already failed the run above, so the mark is there when the queue is.
-    status(code === 0 ? "success" : code === 1 ? "failure" : "error", block.length ? `${block.length} finding(s) block the merge; see the review.` : outcome.split("\n").filter(Boolean).join(" "), url);
+    // The enqueue comes before the green status: a run that dies between the
+    // two leaves a pending status, which the poller takes up again, rather
+    // than a green head that never entered the queue.
     if (queue) {
       const g = gate([n, "--reviewed", head], { run });
       if (g.code !== 0) fail(`adding it to the merge queue failed after the review was posted: ${g.stdout ?? g.stderr}`);
     }
+    status(verdict, summary ?? (block.length ? `${block.length} finding(s) block the merge; see the review.` : outcome.split("\n").filter(Boolean).join(" ")), url);
     return { code, stdout: `#${n} at ${head.slice(0, 7)}: ${block.length ? `${block.length} blocking finding(s)` : "clean"}${fresh ? "" : " (already reviewed)"}. ${outcome}\n` };
   }
 }
 
 // The "Merge review" commit status on the head. GitHub keeps 140 characters of
-// a description. Failure and error are final: a problem after the verdict
-// (an enqueue that failed) turns a success red once, and nothing turns a red
-// status green again within the run. A status that cannot be set fails the
-// run: the poller reads it as the mark that a head is reviewed, so a review
-// without one would run again on the next tick.
+// a description, and each call is a new status with its own time, so a
+// pending set again with the gate's reason restarts the poller's hour. A
+// status that cannot be set fails the run: the poller reads it as the mark
+// that a head is reviewed, so a review without one would run again on the
+// next tick.
 function commitStatus(run, head) {
-  let state = "";
-  return (next, description, url = "") => {
-    if (state === next || state === "failure" || state === "error") return;
-    state = next;
-    const r = run("gh", ["api", `repos/{owner}/{repo}/statuses/${head}`, "-f", `state=${next}`, "-f", `context=${MERGE_REVIEW}`, "-f", `description=${description.slice(0, 140)}`, ...(url ? ["-f", `target_url=${url}`] : [])]);
-    if (!r.ok) fail(`the "${MERGE_REVIEW}" status could not be set to ${next}: ${r.err.split("\n")[0]}`);
+  return (state, description, url = "") => {
+    const r = run("gh", ["api", `repos/{owner}/{repo}/statuses/${head}`, "-f", `state=${state}`, "-f", `context=${MERGE_REVIEW}`, "-f", `description=${description.slice(0, 140)}`, ...(url ? ["-f", `target_url=${url}`] : [])]);
+    if (!r.ok) fail(`the "${MERGE_REVIEW}" status could not be set to ${state}: ${r.err.split("\n")[0]}`);
   };
 }
 
