@@ -13,8 +13,8 @@ To develop against the replay server instead of your own Core: `ersa-core replay
 
 In `apps/shell`:
 
-- `pnpm gen` regenerates `src/protocol/*.gen.ts` from the schemas and `src/theme/tokens.gen.css` from `docs/design/DESIGN.md`; CI fails when they are stale.
-- `pnpm typecheck`, `pnpm test` (unit tests, including the check that interface code uses only tokens).
+- `pnpm gen` regenerates `src/protocol/*.gen.ts` from the schemas, `src/theme/tokens.gen.css` from `docs/design/DESIGN.md`, and `src/catalog/en-US.gen.md` from the string catalog; CI fails when they're stale.
+- `pnpm typecheck`, `pnpm test` (unit tests, including the checks that interface code uses only tokens and takes its copy from the string catalog).
 - `pnpm dev`, then open `/gallery.html`: every component in every state, light and dark. Add a component there in the change that builds it.
 - `pnpm test:screenshots` photographs the gallery. Baselines are Linux renders from the Playwright container; `pnpm test:screenshots:update` (Docker) rewrites them, or take them from the `screenshots` artifact of a failed CI run.
 - `src/session/replays/*.json` are what the replay server sends for two fixtures, which the Interface's tests replay. The Shell's `tests/replay.rs` fails when they go stale; rewrite them with `ERSA_UPDATE_REPLAYS=1 cargo test -p ersa-shell --test replay`, which builds `ersa-core` first and stamps each capture with the commit it came from (`ersa_commit`), and review the diff.
