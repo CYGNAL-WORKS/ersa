@@ -1,11 +1,11 @@
 ---
 name: review-pr
-description: Review a diff adversarially with parallel reviewers, verify their findings, and act on them. Use as the author of a branch before opening its pull request (the implement-ticket skill points here) and at merge time, where the merge review workflow runs it; both layers run the same protocol so the author's review asks the merge-time questions.
+description: Review a diff adversarially with parallel reviewers, verify their findings, and act on them. Use as the author of a branch before opening its pull request (the implement-ticket skill points here) and at merge time, where the merge review runs it; both layers run the same protocol so the author's review asks the merge-time questions.
 ---
 
 # Review a diff
 
-One protocol for both layers. The **author** runs it on `git diff origin/main...HEAD` before opening the pull request. The **merge review** workflow runs it at merge time through `scripts/merge-review.mjs` on every head whose CI passed, and again on each fix round's commits; an orchestration session runs it by hand when asked, on `git diff origin/main...origin/<branch>`. Reviewers get the diff, the branch's files, the issue text and the brief paths, never the author's summary or reasoning.
+One protocol for both layers. The **author** runs it on `git diff origin/main...HEAD` before opening the pull request. The **merge review** runs it at merge time through `scripts/merge-review.mjs` on every head whose CI passed, and again on each fix round's commits; an orchestration session runs it by hand when asked, on `git diff origin/main...origin/<branch>`. Reviewers get the diff, the branch's files, the issue text and the brief paths, never the author's summary or reasoning.
 
 ## Steps
 
