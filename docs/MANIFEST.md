@@ -33,4 +33,4 @@ Empty.
 
 ## Problems
 
-None.
+- vendored file docs/agents/triage-labels.md changed without updating .claude/skills/VENDORED.sha256
