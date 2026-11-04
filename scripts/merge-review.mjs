@@ -258,7 +258,7 @@ function review(argv, run) {
     if (ownerMerges && !labels.includes("needs-owner")) must("gh", ["pr", "edit", n, "--add-label", "needs-owner"]);
     if (merge) {
       const g = gate([n, "--reviewed", head], { run });
-      if (g.code !== 0) fail(`the merge failed after the review was posted: ${g.stdout ?? g.stderr}`);
+      if (g.code !== 0) fail(g.stderr?.startsWith(`#${n} merged`) ? g.stderr.trimEnd() : `the merge failed after the review was posted: ${g.stdout ?? g.stderr}`);
     }
     if (code) check("failure", outcome);
     return { code, stdout: `#${n} at ${head.slice(0, 7)}: ${block.length ? `${block.length} blocking finding(s)` : "clean"}${fresh ? "" : " (already reviewed)"}. ${outcome}\n` };

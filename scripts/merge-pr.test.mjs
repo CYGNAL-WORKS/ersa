@@ -214,6 +214,7 @@ test("an octopus merge never reads as clean, even when git prints no remerge-dif
 // from `pr` (or `view`), git fetch does nothing, and origin/main points at
 // `originMain`.
 function gate(r, argv, { head, originMain, pr = {}, view, merged = true, fetched = true, mergedOn = originMain, issueState = "CLOSED" }) {
+  const states = [issueState].flat();
   r.git(["update-ref", "refs/remotes/origin/main", originMain]);
   const gh = [];
   const ok = (out = "") => ({ ok: true, out, err: "" });
@@ -222,7 +223,7 @@ function gate(r, argv, { head, originMain, pr = {}, view, merged = true, fetched
   const run = (cmd, args) => {
     if (cmd === "gh") {
       gh.push(args);
-      if (args[0] === "issue") return ok(issueState);
+      if (args[0] === "issue") return ok(states.length > 1 ? states.shift() : states[0]);
       if (args[1] === "view" && args.some((a) => a.includes("mergeCommit"))) return ok(JSON.stringify({ mergeCommit: { oid: mergeCommit() }, closingIssuesReferences: [{ number: 7 }] }));
       if (args[1] === "view") return view ?? ok(JSON.stringify({ state: "OPEN", isDraft: false, mergeable: "MERGEABLE", headRefOid: head, statusCheckRollup: [check()], ...pr }));
       return merged ? ok() : { ok: false, out: "", err: "head moved" };
@@ -230,7 +231,7 @@ function gate(r, argv, { head, originMain, pr = {}, view, merged = true, fetched
     if (args[0] === "fetch") return fetched ? ok() : { ok: false, out: "", err: "network down" };
     return r.git(args);
   };
-  return { ...main(argv, { run }), gh };
+  return { ...main(argv, { run, wait: () => {} }), gh };
 }
 
 test("the gate merges a head that passes, naming the head it checked", () => {
@@ -260,6 +261,8 @@ test("a merge that landed on a moved main, or left its issue open, fails loudly 
   const open = gate(r, ["5", "--reviewed", r.reviewed], { ...at, issueState: "OPEN" });
   assert.equal(open.code, 2);
   assert.match(open.stderr, /- #7 is still open; close it/);
+  assert.equal(open.gh.filter((a) => a[0] === "issue").length, 2, "an open issue is read again after a pause");
+  assert.equal(gate(r, ["5", "--reviewed", r.reviewed], { ...at, issueState: ["OPEN", "CLOSED"] }).code, 0, "closed by the second read");
   assert.equal(gate(r, ["5", "--reviewed", r.reviewed], at).code, 0);
 });
 
@@ -268,6 +271,10 @@ test("afterMerge reports what it could not read instead of passing", () => {
   assert.deepEqual(afterMerge({ n: "5", mainTip: "m", run: down }), ["GitHub did not say what merged; check main's tip and the fixed issues by hand"]);
   const noParent = (cmd, args) => (cmd === "gh" ? { ok: true, out: JSON.stringify({ mergeCommit: { oid: "x" }, closingIssuesReferences: [] }), err: "" } : { ok: args[0] === "fetch", out: "", err: "" });
   assert.deepEqual(afterMerge({ n: "5", mainTip: "m", run: noParent }), ["the merge commit's first parent could not be read; check that main's tip was the one the gate checked"]);
+  const asked = [];
+  const unreadIssue = (cmd, args) => (cmd === "gh" && args[0] === "pr" ? { ok: true, out: JSON.stringify({ mergeCommit: { oid: "x" }, closingIssuesReferences: [{ number: 9, repository: { name: "other", owner: { login: "o" } } }] }), err: "" } : cmd === "gh" ? (asked.push(args), { ok: false, out: "", err: "down" }) : { ok: true, out: args[0] === "rev-parse" ? "m" : "", err: "" });
+  assert.deepEqual(afterMerge({ n: "5", mainTip: "m", run: unreadIssue, wait: () => {} }), ["#9's state could not be read; check it by hand"]);
+  assert.deepEqual(asked[0].slice(0, 5), ["issue", "view", "9", "-R", "o/other"], "an issue is read in its own repository");
 });
 
 test("the gate refuses with exit 1 and never calls merge", () => {

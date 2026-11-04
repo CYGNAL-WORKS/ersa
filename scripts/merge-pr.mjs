@@ -126,16 +126,16 @@ const USAGE = "usage: node scripts/merge-pr.mjs <n> --reviewed <sha> [--dry-run]
 // Runs the gate for argv and returns the exit code, what to print and, when
 // the gate refuses, its reasons. `run` runs one git or gh command, so a test
 // can stand in for GitHub.
-export function main(argv, { run: r = run } = {}) {
+export function main(argv, { run: r = run, wait = pause } = {}) {
   try {
-    return { code: 0, ...gate(argv, r) };
+    return { code: 0, ...gate(argv, r, wait) };
   } catch (e) {
     if (e instanceof Refused) return { code: 1, stdout: e.message, reasons: e.reasons };
     return { code: 2, stderr: `${e.message}\n` };
   }
 }
 
-function gate(args, run) {
+function gate(args, run, wait) {
   let n;
   let reviewedArg;
   let dryRun = false;
@@ -174,16 +174,19 @@ function gate(args, run) {
   if (dryRun) return { stdout: `#${n} may merge at ${head.slice(0, 7)}\n` };
   const merge = run("gh", ["pr", "merge", n, "--merge", "--match-head-commit", head]);
   if (!merge.ok) fail(`gh pr merge failed: ${merge.err}`);
-  const problems = afterMerge({ n, mainTip, run });
+  const problems = afterMerge({ n, mainTip, run, wait });
   if (problems.length) fail(`#${n} merged at ${head.slice(0, 7)}, but:\n${problems.map((x) => `- ${x}\n`).join("")}`);
   return { stdout: `#${n} merged at ${head.slice(0, 7)}\n` };
 }
 
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
 // What the merge must have left behind. GitHub pins the head, not main, so a
 // merge made while main moved sits on a tip the gate never checked, and a
 // merge made with a token that may not close issues leaves `Fixes #n` open;
-// both would otherwise pass in silence.
-export function afterMerge({ n, mainTip, run }) {
+// both would otherwise pass in silence. GitHub closes the issues in the
+// background, so an open one is read again after a pause before it counts.
+export function afterMerge({ n, mainTip, run, wait = pause }) {
   const out = [];
   const view = run("gh", ["pr", "view", n, "--json", "mergeCommit,closingIssuesReferences"]);
   let after;
@@ -196,10 +199,14 @@ export function afterMerge({ n, mainTip, run }) {
   const parent = oid && run("git", ["fetch", "-q", "origin", "main"]).ok ? run("git", ["rev-parse", "--verify", "--quiet", `${oid}^1`]) : { ok: false };
   if (!parent.ok) out.push("the merge commit's first parent could not be read; check that main's tip was the one the gate checked");
   else if (parent.out !== mainTip) out.push(`main moved during the merge (the gate checked ${mainTip.slice(0, 7)}; the merge sits on ${parent.out.slice(0, 7)}), so CI has not tested main's tree; run CI on main`);
-  for (const issue of after?.closingIssuesReferences ?? []) {
-    const state = run("gh", ["issue", "view", String(issue.number), "--json", "state", "--jq", ".state"]);
-    if (!state.ok || state.out !== "CLOSED") out.push(`#${issue.number} is still open; close it`);
+  const repo = (issue) => (issue.repository?.owner?.login && issue.repository?.name ? ["-R", `${issue.repository.owner.login}/${issue.repository.name}`] : []);
+  const state = (issue) => run("gh", ["issue", "view", String(issue.number), ...repo(issue), "--json", "state", "--jq", ".state"]);
+  let open = (after?.closingIssuesReferences ?? []).map((issue) => [issue, state(issue)]).filter(([, s]) => !s.ok || s.out !== "CLOSED");
+  if (open.length) {
+    wait(5000);
+    open = open.map(([issue]) => [issue, state(issue)]).filter(([, s]) => !s.ok || s.out !== "CLOSED");
   }
+  for (const [issue, s] of open) out.push(s.ok ? `#${issue.number} is still open; close it` : `#${issue.number}'s state could not be read; check it by hand`);
   return out;
 }
 
