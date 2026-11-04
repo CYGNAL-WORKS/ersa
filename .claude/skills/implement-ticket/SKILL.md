@@ -21,6 +21,7 @@ You are an implementing session, usually unattended. The orchestration session r
 - Work test-first with the `tdd` skill, at the ticket's **Test seams**. Tests cite requirement IDs with `verifies: <ID>` in test files, and a test for a requirement asserts every value the requirement names (a level, a code, a default), not only that something happened. Reach for `codebase-design` when the shape of an interface is the question, and `diagnosing-bugs` when something fails and the cause is unclear.
 - Plain, idiomatic code with the why commented: the owner is learning Rust.
 - Where a brief is wrong, silent, or contradicts what you find, append one line to `docs/briefs/INBOX.md` and carry on. Briefs, ADRs, the glossary, `CLAUDE.md`, `.claude/` and `scripts/hooks/` are planning-only; propose changes to them as inbox lines.
+- When interface code needs a token `docs/design/DESIGN.md` lacks, define it in `apps/shell/src/theme/tokens.pending.yaml` (the generator merges it) and propose it as an inbox line; a planning pass moves it into DESIGN.md.
 - Commit as you go; commits that implement requirements end with `Implements: <IDs>`. No attribution trailers.
 
 ## 3. Review adversarially
