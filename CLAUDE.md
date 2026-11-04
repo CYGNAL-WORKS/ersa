@@ -37,4 +37,4 @@ Rust core running as its own process; Tauri 2 shell; TypeScript interface speaki
 
 ## Writing for agents
 
-Keep every document short enough to read in one sitting. Put detail behind a pointer whose wording says when to follow it. State what to do rather than what to avoid. When a document grows past about two pages, split it.
+Keep every document short enough to read in one sitting. Put detail behind a pointer whose wording says when to follow it. State what to do rather than what to avoid. Describe what is; what was removed, and where a piece came from, is recorded once, in the ADR that removed it, and nowhere else. When a document grows past about two pages, split it.
