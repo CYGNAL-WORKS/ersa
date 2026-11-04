@@ -165,7 +165,7 @@ describe("the rules for keys and plurals", () => {
 const READ_PROPS = new Set(["aria-label", "aria-description", "aria-roledescription", "aria-valuetext", "title", "placeholder", "label", "alt"]);
 
 /** Props no person reads: names, styles, roles and references. */
-const CODE_PROPS = new Set(["className", "id", "key", "role", "type", "href", "src", "htmlFor", "name", "autoComplete", "inputMode", "lang"]);
+const CODE_PROPS = new Set(["className", "id", "key", "role", "type", "href", "src", "htmlFor", "autoComplete", "inputMode", "lang"]);
 
 // A component's own props (`summary`, `what`, `unavailable`) carry copy too.
 // Any other prop counts when its text reads as words: a capital letter first,
@@ -301,6 +301,8 @@ describe("the inline-copy scan", () => {
       "Connecting…",
       "The projects",
     ]);
+    // A chip's `name` is its spoken label; a form field's `name` is a token.
+    expect(scan(`export const A = () => <><Chip name="Branch" /><input name="branch" /></>;`)).toEqual(["Branch"]);
   });
 
   it("passes props no person reads, and text with no letters", () => {
