@@ -14,7 +14,7 @@ How the orchestration session runs the engineering loop: cut tickets, start impl
 
 ## Review a pull request
 
-The merge review workflow (`.github/workflows/review.yml`, ADR 0022) runs the `review-pr` skill on every head whose CI passed and posts its findings as a review on the pull request; a high or medium finding makes the Merge review check red. Each round:
+The merge review runs on the owner's machine (ADR 0023): the owner runs `scripts/merge-review.mjs` by hand until #142 lands the merge review poller. It runs the `review-pr` skill on every head whose CI passed and posts its findings as a review on the pull request; a high or medium finding makes the Merge review check red. Each round:
 
 1. Read the review and the inbox entries. When the implementing session is not already watching the pull request (`implement-ticket` step 4 has it wait for the check), send it every finding of the round in one message: a second message queues behind the session's turn and may never be read (#48's medium waited a round that way). Check the reply's fix list against the findings sent.
 2. Run `review-pr` by hand only when asked, on `git diff origin/main...origin/<branch>`, in a detached worktree under `.scratch/`; reviewers never check out a branch in the integration checkout, and get what the skill's step 2 names, not the implementer's conclusions.
@@ -32,7 +32,7 @@ Planning commits for a pull request go onto its branch, which is checked out in 
 
 ## Merge
 
-- The workflow merges through the gate (`scripts/merge-pr.mjs`, merge commits, so `Implements:` trailers stay) when the review is clean, CI is green and the head contains main's tip. A pull request that changes an owner-only path (workflows, hooks, instruction files, the review or the gate), is labeled `needs-owner`, and the owner merges it; a bot's pull request (a dependency bump) gets the label without a review, since taking a new version is the owner's call (ADR 0015); one labeled `hold` is reviewed and never merged by the workflow. A branch behind main gets main merged in and pushed by whoever is driving it, and CI and the review run again: CI never tests the merge commit itself, and #61 landed red on main because its branch predated #56's test literal.
+- The merge review merges through the gate (`scripts/merge-pr.mjs`, merge commits, so `Implements:` trailers stay) when the review is clean, CI is green and the head contains main's tip. A branch behind main gets main merged in and pushed by whoever is driving it, and CI and the review run again: CI never tests the merge commit itself, and #61 landed red on main because its branch predated #56's test literal. Once #142 lands, a clean head enters the merge queue instead, which tests the merge before `main` moves (ADR 0023). A pull request that changes an owner-only path (workflows, hooks, instruction files, the review or the gate), is labeled `needs-owner`, and the owner merges it; a bot's pull request (a dependency bump) gets the label without a review, since taking a new version is the owner's call (ADR 0015); one labeled `hold` is reviewed and never merged.
 - After a merge, `git pull` in the integration checkout and report to the owner in a few lines.
 
 ## Train the harness

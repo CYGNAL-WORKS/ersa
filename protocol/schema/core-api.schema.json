@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/KPandaK/ersa/protocol/schema/core-api.schema.json",
+  "$id": "https://github.com/CYGNAL-WORKS/ersa/protocol/schema/core-api.schema.json",
   "title": "Ersa Core API",
   "description": "The Core request/response API (PROTO-CORE-API): newline-delimited JSON-RPC 2.0 between the Interface and Core. Each method has a `<method>.params` and a `<method>.result` definition; each notification a `<method>.notification` definition. Objects are closed (additionalProperties: false) except settings and the shapes reserved for later milestones. Agent events are not copied here: session.event carries an envelope from agent-events.schema.json by reference.",
   "x-api-version": 3,

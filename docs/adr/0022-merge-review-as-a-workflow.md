@@ -1,6 +1,6 @@
 # 0022: The merge review is a GitHub Actions workflow, and nothing fixes automatically
 
-- Status: accepted
+- Status: superseded by 0023
 - Date: 2026-11-04
 - Related briefs: none
 

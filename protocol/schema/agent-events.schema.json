@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/KPandaK/ersa/protocol/schema/agent-events.schema.json",
+  "$id": "https://github.com/CYGNAL-WORKS/ersa/protocol/schema/agent-events.schema.json",
   "title": "Ersa agent event",
   "description": "One event in a session's agent event stream (PROTO-AGENT-EVENTS): an envelope around a typed payload. Every object is closed (additionalProperties: false) so backend-specific field names cannot leak (PROTO-AGENT-EVENTS-R08). The open places are backend.passthrough.payload and permission.requested.suggestions[].payload, which are backend-specific by design, and the tool data fields (tool.requested.input, permission.requested.input, structured tool.result.content), which carry a tool's own arguments and output rather than protocol fields.",
   "$ref": "#/$defs/envelope",
