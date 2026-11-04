@@ -30,6 +30,8 @@ const STATE_DIR = join(ROOT, ".scratch", "pr-queue");
 const LAST = join(STATE_DIR, "last.json");
 
 export const NEVER_STARTED = "job ran no steps (no runner took it)";
+// The first line of the one comment scripts/shepherd.mjs keeps on a pull request.
+export const SHEPHERD_MARK = "<!-- shepherd -->";
 
 // The cause of a failed job, from its `gh run view --log-failed` output: the
 // failed test names if any, else the first error line that is not the generic
@@ -148,7 +150,8 @@ function main() {
       logs[key] = failures[c.name] = last.logs[key];
     }
     const containsMain = run("git", ["merge-base", "--is-ancestor", "origin/main", pr.headRefOid]).ok;
-    const feedback = (pr.comments?.length ?? 0) + (pr.reviews?.length ?? 0);
+    // The shepherd's own notes comment is not feedback.
+    const feedback = (pr.comments ?? []).filter((c) => !String(c.body).startsWith(SHEPHERD_MARK)).length + (pr.reviews?.length ?? 0);
     return { number: pr.number, title: pr.title, head: pr.headRefOid.slice(0, 7), feedback, ...classify(pr, { failures, containsMain }) };
   });
   // --json prints the rows for scripts/shepherd.mjs and keeps no state.

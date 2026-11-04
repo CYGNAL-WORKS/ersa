@@ -1,89 +1,138 @@
 #!/usr/bin/env node
-// The PR shepherd: moves a set of open pull requests toward merge with no model
-// session waiting. Each pass reads the queue (scripts/pr-queue.mjs), decides
-// one action per pull request, and acts: merges main into a branch, reruns a
-// flaky CI run, starts a review or a fix (scripts/shepherd-job.mjs, a headless
-// claude -p run), or merges through the gate (scripts/merge-pr.mjs). Between
-// passes it sleeps; a model runs only inside a job.
+// The PR shepherd: moves every open pull request toward merge with no model
+// session waiting. Each pull request gets one full review; a fix job works on
+// what blocks it; a verify reads only the fix's commits; then it merges, or
+// after three rounds goes to the owner with the `needs-owner` label. A script
+// decides, and a model runs only inside a job (scripts/shepherd-job.mjs).
 //
-//   node scripts/shepherd.mjs              run until the set is done, waiting on you, or out of budget
+//   node scripts/shepherd.mjs --merge      run until everything is merged, closed or the owner's
+//   node scripts/shepherd.mjs              shadow run: everything short of merging
 //   node scripts/shepherd.mjs --dry-run    one pass that prints each decision and acts on none
-//   --merge             may merge pull requests the gate passes (otherwise they wait on you)
-//   --skip 31,117       leave these out of the set (another session is driving them, say)
+//   --skip 117          leave these out (another session is driving them)
 //   --reviewed 118=386eca0,...   record a clean review done elsewhere of that head
-//   --max-jobs 8        claude -p jobs this run may start
-//   --max-fixes 2       fix jobs per pull request, across heads
+//   --max-jobs 10       claude -p jobs this run may start
+//   --max-fixes 3       fix rounds per pull request for review findings (CI and conflicts count apart)
 //   --interval 600      seconds between passes while nothing changes
 //
-// The set is the open pull requests at the start, minus drafts and --skip. A
-// file at .scratch/pr-queue/stop ends the run at the next pass. Each pass
-// writes .scratch/pr-queue/report.md, one line per pull request, and prints it
-// when it changed.
+// The set is the open pull requests at the start, minus drafts, forks and
+// --skip. A pull request labeled `hold` is reviewed and fixed but never
+// merged; one that changes CI, the shepherd, or the instructions agents run
+// under is merged only by the owner (OWNER_MERGES). Each pull
+// request carries one comment, kept up to date, with the latest findings and,
+// when it needs the owner, why. A file at .scratch/pr-queue/stop ends the run
+// at the next pass.
 //
-// Exit 0 when every pull request in the set is merged, closed, or waiting on a
-// decision only the owner can make; 3 when stopped or out of job budget; 2 on a
-// tool error.
+// Exit 0 when every pull request in the set is merged, closed, ready (in a
+// shadow run) or the owner's; 3 when stopped or out of job budget; 2 on a tool
+// error.
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { commitsSinceReview } from "./merge-pr.mjs";
+import { SHEPHERD_MARK } from "./pr-queue.mjs";
+import { blocking } from "./shepherd-job.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const STATE = join(ROOT, ".scratch", "pr-queue");
 const JOBS = join(STATE, "jobs");
 const WORK = join(ROOT, ".scratch", "jobs");
 const STOP = join(STATE, "stop");
+const NEEDS_OWNER = "needs-owner";
+const HOLD = "hold";
 
-// What the merge gate's dry run says about a pull request with a clean review:
-// "merge" when it passes, "review" when the head changed in a way no reviewer
-// saw, "behind" when only main's tip is missing, "wait" otherwise (CI, or
-// GitHub still computing mergeability).
+// Paths whose change the owner merges, so the loop never approves a change to
+// its own judgement: CI, the shepherd and its gate, and the instructions and
+// hooks every agent (its reviewers included) runs under.
+export const OWNER_MERGES = /^(\.github\/|\.claude\/|CLAUDE\.md$|scripts\/hooks\/|scripts\/(merge-pr|shepherd|shepherd-job|pr-queue)\.mjs$)/;
+
+// What the merge gate's dry run says: "merge" when it passes, "behind" when
+// only main's tip is missing, "wait" otherwise (CI, or GitHub still computing).
 export function readiness(code, out) {
   if (code === 0) return "merge";
-  if (code !== 1) return "wait";
-  if (out.includes("review the head")) return "review";
-  if (out.includes("does not contain main's tip")) return "behind";
+  if (code === 1 && out.includes("does not contain main's tip") && !out.includes("review the head")) return "behind";
   return "wait";
 }
 
-// One action per pull request. `f` holds what the job records say about the
-// current head; see gather().
+// Whether a review record blocks the merge; records from the first loop kept a verdict.
+export function blocks(r) {
+  if (typeof r.blocks === "boolean") return r.blocks;
+  if (r.output?.verdict) return r.output.verdict !== "clean";
+  return blocking(r.output?.findings, !!r.since).length > 0;
+}
+
+// What kind of work a fix record did, from its task.
+export function fixKind(f) {
+  if (/^CI failed/.test(f.task ?? "")) return "ci";
+  if (/^GitHub reports this branch conflicts/.test(f.task ?? "")) return "conflict";
+  return "review";
+}
+
+const byStart = (a, b) => a.startedAt.localeCompare(b.startedAt);
+
+// Which review covers the head, and what the head still needs. `g` answers
+// git questions: isAncestor(a, b), and onlyCleanMain(from, to), true when
+// every commit after `from` is a clean merge of main.
+//   none:   the latest review still covers the head
+//   verify: the loop's own fix landed on the reviewed head; check only that
+//   review: anything else (no review yet, or code no review or fix accounts for)
+export function route(oid, reviews, fixes, g) {
+  const p = reviews.filter((r) => g.isAncestor(r.head, oid)).sort(byStart).at(-1);
+  if (!p) return { need: "review" };
+  if (g.onlyCleanMain(p.head, oid)) return { need: "none", review: p };
+  const f = fixes.filter((x) => x.head === p.head && x.pushedHead && g.isAncestor(x.pushedHead, oid)).sort(byStart).at(-1);
+  if (f && g.onlyCleanMain(f.pushedHead, oid)) return { need: "verify", review: p, fix: f };
+  return { need: "review" };
+}
+
+// One action per pull request; `f` is what gather() found.
 export function decide(row, f, { merge, maxFixes }) {
   const wait = (reason) => ({ kind: "wait", reason });
   const owner = (reason) => ({ kind: "owner", reason });
-  const fixOr = (task, ownerReason) =>
-    !f.fixHere && f.fixes < maxFixes && f.failed.fix < 2 ? { kind: "fix", task } : owner(ownerReason);
+  const fix = (task, extra = {}) => {
+    if (f.failed.fix >= 2) return owner("the fix job failed twice");
+    if (f.rounds[task] >= maxFixes) return owner(`${task === "review" ? "findings remain" : `${task} still failing`} after ${maxFixes} fix rounds`);
+    return { kind: "fix", task, ...extra };
+  };
 
   if (row.state === "draft") return wait("draft");
   if (row.state === "ci-running") return wait("CI is running");
   if (f.dependabot) return owner("a dependency update: yours to take or close");
+  if (f.fixPending) return wait("GitHub does not show the fix's push yet");
 
-  // Merging main in: a conflict git cannot resolve goes to a fix job; any other
-  // failure (a push GitHub rejected, say) is tried again, up to three times.
   const mergeMain = () => {
-    if (f.mainHere?.conflict) return fixOr("conflict", `conflicts with main after ${f.fixes} fix rounds`);
+    if (f.mainHere?.conflict) return f.fixHere ? owner("the fix job could not resolve the conflict with main") : fix("conflict");
     if ((f.mainHere?.failures ?? 0) >= 3) return owner(`merging main in failed three times: ${f.mainHere.error}`);
     return { kind: "merge-main" };
   };
   if (row.state === "conflicting") return mergeMain();
 
-  // A rerun costs CI time and no tokens, and the self-hosted runners drop jobs,
-  // so every red head gets one before a fix job reads its log.
+  // A rerun costs CI time and no tokens, and the self-hosted runners drop jobs.
   if (row.state === "ci-red") {
     if (!f.rerunHere) return { kind: "rerun" };
     if (row.shared) return owner(`CI fails the same way on several pull requests, after a rerun: ${row.signature}`);
-    return fixOr("ci", `CI still red after a rerun and ${f.fixes} fix rounds: ${row.signature}`);
+    if (f.fixHere) return owner(`CI still red after a fix: ${row.signature}`);
+    return fix("ci");
   }
 
   // green or behind-main
-  if (f.ready === "merge") return merge ? { kind: "merge" } : owner("reviewed clean and ready: merge it, or run with --merge");
+  const r = f.route;
+  if (r.need !== "none") {
+    if (f.failed.review >= 2) return owner("the review job failed twice");
+    return r.need === "verify" ? { kind: "verify", review: r.review, fix: r.fix } : { kind: "review" };
+  }
+  if (blocks(r.review)) {
+    const done = f.fixOn(r.review.head);
+    if (done) return owner(`the fix job ended with "${done.output?.outcome ?? done.error}": ${(done.output?.summary ?? "").split("\n")[0].slice(0, 200)}`);
+    return fix("review", { review: r.review });
+  }
   if (f.ready === "behind") return mergeMain();
-  if (f.ready === "wait") return wait("the merge gate says not yet");
-  if (!f.reviewHere) return f.failed.review < 2 ? { kind: "review" } : owner("the review job failed twice on this head");
-  if (f.reviewHere.output?.verdict === "clean") return wait("reviewed clean; the gate will decide next pass");
-  return fixOr("review", `review findings remain after ${f.fixes} fix rounds`);
+  if (f.ready !== "merge") return wait("the merge gate says not yet");
+  if (f.hold) return wait("labeled hold");
+  if (f.ownerMerges) return owner("ready, but it changes CI, the shepherd, or agent instructions: merge it yourself");
+  return merge ? { kind: "merge", review: r.review } : { kind: "ready", reason: "would merge (shadow run)" };
 }
 
 export function ciTask(n, signature) {
@@ -99,6 +148,19 @@ export const CONFLICT_TASK = [
   "Resolve each conflict keeping both sides' intent, run `git diff --cached --check` (it fails on a conflict marker left behind), and commit the merge.",
 ].join(" ");
 
+// The one comment the shepherd keeps on a pull request.
+export function notesComment(review, ownerReason) {
+  const lines = [SHEPHERD_MARK, `**PR shepherd** · ${review ? `${review.since ? "verify" : "review"} of ${review.head.slice(0, 7)}` : "no review yet"}`];
+  if (review) {
+    const findings = review.output?.findings ?? [];
+    const block = blocks(review);
+    lines.push("", block ? "These findings block the merge until fixed:" : findings.length ? "Nothing blocks the merge. Follow-ups:" : "No findings.");
+    for (const x of findings) lines.push(`- **${x.severity}**${x.origin === "listed" ? " (still open)" : ""}, \`${x.location}\`: ${x.defect}`);
+  }
+  if (ownerReason) lines.push("", `**Needs the owner:** ${ownerReason}`);
+  return `${lines.join("\n")}\n`;
+}
+
 function run(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, ...opts });
   return { code: r.status, ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim() || (r.error?.message ?? "") };
@@ -111,52 +173,63 @@ function fail(message) {
 
 const readJson = (f) => JSON.parse(readFileSync(f, "utf8"));
 const jobFiles = () => (existsSync(JOBS) ? readdirSync(JOBS) : []);
+const isAncestor = (a, b) => run("git", ["merge-base", "--is-ancestor", a, b]).ok;
+const onlyCleanMain = (from, to) => {
+  try {
+    return commitsSinceReview({ reviewed: from, head: to }).every((c) => c.merge && c.fromMain && c.clean);
+  } catch {
+    return false;
+  }
+};
 
 function queue() {
   const rows = run("node", ["scripts/pr-queue.mjs", "--json"]);
   if (!rows.ok) fail(`pr-queue failed: ${rows.err}`);
-  const prs = run("gh", ["pr", "list", "--state", "open", "--limit", "100", "--json", "number,headRefOid,headRefName"]);
+  const prs = run("gh", ["pr", "list", "--state", "open", "--limit", "100", "--json", "number,headRefOid,headRefName,isCrossRepository,labels"]);
   if (!prs.ok) fail(`gh pr list failed: ${prs.err}`);
-  const info = new Map(JSON.parse(prs.out).map((p) => [p.number, { oid: p.headRefOid, branch: p.headRefName }]));
+  const info = new Map(JSON.parse(prs.out).map((p) => [p.number, { oid: p.headRefOid, branch: p.headRefName, fork: p.isCrossRepository, labels: p.labels.map((l) => l.name) }]));
   return JSON.parse(rows.out).flatMap((r) => (info.has(r.number) ? [{ ...r, ...info.get(r.number) }] : []));
 }
 
-// What the job records say about this pull request's current head.
+// What the job records say about this pull request and its current head.
 function gather(row) {
   const id = (kind) => `${row.number}-${row.head}-${kind}`;
   const files = jobFiles();
   const mine = files.filter((f) => f.startsWith(`${row.number}-`) && /-(review|fix)\.json$/.test(f)).map((f) => readJson(join(JOBS, f)));
-  const reviewHere = files.includes(`${id("review")}.json`) ? readJson(join(JOBS, `${id("review")}.json`)) : null;
-
-  let ready = null;
-  if (row.state === "green" || row.state === "behind-main") {
-    const clean = mine
-      .filter((r) => r.kind === "review" && r.output?.verdict === "clean")
-      .filter((r) => run("git", ["merge-base", "--is-ancestor", r.head, row.oid]).ok)
-      .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
-    if (clean) {
-      const gate = run("node", ["scripts/merge-pr.mjs", String(row.number), "--reviewed", clean.head, "--dry-run"]);
-      ready = readiness(gate.code, gate.out);
-      row.reviewed = clean.head;
-    }
-  }
-  return {
+  const reviews = mine.filter((r) => r.kind === "review");
+  // A fix's kind comes from its task; first-loop records kept none, only a task file.
+  const taskFile = (x, kind) => files.includes(`${row.number}-${x.head.slice(0, 7)}-${kind}.task.md`);
+  const fixes = mine
+    .filter((r) => r.kind === "fix")
+    .map((x) => ({ ...x, fixKind: x.task ? fixKind(x) : taskFile(x, "ci") ? "ci" : taskFile(x, "conflict") ? "conflict" : "review" }));
+  const failed = (kind) => files.filter((f) => f.startsWith(`${row.number}-`) && f.includes(`-${kind}.`) && f.endsWith(".failed.json")).length;
+  const f = {
     dependabot: row.branch.startsWith("dependabot/"),
-    reviewHere,
-    fixHere: files.includes(`${id("fix")}.json`),
-    fixes: mine.filter((r) => r.kind === "fix").length,
-    failed: {
-      review: files.filter((f) => f.startsWith(`${id("review")}.`) && f.endsWith(".failed.json")).length,
-      fix: files.filter((f) => f.startsWith(`${id("fix")}.`) && f.endsWith(".failed.json")).length,
-    },
+    hold: row.labels.includes(HOLD),
+    fixHere: fixes.some((x) => x.head === row.oid),
+    // A fix pushed, but GitHub still reports the head it started from.
+    fixPending: fixes.some((x) => x.head === row.oid && x.pushedHead && x.pushedHead !== row.oid),
+    fixOn: (head) => fixes.filter((x) => x.head === head && x.fixKind === "review").sort(byStart).at(-1),
+    rounds: { review: 0, ci: 0, conflict: 0 },
+    failed: { review: failed("review"), fix: failed("fix") },
     mainHere: files.includes(`${id("main")}.json`) ? readJson(join(JOBS, `${id("main")}.json`)) : null,
     rerunHere: files.includes(`${id("rerun")}.json`),
-    ready,
+    route: { need: "review" },
+    ready: null,
+    ownerMerges: false,
   };
+  for (const x of fixes) f.rounds[x.fixKind]++;
+  if (row.state === "green" || row.state === "behind-main") {
+    f.route = route(row.oid, reviews, fixes, { isAncestor, onlyCleanMain });
+    if (f.route.need === "none" && !blocks(f.route.review)) {
+      const gate = run("node", ["scripts/merge-pr.mjs", String(row.number), "--reviewed", f.route.review.head, "--dry-run"]);
+      f.ready = readiness(gate.code, gate.out);
+      f.ownerMerges = run("git", ["diff", "--name-only", "--no-renames", `origin/main...${row.oid}`]).out.split("\n").some((p) => OWNER_MERGES.test(p));
+    }
+  }
+  return f;
 }
 
-// Clears a worktree a crashed or interrupted run left at this path, so the
-// next `git worktree add` there does not fail for good.
 function fresh(dir) {
   run("git", ["worktree", "remove", "--force", dir]);
   rmSync(dir, { recursive: true, force: true });
@@ -168,25 +241,31 @@ function mark(row, kind, data) {
   writeFileSync(join(JOBS, `${row.number}-${row.head}-${kind}.json`), JSON.stringify({ at: new Date().toISOString(), ...data }, null, 2));
 }
 
-function job(args) {
-  const r = run("node", ["scripts/shepherd-job.mjs", ...args], { stdio: ["ignore", "pipe", "pipe"] });
-  return r.ok ? "done" : `failed (${r.code}): ${(r.err || r.out).split("\n").at(-1)}`;
+// Creates or updates the shepherd's one comment on a pull request.
+function upsertComment(n, body) {
+  const list = run("gh", ["api", `repos/{owner}/{repo}/issues/${n}/comments`, "--paginate"]);
+  if (!list.ok) return `comment: ${list.err.split("\n")[0]}`;
+  const mine = JSON.parse(list.out.replace(/\]\s*\[/g, ",") || "[]").find((c) => String(c.body).startsWith(SHEPHERD_MARK));
+  const file = join(STATE, `comment-${n}.md`);
+  writeFileSync(file, body);
+  const r = mine
+    ? run("gh", ["api", "-X", "PATCH", `repos/{owner}/{repo}/issues/comments/${mine.id}`, "-F", `body=@${file}`])
+    : run("gh", ["api", `repos/{owner}/{repo}/issues/${n}/comments`, "-F", `body=@${file}`]);
+  return r.ok ? "" : `comment: ${r.err.split("\n")[0]}`;
 }
 
-// Returns a line for the log; `ctx.jobs` counts claude -p runs.
-function act(row, action, ctx) {
+function latestReview(n) {
+  return jobFiles()
+    .filter((f) => f.startsWith(`${n}-`) && f.endsWith("-review.json"))
+    .map((f) => readJson(join(JOBS, f)))
+    .sort(byStart)
+    .at(-1);
+}
+
+// The cheap actions, done in the pass. Returns a line for the log.
+function act(row, action) {
   const n = String(row.number);
   switch (action.kind) {
-    case "review":
-      ctx.jobs++;
-      return `review ${job(["review", n])}`;
-    case "fix": {
-      ctx.jobs++;
-      const task = join(JOBS, `${row.number}-${row.head}-${action.task}.task.md`);
-      if (action.task === "ci") writeFileSync(task, ciTask(n, row.signature));
-      if (action.task === "conflict") writeFileSync(task, CONFLICT_TASK);
-      return `fix (${action.task}) ${job(["fix", n, "--task", task])}`;
-    }
     case "merge-main": {
       const marker = join(JOBS, `${row.number}-${row.head}-main.json`);
       const failures = ((existsSync(marker) ? readJson(marker) : {}).failures ?? 0) + 1;
@@ -205,23 +284,22 @@ function act(row, action, ctx) {
       fresh(dir);
       if (push?.ok) return "merged main in and pushed";
       if (!conflicts) return failed(push ? `push: ${push.err}` : `merge: ${merged.err || merged.out}`);
-      // A conflict git could not resolve goes to a fix job at the next pass,
-      // under the same limits and budget as any other.
       mark(row, "main", { conflict: true, files: conflicts.split("\n") });
       return `merging main conflicts in ${conflicts.split("\n").join(", ")}; a fix job resolves it next`;
     }
     case "rerun": {
       const list = run("gh", ["run", "list", "--commit", row.oid, "--json", "databaseId,conclusion"]);
       if (!list.ok) return `rerun: gh run list failed: ${list.err.split("\n")[0]}`;
-      const runs = JSON.parse(list.out || "[]");
-      const failed = runs.filter((r) => ["failure", "timed_out", "startup_failure", "cancelled"].includes(r.conclusion));
+      const failed = JSON.parse(list.out || "[]").filter((r) => ["failure", "timed_out", "startup_failure", "cancelled"].includes(r.conclusion));
       const done = failed.filter((r) => run("gh", ["run", "rerun", String(r.databaseId), "--failed"]).ok).map((r) => r.databaseId);
       mark(row, "rerun", { runs: done });
       return `reran ${done.length} failed run(s)`;
     }
     case "merge": {
-      ctx.merged = true;
-      const m = run("node", ["scripts/merge-pr.mjs", n, "--reviewed", row.reviewed]);
+      const body = join(STATE, `merge-${n}.md`);
+      const rv = action.review;
+      writeFileSync(body, `Merged by the PR shepherd at ${row.oid.slice(0, 7)}: CI green on a head containing main; ${rv.since ? "verify" : "review"} of ${rv.head.slice(0, 7)} with nothing blocking (${(rv.output?.findings ?? []).length} follow-up findings).\n`);
+      const m = run("node", ["scripts/merge-pr.mjs", n, "--reviewed", rv.head, "--body-file", body]);
       return m.ok ? m.out : `merge refused: ${(m.out || m.err).replace(/\n/g, " ")}`;
     }
     default:
@@ -229,9 +307,37 @@ function act(row, action, ctx) {
   }
 }
 
-const JOB_KINDS = ["review", "fix"];
+// Starts a job without waiting for it; `done` settles with its log line.
+function startJob(row, action) {
+  const n = String(row.number);
+  let args;
+  if (action.kind === "review") args = ["review", n];
+  if (action.kind === "verify") {
+    const notes = join(JOBS, `${row.number}-${row.head}-verify.notes.md`);
+    const fx = action.fix;
+    const task = fx.task ?? (existsSync(join(JOBS, `${fx.pr}-${fx.head.slice(0, 7)}-review.task.md`)) ? readFileSync(join(JOBS, `${fx.pr}-${fx.head.slice(0, 7)}-review.task.md`), "utf8") : "");
+    writeFileSync(notes, `${task}\n\n## The fix job's summary\n\n${fx.output?.summary ?? ""}\n`);
+    args = ["review", n, "--since", action.review.head, "--notes", notes];
+  }
+  if (action.kind === "fix") {
+    let task = join(JOBS, `${row.number}-${row.head}-${action.task}.task.md`);
+    if (action.task === "ci") writeFileSync(task, ciTask(n, row.signature));
+    if (action.task === "conflict") writeFileSync(task, CONFLICT_TASK);
+    if (action.task === "review") task = join(JOBS, `${row.number}-${action.review.head.slice(0, 7)}-review.task.md`);
+    args = ["fix", n, "--task", task];
+  }
+  const child = spawn("node", ["scripts/shepherd-job.mjs", ...args], { cwd: ROOT, stdio: ["ignore", "ignore", "pipe"] });
+  let err = "";
+  child.stderr.on("data", (d) => (err += d));
+  const done = new Promise((settle) => child.on("close", (code) => settle(code === 0 ? "done" : `failed (${code}): ${err.trim().split("\n").at(-1) ?? ""}`)));
+  return done;
+}
+
+const JOB_KINDS = ["verify", "fix", "review"];
+const TERMINAL = ["owner", "ready", "budget"];
 const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
 const stamp = () => new Date().toISOString().slice(0, 19).replace("T", " ");
+const labelOf = (a) => `${a.kind}${a.task ? ` (${a.task})` : ""}${a.reason ? `: ${a.reason}` : ""}`;
 
 async function main() {
   const args = process.argv.slice(2);
@@ -240,13 +346,12 @@ async function main() {
     merge: args.includes("--merge"),
     dryRun: args.includes("--dry-run"),
     skip: new Set(String(opt("--skip", "")).split(",").filter(Boolean).map(Number)),
-    maxJobs: Number(opt("--max-jobs", 8)),
-    maxFixes: Number(opt("--max-fixes", 2)),
+    maxJobs: Number(opt("--max-jobs", 10)),
+    maxFixes: Number(opt("--max-fixes", 3)),
     interval: Number(opt("--interval", 600)),
   };
   if ([opts.maxJobs, opts.maxFixes, opts.interval].some((v) => !Number.isFinite(v))) fail("--max-jobs, --max-fixes and --interval take numbers");
 
-  // A clean review done elsewhere (a session, the owner) counts as a job record.
   for (const pair of String(opt("--reviewed", "")).split(",").filter(Boolean)) {
     const [n, sha] = pair.split("=");
     const full = run("git", ["rev-parse", "--verify", "--quiet", `${sha}^{commit}`]).out;
@@ -254,20 +359,23 @@ async function main() {
     const file = join(JOBS, `${n}-${full.slice(0, 7)}-review.json`);
     mkdirSync(JOBS, { recursive: true });
     if (!existsSync(file))
-      writeFileSync(file, JSON.stringify({ kind: "review", pr: Number(n), head: full, startedAt: new Date().toISOString(), source: "--reviewed", output: { verdict: "clean", findings: [], dismissed: [] } }, null, 2));
+      writeFileSync(file, JSON.stringify({ kind: "review", pr: Number(n), head: full, since: null, blocks: false, startedAt: new Date().toISOString(), source: "--reviewed", output: { findings: [], dismissed: [] } }, null, 2));
+  }
+  if (!opts.dryRun) {
+    run("gh", ["label", "create", NEEDS_OWNER, "--force", "--color", "D93F0B", "--description", "The PR shepherd stopped; its comment says why"]);
+    run("gh", ["label", "create", HOLD, "--force", "--color", "FBCA04", "--description", "The PR shepherd reviews and fixes this but does not merge it"]);
   }
 
-  const set = new Set(queue().filter((r) => r.state !== "draft" && !opts.skip.has(r.number)).map((r) => r.number));
-  process.stdout.write(`${stamp()} set: ${[...set].map((n) => `#${n}`).join(" ") || "(empty)"}${opts.merge ? ", may merge" : ""}\n`);
-  const ctx = { jobs: 0, merged: false };
-  // Each pull request's line prints when it changes, and an action prints as
-  // it starts, so the log shows what is running now, not only finished passes.
+  const set = new Set(queue().filter((r) => r.state !== "draft" && !r.fork && !opts.skip.has(r.number)).map((r) => r.number));
+  process.stdout.write(`${stamp()} set: ${[...set].map((n) => `#${n}`).join(" ") || "(empty)"}${opts.merge ? ", may merge" : ", shadow run"}\n`);
+  const ctx = { jobs: 0, running: null };
   const said = new Map();
-  const say = (row, what) => {
-    if (said.get(row.number) === what) return;
-    said.set(row.number, what);
-    process.stdout.write(`${stamp()} #${row.number}\t${row.state}\t${what}\n`);
+  const say = (n, state, what) => {
+    if (said.get(n) === what) return;
+    said.set(n, what);
+    process.stdout.write(`${stamp()} #${n}\t${state}\t${what}\n`);
   };
+  const posted = new Map();
 
   for (;;) {
     if (existsSync(STOP)) {
@@ -275,26 +383,71 @@ async function main() {
       process.exit(3);
     }
     const rows = queue().filter((r) => set.has(r.number)).sort((a, b) => a.number - b.number);
-    if (!rows.length) {
+    if (!rows.length && !ctx.running) {
       process.stdout.write(`${stamp()} done: every pull request in the set is merged or closed\n`);
       process.exit(0);
     }
 
-    ctx.merged = false;
+    let merged = false;
     let acted = false;
     const lines = [];
+    const wanting = [];
     for (const row of rows) {
+      if (ctx.running?.n === row.number) {
+        lines.push({ row, action: { kind: "running" }, what: `${ctx.running.kind} running` });
+        continue;
+      }
       let action = decide(row, gather(row), opts);
-      if (action.kind === "merge" && ctx.merged) action = { kind: "wait", reason: "one merge per pass; main just moved" };
-      if (JOB_KINDS.includes(action.kind) && ctx.jobs >= opts.maxJobs) action = { kind: "budget", reason: `would start a ${action.kind}, but the run's ${opts.maxJobs} jobs are used` };
-      const label = `${action.kind}${action.task ? ` (${action.task})` : ""}${action.reason ? `: ${action.reason}` : ""}`;
-      const acts = !opts.dryRun && !["wait", "owner", "budget"].includes(action.kind);
-      if (acts) {
-        say(row, `${label}: starting${JOB_KINDS.includes(action.kind) ? ` (job ${ctx.jobs + 1} of ${opts.maxJobs})` : ""}`);
+      if (action.kind === "merge" && merged) action = { kind: "wait", reason: "one merge per pass; main just moved" };
+      if (JOB_KINDS.includes(action.kind)) {
+        wanting.push({ row, action });
+        continue;
+      }
+      let what = labelOf(action);
+      if (!opts.dryRun && ["merge-main", "rerun", "merge"].includes(action.kind)) {
+        say(row.number, row.state, `${what}: starting`);
+        what = act(row, action);
+        acted = true;
+        merged ||= action.kind === "merge";
+      }
+      // The label and the comment say why a pull request waits on the owner.
+      if (!opts.dryRun) {
+        const isOwner = action.kind === "owner";
+        if (isOwner && posted.get(row.number) !== action.reason) {
+          const e = upsertComment(row.number, notesComment(latestReview(row.number), action.reason));
+          if (!e) posted.set(row.number, action.reason);
+        }
+        if (isOwner !== row.labels.includes(NEEDS_OWNER)) run("gh", ["pr", "edit", String(row.number), isOwner ? "--add-label" : "--remove-label", NEEDS_OWNER]);
+        if (!isOwner) posted.delete(row.number);
+      }
+      say(row.number, row.state, what);
+      lines.push({ row, action, what });
+    }
+
+    // At most one job at a time, the one nearest a merge first.
+    wanting.sort((a, b) => JOB_KINDS.indexOf(a.action.kind) - JOB_KINDS.indexOf(b.action.kind) || a.row.number - b.row.number);
+    for (const { row, action } of wanting) {
+      let what = labelOf(action);
+      if (ctx.jobs >= opts.maxJobs) {
+        what = `budget: would start a ${what}, but the run's ${opts.maxJobs} jobs are used`;
+        action.kind = "budget";
+      } else if (opts.dryRun || ctx.running) what = `${what} (queued)`;
+      else {
+        ctx.jobs++;
+        const kind = labelOf(action);
+        what = `${kind}: started (job ${ctx.jobs} of ${opts.maxJobs})`;
+        const done = startJob(row, action).then((result) => {
+          say(row.number, row.state, `${kind} ${result}`);
+          if (action.kind !== "fix") {
+            const rv = latestReview(row.number);
+            if (rv) upsertComment(row.number, notesComment(rv));
+          }
+          ctx.running = null;
+        });
+        ctx.running = { n: row.number, kind, done };
         acted = true;
       }
-      const what = acts ? act(row, action, ctx) : label;
-      say(row, what);
+      say(row.number, row.state, what);
       lines.push({ row, action, what });
     }
 
@@ -302,14 +455,14 @@ async function main() {
     writeFileSync(join(STATE, "report.md"), `${lines.map(({ row, what }) => `#${row.number}\t${row.state}\t${what}`).join("\n")}\n`);
 
     if (opts.dryRun) process.exit(0);
-    // Nothing left that a pass could move: the rest is the owner's, or needs a job the budget has no room for.
-    if (lines.every((l) => ["owner", "budget"].includes(l.action.kind))) {
+    if (!ctx.running && lines.every((l) => TERMINAL.includes(l.action.kind))) {
       const outOfBudget = lines.some((l) => l.action.kind === "budget");
-      process.stdout.write(`${stamp()} ${outOfBudget ? "out of job budget" : "done: everything left waits on you"}\n`);
+      process.stdout.write(`${stamp()} ${outOfBudget ? "out of job budget" : "done: everything left is ready or waits on you"}\n`);
       process.exit(outOfBudget ? 3 : 0);
     }
-    // After an action GitHub needs a moment to start CI or settle mergeability.
-    await sleep(acted ? 60 : opts.interval);
+    // A finished job wakes the loop at once; otherwise poll often while work is
+    // in flight, and rarely when nothing is.
+    await Promise.race([sleep(acted || ctx.running ? 60 : opts.interval), ctx.running?.done].filter(Boolean));
   }
 }
 

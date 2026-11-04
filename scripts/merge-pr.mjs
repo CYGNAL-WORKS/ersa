@@ -5,6 +5,7 @@
 //
 //   node scripts/merge-pr.mjs <n> --reviewed <sha>            merge if the gate passes
 //   node scripts/merge-pr.mjs <n> --reviewed <sha> --dry-run  say whether it would
+//   ... --body-file <file>    the merge commit's body: what the merge rests on
 //
 // The gate: the pull request is open, not a draft, and mergeable; every latest
 // CI check passed; the head contains main's tip; and the head is the reviewed
@@ -96,7 +97,7 @@ function main() {
   const reviewedAt = args.indexOf("--reviewed") + 1;
   const reviewedArg = reviewedAt > 0 ? args[reviewedAt] : undefined;
   const n = args.find((a, i) => i !== reviewedAt && /^\d+$/.test(a));
-  if (!n || !args.includes("--reviewed") || !reviewedArg) fail("usage: node scripts/merge-pr.mjs <n> --reviewed <sha> [--dry-run]");
+  if (!n || !args.includes("--reviewed") || !reviewedArg) fail("usage: node scripts/merge-pr.mjs <n> --reviewed <sha> [--dry-run] [--body-file <file>]");
 
   const view = run("gh", ["pr", "view", n, "--json", "state,isDraft,mergeable,headRefOid,statusCheckRollup"]);
   if (!view.ok) fail(`gh pr view failed: ${view.err}`);
@@ -126,7 +127,8 @@ function main() {
     process.stdout.write(`#${n} may merge at ${head.slice(0, 7)}\n`);
     process.exit(0);
   }
-  const merge = run("gh", ["pr", "merge", n, "--merge", "--match-head-commit", head]);
+  const body = args.includes("--body-file") ? ["--body-file", args[args.indexOf("--body-file") + 1]] : [];
+  const merge = run("gh", ["pr", "merge", n, "--merge", "--match-head-commit", head, ...body]);
   if (!merge.ok) fail(`gh pr merge failed: ${merge.err}`);
   process.stdout.write(`#${n} merged at ${head.slice(0, 7)}\n`);
 }
