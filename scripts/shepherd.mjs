@@ -91,19 +91,19 @@ export function decide(row, f, { merge, maxFixes }) {
   const wait = (reason) => ({ kind: "wait", reason });
   const owner = (reason) => ({ kind: "owner", reason });
   const fix = (task, extra = {}) => {
-    if (f.failed.fix >= 2) return owner("the fix job failed twice");
-    if (f.rounds[task] >= maxFixes) return owner(`${task === "review" ? "findings remain" : `${task} still failing`} after ${maxFixes} fix rounds`);
+    if (f.failed.fix >= 2) return owner("The automatic fixer crashed twice on this pull request. That points to a problem in the automation, not necessarily the code.");
+    if (f.rounds[task] >= maxFixes) return owner(`The fixer has tried ${maxFixes} times and ${task === "review" ? "problems remain" : task === "ci" ? "the tests still fail" : "the conflict remains"}, so carrying on automatically is not working. Decide whether to merge anyway, fix it by hand, or close it.`);
     return { kind: "fix", task, ...extra };
   };
 
   if (row.state === "draft") return wait("draft");
   if (row.state === "ci-running") return wait("CI is running");
-  if (f.dependabot) return owner("a dependency update: yours to take or close");
+  if (f.dependabot) return owner("This is an automatic update to a library the project uses. Taking a new version is a policy call, so merge or close it yourself.");
   if (f.fixPending) return wait("GitHub does not show the fix's push yet");
 
   const mergeMain = () => {
-    if (f.mainHere?.conflict) return f.fixHere ? owner("the fix job could not resolve the conflict with main") : fix("conflict");
-    if ((f.mainHere?.failures ?? 0) >= 3) return owner(`merging main in failed three times: ${f.mainHere.error}`);
+    if (f.mainHere?.conflict) return f.fixHere ? owner("This branch and main changed the same lines, and the fixer could not combine them. Someone needs to merge them by hand.") : fix("conflict");
+    if ((f.mainHere?.failures ?? 0) >= 3) return owner(`Bringing this branch up to date with main failed three times, so it cannot be updated automatically. (${f.mainHere.error})`);
     return { kind: "merge-main" };
   };
   if (row.state === "conflicting") return mergeMain();
@@ -111,26 +111,26 @@ export function decide(row, f, { merge, maxFixes }) {
   // A rerun costs CI time and no tokens, and the self-hosted runners drop jobs.
   if (row.state === "ci-red") {
     if (!f.rerunHere) return { kind: "rerun" };
-    if (row.shared) return owner(`CI fails the same way on several pull requests, after a rerun: ${row.signature}`);
-    if (f.fixHere) return owner(`CI still red after a fix: ${row.signature}`);
+    if (row.shared) return owner(`The tests fail the same way on several pull requests, even after a rerun, so the cause is probably outside this one: the test machines, or main itself. (${row.signature})`);
+    if (f.fixHere) return owner(`The tests still fail after an automatic fix attempt. (${row.signature})`);
     return fix("ci");
   }
 
   // green or behind-main
   const r = f.route;
   if (r.need !== "none") {
-    if (f.failed.review >= 2) return owner("the review job failed twice");
+    if (f.failed.review >= 2) return owner("The automatic review crashed twice on this pull request. That points to a problem in the automation, not necessarily the code.");
     return r.need === "verify" ? { kind: "verify", review: r.review, fix: r.fix } : { kind: "review" };
   }
   if (blocks(r.review)) {
     const done = f.fixOn(r.review.head);
-    if (done) return owner(`the fix job ended with "${done.output?.outcome ?? done.error}": ${(done.output?.summary ?? "").split("\n")[0].slice(0, 200)}`);
+    if (done) return owner(`The automatic fixer did not fix this. ${done.output?.plain ?? (done.output?.summary ?? done.error ?? "").split("\n")[0].slice(0, 300)}`);
     return fix("review", { review: r.review });
   }
   if (f.ready === "behind") return mergeMain();
   if (f.ready !== "merge") return wait("the merge gate says not yet");
   if (f.hold) return wait("labeled hold");
-  if (f.ownerMerges) return owner("ready, but it changes CI, the shepherd, or agent instructions: merge it yourself");
+  if (f.ownerMerges) return owner("Ready to merge. It changes the automation's own rules (the test setup, the shepherd, or the instructions agents follow), so the shepherd will not approve it on its own: merge it yourself if you agree.");
   return merge ? { kind: "merge", review: r.review } : { kind: "ready", reason: "would merge (shadow run)" };
 }
 
@@ -147,16 +147,19 @@ export const CONFLICT_TASK = [
   "Resolve each conflict keeping both sides' intent, run `git diff --cached --check` (it fails on a conflict marker left behind), and commit the merge.",
 ].join(" ");
 
-// The one comment the shepherd keeps on a pull request.
+// The one comment the shepherd keeps on a pull request: plain English first,
+// for the owner, and the technical detail folded below it.
 export function notesComment(review, ownerReason) {
-  const lines = [SHEPHERD_MARK, `**PR shepherd** · ${review ? `${review.since ? "verify" : "review"} of ${review.head.slice(0, 7)}` : "no review yet"}`];
-  if (review) {
-    const findings = review.output?.findings ?? [];
-    const block = blocks(review);
-    lines.push("", block ? "These findings block the merge until fixed:" : findings.length ? "Nothing blocks the merge. Follow-ups:" : "No findings.");
-    for (const x of findings) lines.push(`- **${x.severity}**${x.origin === "listed" ? " (still open)" : ""}, \`${x.location}\`: ${x.defect}`);
+  const lines = [SHEPHERD_MARK];
+  if (ownerReason) lines.push(`**Needs you:** ${ownerReason}`, "");
+  const findings = review?.output?.findings ?? [];
+  lines.push(!review ? "Not reviewed yet." : blocks(review) ? "**What blocks the merge:**" : findings.length ? "Nothing blocks the merge. Smaller follow-ups:" : "The review found no problems.");
+  for (const x of findings) lines.push(`- ${x.plain ?? x.defect}`);
+  if (findings.length) {
+    lines.push("", `<details><summary>Technical detail (${review.since ? "verify" : "review"} of ${review.head.slice(0, 7)})</summary>`, "");
+    for (const x of findings) lines.push(`- **${x.severity}**${x.origin === "listed" ? " (still open)" : ""}, \`${x.location}\`: ${x.defect} ${x.scenario}`);
+    lines.push("", "</details>");
   }
-  if (ownerReason) lines.push("", `**Needs the owner:** ${ownerReason}`);
   return `${lines.join("\n")}\n`;
 }
 
@@ -431,7 +434,7 @@ async function main() {
       if (ctx.started.has(key)) {
         // The same job on the same head twice in a run means its result did
         // not change the decision: a defect in the loop, not more work.
-        what = `owner: a ${what} already ran on this head this run and changed nothing`;
+        what = `owner: The automation ran the same step (${what}) twice without making progress, which is a bug in the shepherd, not necessarily in this pull request.`;
         action.kind = "owner";
       } else if (ctx.jobs >= opts.maxJobs) {
         what = `budget: would start a ${what}, but the run's ${opts.maxJobs} jobs are used`;
