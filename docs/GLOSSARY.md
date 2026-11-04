@@ -72,6 +72,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **ADR**: an architecture decision record. One decision per file, superseded rather than edited.
 - **Inbox**: the committed file where implementing sessions record findings that need a planning pass.
 - **Manifest**: the generated index of briefs, their status, requirement coverage, and problems.
+- **Reviewer agent**: a read-only subagent that reviews one diff for one concern, such as Spec, Surface (growth that costs more to keep than it is worth), Failure or Design, and reports only findings it confirmed.
 - **Ticket**: an ephemeral unit of implementation work sized to one fresh agent context, derived from a brief.
 - **Planning session**: an agent session that may edit briefs and ADRs. Declares itself with the planning role.
 - **Implementing session**: an agent session that builds tickets, may not edit briefs or ADRs, and writes findings to the inbox.
