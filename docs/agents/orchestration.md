@@ -14,11 +14,12 @@ How the orchestration session runs the engineering loop: cut tickets, start impl
 
 ## Review a pull request
 
-1. Read the description, the review section, and the inbox entries.
-2. Run the `review-pr` skill on `git diff origin/main...origin/<branch>`: it names the reviewer agents in `.claude/agents/`, the worktree rule (reviewers never check out a branch in the integration checkout), the mutation step and the dismissal rule. Give reviewers what the skill's step 2 names, not the implementer's conclusions.
-3. Send every confirmed finding of a round to the implementing session in one message: a second message queues behind the session's turn and may never be read (#48's medium waited a round that way). Before merging, check the reply's fix list against the findings sent. Re-review the fix commits with the skill's step 6.
-4. For each finding, name the smallest change that removes the defect; the skill's step 5 says when a fix is a new mechanism and becomes its own ticket. A mechanism kept because the pull request is unsafe without it is re-reviewed whole (the skill's step 6): #71's round-one stage reducer drew a high and then a medium in the next two rounds.
-5. Stop after three fix rounds. If the third still finds a defect of medium severity or worse, take the choice to the owner (merge and follow up, or another round) rather than sending a fourth.
+The merge review workflow (`.github/workflows/review.yml`, ADR 0022) runs the `review-pr` skill on every head whose CI passed and posts its findings as a review on the pull request; a high or medium finding makes the Merge review check red. Each round:
+
+1. Read the review and the inbox entries. When the implementing session is not already watching the pull request (`implement-ticket` step 4 has it wait for the check), send it every finding of the round in one message: a second message queues behind the session's turn and may never be read (#48's medium waited a round that way). Check the reply's fix list against the findings sent.
+2. Run `review-pr` by hand only when asked, on `git diff origin/main...origin/<branch>`, in a detached worktree under `.scratch/`; reviewers never check out a branch in the integration checkout, and get what the skill's step 2 names, not the implementer's conclusions.
+3. For each finding, name the smallest change that removes the defect; the skill's step 5 says when a fix is a new mechanism and becomes its own ticket. A mechanism kept because the pull request is unsafe without it is re-reviewed whole (the skill's step 6): #71's round-one stage reducer drew a high and then a medium in the next two rounds.
+4. Stop after three fix rounds. If the third still finds a defect of medium severity or worse, take the choice to the owner (merge and follow up, or another round) rather than sending a fourth.
 
 ## Resolve inbox entries
 
@@ -31,9 +32,9 @@ Planning commits for a pull request go onto its branch, which is checked out in 
 
 ## Merge
 
-- Merge only when CI is green on a head that contains main's current tip (`git merge-base --is-ancestor origin/main origin/<branch>`) and the review is clean: `gh pr merge <n> --merge` (merge commits keep `Implements:` trailers). GitHub deletes the branch. A branch behind main gets main merged in first and its CI run again: CI never tests the merge commit itself, and #61 landed red on main because its branch predated #56's test literal.
-- After the merge, `git pull` in the integration checkout and report to the owner in a few lines.
+- The workflow merges through the gate (`scripts/merge-pr.mjs`, merge commits, so `Implements:` trailers stay) when the review is clean, CI is green and the head contains main's tip. A pull request that changes an owner-only path (workflows, hooks, instruction files, the review or the gate) is labeled `needs-owner`, and the owner merges it. A branch behind main gets main merged in and pushed by whoever is driving it, and CI and the review run again: CI never tests the merge commit itself, and #61 landed red on main because its branch predated #56's test literal.
+- After a merge, `git pull` in the integration checkout and report to the owner in a few lines.
 
 ## Train the harness
 
-After each merge, compare what the merge-time reviewers found with what the implementing session's own review caught. For each defect that got through, ask which part of the harness should have stopped it (a brief requirement, a reviewer agent's prompt, a test convention, a check in `scripts/`, the hook) and change that part in a planning commit, so the lesson outlives the session. Prune at the same time: a rule nobody needs, a duplicated instruction, a stale note.
+After each merge, compare what the merge review found with what the implementing session's own review caught. For each defect that got through, ask which part of the harness should have stopped it (a brief requirement, a reviewer agent's prompt, a test convention, a check in `scripts/`, the hook) and change that part in a planning commit, so the lesson outlives the session. Prune at the same time: a rule nobody needs, a duplicated instruction, a stale note.
