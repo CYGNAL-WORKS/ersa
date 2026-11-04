@@ -27,7 +27,7 @@ const CRATES_IO_SOURCES = new Set([
   "registry+https://github.com/rust-lang/crates.io-index",
   "sparse+https://index.crates.io/",
 ]);
-const USER_AGENT = "ersa-deps-check (https://github.com/KPandaK/ersa)";
+const USER_AGENT = "ersa-deps-check (https://github.com/CYGNAL-WORKS/ersa)";
 const MAX_EXCEPTION_DAYS = 90;
 const DAY_MS = 86_400_000;
 

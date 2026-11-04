@@ -12,3 +12,7 @@ A desktop harness for running many agentic coding sessions at once, each in its 
 - `docs/MANIFEST.md`: generated index of briefs, their status, and requirement coverage.
 
 Status: pre-alpha. Nothing runs yet.
+
+## License
+
+Ersa is free software under the GNU Affero General Public License, version 3 (`LICENSE`). A modified version you run for others, including over a network, must offer them its source. The vendored third-party skills under `.claude/skills/` keep their MIT license (`.claude/skills/THIRD-PARTY.md`).
