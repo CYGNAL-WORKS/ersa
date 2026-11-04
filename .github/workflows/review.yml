@@ -22,6 +22,7 @@ on:
         required: true
 
 permissions:
+  actions: read # the gate reads statusCheckRollup, whose query reads each check suite's workflow run
   checks: write
   contents: write
   pull-requests: write
