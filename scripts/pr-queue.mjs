@@ -153,6 +153,11 @@ export function step(last, rows, now) {
   return { marked, settled, print, diff, since, changed: print !== last.fingerprint || diff.length > 0 };
 }
 
+// What a --changed run keeps for the next one, from its step and its logs.
+export function kept(s, logs) {
+  return { fingerprint: s.print, rows: s.settled, logs, since: s.since };
+}
+
 function run(cmd, args) {
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "" };
@@ -201,7 +206,8 @@ function main() {
     const feedback = (pr.comments?.length ?? 0) + (pr.reviews?.length ?? 0);
     return { number: pr.number, title: pr.title, head: pr.headRefOid.slice(0, 7), feedback, ...classify(pr, { failures, containsMain }) };
   });
-  const { marked, settled, print, diff, since, changed } = step(last, rows, Date.now());
+  const s = step(last, rows, Date.now());
+  const { marked, diff, changed } = s;
   // An unchanged run prints nothing in --changed mode: whatever waits on it
   // reads only the run that changed.
   if (!changedMode || changed) {
@@ -218,7 +224,7 @@ function main() {
   if (!changedMode) process.exit(0);
   mkdirSync(STATE_DIR, { recursive: true });
   // Through a temporary file, so a run cut short never leaves a torn one.
-  writeFileSync(`${LAST}.tmp`, JSON.stringify({ fingerprint: print, rows: settled, logs, since }, null, 2));
+  writeFileSync(`${LAST}.tmp`, JSON.stringify(kept(s, logs), null, 2));
   renameSync(`${LAST}.tmp`, LAST);
   process.exit(changed ? 0 : 1);
 }
