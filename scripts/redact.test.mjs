@@ -7,7 +7,19 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { EMAIL_RE, HOME_RE, MUNGED_HOME_RE, PLACEHOLDER_EMAIL, PLACEHOLDER_HOME, PLACEHOLDER_ORG, PLACEHOLDER_UUID, redact } from "./redact.mjs";
+import {
+  EMAIL_RE,
+  HOME_RE,
+  MUNGED_HOME_RE,
+  MUNGED_SCRATCHPAD_RE,
+  PLACEHOLDER_EMAIL,
+  PLACEHOLDER_HOME,
+  PLACEHOLDER_ORG,
+  PLACEHOLDER_PROJECT,
+  PLACEHOLDER_UUID,
+  SCRATCHPAD_RE,
+  redact,
+} from "./redact.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 
@@ -35,6 +47,21 @@ test("redacts the home directory in every spelling", () => {
   }
 });
 
+test("redacts the project in the desktop app's scratchpad path, plain and munged", () => {
+  const id = "a4014d3f-20bb-4871-b2c0-5dc501d3ca21";
+  for (const [input, expected] of [
+    [`C:/Users/user\\AppData\\Local\\Temp\\claude\\D--Work-app\\${id}\\scratchpad`, `${PLACEHOLDER_HOME}\\AppData\\Local\\Temp\\claude\\${PLACEHOLDER_PROJECT}\\${id}\\scratchpad`],
+    [`C:/Users/user/AppData/Local/Temp/claude/D--Work-app/${id}/scratchpad`, `${PLACEHOLDER_HOME}/AppData/Local/Temp/claude/${PLACEHOLDER_PROJECT}/${id}/scratchpad`],
+    [`C--Users-user-AppData-Local-Temp-claude-D--Work-app-${id}-scratchpad`, `C--Users-user-AppData-Local-Temp-claude-${PLACEHOLDER_PROJECT}-${id}-scratchpad`],
+  ]) {
+    assert.equal(redact(input), expected, input);
+    assert.equal(redact(expected), expected, expected);
+  }
+  // A project under the home directory is already redacted by the home rule.
+  const underHome = `Temp\\claude\\C--Users-jo-AppData-Local-Temp-rec\\${id}`;
+  assert.equal(redact(underHome), `Temp\\claude\\C--Users-user-AppData-Local-Temp-rec\\${id}`);
+});
+
 test("leaves other paths and placeholders alone", () => {
   const text = `C:\\Windows\\System32 C:\\Users\\Public\\x ${PLACEHOLDER_HOME}/x ${PLACEHOLDER_EMAIL}`;
   assert.equal(redact(text), text);
@@ -52,13 +79,16 @@ function* recordings() {
   }
 }
 
-test("guard: no recording or golden carries a real email or home path", () => {
+test("guard: no recording or golden carries a real email, home path or project path", () => {
   const found = [];
   for (const file of recordings()) {
     const text = readFileSync(file, "utf8");
     for (const [m] of text.matchAll(EMAIL_RE)) if (m !== PLACEHOLDER_EMAIL) found.push(`${file}: ${m}`);
     for (const re of [HOME_RE, MUNGED_HOME_RE]) {
       for (const m of text.matchAll(re)) if (m.at(-1) !== "user") found.push(`${file}: ${m[0]}`);
+    }
+    for (const re of [SCRATCHPAD_RE, MUNGED_SCRATCHPAD_RE]) {
+      for (const m of text.matchAll(re)) if (m.at(-1) !== PLACEHOLDER_PROJECT) found.push(`${file}: ${m[0]}`);
     }
   }
   assert.deepEqual(found, []);

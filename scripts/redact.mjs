@@ -13,6 +13,7 @@ export const PLACEHOLDER_EMAIL = "user@example.com";
 export const PLACEHOLDER_ORG = "Example Org";
 export const PLACEHOLDER_HOME = "C:/Users/user";
 export const PLACEHOLDER_UUID = "00000000-0000-0000-0000-000000000000";
+export const PLACEHOLDER_PROJECT = "project";
 
 // Any email address. The placeholder itself matches and is left as is.
 export const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g;
@@ -24,6 +25,14 @@ export const HOME_RE = /(?:[A-Za-z]:)?(?:\\+|\/)(Users|home)(?:\\+|\/)(?!Public\
 // Claude Code also names project directories after the path with every
 // separator turned into a dash: `C--Users-<name>-AppData-...`.
 export const MUNGED_HOME_RE = /\b([A-Za-z])--(Users|home)-(?!Public-)([^-\\/"'`\s]+)/gi;
+// The desktop app's scratchpad lives under `Temp\claude\<project>\<session>`,
+// where the project is the working directory munged the same way
+// (`D--Work-app`), so it names the owner's disk layout; and the memory path
+// munges that whole scratchpad path again, so the project sits between
+// `Temp-claude-` and the session id. A project under the home directory is
+// already the munged placeholder, which says nothing, and is left alone.
+export const SCRATCHPAD_RE = /(Temp(?:\\+|\/)claude(?:\\+|\/))((?![A-Za-z]--(?:Users|home)-)[^\\/"'`\s]+)/g;
+export const MUNGED_SCRATCHPAD_RE = /(Temp-claude-)((?![A-Za-z]--(?:Users|home)-)[A-Za-z]--[A-Za-z0-9-]*?|project)(?=-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b)/g;
 
 export function redact(text) {
   return text
@@ -34,7 +43,9 @@ export function redact(text) {
     .replace(EMAIL_RE, PLACEHOLDER_EMAIL)
     // Windows homes become the placeholder; Unix ones keep their shape.
     .replace(HOME_RE, (_m, dir) => (dir === "home" ? "/home/user" : PLACEHOLDER_HOME))
-    .replace(MUNGED_HOME_RE, (_m, drive, dir) => `${drive}--${dir}-user`);
+    .replace(MUNGED_HOME_RE, (_m, drive, dir) => `${drive}--${dir}-user`)
+    .replace(SCRATCHPAD_RE, `$1${PLACEHOLDER_PROJECT}`)
+    .replace(MUNGED_SCRATCHPAD_RE, `$1${PLACEHOLDER_PROJECT}`);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

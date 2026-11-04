@@ -10,7 +10,7 @@ import { ContextRing } from "./ContextRing";
 import { NewSessionScreen } from "./NewSessionScreen";
 
 const host = { id: "local", name: "WORKSTATION", platform: "windows" as const };
-const ersa: Project = { id: "p1", host_id: "local", path: "D:\\Projects\\ersa", name: "ersa", vcs: "git", trusted: true };
+const ersa: Project = { id: "p1", host_id: "local", path: "C:\\Users\\me\\ersa", name: "ersa", vcs: "git", trusted: true };
 const notes: Project = { id: "p2", host_id: "local", path: "C:\\notes", name: "notes", vcs: "none", trusted: false };
 
 const choices = (pairs: [string, string][], dflt: string): Choice[] =>
