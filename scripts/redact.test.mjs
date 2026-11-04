@@ -4,11 +4,12 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  CHECKOUT,
   EMAIL_RE,
   HOME_RE,
   MUNGED_HOME_RE,
@@ -22,6 +23,7 @@ import {
   expandMcpConfig,
   expandRepo,
   redact,
+  repoRules,
 } from "./redact.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
@@ -62,26 +64,38 @@ test("redacts the repository's path in every spelling, plain and munged, and lea
     [REPO.toLowerCase(), PLACEHOLDER_REPO],
     [`Temp\\claude\\${munged}\\00000000-0000-0000-0000-000000000000`, `Temp\\claude\\${PLACEHOLDER_MUNGED_REPO}\\00000000-0000-0000-0000-000000000000`],
     [`projects\\${munged}--claude-worktrees-w\\memory`, `projects\\${PLACEHOLDER_MUNGED_REPO}--claude-worktrees-w\\memory`],
-    [`${REPO}2/x ${munged}2`, `${REPO}2/x ${munged}2`],
+    [`${REPO}2/x ${REPO}-x ${munged}2`, `${REPO}2/x ${REPO}-x ${munged}2`],
+    [`(${REPO}) ${REPO}. ${REPO}:12 ${REPO}.git`, `(${PLACEHOLDER_REPO}) ${PLACEHOLDER_REPO}. ${PLACEHOLDER_REPO}:12 ${PLACEHOLDER_REPO}.git`],
   ]) {
     assert.equal(redact(input), expected, input);
     assert.equal(redact(expected), expected, expected);
   }
 });
 
-test("expands the repository placeholder for a file the CLI reads", () => {
-  assert.equal(expandRepo(`{"args":["${PLACEHOLDER_REPO}/scripts/s.mjs"]}`), `{"args":["${REPO}/scripts/s.mjs"]}`);
+test("the repository rules hold for a Unix path, whose munged form starts with a dash", () => {
+  const { plain, munged } = repoRules("/home/runner/work/ersa/ersa");
+  assert.equal("cwd /home/runner/work/ersa/ersa/x (/home/runner/work/ersa/ersa).".replace(plain, "R"), "cwd R/x (R).");
+  assert.equal("/home/runner/work/ersa/ersa2 \\home\\runner\\work\\ersa\\ersa".replace(plain, "R"), "/home/runner/work/ersa/ersa2 R");
+  assert.equal("projects\\-home-runner-work-ersa-ersa--claude-w".replace(munged, "M"), "projects\\M--claude-w");
+  assert.equal("x-home-runner-work-ersa-ersa".replace(munged, "M"), "x-home-runner-work-ersa-ersa");
+});
+
+test("expands the repository placeholder, to this checkout, for a file the CLI reads", () => {
+  assert.ok(CHECKOUT.startsWith(REPO), `${CHECKOUT} under ${REPO}`);
+  assert.equal(expandRepo(`{"args":["${PLACEHOLDER_REPO}/scripts/s.mjs"]}`), `{"args":["${CHECKOUT}/scripts/s.mjs"]}`);
   const dir = mkdtempSync(join(tmpdir(), "ersa-redact-"));
   try {
     const fixture = join(dir, "fixture.json");
     writeFileSync(fixture, `{"cwd":"${PLACEHOLDER_REPO}"}`);
-    const extra = ["--max-turns", "3", "--mcp-config", fixture];
-    expandMcpConfig(extra, dir);
-    assert.equal(extra[3], join(dir, "mcp-config.json"));
-    assert.equal(readFileSync(extra[3], "utf8"), `{"cwd":"${REPO}"}`);
+    const args = ["--max-turns", "3", "--mcp-config", fixture, "prompt"];
+    const cli = expandMcpConfig(args);
+    assert.deepEqual(cli.toSpliced(3, 1), ["--max-turns", "3", "--mcp-config", "prompt"]);
+    assert.notEqual(dirname(cli[3]), dir, "the copy lives in a scratch directory of its own");
+    assert.deepEqual(args, ["--max-turns", "3", "--mcp-config", fixture, "prompt"], "the recorded arguments keep the file as given");
+    assert.equal(readFileSync(cli[3], "utf8"), `{"cwd":"${CHECKOUT}"}`);
+    rmSync(dirname(cli[3]), { recursive: true, force: true });
     const none = ["--max-turns", "3"];
-    expandMcpConfig(none, dir);
-    assert.deepEqual(none, ["--max-turns", "3"]);
+    assert.equal(expandMcpConfig(none), none);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -54,9 +54,6 @@ if (existsSync(join(dir, stem + ".jsonl"))) {
   process.exit(1);
 }
 
-const cwd = mkdtempSync(join(tmpdir(), "ersa-rec-"));
-expandMcpConfig(extra, cwd);
-
 const args = [
   "--input-format", "stream-json",
   "--output-format", "stream-json",
@@ -67,8 +64,9 @@ const args = [
   ...extra,
 ];
 
+const cwd = mkdtempSync(join(tmpdir(), "ersa-rec-"));
 const started = Date.now();
-const child = spawn(CLAUDE, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+const child = spawn(CLAUDE, expandMcpConfig(args), { cwd, stdio: ["pipe", "pipe", "pipe"] });
 
 const stdoutLines = [];
 const sent = [];

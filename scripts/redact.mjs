@@ -9,7 +9,8 @@
 // passes all text through `redact` first.
 
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,17 +34,25 @@ export const HOME_RE = /(?:[A-Za-z]:)?(?:\\+|\/)(Users|home)(?:\\+|\/)(?!Public\
 // separator turned into a dash: `C--Users-<name>-AppData-...`.
 export const MUNGED_HOME_RE = /\b([A-Za-z])--(Users|home)-(?!Public-)([^-\\/"'`\s]+)/gi;
 
-// The repository on this machine: the main checkout, which a worktree of it
-// sits under, with forward slashes. Recordings are made from one or the other.
-const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
-const common = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: ROOT, encoding: "utf8" }).stdout?.trim();
-export const REPO = (common ? dirname(common) : ROOT).replace(/\\/g, "/").replace(/\/+$/, "");
+// This checkout, and the repository on this machine: the main checkout, which
+// a worktree of it sits under, both with forward slashes. Recordings are made
+// from one or the other; a worktree elsewhere is caught by the guard test.
+export const CHECKOUT = join(fileURLToPath(import.meta.url), "..", "..").replace(/\\/g, "/").replace(/\/+$/, "");
+const common = spawnSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: CHECKOUT, encoding: "utf8", timeout: 5000 }).stdout?.trim();
+export const REPO = common ? dirname(common).replace(/\\/g, "/").replace(/\/+$/, "") : CHECKOUT;
 
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // The repository path in any spelling of its separators (`\`, `/`, JSON-escaped
-// `\\`), whole: `<repo>2` is another folder.
-export const REPO_RE = new RegExp(REPO.split("/").map(escape).join("[\\\\/]+") + "(?![^\\\\/\"'`\\s])", "gi");
-export const MUNGED_REPO_RE = new RegExp("\\b" + escape(REPO.replace(/[^A-Za-z0-9]/g, "-")) + "(?![A-Za-z0-9])", "gi");
+// `\\`), whole: `<repo>2` and `<repo>-x` are other folders, while `<repo>.`
+// ends a sentence. A Unix path's munged form starts with `-`, where `\b`
+// would never match, so the boundary is spelled out.
+export function repoRules(repo) {
+  return {
+    plain: new RegExp(repo.split("/").map(escape).join("[\\\\/]+") + "(?![A-Za-z0-9_-])", "gi"),
+    munged: new RegExp("(?<![A-Za-z0-9])" + escape(repo.replace(/[^A-Za-z0-9]/g, "-")) + "(?![A-Za-z0-9])", "gi"),
+  };
+}
+export const { plain: REPO_RE, munged: MUNGED_REPO_RE } = repoRules(REPO);
 
 export function redact(text) {
   return text
@@ -62,18 +71,22 @@ export function redact(text) {
 }
 
 // The other direction, for a committed file a recorder hands to the CLI: an
-// `--mcp-config` fixture names the repository by its placeholder, and the
-// recorder gives the CLI an expanded copy in the scratch directory instead.
+// `--mcp-config` fixture names the repository by its placeholder, which
+// expands to this checkout, so a worktree records against its own files.
 export function expandRepo(text) {
-  return text.split(PLACEHOLDER_REPO).join(REPO);
+  return text.split(PLACEHOLDER_REPO).join(CHECKOUT);
 }
 
-export function expandMcpConfig(extra, cwd) {
-  const i = extra.indexOf("--mcp-config");
-  if (i === -1 || !extra[i + 1]) return;
-  const expanded = join(cwd, "mcp-config.json");
-  writeFileSync(expanded, expandRepo(readFileSync(extra[i + 1], "utf8")));
-  extra[i + 1] = expanded;
+// The arguments for the CLI: `args` with its `--mcp-config` file replaced by
+// an expanded copy in a scratch directory of its own (the CLI's working
+// directory stays empty), or `args` itself. The recording keeps the
+// arguments as given.
+export function expandMcpConfig(args) {
+  const i = args.indexOf("--mcp-config");
+  if (i === -1 || !args[i + 1]) return args;
+  const expanded = join(mkdtempSync(join(tmpdir(), "ersa-rec-mcp-")), "mcp-config.json");
+  writeFileSync(expanded, expandRepo(readFileSync(args[i + 1], "utf8")));
+  return [...args.slice(0, i + 1), expanded, ...args.slice(i + 2)];
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
