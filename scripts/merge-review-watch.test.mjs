@@ -1,0 +1,186 @@
+// Tests for merge-review-watch.mjs, run without GitHub, git or the review.
+// Run: node --test scripts/merge-review-watch.test.mjs
+
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, test } from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { INTERVAL_MS, STALE_MS, lock, main, select } from "./merge-review-watch.mjs";
+
+const HEAD = "b".repeat(40);
+const NOW = Date.parse("2026-11-04T12:00:00Z");
+const ago = (ms) => new Date(NOW - ms).toISOString();
+const ci = (over) => ({ __typename: "CheckRun", name: "CI", status: "COMPLETED", conclusion: "SUCCESS", startedAt: ago(20 * 60 * 1000), ...over });
+const mark = (state, over) => ({ __typename: "StatusContext", context: "Merge review", state, startedAt: ago(10 * 60 * 1000), ...over });
+const pr = (over) => ({ number: 7, isDraft: false, isCrossRepository: false, headRefOid: HEAD, autoMergeRequest: null, statusCheckRollup: [ci()], ...over });
+
+test("a same-repository, non-draft pull request whose CI passed on an unreviewed head is reviewed", () => {
+  assert.deepEqual(select([pr()], NOW), { review: [{ number: 7, head: HEAD }], disarm: [] });
+  // CI read as the gate reads it: the latest run of each check, skipped and neutral pass, a commit status counts.
+  assert.deepEqual(select([pr({ statusCheckRollup: [ci({ conclusion: "FAILURE" }), ci({ startedAt: ago(60 * 1000) }), ci({ name: "W", conclusion: "SKIPPED" }), { context: "ext", state: "SUCCESS" }] })], NOW).review.length, 1);
+});
+
+test("a fork's pull request is never reviewed", () => {
+  assert.deepEqual(select([pr({ isCrossRepository: true })], NOW).review, []);
+});
+
+test("a draft is not reviewed", () => {
+  assert.deepEqual(select([pr({ isDraft: true })], NOW).review, []);
+});
+
+test("a head whose CI failed, is still running or never ran is not reviewed", () => {
+  assert.deepEqual(select([pr({ statusCheckRollup: [ci({ conclusion: "FAILURE" })] })], NOW).review, []);
+  assert.deepEqual(select([pr({ statusCheckRollup: [ci(), ci({ name: "W", status: "IN_PROGRESS", conclusion: "" })] })], NOW).review, []);
+  assert.deepEqual(select([pr({ statusCheckRollup: [] })], NOW).review, []);
+  assert.deepEqual(select([pr({ statusCheckRollup: [mark("SUCCESS")] })], NOW).review, [], "the review's own status is not CI");
+});
+
+test("a head that carries a merge review is not reviewed again, whatever the verdict", () => {
+  for (const state of ["SUCCESS", "FAILURE", "ERROR", "PENDING"]) assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark(state)] })], NOW).review, [], state);
+  // Only the latest status of the context counts: a run that died and was rerun by hand.
+  assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: ago(2 * STALE_MS) }), mark("SUCCESS")] })], NOW).review, []);
+});
+
+test("a pending merge review older than an hour is a run that died, and the head is reviewed again", () => {
+  assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: ago(STALE_MS + 1000) })] })], NOW).review, [{ number: 7, head: HEAD }]);
+  assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: ago(STALE_MS - 1000) })] })], NOW).review, []);
+  assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: undefined })] })], NOW).review, [], "a pending status with no time is left alone");
+});
+
+test("auto-merge on an unreviewed head is disarmed, reviewed or not yet reviewable; on a reviewed head it is the review's own", () => {
+  const armed = { enabledAt: ago(1000) };
+  assert.deepEqual(select([pr({ autoMergeRequest: armed })], NOW), { review: [{ number: 7, head: HEAD }], disarm: [7] });
+  assert.deepEqual(select([pr({ autoMergeRequest: armed, statusCheckRollup: [ci({ status: "IN_PROGRESS", conclusion: "" })] })], NOW), { review: [], disarm: [7] }, "disarmed before CI finishes, so the queue never gets it");
+  assert.deepEqual(select([pr({ autoMergeRequest: armed, statusCheckRollup: [ci(), mark("SUCCESS")] })], NOW), { review: [], disarm: [] });
+  assert.deepEqual(select([pr({ autoMergeRequest: armed, isCrossRepository: true })], NOW).disarm, [], "a fork's pull request is left to the owner");
+});
+
+// The lock in a temporary folder, with the liveness check stood in for.
+let home;
+const tmp = () => (home ??= mkdtempSync(join(tmpdir(), "merge-review-watch-")));
+after(() => home && rmSync(home, { recursive: true, force: true }));
+
+test("the lock is held by one tick at a time, survives a dead holder, and is released", () => {
+  const path = join(tmp(), "a", "lock");
+  const alive = (pid) => pid === 100;
+  const release = lock(path, { alive, pid: 100 });
+  assert.equal(readFileSync(path, "utf8"), "100");
+  assert.equal(lock(path, { alive, pid: 200 }), null, "a second tick finds the lock held");
+  release();
+  assert.ok(!existsSync(path));
+  writeFileSync(path, "300");
+  const taken = lock(path, { alive, pid: 200 });
+  assert.ok(taken, "a lock whose process is gone is taken over");
+  assert.equal(readFileSync(path, "utf8"), "200");
+  taken();
+  writeFileSync(path, "");
+  assert.equal(lock(path, { alive, pid: 200 }), null, "a lock that names no pid is left for a person");
+  assert.ok(existsSync(path));
+});
+
+// The poller's own repository, where the worktree is added from.
+const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
+
+// main() with every tool stood in for: gh lists `prs`, git answers from
+// `git`, the review exits `exit`; `exists` says whether the checkout is there.
+function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), lockPath, alive, sleep } = {}) {
+  const calls = [];
+  const logs = [];
+  const ok = (out = "") => ({ ok: true, status: 0, out, err: "" });
+  const run = (cmd, args, cwd, opts) => {
+    calls.push({ cmd, args, cwd, live: opts?.live ?? false });
+    if (cmd === "gh" && args[1] === "list") return ok(JSON.stringify(prs));
+    if (cmd === "gh") return ok();
+    if (cmd === "git") return { ok: true, status: 0, out: "", err: "", ...git(args, cwd) };
+    if (cmd === "node") return { ok: exit === 0, status: exit, out: "", err: "" };
+    throw new Error(`unexpected ${cmd}`);
+  };
+  const path = lockPath ?? join(tmp(), `lock-${Math.random().toString(36).slice(2)}`);
+  const got = main(argv, { run, now: () => NOW, log: (l) => logs.push(l), lockPath: path, alive, sleep });
+  return { ...got, calls, logs, lockPath: path, reviews: calls.filter((c) => c.cmd === "node"), gh: calls.filter((c) => c.cmd === "gh").map((c) => c.args.join(" ")) };
+}
+
+test("one tick prepares the review checkout at the head, with main's review logic, and runs the review there", () => {
+  const dir = join(tmp(), "review");
+  const got = drive(["--once", "--checkout", dir]);
+  assert.equal(got.code, 0, got.stderr);
+  const git = got.calls.filter((c) => c.cmd === "git").map((c) => [c.args.join(" "), c.cwd]);
+  assert.deepEqual(git, [
+    [`worktree add --detach ${dir} origin/main`, ROOT],
+    ["fetch -q origin main pull/7/head", dir],
+    [`reset -q --hard ${HEAD}`, dir],
+    ["clean -q -fd", dir],
+    ["checkout -q origin/main -- scripts/merge-review.mjs scripts/merge-pr.mjs", dir],
+  ]);
+  assert.deepEqual(got.reviews.map((c) => [c.args.join(" "), c.cwd, c.live]), [[`scripts/merge-review.mjs 7 --head ${HEAD}`, dir, true]]);
+  assert.deepEqual(got.gh, ["pr list --state open --limit 100 --json number,isDraft,isCrossRepository,headRefOid,autoMergeRequest,statusCheckRollup"]);
+  assert.match(got.logs.at(-1), /#7 at bbbbbbb: the review exited 0/);
+  assert.ok(!existsSync(got.lockPath), "the lock is released");
+});
+
+test("an existing checkout is reused, and a review that blocks or fails is reported and the tick goes on", () => {
+  const dir = join(tmp(), "existing");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, ".git"), "gitdir: elsewhere");
+  const got = drive(["--once", "--checkout", dir], { prs: [pr(), pr({ number: 8, headRefOid: "c".repeat(40) })], exit: 1 });
+  assert.equal(got.code, 0, got.stderr);
+  assert.ok(!got.calls.some((c) => c.cmd === "git" && c.args[0] === "worktree"));
+  assert.equal(got.reviews.length, 2, "one at a time, in list order, each after the other finished");
+  assert.deepEqual(got.reviews.map((c) => c.args[1]), ["7", "8"]);
+  assert.match(got.logs.join("\n"), /#7 at bbbbbbb: the review exited 1\n[\s\S]*#8 at ccccccc: the review exited 1/);
+});
+
+test("a checkout that cannot be prepared is reported and skipped; the next pull request still runs", () => {
+  const got = drive(["--once", "--checkout", join(tmp(), "r2")], {
+    prs: [pr(), pr({ number: 8 })],
+    git: (args) => (args[0] === "fetch" && args.includes("pull/7/head") ? { ok: false, err: "network down" } : {}),
+  });
+  assert.equal(got.code, 0, got.stderr);
+  assert.deepEqual(got.reviews.map((c) => c.args[1]), ["8"]);
+  assert.match(got.logs.join("\n"), /#7 at bbbbbbb: git fetch -q failed: network down/);
+});
+
+test("auto-merge on an unreviewed head is disabled before anything else", () => {
+  const got = drive(["--once", "--checkout", join(tmp(), "r3")], { prs: [pr({ autoMergeRequest: { enabledAt: "x" }, statusCheckRollup: [ci({ status: "IN_PROGRESS", conclusion: "" })] })] });
+  assert.deepEqual(got.gh.slice(1), ["pr merge 7 --disable-auto"]);
+  assert.equal(got.reviews.length, 0);
+  assert.match(got.logs[0], /#7: auto-merge was on for an unreviewed head; disabled it/);
+});
+
+test("two overlapping ticks: the second finds the lock held and does nothing", () => {
+  const path = join(tmp(), "shared-lock");
+  writeFileSync(path, "4242");
+  const got = drive(["--once", "--checkout", join(tmp(), "r4")], { lockPath: path, alive: (pid) => pid === 4242 });
+  assert.equal(got.code, 0);
+  assert.match(got.stdout, /another tick holds .*shared-lock; nothing to do/);
+  assert.equal(got.calls.length, 0, "no gh, git or review ran");
+  assert.equal(readFileSync(path, "utf8"), "4242", "the other tick's lock is untouched");
+});
+
+test("without --once the poller ticks, waits five minutes, and ticks again; a tool error exits 2 and releases the lock", () => {
+  const waits = [];
+  const stop = new Error("stop");
+  const got = drive(["--checkout", join(tmp(), "r5")], {
+    sleep: (ms) => {
+      waits.push(ms);
+      if (waits.length === 2) throw stop;
+    },
+  });
+  assert.equal(got.code, 2);
+  assert.deepEqual(waits, [INTERVAL_MS, INTERVAL_MS]);
+  assert.equal(got.reviews.length, 2, "one review per tick");
+  assert.ok(!existsSync(got.lockPath));
+  assert.equal(INTERVAL_MS, 5 * 60 * 1000);
+});
+
+test("a usage error exits 2 before anything runs", () => {
+  for (const argv of [["--twice"], ["--checkout"], ["--once", "extra"]]) {
+    const got = drive(argv);
+    assert.equal(got.code, 2, argv.join(" "));
+    assert.match(got.stderr, /usage/);
+    assert.equal(got.calls.length, 0);
+  }
+});
