@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { JOBS, blocking, claudeArgs, needsPlanning } from "./shepherd-job.mjs";
+import { JOBS, blocking, claudeArgs, instructionPaths, needsPlanning } from "./shepherd-job.mjs";
 
 const data = "D:/x/118-386eca0-review.data";
 
@@ -26,6 +26,11 @@ test("a fix to a planning file runs as planning; the inbox alone does not count"
   assert.equal(needsPlanning(["docs/briefs/FLOW-NEW-SESSION.md"]), true);
   assert.equal(needsPlanning(["CLAUDE.md"]), true);
   assert.equal(needsPlanning(["docs/briefs/INBOX.md", "crates/x/src/lib.rs"]), false);
+});
+
+test("a review takes every instruction file the pull request changed from main, in any folder", () => {
+  const files = ["CLAUDE.md", "scripts/CLAUDE.md", "apps/CLAUDE.local.md", "apps/shell/.claude/settings.json", ".claude/skills/x/SKILL.md", "scripts/shepherd.mjs", "docs/NOTCLAUDE.md.txt"];
+  assert.deepEqual(instructionPaths(files), files.slice(0, 5));
 });
 
 test("jobs run with hooks off, can read their data folder, and may not push, merge or write on GitHub", () => {

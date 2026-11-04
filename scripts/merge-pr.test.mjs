@@ -203,7 +203,7 @@ test("an octopus merge never reads as clean, even when git prints no remerge-dif
 // main() against the real repository, with GitHub stood in for: gh answers
 // from `pr` (or `view`), git fetch does nothing, and origin/main points at
 // `originMain`.
-function gate(r, argv, { head, originMain, pr = {}, view, merged = true }) {
+function gate(r, argv, { head, originMain, pr = {}, view, merged = true, fetched = true }) {
   r.git(["update-ref", "refs/remotes/origin/main", originMain]);
   const gh = [];
   const ok = (out = "") => ({ ok: true, out, err: "" });
@@ -213,7 +213,7 @@ function gate(r, argv, { head, originMain, pr = {}, view, merged = true }) {
       if (args[1] === "view") return view ?? ok(JSON.stringify({ state: "OPEN", isDraft: false, mergeable: "MERGEABLE", headRefOid: head, statusCheckRollup: [check()], ...pr }));
       return merged ? ok() : { ok: false, out: "", err: "head moved" };
     }
-    if (args[0] === "fetch") return ok();
+    if (args[0] === "fetch") return fetched ? ok() : { ok: false, out: "", err: "network down" };
     return r.git(args);
   };
   return { ...main(argv, { run }), gh };
@@ -254,7 +254,7 @@ test("the gate refuses with exit 1 and never calls merge", () => {
 test("a usage or tool error exits 2 before anything merges", () => {
   const r = shared();
   const at = { head: r.clean, originMain: r.main1 };
-  for (const argv of [["5", "--reviewed", r.reviewed, "--dryrun"], ["5", "--reviewed", r.reviewed, "--dry-run=true"], ["5"], ["--reviewed", r.reviewed]]) {
+  for (const argv of [["5", "--reviewed", r.reviewed, "--reviewed", r.clean], ["5", "--reviewed", r.reviewed, "--dryrun"], ["5", "--reviewed", r.reviewed, "--dry-run=true"], ["5"], ["--reviewed", r.reviewed]]) {
     const got = gate(r, argv, at);
     assert.equal(got.code, 2, argv.join(" "));
     assert.equal(got.gh.length, 0, argv.join(" "));
@@ -270,4 +270,9 @@ test("a usage or tool error exits 2 before anything merges", () => {
     assert.equal(got.gh.length, 1);
   }
   assert.equal(gate(r, ["5", "--reviewed", "nosuchcommit"], at).code, 2);
+  // A failed fetch would leave origin/main stale, so the gate stops rather than judge against it.
+  const offline = gate(r, ["5", "--reviewed", r.reviewed], { ...at, fetched: false });
+  assert.equal(offline.code, 2);
+  assert.match(offline.stderr, /git fetch failed: network down/);
+  assert.equal(offline.gh.length, 1);
 });

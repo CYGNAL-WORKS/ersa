@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { changes, classify, fingerprint, kept, markShared, settle, signature, step } from "./pr-queue.mjs";
+import { SHEPHERD_MARK, changes, classify, feedback, fingerprint, kept, markShared, settle, signature, step } from "./pr-queue.mjs";
 
 const job = "Build, lint, test, dependencies (Linux)\tTest\t2026-11-03T06:41:47.5718425Z ";
 
@@ -82,6 +82,12 @@ test("new comments are a change even when the state is not", () => {
   const before = [{ number: 1, head: "a", state: "green", feedback: 2 }];
   assert.deepEqual(changes(before, [{ ...before[0], feedback: 3 }]), [{ number: 1, change: "new comments", from: "green", to: "green" }]);
   assert.deepEqual(changes(before, [{ ...before[0] }]), []);
+});
+
+test("the shepherd's own notes comment is not feedback", () => {
+  const pr = { comments: [{ body: "Please rename this." }, { body: `${SHEPHERD_MARK}\nNot reviewed yet.` }], reviews: [{}] };
+  assert.equal(feedback(pr), 2);
+  assert.equal(feedback({}), 0);
 });
 
 test("changes lists new, moved and gone pull requests", () => {

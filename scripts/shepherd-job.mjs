@@ -11,7 +11,8 @@
 //   ... --model <m> --effort <e>   override the job's model and effort
 //
 // The pull request cannot steer its own job: hooks are off for every job, and
-// a review runs with CLAUDE.md and .claude/ from origin/main. Notes and tasks
+// a review runs with every CLAUDE.md, CLAUDE.local.md and .claude/ as main has
+// them, at the root and in subfolders. Notes and tasks
 // reach the job as files it reads as data. A fix commits in its worktree; this
 // script pushes the commits only when they add to the head it was given.
 //
@@ -95,11 +96,17 @@ export const JOBS = {
 };
 
 // Whether a review's findings block the merge. A full review blocks on any
-// high or medium finding. A verify blocks only on a listed finding left
-// high or medium finding left unresolved, or a new high one: a fresh pass always finds new mediums, and
-// blocking on them is what kept the first loop from ever finishing.
+// high or medium finding. A verify blocks only on a listed high or medium
+// finding left unresolved, or a new high one: a fresh pass always finds new
+// mediums, and blocking on them is what kept the first loop from ever finishing.
 export function blocking(findings, verify) {
   return (findings ?? []).filter((f) => (verify ? (f.origin === "listed" && f.severity !== "low") || f.severity === "high" : f.severity !== "low"));
+}
+
+// The paths the pull request changed that Claude Code reads as instructions,
+// anywhere in the tree: a review puts main's version back, or none.
+export function instructionPaths(files) {
+  return files.filter((f) => /(^|\/)(CLAUDE(\.local)?\.md$|\.claude\/)/i.test(f));
 }
 
 export function issueOf(body) {
@@ -135,7 +142,7 @@ export function verifyPrompt(pr, data, since) {
   return [
     `You verify a fix. ${about(pr, data)}`,
     "CLAUDE.md and .claude/ in this worktree are main's; read the pull request's own versions with `git show HEAD:<path>`.",
-    `${join(data, "notes.md")} lists the findings a fix job was asked to fix, and its summary. The fix is the commits in \`git log -p --no-merges ${range} --not origin/main\`, plus \`git show --remerge-diff\` of any merge in that range.`,
+    `${join(data, "notes.md")} lists the findings a fix job was asked to fix. The fix is the commits in \`git log -p --no-merges ${range} --not origin/main\`, plus \`git show --remerge-diff\` of any merge in that range.`,
     "Run review-pr step 6 on those commits (Correctness and Failure; a mechanism the fix kept, whole) and step 3's mutation on the fix's tests. Restore every file you change. Do not fix, commit, push, or write on GitHub.",
     "Report each listed finding that is not resolved, with origin \"listed\" and the evidence, and each defect the fix commits introduced, with origin \"new\" and a reproduction or the cited line. Do not report code the fix did not touch.",
   ].join("\n\n");
@@ -177,8 +184,11 @@ export function claudeArgs(job, prompt, data) {
   ];
 }
 
+// A git or gh command that stalls (a credential prompt, a network hang) is
+// killed after five minutes and reads as failed, so the loop never blocks on it.
 function run(cmd, args, opts = {}) {
-  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, ...opts });
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" };
+  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: 5 * 60 * 1000, env, ...opts });
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim() || (r.error?.message ?? "") };
 }
 
@@ -221,8 +231,10 @@ function runClaude(args, opts) {
       if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"]);
       else process.kill(-child.pid, "SIGKILL");
     }, LIMIT);
-    child.on("error", (e) => (err += e.message));
-    child.on("close", () => {
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       let result;
       try {
@@ -231,6 +243,20 @@ function runClaude(args, opts) {
         result = { is_error: true, subtype: `no JSON result: ${err.trim().slice(0, 300)}` };
       }
       done(result);
+    };
+    child.on("error", (e) => {
+      err += e.message;
+      settle();
+    });
+    child.on("close", settle);
+    // A process claude started can outlive it holding its output pipes, so
+    // "close" never comes: settle a little after claude itself exits.
+    child.on("exit", () => {
+      setTimeout(() => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+        settle();
+      }, 10000);
     });
   });
 }
@@ -277,7 +303,15 @@ async function main() {
     // rewrite them.
     rmSync(join(dir, ".claude"), { recursive: true, force: true });
     rmSync(join(dir, "CLAUDE.md"), { force: true });
-    run("git", ["checkout", "origin/main", "--", ".claude", "CLAUDE.md"], { cwd: dir });
+    const root = run("git", ["checkout", "origin/main", "--", ".claude", "CLAUDE.md"], { cwd: dir });
+    if (!root.ok) fail(`git checkout of main's instructions failed: ${root.err}`);
+    for (const p of instructionPaths(files)) {
+      rmSync(join(dir, p), { force: true });
+      if (run("git", ["cat-file", "-e", `origin/main:${p}`]).ok) {
+        const back = run("git", ["checkout", "origin/main", "--", p], { cwd: dir });
+        if (!back.ok) fail(`git checkout origin/main -- ${p} failed: ${back.err}`);
+      }
+    }
     if (notesFile) writeFileSync(join(data, "notes.md"), readFileSync(notesFile, "utf8"));
   } else writeFileSync(join(data, "task.md"), readFileSync(taskFile, "utf8"));
 
@@ -296,8 +330,13 @@ async function main() {
     result = await runClaude([...claudeArgs(job, "Return your structured result now. Do no more work.", data), "--resume", result.session_id], { cwd: dir, env });
 
   const pushed = kind === "fix" && !result.is_error && result.structured_output?.outcome === "committed" ? pushFix(dir, pr) : {};
-  fresh(dir);
-  rmSync(data, { recursive: true, force: true });
+  try {
+    fresh(dir);
+    rmSync(data, { recursive: true, force: true });
+  } catch (e) {
+    // A leftover process holding a file; the record matters more, and the next job's fresh() retries.
+    process.stderr.write(`cleanup: ${e.message}\n`);
+  }
 
   const output = result.structured_output ?? null;
   const block = kind === "review" && output ? blocking(output.findings, !!since) : [];

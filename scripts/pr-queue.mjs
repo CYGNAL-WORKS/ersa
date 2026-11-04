@@ -160,6 +160,12 @@ export function kept(s, logs) {
   return { fingerprint: s.print, rows: s.settled, logs, since: s.since };
 }
 
+// How many comments and reviews a pull request has; the shepherd's own notes
+// comment is not feedback, so updating it never wakes the queue.
+export function feedback(pr) {
+  return (pr.comments ?? []).filter((c) => !String(c.body).startsWith(SHEPHERD_MARK)).length + (pr.reviews?.length ?? 0);
+}
+
 function run(cmd, args) {
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "" };
@@ -205,9 +211,7 @@ function main() {
       logs[key] = failures[c.name] = last.logs[key];
     }
     const containsMain = run("git", ["merge-base", "--is-ancestor", "origin/main", pr.headRefOid]).ok;
-    // The shepherd's own notes comment is not feedback.
-    const feedback = (pr.comments ?? []).filter((c) => !String(c.body).startsWith(SHEPHERD_MARK)).length + (pr.reviews?.length ?? 0);
-    return { number: pr.number, title: pr.title, head: pr.headRefOid.slice(0, 7), feedback, ...classify(pr, { failures, containsMain }) };
+    return { number: pr.number, title: pr.title, head: pr.headRefOid.slice(0, 7), feedback: feedback(pr), ...classify(pr, { failures, containsMain }) };
   });
   // --json prints the rows for scripts/shepherd.mjs and keeps no state.
   if (process.argv.includes("--json")) {

@@ -11,9 +11,9 @@ const opts = { merge: true, maxFixes: 3 };
 const clean = { kind: "review", head: "r1", startedAt: "1", blocks: false, output: { findings: [] } };
 const dirty = { kind: "review", head: "r1", startedAt: "1", blocks: true, output: { findings: [{ severity: "medium", origin: "new", location: "a.mjs:1", defect: "Breaks." }] } };
 const facts = (over = {}) => ({
-  dependabot: false, hold: false, fixHere: false, fixPending: false, fixOn: () => undefined,
+  dependabot: false, hold: false, fixHere: () => false, fixPending: false, fixOn: () => undefined,
   rounds: { review: 0, ci: 0, conflict: 0 }, failed: { review: 0, fix: 0 },
-  mainHere: null, rerunHere: false, route: { need: "review" }, ready: null, ownerMerges: false, ...over,
+  mainHere: null, mergeRefused: null, rerunHere: false, route: { need: "review" }, ready: null, ownerMerges: false, ...over,
 });
 const row = (state, over = {}) => ({ number: 1, head: "aaaaaaa", oid: "aaaaaaaa", state, ...over });
 const kind = (r, f = facts(), o = opts) => decide(r, f, o).kind;
@@ -80,6 +80,8 @@ test("the loop stops at the round limit and on a fix that changed nothing", () =
   assert.equal(kind(row("green"), facts({ ...blocked, rounds: { review: 2, ci: 3, conflict: 0 } })), "fix", "CI fixes count apart");
   assert.equal(kind(row("green"), facts({ ...blocked, fixOn: () => ({ output: { outcome: "blocked", summary: "Disagree." } }) })), "owner");
   assert.equal(kind(row("green"), facts({ failed: { review: 2, fix: 0 } })), "owner");
+  assert.equal(kind(row("green"), facts({ ...blocked, failed: { review: 0, fix: 1 } })), "fix", "one crash runs the fixer again");
+  assert.equal(kind(row("green"), facts({ ...blocked, failed: { review: 0, fix: 2 } })), "owner", "two crashes go to the owner");
 });
 
 test("ready: a hold label waits, owner paths and shadow runs do not merge", () => {
@@ -87,6 +89,8 @@ test("ready: a hold label waits, owner paths and shadow runs do not merge", () =
   assert.equal(kind(row("green"), facts({ ...ready, hold: true })), "wait");
   assert.equal(kind(row("green"), facts({ ...ready, ownerMerges: true })), "owner");
   assert.equal(kind(row("green"), facts(ready), { ...opts, merge: false }), "ready");
+  assert.equal(kind(row("green"), facts({ ...ready, mergeRefused: { failures: 1, error: "x" } })), "merge", "one refusal is retried");
+  assert.equal(kind(row("green"), facts({ ...ready, mergeRefused: { failures: 2, error: "x" } })), "owner", "a second refusal goes to the owner");
   assert.equal(kind(row("behind-main"), facts({ route: { need: "none", review: clean }, ready: "behind" })), "merge-main");
 });
 
@@ -101,13 +105,15 @@ test("merging main in retries failures, and a conflict goes to one fix", () => {
   assert.equal(kind(row("behind-main"), facts({ ...behind, mainHere: { failures: 2 } })), "merge-main");
   assert.equal(kind(row("behind-main"), facts({ ...behind, mainHere: { failures: 3, error: "500" } })), "owner");
   assert.deepEqual(decide(row("conflicting"), facts({ mainHere: { conflict: true } }), opts), { kind: "fix", task: "conflict" });
-  assert.equal(kind(row("conflicting"), facts({ mainHere: { conflict: true }, fixHere: true })), "owner");
+  assert.equal(kind(row("conflicting"), facts({ mainHere: { conflict: true }, fixHere: (k) => k === "conflict" })), "owner");
+  assert.equal(kind(row("conflicting"), facts({ mainHere: { conflict: true }, fixHere: (k) => k === "review" })), "fix", "a review fix on the head is not a conflict fix");
 });
 
 test("red CI reruns once per head, then gets one fix", () => {
   assert.equal(kind(row("ci-red", { signature: "x" })), "rerun");
   assert.equal(kind(row("ci-red", { signature: "x", shared: true }), facts({ rerunHere: true })), "owner");
   assert.deepEqual(decide(row("ci-red", { signature: "x" }), facts({ rerunHere: true }), opts), { kind: "fix", task: "ci" });
-  assert.equal(kind(row("ci-red", { signature: "x" }), facts({ rerunHere: true, fixHere: true })), "owner");
+  assert.equal(kind(row("ci-red", { signature: "x" }), facts({ rerunHere: true, fixHere: (k) => k === "ci" })), "owner");
+  assert.equal(kind(row("ci-red", { signature: "x" }), facts({ rerunHere: true, fixHere: (k) => k === "review" })), "fix", "a review fix on the head is not a CI fix");
 });
 
