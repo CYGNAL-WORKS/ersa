@@ -73,10 +73,16 @@
     "working or waiting for you, and will stop. Closing the window instead keeps"
   ],
   "components/SessionControls.tsx": [
+    "Backend",
     "Detecting backends…",
     "Effort",
+    "Host",
+    "Model",
     "No backend",
-    "Session controls"
+    "Permission mode",
+    "Project",
+    "Session controls",
+    "Workspace"
   ],
   "components/SessionList.tsx": [
     "Loading…",
