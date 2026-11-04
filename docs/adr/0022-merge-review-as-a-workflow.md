@@ -16,7 +16,7 @@ The review and merge pipeline had three generations layered on each other: a ses
 
 ## Decision
 
-Option 3. The shepherd skill, the queue script and the job runner are retired; the merge gate stays. The workflow file, the review script, the gate, the hook scripts and the instruction files all come from main, so a pull request cannot change its own reviewer; a pull request that changes a workflow, an instruction file, a hook, the review or the gate is labeled `needs-owner` and the owner merges it. Reviews are posted as comments, never approvals, since Actions may not approve pull requests here.
+Option 3. The shepherd skill, the queue script and the job runner are retired; the merge gate stays. The workflow file, the review script, the gate, the hook scripts and the instruction files all come from main, so a pull request cannot change its own reviewer; a pull request that changes a workflow, an instruction file, a hook, the review or the gate is labeled `needs-owner` and the owner merges it. A bot's pull request is labeled for the owner and not reviewed: a dependency bump is a policy call, and its third-party code does not run under the review. Reviews are posted as comments, never approvals, since Actions may not approve pull requests here.
 
 ## Consequences
 
