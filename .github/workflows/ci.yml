@@ -195,7 +195,7 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      - name: Generated types and tokens are current
+      - name: Generated types, tokens and catalog export are current
         run: pnpm gen:check
 
       - name: Type-check
