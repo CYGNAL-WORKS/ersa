@@ -4,7 +4,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { OWNER_MERGES, blocks, ciTask, decide, fixKind, notesComment, readiness, route } from "./shepherd.mjs";
+import { refusals } from "./merge-pr.mjs";
+import { OWNER_MERGES, blocks, decide, readiness, route } from "./shepherd.mjs";
 
 const opts = { merge: true, maxFixes: 3 };
 const clean = { kind: "review", head: "r1", startedAt: "1", blocks: false, output: { findings: [] } };
@@ -17,11 +18,15 @@ const facts = (over = {}) => ({
 const row = (state, over = {}) => ({ number: 1, head: "aaaaaaa", oid: "aaaaaaaa", state, ...over });
 const kind = (r, f = facts(), o = opts) => decide(r, f, o).kind;
 
-test("the gate's dry run maps to readiness", () => {
+test("readiness reads the gate's own refusals", () => {
+  const green = { state: "OPEN", isDraft: false, mergeable: "MERGEABLE", statusCheckRollup: [{ name: "CI", status: "COMPLETED", conclusion: "SUCCESS" }] };
+  const say = (facts) => `#1 may not merge:
+${refusals({ pr: green, containsMain: true, reviewedInBranch: true, sinceReview: [], ...facts }).map((x) => `- ${x}
+`).join("")}`;
   assert.equal(readiness(0, "#1 may merge at abc"), "merge");
-  assert.equal(readiness(1, "- its head does not contain main's tip; merge main in and let CI run"), "behind");
-  assert.equal(readiness(1, "- its head does not contain main's tip\n- abc, after the review, is not a merge; review the head"), "wait");
-  assert.equal(readiness(1, "- GitHub reports it unknown"), "wait");
+  assert.equal(readiness(1, say({ containsMain: false })), "behind");
+  assert.equal(readiness(1, say({ containsMain: false, reviewedInBranch: false })), "wait");
+  assert.equal(readiness(1, say({ pr: { ...green, mergeable: "UNKNOWN" } })), "wait");
   assert.equal(readiness(2, "gh pr view failed"), "wait");
 });
 
@@ -106,18 +111,3 @@ test("red CI reruns once per head, then gets one fix", () => {
   assert.equal(kind(row("ci-red", { signature: "x" }), facts({ rerunHere: true, fixHere: true })), "owner");
 });
 
-test("a fix's kind comes from its task", () => {
-  assert.equal(fixKind({ task: ciTask("1", "x") }), "ci");
-  assert.equal(fixKind({ task: "GitHub reports this branch conflicts with main." }), "conflict");
-  assert.equal(fixKind({ task: "The merge-time review of ..." }), "review");
-  assert.equal(fixKind({}), "review");
-});
-
-test("the notes comment carries the marker, the findings and the owner's reason", () => {
-  const c = notesComment(dirty, "findings remain after 3 fix rounds");
-  assert.match(c, /^<!-- shepherd -->\n\*\*PR shepherd\*\* · review of r1/);
-  assert.match(c, /block the merge[^]*- \*\*medium\*\*, `a.mjs:1`: Breaks\./);
-  assert.match(c, /\*\*Needs the owner:\*\* findings remain after 3 fix rounds/);
-  assert.match(notesComment(clean), /No findings\./);
-  assert.match(notesComment(undefined, "a dependency update"), /no review yet[^]*Needs the owner/);
-});

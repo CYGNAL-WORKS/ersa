@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 
 import { commitsSinceReview, main, refusals } from "./merge-pr.mjs";
 
@@ -77,6 +77,11 @@ test("an expected commit status counts as still running", () => {
 // an octopus merge of two main commits, an octopus merge of main and the other
 // branch, and a plain commit. git reads no global or system config and no GIT_*
 // variables, so the fixture is the same on every machine.
+// Built once and shared: building it takes about two seconds on Windows.
+let fixture;
+const shared = () => (fixture ??= repo());
+after(() => fixture && rmSync(fixture.home, { recursive: true, force: true }));
+
 function repo() {
   const home = mkdtempSync(join(tmpdir(), "merge-pr-"));
   const dir = join(home, "repo");
@@ -160,29 +165,25 @@ function repo() {
 }
 
 test("the commits after the review are read and classified from git", () => {
-  const r = repo();
-  try {
-    const got = commitsSinceReview({ reviewed: r.reviewed, head: r.plain, main: "main", git: r.git });
-    const by = Object.fromEntries(got.map((c) => [c.sha, c]));
-    // The other branch's own commit came in unreviewed too.
-    assert.equal(got.length, 8);
-    assert.deepEqual(by[r.side], { sha: r.side, merge: false, fromMain: false, clean: false });
-    assert.deepEqual(by[r.clean], { sha: r.clean, merge: true, fromMain: true, clean: true });
-    assert.deepEqual(by[r.conflicted], { sha: r.conflicted, merge: true, fromMain: true, clean: false });
-    assert.deepEqual(by[r.other], { sha: r.other, merge: true, fromMain: false, clean: true });
-    // Keeping the branch's side leaves the combined diff empty; only the
-    // remerge-diff shows the resolution.
-    assert.deepEqual(by[r.keptOurs], { sha: r.keptOurs, merge: true, fromMain: true, clean: false });
-    // git prints no remerge-diff for an octopus merge, so one never reads as clean.
-    assert.deepEqual(by[r.octoMain], { sha: r.octoMain, merge: true, fromMain: true, clean: false });
-    assert.deepEqual(by[r.octoSide], { sha: r.octoSide, merge: true, fromMain: false, clean: false });
-    assert.deepEqual(by[r.plain], { sha: r.plain, merge: false, fromMain: false, clean: false });
-    assert.deepEqual(commitsSinceReview({ reviewed: r.reviewed, head: r.clean, main: "main", git: r.git }), [
-      { sha: r.clean, merge: true, fromMain: true, clean: true },
-    ]);
-  } finally {
-    rmSync(r.home, { recursive: true, force: true });
-  }
+  const r = shared();
+  const got = commitsSinceReview({ reviewed: r.reviewed, head: r.plain, main: "main", git: r.git });
+  const by = Object.fromEntries(got.map((c) => [c.sha, c]));
+  // The other branch's own commit came in unreviewed too.
+  assert.equal(got.length, 8);
+  assert.deepEqual(by[r.side], { sha: r.side, merge: false, fromMain: false, clean: false });
+  assert.deepEqual(by[r.clean], { sha: r.clean, merge: true, fromMain: true, clean: true });
+  assert.deepEqual(by[r.conflicted], { sha: r.conflicted, merge: true, fromMain: true, clean: false });
+  assert.deepEqual(by[r.other], { sha: r.other, merge: true, fromMain: false, clean: true });
+  // Keeping the branch's side leaves the combined diff empty; only the
+  // remerge-diff shows the resolution.
+  assert.deepEqual(by[r.keptOurs], { sha: r.keptOurs, merge: true, fromMain: true, clean: false });
+  // git prints no remerge-diff for an octopus merge, so one never reads as clean.
+  assert.deepEqual(by[r.octoMain], { sha: r.octoMain, merge: true, fromMain: true, clean: false });
+  assert.deepEqual(by[r.octoSide], { sha: r.octoSide, merge: true, fromMain: false, clean: false });
+  assert.deepEqual(by[r.plain], { sha: r.plain, merge: false, fromMain: false, clean: false });
+  assert.deepEqual(commitsSinceReview({ reviewed: r.reviewed, head: r.clean, main: "main", git: r.git }), [
+    { sha: r.clean, merge: true, fromMain: true, clean: true },
+  ]);
 });
 
 test("a failed git command throws rather than reading as no commits or a clean merge", () => {
@@ -219,66 +220,54 @@ function gate(r, argv, { head, originMain, pr = {}, view, merged = true }) {
 }
 
 test("the gate merges a head that passes, naming the head it checked", () => {
-  const r = repo();
-  try {
-    const at = { head: r.clean, originMain: r.main1 };
-    const got = gate(r, ["5", "--reviewed", r.reviewed], at);
-    assert.equal(got.code, 0, got.stderr);
-    assert.equal(got.stdout, `#5 merged at ${r.clean.slice(0, 7)}\n`);
-    assert.deepEqual(got.gh.at(-1), ["pr", "merge", "5", "--merge", "--match-head-commit", r.clean]);
+  const r = shared();
+  const at = { head: r.clean, originMain: r.main1 };
+  const got = gate(r, ["5", "--reviewed", r.reviewed], at);
+  assert.equal(got.code, 0, got.stderr);
+  assert.equal(got.stdout, `#5 merged at ${r.clean.slice(0, 7)}\n`);
+  assert.deepEqual(got.gh.at(-1), ["pr", "merge", "5", "--merge", "--match-head-commit", r.clean]);
 
-    const dry = gate(r, ["--dry-run", "--reviewed", r.reviewed, "5"], at);
-    assert.equal(dry.code, 0, dry.stderr);
-    assert.equal(dry.stdout, `#5 may merge at ${r.clean.slice(0, 7)}\n`);
-    assert.equal(dry.gh.length, 1, "a dry run only reads the pull request");
+  const dry = gate(r, ["--dry-run", "--reviewed", r.reviewed, "5"], at);
+  assert.equal(dry.code, 0, dry.stderr);
+  assert.equal(dry.stdout, `#5 may merge at ${r.clean.slice(0, 7)}\n`);
+  assert.equal(dry.gh.length, 1, "a dry run only reads the pull request");
 
-    const failedMerge = gate(r, ["5", "--reviewed", r.reviewed], { ...at, merged: false });
-    assert.equal(failedMerge.code, 2);
-    assert.match(failedMerge.stderr, /head moved/);
-  } finally {
-    rmSync(r.home, { recursive: true, force: true });
-  }
+  const failedMerge = gate(r, ["5", "--reviewed", r.reviewed], { ...at, merged: false });
+  assert.equal(failedMerge.code, 2);
+  assert.match(failedMerge.stderr, /head moved/);
 });
 
 test("the gate refuses with exit 1 and never calls merge", () => {
-  const r = repo();
-  try {
-    const refused = (argv, at, reason) => {
-      const got = gate(r, argv, at);
-      assert.equal(got.code, 1, got.stderr);
-      assert.match(got.stdout, reason);
-      assert.equal(got.gh.length, 1);
-    };
-    refused(["5", "--reviewed", r.reviewed], { head: r.clean, originMain: r.main5 }, /does not contain main's tip/);
-    refused(["5", "--reviewed", r.reviewed], { head: r.conflicted, originMain: r.main2 }, /resolved a conflict by hand/);
-    refused(["5", "--reviewed", r.clean], { head: r.reviewed, originMain: r.main1 }, /not in the branch's history/);
-    refused(["5", "--reviewed", r.reviewed], { head: r.clean, originMain: r.main1, pr: { isDraft: true } }, /draft/);
-  } finally {
-    rmSync(r.home, { recursive: true, force: true });
-  }
+  const r = shared();
+  const refused = (argv, at, reason) => {
+    const got = gate(r, argv, at);
+    assert.equal(got.code, 1, got.stderr);
+    assert.match(got.stdout, reason);
+    assert.equal(got.gh.length, 1);
+  };
+  refused(["5", "--reviewed", r.reviewed], { head: r.clean, originMain: r.main5 }, /does not contain main's tip/);
+  refused(["5", "--reviewed", r.reviewed], { head: r.conflicted, originMain: r.main2 }, /resolved a conflict by hand/);
+  refused(["5", "--reviewed", r.clean], { head: r.reviewed, originMain: r.main1 }, /not in the branch's history/);
+  refused(["5", "--reviewed", r.reviewed], { head: r.clean, originMain: r.main1, pr: { isDraft: true } }, /draft/);
 });
 
 test("a usage or tool error exits 2 before anything merges", () => {
-  const r = repo();
-  try {
-    const at = { head: r.clean, originMain: r.main1 };
-    for (const argv of [["5", "--reviewed", r.reviewed, "--dryrun"], ["5", "--reviewed", r.reviewed, "--dry-run=true"], ["5"], ["--reviewed", r.reviewed]]) {
-      const got = gate(r, argv, at);
-      assert.equal(got.code, 2, argv.join(" "));
-      assert.equal(got.gh.length, 0, argv.join(" "));
-    }
-    const views = [
-      { ok: true, out: "not json", err: "" },
-      { ok: true, out: JSON.stringify({ state: null, mergeable: null, headRefOid: r.clean }), err: "" },
-      { ok: false, out: "", err: "no gh" },
-    ];
-    for (const view of views) {
-      const got = gate(r, ["5", "--reviewed", r.reviewed], { ...at, view });
-      assert.equal(got.code, 2, view.out);
-      assert.equal(got.gh.length, 1);
-    }
-    assert.equal(gate(r, ["5", "--reviewed", "nosuchcommit"], at).code, 2);
-  } finally {
-    rmSync(r.home, { recursive: true, force: true });
+  const r = shared();
+  const at = { head: r.clean, originMain: r.main1 };
+  for (const argv of [["5", "--reviewed", r.reviewed, "--dryrun"], ["5", "--reviewed", r.reviewed, "--dry-run=true"], ["5"], ["--reviewed", r.reviewed]]) {
+    const got = gate(r, argv, at);
+    assert.equal(got.code, 2, argv.join(" "));
+    assert.equal(got.gh.length, 0, argv.join(" "));
   }
+  const views = [
+    { ok: true, out: "not json", err: "" },
+    { ok: true, out: JSON.stringify({ state: null, mergeable: null, headRefOid: r.clean }), err: "" },
+    { ok: false, out: "", err: "no gh" },
+  ];
+  for (const view of views) {
+    const got = gate(r, ["5", "--reviewed", r.reviewed], { ...at, view });
+    assert.equal(got.code, 2, view.out);
+    assert.equal(got.gh.length, 1);
+  }
+  assert.equal(gate(r, ["5", "--reviewed", "nosuchcommit"], at).code, 2);
 });
