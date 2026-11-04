@@ -1,0 +1,8 @@
+# Remote hosts: lessons for later
+
+Much of this is prior art from VS Code's remote server rather than observed behavior; each lesson says which.
+
+- **Surviving a drop.** FLOW-REMOTE-SESSION shows output from an outage, but nothing says how a remote Core outlives the SSH connection, how long it waits, or how a reconnect avoids two agents for one session. Prior art: on a Windows remote, sshd stops a connection's processes through a job object that `nohup` and `Start-Process` don't escape and `CREATE_BREAKAWAY_FROM_JOB` does; VS Code waits 3 hours for a reconnect, 5 minutes once another client connects.
+- **Passing commands.** ARCH-CORE says "local spawn, or SSH" without saying how commands travel, which matters at least for bootstrapping the remote Core. On Windows the sshd default shell varies (cmd or PowerShell) and cmd's line limit is 8191 characters; VS Code sends its script on stdin, or with `-EncodedCommand` when the default shell is PowerShell. A related local hazard has been seen: a shell parsed a folder name with a space as two arguments.
+- **Installing the remote Core.** For FLOW-REMOTE-SESSION's open question. Proven in practice: one folder per version, and a marker written last so a half-finished install never looks installed. From VS Code: verify by running `--version`, take the install lock on the remote disk, keep the newest five versions; the alternative is removing versions whose lock process has ended. Avoid roaming profiles on Windows.
+- **Sharing one connection.** ARCH-CORE's one connection per host has no sharing rules: one session's output must not stall the others, a mid-session silent drop must read as reconnecting within a bound, and a remote failure must reach every session it served.
