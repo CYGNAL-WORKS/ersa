@@ -31,7 +31,9 @@ jobs:
   review:
     name: Merge review
     # A CI run on a push to main has no pull request; a failed one needs no
-    # review. The private guard is ci.yml's: never a fork on this runner.
+    # review. Private only, so a fork never reaches this runner; once the
+    # repository is public this job does not run, and its replacement runs on
+    # the owner's machine outside Actions.
     if: >-
       github.event.repository.private &&
       (github.event_name == 'workflow_dispatch' ||
@@ -57,8 +59,8 @@ jobs:
       GIT_CONFIG_KEY_1: credential.helper
       GIT_CONFIG_VALUE_1: "!gh auth git-credential"
     steps:
-      # Git Bash first, as the CI workflow does, and claude's install folder,
-      # which is not on the runner's PATH.
+      # Git Bash first (System32's bash.exe, often earlier on PATH, is the WSL
+      # launcher), and claude's install folder, which is not on the runner's PATH.
       - name: Git Bash and claude on PATH
         run: |
           Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\bin'
