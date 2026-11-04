@@ -25,6 +25,13 @@ test("recognizes a commit and where it runs", () => {
   assert.deepEqual(commitTarget('git commit --amend -m "-a in a message"'), { dir: null, all: false });
 });
 
+test("a commit after a directory change is not recognized, since where it runs is unknown", () => {
+  for (const command of ["cd sub && git commit -m x", "Set-Location sub; git commit -m x", "pushd sub && git -C . commit -m x"]) {
+    assert.equal(commitTarget(command), null, command);
+  }
+  assert.deepEqual(commitTarget("git commit -m x && cd sub"), { dir: null, all: false });
+});
+
 test("ignores everything that is not a commit", () => {
   for (const command of ["git status", "git log --oneline", "git commit-tree abc", "echo commit", "git merge main"]) {
     assert.equal(commitTarget(command), null, command);
@@ -40,8 +47,9 @@ test("open inbox entries alone do not block", () => {
 });
 
 // A repository with a committed docs/MANIFEST.md and a stub manifest script
-// that writes `manifest` to it and exits with `status`.
-function repo({ manifest = "## Problems\n\nNone.\n", status = 0 } = {}) {
+// that writes `manifest` to it (and `adr` to the ADR index, when given), says so
+// as the real script does, and exits with `status`. `crash` makes it throw first.
+function repo({ manifest = "## Problems\n\nNone.\n", status = 0, adr, crash = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "ersa-hook-"));
   scratch.push(dir);
   mkdirSync(join(dir, "scripts"));
@@ -52,7 +60,10 @@ function repo({ manifest = "## Problems\n\nNone.\n", status = 0 } = {}) {
     join(dir, "scripts", "manifest.mjs"),
     `import { writeFileSync } from "node:fs";\n` +
       `writeFileSync("ran", "");\n` +
+      (crash ? `throw new Error("stub crashed");\n` : "") +
       `writeFileSync("docs/MANIFEST.md", ${JSON.stringify(manifest)});\n` +
+      (adr ? `writeFileSync("docs/adr/README.md", ${JSON.stringify(adr)});\n` : "") +
+      `console.log("wrote docs/MANIFEST.md and the ADR index");\n` +
       `process.exit(${status});\n`
   );
   const git = (...args) => spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
@@ -103,12 +114,40 @@ test("a regenerated file left unstaged blocks, unless the commit stages it", () 
   assert.equal(hook('git commit -am "x"', dir).status, 0);
 });
 
-test("git -C names the repository checked", () => {
+test("a regenerated ADR index left unstaged blocks", () => {
+  const dir = repo({ adr: "new index\n" });
+  const run = hook('git commit -m "x"', dir);
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /docs\/adr\/README\.md/);
+});
+
+test("git -C naming another worktree of the session's repository checks that worktree", () => {
   const dir = repo();
-  const elsewhere = mkdtempSync(join(tmpdir(), "ersa-hook-cwd-"));
-  scratch.push(elsewhere);
-  assert.equal(hook(`git -C "${dir}" commit -m x`, elsewhere).status, 0);
-  assert.ok(existsSync(join(dir, "ran")));
+  const tree = mkdtempSync(join(tmpdir(), "ersa-hook-wt-"));
+  scratch.push(tree);
+  rmSync(tree, { recursive: true });
+  spawnSync("git", ["-C", dir, "worktree", "add", "-q", "--detach", tree]);
+  assert.equal(hook(`git -C "${tree}" commit -m x`, dir).status, 0);
+  assert.ok(existsSync(join(tree, "ran")));
+  assert.ok(!existsSync(join(dir, "ran")));
+});
+
+test("git -C naming another repository runs none of its scripts", () => {
+  const own = repo();
+  const other = repo({ status: 1 });
+  assert.equal(hook(`git -C "${other}" commit -m x`, own).status, 0);
+  assert.ok(!existsSync(join(other, "ran")));
+  assert.ok(!existsSync(join(own, "ran")));
+});
+
+test("a check that crashes blocks, even when the old manifest lists only open inbox entries", () => {
+  const manifest = "## Problems\n\n- 1 open inbox entry need a planning pass\n";
+  const dir = repo({ crash: true });
+  writeFileSync(join(dir, "docs", "MANIFEST.md"), manifest);
+  spawnSync("git", ["-C", dir, "add", "docs"]);
+  const run = hook('git commit -m "x"', dir);
+  assert.equal(run.status, 2);
+  assert.match(run.stderr, /stub crashed/);
 });
 
 test("a failing check that reports no problem blocks with its stderr", () => {
