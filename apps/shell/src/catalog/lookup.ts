@@ -63,7 +63,8 @@ export interface Lookup<C> {
   <K extends Key<C>>(key: K, ...values: Args<At<C, K>, Value>): ReactNode;
 }
 
-const isPlural = (entry: Message | Section | undefined): entry is Plural =>
+/** Whether a catalog entry is a message with plural forms rather than a section. */
+export const isPlural = (entry: Message | Section | undefined): entry is Plural =>
   typeof entry === "object" && typeof entry.other === "string";
 
 // The message at a dotted key. Unreachable through the types; it throws so a

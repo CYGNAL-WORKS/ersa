@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import { isCurrent, markdown } from "../../scripts/gen-catalog.mjs";
 import { enUS } from "./en-US";
 import allowed from "./inline-copy.allow.json";
-import type { Message, Plural, Section } from "./lookup";
+import { isPlural, type Section } from "./lookup";
 
 const SRC = join(import.meta.dirname, "..");
 
@@ -37,15 +37,15 @@ function problems(key: string, text: string): string[] {
   // Values ("The string catalog", Values): braces only around a camelCase name.
   if (/[{}]/.test(text.replace(/\{[a-z][a-zA-Z0-9]*\}/g, ""))) found.push("has a brace that isn't a {value}");
   // By kind ("The string catalog", last paragraph; "Interface patterns").
+  // Trailing space would hide the last character from these checks.
   const kind = kindOf(key);
-  if (kind === "Button" && /\p{P}$/u.test(text) && !text.endsWith("…")) found.push("is a Button ending in punctuation");
-  if ((kind === "Error" || kind === "Empty") && !text.endsWith(".")) found.push(`is ${kind === "Error" ? "an Error" : "an Empty"} string without a closing period`);
-  if (kind === "Progress" && !text.endsWith("…")) found.push("is a Progress string not ending in …");
+  const end = text.trimEnd();
+  if (kind === "Button" && /\p{P}$/u.test(end) && !end.endsWith("…")) found.push("is a Button ending in punctuation");
+  if ((kind === "Error" || kind === "Empty") && !end.endsWith(".")) found.push(`is ${kind === "Error" ? "an Error" : "an Empty"} string without a closing period`);
+  if (kind === "Progress" && !end.endsWith("…")) found.push("is a Progress string not ending in …");
   if (kind === "Status" && text.trim().split(/\s+/).length > 2) found.push("is a Status longer than two words");
   return found;
 }
-
-const isPlural = (entry: Message | Section): entry is Plural => typeof entry === "object" && "other" in entry;
 
 /** Every problem in a catalog: its keys, its plurals, and each string under its key's rules. */
 function catalogProblems(section: Section, path: string[] = []): string[] {
@@ -110,6 +110,7 @@ describe("the rules by kind", () => {
   it("fail a Button ending in punctuation other than the ellipsis", () => {
     expect(problems("quit.quitButton", "Quit.")).toEqual(["is a Button ending in punctuation"]);
     expect(problems("quit.quitButton", "Quit?")).toEqual(["is a Button ending in punctuation"]);
+    expect(problems("quit.quitButton", "Quit. ")).toEqual(["is a Button ending in punctuation"]);
     expect(problems("quit.quitButton", "Quit")).toEqual([]);
     expect(problems("rail.addProjectButton", "Add project…")).toEqual([]);
   });
@@ -160,8 +161,21 @@ describe("the rules for keys and plurals", () => {
 
 // --- Copy written into components --------------------------------------------
 
-/** Props whose text a person reads or hears. */
+/** Props whose text a person reads or hears, whatever it looks like. */
 const READ_PROPS = new Set(["aria-label", "aria-description", "aria-roledescription", "aria-valuetext", "title", "placeholder", "label", "alt"]);
+
+/** Props no person reads: names, styles, roles and references. */
+const CODE_PROPS = new Set(["className", "id", "key", "role", "type", "href", "src", "htmlFor", "name", "autoComplete", "inputMode", "lang"]);
+
+// A component's own props (`summary`, `what`, `unavailable`) carry copy too.
+// Any other prop counts when its text reads as words: a capital letter first,
+// or a space, which a token such as "accent" or "md" never has.
+const readsAsWords = (text: string) => /^\p{Lu}|\p{L}\s+\p{L}/u.test(text);
+function propCopy(name: string, texts: string[]): string[] {
+  if (READ_PROPS.has(name)) return texts;
+  if (CODE_PROPS.has(name) || name.startsWith("data-") || name.startsWith("aria-")) return [];
+  return texts.filter(readsAsWords);
+}
 
 // Text with a letter in it; spacing and punctuation alone aren't copy.
 const isCopy = (text: string) => /\p{L}/u.test(text);
@@ -196,7 +210,7 @@ function inlineCopy(file: string, source: string): string[] {
     if (node.type === "JSXExpressionContainer" && node.parent !== "attribute") found.push(...shown(node.expression));
     if (node.type === "JSXAttribute") {
       const name = (node.name as Node).name;
-      if (typeof name === "string" && READ_PROPS.has(name)) found.push(...shown(node.value));
+      if (typeof name === "string") found.push(...propCopy(name, shown(node.value)));
       // The value was read above, or isn't read by a person; JSX inside it is still visited.
       if (isNode(node.value) && node.value.type === "JSXExpressionContainer") visit({ ...node.value, parent: "attribute" });
       return;
@@ -218,6 +232,18 @@ function componentFiles(dir: string): string[] {
 }
 const fromSrc = (path: string) => relative(SRC, path).split(sep).join("/");
 
+type CopyByFile = Readonly<Record<string, readonly string[]>>;
+
+// Compared both ways: new copy fails, and so does an entry left after its string moved.
+function offList(found: CopyByFile, allowed: CopyByFile): string[] {
+  const missing = (from: CopyByFile, other: CopyByFile) =>
+    Object.entries(from).flatMap(([file, texts]) => texts.filter((text) => !other[file]?.includes(text)).map((text) => [file, text] as const));
+  return [
+    ...missing(found, allowed).map(([file, text]) => `${file}: ${JSON.stringify(text)} is inline copy; move it to the catalog`),
+    ...missing(allowed, found).map(([file, text]) => `${file}: ${JSON.stringify(text)} is on the allow-list but no longer inline; remove it there`),
+  ];
+}
+
 describe("component source (The string catalog: no copy in components)", () => {
   it("holds only the inline copy on the allow-list, which the migration tickets empty", () => {
     const found: Record<string, string[]> = {};
@@ -225,8 +251,27 @@ describe("component source (The string catalog: no copy in components)", () => {
       const copy = inlineCopy(file, readFileSync(file, "utf8"));
       if (copy.length > 0) found[fromSrc(file)] = copy;
     }
-    // Equal both ways: new copy fails, and so does an entry left after its string moved.
-    expect(found).toEqual(allowed);
+    expect(offList(found, allowed)).toEqual([]);
+  });
+});
+
+describe("the allow-list comparison", () => {
+  it("fails copy that isn't on the list, in a listed file or a new one", () => {
+    expect(offList({ "A.tsx": ["Quit", "Cancel"], "B.tsx": ["Save"] }, { "A.tsx": ["Quit"] })).toEqual([
+      "A.tsx: \"Cancel\" is inline copy; move it to the catalog",
+      "B.tsx: \"Save\" is inline copy; move it to the catalog",
+    ]);
+  });
+
+  it("fails an entry whose string has moved, so the list only shrinks", () => {
+    expect(offList({ "A.tsx": ["Quit"] }, { "A.tsx": ["Quit", "Cancel"], "B.tsx": ["Save"] })).toEqual([
+      "A.tsx: \"Cancel\" is on the allow-list but no longer inline; remove it there",
+      "B.tsx: \"Save\" is on the allow-list but no longer inline; remove it there",
+    ]);
+  });
+
+  it("passes when the two agree", () => {
+    expect(offList({ "A.tsx": ["Quit"] }, { "A.tsx": ["Quit"] })).toEqual([]);
   });
 });
 
@@ -249,6 +294,13 @@ describe("the inline-copy scan", () => {
     expect(
       scan(`export const A = () => <input aria-label="Message" title={"Send"} placeholder={\`Write\`} label="Name" alt="Logo" />;`),
     ).toEqual(["Logo", "Message", "Name", "Send", "Write"]);
+  });
+
+  it("finds words in a component's own props, and passes its tokens", () => {
+    expect(scan(`export const A = () => <StatusTile summary="Connecting…" what="The projects" tone="accent" size="md" />;`)).toEqual([
+      "Connecting…",
+      "The projects",
+    ]);
   });
 
   it("passes props no person reads, and text with no letters", () => {
