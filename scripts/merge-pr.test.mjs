@@ -45,6 +45,8 @@ test("CI must have run, finished and passed", () => {
 test("latestChecks keeps the newest run of each check by name", () => {
   const checks = [check({ conclusion: "FAILURE" }), check({ startedAt: "2026-11-03T11:00:00Z" }), check({ name: "Lint", startedAt: undefined })];
   assert.deepEqual(latestChecks(checks), [checks[1], checks[2]]);
+  // The order GitHub lists them in does not matter.
+  assert.deepEqual(latestChecks([checks[1], checks[0]]), [checks[1]]);
   assert.deepEqual(latestChecks([]), []);
 });
 
