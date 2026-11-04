@@ -35,7 +35,7 @@ confidence-threshold = 0.93
 unused-allowed-license = "allow"
 
 [licenses.private]
-# Ersa's own crates are `publish = false` and UNLICENSED; they are not judged.
+# Ersa's own crates are `publish = false` (MIT, ADR 0024); they are not judged.
 ignore = true
 
 [bans]
