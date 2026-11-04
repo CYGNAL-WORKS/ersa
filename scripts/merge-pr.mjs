@@ -1,20 +1,21 @@
 #!/usr/bin/env node
-// The merge gate: merges one pull request only when the merge rule in
-// docs/agents/orchestration.md holds, so whoever calls it (the owner, an
-// orchestration session, the merge review workflow) cannot merge on a misread.
+// The merge gate: adds one pull request to the merge queue only when the merge
+// rule in docs/agents/orchestration.md holds, so whoever calls it (the owner,
+// an orchestration session, the merge review) cannot merge on a misread.
 //
-//   node scripts/merge-pr.mjs <n> --reviewed <sha>            merge if the gate passes
+//   node scripts/merge-pr.mjs <n> --reviewed <sha>            enqueue if the gate passes
 //   node scripts/merge-pr.mjs <n> --reviewed <sha> --dry-run  say whether it would
 //
 // The gate: the pull request is open, not a draft, and mergeable; every latest
-// CI check passed; the head contains main's tip; and the head is the reviewed
-// commit, or differs from it only by clean merges of main. A merge of main that
-// resolved a conflict by hand changes code no reviewer saw, so it needs a new
-// review. The merge names the head it checked (--match-head-commit), so a push
-// between the check and the merge makes GitHub refuse it.
+// CI check passed; and the head is the reviewed commit, or differs from it only
+// by clean merges of main. A merge of main that resolved a conflict by hand
+// changes code no reviewer saw, so it needs a new review. The head need not
+// contain main's tip: the merge queue builds and tests the merge before main
+// moves (ADR 0023). The enqueue names the head it checked (--match-head-commit),
+// so a push between the check and the enqueue makes GitHub refuse it.
 //
-// Exit 0 when merged (or, with --dry-run, when it would merge); 1 when the gate
-// refuses, with one line per reason; 2 on a usage or tool error.
+// Exit 0 when added to the queue (or, with --dry-run, when it would be); 1
+// when the gate refuses, with one line per reason; 2 on a usage or tool error.
 
 import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
@@ -22,7 +23,10 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const PASSED = ["SUCCESS", "SKIPPED", "NEUTRAL"];
-export const BEHIND_MAIN = "its head does not contain main's tip; merge main in and let CI run";
+
+// The merge review's own commit status on a head. It is not CI, so the gate
+// never counts or waits for it: a head with only that status has not been built.
+export const MERGE_REVIEW = "Merge review";
 
 // The latest run of each check by name: a head can carry a run that a newer
 // one superseded and cancelled, and only the newer one counts.
@@ -35,25 +39,35 @@ export function latestChecks(checks) {
   return [...latest.values()];
 }
 
+// gh's statusCheckRollup in one shape: a commit status (rather than a check
+// run) carries `context` and `state`, a check run `name`, `status` and `conclusion`.
+export const normalizeChecks = (rollup) =>
+  latestChecks(
+    (rollup ?? []).map((c) => ({ ...c, name: c.name ?? c.context, status: c.status ?? (["PENDING", "EXPECTED"].includes(c.state) ? "PENDING" : "COMPLETED"), conclusion: c.conclusion ?? c.state }))
+  );
+
+// Why a head's CI does not count as passed; empty when every latest check
+// finished and passed. The merge review poller asks this too, so the two read
+// CI the same way.
+export function ciRefusals(rollup) {
+  const checks = normalizeChecks(rollup).filter((c) => c.name !== MERGE_REVIEW);
+  const out = [];
+  const running = checks.filter((c) => c.status !== "COMPLETED");
+  const failed = checks.filter((c) => c.status === "COMPLETED" && !PASSED.includes(c.conclusion));
+  if (!checks.length) out.push("it has no CI checks");
+  if (running.length) out.push(`CI is still running: ${running.map((c) => c.name).join(", ")}`);
+  if (failed.length) out.push(`CI did not pass: ${failed.map((c) => c.name).join(", ")}`);
+  return out;
+}
+
 // Why the pull request may not merge; empty when it may. `sinceReview` lists
 // the commits on the branch after the reviewed one that main does not have.
-export function refusals({ pr, containsMain, reviewedInBranch, sinceReview }) {
+export function refusals({ pr, reviewedInBranch, sinceReview }) {
   const out = [];
   if (pr.state !== "OPEN") out.push(`it is ${pr.state.toLowerCase()}`);
   if (pr.isDraft) out.push("it is a draft");
   if (pr.mergeable !== "MERGEABLE") out.push(`GitHub reports it ${pr.mergeable.toLowerCase()}`);
-
-  // A commit status (rather than a check run) carries `context` and `state`.
-  const checks = latestChecks(
-    (pr.statusCheckRollup ?? []).map((c) => ({ ...c, name: c.name ?? c.context, status: c.status ?? (["PENDING", "EXPECTED"].includes(c.state) ? "PENDING" : "COMPLETED"), conclusion: c.conclusion ?? c.state }))
-  );
-  const running = checks.filter((c) => c.status !== "COMPLETED");
-  const failed = checks.filter((c) => c.status === "COMPLETED" && !PASSED.includes(c.conclusion));
-  // The merge review's own check run is not CI: a head with only that check has not been built.
-  if (!checks.some((c) => c.name !== "Merge review")) out.push("it has no CI checks");
-  if (running.length) out.push(`CI is still running: ${running.map((c) => c.name).join(", ")}`);
-  if (failed.length) out.push(`CI did not pass: ${failed.map((c) => c.name).join(", ")}`);
-  if (!containsMain) out.push(BEHIND_MAIN);
+  out.push(...ciRefusals(pr.statusCheckRollup));
 
   if (!reviewedInBranch) out.push("the reviewed commit is not in the branch's history; review the head");
   for (const c of sinceReview ?? []) {
@@ -168,12 +182,15 @@ function gate(args, run) {
   const reviewedInBranch = isAncestor(reviewed.out, head);
   const sinceReview = reviewedInBranch ? commitsSinceReview({ reviewed: reviewed.out, head, git: (a) => run("git", a) }) : [];
 
-  const reasons = refusals({ pr, containsMain: isAncestor("origin/main", head), reviewedInBranch, sinceReview });
+  const reasons = refusals({ pr, reviewedInBranch, sinceReview });
   if (reasons.length) throw new Refused(n, reasons);
-  if (dryRun) return { stdout: `#${n} may merge at ${head.slice(0, 7)}\n` };
-  const merge = run("gh", ["pr", "merge", n, "--merge", "--match-head-commit", head]);
+  if (dryRun) return { stdout: `#${n} may enter the merge queue at ${head.slice(0, 7)}\n` };
+  // --auto on a branch with a merge queue adds the pull request to the queue,
+  // or arms it until its required checks pass; the queue sets the merge
+  // method, so --merge only states the intent gh would otherwise ask for.
+  const merge = run("gh", ["pr", "merge", n, "--auto", "--merge", "--match-head-commit", head]);
   if (!merge.ok) fail(`gh pr merge failed: ${merge.err}`);
-  return { stdout: `#${n} merged at ${head.slice(0, 7)}\n` };
+  return { stdout: `#${n} added to the merge queue at ${head.slice(0, 7)}\n` };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

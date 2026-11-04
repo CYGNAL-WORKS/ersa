@@ -8,11 +8,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 
-import { commitsSinceReview, latestChecks, main, refusals } from "./merge-pr.mjs";
+import { ciRefusals, commitsSinceReview, latestChecks, main, refusals } from "./merge-pr.mjs";
 
 const check = (over) => ({ name: "CI", status: "COMPLETED", conclusion: "SUCCESS", startedAt: "2026-11-03T10:00:00Z", ...over });
 const facts = (over = {}) => ({
-  containsMain: true,
   reviewedInBranch: true,
   sinceReview: [],
   ...over,
@@ -20,7 +19,7 @@ const facts = (over = {}) => ({
 });
 const mergeOfMain = { sha: "aaaaaaa1", merge: true, fromMain: true, clean: true };
 
-test("a reviewed head with green CI that contains main may merge", () => {
+test("a reviewed head with green CI may merge", () => {
   assert.deepEqual(refusals(facts()), []);
 });
 
@@ -39,6 +38,10 @@ test("CI must have run, finished and passed", () => {
   assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [] } })), ["it has no CI checks"]);
   assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [check({ name: "Merge review" })] } })), ["it has no CI checks"]);
   assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [check({ name: "Merge review" }), check()] } })), []);
+  // The review's own status, pending or red, is not CI the gate waits for: the review itself calls the gate.
+  assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [{ context: "Merge review", state: "PENDING" }, { context: "Merge review", state: "FAILURE" }, check()] } })), []);
+  assert.deepEqual(ciRefusals([check()]), []);
+  assert.deepEqual(ciRefusals(undefined), ["it has no CI checks"]);
   assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [check({ status: "IN_PROGRESS", conclusion: "" })] } })), ["CI is still running: CI"]);
   assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [check({ conclusion: "FAILURE" })] } })), ["CI did not pass: CI"]);
   assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [check({ conclusion: "CANCELLED" })] } })), ["CI did not pass: CI"]);
@@ -62,10 +65,6 @@ test("a commit status counts as a check", () => {
   assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [{ context: "ext", state: "SUCCESS" }] } })), []);
   assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [{ context: "ext", state: "PENDING" }] } })), ["CI is still running: ext"]);
   assert.deepEqual(refusals(facts({ pr: { statusCheckRollup: [{ context: "ext", state: "ERROR" }] } })), ["CI did not pass: ext"]);
-});
-
-test("a head behind main may not merge", () => {
-  assert.deepEqual(refusals(facts({ containsMain: false })), ["its head does not contain main's tip; merge main in and let CI run"]);
 });
 
 test("code no reviewer saw sends the head back for review", () => {
@@ -229,18 +228,23 @@ function gate(r, argv, { head, originMain, pr = {}, view, merged = true, fetched
   return { ...main(argv, { run }), gh };
 }
 
-test("the gate merges a head that passes, naming the head it checked", () => {
+test("the gate adds a head that passes to the merge queue, naming the head it checked", () => {
   const r = shared();
   const at = { head: r.clean, originMain: r.main1 };
   const got = gate(r, ["5", "--reviewed", r.reviewed], at);
   assert.equal(got.code, 0, got.stderr);
-  assert.equal(got.stdout, `#5 merged at ${r.clean.slice(0, 7)}\n`);
-  assert.deepEqual(got.gh.at(-1), ["pr", "merge", "5", "--merge", "--match-head-commit", r.clean]);
+  assert.equal(got.stdout, `#5 added to the merge queue at ${r.clean.slice(0, 7)}\n`);
+  assert.deepEqual(got.gh.at(-1), ["pr", "merge", "5", "--auto", "--merge", "--match-head-commit", r.clean]);
 
   const dry = gate(r, ["--dry-run", "--reviewed", r.reviewed, "5"], at);
   assert.equal(dry.code, 0, dry.stderr);
-  assert.equal(dry.stdout, `#5 may merge at ${r.clean.slice(0, 7)}\n`);
+  assert.equal(dry.stdout, `#5 may enter the merge queue at ${r.clean.slice(0, 7)}\n`);
   assert.equal(dry.gh.length, 1, "a dry run only reads the pull request");
+
+  // A head behind main is not refused for that alone: the queue builds and tests the merge (ADR 0023).
+  const behind = gate(r, ["5", "--reviewed", r.reviewed], { head: r.clean, originMain: r.main5 });
+  assert.equal(behind.code, 0, behind.stderr);
+  assert.equal(behind.gh.length, 2);
 
   const failedMerge = gate(r, ["5", "--reviewed", r.reviewed], { ...at, merged: false });
   assert.equal(failedMerge.code, 2);
@@ -255,7 +259,6 @@ test("the gate refuses with exit 1 and never calls merge", () => {
     assert.match(got.stdout, reason);
     assert.equal(got.gh.length, 1);
   };
-  refused(["5", "--reviewed", r.reviewed], { head: r.clean, originMain: r.main5 }, /does not contain main's tip/);
   refused(["5", "--reviewed", r.reviewed], { head: r.conflicted, originMain: r.main2 }, /resolved a conflict by hand/);
   refused(["5", "--reviewed", r.clean], { head: r.reviewed, originMain: r.main1 }, /not in the branch's history/);
   refused(["5", "--reviewed", r.reviewed], { head: r.clean, originMain: r.main1, pr: { isDraft: true } }, /draft/);
