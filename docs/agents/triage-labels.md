@@ -10,6 +10,8 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 | `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
 | `wontfix`                  | `wontfix`            | Will not be actioned                     |
 
+Two more labels belong to pull requests, not issues: `needs-owner`, which the merge review puts on a clean pull request the owner merges (owner-only paths, an automated author), and `hold`, which anyone puts on a pull request to keep the merge review from merging it.
+
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
 Adapted from `mattpocock/skills` (MIT; see `.claude/skills/THIRD-PARTY.md`). These labels exist in `KPandaK/ersa`.

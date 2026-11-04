@@ -1,6 +1,6 @@
 ---
 name: review-pr
-description: Review a diff adversarially with parallel reviewers, verify their findings, and act on them. Use as the author of a branch before opening its pull request (the implement-ticket skill points here) and as the orchestration session at merge time; both layers run the same protocol so the author's review asks the merge-time questions.
+description: Review a diff adversarially with parallel reviewers, verify their findings, and act on them. Use as the author of a branch before opening its pull request (the implement-ticket skill points here) and at merge time, where the merge review workflow runs it; both layers run the same protocol so the author's review asks the merge-time questions.
 ---
 
 # Review a diff
@@ -9,7 +9,7 @@ One protocol for both layers. The **author** runs it on `git diff origin/main...
 
 ## Steps
 
-1. **Pin the diff.** `git fetch origin`, then pick the checkout the reviewers read the branch's files from: the author's own worktree, or for the orchestrator a detached worktree under the integration checkout's `.scratch/`, not the temp folder, which a headless reviewer cannot read (`git worktree add --detach <dir> origin/<branch>`), removed when the review is done. Write the diff command above to `.scratch/review.diff` in that checkout, where every reviewer can read it, and confirm it is non-empty. Never check out a branch in a shared checkout.
+1. **Pin the diff.** `git fetch origin`, then pick the checkout the reviewers read the branch's files from: the author's own worktree, the merge review's own checkout, or for a run by hand a detached worktree under the integration checkout's `.scratch/`, not the temp folder, which a headless reviewer cannot read (`git worktree add --detach <dir> origin/<branch>`), removed when the review is done. Write the diff command above to `.scratch/review.diff` in that checkout, where every reviewer can read it, and confirm it is non-empty. Never check out a branch in a shared checkout.
 2. **Start the reviewers in parallel**, each in a fresh context. Write the issue text (`gh issue view <n>`) to `.scratch/issue.md` in the checkout; the reviewers are read-only and cannot fetch it. When the pull request names no issue, write its title alone (`gh pr view <n> --json title -q .title`): its description is the author's summary. Give each the diff file, the checkout's path, the issue file's path, the brief paths, and the report rule below.
    - **Correctness**, always: Claude Code's `/code-review` at `high`, or the `code-review:correctness-reviewer` agent.
    - **Spec**, always: the `spec-reviewer` agent.

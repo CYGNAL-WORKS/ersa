@@ -32,7 +32,9 @@ test("a review body starts with the marker and carries its state, which round-tr
   const findings = [finding({ defect: "writes `a --> b` and `--` into the comment.", plain: "Arrows -- like this --> vanish." }), finding({ severity: "low", origin: "listed" })];
   const text = body(HEAD, findings);
   assert.ok(text.startsWith(`${MARK}\n`));
-  assert.ok(!/--[^>]*-->[^\n]*-->/.test(text.split("\n")[1]), "the state comment closes once");
+  // The state comment is one HTML comment: no `--` inside it, so it closes once.
+  const state = text.split("\n").find((l) => l.startsWith("<!-- merge-review {"));
+  assert.ok(state.endsWith(" -->") && !state.slice(4, -3).includes("--"), state);
   assert.deepEqual(parseState(text), { head: HEAD, verdict: "blocked", findings });
   assert.equal(parseState(body(HEAD)).verdict, "clean");
   assert.match(text, /\*\*1 finding blocks the merge\.\*\*/);
@@ -81,26 +83,42 @@ test("the review runs Opus with hooks on and may not commit, push or write on Gi
   assert.deepEqual(claudeArgs("p", "sid").slice(-2), ["--resume", "sid"]);
 });
 
-// main() with every tool stood in for. `gh pr view` answers from `pr`, the
-// reviews list from `reviews`, claude from `claude`, and the gate from `gate`.
-function drive(argv, { pr = {}, reviews = [], claude, gate = { ok: true, out: "#7 may merge", err: "" }, ancestors = [], files = "scripts/x.mjs\0scripts/x.test.mjs\0" } = {}) {
+// main() with every tool stood in for. `gh pr view` answers from `pr` for the
+// review and from `gate` for the gate (which asks for `mergeable`), the reviews
+// list from `reviews`, claude from `claude`, `git diff` from `files` (against
+// main) and `since` (against the previous head), and main's tip is an ancestor
+// of the head unless `behind`.
+function drive(argv, { pr = {}, reviews = [], claude, gate = {}, behind = false, ancestors = [], files = "scripts/x.mjs\0scripts/x.test.mjs\0", since = "", mainHas = [] } = {}) {
   const calls = [];
   const ok = (out = "") => ({ ok: true, out, err: "" });
+  const no = (err = "no") => ({ ok: false, out: "", err });
   const run = (cmd, args) => {
     calls.push([cmd, ...args]);
-    if (cmd === "gh" && args[1] === "view") return ok(JSON.stringify({ state: "OPEN", isDraft: false, headRefOid: HEAD, headRefName: "claude/x", isCrossRepository: false, labels: [], title: "T", body: "Fixes #5", url: "u", author: { login: "KPandaK" }, ...pr }));
+    if (cmd === "gh" && args[1] === "view" && args.some((a) => a.includes("mergeable"))) return gate.view ?? ok(JSON.stringify({ state: "OPEN", isDraft: false, mergeable: "MERGEABLE", headRefOid: HEAD, statusCheckRollup: [{ name: "CI", status: "COMPLETED", conclusion: "SUCCESS" }], ...gate.pr }));
+    if (cmd === "gh" && args[1] === "view") return ok(JSON.stringify({ state: "OPEN", isDraft: false, headRefOid: HEAD, headRefName: "claude/x", isCrossRepository: false, labels: [], title: "T", body: "Fixes #5", author: { login: "KPandaK", is_bot: false }, ...pr }));
     if (cmd === "gh" && args[0] === "api" && args[1] === "--paginate") return ok(reviews.map((r) => JSON.stringify(r)).join("\n"));
-    if (cmd === "gh" && args[1] === "user") return { ok: false, out: "", err: "no" };
+    if (cmd === "gh" && args[1] === "user") return no();
+    if (cmd === "gh" && args[1] === "api" && args[2] === "repos/{owner}/{repo}/check-runs") return ok("77");
+    if (cmd === "gh" && args[0] === "pr" && args[1] === "merge") return gate.merge ?? ok();
     if (cmd === "git" && args[0] === "rev-parse") return ok(HEAD);
-    if (cmd === "git" && args[0] === "merge-base") return ancestors.includes(args[2]) ? ok() : { ok: false, out: "", err: "" };
-    if (cmd === "git" && args[0] === "diff") return ok(files);
+    if (cmd === "git" && args[0] === "merge-base") return args[2] === "origin/main" ? (behind ? no("") : ok()) : args[2] === HEAD || ancestors.includes(args[2]) ? ok() : no("");
+    if (cmd === "git" && args[0] === "diff") return ok(args.includes("origin/main...HEAD") ? files : since);
+    if (cmd === "git" && args[0] === "cat-file") return mainHas.includes(args[2].replace("origin/main:", "")) ? ok() : no("");
+    if (cmd === "git" && args[0] === "rev-list") return ok("");
     if (cmd === "claude") return ok(JSON.stringify(claude ?? { structured_output: { findings: [], dismissed: [] }, num_turns: 1, total_cost_usd: 0.5 }));
-    if (cmd === "node") return gate;
     return ok();
   };
   const got = main(argv, { run });
-  const of = (cmd, sub) => calls.filter((c) => c[0] === cmd && (!sub || c[1] === sub));
-  return { ...got, calls, reviewed: of("claude").length, posted: of("gh", "api").filter((c) => c[1] === "api" && /reviews$/.test(c[2]) && c.includes("event=COMMENT")), merged: of("node").filter((c) => !c.includes("--dry-run")), labeled: of("gh", "pr").filter((c) => c[2] === "edit") };
+  const of = (cmd, i, v) => calls.filter((c) => c[0] === cmd && c[i] === v);
+  return {
+    ...got,
+    calls,
+    reviewed: of("claude", 0, "claude").length,
+    posted: calls.filter((c) => c[0] === "gh" && c[1] === "api" && /\/reviews$/.test(c[2]) && c.includes("event=COMMENT")),
+    merged: of("gh", 2, "merge"),
+    labeled: of("gh", 2, "edit"),
+    checks: calls.filter((c) => c[0] === "gh" && c.some((a) => /check-runs/.test(a))).map((c) => c.find((a) => /^(status=in_progress|conclusion=)/.test(a))),
+  };
 }
 
 test("a head that moved, a closed, draft or fork pull request gets no review", () => {
@@ -110,25 +128,40 @@ test("a head that moved, a closed, draft or fork pull request gets no review", (
     assert.match(got.stdout, /nothing to do/);
     assert.equal(got.reviewed, 0);
     assert.equal(got.posted.length, 0);
+    assert.equal(got.checks.length, 0);
   }
 });
 
-test("a clean review is posted and the head merges through the gate", () => {
+test("a clean review is posted on the head and the head merges through the gate, with a check run for the watcher", () => {
   const got = drive(["7", "--head", HEAD]);
   assert.equal(got.code, 0, got.stderr);
   assert.equal(got.reviewed, 1);
   assert.equal(got.posted.length, 1);
-  assert.deepEqual(got.merged, [["node", "scripts/merge-pr.mjs", "7", "--reviewed", HEAD]]);
+  assert.ok(got.posted[0].includes(`commit_id=${HEAD}`));
+  assert.deepEqual(got.merged, [["gh", "pr", "merge", "7", "--merge", "--match-head-commit", HEAD]]);
   assert.equal(got.labeled.length, 0);
-  // The instructions came from main before the review ran.
-  assert.ok(got.calls.some((c) => c.join(" ") === "git checkout origin/main -- CLAUDE.md .claude"));
+  assert.deepEqual(got.checks, ["status=in_progress", "conclusion=success"]);
+  // The instructions and hooks came from main before the review ran.
+  assert.ok(got.calls.some((c) => c.join(" ") === "git checkout origin/main -- CLAUDE.md .claude scripts/hooks"));
+  const order = got.calls.map((c) => c.join(" "));
+  assert.ok(order.findIndex((c) => c.startsWith("git checkout")) < order.findIndex((c) => c.startsWith("claude")));
 });
 
-test("a blocking finding is posted and exits 1 without merging", () => {
+test("every instruction file the diff touched goes back to main's version, or away where main has none", () => {
+  // Paths that exist in no checkout, since the restore deletes from the real tree.
+  const files = "scripts/x.mjs\0nope/crates/CLAUDE.md\0nope/apps/.mcp.json\0nope/.claude/settings.json\0";
+  const got = drive(["7", "--head", HEAD], { files, mainHas: ["nope/crates/CLAUDE.md", "nope/.claude/settings.json"] });
+  const restores = got.calls.filter((c) => c[0] === "git" && c[1] === "checkout").map((c) => c.slice(4).join(" "));
+  assert.deepEqual(restores, ["CLAUDE.md .claude scripts/hooks", "nope/crates/CLAUDE.md", "nope/.claude/settings.json"]);
+  assert.ok(got.calls.some((c) => c[0] === "git" && c[1] === "cat-file" && c[3] === "origin/main:nope/apps/.mcp.json"));
+});
+
+test("a blocking finding is posted, fails the check and exits 1 without merging", () => {
   const got = drive(["7", "--head", HEAD], { claude: { structured_output: { findings: [finding()], dismissed: [{ finding: "x", evidence: "y" }] } } });
   assert.equal(got.code, 1);
   assert.equal(got.posted.length, 1);
   assert.equal(got.merged.length, 0);
+  assert.deepEqual(got.checks, ["status=in_progress", "conclusion=failure"]);
 });
 
 test("a head already reviewed is not reviewed or posted again, and a clean one still merges", () => {
@@ -142,40 +175,57 @@ test("a head already reviewed is not reviewed or posted again, and a clean one s
   assert.equal(blocked.reviewed, 0);
 });
 
-test("a previous review on an ancestor makes this a re-review", () => {
-  const got = drive(["7", "--head", HEAD], { reviews: [{ author: "github-actions[bot]", body: body(OLD, [finding()]) }], ancestors: [OLD] });
+test("a previous review on an ancestor makes this a re-review, unless the commits since touched .github/", () => {
+  const reviews = [{ author: "github-actions[bot]", body: body(OLD, [finding()]) }];
+  const got = drive(["7", "--head", HEAD], { reviews, ancestors: [OLD], since: "scripts/x.mjs\0" });
   assert.equal(got.reviewed, 1);
-  const text = got.calls.find((c) => c[0] === "claude")[2];
-  assert.match(text, /step 6/);
-  assert.match(text, /drops the last line/);
+  const text = (r) => r.calls.find((c) => c[0] === "claude")[2];
+  assert.match(text(got), /step 6/);
+  assert.match(text(got), /drops the last line/);
+  assert.ok(got.calls.some((c) => c[0] === "git" && c[1] === "diff" && c.includes(OLD)));
+  // A workflow the pull request carried could have posted that review itself.
+  const forged = drive(["7", "--head", HEAD], { reviews, ancestors: [OLD], since: "scripts/x.mjs\0.github/workflows/fake.yml\0" });
+  assert.match(text(forged), /steps 1 to 4/);
+  assert.doesNotMatch(text(forged), /step 6/);
 });
 
-test("a clean head on owner paths, a hold label or a bot's pull request is labeled for the owner and not merged", () => {
+test("a clean head on owner paths, a hold label or a bot's pull request is the owner's and not merged", () => {
   const owner = drive(["7", "--head", HEAD], { files: "scripts/x.mjs\0.github/workflows/review.yml\0" });
   assert.equal(owner.code, 0, owner.stderr);
   assert.equal(owner.merged.length, 0);
   assert.deepEqual(owner.labeled, [["gh", "pr", "edit", "7", "--add-label", "needs-owner"]]);
   assert.match(owner.stdout, /changes `\.github\/workflows\/review\.yml`, which the owner merges/);
-  const hold = drive(["7", "--head", HEAD], { pr: { labels: [{ name: "hold" }] } });
+  const hold = drive(["7", "--head", HEAD], { pr: { labels: [{ name: "hold" }] }, files: "scripts/merge-pr.mjs\0" });
   assert.equal(hold.code, 0);
   assert.equal(hold.merged.length, 0);
-  assert.equal(hold.labeled.length, 0);
+  assert.equal(hold.labeled.length, 0, "a held pull request is not labeled for the owner");
   assert.match(hold.stdout, /hold/);
-  const bot = drive(["7", "--head", HEAD], { pr: { author: { login: "dependabot[bot]" } } });
-  assert.equal(bot.merged.length, 0);
-  assert.deepEqual(bot.labeled, [["gh", "pr", "edit", "7", "--add-label", "needs-owner"]]);
-  const already = drive(["7", "--head", HEAD], { pr: { author: { login: "dependabot[bot]" }, labels: [{ name: "needs-owner" }] } });
+  for (const author of [{ login: "app/dependabot", is_bot: true }, { login: "dependabot[bot]" }, { login: "renovate", is_bot: true }]) {
+    const bot = drive(["7", "--head", HEAD], { pr: { author } });
+    assert.equal(bot.merged.length, 0, author.login);
+    assert.deepEqual(bot.labeled, [["gh", "pr", "edit", "7", "--add-label", "needs-owner"]]);
+  }
+  const already = drive(["7", "--head", HEAD], { pr: { author: { login: "app/dependabot", is_bot: true }, labels: [{ name: "needs-owner" }] } });
   assert.equal(already.labeled.length, 0);
 });
 
-test("a head behind main is told so; any other refusal is surfaced", () => {
-  const behind = drive(["7", "--head", HEAD], { gate: { ok: false, out: "#7 may not merge:\n- its head does not contain main's tip; merge main in and let CI run\n", err: "" } });
-  assert.equal(behind.code, 0);
+test("a head behind main is told so and stays green; any other refusal or a gate error is surfaced and red", () => {
+  const behind = drive(["7", "--head", HEAD], { behind: true });
+  assert.equal(behind.code, 0, behind.stderr);
   assert.match(behind.stdout, /Behind main/);
   assert.equal(behind.merged.length, 0);
-  const refused = drive(["7", "--head", HEAD], { gate: { ok: false, out: "#7 may not merge:\n- its head does not contain main's tip; merge main in and let CI run\n- CI did not pass: CI\n", err: "" } });
-  assert.match(refused.stdout, /The merge gate refused:[\s\S]*CI did not pass/);
+  const refused = drive(["7", "--head", HEAD], { behind: true, gate: { pr: { mergeable: "CONFLICTING" } } });
+  assert.equal(refused.code, 1);
+  assert.match(refused.stdout, /The merge gate refused:[\s\S]*conflicting[\s\S]*main's tip/);
   assert.equal(refused.merged.length, 0);
+  assert.equal(refused.posted.length, 1, "the review is kept");
+  const broken = drive(["7", "--head", HEAD], { gate: { view: { ok: false, out: "", err: "gh down" } } });
+  assert.equal(broken.code, 2);
+  assert.match(broken.stdout, /could not run:[\s\S]*gh down/);
+  assert.deepEqual(broken.checks, ["status=in_progress", "conclusion=failure"]);
+  const failedMerge = drive(["7", "--head", HEAD], { gate: { merge: { ok: false, out: "", err: "head moved" } } });
+  assert.equal(failedMerge.code, 2);
+  assert.match(failedMerge.stderr, /after the review was posted[\s\S]*head moved/);
 });
 
 test("a run that returns no result is resumed once, then fails with nothing posted", () => {
@@ -195,7 +245,7 @@ test("a run that returns no result is resumed once, then fails with nothing post
 });
 
 test("a usage error or a checkout at another commit exits 2 before anything runs", () => {
-  for (const argv of [["7"], ["--head", HEAD], ["7", "--head", HEAD, "extra"]]) assert.equal(main(argv, { run: () => assert.fail("ran") }).code, 2);
+  for (const argv of [["7"], ["--head", HEAD], ["7", "--head", HEAD, "extra"], ["7", "x", "y"], ["--head", HEAD, "--head"]]) assert.equal(main(argv, { run: () => assert.fail("ran") }).code, 2, argv.join(" "));
   const run = (cmd, args) => ({ ok: true, out: cmd === "git" && args[0] === "rev-parse" ? OLD : JSON.stringify({ state: "OPEN", isDraft: false, headRefOid: HEAD, isCrossRepository: false, labels: [], author: {} }), err: "" });
   const got = main(["7", "--head", HEAD], { run });
   assert.equal(got.code, 2);
