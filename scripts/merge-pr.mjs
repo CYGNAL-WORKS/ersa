@@ -49,7 +49,8 @@ export function refusals({ pr, containsMain, reviewedInBranch, sinceReview }) {
   );
   const running = checks.filter((c) => c.status !== "COMPLETED");
   const failed = checks.filter((c) => c.status === "COMPLETED" && !PASSED.includes(c.conclusion));
-  if (!checks.length) out.push("it has no CI checks");
+  // The merge review's own check run is not CI: a head with only that check has not been built.
+  if (!checks.some((c) => c.name !== "Merge review")) out.push("it has no CI checks");
   if (running.length) out.push(`CI is still running: ${running.map((c) => c.name).join(", ")}`);
   if (failed.length) out.push(`CI did not pass: ${failed.map((c) => c.name).join(", ")}`);
   if (!containsMain) out.push(BEHIND_MAIN);
