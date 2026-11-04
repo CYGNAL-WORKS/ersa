@@ -88,7 +88,7 @@ test("the review runs Opus with hooks on and may not commit, push or write on Gi
 // list from `reviews`, claude from `claude`, `git diff` from `files` (against
 // main) and `since` (against the previous head), and main's tip is an ancestor
 // of the head unless `behind`.
-function drive(argv, { pr = {}, reviews = [], claude, gate = {}, behind = false, ancestors = [], files = "scripts/x.mjs\0scripts/x.test.mjs\0", since = "", mainHas = [] } = {}) {
+function drive(argv, { pr = {}, reviews = [], claude, gate = {}, behind = false, reviewedMissing = false, ancestors = [], files = "scripts/x.mjs\0scripts/x.test.mjs\0", since = "", mainHas = [] } = {}) {
   const calls = [];
   const ok = (out = "") => ({ ok: true, out, err: "" });
   const no = (err = "no") => ({ ok: false, out: "", err });
@@ -106,7 +106,7 @@ function drive(argv, { pr = {}, reviews = [], claude, gate = {}, behind = false,
     if (cmd === "gh" && args[1] === "api" && args[2] === "repos/{owner}/{repo}/check-runs") return ok("77");
     if (cmd === "gh" && args[0] === "pr" && args[1] === "merge") return gate.merge ?? ok();
     if (cmd === "git" && args[0] === "rev-parse") return ok(HEAD);
-    if (cmd === "git" && args[0] === "merge-base") return args[2] === "origin/main" ? (behind ? no("") : ok()) : args[2] === HEAD || ancestors.includes(args[2]) ? ok() : no("");
+    if (cmd === "git" && args[0] === "merge-base") return args[2] === "origin/main" ? (behind ? no("") : ok()) : (args[2] === HEAD && !reviewedMissing) || ancestors.includes(args[2]) ? ok() : no("");
     if (cmd === "git" && args[0] === "diff") return ok(args.includes("origin/main...HEAD") ? files : since);
     if (cmd === "git" && args[0] === "cat-file") return mainHas.includes(args[2].replace("origin/main:", "")) ? ok() : no("");
     if (cmd === "git" && args[0] === "rev-list") return ok("");
@@ -227,27 +227,38 @@ test("a head behind main is told so and stays green; any other refusal or a gate
   assert.match(refused.stdout, /The merge gate refused:[\s\S]*conflicting[\s\S]*main's tip/);
   assert.equal(refused.merged.length, 0);
   assert.equal(refused.posted.length, 1, "the review is kept");
+  assert.deepEqual(behind.checks, ["status=in_progress", "conclusion=success"]);
+  assert.deepEqual(refused.checks, ["status=in_progress", "conclusion=success", "conclusion=failure"], "a refusal after a clean verdict turns the check red");
   const both = drive(["7", "--head", HEAD], { behind: true, gate: { pr: { statusCheckRollup: [{ name: "CI", status: "COMPLETED", conclusion: "FAILURE" }] } } });
   assert.equal(both.code, 1, "behind main and red CI is not merely behind main");
   assert.match(both.stdout, /The merge gate refused:[\s\S]*CI did not pass/);
+  // Behind main first in the list, with another reason after it, is still not merely behind main.
+  const unreviewed = drive(["7", "--head", HEAD], { behind: true, reviewedMissing: true });
+  assert.equal(unreviewed.code, 1);
+  assert.match(unreviewed.stdout, /The merge gate refused:[\s\S]*main's tip[\s\S]*not in the branch's history/);
   const broken = drive(["7", "--head", HEAD], { gate: { view: { ok: false, out: "", err: "gh down" } } });
   assert.equal(broken.code, 2);
   assert.match(broken.stdout, /could not run:[\s\S]*gh down/);
-  assert.deepEqual(broken.checks, ["status=in_progress", "conclusion=success"], "the check is the review's verdict");
+  assert.deepEqual(broken.checks, ["status=in_progress", "conclusion=success", "conclusion=failure"], "a gate error turns the check red");
   const failedMerge = drive(["7", "--head", HEAD], { gate: { merge: { ok: false, out: "", err: "head moved" } } });
   assert.equal(failedMerge.code, 2);
   assert.match(failedMerge.stderr, /after the review was posted[\s\S]*head moved/);
+  assert.deepEqual(failedMerge.checks, ["status=in_progress", "conclusion=success", "conclusion=failure"], "a failed merge turns the check red");
 });
 
-test("a run that returns no result is resumed once, then fails with nothing posted and the check run failed", () => {
+test("a run that returns no result is resumed once, briefly, then fails with nothing posted and the check run failed", () => {
   let n = 0;
   const checks = [];
-  const run = (cmd, args) => {
+  const minutes = [];
+  const run = (cmd, args, m) => {
     if (cmd === "gh" && args.some((a) => /check-runs/.test(a))) {
       checks.push(args.find((a) => /^(status=in_progress|conclusion=)/.test(a)));
       return { ok: true, out: "77", err: "" };
     }
-    if (cmd === "claude") return { ok: true, out: JSON.stringify(++n === 1 ? { session_id: "s1", result: "ran out" } : { is_error: true, subtype: "error_max_turns" }), err: "" };
+    if (cmd === "claude") {
+      minutes.push(m);
+      return { ok: true, out: JSON.stringify(++n === 1 ? { session_id: "s1", result: "ran out" } : { is_error: true, subtype: "error_max_turns" }), err: "" };
+    }
     if (cmd === "gh" && args[1] === "view") return { ok: true, out: JSON.stringify({ state: "OPEN", isDraft: false, headRefOid: HEAD, headRefName: "b", isCrossRepository: false, labels: [], title: "T", body: "", author: {} }), err: "" };
     if (cmd === "gh" && args[1] === "user") return { ok: false, out: "", err: "" };
     if (cmd === "git" && args[0] === "rev-parse") return { ok: true, out: HEAD, err: "" };
@@ -258,6 +269,7 @@ test("a run that returns no result is resumed once, then fails with nothing post
   assert.equal(got.code, 2);
   assert.match(got.stderr, /no result: error_max_turns/);
   assert.equal(n, 2);
+  assert.ok(minutes[0] + minutes[1] < 45, `the two runs fit in the job's 45 minutes: ${minutes}`);
   assert.deepEqual(checks, ["status=in_progress", "conclusion=failure"]);
 });
 
