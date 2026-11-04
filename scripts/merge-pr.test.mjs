@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 
-import { commitsSinceReview, latestChecks, main, refusals } from "./merge-pr.mjs";
+import { afterMerge, commitsSinceReview, latestChecks, main, refusals } from "./merge-pr.mjs";
 
 const check = (over) => ({ name: "CI", status: "COMPLETED", conclusion: "SUCCESS", startedAt: "2026-11-03T10:00:00Z", ...over });
 const facts = (over = {}) => ({
@@ -213,13 +213,17 @@ test("an octopus merge never reads as clean, even when git prints no remerge-dif
 // main() against the real repository, with GitHub stood in for: gh answers
 // from `pr` (or `view`), git fetch does nothing, and origin/main points at
 // `originMain`.
-function gate(r, argv, { head, originMain, pr = {}, view, merged = true, fetched = true }) {
+function gate(r, argv, { head, originMain, pr = {}, view, merged = true, fetched = true, mergedOn = originMain, issueState = "CLOSED" }) {
   r.git(["update-ref", "refs/remotes/origin/main", originMain]);
   const gh = [];
   const ok = (out = "") => ({ ok: true, out, err: "" });
+  // The merge commit GitHub would make: the head's tree on `mergedOn`.
+  const mergeCommit = () => r.git(["commit-tree", r.git(["rev-parse", `${head}^{tree}`]).out, "-p", mergedOn, "-p", head, "-m", "merge"]).out;
   const run = (cmd, args) => {
     if (cmd === "gh") {
       gh.push(args);
+      if (args[0] === "issue") return ok(issueState);
+      if (args[1] === "view" && args.some((a) => a.includes("mergeCommit"))) return ok(JSON.stringify({ mergeCommit: { oid: mergeCommit() }, closingIssuesReferences: [{ number: 7 }] }));
       if (args[1] === "view") return view ?? ok(JSON.stringify({ state: "OPEN", isDraft: false, mergeable: "MERGEABLE", headRefOid: head, statusCheckRollup: [check()], ...pr }));
       return merged ? ok() : { ok: false, out: "", err: "head moved" };
     }
@@ -235,7 +239,7 @@ test("the gate merges a head that passes, naming the head it checked", () => {
   const got = gate(r, ["5", "--reviewed", r.reviewed], at);
   assert.equal(got.code, 0, got.stderr);
   assert.equal(got.stdout, `#5 merged at ${r.clean.slice(0, 7)}\n`);
-  assert.deepEqual(got.gh.at(-1), ["pr", "merge", "5", "--merge", "--match-head-commit", r.clean]);
+  assert.deepEqual(got.gh.find((a) => a[1] === "merge"), ["pr", "merge", "5", "--merge", "--match-head-commit", r.clean]);
 
   const dry = gate(r, ["--dry-run", "--reviewed", r.reviewed, "5"], at);
   assert.equal(dry.code, 0, dry.stderr);
@@ -245,6 +249,25 @@ test("the gate merges a head that passes, naming the head it checked", () => {
   const failedMerge = gate(r, ["5", "--reviewed", r.reviewed], { ...at, merged: false });
   assert.equal(failedMerge.code, 2);
   assert.match(failedMerge.stderr, /head moved/);
+});
+
+test("a merge that landed on a moved main, or left its issue open, fails loudly after merging", () => {
+  const r = shared();
+  const at = { head: r.clean, originMain: r.main1 };
+  const moved = gate(r, ["5", "--reviewed", r.reviewed], { ...at, mergedOn: r.main2 });
+  assert.equal(moved.code, 2);
+  assert.match(moved.stderr, /merged at \w+, but:\n- main moved during the merge .*run CI on main/);
+  const open = gate(r, ["5", "--reviewed", r.reviewed], { ...at, issueState: "OPEN" });
+  assert.equal(open.code, 2);
+  assert.match(open.stderr, /- #7 is still open; close it/);
+  assert.equal(gate(r, ["5", "--reviewed", r.reviewed], at).code, 0);
+});
+
+test("afterMerge reports what it could not read instead of passing", () => {
+  const down = () => ({ ok: false, out: "", err: "down" });
+  assert.deepEqual(afterMerge({ n: "5", mainTip: "m", run: down }), ["GitHub did not say what merged; check main's tip and the fixed issues by hand"]);
+  const noParent = (cmd, args) => (cmd === "gh" ? { ok: true, out: JSON.stringify({ mergeCommit: { oid: "x" }, closingIssuesReferences: [] }), err: "" } : { ok: args[0] === "fetch", out: "", err: "" });
+  assert.deepEqual(afterMerge({ n: "5", mainTip: "m", run: noParent }), ["the merge commit's first parent could not be read; check that main's tip was the one the gate checked"]);
 });
 
 test("the gate refuses with exit 1 and never calls merge", () => {

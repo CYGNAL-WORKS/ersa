@@ -168,12 +168,39 @@ function gate(args, run) {
   const reviewedInBranch = isAncestor(reviewed.out, head);
   const sinceReview = reviewedInBranch ? commitsSinceReview({ reviewed: reviewed.out, head, git: (a) => run("git", a) }) : [];
 
+  const mainTip = run("git", ["rev-parse", "origin/main"]).out;
   const reasons = refusals({ pr, containsMain: isAncestor("origin/main", head), reviewedInBranch, sinceReview });
   if (reasons.length) throw new Refused(n, reasons);
   if (dryRun) return { stdout: `#${n} may merge at ${head.slice(0, 7)}\n` };
   const merge = run("gh", ["pr", "merge", n, "--merge", "--match-head-commit", head]);
   if (!merge.ok) fail(`gh pr merge failed: ${merge.err}`);
+  const problems = afterMerge({ n, mainTip, run });
+  if (problems.length) fail(`#${n} merged at ${head.slice(0, 7)}, but:\n${problems.map((x) => `- ${x}\n`).join("")}`);
   return { stdout: `#${n} merged at ${head.slice(0, 7)}\n` };
+}
+
+// What the merge must have left behind. GitHub pins the head, not main, so a
+// merge made while main moved sits on a tip the gate never checked, and a
+// merge made with a token that may not close issues leaves `Fixes #n` open;
+// both would otherwise pass in silence.
+export function afterMerge({ n, mainTip, run }) {
+  const out = [];
+  const view = run("gh", ["pr", "view", n, "--json", "mergeCommit,closingIssuesReferences"]);
+  let after;
+  try {
+    after = JSON.parse(view.ok ? view.out : "");
+  } catch {
+    return ["GitHub did not say what merged; check main's tip and the fixed issues by hand"];
+  }
+  const oid = after?.mergeCommit?.oid;
+  const parent = oid && run("git", ["fetch", "-q", "origin", "main"]).ok ? run("git", ["rev-parse", "--verify", "--quiet", `${oid}^1`]) : { ok: false };
+  if (!parent.ok) out.push("the merge commit's first parent could not be read; check that main's tip was the one the gate checked");
+  else if (parent.out !== mainTip) out.push(`main moved during the merge (the gate checked ${mainTip.slice(0, 7)}; the merge sits on ${parent.out.slice(0, 7)}), so CI has not tested main's tree; run CI on main`);
+  for (const issue of after?.closingIssuesReferences ?? []) {
+    const state = run("gh", ["issue", "view", String(issue.number), "--json", "state", "--jq", ".state"]);
+    if (!state.ok || state.out !== "CLOSED") out.push(`#${issue.number} is still open; close it`);
+  }
+  return out;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

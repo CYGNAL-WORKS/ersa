@@ -76,7 +76,7 @@ test("a first review reads the whole diff; a re-review reads the commits since t
 test("the review runs Opus with hooks on and may not commit, push or write on GitHub", () => {
   const args = claudeArgs("p");
   const denied = args.slice(args.indexOf("--disallowedTools") + 1);
-  for (const rule of ["Bash(git commit:*)", "Bash(git push:*)", "Bash(gh pr merge:*)", "Bash(gh api:*)", "PowerShell"]) assert.ok(denied.includes(rule), rule);
+  for (const rule of ["Bash(git commit:*)", "Bash(git push:*)", "Bash(gh pr merge:*)", "Bash(gh api:*)", "Bash(gh issue reopen:*)", "Bash(gh issue lock:*)", "PowerShell"]) assert.ok(denied.includes(rule), rule);
   assert.ok(!args.includes("--settings"));
   assert.equal(args[args.indexOf("--model") + 1], "opus");
   assert.ok(JSON.parse(args[args.indexOf("--json-schema") + 1]).required.includes("dismissed"));
@@ -100,6 +100,7 @@ function drive(argv, { pr = {}, reviews = [], claude, gate = {}, behind = false,
       const review = own ? [{ name: "Merge review", status: own.includes("status=completed") ? "COMPLETED" : "IN_PROGRESS", conclusion: own.find((a) => a.startsWith("conclusion="))?.slice(11).toUpperCase() ?? "" }] : [];
       return gate.view ?? ok(JSON.stringify({ state: "OPEN", isDraft: false, mergeable: "MERGEABLE", headRefOid: HEAD, statusCheckRollup: [{ name: "CI", status: "COMPLETED", conclusion: "SUCCESS" }, ...review], ...gate.pr }));
     }
+    if (cmd === "gh" && args[1] === "view" && args.some((a) => a.includes("mergeCommit"))) return ok(JSON.stringify({ mergeCommit: { oid: "m" }, closingIssuesReferences: [] }));
     if (cmd === "gh" && args[1] === "view") return ok(JSON.stringify({ state: "OPEN", isDraft: false, headRefOid: HEAD, headRefName: "claude/x", isCrossRepository: false, labels: [], title: "T", body: "Fixes #5", author: { login: "KPandaK", is_bot: false }, ...pr }));
     if (cmd === "gh" && args[0] === "api" && args[1] === "--paginate") return ok(reviews.map((r) => JSON.stringify(r)).join("\n"));
     if (cmd === "gh" && args[1] === "user") return no();
@@ -259,6 +260,7 @@ test("a run that returns no result is resumed once, briefly, then fails with not
       minutes.push(m);
       return { ok: true, out: JSON.stringify(++n === 1 ? { session_id: "s1", result: "ran out" } : { is_error: true, subtype: "error_max_turns" }), err: "" };
     }
+    if (cmd === "gh" && args[1] === "view" && args.some((a) => a.includes("mergeCommit"))) return { ok: true, out: JSON.stringify({ mergeCommit: { oid: "m" }, closingIssuesReferences: [] }), err: "" };
     if (cmd === "gh" && args[1] === "view") return { ok: true, out: JSON.stringify({ state: "OPEN", isDraft: false, headRefOid: HEAD, headRefName: "b", isCrossRepository: false, labels: [], title: "T", body: "", author: {} }), err: "" };
     if (cmd === "gh" && args[1] === "user") return { ok: false, out: "", err: "" };
     if (cmd === "git" && args[0] === "rev-parse") return { ok: true, out: HEAD, err: "" };
