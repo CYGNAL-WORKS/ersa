@@ -30,13 +30,14 @@ const checks = [
   { name: "clippy", cmd: "cargo", args: ["clippy", "--all-targets", "--locked", "--", "-D", "warnings"] },
   ...(QUICK ? [] : [{ name: "tests", cmd: "cargo", args: ["test", "--locked"] }]),
   ...(scriptTests.length ? [{ name: "script tests", cmd: "node", args: ["--test", ...scriptTests] }] : []),
-  // The interface's TypeScript types and design tokens are generated from the
-  // protocol schemas and DESIGN.md; a schema change in a Rust ticket makes them
-  // stale. Needs the interface's packages installed (`pnpm install` in apps/shell).
+  // The interface's TypeScript types, design tokens and catalog export are
+  // generated from the protocol schemas, DESIGN.md and the string catalog; a
+  // schema change in a Rust ticket makes them stale. Needs the interface's packages installed (`pnpm install` in apps/shell).
   ...(existsSync(join(ROOT, "apps", "shell", "node_modules"))
     ? [
         { name: "interface types", cmd: "node", args: ["scripts/gen-types.mjs", "--check"], cwd: join(ROOT, "apps", "shell") },
         { name: "interface tokens", cmd: "node", args: ["scripts/gen-tokens.mjs", "--check"], cwd: join(ROOT, "apps", "shell") },
+        { name: "interface catalog export", cmd: "node", args: ["scripts/gen-catalog.mjs", "--check"], cwd: join(ROOT, "apps", "shell") },
       ]
     : []),
   { name: "manifest", cmd: "node", args: ["scripts/manifest.mjs", "--check"], manifest: true },
