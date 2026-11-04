@@ -71,6 +71,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Requirement**: one testable statement inside a flow or protocol brief, carrying a stable ID such as `FLOW-NEW-SESSION-R03`.
 - **ADR**: an architecture decision record. One decision per file, superseded rather than edited.
 - **Inbox**: the committed file where implementing sessions record findings that need a planning pass.
+- **Merge review**: the review the merge review workflow posts on a pull request's head once CI passes, running the same protocol the author ran before opening it. A pull request merges when its merge review is clean.
 - **Manifest**: the generated index of briefs, their status, requirement coverage, and problems.
 - **Reviewer agent**: a read-only subagent that reviews one diff for one concern, such as Spec, Surface (growth that costs more to keep than it is worth), Failure or Design, and reports only findings it confirmed.
 - **Ticket**: an ephemeral unit of implementation work sized to one fresh agent context, derived from a brief.
