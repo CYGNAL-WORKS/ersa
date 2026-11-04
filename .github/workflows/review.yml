@@ -3,10 +3,12 @@
 # through scripts/merge-pr.mjs when nothing blocks. The logic is in
 # scripts/merge-review.mjs, which has tests; this file is plumbing.
 #
-# workflow_run, so the workflow file always comes from main and a pull request
-# cannot change its own reviewer. It runs on the owner's Windows machine, where
-# Claude Code is installed and logged in; the WSL runners have no login. Every
-# gh call uses the workflow's token, never the owner's.
+# workflow_run, so this file always comes from main; the review script, the
+# gate and the hooks are taken from main too, so a pull request cannot change
+# its own reviewer. It runs on the owner's Windows machine, where Claude Code
+# is installed and logged in; the WSL runners have no login. Every gh and git
+# call uses the workflow's token, never the owner's. The job's own check lands
+# on main, so the script keeps a "Merge review" check run on the head.
 name: Merge review
 
 on:
@@ -20,18 +22,21 @@ on:
         required: true
 
 permissions:
+  checks: write
   contents: write
   pull-requests: write
 
 jobs:
   review:
     name: Merge review
-    # A CI run on a push to main has no pull request; a failed one needs no review.
+    # A CI run on a push to main has no pull request; a failed one needs no
+    # review. The private guard is ci.yml's: never a fork on this runner.
     if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'pull_request' &&
-       github.event.workflow_run.pull_requests[0] != null)
+      github.event.repository.private &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'pull_request' &&
+        github.event.workflow_run.pull_requests[0] != null))
     runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 45
     # A newer head of the same pull request cancels the review of the older one.
@@ -42,7 +47,14 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       PR: ${{ github.event_name == 'workflow_dispatch' && inputs.pr || github.event.workflow_run.pull_requests[0].number }}
-      HEAD: ${{ github.event.workflow_run.head_sha }}
+      # git fetches with the workflow's token through gh, not the owner's
+      # stored login; the empty helper resets the list the owner's global
+      # config fills.
+      GIT_CONFIG_COUNT: 2
+      GIT_CONFIG_KEY_0: credential.helper
+      GIT_CONFIG_VALUE_0: ""
+      GIT_CONFIG_KEY_1: credential.helper
+      GIT_CONFIG_VALUE_1: "!gh auth git-credential"
     steps:
       # Git Bash first, as the CI workflow does, and claude's install folder,
       # which is not on the runner's PATH.
@@ -51,18 +63,26 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\bin'
           Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.local\bin"
 
-      # A manual run reviews the pull request's current head.
-      - name: Head of the pull request
-        if: github.event_name == 'workflow_dispatch'
-        run: Add-Content -Path $env:GITHUB_ENV -Value "HEAD=$(gh pr view $env:PR --json headRefOid --jq .headRefOid)"
+      # The head CI ran on; a manual run reviews the pull request's current head.
+      - name: Head to review
+        id: head
+        env:
+          RUN_HEAD: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          $sha = if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch') { gh pr view $env:PR --json headRefOid --jq .headRefOid } else { $env:RUN_HEAD }
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "sha=$sha"
 
-      # The whole history, so origin/main and every reviewed head are here. The
-      # token stays in the checkout's config: the merge gate fetches with it,
-      # and the post step removes it.
+      # The whole history, so origin/main and every reviewed head are here.
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          ref: ${{ env.HEAD }}
+          ref: ${{ steps.head.outputs.sha }}
           fetch-depth: 0
+          persist-credentials: false
+
+      # The review and the gate from main, before either runs; the script takes
+      # the hooks and the instruction files from main itself.
+      - name: Review logic from main
+        run: git checkout origin/main -- scripts/merge-review.mjs scripts/merge-pr.mjs
 
       - name: Review and merge
-        run: node scripts/merge-review.mjs $env:PR --head $env:HEAD
+        run: node scripts/merge-review.mjs $env:PR --head ${{ steps.head.outputs.sha }}

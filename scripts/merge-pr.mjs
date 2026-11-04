@@ -5,7 +5,6 @@
 //
 //   node scripts/merge-pr.mjs <n> --reviewed <sha>            merge if the gate passes
 //   node scripts/merge-pr.mjs <n> --reviewed <sha> --dry-run  say whether it would
-//   ... --body-file <file>    the merge commit's body: what the merge rests on
 //
 // The gate: the pull request is open, not a draft, and mergeable; every latest
 // CI check passed; the head contains main's tip; and the head is the reviewed
@@ -23,6 +22,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const PASSED = ["SUCCESS", "SKIPPED", "NEUTRAL"];
+export const BEHIND_MAIN = "its head does not contain main's tip; merge main in and let CI run";
 
 // The latest run of each check by name: a head can carry a run that a newer
 // one superseded and cancelled, and only the newer one counts.
@@ -52,7 +52,7 @@ export function refusals({ pr, containsMain, reviewedInBranch, sinceReview }) {
   if (!checks.length) out.push("it has no CI checks");
   if (running.length) out.push(`CI is still running: ${running.map((c) => c.name).join(", ")}`);
   if (failed.length) out.push(`CI did not pass: ${failed.map((c) => c.name).join(", ")}`);
-  if (!containsMain) out.push("its head does not contain main's tip; merge main in and let CI run");
+  if (!containsMain) out.push(BEHIND_MAIN);
 
   if (!reviewedInBranch) out.push("the reviewed commit is not in the branch's history; review the head");
   for (const c of sinceReview ?? []) {
@@ -109,21 +109,27 @@ export function commitsSinceReview({ reviewed, head, main = "origin/main", git =
     });
 }
 
-class Refused extends Error {}
+class Refused extends Error {
+  constructor(n, reasons) {
+    super(`#${n} may not merge:\n${reasons.map((x) => `- ${x}\n`).join("")}`);
+    this.reasons = reasons;
+  }
+}
 class ToolError extends Error {}
 const fail = (message) => {
   throw new ToolError(message);
 };
 
-const USAGE = "usage: node scripts/merge-pr.mjs <n> --reviewed <sha> [--dry-run] [--body-file <file>]";
+const USAGE = "usage: node scripts/merge-pr.mjs <n> --reviewed <sha> [--dry-run]";
 
-// Runs the gate for argv and returns the exit code and what to print. `run`
-// runs one git or gh command, so a test can stand in for GitHub.
+// Runs the gate for argv and returns the exit code, what to print and, when
+// the gate refuses, its reasons. `run` runs one git or gh command, so a test
+// can stand in for GitHub.
 export function main(argv, { run: r = run } = {}) {
   try {
     return { code: 0, ...gate(argv, r) };
   } catch (e) {
-    if (e instanceof Refused) return { code: 1, stdout: e.message };
+    if (e instanceof Refused) return { code: 1, stdout: e.message, reasons: e.reasons };
     return { code: 2, stderr: `${e.message}\n` };
   }
 }
@@ -132,12 +138,10 @@ function gate(args, run) {
   let n;
   let reviewedArg;
   let dryRun = false;
-  let body = [];
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--reviewed" && reviewedArg === undefined && i + 1 < args.length) reviewedArg = args[++i];
     else if (a === "--dry-run") dryRun = true;
-    else if (a === "--body-file" && !body.length && i + 1 < args.length) body = ["--body-file", args[++i]];
     else if (/^\d+$/.test(a) && n === undefined) n = a;
     else fail(`unrecognized argument ${a}\n${USAGE}`);
   }
@@ -164,9 +168,9 @@ function gate(args, run) {
   const sinceReview = reviewedInBranch ? commitsSinceReview({ reviewed: reviewed.out, head, git: (a) => run("git", a) }) : [];
 
   const reasons = refusals({ pr, containsMain: isAncestor("origin/main", head), reviewedInBranch, sinceReview });
-  if (reasons.length) throw new Refused(`#${n} may not merge:\n${reasons.map((x) => `- ${x}\n`).join("")}`);
+  if (reasons.length) throw new Refused(n, reasons);
   if (dryRun) return { stdout: `#${n} may merge at ${head.slice(0, 7)}\n` };
-  const merge = run("gh", ["pr", "merge", n, "--merge", "--match-head-commit", head, ...body]);
+  const merge = run("gh", ["pr", "merge", n, "--merge", "--match-head-commit", head]);
   if (!merge.ok) fail(`gh pr merge failed: ${merge.err}`);
   return { stdout: `#${n} merged at ${head.slice(0, 7)}\n` };
 }
