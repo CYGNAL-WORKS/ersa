@@ -122,6 +122,8 @@ jobs:
         run: cargo test --locked
 
       - name: Script tests
+        # Every script test, found by the shell's glob, so a new test file runs
+        # in CI without anyone adding it here. scripts/check.mjs finds the same set.
         run: node --test scripts/*.test.mjs
 
       - name: Manifest
