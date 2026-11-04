@@ -175,21 +175,34 @@ test("a focused input's edge is the accent, in both themes", async ({ page }) =>
 });
 
 // The open list's shadow is soft enough to sit inside the screenshots' per-pixel threshold, so it is checked here.
-test("an open chip list floats: a shadow and the floating radius, in both themes", async ({ page }) => {
+// Its options take radius-md, so their corners nest within the list's (DESIGN.md, Shapes).
+test("an open chip list floats: a shadow and the floating radius, its options nested, in both themes", async ({ page }) => {
   await page.goto("/gallery.html");
   for (const theme of ["light", "dark"]) {
     const list = page.locator(`[data-theme="${theme}"] [data-component="Chip"] .chip-list`).first();
-    const { shadow, radius, floating } = await list.evaluate((el) => {
-      const probe = document.createElement("span");
-      probe.style.borderRadius = "var(--radius-lg)";
-      el.appendChild(probe);
-      const floating = getComputedStyle(probe).borderTopLeftRadius;
-      probe.remove();
+    const { shadow, radius, floating, options, nested } = await list.evaluate((el) => {
+      // Resolve a token to pixels by giving it to a probe inside the list.
+      const resolve = (token: string) => {
+        const probe = document.createElement("span");
+        probe.style.borderRadius = `var(${token})`;
+        el.appendChild(probe);
+        const value = getComputedStyle(probe).borderTopLeftRadius;
+        probe.remove();
+        return value;
+      };
       const style = getComputedStyle(el);
-      return { shadow: style.boxShadow, radius: style.borderTopLeftRadius, floating };
+      return {
+        shadow: style.boxShadow,
+        radius: style.borderTopLeftRadius,
+        floating: resolve("--radius-lg"),
+        options: [...el.querySelectorAll(".chip-option")].map((o) => getComputedStyle(o).borderTopLeftRadius),
+        nested: resolve("--radius-md"),
+      };
     });
     expect(shadow, theme).not.toBe("none");
     expect(radius, theme).toBe(floating);
+    expect(options.length, theme).toBeGreaterThan(0);
+    for (const option of options) expect(option, `an option in ${theme}`).toBe(nested);
   }
 });
 
