@@ -81,7 +81,8 @@ test("the repository rules hold for a Unix path, whose munged form starts with a
 });
 
 test("expands the repository placeholder, to this checkout, for a file the CLI reads", () => {
-  assert.ok(CHECKOUT.startsWith(REPO), `${CHECKOUT} under ${REPO}`);
+  assert.ok(CHECKOUT === REPO || CHECKOUT.startsWith(REPO + "/"), `${CHECKOUT} under ${REPO}`);
+  assert.equal(redact(`${CHECKOUT}/x`), `${PLACEHOLDER_REPO}${CHECKOUT.slice(REPO.length)}/x`);
   assert.equal(expandRepo(`{"args":["${PLACEHOLDER_REPO}/scripts/s.mjs"]}`), `{"args":["${CHECKOUT}/scripts/s.mjs"]}`);
   const dir = mkdtempSync(join(tmpdir(), "ersa-redact-"));
   try {
