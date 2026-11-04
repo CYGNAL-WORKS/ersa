@@ -1,8 +1,15 @@
 {
   "App.tsx": [
+    "Core is not connected.",
+    "Core's status",
     "No session open. Start one from a project in the rail.",
     "Rail",
     "Retry",
+    "The composer",
+    "The new-session screen",
+    "The projects",
+    "The sessions",
+    "This session",
     "Untitled session"
   ],
   "components/AddProject.tsx": [
@@ -24,8 +31,12 @@
     "percent used"
   ],
   "components/CoreStatus.tsx": [
+    "Attached to",
+    "Connecting…",
     "Core",
-    "Retry"
+    "Reconnecting…",
+    "Retry",
+    "Unavailable"
   ],
   "components/ErrorBoundary.tsx": [
     "could not be shown:"
@@ -63,6 +74,7 @@
   ],
   "components/SessionControls.tsx": [
     "Detecting backends…",
+    "Effort",
     "No backend",
     "Session controls"
   ],

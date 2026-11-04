@@ -52,8 +52,10 @@ export function markdown(catalog) {
 export function isCurrent(catalog, path) {
   try {
     return readFileSync(path, "utf8").replace(/\r\n/g, "\n") === markdown(catalog);
-  } catch {
-    return false;
+  } catch (error) {
+    // Only a missing file is stale; a locked or unreadable one is reported as itself.
+    if (error.code === "ENOENT") return false;
+    throw error;
   }
 }
 
