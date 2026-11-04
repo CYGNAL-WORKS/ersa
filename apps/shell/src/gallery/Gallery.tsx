@@ -185,6 +185,14 @@ const twoTurns: Event[] = [
   { type: "user.message", origin: "human", text: "Now delete probe.txt." },
   { type: "assistant.text", block_id: "m3/0", text: "Deleted. probe.txt no longer exists.", final: true },
 ];
+// A path with no break in it, which must wrap inside the bubble rather than widen it.
+const longPath: Event[] = [
+  {
+    type: "user.message",
+    origin: "human",
+    text: "Read C:\\Users\\me\\Projects\\ersa\\target\\debug\\build\\ersa-core-5f3c2a9e1b7d4c08\\out\\generated_protocol_bindings_for_the_session_stream.rs and summarize it.",
+  },
+];
 const streaming: Event[] = [
   { type: "session.state", state: "running" },
   { type: "user.message", origin: "human", text: "Say ready." },
@@ -223,6 +231,7 @@ const transcriptStates: [string, SessionView][] = [
   ["Hidden characters", sessionView(hiding)],
   ["Answered", sessionView(answered)],
   ["Two turns", sessionView(twoTurns)],
+  ["Long path", sessionView(longPath)],
   ["Failed", sessionView(failing)],
   ["Not receiving events", sessionView([], { stream: { state: "failed", message: "Core closed the connection" } })],
 ];

@@ -107,7 +107,8 @@
   padding: var(--space-xs) var(--space-sm);
   color: var(--color-ink);
   border: var(--line-hairline) solid transparent;
-  border-radius: var(--radius-sm);
+  /* An option in a floating layer: radius-md nests within the list's radius-lg (DESIGN.md, Shapes). */
+  border-radius: var(--radius-md);
   white-space: nowrap;
   cursor: pointer;
 }
