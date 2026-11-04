@@ -48,9 +48,6 @@ if (existsSync(join(dir, stem + ".jsonl"))) {
   process.exit(1);
 }
 
-const cwd = mkdtempSync(join(tmpdir(), "ersa-rec-"));
-expandMcpConfig(extra, cwd);
-
 // Explicit flags: nothing here relies on a CLI default (ADR 0012).
 const args = [
   "-p",
@@ -63,8 +60,9 @@ const args = [
   prompt,
 ];
 
+const cwd = mkdtempSync(join(tmpdir(), "ersa-rec-"));
 const started = Date.now();
-const res = spawnSync(CLAUDE, args, { cwd, encoding: "utf8", input: "", maxBuffer: 64 * 1024 * 1024, timeout: 180_000 });
+const res = spawnSync(CLAUDE, expandMcpConfig(args), { cwd, encoding: "utf8", input: "", maxBuffer: 64 * 1024 * 1024, timeout: 180_000 });
 const elapsed_ms = Date.now() - started;
 
 writeFileSync(join(dir, stem + ".jsonl"), redact(res.stdout ?? ""));
