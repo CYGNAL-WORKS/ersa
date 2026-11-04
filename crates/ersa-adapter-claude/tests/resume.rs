@@ -291,9 +291,9 @@ fn a_registry_file_of_another_shape_makes_the_answer_unknown_not_free() {
 fn the_record_lives_under_the_encoded_working_directory() {
     let home = std::path::Path::new("/h/.claude");
     assert_eq!(
-        record_path(home, r"D:\Projects\ersa", SESSION_ID),
+        record_path(home, r"C:\Users\user\ersa", SESSION_ID),
         home.join("projects")
-            .join("D--Projects-ersa")
+            .join("C--Users-user-ersa")
             .join(format!("{SESSION_ID}.jsonl"))
     );
 }

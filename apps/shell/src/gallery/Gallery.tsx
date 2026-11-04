@@ -35,7 +35,7 @@ const hello: CoreHelloResult = {
 };
 
 const projects: Project[] = [
-  { id: "p1", host_id: "local", path: "D:\\Projects\\ersa", name: "ersa", vcs: "git", trusted: true },
+  { id: "p1", host_id: "local", path: "C:\\Users\\me\\ersa", name: "ersa", vcs: "git", trusted: true },
   { id: "p2", host_id: "local", path: "D:\\Projects\\game\\engine\\source\\runtime", name: "engine", vcs: "perforce", trusted: false },
   { id: "p3", host_id: "local", path: "C:\\Users\\me\\notes", name: "notes with a rather long project name", vcs: "none", trusted: false },
   { id: "p4", host_id: "local", path: "D:\\Clones\\stranger", name: "stranger", vcs: "git", trusted: false },
@@ -374,15 +374,15 @@ const entries: Entry[] = [
     name: "AddProject",
     states: [
       ["Empty", <AddProject onAdd={async () => false} />],
-      ["Typed", <AddProject onAdd={async () => false} initialPath="D:\Projects\ersa" />],
+      ["Typed", <AddProject onAdd={async () => false} initialPath="C:\Users\me\ersa" />],
       ["Hover", <AddProject onAdd={async () => false} force="hover" />],
-      ["Focus", <AddProject onAdd={async () => false} initialPath="D:\Projects\ersa" force="focus" />],
+      ["Focus", <AddProject onAdd={async () => false} initialPath="C:\Users\me\ersa" force="focus" />],
       ["Asking to trust", <AddProject onAdd={async () => false} initialPath="D:\Clones\stranger" initialAsking />],
       [
         "Asking, from the keyboard",
         <AddProject onAdd={async () => false} initialPath="D:\Clones\stranger" initialAsking forceCancelFocus />,
       ],
-      ["Adding", <AddProject onAdd={async () => false} initialPath="D:\Projects\ersa" adding={{ state: "sending" }} />],
+      ["Adding", <AddProject onAdd={async () => false} initialPath="C:\Users\me\ersa" adding={{ state: "sending" }} />],
       [
         "Refused",
         <AddProject

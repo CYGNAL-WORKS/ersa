@@ -12,7 +12,9 @@
 // lines we SENT recorded in the meta file under `sent`.
 //
 // Both files pass through redact() (scripts/redact.mjs) before they are written:
-// account email, organization and home-directory paths become placeholders.
+// account email, organization, home-directory and repository paths become
+// placeholders. An --mcp-config file among the extra flags names the
+// repository by that placeholder; the CLI gets an expanded copy.
 //
 // Set ERSA_CLAUDE to the claude executable if it is not on PATH.
 
@@ -22,7 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { redact } from "./redact.mjs";
+import { expandMcpConfig, redact } from "./redact.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const CLAUDE = process.env.ERSA_CLAUDE || "claude";
@@ -64,7 +66,7 @@ const args = [
 
 const cwd = mkdtempSync(join(tmpdir(), "ersa-rec-"));
 const started = Date.now();
-const child = spawn(CLAUDE, args, { cwd, stdio: ["pipe", "pipe", "pipe"] });
+const child = spawn(CLAUDE, expandMcpConfig(args), { cwd, stdio: ["pipe", "pipe", "pipe"] });
 
 const stdoutLines = [];
 const sent = [];

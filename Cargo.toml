@@ -19,9 +19,9 @@ resolver = "2"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "UNLICENSED"
+license = "AGPL-3.0-only"
 publish = false
-repository = "https://github.com/KPandaK/ersa"
+repository = "https://github.com/CYGNAL-WORKS/ersa"
 
 # Shared dependency versions. A crate opts in with `name.workspace = true`;
 # nothing here is compiled unless some crate asks for it.
