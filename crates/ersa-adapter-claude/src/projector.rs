@@ -35,6 +35,10 @@ use crate::{BACKEND, MAX_TESTED_VERSION};
 /// some raw log would change, so Core re-projects cached sessions.
 pub const PROJECTOR_VERSION: u32 = 4;
 
+/// The `model` the CLI gives the messages it writes itself rather than
+/// receiving from the API.
+const SYNTHETIC_MODEL: &str = "<synthetic>";
+
 /// Projects one Claude Code session's raw log. Make a fresh one per pass.
 #[derive(Debug, Default)]
 pub struct ClaudeProjector {
@@ -255,8 +259,11 @@ impl ClaudeProjector {
             self.main_model = Some(reply.message.model.clone());
         }
         // Read before `reply_events` takes the message apart; projected after
-        // the message's own events.
-        let output = reply.message.usage.as_ref().and_then(|u| u.output_tokens);
+        // the message's own events. A synthetic message (a failed login, a
+        // local command's output) made no API call, so it generated nothing.
+        let output = (reply.message.model != SYNTHETIC_MODEL)
+            .then(|| reply.message.usage.as_ref()?.output_tokens)
+            .flatten();
         let usage = output.map(|tokens| self.turn_output(line, reply.message.id.clone(), tokens));
         // The session record keeps this message under the same `uuid`, which
         // is how Core yields it once when it is in both (PROTO-AGENT-EVENTS-R12).
@@ -688,8 +695,6 @@ impl ClaudeProjector {
     fn open_turn(&mut self, line: &RawLine, trigger: TurnTrigger) -> Vec<Projected> {
         self.turn += 1;
         self.turn_open = true;
-        // The count belongs to one turn, even one that ended without a `result`.
-        self.output_tokens.clear();
         vec![
             at(
                 line,

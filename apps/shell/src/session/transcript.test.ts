@@ -9,7 +9,7 @@ import { Revealed, Transcript as TranscriptView } from "../components/Transcript
 import type { Envelope, Event } from "../protocol/agent-events.gen";
 import type { SessionView } from "./follow";
 import { events } from "./replays";
-import { type Transcript, apply, emptyTranscript, isOpen } from "./transcript";
+import { EVENT_VERSION, type Transcript, apply, emptyTranscript, isOpen } from "./transcript";
 
 const play = (list: Envelope[], from: Transcript = emptyTranscript) => list.reduce(apply, from);
 
@@ -25,7 +25,7 @@ const steps = (list: Envelope[]) => {
 };
 
 const envelope = (seq: number, event: Event): Envelope => ({
-  v: 3,
+  v: EVENT_VERSION,
   session_id: "s1",
   seq,
   ts: "2026-01-01T00:00:00Z",
@@ -121,11 +121,11 @@ describe("applying events", () => {
   });
 
   it("refuses a schema version it does not know, and applies nothing after it", () => {
-    const unknown = { ...envelope(0, { type: "user.message", text: "hi", origin: "human" }), v: 4 } as unknown as Envelope;
+    const unknown = { ...envelope(0, { type: "user.message", text: "hi", origin: "human" }), v: EVENT_VERSION + 1 } as unknown as Envelope;
     const refused = play([unknown, envelope(1, { type: "user.message", text: "later", origin: "human" })]);
     expect(refused.items).toEqual([]);
     expect(refused.refused).toMatch(/older than Core and needs updating/);
-    expect(refused.refused).toMatch(/version 4/);
+    expect(refused.refused).toMatch(new RegExp(`version ${EVENT_VERSION + 1}`));
   });
 });
 

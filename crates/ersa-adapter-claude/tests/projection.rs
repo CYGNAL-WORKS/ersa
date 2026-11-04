@@ -918,6 +918,17 @@ fn each_line_reporting_output_usage_projects_the_turns_output_tokens_so_far() {
         .collect();
     assert_eq!(last, results);
 
+    // A synthetic message (a failed login, a local command's output) made no
+    // API call, so it gives no count.
+    for name in ["00-not-logged-in", "03-local-command"] {
+        let synthetic = common::events(&common::fixture(name).raw_log());
+        assert_eq!(
+            turn_output_tokens(&synthetic),
+            [Vec::<u64>::new()],
+            "{name}"
+        );
+    }
+
     // Only the count rides on these events, and the `result` line's usage
     // carries none: it belongs to the running turn.
     for event in &events {

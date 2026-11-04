@@ -12,6 +12,7 @@ use std::time::Duration;
 
 use ersa_adapter::OpenElsewhere;
 use ersa_core::Adapter;
+use ersa_protocol::events::PROJECTION_VERSION;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Records, Stats};
 use support::{Client, TestCore, app_log_facts, kind, start_with_adapters, tempdir, workspace};
@@ -96,7 +97,7 @@ async fn events_are_numbered_from_zero_without_gaps() {
     let events = client.events_until("assistant.text").await;
     assert_eq!(seqs(&events), (0..events.len() as u64).collect::<Vec<_>>());
     for event in &events {
-        assert_eq!(event["v"], 3);
+        assert_eq!(event["v"], json!(PROJECTION_VERSION));
         assert_eq!(event["session_id"], id.as_str());
         assert_eq!(event["source"]["backend"], fake::BACKEND);
     }
