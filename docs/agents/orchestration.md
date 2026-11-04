@@ -33,6 +33,7 @@ Planning commits for a pull request go onto its branch, which is checked out in 
 ## Merge
 
 - The workflow merges through the gate (`scripts/merge-pr.mjs`, merge commits, so `Implements:` trailers stay) when the review is clean, CI is green and the head contains main's tip. A pull request that changes an owner-only path (workflows, hooks, instruction files, the review or the gate), is labeled `needs-owner`, and the owner merges it; a bot's pull request (a dependency bump) gets the label without a review, since taking a new version is the owner's call (ADR 0015); one labeled `hold` is reviewed and never merged by the workflow. A branch behind main gets main merged in and pushed by whoever is driving it, and CI and the review run again: CI never tests the merge commit itself, and #61 landed red on main because its branch predated #56's test literal.
+- A merge the workflow makes fires no workflow run, so CI does not run on main after it; the gate merges only a head that contains main's tip, so main's tree is the head's, which CI tested. The owner's merges run CI on main as before.
 - After a merge, `git pull` in the integration checkout and report to the owner in a few lines.
 
 ## Train the harness

@@ -8,7 +8,10 @@
 # its own reviewer. It runs on the owner's Windows machine, where Claude Code
 # is installed and logged in; the WSL runners have no login. Every gh and git
 # call uses the workflow's token, never the owner's. The job's own check lands
-# on main, so the script keeps a "Merge review" check run on the head.
+# on main, so the script keeps a "Merge review" check run on the head. A merge
+# made with the token fires no workflow, so CI does not run on main after one;
+# the gate merges only a head that contains main's tip, so main's tree is the
+# head's, which CI tested.
 name: Merge review
 
 on:
@@ -25,6 +28,7 @@ permissions:
   actions: read # the gate reads statusCheckRollup, whose query reads each check suite's workflow run
   checks: write
   contents: write
+  issues: write # closing the issues a merged pull request fixes
   pull-requests: write
 
 jobs:
