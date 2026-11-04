@@ -1,5 +1,5 @@
-/* The transcript reads as a document (DESIGN.md): prose on the canvas, no bubbles, no avatars.
-   Cards carry tool calls and permission requests. */
+/* The transcript reads as a document (DESIGN.md): the agent's prose on the canvas, the user's words in bubbles,
+   no avatars. Cards carry tool calls and permission requests. */
 
 .transcript {
   display: grid;
@@ -48,13 +48,18 @@
   overflow-wrap: anywhere;
 }
 
-/* The user's words: as plain as the agent's, set apart by a rule and a quiet label. */
+/* The user's words: a bubble at the right of the reading column, as wide as its words up to bubble-max
+   (DESIGN.md, Layout and Shapes). min-width: 0 lets a long word or path wrap inside it rather than widen it. */
 .transcript-user {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-  padding-left: var(--space-md);
-  border-left: var(--line-hairline) solid var(--color-line);
+  align-self: flex-end;
+  min-width: 0;
+  max-width: var(--size-bubble-max);
+  /* bubble-max is the whole bubble, padding and edge included. */
+  box-sizing: border-box;
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface-raised);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-lg);
 }
 
 /* A new turn: the gap before every user message but the first grows to space-xxxl, so turns read as groups (DESIGN.md, Layout). */
@@ -62,7 +67,6 @@
   margin-top: calc(var(--space-xxxl) - var(--space-md));
 }
 
-.transcript-who,
 .transcript-note,
 .transcript-ended {
   margin: 0;
