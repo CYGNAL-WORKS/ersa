@@ -9,7 +9,9 @@
 //   docs/briefs/protocol/fixtures/claude-code/<version>/<NN>-<name>.meta.json  command line, exit code, stderr, timings
 //
 // Both files pass through redact() (scripts/redact.mjs) before they are written:
-// account email, organization and home-directory paths become placeholders.
+// account email, organization, home-directory and repository paths become
+// placeholders. An --mcp-config file among the extra flags names the
+// repository by that placeholder; the CLI gets an expanded copy.
 //
 // Set ERSA_CLAUDE to the claude executable if it is not on PATH.
 // Fixtures are the evidence behind PROTO-CLAUDE-CODE-STREAM; never hand-edit them.
@@ -20,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { redact } from "./redact.mjs";
+import { expandMcpConfig, redact } from "./redact.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const CLAUDE = process.env.ERSA_CLAUDE || "claude";
@@ -46,6 +48,9 @@ if (existsSync(join(dir, stem + ".jsonl"))) {
   process.exit(1);
 }
 
+const cwd = mkdtempSync(join(tmpdir(), "ersa-rec-"));
+expandMcpConfig(extra, cwd);
+
 // Explicit flags: nothing here relies on a CLI default (ADR 0012).
 const args = [
   "-p",
@@ -58,7 +63,6 @@ const args = [
   prompt,
 ];
 
-const cwd = mkdtempSync(join(tmpdir(), "ersa-rec-"));
 const started = Date.now();
 const res = spawnSync(CLAUDE, args, { cwd, encoding: "utf8", input: "", maxBuffer: 64 * 1024 * 1024, timeout: 180_000 });
 const elapsed_ms = Date.now() - started;
