@@ -9,7 +9,7 @@ metadata:
     url: "https://github.com/humanlayer/skills/blob/main/plugins/show-me/skills/show-me/SKILL.md"
 ---
 
-> **Ersa adaptation.** Ersa pull requests also carry, after Merge Danger: **Requirements** (the IDs implemented, and the test that verifies each), **Review** (the `code-review` findings and what was done about each), **Inbox entries** added (verbatim), and `Fixes #<ticket>`. The glossary is `docs/GLOSSARY.md`.
+> **Ersa adaptation.** Ersa pull requests also carry, after Merge Danger: **Requirements** (the IDs implemented, and the test that verifies each), **Review** (the `review-pr` findings and what was done about each), **Inbox entries** added (verbatim), and `Fixes #<ticket>`. The glossary is `docs/GLOSSARY.md`.
 
 Use this template for writing the PR body:
 
