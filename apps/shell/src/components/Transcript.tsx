@@ -113,8 +113,8 @@ const Block = memo(function Block({ item, answer, waiting, live, onDecide }: Blo
   switch (item.kind) {
     case "user":
       return (
-        <div className="transcript-user">
-          <span className="transcript-who">You</span>
+        // A bubble with no label: its place says who wrote it, and assistive technology hears "You" (DESIGN.md, Layout).
+        <div className="transcript-user" role="group" aria-label="You">
           <p className="transcript-text">{item.text}</p>
         </div>
       );
