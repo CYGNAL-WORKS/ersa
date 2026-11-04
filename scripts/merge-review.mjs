@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // The merge review: one headless Claude Code run of the review-pr skill on a
 // pull request's head once CI passed, posted on the pull request as a review,
-// then the merge through scripts/merge-pr.mjs when nothing blocks it. Run by
-// .github/workflows/review.yml on the owner's own machine, from a checkout of
-// the head with origin/main fetched and this script, the gate and the hooks
-// taken from main; the same command runs by hand.
+// then the head added to the merge queue through scripts/merge-pr.mjs when
+// nothing blocks it. Run by scripts/merge-review-watch.mjs on the owner's own
+// machine (ADR 0023), with the owner's gh and Claude Code logins, from a
+// checkout of the head with origin/main fetched and this script, the gate and
+// the hooks taken from main; the same command runs by hand.
 //
 //   node scripts/merge-review.mjs <n> --head <sha>
 //
@@ -12,14 +13,16 @@
 // its head, verdict and findings in an HTML comment. The first review of a
 // pull request reads the whole diff; a later head gets a re-review of the
 // commits since the last reviewed head that is its ancestor (ADR 0021). A head
-// already reviewed is not reviewed again; a clean one is still merged when the
-// gate lets it. A workflow_run job's own check lands on main, not on the pull
-// request, so the run keeps a "Merge review" check run on the head where it
-// can (the Checks API takes the workflow's token, not a person's).
+// already reviewed is not reviewed again; a clean one is still enqueued when
+// the gate lets it. The run keeps a "Merge review" commit status on the head
+// (a person's token may set a status but not create a check run): pending
+// while it works, then success, failure when findings or the gate block the
+// merge, or error when the run itself failed. The poller reads that status as
+// the mark that a head has been reviewed.
 //
-// Exit 0 when the head merged, is the owner's, waits for main, or there was
-// nothing to do; 1 when the review blocks the merge or the gate refuses; 2 on a
-// tool or usage error.
+// Exit 0 when the head was added to the merge queue, is the owner's, or there
+// was nothing to do; 1 when the review blocks the merge or the gate refuses;
+// 2 on a tool or usage error.
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -29,19 +32,18 @@ import { fileURLToPath } from "node:url";
 
 // Loaded before the review runs, so an edit to the gate's file during it (a
 // mutation left behind, a test) changes nothing.
-import { BEHIND_MAIN, main as gate } from "./merge-pr.mjs";
+import { MERGE_REVIEW, main as gate } from "./merge-pr.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 export const MARK = "<!-- merge-review -->";
-const BOT = "github-actions[bot]";
 
 // Paths Claude Code reads as instructions, anywhere in the tree: the review
 // runs with main's version of each, or none.
 export const instructionPaths = (files) => files.filter((f) => /(^|\/)(CLAUDE(\.local)?\.md$|\.claude\/|\.mcp\.json$)/i.test(f));
 
-// Paths whose change the owner merges: the workflows, this review and its gate,
-// the hooks, and every instruction file.
-export const ownerPaths = (files) => files.filter((f) => /^(\.github\/|scripts\/hooks\/|scripts\/merge-(pr|review)\.mjs$)/.test(f) || instructionPaths([f]).length);
+// Paths whose change the owner merges: the workflows, this review, its gate
+// and its poller, the hooks, and every instruction file.
+export const ownerPaths = (files) => files.filter((f) => /^(\.github\/|scripts\/hooks\/|scripts\/merge-(pr|review|review-watch)\.mjs$)/.test(f) || instructionPaths([f]).length);
 
 // What blocks the merge, listed or new (ADR 0021).
 export const blocking = (findings) => (findings ?? []).filter((f) => f.severity !== "low");
@@ -59,10 +61,9 @@ export function parseState(body) {
   }
 }
 
-// The latest review by a trusted author whose head is `head` or an ancestor of
-// it; `authors` is the bot and whoever runs this by hand, so a run by hand
-// finds its own reviews. Null when there is none.
-export function previousReview(reviews, head, isAncestor, authors = [BOT]) {
+// The latest review by one of `authors` (the account this runs as) whose head
+// is `head` or an ancestor of it. Null when there is none.
+export function previousReview(reviews, head, isAncestor, authors) {
   return (
     reviews
       .filter((r) => authors.includes(r.author))
@@ -134,16 +135,16 @@ const SCHEMA = {
   required: ["findings", "dismissed"],
 };
 
-// The review runs the repository's tests, which is running its code with the
-// workflow's token in the environment, so the tool list states intent rather
-// than a sandbox: no commit, push or write to GitHub. The rules are prefixes,
-// so `git -C . push` gets past them: they stop habits, not a hostile pull
-// request, which is why a fork is never reviewed. Hooks stay on; the settings
-// and the hook scripts are main's.
+// The review runs the repository's tests, which is running its code as the
+// owner, with the owner's gh login in the environment, so the tool list states
+// intent rather than a sandbox: no commit, push or write to GitHub. The rules
+// are prefixes, so `git -C . push` gets past them: they stop habits, not a
+// hostile pull request, which is why a fork is never reviewed. Hooks stay on;
+// the settings and the hook scripts are main's.
 const NEVER = [
   "PowerShell", "WebFetch", "WebSearch", "Bash(curl:*)", "Bash(git commit:*)", "Bash(git push:*)",
   "Bash(gh pr merge:*)", "Bash(gh pr comment:*)", "Bash(gh pr review:*)", "Bash(gh pr close:*)", "Bash(gh pr reopen:*)", "Bash(gh pr edit:*)", "Bash(gh pr create:*)", "Bash(gh pr ready:*)",
-  "Bash(gh issue comment:*)", "Bash(gh issue create:*)", "Bash(gh issue close:*)", "Bash(gh issue edit:*)", "Bash(gh api:*)",
+  "Bash(gh issue comment:*)", "Bash(gh issue create:*)", "Bash(gh issue close:*)", "Bash(gh issue edit:*)", "Bash(gh issue reopen:*)", "Bash(gh issue lock:*)", "Bash(gh issue unlock:*)", "Bash(gh issue pin:*)", "Bash(gh issue unpin:*)", "Bash(gh issue transfer:*)", "Bash(gh issue delete:*)", "Bash(gh issue develop:*)", "Bash(gh api:*)",
   "Bash(gh workflow:*)", "Bash(gh run rerun:*)", "Bash(gh run cancel:*)", "Bash(gh release:*)", "Bash(gh repo:*)", "Bash(gh label:*)",
   "Bash(gh secret:*)", "Bash(gh variable:*)", "Bash(gh gist:*)", "Bash(gh auth:*)",
 ];
@@ -154,8 +155,8 @@ export const claudeArgs = (text, resume) => [
 ];
 
 // A stalled git or gh call ends after two minutes; the review itself gets 38
-// and the ask for its result 4, inside the workflow's 45, so the check run is
-// finished before the runner kills the job, and a run by hand ends too.
+// and the ask for its result 4, so a run ends within the hour the poller's
+// scheduled task allows it, and a run by hand ends too.
 function run(cmd, args, minutes = 2) {
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: minutes * 60 * 1000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" } });
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: [(r.stderr ?? "").trim(), r.error?.message].filter(Boolean).join("; ") };
@@ -177,7 +178,7 @@ export function main(argv, { run: r = run } = {}) {
 }
 
 // gh names an app's account `app/<name>` and flags it; the API's own form is `<name>[bot]`.
-const isBot = (pr) => pr.author?.is_bot === true || /^app\/|\[bot\]$/.test(pr.author?.login ?? "");
+export const isBot = (pr) => pr.author?.is_bot === true || /^app\/|\[bot\]$/.test(pr.author?.login ?? "");
 
 function review(argv, run) {
   const at = argv.indexOf("--head");
@@ -197,89 +198,84 @@ function review(argv, run) {
   if (pr.isDraft) return skip("it is a draft");
   if (pr.isCrossRepository) return skip("it is from a fork");
   const labels = pr.labels.map((l) => l.name);
+  const status = commitStatus(run, head);
   // A dependency bump is a policy call (ADR 0015), so a bot's pull request is
   // the owner's to merge, and its third-party code never runs under the review.
+  // The status marks the head so the poller does not come back to it.
   if (isBot(pr)) {
     if (!labels.includes("needs-owner")) must("gh", ["pr", "edit", n, "--add-label", "needs-owner"]);
+    status("success", "An automated pull request is the owner's to merge; not reviewed.");
     return skip("an automated pull request is the owner's to merge");
   }
   if (must("git", ["rev-parse", "HEAD"]) !== head) fail(`this checkout is not at ${head.slice(0, 7)}`);
 
-  const reviews = must("gh", ["api", "--paginate", `repos/{owner}/{repo}/pulls/${n}/reviews?per_page=100`, "--jq", ".[] | {author: .user.login, body}"]).split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  // The workflow's token cannot read /user, so in the workflow only the bot counts.
-  const me = run("gh", ["api", "user", "--jq", ".login"]);
-  const isAncestor = (a, b) => run("git", ["merge-base", "--is-ancestor", a, b]).ok;
-  const previous = previousReview(reviews, head, isAncestor, me.ok ? [BOT, me.out] : [BOT]);
-  const files = must("git", ["diff", "--name-only", "--no-renames", "-z", "origin/main...HEAD"]).split("\0").filter(Boolean);
-
-  const fresh = previous?.head !== head;
-  // A re-review reads only the commits since the previous review, unless one
-  // of them touched .github/: a workflow a pull request adds can post a review
-  // as the bot, so a range that could have forged the previous review gets the
-  // whole diff again.
-  const since = fresh && previous ? must("git", ["diff", "--name-only", "--no-renames", "-z", previous.head, "HEAD"]).split("\0").filter(Boolean) : [];
-  const narrow = previous && !since.some((f) => f.startsWith(".github/")) ? previous : null;
-  const check = checkRun(run, head);
   try {
     return decide();
   } catch (e) {
-    check("failure", `The run failed: ${e.message}`);
+    // The failure that stopped the run is the one to report, even when the
+    // status cannot be set either.
+    try {
+      status("error", `The run failed: ${e.message}`);
+    } catch {}
     throw e;
   }
 
   function decide() {
+    status("pending", "Reviewing…");
+    const reviews = must("gh", ["api", "--paginate", `repos/{owner}/{repo}/pulls/${n}/reviews?per_page=100`, "--jq", ".[] | {author: .user.login, body}"]).split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    // Only reviews this account posted count: a pull request cannot forge one.
+    const me = must("gh", ["api", "user", "--jq", ".login"]);
+    const isAncestor = (a, b) => run("git", ["merge-base", "--is-ancestor", a, b]).ok;
+    const previous = previousReview(reviews, head, isAncestor, [me]);
+    const files = must("git", ["diff", "--name-only", "--no-renames", "-z", "origin/main...HEAD"]).split("\0").filter(Boolean);
+    const fresh = previous?.head !== head;
+
     let findings = previous?.findings ?? [];
     let dismissed = [];
     if (fresh) {
       instructionsFromMain(files, run);
-      ({ findings, dismissed } = ask(run, prompt({ number: n, branch: pr.headRefName, title: pr.title, issue: issueOf(pr.body), head }, narrow)));
+      ({ findings, dismissed } = ask(run, prompt({ number: n, branch: pr.headRefName, title: pr.title, issue: issueOf(pr.body), head }, previous)));
     }
 
-    // The check is the review's verdict, finished before the gate reads the
-    // head's checks (the gate would otherwise wait for it); anything that then
-    // fails the run turns it red.
     const block = blocking(findings);
-    check(block.length ? "failure" : "success", block.length ? `${block.length} finding(s) block the merge; see the review.` : "Nothing blocks the merge.");
     const owner = ownerPaths(files);
-    const ownerMerges = !block.length && !labels.includes("hold") && owner.length > 0;
     let code = 0;
     let outcome;
-    let merge = false;
+    let queue = false;
     if (block.length) [code, outcome] = [1, "Fix each blocking finding with the smallest change and push; CI and this review run again."];
-    else if (labels.includes("hold")) outcome = "Labeled `hold`, so not merged.";
+    else if (labels.includes("hold")) outcome = "Labeled `hold`, so not added to the merge queue.";
     else if (owner.length) outcome = `Ready. It changes ${owner.map((p) => `\`${p}\``).join(", ")}, which the owner merges.`;
     else {
       const g = gate([n, "--reviewed", head, "--dry-run"], { run });
-      if (g.code === 0) [merge, outcome] = [true, "The merge gate passes; merging."];
-      else if (g.code === 1 && g.reasons.length === 1 && g.reasons[0] === BEHIND_MAIN) outcome = "Behind main: merge main into the branch and push; CI and this review run again, and then it merges.";
+      if (g.code === 0) [queue, outcome] = [true, "The merge gate passes; adding it to the merge queue."];
       else [code, outcome] = [g.code, `The merge gate ${g.code === 1 ? "refused" : "could not run"}:\n\n${g.stdout ?? g.stderr}`];
     }
-    if (fresh) post(run, n, head, reviewBody({ head, findings, dismissed, outcome }));
-    if (ownerMerges && !labels.includes("needs-owner")) must("gh", ["pr", "edit", n, "--add-label", "needs-owner"]);
-    if (merge) {
+    const url = fresh ? post(run, n, head, reviewBody({ head, findings, dismissed, outcome })) : "";
+    if (!block.length && !labels.includes("hold") && owner.length && !labels.includes("needs-owner")) must("gh", ["pr", "edit", n, "--add-label", "needs-owner"]);
+    // The verdict, before the enqueue: a status the owner's token could not set
+    // has already failed the run above, so the mark is there when the queue is.
+    status(code === 0 ? "success" : code === 1 ? "failure" : "error", block.length ? `${block.length} finding(s) block the merge; see the review.` : outcome.split("\n").filter(Boolean).join(" "), url);
+    if (queue) {
       const g = gate([n, "--reviewed", head], { run });
-      if (g.code !== 0) fail(`the merge failed after the review was posted: ${g.stdout ?? g.stderr}`);
+      if (g.code !== 0) fail(`adding it to the merge queue failed after the review was posted: ${g.stdout ?? g.stderr}`);
     }
-    if (code) check("failure", outcome);
     return { code, stdout: `#${n} at ${head.slice(0, 7)}: ${block.length ? `${block.length} blocking finding(s)` : "clean"}${fresh ? "" : " (already reviewed)"}. ${outcome}\n` };
   }
 }
 
-// A "Merge review" check run on the head, in progress now and finished with
-// the review's verdict, so `gh pr checks --watch` waits for it and sees it
-// red when findings block; a failure later in the run makes it red too, once.
-// Only the workflow's token may create one; a run by hand gets no check and
-// says so.
-function checkRun(run, head) {
-  const url = process.env.GITHUB_RUN_ID ? `${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : "";
-  const made = run("gh", ["api", "repos/{owner}/{repo}/check-runs", "-f", "name=Merge review", "-f", `head_sha=${head}`, "-f", "status=in_progress", ...(url ? ["-f", `details_url=${url}`] : []), "--jq", ".id"]);
-  if (!made.ok) process.stderr.write(`no check run on the head: ${made.err.split("\n")[0]}\n`);
+// The "Merge review" commit status on the head. GitHub keeps 140 characters of
+// a description. Failure and error are final: a problem after the verdict
+// (an enqueue that failed) turns a success red once, and nothing turns a red
+// status green again within the run. A status that cannot be set fails the
+// run: the poller reads it as the mark that a head is reviewed, so a review
+// without one would run again on the next tick.
+function commitStatus(run, head) {
   let state = "";
-  return (conclusion, summary) => {
-    if (!made.ok || state === conclusion || state === "failure") return;
-    state = conclusion;
-    const done = run("gh", ["api", "-X", "PATCH", `repos/{owner}/{repo}/check-runs/${made.out}`, "-f", "status=completed", "-f", `conclusion=${conclusion}`, "-f", "output[title]=Merge review", "-f", `output[summary]=${summary}`]);
-    if (!done.ok) process.stderr.write(`the check run was not finished: ${done.err.split("\n")[0]}\n`);
+  return (next, description, url = "") => {
+    if (state === next || state === "failure" || state === "error") return;
+    state = next;
+    const r = run("gh", ["api", `repos/{owner}/{repo}/statuses/${head}`, "-f", `state=${next}`, "-f", `context=${MERGE_REVIEW}`, "-f", `description=${description.slice(0, 140)}`, ...(url ? ["-f", `target_url=${url}`] : [])]);
+    if (!r.ok) fail(`the "${MERGE_REVIEW}" status could not be set to ${next}: ${r.err.split("\n")[0]}`);
   };
 }
 
@@ -316,12 +312,15 @@ function ask(run, text) {
   return result.structured_output;
 }
 
+// Posts the review on the head and returns its address, for the status to
+// point at; an address GitHub did not give leaves the status without one.
 function post(run, n, head, body) {
   const dir = mkdtempSync(join(tmpdir(), "merge-review-"));
   try {
     writeFileSync(join(dir, "body.md"), body);
-    const r = run("gh", ["api", `repos/{owner}/{repo}/pulls/${n}/reviews`, "-f", "event=COMMENT", "-f", `commit_id=${head}`, "-F", `body=@${join(dir, "body.md")}`]);
+    const r = run("gh", ["api", `repos/{owner}/{repo}/pulls/${n}/reviews`, "-f", "event=COMMENT", "-f", `commit_id=${head}`, "-F", `body=@${join(dir, "body.md")}`, "--jq", ".html_url"]);
     if (!r.ok) fail(`posting the review failed: ${r.err}`);
+    return /^https:\/\//.test(r.out) ? r.out : "";
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
