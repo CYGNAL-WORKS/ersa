@@ -1,0 +1,123 @@
+{
+  "App.tsx": [
+    "No session open. Start one from a project in the rail.",
+    "Rail",
+    "Retry",
+    "Untitled session"
+  ],
+  "components/AddProject.tsx": [
+    "Add",
+    "Add a project",
+    "Adding…",
+    "Folder path",
+    "Project folder"
+  ],
+  "components/Composer.tsx": [
+    "Composer",
+    "Message",
+    "Send",
+    "Write to the agent"
+  ],
+  "components/ContextRing.tsx": [
+    "Context:",
+    "Context: none used yet",
+    "percent used"
+  ],
+  "components/CoreStatus.tsx": [
+    "Core",
+    "Retry"
+  ],
+  "components/ErrorBoundary.tsx": [
+    "could not be shown:"
+  ],
+  "components/NewSessionScreen.tsx": [
+    "Add a project to start a session: a folder on this computer.",
+    "Ersa",
+    "New session"
+  ],
+  "components/ProjectList.tsx": [
+    "Don’t trust",
+    "Loading…",
+    "New session",
+    "No projects yet.",
+    "Not trusted",
+    "Projects",
+    "Projects added to Core appear here.",
+    "Projects appear once Core is connected.",
+    "Saving…",
+    "Trusted",
+    "Trust…"
+  ],
+  "components/QuitQuestion.tsx": [
+    "Cancel",
+    "Ersa could not count the sessions. Any session working or waiting for you will stop. Closing the window instead keeps them running.",
+    "Quit",
+    "Quit Ersa?",
+    "Quitting…",
+    "it",
+    "running.",
+    "session is",
+    "sessions are",
+    "them",
+    "working or waiting for you, and will stop. Closing the window instead keeps"
+  ],
+  "components/SessionControls.tsx": [
+    "Detecting backends…",
+    "No backend",
+    "Session controls"
+  ],
+  "components/SessionList.tsx": [
+    "Loading…",
+    "Needs you ·",
+    "No sessions yet.",
+    "Sessions",
+    "Sessions appear once Core is connected.",
+    "Start one from a project above.",
+    "Untitled session",
+    "Workspace"
+  ],
+  "components/SessionTitle.tsx": [
+    "Cancel",
+    "Rename the session",
+    "Save",
+    "Saving…",
+    "Session title"
+  ],
+  "components/Transcript.tsx": [
+    "Allow",
+    "An invisible character",
+    "Answer once Core is connected",
+    "Deny",
+    "Done",
+    "Failed",
+    "Invisible characters",
+    "Loading…",
+    "Not answered",
+    "Not receiving this session's events:",
+    "Nothing yet. Write to the agent below.",
+    "Path:",
+    "Permission:",
+    "Question",
+    "Question, answered",
+    "Reconnecting to Core…",
+    "Retry",
+    "Running…",
+    "Sending…",
+    "Thinking…",
+    "Thought",
+    "Transcript",
+    "U+",
+    "Waiting for you",
+    "You",
+    "more invisible characters, each shown as"
+  ],
+  "components/TrustQuestion.tsx": [
+    "A trusted project’s own configuration runs in its sessions: hooks and MCP servers that start programs on this computer, and settings that change what the agent may do without asking.",
+    "Add, not trusted",
+    "Add, trusted",
+    "Cancel",
+    "Claude Code records the trust for the whole repository the project is in, and applies it outside Ersa too.",
+    "Trust",
+    "Untrusted, its sessions use only your own settings."
+  ]
+}
