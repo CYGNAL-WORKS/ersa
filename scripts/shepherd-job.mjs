@@ -39,10 +39,15 @@ const LIMIT = 45 * 60 * 1000;
 // states intent rather than a sandbox: no push, merge or write to GitHub. A
 // deny rule wins over an allow rule and applies to each command of a compound one.
 const TOOLS = ["Read", "Grep", "Glob", "Agent", "Skill", "Edit", "Write", "Bash"];
+// The rules are prefixes, so `git -C . push` or `bash -c` gets past them: they
+// stop a job's habits, not a hostile pull request, which is why the loop never
+// runs a job on a fork.
 const NEVER = [
-  "PowerShell", "WebFetch", "WebSearch", "Bash(git push:*)",
-  "Bash(gh pr merge:*)", "Bash(gh pr comment:*)", "Bash(gh pr review:*)", "Bash(gh pr close:*)", "Bash(gh pr edit:*)", "Bash(gh pr create:*)", "Bash(gh pr ready:*)",
+  "PowerShell", "WebFetch", "WebSearch", "Bash(curl:*)", "Bash(git push:*)",
+  "Bash(gh pr merge:*)", "Bash(gh pr comment:*)", "Bash(gh pr review:*)", "Bash(gh pr close:*)", "Bash(gh pr reopen:*)", "Bash(gh pr edit:*)", "Bash(gh pr create:*)", "Bash(gh pr ready:*)",
   "Bash(gh issue comment:*)", "Bash(gh issue create:*)", "Bash(gh issue close:*)", "Bash(gh issue edit:*)", "Bash(gh api:*)",
+  "Bash(gh workflow:*)", "Bash(gh run rerun:*)", "Bash(gh run cancel:*)", "Bash(gh release:*)", "Bash(gh repo:*)", "Bash(gh label:*)",
+  "Bash(gh secret:*)", "Bash(gh variable:*)", "Bash(gh gist:*)", "Bash(gh auth:*)",
 ];
 
 const finding = {
@@ -161,7 +166,9 @@ export function claudeArgs(job, prompt, data) {
     "--output-format", "json",
     "--json-schema", JSON.stringify(job.schema),
     "--permission-mode", "acceptEdits",
+    // The pull request's hooks and .mcp.json servers would run outside the deny rules.
     "--settings", JSON.stringify({ disableAllHooks: true }),
+    "--strict-mcp-config",
     "--add-dir", data,
     "--allowedTools", ...TOOLS,
     "--disallowedTools", ...job.never,
@@ -306,7 +313,9 @@ async function main() {
   }
 
   mkdirSync(JOBS_DIR, { recursive: true });
-  writeFileSync(output ? recordFile : join(JOBS_DIR, `${id}.${started}.failed.json`), JSON.stringify(record, null, 2));
+  // Only a job with a result and no error uses up its head; any other record
+  // goes aside, so the next ask runs the job again.
+  writeFileSync(output && !record.error ? recordFile : join(JOBS_DIR, `${id}.${started}.failed.json`), JSON.stringify(record, null, 2));
   if (block.length) writeFileSync(join(JOBS_DIR, `${id}.task.md`), findingsTask(output.findings, !!since, v.url));
   process.stdout.write(`${JSON.stringify(record, null, 2)}\n`);
 
