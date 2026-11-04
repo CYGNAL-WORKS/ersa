@@ -2,11 +2,14 @@
 {"raw":0,"event":{"type":"turn.started","turn":1,"trigger":"user"}}
 {"raw":0,"event":{"type":"session.state","state":"running"}}
 {"raw":1,"message_id":"cdaea738-27ec-4456-8b42-050c27883fc0","event":{"type":"assistant.text","block_id":"msg_011CgbD21Nxt34NiGyGZ8CiP/0","text":"Running the echo command now.","final":true}}
+{"raw":1,"event":{"type":"usage.updated","turn_output_tokens":3}}
 {"raw":2,"message_id":"9519ae55-0ac1-4427-889e-22c6b0fe25c7","event":{"type":"tool.requested","tool_use_id":"toolu_01FVRvyzDpPfnqkkrFoNnRmt","name":"Bash","input":{"command":"echo hello-from-bash","description":"Print a test string"}}}
+{"raw":2,"event":{"type":"usage.updated","turn_output_tokens":3}}
 {"raw":3,"event":{"type":"usage.updated","rate_limit":{"status":"allowed","resets_at":"2026-11-04T20:00:00Z","detail":"seven_day"}}}
 {"raw":4,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"system/task_summary","payload":{"detail":"Printing a test string","session_id":"d4e04ec4-fd1b-454d-9f16-3bced80b8199","subtype":"task_summary","type":"system","uuid":"ed88cbfd-c552-4806-bb20-41370cbb07b9"}}}
 {"raw":5,"message_id":"ee08eb94-a814-4839-8723-ad6179c51f70","event":{"type":"tool.result","tool_use_id":"toolu_01FVRvyzDpPfnqkkrFoNnRmt","content":"hello-from-bash","is_error":false}}
 {"raw":6,"message_id":"983afb84-3a97-413f-b9d8-4a2d82cf192e","event":{"type":"assistant.text","block_id":"msg_011CgbD2NeedYDA2P8pnaSpo/0","text":"The command ran successfully and printed:\n\n```\nhello-from-bash\n```","final":true}}
+{"raw":6,"event":{"type":"usage.updated","turn_output_tokens":28}}
 {"raw":7,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"system/post_turn_summary","payload":{"needs_action":"","session_id":"d4e04ec4-fd1b-454d-9f16-3bced80b8199","status_category":"completed","status_detail":"echo ran via Bash; printed hello-from-bash","subtype":"post_turn_summary","summarizes_uuid":"983afb84-3a97-413f-b9d8-4a2d82cf192e","type":"system","uuid":"d600c420-6fe1-4820-9299-8726e9b21d9e"}}}
 {"raw":8,"event":{"type":"turn.completed","turn":1,"outcome":"success","duration_ms":8817,"is_error":false,"final_text":"The command ran successfully and printed:\n\n```\nhello-from-bash\n```"}}
 {"raw":8,"event":{"type":"usage.updated","context_tokens":38692,"context_window":1000000,"cost_usd_total":0.211786,"turns":1}}
