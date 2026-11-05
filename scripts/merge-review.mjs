@@ -33,7 +33,7 @@ import { fileURLToPath } from "node:url";
 
 // Loaded before the review runs, so an edit to the gate's file during it (a
 // mutation left behind, a test) changes nothing.
-import { MERGE_REVIEW, commitsSinceReview, main as gate } from "./merge-pr.mjs";
+import { MERGE_REVIEW, cleanMergeOfMain, commitsSinceReview, main as gate } from "./merge-pr.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 export const MARK = "<!-- merge-review -->";
@@ -235,7 +235,7 @@ function review(argv, run) {
     // hand-resolved conflict changes nothing a reviewer read (ADR 0021), so
     // the verdict carries over without a run, as the gate already allows.
     const merged = previous && previous.head !== head ? commitsSinceReview({ reviewed: previous.head, head, git: (a) => run("git", a) }) : [];
-    const onlyCleanMerges = merged.length > 0 && merged.every((c) => c.merge && c.fromMain && c.clean);
+    const onlyCleanMerges = merged.length > 0 && merged.every(cleanMergeOfMain);
     const fresh = previous?.head !== head && !onlyCleanMerges;
 
     let findings = previous?.findings ?? [];
@@ -258,10 +258,12 @@ function review(argv, run) {
     let queue = false;
     if (block.length) [code, verdict, outcome] = [1, "failure", "Fix each blocking finding with the smallest change and push; CI and this review run again."];
     else if (labels.includes("hold")) outcome = "Labeled `hold`, so not added to the merge queue.";
-    else if (owner.length) outcome = `Ready. It changes ${owner.map((p) => `\`${p}\``).join(", ")}, which the owner merges.`;
     else {
+      // The owner's pull requests go through the gate too, so one with an
+      // open inbox entry or unfinished CI waits rather than reading as ready.
       const g = gate([n, "--reviewed", head, "--dry-run"], { run });
-      if (g.code === 0) [queue, outcome] = [true, "The merge gate passes; adding it to the merge queue."];
+      if (g.code === 0 && owner.length) outcome = `Ready. It changes ${owner.map((p) => `\`${p}\``).join(", ")}, which the owner merges.`;
+      else if (g.code === 0) [queue, outcome] = [true, "The merge gate passes; adding it to the merge queue."];
       else if (g.code === 1) [verdict, summary, outcome] = ["pending", `Clean; the merge gate does not pass yet: ${g.reasons.join("; ")}`, `The merge gate does not pass yet; the merge review tries again within the hour, or at once after a push:\n\n${g.stdout}`];
       else [code, verdict, outcome] = [2, "error", `The merge gate could not run:\n\n${g.stderr}`];
     }

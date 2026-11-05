@@ -240,6 +240,11 @@ test("a clean head on owner paths or with a hold label is the owner's and not en
   assert.deepEqual(owner.labeled, [["gh", "pr", "edit", "7", "--add-label", "needs-owner"]]);
   assert.match(owner.stdout, /changes `\.github\/workflows\/ci\.yml`, which the owner merges/);
   assert.deepEqual(owner.statuses, ["pending", `success ${REVIEW_URL}`]);
+  // The owner's pull request still goes through the gate: one it refuses (an open inbox entry, CI not done) waits, not ready.
+  const waiting = drive(["7", "--head", HEAD], { files: ".github/workflows/ci.yml\0", gate: { pr: { isDraft: true } } });
+  assert.equal(waiting.queued.length, 0);
+  assert.deepEqual(waiting.statuses, ["pending", `pending ${REVIEW_URL}`]);
+  assert.doesNotMatch(waiting.stdout, /which the owner merges/);
   const hold = drive(["7", "--head", HEAD], { pr: { labels: [{ name: "hold" }] }, files: "scripts/merge-pr.mjs\0" });
   assert.equal(hold.code, 0);
   assert.equal(hold.queued.length, 0);

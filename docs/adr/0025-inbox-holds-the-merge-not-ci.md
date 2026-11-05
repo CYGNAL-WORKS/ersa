@@ -17,7 +17,7 @@ ADR 0013 gave write-back an actor and a trigger: implementing sessions append br
 
 ## Decision
 
-Option 4. The manifest check still fails on every other problem, in CI and on the merge queue's merges. The inbox holds only gaps in a brief, `CONTENT.md` or `DESIGN.md` that the branch's code depends on. A harness or process proposal no branch depends on is not an entry: an attended session proposes it in chat, and an unattended one lists it as a follow-up in its pull request, which the orchestration session files as a `needs-triage` issue.
+Option 4. The manifest check still fails on every other problem, in CI and on the merge queue's merges, and on the merge queue's merges and on main it also fails on an open entry, so a merge that skips the gate, such as the owner's, cannot carry one onto main. The merge review runs the gate for the owner's pull requests too, so one with an open entry shows as waiting rather than ready. The inbox holds only gaps in a brief, `CONTENT.md` or `DESIGN.md` that the branch's code depends on. A harness or process proposal no branch depends on is not an entry: an attended session proposes it in chat, and an unattended one lists it as a follow-up in its pull request, which the orchestration session files as a `needs-triage` issue.
 
 ## Consequences
 
