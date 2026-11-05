@@ -18,7 +18,7 @@ const mark = (state, over) => ({ __typename: "StatusContext", context: "Merge re
 const pr = (over) => ({ number: 7, isDraft: false, isCrossRepository: false, headRefOid: HEAD, autoMergeRequest: null, statusCheckRollup: [ci()], ...over });
 
 test("a same-repository, non-draft pull request whose CI passed on an unreviewed head is reviewed", () => {
-  assert.deepEqual(select([pr()], NOW), { review: [{ number: 7, head: HEAD }], disarm: [] });
+  assert.deepEqual(select([pr()], NOW), { review: [{ number: 7, head: HEAD }], disarm: [], skip: [] });
   // CI read as the gate reads it: the latest run of each check, skipped and neutral pass, a commit status counts.
   assert.deepEqual(select([pr({ statusCheckRollup: [ci({ conclusion: "FAILURE" }), ci({ startedAt: ago(60 * 1000) }), ci({ name: "W", conclusion: "SKIPPED" }), { context: "ext", state: "SUCCESS" }] })], NOW).review.length, 1);
 });
@@ -50,11 +50,36 @@ test("a pending merge review older than an hour is a run that died, and the head
   assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: undefined })] })], NOW).review, [{ number: 7, head: HEAD }], "a pending status with no time is stale, not reviewed forever");
 });
 
+test("every open pull request not reviewed this tick says why, and a tick with nothing to review logs it", () => {
+  const prs = [
+    pr({ number: 1, isDraft: true }),
+    pr({ number: 2, isCrossRepository: true }),
+    pr({ number: 3, statusCheckRollup: [ci({ status: "IN_PROGRESS", conclusion: "" })] }),
+    pr({ number: 4, statusCheckRollup: [ci({ conclusion: "FAILURE" })] }),
+    pr({ number: 5, statusCheckRollup: [] }),
+    ...["SUCCESS", "FAILURE", "ERROR", "PENDING"].map((state, i) => pr({ number: 6 + i, statusCheckRollup: [ci(), mark(state)] })),
+  ];
+  assert.deepEqual(select(prs, NOW).skip, [
+    { number: 1, why: "it is a draft" },
+    { number: 2, why: "it is from a fork" },
+    { number: 3, why: "CI is still running: CI" },
+    { number: 4, why: "CI did not pass: CI" },
+    { number: 5, why: "it has no CI checks" },
+    { number: 6, why: "its merge review passed" },
+    { number: 7, why: "its merge review blocks the merge" },
+    { number: 8, why: "its merge review failed to run" },
+    { number: 9, why: "its merge review is running or waits for the gate" },
+  ]);
+  assert.deepEqual(select([pr()], NOW).skip, [], "a head due for review is not also skipped");
+  assert.deepEqual(drive(["--once"], { prs: prs.slice(2, 4) }).logs, ["nothing to review: #3 (CI is still running: CI); #4 (CI did not pass: CI)"]);
+  assert.deepEqual(drive(["--once"], { prs: [] }).logs, ["nothing to review"]);
+});
+
 test("auto-merge on an unreviewed head is disarmed, reviewed or not yet reviewable; on a reviewed head it is the review's own", () => {
   const armed = { enabledAt: ago(1000) };
-  assert.deepEqual(select([pr({ autoMergeRequest: armed })], NOW), { review: [{ number: 7, head: HEAD }], disarm: [7] });
-  assert.deepEqual(select([pr({ autoMergeRequest: armed, statusCheckRollup: [ci({ status: "IN_PROGRESS", conclusion: "" })] })], NOW), { review: [], disarm: [7] }, "disarmed before CI finishes, so the queue never gets it");
-  assert.deepEqual(select([pr({ autoMergeRequest: armed, statusCheckRollup: [ci(), mark("SUCCESS")] })], NOW), { review: [], disarm: [] });
+  assert.deepEqual(select([pr({ autoMergeRequest: armed })], NOW).disarm, [7]);
+  assert.deepEqual(select([pr({ autoMergeRequest: armed, statusCheckRollup: [ci({ status: "IN_PROGRESS", conclusion: "" })] })], NOW).disarm, [7], "disarmed before CI finishes, so the queue never gets it");
+  assert.deepEqual(select([pr({ autoMergeRequest: armed, statusCheckRollup: [ci(), mark("SUCCESS")] })], NOW).disarm, []);
   assert.deepEqual(select([pr({ autoMergeRequest: armed, isCrossRepository: true })], NOW).disarm, [], "a fork's pull request is left to the owner");
   // A hold put on after the head was enqueued still holds it.
   assert.deepEqual(select([pr({ autoMergeRequest: armed, labels: [{ name: "hold" }], statusCheckRollup: [ci(), mark("SUCCESS")] })], NOW).disarm, [7]);
