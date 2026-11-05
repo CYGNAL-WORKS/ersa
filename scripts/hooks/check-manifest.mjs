@@ -3,10 +3,9 @@
 // agent's `git commit`, so no commit carries a structural problem CI would fail
 // on, or a docs/MANIFEST.md or ADR index older than the briefs beside it.
 //
-// It blocks when the check reports a problem other than open inbox entries
-// (implementing sessions commit with the entries they added; a planning pass
-// clears them before merge), and when the check rewrote a generated file the
-// commit would leave out. The repository is the one `git -C <dir>` names, else
+// It blocks when the check reports a problem (open inbox entries are not one:
+// the merge gate holds those, ADR 0025), and when the check rewrote a
+// generated file the commit would leave out. The repository is the one `git -C <dir>` names, else
 // the session's working directory, and the check runs only when that is the
 // session's own repository (any of its worktrees): the hook runs before the
 // user's permission prompt, so it must not run another repository's script.
@@ -40,14 +39,10 @@ export function commitTarget(command) {
   return { dir, all };
 }
 
-// The manifest lists its problems under "## Problems"; open inbox entries are
-// one line of their own (as scripts/check.mjs reads it).
+// The problems the manifest lists under "## Problems".
 export function blockingProblems(manifest) {
   const section = manifest.split("## Problems")[1] ?? "";
-  return section
-    .split(/\r?\n/)
-    .filter((l) => l.startsWith("- "))
-    .filter((l) => !/open inbox entr(y|ies) need a planning pass/.test(l));
+  return section.split(/\r?\n/).filter((l) => l.startsWith("- "));
 }
 
 function git(dir, args) {
@@ -96,14 +91,11 @@ function main() {
     const manifest = join(root, "docs", "MANIFEST.md");
     const text = wrote && existsSync(manifest) ? readFileSync(manifest, "utf8") : "";
     const problems = blockingProblems(text);
-    const onlyInbox = /open inbox entr(y|ies) need a planning pass/.test(text);
-    if (problems.length || !onlyInbox) {
-      block(
-        "Blocked: the manifest check failed, and CI runs the same check.\n" +
-          (problems.length ? problems.join("\n") : `${run.stdout ?? ""}${run.stderr ?? ""}${run.error ?? ""}`.trim()) +
-          "\nFix these, then commit again."
-      );
-    }
+    block(
+      "Blocked: the manifest check failed, and CI runs the same check.\n" +
+        (problems.length ? problems.join("\n") : `${run.stdout ?? ""}${run.stderr ?? ""}${run.error ?? ""}`.trim()) +
+        "\nFix these, then commit again."
+    );
   }
 
   if (!target.all) {
