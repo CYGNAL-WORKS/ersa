@@ -17,7 +17,9 @@
 // that may pass now), and the head is taken up again. One review per tick,
 // and an hour at most spent on heads whose checkout cannot be prepared (each
 // is logged and the next head gets the tick), so a tick ends within the two
-// hours the task allows it. A head without the status that
+// hours the task allows it. A tick with no head to review logs each open pull
+// request it passed over and why, so a quiet log says what it waits for. A
+// head without the status that
 // GitHub would merge on its own (auto-merge armed by a review of an earlier
 // head, which a push by the owner's account does not disarm), or any head of a
 // pull request labeled `hold`, gets auto-merge disabled first, so nothing
@@ -73,23 +75,36 @@ export const STALE_MS = 60 * 60 * 1000;
 export const LOCK_STALE_MS = 3 * STALE_MS;
 const FIELDS = "number,isDraft,isCrossRepository,headRefOid,labels,autoMergeRequest,statusCheckRollup";
 
+// What a head's merge review status says, for the line that tells why the
+// head is not reviewed again.
+const VERDICT = { SUCCESS: "passed", FAILURE: "blocks the merge", ERROR: "failed to run", PENDING: "is running or waits for the gate" };
+
 // Which pull requests a tick acts on: `review` the heads to review, in list
-// order, `disarm` the numbers whose auto-merge must go. Pure, so a test can
-// drive every case with gh's JSON alone.
+// order, `disarm` the numbers whose auto-merge must go, and `skip` every other
+// open pull request with why it is not reviewed, so a tick with nothing to
+// review says what it is waiting for. Pure, so a test can drive every case
+// with gh's JSON alone.
 export function select(prs, now = Date.now()) {
   const review = [];
   const disarm = [];
+  const skip = [];
   for (const pr of prs) {
-    if (pr.isDraft || pr.isCrossRepository) continue;
+    if (pr.isDraft || pr.isCrossRepository) {
+      skip.push({ number: pr.number, why: pr.isDraft ? "it is a draft" : "it is from a fork" });
+      continue;
+    }
     const mark = normalizeChecks(pr.statusCheckRollup).find((c) => c.name === MERGE_REVIEW);
     // A pending time gh did not give reads as stale: the lock keeps a running review safe from the retake.
     const stale = mark?.status === "PENDING" && !(now - Date.parse(mark.startedAt ?? "") <= STALE_MS);
     const reviewed = Boolean(mark) && !stale;
     const held = (pr.labels ?? []).some((l) => l.name === "hold");
     if (pr.autoMergeRequest && (!reviewed || held)) disarm.push(pr.number);
-    if (!reviewed && !ciRefusals(pr.statusCheckRollup).length) review.push({ number: pr.number, head: pr.headRefOid });
+    const ci = ciRefusals(pr.statusCheckRollup);
+    if (reviewed) skip.push({ number: pr.number, why: `its merge review ${VERDICT[mark.status === "COMPLETED" ? mark.conclusion : "PENDING"] ?? "has a status this poller cannot read"}${held ? ", and it is on hold" : ""}` });
+    else if (ci.length) skip.push({ number: pr.number, why: ci.join(", and ") });
+    else review.push({ number: pr.number, head: pr.headRefOid });
   }
-  return { review, disarm };
+  return { review, disarm, skip };
 }
 
 // Takes the lock for this process and returns what releases it, or null when
@@ -211,12 +226,13 @@ function prepare(run, dir, n, head) {
 function tick(run, dir, log, now) {
   const list = run("gh", ["pr", "list", "--state", "open", "--limit", "100", "--json", FIELDS]);
   if (!list.ok) fail(`gh pr list failed: ${list.err}`);
-  const { review, disarm } = select(JSON.parse(list.out), now());
+  const { review, disarm, skip } = select(JSON.parse(list.out), now());
   for (const n of disarm) {
     const r = run("gh", ["pr", "merge", String(n), "--disable-auto"]);
     log(`#${n}: auto-merge was on for an unreviewed or held head; ${r.ok ? "disabled it" : `could not disable it: ${r.err}`}`);
   }
-  if (!review.length) return log("nothing to review");
+  // Check names come from the pull request's own workflows: one line, whatever they hold.
+  if (!review.length) return log(`nothing to review${skip.length ? `: ${skip.map((p) => `#${p.number} (${p.why})`).join("; ")}` : ""}`.replace(/\s+/g, " "));
   const started = now();
   for (const [i, { number: n, head }] of review.entries()) {
     const later = review.slice(i + 1);
