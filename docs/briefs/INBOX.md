@@ -8,5 +8,7 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-05 none: #162 renders screenshot baselines on GitHub, but no skill tells agents how to update them, so a session may reach for Docker (which the owner does not want started on their machine) or fail CI to get images. Add to `.claude/skills/implement-ticket/SKILL.md`, after the bullet on missing tokens: "- When a change moves the gallery's screenshots, push the branch, then run `node scripts/render-baselines.mjs`: it renders the baselines on GitHub in CI's container and copies them into `apps/shell/e2e/__screenshots__/`. Open the changed images, then commit them. Do not run Docker, and do not fail CI to get images." Meanwhile the README and the Playwright config say so.
+
 
 ## Resolved recently (optional, trimmed in planning passes)
