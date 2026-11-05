@@ -277,3 +277,41 @@ test("with no project, the new-session screen asks whether the user trusts a fol
   await expect(question.getByRole("button", { name: "Add, trusted" })).toBeVisible();
   await expect(question.getByRole("button", { name: "Add, not trusted" })).toBeVisible();
 });
+
+// The rail's foot (LAY-SHELL, The foot; issue #155): Retry attaches again, focus comes back to it when the retry
+// fails, and reaching the sessions again is heard though nothing is shown.
+test("Retry in the rail's foot attaches again, keeps keyboard focus, and says when it reconnects", async ({ page }) => {
+  await page.goto("/gallery.html?component=RailFoot&theme=light");
+  const foot = page.locator("figure").filter({ has: page.locator("figcaption", { hasText: /^Unreachable$/ }) });
+  const retry = foot.getByRole("button", { name: "Retry" });
+  const status = foot.getByRole("status");
+  await expect(status).toHaveText("");
+
+  // The first retry fails: Retry goes while Ersa connects, then comes back with focus.
+  await retry.focus();
+  await page.keyboard.press("Enter");
+  await expect(retry).toHaveCount(0);
+  await expect(retry).toBeFocused();
+
+  // The next one reaches the sessions: the alert goes, and the status region says so out of sight.
+  await page.keyboard.press("Enter");
+  await expect(foot.getByRole("alert")).toHaveCount(0);
+  await expect(status).toHaveText("Reconnected");
+  const box = await status.boundingBox();
+  expect((box?.width ?? 0) * (box?.height ?? 0)).toBeLessThanOrEqual(1);
+});
+
+// RAIL.md: with reduced motion on, the foot's ring holds still and the foot appears without its fade.
+test("the rail's foot holds still with reduced motion on", async ({ page }) => {
+  const animations = async () => {
+    await page.goto("/gallery.html?component=RailFoot&theme=light");
+    const trying = page.locator("figure").filter({ has: page.locator("figcaption", { hasText: /^Reconnecting$/ }) });
+    return trying.locator(".rail-foot").evaluate((el) => ({
+      ring: getComputedStyle(el.querySelector(".rail-foot-trying")!, "::before").animationName,
+      fade: getComputedStyle(el).animationName,
+    }));
+  };
+  expect(await animations()).toEqual({ ring: "rail-foot-turn", fade: "rail-foot-in" });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await animations()).toEqual({ ring: "none", fade: "none" });
+});
