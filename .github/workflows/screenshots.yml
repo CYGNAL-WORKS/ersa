@@ -1,0 +1,53 @@
+# Renders the gallery's screenshot baselines for a pushed branch, on demand,
+# so no one needs Docker to update them. `node scripts/render-baselines.mjs`
+# starts it for the current branch, waits, and copies the images into
+# apps/shell/e2e/__screenshots__; the session commits them itself, since a
+# commit made with this workflow's token would not trigger CI.
+# Runs in the interface job's image with the interface job's setup
+# (ci.yml), so its renders match CI's pixel for pixel. Keep the image
+# identical to ci.yml's and apps/shell/scripts/screenshots-in-container.sh's;
+# scripts/render-baselines.test.mjs fails when they differ.
+# Actions are pinned by commit SHA (ADR 0015).
+name: Screenshot baselines
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  render:
+    name: Render baselines
+    runs-on: ubuntu-24.04
+    container: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/shell
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        run: |
+          npm install --global corepack@0.36.0
+          corepack enable pnpm
+          corepack install
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Render baselines
+        run: pnpm exec playwright test --update-snapshots
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screenshots
+          path: apps/shell/e2e/__screenshots__
+          if-no-files-found: error
