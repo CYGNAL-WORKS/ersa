@@ -5,7 +5,7 @@ description: Build one Ersa ticket (a GitHub issue) end to end in an implementin
 
 # Implement a ticket
 
-You are an implementing session, usually unattended. The orchestration session reviews and merges after you; your job is to hand it a change that has already survived review. Every skill you call may say "ask the user": in this skill, nobody is there to answer, so record the open point as an inbox line or a pull request note and carry on with the most reasonable choice.
+You are an implementing session, usually unattended. The orchestration session reviews and merges after you; your job is to hand it a change that has already survived review. Every skill you call may say "ask the user": in this skill, nobody is there to answer, so carry on with the most reasonable choice and record it: as an inbox line when it is a gap in a brief your code depends on, else as a pull request note.
 
 ## 1. Orient
 

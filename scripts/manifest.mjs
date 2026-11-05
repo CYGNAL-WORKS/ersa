@@ -3,6 +3,9 @@
 //
 //   node scripts/manifest.mjs          write both files
 //   node scripts/manifest.mjs --check  also exit 1 if there are problems
+//   node scripts/manifest.mjs --check --inbox  count open inbox entries as a
+//                                     problem too: CI does on the merge queue
+//                                     and main, so none reaches main (ADR 0025)
 //   node scripts/manifest.mjs --verifies ID,ID  also exit 1 if a listed ID
 //                                     has no `verifies:` line in a test file
 //
@@ -14,6 +17,8 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "
 import { basename, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { openInboxEntries } from "./merge-pr.mjs";
+
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const BRIEFS_DIR = join(ROOT, "docs", "briefs");
 const ADR_DIR = join(ROOT, "docs", "adr");
@@ -21,6 +26,7 @@ const INBOX = join(BRIEFS_DIR, "INBOX.md");
 const OUT = join(ROOT, "docs", "MANIFEST.md");
 const ADR_README = join(ADR_DIR, "README.md");
 const CHECK = process.argv.includes("--check");
+const INBOX_BLOCKS = process.argv.includes("--inbox");
 // The requirement IDs a ticket implements, each of which must be cited by a test.
 // Every argument after the flag up to the next flag counts, so an unquoted
 // "A, B" that the shell splits in two still lists both IDs.
@@ -179,12 +185,15 @@ for (const id of cited.keys()) {
 
 let openInbox = 0;
 try {
-  openInbox = readFileSync(INBOX, "utf8").split(/\r?\n/).filter((l) => /^\s*-\s*\[ \]/.test(l)).length;
+  openInbox = openInboxEntries(readFileSync(INBOX, "utf8"));
 } catch {
   problems.push("docs/briefs/INBOX.md is missing");
 }
-// Open entries are not a problem here: the merge gate holds a pull request
+// On a pull request open entries are not a problem: the merge gate holds it
 // while its inbox has any (ADR 0025), so CI stays green and the review runs.
+// On the merge queue and main they are, so a merge that skips the gate (the
+// owner's) still cannot carry one onto main.
+if (INBOX_BLOCKS && openInbox > 0) problems.push(`${openInbox} open inbox entr${openInbox === 1 ? "y needs" : "ies need"} a planning pass`);
 
 // ---- Vendored files ----------------------------------------------------------
 // .claude/skills/VENDORED.sha256 pins every third-party file we copied (after our
