@@ -3,6 +3,7 @@
 // component section in each theme, so a visual change shows up in review.
 // A component built for the window gets an entry here in the same change.
 
+import { ChevronDown, ChevronRight, Plus, ShieldAlert, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { AddProject } from "../components/AddProject";
 import { Button } from "../components/Button";
@@ -11,6 +12,7 @@ import { ContextRing } from "../components/ContextRing";
 import { Composer } from "../components/Composer";
 import { CoreStatus } from "../components/CoreStatus";
 import { ErrorBoundary } from "../components/ErrorBoundary";
+import { Icon, IconButton } from "../components/Icon";
 import { NewSessionScreen } from "../components/NewSessionScreen";
 import { ProjectList } from "../components/ProjectList";
 import { QuitQuestion } from "../components/QuitQuestion";
@@ -568,6 +570,20 @@ const entries: Entry[] = [
         />,
       ],
       ["Core not connected", <Composer autoFocus={false} onSend={async () => false} unavailable="Core is not connected." />],
+    ],
+  },
+  {
+    name: "Icon",
+    states: [
+      ["At icon, beside ui type", <span className="gallery-icon-row"><Icon icon={Plus} /> New session</span>],
+      ["At icon-sm, beside ui-small type", <span className="gallery-icon-row"><Icon icon={ChevronDown} size="icon-sm" /> ersa <Icon icon={ChevronRight} size="icon-sm" /></span>],
+      ["At icon-xs, a mark in a tile", <span className="gallery-icon-row"><Icon icon={ChevronRight} size="icon-xs" /></span>],
+      ["A mark that carries state, in its tone", <span className="gallery-icon-row"><span className="gallery-icon-caution"><Icon icon={ShieldAlert} size="icon-sm" /></span> Not trusted</span>],
+      ["Icon button", <IconButton icon={X} label="Close" />],
+      ["Icon button hover", <IconButton icon={X} label="Close" force="hover" />],
+      ["Icon button focus", <IconButton icon={X} label="Close" force="focus" />],
+      ["Icon button pressed", <IconButton icon={X} label="Close" force="pressed" />],
+      ["Icon button disabled", <IconButton icon={X} label="Close" disabled />],
     ],
   },
   {
