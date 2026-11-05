@@ -141,9 +141,6 @@
     "Trust",
     "Untrusted, its sessions use only your own settings."
   ],
-  "core/connection.ts": [
-    "Core's handshake could not be read; this window may be older than Core."
-  ],
   "session/controls.ts": [
     "Root workspace"
   ],

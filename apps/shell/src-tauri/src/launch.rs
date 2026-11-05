@@ -60,18 +60,20 @@ impl How {
 pub enum LaunchError {
     /// Something serves the endpoint but we may not talk to it: another
     /// user's process (the client refuses it), or a pipe that stayed busy.
-    #[error("cannot attach to Core at {endpoint}: {source}")]
+    #[error("Ersa can't open the connection. {endpoint}: {source}")]
     Attach { endpoint: String, source: io::Error },
-    #[error("cannot start Core ({program}): {source}")]
+    #[error("Ersa can't start its background process. {program}: {source}")]
     Spawn { program: String, source: io::Error },
     /// The launched Core exited before serving. `log` is the end of its output.
-    #[error("Core exited before it started serving ({status}){log}")]
+    #[error("Ersa's background process stopped before it was ready. It ended with {status}.{log}")]
     Exited { status: ExitStatus, log: String },
-    #[error("Core did not start serving at {endpoint} within {timeout:?}")]
+    #[error(
+        "Ersa's background process wasn't ready in time. Nothing answered at {endpoint} within {timeout:?}."
+    )]
     Timeout { endpoint: String, timeout: Duration },
     /// The location may not launch, and nothing serves it.
     #[error(
-        "nothing serves {endpoint}; start it first (a replay: ersa-core replay --fixture <path>)"
+        "Nothing is serving the endpoint Ersa is attached to. Start it first: {endpoint} (a replay: ersa-core replay --fixture <path>)"
     )]
     NotServing { endpoint: String },
 }
@@ -315,7 +317,7 @@ fn log_tail(path: &Path, start: u64) -> String {
     if tail.is_empty() {
         String::new()
     } else {
-        format!(":\n{tail}")
+        format!("\n{tail}")
     }
 }
 

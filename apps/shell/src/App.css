@@ -26,7 +26,7 @@
   flex: 1;
 }
 
-/* Core's tile, with the quit question above it while it is open. */
+/* The rail's foot, with the quit question above it while it is open. */
 .rail-core {
   display: flex;
   flex-direction: column;

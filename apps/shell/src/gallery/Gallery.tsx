@@ -4,7 +4,7 @@
 // A component built for the window gets an entry here in the same change.
 
 import { ChevronDown, ChevronRight, Plus, ShieldAlert, X } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { AddProject } from "../components/AddProject";
 import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
@@ -43,21 +43,20 @@ const projects: Project[] = [
   { id: "p4", host_id: "local", path: "D:\\Clones\\stranger", name: "stranger", vcs: "git", trusted: false },
 ];
 
+const connected: CoreView = {
+  phase: "connected",
+  link: 1,
+  how: "launched",
+  hello,
+  status: { sessions_running: 3, sessions_waiting: 1, uptime_s: 42, db_path: "" },
+  projects: { state: "loading" },
+  sessions: { state: "loading" },
+};
+
 const coreViews: [string, CoreView][] = [
   // The first two draw nothing: the foot is silent while all is well.
   ["Connecting", { phase: "connecting" }],
-  [
-    "Connected",
-    {
-      phase: "connected",
-      link: 1,
-      how: "launched",
-      hello,
-      status: { sessions_running: 3, sessions_waiting: 1, uptime_s: 42, db_path: "" },
-      projects: { state: "loading" },
-      sessions: { state: "loading" },
-    },
-  ],
+  ["Connected", connected],
   [
     "Attached to a label",
     {
@@ -77,10 +76,26 @@ const coreViews: [string, CoreView][] = [
     {
       phase: "failed",
       message:
-        "Core exited before it started serving (exit code: 1):\nersa-core: cannot open the database at C:\\Users\\me\\AppData\\Local\\Ersa\\ersa.db",
+        "Ersa's background process stopped before it was ready. It ended with exit code: 1.\nersa-core: cannot open the database at C:\\Users\\me\\AppData\\Local\\Ersa\\ersa.db",
     },
   ],
 ];
+
+/**
+ * The foot as Retry drives it, for the browser tests: Ersa connects for a moment, then the first Retry fails again
+ * and the next one reaches the sessions.
+ */
+function RetryingFoot({ view }: { view: CoreView }) {
+  const [shown, setShown] = useState(view);
+  const [tries, setTries] = useState(0);
+  const retry = () => {
+    const next = tries === 0 ? view : connected;
+    setTries(tries + 1);
+    setShown({ phase: "connecting" });
+    setTimeout(() => setShown(next), 500);
+  };
+  return <RailFoot view={shown} onRetry={retry} />;
+}
 
 const session = (id: string, title: string, created_at: string, tile: Session["tile"]): Session => ({
   id,
@@ -309,7 +324,10 @@ interface Entry {
 const entries: Entry[] = [
   {
     name: "RailFoot",
-    states: coreViews.map(([label, view]) => [label, <RailFoot view={view} onRetry={() => {}} />]),
+    states: coreViews.map(([label, view]) => [
+      label,
+      view.phase === "failed" ? <RetryingFoot view={view} /> : <RailFoot view={view} onRetry={() => {}} />,
+    ]),
   },
   {
     name: "QuitQuestion",

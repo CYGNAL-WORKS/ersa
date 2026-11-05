@@ -40,9 +40,10 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* The glyph sits on the note's first line, however many lines the note wraps to: with no text of its own, it
+   rests on the line's baseline, as tall as a lowercase letter. */
 .problem::before {
   content: "";
-  align-self: center;
   width: var(--size-glyph);
   height: var(--size-glyph);
   border-radius: var(--radius-pill);

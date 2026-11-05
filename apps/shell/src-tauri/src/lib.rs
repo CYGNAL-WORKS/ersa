@@ -157,7 +157,7 @@ async fn core_request(
 ) -> Result<Value, BridgeError> {
     // Clone the link out so the lock is not held while Core answers.
     let link = shell.link.lock().await.clone();
-    let link = link.ok_or_else(|| BridgeError::unavailable("not attached to Core"))?;
+    let link = link.ok_or_else(|| BridgeError::unavailable("Ersa isn't connected."))?;
     link.request(&method, params).await
 }
 
@@ -377,7 +377,7 @@ pub fn run() {
         None => CoreLocation::default_for_user(),
     };
     let shell = Shell {
-        location: location.map_err(|e| format!("cannot locate Core: {e}")),
+        location: location.map_err(|e| format!("Ersa can't work out where to connect. {e}")),
         label,
         link: Mutex::new(None),
         sink: Arc::new(std::sync::Mutex::new(None)),
