@@ -201,7 +201,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const select = (id: string) => dispatch({ type: "select", id });
 
   // The first message starts the session; on a failure the screen says why and the composer keeps the message
-  // (FLOW-NEW-SESSION-R08). Once started, it is the active session (R09).
+  // (FLOW-NEW-SESSION-R08). Once started, it is the active session (R12).
   const start = async (text: string, values: SessionValues) => {
     dispatch({ type: "sending" });
     const outcome = await startSession(client, values, text);
@@ -305,7 +305,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       w.kind === "root" ? { project: project.name, name: "Root workspace" } : w.vcs_ref ? { project: project.name, name: w.vcs_ref } : { project: project.name, name: w.path, path: true };
   }
 
-  // The session controls under the active session show its own values, as Core lists them (FLOW-NEW-SESSION-R09);
+  // The session controls under the active session show its own values, as Core lists them (FLOW-NEW-SESSION-R12);
   // they change nothing during a session. Absent until the session's workspace and project are known.
   const listed = sessions.state === "ready" ? sessions.sessions.find((s) => s.id === shown?.id) : undefined;
   const listedWorkspace = listed && workspaces[listed.workspace_id];

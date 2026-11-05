@@ -31,7 +31,7 @@ Alongside those, the everyday problem that started this: with ten sessions open 
 
 Ersa is a desktop application that hosts many agent sessions in one window. Each session drives a vendor's own CLI (Claude Code first, GitHub Copilot second, others and local inference later) through that CLI's structured-event interface, using the login the user already has. Each session runs in an isolated workspace on a local or remote host; isolation is provided by a pluggable version-control layer, git worktrees first and Perforce next.
 
-The window has four regions. The rail lists projects, their workspaces, and their sessions; each session is a rich tile showing title, backend, activity state, a context ring, and cost as the backend reports it, and a tile pulls out a shelf when the session needs the user (a permission, a question) so it can be answered without leaving the current session. The transcript renders the active session as a document with cards for tool calls and diffs. The composer is where the user writes. The workbench holds purpose-built panes: files, diff, a full hosted terminal in the workspace, browser.
+The window has four regions. The rail lists projects and, under each, its sessions; each session is a rich tile showing title, backend, activity state, a context ring, and cost as the backend reports it, and a tile pulls out a shelf when the session needs the user (a permission, a question) so it can be answered without leaving the current session. The transcript renders the active session as a document with cards for tool calls and diffs. The composer is where the user writes. The workbench holds purpose-built panes: files, diff, a full hosted terminal in the workspace, browser.
 
 Ersa exposes its own tool server to every session, so agents can message other sessions, read session state, and, with consent, show the user how to do something in the interface. Users can add their own tools to that server. Packs are a neutral description of agents, skills, tool servers, and prompts, rendered into each backend's native format and fetched from a simple versioned source. Modes are named presets (base instructions, allowed tools, tool servers) chosen per session.
 
@@ -95,6 +95,7 @@ Verified by review at this level; testable requirements live in the flow and pro
 
 ## Changes
 
+- 2026-11-05: the rail lists projects and their sessions; workspaces are not a level in it (LAY-SHELL). No requirement IDs changed.
 - 2026-11-02: the "Beautiful and calm" principle follows ADR 0019's visual direction, and ADR 0019 joins the front matter. No requirement IDs changed.
 - 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-01: ADR 0017 replaces ADR 0010 in the front matter. No requirement IDs changed.

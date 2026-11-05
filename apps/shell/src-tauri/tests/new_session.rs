@@ -74,7 +74,7 @@ fn default_of(choices: &Value) -> Value {
 
 // verifies: FLOW-NEW-SESSION-R03
 // verifies: FLOW-NEW-SESSION-R04
-// verifies: FLOW-NEW-SESSION-R09
+// verifies: FLOW-NEW-SESSION-R12
 #[tokio::test]
 async fn the_first_message_creates_the_workspace_the_session_and_its_first_turn() {
     let dir = tempfile::tempdir().expect("temp dir");
@@ -138,7 +138,7 @@ async fn the_first_message_creates_the_workspace_the_session_and_its_first_turn(
             .await;
             assert!(sent["turn"].as_u64().is_some(), "a turn: {sent}");
 
-            // The session is listed under its workspace with a tile, and
+            // The session is listed with a tile, and
             // with the values it started with, for the session controls.
             let listed = sessions(&link).await;
             assert_eq!(listed.len(), 1);

@@ -77,7 +77,7 @@ export function stage(state: StageState, action: StageAction): StageState {
         message: action.firstSend.message,
         ...(action.firstSend.giveBack ? { text: action.text } : {}),
       };
-      // The session becomes the active one (FLOW-NEW-SESSION-R09); the screen stays until the window follows it,
+      // The session becomes the active one (FLOW-NEW-SESSION-R12); the screen stays until the window follows it,
       // and goes now when the window already does.
       if (state.following === action.id) return { ...state, activeId: action.id, opening: undefined, composing: undefined, starting: undefined, firstSend };
       return { ...state, activeId: action.id, opening: action.id, firstSend };
