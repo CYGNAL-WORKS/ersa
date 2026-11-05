@@ -32,6 +32,50 @@ Ersa can't read the connection's handshake. This window may need updating.
 
 The connection status
 
+### `rail.tile.untitledLabel`
+
+Untitled session
+
+### `rail.tile.startingStatus`
+
+Starting
+
+### `rail.tile.workingStatus`
+
+Working
+
+### `rail.tile.disconnectedStatus`
+
+Disconnected
+
+### `rail.tile.errorStatus`
+
+Error
+
+### `rail.tile.endedStatus`
+
+Ended
+
+### `rail.tile.unknownStateStatus`
+
+Unknown state
+
+### `rail.tile.permissionWant`
+
+Needs permission
+
+### `rail.tile.questionWant`
+
+Has a question
+
+### `rail.tile.needsYouWant`
+
+Needs you
+
+### `rail.tile.needsYouCountWant`
+
+Needs you · {count}
+
 ## `transcript`
 
 ## `composer`
@@ -39,6 +83,14 @@ The connection status
 ## `newSession`
 
 ## `sessionControls`
+
+### `sessionControls.contextRing.noneLabel`
+
+Context: none used yet
+
+### `sessionControls.contextRing.usedLabel`
+
+Context: {percent} percent used
 
 ## `quit`
 

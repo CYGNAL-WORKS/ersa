@@ -28,11 +28,6 @@
     "Sending…",
     "Write to the agent"
   ],
-  "components/ContextRing.tsx": [
-    "Context:",
-    "Context: none used yet",
-    "percent used"
-  ],
   "components/ErrorBoundary.tsx": [
     "could not be shown:"
   ],
@@ -88,12 +83,10 @@
   ],
   "components/SessionList.tsx": [
     "Loading…",
-    "Needs you ·",
     "No sessions yet.",
     "Sessions",
     "Sessions appear once Core is connected.",
     "Start one from a project above.",
-    "Untitled session",
     "Workspace"
   ],
   "components/SessionTitle.tsx": [

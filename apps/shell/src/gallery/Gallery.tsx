@@ -124,6 +124,49 @@ const sessions: Session[] = [
   session("s5", "A session whose backend exited with an error", "2026-11-01T06:00:00Z", { state: "error", pending: [] }),
 ];
 
+/** A tile in every state and want RAIL.md gives, newest first in this order. */
+const ring = { context_tokens: 84_000, context_window: 200_000 };
+const everyState: Session[] = (
+  [
+    ["Start-up", { state: "starting", pending: [] }],
+    ["Tidy the gallery", { state: "running", pending: [], cost_usd_total: 0.19, ...ring }],
+    ["Fix the flaky reconnect test", { state: "waiting_user", pending: [{ kind: "permission", request_id: "a" }], cost_usd_total: 0.82, ...ring }],
+    ["Rotate the runner image", { state: "waiting_user", pending: [{ kind: "question", request_id: "b" }], ...ring }],
+    [
+      "Port the replay server",
+      {
+        state: "waiting_user",
+        pending: [
+          { kind: "question", request_id: "c" },
+          { kind: "permission", request_id: "d" },
+          { kind: "question", request_id: "e" },
+        ],
+        cost_usd_total: 3.1,
+        ...ring,
+      },
+    ],
+    ["Three questions", { state: "running", pending: ["f", "g", "h"].map((id) => ({ kind: "question", request_id: id })) }],
+    ["A request of a newer kind", { state: "waiting_user", pending: [{ kind: "approval", request_id: "i" } as unknown as Session["tile"]["pending"][number]] }],
+    ["Explain the raw log", { state: "idle", pending: [], cost_usd_total: 12.4, ...ring }],
+    ["Summarize the protocol briefs", { state: "idle", pending: [], cost_usd_total: 8.12, context_tokens: 182_000, context_window: 200_000 }],
+    ["Waiting, with nothing pending", { state: "waiting_user", pending: [] }],
+    ["Sparse WSL disks", { state: "disconnected", pending: [], cost_usd_total: 0.44, ...ring }],
+    ["Rename across hosts", { state: "error", pending: [], cost_usd_total: 0.02, ...ring }],
+    ["Evaluate the DeepSeek harness", { state: "ended", pending: [], cost_usd_total: 3.9, ...ring }],
+    ["A state from a newer Core", { state: "paused" as unknown as Session["tile"]["state"], pending: [] }],
+    ["", { state: "idle", pending: [] }],
+  ] as const satisfies readonly (readonly [string, Session["tile"]])[]
+).map(([title, tile], i) => ({
+  ...session(`e${i}`, title, `2026-11-01T${String(20 - i).padStart(2, "0")}:00:00Z`, tile),
+  title: title || undefined,
+}));
+
+/** Two tiles, the second of which shows a pointer, keyboard or active state. */
+const pointerPair: Session[] = [
+  session("p1", "At rest", "2026-11-01T10:00:00Z", { state: "idle", pending: [], cost_usd_total: 0.82, ...ring }),
+  session("p2", "The one in question", "2026-11-01T09:00:00Z", { state: "running", pending: [], cost_usd_total: 0.82, ...ring }),
+];
+
 /** The same sessions in two workspaces of one project, as the rail shows them once it knows the workspaces. */
 const byWorkspaceSessions = sessions.map((s) => ({ ...s, workspace_id: s.id === "s1" || s.id === "s3" ? "w-root" : "w-fix" }));
 const workspaceNames = {
@@ -426,17 +469,23 @@ const entries: Entry[] = [
         "By workspace, names still being read",
         <SessionList view={{ state: "ready", sessions: byWorkspaceSessions }} activeId="s2" onSelect={() => {}} workspaces={{}} />,
       ],
+      ["Every state", <SessionList view={{ state: "ready", sessions: everyState }} onSelect={() => {}} />],
+      // A resting tile above each forced one, so the two read apart in the screenshot.
+      ["Hover", <SessionList view={{ state: "ready", sessions: pointerPair }} onSelect={() => {}} force={{ id: "p2", state: "hover" }} />],
+      ["Pressed", <SessionList view={{ state: "ready", sessions: pointerPair }} onSelect={() => {}} force={{ id: "p2", state: "pressed" }} />],
+      ["Focus", <SessionList view={{ state: "ready", sessions: pointerPair }} onSelect={() => {}} force={{ id: "p2", state: "focus" }} />],
+      ["Active", <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} />],
       [
-        "Hover",
-        <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} force={{ id: "s3", state: "hover" }} />,
+        "Active, under the pointer",
+        <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} force={{ id: "p2", state: "hover" }} />,
       ],
       [
-        "Focus on the active tile",
-        <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} force={{ id: "s2", state: "focus" }} />,
+        "Active, pressed",
+        <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} force={{ id: "p2", state: "pressed" }} />,
       ],
       [
-        "Pressed",
-        <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} force={{ id: "s3", state: "pressed" }} />,
+        "Active, focused",
+        <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} force={{ id: "p2", state: "focus" }} />,
       ],
       ["Error", <SessionList view={{ state: "error", message: "Core could not read its database." }} onSelect={() => {}} />],
       ["Core unavailable", <SessionList view={{ state: "unavailable" }} onSelect={() => {}} />],
