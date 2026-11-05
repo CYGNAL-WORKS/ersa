@@ -90,7 +90,7 @@ describe("the session controls under a running session", () => {
   const running = { host_id: "local", backend: "claude", model: "claude-small", effort: "low", permission_mode: "edits" };
   const branch = { project_id: "p1", kind: "isolated" as const, vcs_ref: "ersa/fix-build" };
 
-  // verifies: FLOW-NEW-SESSION-R09
+  // verifies: FLOW-NEW-SESSION-R12
   it("show the session's own values and its branch, not the host's defaults", () => {
     const shown = sessionShown(running, branch, [backend("claude"), backend("copilot")]);
     expect(shown.values).toEqual({
@@ -105,7 +105,7 @@ describe("the session controls under a running session", () => {
     expect(shown.workspaceLabel).toBe("ersa/fix-build");
   });
 
-  // verifies: FLOW-NEW-SESSION-R09
+  // verifies: FLOW-NEW-SESSION-R12
   it("keep the session's values when the host lists no backend, or no longer offers them", () => {
     const none = sessionShown(running, branch, []);
     expect(none.values.backend).toBe("claude");
