@@ -7,8 +7,10 @@
 //   node scripts/merge-pr.mjs <n> --reviewed <sha> --dry-run  say whether it would
 //
 // The gate: the pull request is open, not a draft, and mergeable; every latest
-// CI check passed; and the head is the reviewed commit, or differs from it only
-// by clean merges of main. A merge of main that resolved a conflict by hand
+// CI check passed; the head's docs/briefs/INBOX.md has no open entry, since an
+// entry is a brief gap the branch's code depends on and waits for the planning
+// commit that closes it (ADR 0025); and the head is the reviewed commit, or
+// differs from it only by clean merges of main. A merge of main that resolved a conflict by hand
 // changes code no reviewer saw, so it needs a new review. The head need not
 // contain main's tip: the merge queue builds and tests the merge before main
 // moves (ADR 0023). The enqueue names the head it checked (--match-head-commit),
@@ -60,10 +62,19 @@ export function ciRefusals(rollup) {
   return out;
 }
 
+// A commit after the review that changes nothing a reviewer read: a merge of
+// main with no hand-resolved conflict. The merge review reads it the same way.
+export const cleanMergeOfMain = (c) => c.merge && c.fromMain && c.clean;
+
+// How many open entries (`- [ ]` lines) an inbox file's text holds.
+export const openInboxEntries = (text) => text.split(/\r?\n/).filter((l) => /^\s*-\s*\[ \]/.test(l)).length;
+
 // Why the pull request may not merge; empty when it may. `sinceReview` lists
-// the commits on the branch after the reviewed one that main does not have.
-export function refusals({ pr, reviewedInBranch, sinceReview }) {
+// the commits on the branch after the reviewed one that main does not have;
+// `openInbox` counts the head's open inbox entries.
+export function refusals({ pr, reviewedInBranch, sinceReview, openInbox = 0 }) {
   const out = [];
+  if (openInbox) out.push(`${openInbox} open inbox entr${openInbox === 1 ? "y needs" : "ies need"} a planning pass`);
   if (pr.state !== "OPEN") out.push(`it is ${pr.state.toLowerCase()}`);
   if (pr.isDraft) out.push("it is a draft");
   if (pr.mergeable !== "MERGEABLE") out.push(`GitHub reports it ${pr.mergeable.toLowerCase()}`);
@@ -77,6 +88,7 @@ export function refusals({ pr, reviewedInBranch, sinceReview }) {
   if (!reviewedInBranch) out.push("the reviewed commit is not in the branch's history; review the head");
   for (const c of sinceReview ?? []) {
     const short = c.sha.slice(0, 7);
+    if (cleanMergeOfMain(c)) continue;
     if (!c.merge) out.push(`${short}, after the review, is not a merge; review the head`);
     else if (!c.fromMain) out.push(`${short}, after the review, merges a branch other than main; review the head`);
     else if (!c.clean) out.push(`${short}, after the review, resolved a conflict by hand; review the head`);
@@ -197,7 +209,19 @@ function gate(args, run, wait) {
   const reviewedInBranch = isAncestor(reviewed.out, head);
   const sinceReview = reviewedInBranch ? commitsSinceReview({ reviewed: reviewed.out, head, git: (a) => run("git", a) }) : [];
 
-  const reasons = refusals({ pr, reviewedInBranch, sinceReview });
+  // The head's inbox, read from git: ls-tree prints nothing when the file is
+  // absent, and a git failure is a tool error, so it never reads as empty.
+  const INBOX = "docs/briefs/INBOX.md";
+  const listed = run("git", ["ls-tree", head, "--", INBOX]);
+  if (!listed.ok) fail(`git ls-tree failed: ${listed.err}`);
+  let openInbox = 0;
+  if (listed.out) {
+    const inbox = run("git", ["show", `${head}:${INBOX}`]);
+    if (!inbox.ok) fail(`git show ${INBOX} failed: ${inbox.err}`);
+    openInbox = openInboxEntries(inbox.out);
+  }
+
+  const reasons = refusals({ pr, reviewedInBranch, sinceReview, openInbox });
   if (reasons.length) throw new Refused(n, reasons);
   if (dryRun) return { stdout: `#${n} may enter the merge queue at ${head.slice(0, 7)}\n` };
   // --auto on a branch with a merge queue adds the pull request to the queue,

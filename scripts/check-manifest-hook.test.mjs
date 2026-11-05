@@ -38,11 +38,8 @@ test("ignores everything that is not a commit", () => {
   }
 });
 
-test("open inbox entries alone do not block", () => {
-  assert.deepEqual(blockingProblems("## Problems\n\n- 2 open inbox entries need a planning pass\n"), []);
-  assert.deepEqual(blockingProblems("## Problems\n\n- 1 open inbox entry need a planning pass\n- x: missing id\n"), [
-    "- x: missing id",
-  ]);
+test("every listed problem blocks", () => {
+  assert.deepEqual(blockingProblems("## Problems\n\n- x: missing id\r\n- y: cycle\n"), ["- x: missing id", "- y: cycle"]);
   assert.deepEqual(blockingProblems("## Problems\n\nNone.\n"), []);
 });
 
@@ -98,14 +95,6 @@ test("a structural problem blocks the commit and is named", () => {
   assert.match(run.stderr, /tests cite X-R01, which no brief defines/);
 });
 
-test("open inbox entries alone allow the commit", () => {
-  const manifest = "## Problems\n\n- 1 open inbox entry need a planning pass\n";
-  const dir = repo({ manifest, status: 1 });
-  writeFileSync(join(dir, "docs", "MANIFEST.md"), manifest);
-  spawnSync("git", ["-C", dir, "add", "docs"]);
-  assert.equal(hook('git commit -m "x"', dir).status, 0);
-});
-
 test("a regenerated file left unstaged blocks, unless the commit stages it", () => {
   const dir = repo({ manifest: "## Problems\n\nNone.\n\n<!-- new -->\n" });
   const run = hook('git commit -m "x"', dir);
@@ -140,11 +129,8 @@ test("git -C naming another repository runs none of its scripts", () => {
   assert.ok(!existsSync(join(own, "ran")));
 });
 
-test("a check that crashes blocks, even when the old manifest lists only open inbox entries", () => {
-  const manifest = "## Problems\n\n- 1 open inbox entry need a planning pass\n";
+test("a check that crashes blocks with its own output", () => {
   const dir = repo({ crash: true });
-  writeFileSync(join(dir, "docs", "MANIFEST.md"), manifest);
-  spawnSync("git", ["-C", dir, "add", "docs"]);
   const run = hook('git commit -m "x"', dir);
   assert.equal(run.status, 2);
   assert.match(run.stderr, /stub crashed/);
@@ -155,10 +141,4 @@ test("a failing check that reports no problem blocks with its stderr", () => {
   const run = hook('git commit -m "x"', dir);
   assert.equal(run.status, 2);
   assert.match(run.stderr, /manifest check failed/);
-});
-
-test("a failing check with only open inbox entries allows the commit", () => {
-  const manifest = ["## Problems", "", "- 1 open inbox entry need a planning pass", ""].join("\n");
-  const dir = repo({ manifest, status: 1 });
-  assert.equal(hook('git commit -am x', dir).status, 0);
 });

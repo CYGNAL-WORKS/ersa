@@ -13,7 +13,7 @@ interface ErrorBoundaryProps {
 
 /**
  * Keeps a part of the window that failed to render from taking the rest
- * down: the Core tile and the rail stay usable when a session cannot be shown.
+ * down: the rail and its foot stay usable when a session cannot be shown.
  */
 export class ErrorBoundary extends Component<ErrorBoundaryProps, { error?: Error; key?: string }> {
   state: { error?: Error; key?: string } = {};

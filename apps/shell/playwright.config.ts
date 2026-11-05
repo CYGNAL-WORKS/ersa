@@ -2,8 +2,11 @@ import { defineConfig } from "@playwright/test";
 
 // Screenshot tests against the gallery (ADR 0008). Baselines are rendered on
 // Linux in the Playwright container, and CI's runner has the same OS, Chromium,
-// and fonts, so fonts and anti-aliasing match; regenerate them with
-// `pnpm test:screenshots:update` (Docker), never on a developer's own OS.
+// and fonts, so fonts and anti-aliasing match. Regenerate them on GitHub with
+// `node scripts/render-baselines.mjs` from the repository root (the branch must
+// be pushed, and .github/workflows/screenshots.yml must be on main), or
+// locally with `pnpm test:screenshots:update` (Docker); never on a
+// developer's own OS.
 export default defineConfig({
   testDir: "e2e",
   // One baseline per test, with no platform suffix: only Linux renders them.
