@@ -1,4 +1,4 @@
-/* The rail's foot: a note after a danger glyph, with no tile and no fill (docs/design/RAIL.md, The foot's problem). */
+/* The rail's foot: a note after a glyph, with no tile and no fill (docs/design/RAIL.md, The foot's problem). */
 
 .rail-foot {
   display: flex;
@@ -28,13 +28,14 @@
   overflow-wrap: anywhere;
 }
 
-/* While Ersa is trying again, the glyph before the line is a turning ring, not the danger dot: the arc is
-   ink-muted on a line-coloured track, one turn per motion-loop-ring. The ring holds still with reduced motion. */
+/* While Ersa is trying again, the glyph before the line is a turning ring, not the danger dot: ink-muted, open by
+   a quarter so its turning shows, one turn per motion-loop-ring. Held still by reduced motion, it still reads as
+   a ring. */
 .problem.rail-foot-trying::before {
   box-sizing: border-box;
   background: none;
-  border: var(--line-hairline) solid var(--color-line);
-  border-top-color: var(--color-ink-muted);
+  border: var(--line-hairline) solid var(--color-ink-muted);
+  border-top-color: var(--color-line);
   animation: rail-foot-turn var(--motion-loop-ring) var(--motion-linear) infinite;
 }
 
