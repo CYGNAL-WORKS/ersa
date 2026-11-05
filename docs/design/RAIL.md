@@ -11,17 +11,17 @@ The owner reviewed this design as a mockup. Its renders are in `reference/`: `ra
 - **The tree** scrolls between New session and the foot. Projects sit `space-sm` apart, and the tiles inside one `space-xs` apart.
 - **Add project** is a quiet row at the end of the tree: `size-control` high, `ui-small` in `ink-muted`, a plus icon at `size-icon-sm` before its label.
 - **Notes** (loading, no projects, a list that could not be read) are `ui` text in `ink-muted`; a hint or a reason beneath one is `ui-small`. A list that could not be read leads with a danger glyph at `size-glyph`.
-- **The foot's problem** is a note like those, after a danger glyph: no tile and no fill. Its reason sits beneath in `ui-small`, and Retry beneath that is the button every other surface uses. It fades in over `motion-settle` with `motion-ease-out`. "Attached to" and its label are one line of `ui-small` in `ink-muted`.
+- **The foot's problem** is a note like those, with no tile and no fill. While Ersa is trying again it follows a ring at `size-glyph` in `ink-muted`, turning once per `motion-loop-ring`; once Ersa has stopped trying, a danger glyph. Its reason sits beneath in `ui-small`, and Retry beneath that is the button every other surface uses. It fades in over `motion-settle` with `motion-ease-out`. "Attached to" and its label are one line of `ui-small` in `ink-muted`.
 
-Every control without an edge here (a tile, a project heading, Add project, an icon button) follows `DESIGN.md`'s rule for one: `material-hover` under the pointer, `material-pressed` when pressed, an `ink` edge with keyboard focus, `radius-md` corners. Fills change over `motion-quick` with `motion-ease-out`.
+A tile, a project heading, Add project and an icon button are controls without an edge, and follow `DESIGN.md`'s rule for one (Pointer and press). Their fills change over `motion-quick` with `motion-ease-out`. Unavailable, one reads `ink-faint` and does not change under the pointer.
 
 ## A project heading
 
 - One row, `size-control` high, in `ui-small` at the heading weight and `ink-muted`; under the pointer it reads `ink`.
 - From the leading edge: a chevron at `size-icon-sm` in `ink-faint`, pointing down when the project is expanded and right when it is collapsed; the project's name, cut with an ellipsis; then the host's name at the regular weight when the project is not on the local machine.
-- Toward the trailing edge, at the regular weight: "Not trusted" after a shield icon at `size-icon-sm` in `caution`, when the project is not trusted; and, when the project is collapsed, how many sessions it holds, after a glyph at `size-glyph` in the tone of what they want when any of them needs the user. A collapsed project that is not trusted shows the shield alone before the count.
+- Toward the trailing edge, at the regular weight: "Not trusted" after a shield icon at `size-icon-sm` in `caution`, when the project is not trusted; and, when the project is collapsed, how many sessions it holds, after a glyph at `size-glyph` in the tone of what they want when any of them needs the user. A collapsed project that is not trusted shows both, "Not trusted" first.
 - New session and More are icon buttons at the trailing edge, `size-control` square, in `ink-muted`, reading `ink` under the pointer. They fade in and out over `motion-quick` with `motion-ease-out` as the pointer or keyboard focus enters and leaves the heading. Their place is kept while they are hidden, so nothing in the heading shifts.
-- Collapsing and expanding, the tiles slide closed or open and fade over `motion-settle` with `motion-ease-out`, and the chevron turns over `motion-quick`.
+- Collapsing and expanding, the tiles slide closed or open and fade over `motion-settle` with `motion-ease-out`, and the chevron turns over `motion-quick` with `motion-ease-out`.
 
 ## A tile
 
@@ -30,7 +30,7 @@ A tile is two lines with no box at rest, padded `space-sm`. Line two keeps its h
 | | Leading, `size-icon-sm` wide | Middle | Trailing |
 |---|---|---|---|
 | Line one | the backend's icon, `ink-muted` | the title in `ui`, cut with an ellipsis | the state mark, in a `size-control-sm` square |
-| Line two | the context ring at `size-icon-xs`, centered under the icon | a phrase, then the cost, in `ui-small` with tabular figures | |
+| Line two | the context ring at `size-ring-sm`, centered under the icon | a phrase, then the cost, in `ui-small` with tabular figures | |
 
 **The state mark**, by the session's state:
 
@@ -43,6 +43,7 @@ A tile is two lines with no box at rest, padded `space-sm`. Line two keeps its h
 | Disconnected | a hollow ring at `size-glyph` with a `hairline` edge in `ink-faint` | "Disconnected" |
 | Error | a glyph at `size-glyph` in `danger` | "Error" |
 | Ended | nothing | "Ended" |
+| One Ersa doesn't know | nothing | "Unknown state" |
 
 - **Line two** is `ink-muted`: the phrase, then a middle dot, then the cost. The dot stands only between a phrase and a cost.
 - **The title** is `ink`, and `ink-muted` when the session is idle or has ended. An unseen session's title reads at the heading weight in `ink`.
@@ -52,4 +53,4 @@ A tile is two lines with no box at rest, padded `space-sm`. Line two keeps its h
 
 **The active session's tile** takes `material-open-session` and a `line` edge, and does not change under the pointer or when pressed: it is already chosen. With keyboard focus its edge turns `ink`, as any tile's does.
 
-With reduced motion on, nothing here moves or fades: the arc and the working glyph hold still at full tone, a chevron appears without its breath, and a heading's tiles and buttons appear and go at once.
+With reduced motion on, nothing here moves or fades: the arc, the foot's ring and the working glyph hold still at full tone, a chevron appears without its breath, and a heading's tiles and buttons appear and go at once.
