@@ -1,0 +1,58 @@
+/* An icon takes its size from a token and its colour from the text around it (currentColor). */
+.icon {
+  flex: none;
+  width: var(--size-icon);
+  height: var(--size-icon);
+}
+.icon[data-size="icon-sm"] {
+  width: var(--size-icon-sm);
+  height: var(--size-icon-sm);
+}
+.icon[data-size="icon-xs"] {
+  width: var(--size-icon-xs);
+  height: var(--size-icon-xs);
+}
+
+/* An icon button follows the rule RAIL.md gives every control without an edge: size-control square, material
+   under the pointer, an ink edge with keyboard focus. */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--size-control);
+  height: var(--size-control);
+  padding: 0;
+  color: var(--color-ink-muted);
+  background: transparent;
+  border: var(--line-hairline) solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background var(--motion-quick) var(--motion-ease-out),
+    color var(--motion-quick) var(--motion-ease-out);
+}
+.icon-button:hover:not(:disabled),
+.icon-button[data-force="hover"] {
+  color: var(--color-ink);
+  background: var(--material-hover);
+}
+.icon-button:active:not(:disabled),
+.icon-button[data-force="pressed"] {
+  color: var(--color-ink);
+  background: var(--material-pressed);
+}
+.icon-button:focus-visible,
+.icon-button[data-force="focus"] {
+  outline: none;
+  border-color: var(--color-ink);
+}
+.icon-button:disabled {
+  color: var(--color-ink-faint);
+  cursor: default;
+}
+@media (prefers-reduced-motion: reduce) {
+  .icon-button {
+    transition: none;
+  }
+}
