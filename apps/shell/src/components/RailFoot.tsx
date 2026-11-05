@@ -22,7 +22,7 @@ export function RailFoot({ view, onRetry }: RailFootProps) {
       // A status region: assistive technology reads it politely when it appears.
       return (
         <div className="rail-foot" role="status">
-          <p className="problem">{t("rail.foot.reconnectingError")}</p>
+          <p className="problem rail-foot-trying">{t("rail.foot.reconnectingError")}</p>
           {foot.reason && <p className="rail-foot-reason">{foot.reason}</p>}
         </div>
       );
