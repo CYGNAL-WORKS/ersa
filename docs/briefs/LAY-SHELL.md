@@ -33,14 +33,14 @@ The transcript header shows the active session's title. The title is renamed in 
 
 ## The rail
 
-From top to bottom: New session, the projects with their sessions, Add project, and the foot. `docs/design/RAIL.md` says how each part and each state looks.
+From top to bottom: New session, the projects with their sessions, Add project, and the foot. The design documents say how each part and each state looks.
 
 - **New session** opens the new-session screen.
 - **Projects.** Each project is a project heading with its sessions beneath it as tiles, newest first; the projects are in the order Core lists them. A project with no sessions shows its heading alone. The heading names the project, and its host when the project is not on the local machine. Workspaces are not a level in the rail: the session controls name a session's workspace. A session whose project Ersa can't tell sits at the end of the tree under no heading, so a session is never missing from the rail.
 - **Collapsing.** A heading collapses and expands its sessions, and stays as the user left it while the window is open. Collapsed, it says how many sessions it holds, with a mark when any of them needs the user.
 - **A heading's actions** appear under the pointer or keyboard focus: New session, which opens the new-session screen for that project, and More, which holds trusting the project or withdrawing its trust. A project the user has not trusted says so on its heading, collapsed or not.
 - **Tiles.** A tile shows the backend's icon, the session's title, a mark for its state, the context ring and the cost as reported. The cost appears once the backend has reported one, and the ring once it has reported both the tokens used and a context window larger than nothing; a session with no title yet is named as untitled. Choosing a tile makes its session the active one. The active session's tile is visibly distinct, quietly.
-- **State.** A tile tells starting, working, error and disconnected apart by its mark, and names in words every state but working and idle. An idle or ended session has no mark. A state Ersa doesn't know reads as idle.
+- **State.** A tile tells starting, working, error and disconnected apart by its mark, and names in words every state but working and idle. An idle or ended session has no mark. A state Ersa doesn't know has no mark either, and the tile says in words that Ersa doesn't know it.
 - **Needs you.** A session with a pending permission request or question shows the shelf's handle in place of its state mark, in the tone of what it wants, and names the want: a permission request, a question, or how many requests when more than one is pending. With both kinds pending, the tone is the permission request's, and a request of a kind Ersa doesn't know reads as needing the user in that tone too. The pending requests decide this, whatever state Core reports: a session reported as waiting on the user with nothing pending reads as idle.
 - **Unseen.** When Core reports a session that is not the active one as idle after working, the session is unseen, and its tile says so, until the user makes it active. Ersa keeps this while the window is open only.
 - **Context.** The context ring is near full from 85 percent of the context window, on a tile and in the session controls alike, and never shows more than full.
@@ -58,7 +58,8 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 - Whether the shelf overlays the transcript or pushes it, and how several pending shelves queue.
 - Where global status (connected hosts, usage today) lives, and where Core's version and API version are shown now that the rail's foot is silent while all is well.
 - What a tile's More menu holds (Rename, Stop and Remove are drawn), and what Stop and Remove do to the session's workspace.
-- Whether collapsed headings and unseen sessions are remembered when Ersa restarts, and whether a turn too short for a tile to show as working should still leave its session unseen.
+- Whether collapsed headings and unseen sessions are remembered when Ersa restarts, and whether a turn too short for a tile to show as working, or one that finishes while Ersa can't reach Core, should still leave its session unseen.
+- Whether the tree keeps its tiles, marked as out of date, while Ersa can't reach Core, so a short drop doesn't empty the rail.
 - Where the control that collapses the rail lives, and the one that shows it again.
 - How a list that could not be read is read again while Core stays reachable. Today the lists are read when Ersa connects and after the user changes one.
 - Keyboard model: which shortcuts the shell owns versus the active pane.
@@ -70,7 +71,7 @@ The rail is a list of projects above one list of sessions grouped under a headin
 
 ## Changes
 
-- 2026-11-05: the rail specified from the owner-reviewed mockup (The rail): projects are headings with their sessions beneath and workspaces are not a level; a tile's contents and states; the shelf's handle on a session that needs the user; unseen sessions; what the tree says when a list can't be read; a foot that is silent while all is well. The context ring is near full from 85 percent, which closes that open question; FLOW-NEW-SESSION-R12 replaces R09 for where a new session's tile sits. No requirement IDs changed.
+- 2026-11-05: the rail specified from the owner-reviewed mockup (The rail): projects are headings with their sessions beneath and workspaces are not a level; a tile's contents and states; the shelf's handle on a session that needs the user; unseen sessions; what the tree says when a list can't be read; a foot that is silent while all is well. The context ring is near full from 85 percent, which closes that open question; FLOW-NEW-SESSION-R13 replaces R09 for where a new session's tile sits. No requirement IDs changed.
 - 2026-11-02: the context-ring open question no longer points at DESIGN.md's gauge vocabulary, which ADR 0019 removed. Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: from #55 inbox: Built so far added: sessions grouped by workspace, the tree still to build. No requirement IDs changed.
 

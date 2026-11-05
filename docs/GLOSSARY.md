@@ -50,6 +50,8 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Rail**: the left column listing projects and, under each, its sessions. *Not: sidebar.*
 - **Tile**: a session's entry in the rail: backend icon, title, state, context ring, and cost as reported by the backend.
 - **Project heading**: a project's row in the rail, above the tiles of its sessions. It collapses and expands them.
+- **Unseen session**: a session that went idle after working while it was not the active session, until the user makes it active.
+- **Foot**: the bottom of the rail. Empty unless Ersa can't reach Core.
 - **Shelf**: the panel that pulls out from a tile when the session needs the user (a permission request or a question), answerable without changing the active session. The chevron on the tile is its handle. *Not: drawer, flyout.*
 - **Context ring**: the circular gauge showing the share of its context window a session has used, on its tile and in the session controls.
 - **Transcript**: the main area rendering the active session's projection as a document with cards. *Not: chat history, chat log.*
