@@ -185,7 +185,7 @@ async fn a_core_that_cannot_start_is_reported_with_its_output() {
         .err()
         .expect("Core cannot start");
     let message = error.to_string();
-    assert!(message.contains("exited"), "{message}");
+    assert!(message.contains("stopped before it was ready"), "{message}");
     assert!(message.contains("--no-such-flag"), "{message}");
     assert!(!message.contains("earlier run"), "{message}");
 }

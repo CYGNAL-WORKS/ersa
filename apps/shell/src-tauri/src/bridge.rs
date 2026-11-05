@@ -54,7 +54,7 @@ pub fn timeout_for(method: &str) -> Duration {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BridgeError {
     /// Core answered with an error.
-    #[error("Core answered with an error: {}", error.message)]
+    #[error("The request failed: {}", error.message)]
     Rpc { error: ErrorObject },
     /// No answer: not attached, the connection closed, or Core timed out.
     #[error("{message}")]
@@ -68,6 +68,12 @@ impl BridgeError {
         }
     }
 }
+
+/// What a request that timed out tells the window, and what the link's close
+/// tells it when a new connection got no answer either.
+const NO_ANSWER: &str = "Ersa got no answer in time.";
+const NO_ANSWER_ANYWHERE: &str =
+    "Ersa got no answer in time, and a new connection got no answer either.";
 
 /// Something Core sent that nobody asked for.
 #[derive(Debug, Clone, PartialEq)]
@@ -141,7 +147,10 @@ impl CoreLink {
             while let Some(mut line) = lines.recv().await {
                 line.push('\n');
                 if let Err(e) = write_line(&mut write, &line).await {
-                    close(&writer_shared, Some(format!("cannot write to Core: {e}")));
+                    close(
+                        &writer_shared,
+                        Some(format!("Ersa can't write to the connection. {e}")),
+                    );
                     break;
                 }
             }
@@ -153,8 +162,8 @@ impl CoreLink {
             let reason = loop {
                 match next_line(&mut read, MAX_LINE_BYTES).await {
                     Ok(Some(line)) => dispatch(&reader_shared, &line),
-                    Ok(None) => break "Core closed the connection".to_string(),
-                    Err(e) => break format!("cannot read from Core: {e}"),
+                    Ok(None) => break "The connection closed.".to_string(),
+                    Err(e) => break format!("Ersa can't read from the connection. {e}"),
                 }
             };
             close(&reader_shared, Some(reason));
@@ -200,7 +209,7 @@ impl CoreLink {
         // either sees the entry and fails it, or is seen here.
         if self.is_closed() {
             self.forget(id);
-            return Err(BridgeError::unavailable("the connection to Core is closed"));
+            return Err(BridgeError::unavailable("The connection is closed."));
         }
         let mut request = Request::new(RequestId::Number(id), method, Value::Null);
         request.params = params;
@@ -210,7 +219,7 @@ impl CoreLink {
         if line.len() > MAX_LINE_BYTES {
             self.forget(id);
             return Err(BridgeError::unavailable(format!(
-                "{method} is {} bytes, more than Core accepts on one line",
+                "The request is too large to send. {method} is {} bytes, more than one line may hold.",
                 line.len()
             )));
         }
@@ -234,21 +243,20 @@ impl CoreLink {
             // The writer stopped, or the waiter was dropped: the connection closed.
             Ok(None) => {
                 self.forget(id);
-                Err(BridgeError::unavailable("the connection to Core closed"))
+                Err(BridgeError::unavailable("The connection closed."))
             }
             Err(_) => {
                 // Only this request fails, unless the probe finds Core wedged.
+                // Which request and how long are for the log: the reason
+                // reaches the window, which speaks in the user's terms.
                 self.forget(id);
-                let message = format!("Core did not answer {method} within {timeout:?}");
+                eprintln!("ersa: {method} got no answer in {timeout:?}");
                 if let Some(endpoint) = &self.shared.options.probe_endpoint
                     && !Box::pin(alive(endpoint)).await
                 {
-                    close(
-                        &self.shared,
-                        Some(format!("{message}, and does not answer a new connection")),
-                    );
+                    close(&self.shared, Some(NO_ANSWER_ANYWHERE.to_owned()));
                 }
-                Err(BridgeError::unavailable(message))
+                Err(BridgeError::unavailable(NO_ANSWER))
             }
         }
     }
@@ -328,12 +336,12 @@ fn dispatch(shared: &Shared, line: &str) {
                     .unwrap_or_else(|e| {
                         ErrorObject::protocol(
                             code::INTERNAL_ERROR,
-                            format!("Core sent an error the Shell cannot read: {e}"),
+                            format!("Ersa got an error it can't read. {e}"),
                         )
                     })),
                 _ => Err(ErrorObject::protocol(
                     code::INTERNAL_ERROR,
-                    "Core sent a response with neither a result nor an error",
+                    "Ersa got an answer with neither a result nor an error.",
                 )),
             };
             // The waiter may have timed out and gone; nothing to do then.
@@ -373,11 +381,11 @@ async fn next_line<R: AsyncBufRead + Unpin>(
             line.pop();
         }
     } else if line.len() > max {
-        return Err(invalid("a line from Core is longer than the cap"));
+        return Err(invalid("A line is longer than the cap."));
     }
     String::from_utf8(line)
         .map(Some)
-        .map_err(|_| invalid("a line from Core is not UTF-8"))
+        .map_err(|_| invalid("A line is not UTF-8."))
 }
 
 #[cfg(test)]
@@ -505,9 +513,10 @@ mod link_tests {
     async fn a_slow_request_fails_alone() {
         let (link, mut core, _events) = open_fake(short()).await;
         let slow = link.request("core.status", None).await;
-        assert!(
-            matches!(slow, Err(BridgeError::Unavailable { .. })),
-            "{slow:?}"
+        // The whole reason: it names no method and no duration.
+        assert_eq!(
+            slow,
+            Err(BridgeError::unavailable("Ersa got no answer in time."))
         );
         assert!(!link.is_closed(), "one slow request must not drop the link");
 
@@ -533,15 +542,18 @@ mod link_tests {
         };
         let (link, _core, mut events) = open_fake(options).await;
         let result = link.request("core.status", None).await;
-        assert!(
-            matches!(result, Err(BridgeError::Unavailable { .. })),
-            "{result:?}"
+        assert_eq!(
+            result,
+            Err(BridgeError::unavailable("Ersa got no answer in time."))
         );
         assert!(link.is_closed(), "the next attach must connect anew");
-        assert!(matches!(
+        assert_eq!(
             events.recv().await,
-            Some(LinkEvent::Closed { .. })
-        ));
+            Some(LinkEvent::Closed {
+                reason: "Ersa got no answer in time, and a new connection got no answer either."
+                    .to_owned()
+            })
+        );
     }
 
     #[tokio::test]
