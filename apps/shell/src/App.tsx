@@ -343,7 +343,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           <ErrorBoundary what="This session" resetKey={`${shown.id}:${shown.transcript.lastSeq}`}>
             <Transcript
               key={shown.id}
-              title={(activeId && titles.current[activeId]) || "Untitled session"}
+              title={(activeId && titles.current[activeId]) || t("rail.tile.untitledLabel")}
               untitled={!(activeId && titles.current[activeId])}
               view={shown}
               onDecide={decide}

@@ -196,7 +196,8 @@
   background: var(--color-accent);
 }
 
-.session-glyph[data-tone="hollow"] {
+/* Disconnected: a hollow ring with a hairline edge in ink-faint. */
+.session-glyph[data-tone="faint"] {
   background: transparent;
   border: var(--line-hairline) solid var(--color-ink-faint);
 }
