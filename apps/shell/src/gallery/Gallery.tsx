@@ -3,9 +3,9 @@
 // component section in each theme, so a visual change shows up in review.
 // A component built for the window gets an entry here in the same change.
 
+import { ChevronDown, ChevronRight, Plus, ShieldAlert, X } from "lucide-react";
 import type { ReactNode } from "react";
 import { AddProject } from "../components/AddProject";
-import { ChevronDown, ChevronRight, Plus, ShieldAlert, X } from "lucide-react";
 import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
 import { ContextRing } from "../components/ContextRing";
