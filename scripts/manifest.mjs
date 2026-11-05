@@ -183,7 +183,8 @@ try {
 } catch {
   problems.push("docs/briefs/INBOX.md is missing");
 }
-if (openInbox > 0) problems.push(`${openInbox} open inbox entr${openInbox === 1 ? "y" : "ies"} need a planning pass`);
+// Open entries are not a problem here: the merge gate holds a pull request
+// while its inbox has any (ADR 0025), so CI stays green and the review runs.
 
 // ---- Vendored files ----------------------------------------------------------
 // .claude/skills/VENDORED.sha256 pins every third-party file we copied (after our
@@ -269,7 +270,7 @@ lines.push("");
 
 lines.push("## Inbox");
 lines.push("");
-lines.push(openInbox ? `${openInbox} open entries in docs/briefs/INBOX.md.` : "Empty.");
+lines.push(openInbox ? `${openInbox} open entries in docs/briefs/INBOX.md; the merge gate holds the pull request until a planning pass closes them.` : "Empty.");
 lines.push("");
 
 lines.push("## Problems");
