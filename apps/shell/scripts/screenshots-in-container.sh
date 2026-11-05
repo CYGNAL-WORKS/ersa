@@ -6,7 +6,8 @@
 #   scripts/screenshots-in-container.sh            check against the baselines
 #   scripts/screenshots-in-container.sh --update   rewrite the baselines
 #
-# Needs Docker. The repository is mounted read-only and copied inside the
+# Needs Docker. Agents render baselines on GitHub instead
+# (scripts/render-baselines.mjs); this is the owner's local option. The repository is mounted read-only and copied inside the
 # container (the host's node_modules are for the host's OS); only the
 # baselines are copied back, and only with --update.
 set -euo pipefail
@@ -14,7 +15,8 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")/.." && pwd)"
 repo="$(cd "$here/../.." && pwd)"
 # Keep in step with @playwright/test in package.json, and identical to the
-# interface job's container in .github/workflows/ci.yml.
+# containers in .github/workflows/ci.yml (the interface job) and
+# .github/workflows/screenshots.yml; scripts/render-baselines.test.mjs checks.
 image="mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea"
 update="${1:-}"
 
