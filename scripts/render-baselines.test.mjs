@@ -222,3 +222,13 @@ test("the baselines workflow only starts by hand, reads, holds no credentials, a
   assert.match(wf, /run: pnpm exec playwright test --update-snapshots\n/);
   assert.match(wf, /name: screenshots\n\s+path: apps\/shell\/e2e\/__screenshots__\n/);
 });
+
+test("an aside folder left by a killed copy goes back in place before anything starts", async () => {
+  const root = fakeRoot();
+  writeFileSync(join(root, BASELINES, "stale.png"), "half");
+  mkdirSync(`${join(root, BASELINES)}.old`);
+  writeFileSync(join(`${join(root, BASELINES)}.old`, "stale.png"), "whole");
+  await assert.rejects(go(fake({ "git ls-remote": { status: 0, stdout: "" } }), root), /not pushed/);
+  assert.equal(readFileSync(join(root, BASELINES, "stale.png"), "utf8"), "whole");
+  assert.equal(existsSync(`${join(root, BASELINES)}.old`), false);
+});

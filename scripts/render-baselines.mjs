@@ -54,6 +54,7 @@ export async function renderBaselines({
     return r.stdout.trim();
   };
 
+  recover(join(root, BASELINES));
   const branch = must("git", ["rev-parse", "--abbrev-ref", "HEAD"], "Reading the branch");
   if (branch === "HEAD") throw new Error("HEAD is detached; check out the branch whose baselines to render.");
   const head = must("git", ["rev-parse", "HEAD"], "Reading the head");
@@ -126,7 +127,6 @@ export async function renderBaselines({
 // copy fails, so a failure never leaves the folder half replaced.
 function replace(target, from) {
   const aside = `${target}.old`;
-  rmSync(aside, { recursive: true, force: true });
   const had = existsSync(target);
   if (had) renameSync(target, aside);
   try {
@@ -137,6 +137,16 @@ function replace(target, from) {
     throw new Error(`Copying the baselines failed, and the old ones are back in place: ${e.message}`);
   }
   rmSync(aside, { recursive: true, force: true });
+}
+
+// An aside folder still there means an earlier run was killed during the
+// copy, or could not delete it after: it holds the last whole set, so it goes
+// back in place before anything else looks at the tree.
+function recover(target) {
+  const aside = `${target}.old`;
+  if (!existsSync(aside)) return;
+  rmSync(target, { recursive: true, force: true });
+  renameSync(aside, target);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
