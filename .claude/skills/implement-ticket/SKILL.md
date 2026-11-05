@@ -22,6 +22,7 @@ You are an implementing session, usually unattended. The orchestration session r
 - Plain, idiomatic code with the why commented: the owner is learning Rust.
 - Where a brief, `CONTENT.md` or `DESIGN.md` is wrong, silent, or contradicts what your code relies on, append one line to `docs/briefs/INBOX.md` and carry on. Always write the line: CI stays green with it, and the merge gate holds the pull request until a planning pass closes it (ADR 0025). Briefs, ADRs, the glossary, `CLAUDE.md`, `.claude/` and `scripts/hooks/` are planning-only; a change to the harness that your code does not depend on is a follow-up in the pull request, not an inbox line.
 - When interface code needs a token `docs/design/DESIGN.md` lacks, define it in `apps/shell/src/theme/tokens.pending.yaml` (the generator merges it) and propose it as an inbox line; a planning pass moves it into DESIGN.md.
+- When a change moves the gallery's screenshots, push the branch, then run `node scripts/render-baselines.mjs` in the background (it waits up to half an hour): it renders the baselines on GitHub in CI's container and copies them into `apps/shell/e2e/__screenshots__/`. If it stops before the copy, run it again; it waits on the run already going. Open the changed images, then commit them. Docker is the owner's route, not a session's.
 - Commit as you go; commits that implement requirements end with `Implements: <IDs>`. No attribution trailers.
 
 ## 3. Review adversarially

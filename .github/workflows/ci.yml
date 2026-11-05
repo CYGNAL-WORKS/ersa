@@ -115,10 +115,11 @@ jobs:
 
   # The Interface (apps/shell): generated files current, types, unit tests, and
   # the gallery's screenshot tests. The job runs in the Playwright image the
-  # baselines are rendered in (apps/shell/scripts/screenshots-in-container.sh),
-  # so its screenshots match them pixel for pixel: same OS, Chromium, fonts
-  # and Node. Keep the two image references identical; a new @playwright/test
-  # version in package.json moves both.
+  # baselines are rendered in (apps/shell/scripts/screenshots-in-container.sh
+  # and screenshots.yml, which renders them on GitHub), so its screenshots
+  # match them pixel for pixel: same OS, Chromium, fonts and Node. Keep the
+  # three image references identical (scripts/render-baselines.test.mjs fails
+  # otherwise); a new @playwright/test version in package.json moves all three.
   interface:
     name: Interface (Linux)
     needs: age
@@ -158,16 +159,14 @@ jobs:
       - name: Screenshot tests
         run: pnpm test:screenshots
 
-      # On a screenshot failure, the rendered images: the new baselines when
-      # none existed, and the actual and diff images otherwise.
+      # On a screenshot failure, the actual and diff images, to see what moved.
+      # New baselines come from screenshots.yml (apps/shell/README.md).
       - name: Upload screenshots
         if: ${{ failure() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: screenshots
-          path: |
-            apps/shell/e2e/__screenshots__
-            apps/shell/test-results
+          path: apps/shell/test-results
           if-no-files-found: ignore
 
   # The Shell's Rust side (apps/shell/src-tauri): a workspace member, but not a
