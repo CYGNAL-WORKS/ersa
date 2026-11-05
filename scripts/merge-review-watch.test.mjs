@@ -70,16 +70,22 @@ test("every open pull request not reviewed this tick says why, and a tick with n
     { number: 8, why: "its merge review failed to run" },
     { number: 9, why: "its merge review is running or waits for the gate" },
   ]);
+  assert.deepEqual(select([pr({ statusCheckRollup: [ci({ conclusion: "FAILURE" }), ci({ name: "W", status: "IN_PROGRESS", conclusion: "" })] })], NOW).skip, [{ number: 7, why: "CI is still running: W, and CI did not pass: CI" }]);
+  assert.deepEqual(select([pr({ labels: [{ name: "hold" }], statusCheckRollup: [ci(), mark("SUCCESS")] })], NOW).skip, [{ number: 7, why: "its merge review passed, and it is on hold" }]);
+  // A merge review mark gh gives in another shape: in progress as a check run, or a status with no state.
+  assert.deepEqual(select([pr({ statusCheckRollup: [ci(), { __typename: "CheckRun", name: "Merge review", status: "IN_PROGRESS", conclusion: "", startedAt: ago(1000) }] })], NOW).skip, [{ number: 7, why: "its merge review is running or waits for the gate" }]);
+  assert.deepEqual(select([pr({ statusCheckRollup: [ci(), { __typename: "StatusContext", context: "Merge review", startedAt: ago(1000) }] })], NOW).skip, [{ number: 7, why: "its merge review has a status this poller cannot read" }]);
   assert.deepEqual(select([pr()], NOW).skip, [], "a head due for review is not also skipped");
   assert.deepEqual(drive(["--once"], { prs: prs.slice(2, 4) }).logs, ["nothing to review: #3 (CI is still running: CI); #4 (CI did not pass: CI)"]);
   assert.deepEqual(drive(["--once"], { prs: [] }).logs, ["nothing to review"]);
+  assert.deepEqual(drive(["--once"], { prs: [pr({ statusCheckRollup: [ci({ name: "a\nb", conclusion: "FAILURE" })] })] }).logs, ["nothing to review: #7 (CI did not pass: a b)"], "a check name cannot break the line");
 });
 
 test("auto-merge on an unreviewed head is disarmed, reviewed or not yet reviewable; on a reviewed head it is the review's own", () => {
   const armed = { enabledAt: ago(1000) };
-  assert.deepEqual(select([pr({ autoMergeRequest: armed })], NOW).disarm, [7]);
-  assert.deepEqual(select([pr({ autoMergeRequest: armed, statusCheckRollup: [ci({ status: "IN_PROGRESS", conclusion: "" })] })], NOW).disarm, [7], "disarmed before CI finishes, so the queue never gets it");
-  assert.deepEqual(select([pr({ autoMergeRequest: armed, statusCheckRollup: [ci(), mark("SUCCESS")] })], NOW).disarm, []);
+  assert.deepEqual(select([pr({ autoMergeRequest: armed })], NOW), { review: [{ number: 7, head: HEAD }], disarm: [7], skip: [] });
+  assert.deepEqual(select([pr({ autoMergeRequest: armed, statusCheckRollup: [ci({ status: "IN_PROGRESS", conclusion: "" })] })], NOW), { review: [], disarm: [7], skip: [{ number: 7, why: "CI is still running: CI" }] }, "disarmed before CI finishes, so the queue never gets it");
+  assert.deepEqual(select([pr({ autoMergeRequest: armed, statusCheckRollup: [ci(), mark("SUCCESS")] })], NOW), { review: [], disarm: [], skip: [{ number: 7, why: "its merge review passed" }] });
   assert.deepEqual(select([pr({ autoMergeRequest: armed, isCrossRepository: true })], NOW).disarm, [], "a fork's pull request is left to the owner");
   // A hold put on after the head was enqueued still holds it.
   assert.deepEqual(select([pr({ autoMergeRequest: armed, labels: [{ name: "hold" }], statusCheckRollup: [ci(), mark("SUCCESS")] })], NOW).disarm, [7]);

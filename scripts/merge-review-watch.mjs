@@ -100,7 +100,7 @@ export function select(prs, now = Date.now()) {
     const held = (pr.labels ?? []).some((l) => l.name === "hold");
     if (pr.autoMergeRequest && (!reviewed || held)) disarm.push(pr.number);
     const ci = ciRefusals(pr.statusCheckRollup);
-    if (reviewed) skip.push({ number: pr.number, why: `its merge review ${VERDICT[mark.conclusion] ?? `is ${String(mark.conclusion).toLowerCase()}`}` });
+    if (reviewed) skip.push({ number: pr.number, why: `its merge review ${VERDICT[mark.status === "COMPLETED" ? mark.conclusion : "PENDING"] ?? "has a status this poller cannot read"}${held ? ", and it is on hold" : ""}` });
     else if (ci.length) skip.push({ number: pr.number, why: ci.join(", and ") });
     else review.push({ number: pr.number, head: pr.headRefOid });
   }
@@ -231,7 +231,8 @@ function tick(run, dir, log, now) {
     const r = run("gh", ["pr", "merge", String(n), "--disable-auto"]);
     log(`#${n}: auto-merge was on for an unreviewed or held head; ${r.ok ? "disabled it" : `could not disable it: ${r.err}`}`);
   }
-  if (!review.length) return log(`nothing to review${skip.length ? `: ${skip.map((p) => `#${p.number} (${p.why})`).join("; ")}` : ""}`);
+  // Check names come from the pull request's own workflows: one line, whatever they hold.
+  if (!review.length) return log(`nothing to review${skip.length ? `: ${skip.map((p) => `#${p.number} (${p.why})`).join("; ")}` : ""}`.replace(/\s+/g, " "));
   const started = now();
   for (const [i, { number: n, head }] of review.entries()) {
     const later = review.slice(i + 1);
