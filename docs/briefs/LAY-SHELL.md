@@ -64,6 +64,8 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 - How a list that could not be read is read again while Core stays reachable. Today the lists are read when Ersa connects and after the user changes one.
 - Where keyboard focus lands after a Retry in the foot that succeeds. The foot goes away while Ersa connects, so today focus falls to the window.
 - How long assistive technology keeps the word that Ersa reconnected. Today it stays, unseen, until the next problem replaces it.
+- Whether the foot shows that Ersa is trying after Retry is pressed. Today it goes away while Ersa connects and comes back unchanged when the try fails, so nothing says a try was made.
+- How much of a failed start's own output the foot shows and assistive technology reads. Today the foot shows its last lines whole, which can push Retry out of sight, and they are read again each time a try fails.
 - Keyboard model: which shortcuts the shell owns versus the active pane.
 - Whether the user can reorder the rail's tiles or change its sort order; today it lists sessions newest first. DESIGN.md says how tiles move if so.
 
@@ -73,6 +75,7 @@ The rail is a list of projects above one list of sessions grouped under a headin
 
 ## Changes
 
+- 2026-11-05: from #155 merge review: whether the foot shows a try after Retry, and how much of a failed start's output it shows and reads, are open questions. No requirement IDs changed.
 - 2026-11-05: from #155 inbox: the foot tells assistive technology when the problem appears and when it ends, and gives keyboard focus back to Retry (The foot); the open question on focus after Retry narrows to a retry that succeeds, and how long the word of reconnecting stays is a new one. No requirement IDs changed.
 - 2026-11-05: Built so far follows the foot, now built; where keyboard focus lands after Retry is an open question. No requirement IDs changed.
 - 2026-11-05: the rail specified from the owner-reviewed mockup (The rail): projects are headings with their sessions beneath and workspaces are not a level; a tile's contents and states; the shelf's handle on a session that needs the user; unseen sessions; what the tree says when a list can't be read; a foot that is silent while all is well. The context ring is near full from 85 percent, which closes that open question; FLOW-NEW-SESSION-R13 replaces R09 for where a new session's tile sits. No requirement IDs changed.
