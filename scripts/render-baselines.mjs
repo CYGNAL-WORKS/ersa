@@ -6,8 +6,7 @@
 //
 // Starts .github/workflows/screenshots.yml on the branch, waits for it, and
 // replaces the local baselines with its `screenshots` artifact. Review and
-// commit the images yourself. The branch must be pushed with the local head,
-// and the workflow must be on main, or GitHub cannot start it.
+// commit the images yourself. apps/shell/README.md gives its limits.
 
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
@@ -19,14 +18,9 @@ const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 export const WORKFLOW = "screenshots.yml";
 export const BASELINES = join("apps", "shell", "e2e", "__screenshots__");
 
-// The one Playwright image reference in a file's text; the interface job,
-// this workflow and the Docker script must name the same one.
-export function imagePins(text) {
-  return [...text.matchAll(/mcr\.microsoft\.com\/playwright:[^\s"']+/g)].map((m) => m[0]);
-}
-
-function defaultRun(cmd, args) {
-  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8" });
+// `show` passes the command's output through to the terminal, for the long wait.
+function defaultRun(cmd, args, { show = false } = {}) {
+  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, stdio: show ? "inherit" : "pipe" });
   if (r.error) return { status: 1, stdout: "", stderr: String(r.error.message) };
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
@@ -35,7 +29,6 @@ function defaultRun(cmd, args) {
 export async function renderBaselines({
   run = defaultRun,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
-  now = () => Date.now(),
   root = ROOT,
   findTries = 30,
   log = (line) => process.stdout.write(`${line}\n`),
@@ -51,26 +44,32 @@ export async function renderBaselines({
   const head = must("git", ["rev-parse", "HEAD"], "Reading the head");
   const remote = must("git", ["ls-remote", "origin", `refs/heads/${branch}`], "Reading the pushed branch").split(/\s+/)[0];
   if (!remote) throw new Error(`${branch} is not pushed; push it, then run this again.`);
-  if (remote !== head) throw new Error(`origin/${branch} is at ${remote.slice(0, 7)}, not the local head ${head.slice(0, 7)}; push, then run this again.`);
+  if (remote !== head) throw new Error(`origin/${branch} is at ${remote.slice(0, 7)}, not the local head ${head.slice(0, 7)}; push or pull until they match, then run this again.`);
+  // The run renders the pushed head, so uncommitted interface changes would
+  // get baselines that do not match them.
+  if (must("git", ["status", "--porcelain", "--", "apps/shell"], "Reading the working tree")) {
+    throw new Error("apps/shell has uncommitted changes; commit and push them, then run this again.");
+  }
 
-  // Allow for clock skew between this machine and GitHub.
-  const since = now() - 60_000;
+  const listRuns = () =>
+    JSON.parse(
+      must("gh", ["run", "list", "--workflow", WORKFLOW, "--branch", branch, "--event", "workflow_dispatch", "--limit", "20", "--json", "databaseId,headSha,createdAt"], "Listing runs"),
+    );
+  // Runs that exist before this dispatch are never the one it starts.
+  const before = new Set(listRuns().map((r) => r.databaseId));
   must("gh", ["workflow", "run", WORKFLOW, "--ref", branch], `Starting ${WORKFLOW} (it must be on main)`);
   log(`Started ${WORKFLOW} on ${branch} at ${head.slice(0, 7)}.`);
 
   let id;
   for (let i = 0; i < findTries && !id; i++) {
     if (i) await sleep(2000);
-    const runs = JSON.parse(
-      must("gh", ["run", "list", "--workflow", WORKFLOW, "--branch", branch, "--event", "workflow_dispatch", "--limit", "20", "--json", "databaseId,headSha,createdAt"], "Listing runs"),
-    );
-    const mine = runs.filter((r) => r.headSha === head && Date.parse(r.createdAt) >= since).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const mine = listRuns().filter((r) => r.headSha === head && !before.has(r.databaseId)).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
     id = mine[0]?.databaseId;
   }
   if (!id) throw new Error(`No ${WORKFLOW} run for ${head.slice(0, 7)} appeared; look with \`gh run list --workflow ${WORKFLOW}\`.`);
 
   log(`Waiting for run ${id}.`);
-  const watched = run("gh", ["run", "watch", String(id), "--exit-status"]);
+  const watched = run("gh", ["run", "watch", String(id), "--exit-status"], { show: true });
   if (watched.status !== 0) throw new Error(`Run ${id} failed; read it with \`gh run view ${id} --log-failed\`.`);
 
   const dir = mkdtempSync(join(tmpdir(), "ersa-baselines-"));
