@@ -62,6 +62,10 @@ export function ciRefusals(rollup) {
   return out;
 }
 
+// A commit after the review that changes nothing a reviewer read: a merge of
+// main with no hand-resolved conflict. The merge review reads it the same way.
+export const cleanMergeOfMain = (c) => c.merge && c.fromMain && c.clean;
+
 // How many open entries (`- [ ]` lines) an inbox file's text holds.
 export const openInboxEntries = (text) => text.split(/\r?\n/).filter((l) => /^\s*-\s*\[ \]/.test(l)).length;
 
@@ -84,6 +88,7 @@ export function refusals({ pr, reviewedInBranch, sinceReview, openInbox = 0 }) {
   if (!reviewedInBranch) out.push("the reviewed commit is not in the branch's history; review the head");
   for (const c of sinceReview ?? []) {
     const short = c.sha.slice(0, 7);
+    if (cleanMergeOfMain(c)) continue;
     if (!c.merge) out.push(`${short}, after the review, is not a merge; review the head`);
     else if (!c.fromMain) out.push(`${short}, after the review, merges a branch other than main; review the head`);
     else if (!c.clean) out.push(`${short}, after the review, resolved a conflict by hand; review the head`);
