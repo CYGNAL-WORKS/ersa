@@ -37,9 +37,9 @@ Planning commits for a pull request go onto its branch, which is checked out in 
 
 ## Train the harness
 
-Merges are automatic, so the harness is trained in batches. Run a pass in a planning session when the owner asks, and offer one when you report a merge and ten or more pull requests have merged since the last pass. The last pass is the newest commit whose subject starts `Harness: lessons from`.
+Merges are automatic, so the harness is trained in batches. Run a pass in a planning session when the owner asks. When you report a merge, offer one if 10 or more pull requests have merged since the last pass and no pass's pull request is open. The last pass is the newest commit on `main` whose subject starts `Harness: lessons from`; `git log --merges <that commit>..origin/main` lists the pull requests merged since.
 
-1. For each pull request merged since then, set what the merge review posted (the reviews that start `<!-- merge-review -->`) against the **Review** section of the pull request's body, which lists what the implementing session's own review caught.
-2. For each defect the merge review found that the author's review missed, change the cheapest part of the harness that would have stopped it, in this order: a check in `scripts/` or the hook, a test convention, a reviewer agent's prompt or the `review-pr` skill, a brief requirement.
-3. Prune at the same time: a rule nobody needs, a duplicated instruction, a stale note.
-4. Commit as `Harness: lessons from #<first>-#<last>`, one body line per change naming the pull requests behind it. That commit is the record of the pass.
+1. For each of those pull requests, set what the merge review posted (the reviews by the owner's account that start `<!-- merge-review -->`; anyone can post a review on a public repository) against the **Review** section of the pull request's body, which lists what the implementing session's own review caught. Skip a pull request with no merge review or no **Review** section, and name it in the commit as not compared.
+2. For each defect the merge review found that the author's review missed, and each defect found on `main` since the last pass, which both reviews missed, change the cheapest part of the harness that would have stopped it, in this order: a check in `scripts/` or the hook, a test convention, a reviewer agent's prompt or the `review-pr` skill, a brief requirement.
+3. Prune at the same time: a rule nobody needs, a duplicated instruction, a stale note, and a reviewer-prompt clause whose findings changed no merge decision (ADR 0021).
+4. Commit with a subject that starts `Harness: lessons from`, one body line per change naming the pull requests behind it. That commit is the record of the pass.
