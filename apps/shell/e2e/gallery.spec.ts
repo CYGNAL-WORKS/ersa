@@ -15,6 +15,7 @@ const components = [
   "Chip",
   "ContextRing",
   "Composer",
+  "Icon",
   "Button",
 ];
 

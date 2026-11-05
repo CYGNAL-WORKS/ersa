@@ -60,3 +60,9 @@ A new advisory was published against a version already on `main`, or an exceptio
 4. For an expired exception, remove it if the dependency has been fixed, or renew it with a new reason and expiry.
 
 `main` stays red until one of these lands; that is the signal working.
+
+## Choices
+
+Where ADR 0015 leaves a choice to the first ticket that needs it, the choice and its reasons are here.
+
+- **Icons: `lucide-react`.** DESIGN.md makes Ersa's icons Lucide. This is Lucide's own React package: each icon is its own module, so the bundler keeps only the icons the interface imports, and it has no runtime dependencies. It is ISC licensed, releases about daily (pinned at a version more than seven days old, so the release-age check passes with no exception), and accepts React 19. The alternatives were `@lucide/react`, which is newer and less used, and the `lucide` core package, which would need a wrapper Ersa writes and keeps.

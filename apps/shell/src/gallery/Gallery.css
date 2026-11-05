@@ -82,3 +82,14 @@
 .gallery-room {
   padding-bottom: var(--size-card-max);
 }
+
+.gallery-icon-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.gallery-icon-caution {
+  display: inline-flex;
+  color: var(--color-caution);
+}
