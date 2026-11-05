@@ -575,7 +575,8 @@ const entries: Entry[] = [
     states: [
       ["At icon, beside ui type", <span className="gallery-icon-row"><Icon icon={Plus} /> New session</span>],
       ["At icon-sm, beside ui-small type", <span className="gallery-icon-row"><Icon icon={ChevronDown} size="icon-sm" /> ersa <Icon icon={ChevronRight} size="icon-sm" /></span>],
-      ["At icon-xs, a mark in a tile", <span className="gallery-icon-row"><Icon icon={ShieldAlert} size="icon-xs" /> Not trusted</span>],
+      ["At icon-xs, a mark in a tile", <span className="gallery-icon-row"><Icon icon={ChevronRight} size="icon-xs" /></span>],
+      ["A mark that carries state, in its tone", <span className="gallery-icon-row"><span className="gallery-icon-caution"><Icon icon={ShieldAlert} size="icon-sm" /></span> Not trusted</span>],
       ["Icon button", <IconButton icon={X} label="Close" />],
       ["Icon button hover", <IconButton icon={X} label="Close" force="hover" />],
       ["Icon button focus", <IconButton icon={X} label="Close" force="focus" />],
