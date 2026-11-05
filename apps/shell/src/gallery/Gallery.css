@@ -88,3 +88,8 @@
   align-items: center;
   gap: var(--space-xs);
 }
+
+.gallery-icon-caution {
+  display: inline-flex;
+  color: var(--color-caution);
+}
