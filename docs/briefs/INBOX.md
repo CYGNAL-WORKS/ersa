@@ -8,5 +8,8 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-05 LAY-SHELL: the Development paragraph still says the rail has "a Core tile at its foot"; #155 retired that tile (the foot is silent while all is well), so the sentence is stale. Left as is.
+- [ ] 2026-11-05 LAY-SHELL: pressing Retry in the foot unmounts it (the view goes to connecting, where the foot is silent), so keyboard focus drops to the page body; the brief does not say where focus should land. Left as is.
+
 
 ## Resolved recently (optional, trimmed in planning passes)

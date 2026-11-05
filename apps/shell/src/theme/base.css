@@ -29,7 +29,7 @@ body {
   font-variant-ligatures: none;
 }
 
-/* A problem stated inline: muted text after the status tile's danger glyph, never a filled row. */
+/* A problem stated inline: muted text after a danger glyph, never a filled row. */
 .problem {
   display: grid;
   grid-template-columns: auto 1fr;
