@@ -157,16 +157,14 @@ jobs:
       - name: Screenshot tests
         run: pnpm test:screenshots
 
-      # On a screenshot failure, the rendered images: the new baselines when
-      # none existed, and the actual and diff images otherwise.
+      # On a screenshot failure, the actual and diff images, to see what moved.
+      # New baselines come from screenshots.yml (apps/shell/README.md).
       - name: Upload screenshots
         if: ${{ failure() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: screenshots
-          path: |
-            apps/shell/e2e/__screenshots__
-            apps/shell/test-results
+          path: apps/shell/test-results
           if-no-files-found: ignore
 
   # The Shell's Rust side (apps/shell/src-tauri): a workspace member, but not a
