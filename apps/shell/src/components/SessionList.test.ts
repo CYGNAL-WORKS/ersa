@@ -40,7 +40,7 @@ describe("the rail's sessions by workspace", () => {
     ]);
   });
 
-  // verifies: FLOW-NEW-SESSION-R09
+  // Workspace headings stand until the rail's tree is built (LAY-SHELL, The rail), so this cites no requirement.
   it("shows a session's tile under its workspace's name", () => {
     const html = renderToStaticMarkup(
       createElement(SessionList, {

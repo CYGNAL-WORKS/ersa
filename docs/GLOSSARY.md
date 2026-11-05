@@ -47,10 +47,11 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 
 ## Interface
 
-- **Rail**: the left column listing projects, their workspaces, and the sessions inside them. *Not: sidebar.*
-- **Tile**: a session's entry in the rail: title, backend icon, activity state, context ring, and cost as reported by the backend.
-- **Shelf**: the panel that pulls out from a tile when the session needs the user (a permission request or a question), answerable without changing the active session. *Not: drawer, flyout.*
-- **Context ring**: the circular gauge on a tile showing context consumed.
+- **Rail**: the left column listing projects and, under each, its sessions. *Not: sidebar.*
+- **Tile**: a session's entry in the rail: backend icon, title, state, context ring, and cost as reported by the backend.
+- **Project heading**: a project's row in the rail, above the tiles of its sessions. It collapses and expands them.
+- **Shelf**: the panel that pulls out from a tile when the session needs the user (a permission request or a question), answerable without changing the active session. The chevron on the tile is its handle. *Not: drawer, flyout.*
+- **Context ring**: the circular gauge showing the share of its context window a session has used, on its tile and in the session controls.
 - **Transcript**: the main area rendering the active session's projection as a document with cards. *Not: chat history, chat log.*
 - **Composer**: the input area beneath the transcript where the user writes to the agent. *Not: chat box, input box, prompt box.*
 - **Session controls**: the row of chips beneath the composer naming where and how a session runs: host, project, workspace, backend, model, effort and permission mode, with the context ring. Set before the first message; shown during the session.
