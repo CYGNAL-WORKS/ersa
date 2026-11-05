@@ -44,7 +44,7 @@ export const instructionPaths = (files) => files.filter((f) => /(^|\/)(CLAUDE(\.
 
 // Paths whose change the owner merges: the workflows, this review, its gate
 // and its poller, the hooks, and every instruction file.
-export const ownerPaths = (files) => files.filter((f) => /^(\.github\/|scripts\/hooks\/|scripts\/merge-(pr|review|review-watch)\.mjs$)/.test(f) || instructionPaths([f]).length);
+export const ownerPaths = (files) => files.filter((f) => /^(\.github\/|scripts\/hooks\/|scripts\/(merge-(pr|review|review-watch)|manifest)\.mjs$)/.test(f) || instructionPaths([f]).length);
 
 // What blocks the merge, listed or new (ADR 0021).
 export const blocking = (findings) => (findings ?? []).filter((f) => f.severity !== "low");

@@ -40,6 +40,8 @@ test("ignores everything that is not a commit", () => {
 
 test("every listed problem blocks", () => {
   assert.deepEqual(blockingProblems("## Problems\n\n- x: missing id\r\n- y: cycle\n"), ["- x: missing id", "- y: cycle"]);
+  // An open inbox entry, when --inbox lists it, blocks like any other problem: the old exception stays gone.
+  assert.deepEqual(blockingProblems("## Problems\n\n- 1 open inbox entry needs a planning pass\n"), ["- 1 open inbox entry needs a planning pass"]);
   assert.deepEqual(blockingProblems("## Problems\n\nNone.\n"), []);
 });
 
