@@ -46,7 +46,7 @@ From top to bottom: New session, the projects with their sessions, Add project, 
 - **Context.** The context ring is near full from 85 percent of the context window, on a tile and in the session controls alike, and never shows more than full.
 - **Add project** sits at the end of the tree and opens the way to add one.
 - **Loading, empty and failed.** While the projects are being read the tree says so; with no projects it says how to add one. When the projects, a project's workspaces or the sessions can't be read, the tree says so with the reason, and shows what it could read.
-- **The foot** is empty while all is well, and while Ersa first connects, when the tree says it is loading. When Ersa can't reach Core, the foot says so in the user's terms, with the reason when Ersa has one, and the tree is empty. While Ersa is trying again the foot says that; once it has stopped trying, the foot offers Retry. New session and Add project are unavailable until Ersa has connected. A debug build attached to a labeled endpoint names the label there (Development).
+- **The foot** is empty while all is well, and while Ersa first connects, when the tree says it is loading. When Ersa can't reach Core, the foot says so in the user's terms, with the reason when Ersa has one, and the tree is empty. While Ersa is trying again the foot says that; once it has stopped trying, the foot offers Retry. Assistive technology is told when the problem appears and when Ersa reaches the sessions again. When Retry was pressed from the keyboard and the foot offers it again, keyboard focus returns to it unless the user has moved it. New session and Add project are unavailable until Ersa has connected. A debug build attached to a labeled endpoint names the label there (Development).
 ## Development
 
 A debug build attaches to a labeled Core endpoint, such as a replay, only when told to: `ERSA_ATTACH=<label>` makes it attach there and never launch a Core, and the rail's foot reads "Attached to <label>". A release build ignores the variable and always uses the user's own Core.
@@ -62,7 +62,8 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 - Whether the tree keeps its tiles, marked as out of date, while Ersa can't reach Core, so a short drop doesn't empty the rail.
 - Where the control that collapses the rail lives, and the one that shows it again.
 - How a list that could not be read is read again while Core stays reachable. Today the lists are read when Ersa connects and after the user changes one.
-- Where keyboard focus lands after Retry in the foot. The foot goes away while Ersa connects, so today focus falls to the window.
+- Where keyboard focus lands after a Retry in the foot that succeeds. The foot goes away while Ersa connects, so today focus falls to the window.
+- How long assistive technology keeps the word that Ersa reconnected. Today it stays, unseen, until the next problem replaces it.
 - Keyboard model: which shortcuts the shell owns versus the active pane.
 - Whether the user can reorder the rail's tiles or change its sort order; today it lists sessions newest first. DESIGN.md says how tiles move if so.
 
@@ -72,6 +73,7 @@ The rail is a list of projects above one list of sessions grouped under a headin
 
 ## Changes
 
+- 2026-11-05: from #155 inbox: the foot tells assistive technology when the problem appears and when it ends, and gives keyboard focus back to Retry (The foot); the open question on focus after Retry narrows to a retry that succeeds, and how long the word of reconnecting stays is a new one. No requirement IDs changed.
 - 2026-11-05: Built so far follows the foot, now built; where keyboard focus lands after Retry is an open question. No requirement IDs changed.
 - 2026-11-05: the rail specified from the owner-reviewed mockup (The rail): projects are headings with their sessions beneath and workspaces are not a level; a tile's contents and states; the shelf's handle on a session that needs the user; unseen sessions; what the tree says when a list can't be read; a foot that is silent while all is well. The context ring is near full from 85 percent, which closes that open question; FLOW-NEW-SESSION-R13 replaces R09 for where a new session's tile sits. No requirement IDs changed.
 - 2026-11-02: the context-ring open question no longer points at DESIGN.md's gauge vocabulary, which ADR 0019 removed. Meaning unchanged; no requirement IDs changed.
