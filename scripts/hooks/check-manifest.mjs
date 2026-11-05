@@ -7,9 +7,9 @@
 // the merge gate holds those, ADR 0025), and when the check rewrote a
 // generated file the commit would leave out. The repository is the one
 // `git -C <dir>` names, else the session's working directory, and the check
-// runs only when that is the
-// session's own repository (any of its worktrees): the hook runs before the
-// user's permission prompt, so it must not run another repository's script.
+// runs only when that is the session's own repository (any of its
+// worktrees): the hook runs before the user's permission prompt, so it must
+// not run another repository's script.
 // A commit after a directory change (`cd x && git commit`) runs no check,
 // since where it lands is unknown; CI checks it.
 //
