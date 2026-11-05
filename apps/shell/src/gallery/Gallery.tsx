@@ -597,6 +597,8 @@ const entries: Entry[] = [
       ["Nothing used yet", <ContextRing />],
       ["Some used", <ContextRing used={0.42} />],
       ["Nearly full", <ContextRing used={0.93} />],
+      ["On a tile", <ContextRing used={0.42} size="ring-sm" />],
+      ["On a tile, nearly full", <ContextRing used={0.93} size="ring-sm" />],
     ],
   },
   {

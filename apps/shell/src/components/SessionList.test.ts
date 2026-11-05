@@ -119,6 +119,12 @@ describe("a session's tile", () => {
     expect(draw({ context_tokens: 84, context_window: 100 })).not.toContain("data-near-full");
   });
 
+  it("draws each mark in the tone the mapping gives", () => {
+    expect(draw({ state: "running" })).toContain('<span class="glyph session-glyph" data-tone="accent" role="img" aria-label="Working">');
+    expect(draw({ state: "disconnected" })).toContain('<span class="glyph session-glyph" data-tone="faint" aria-hidden="true">');
+    expect(draw({ state: "error" })).toContain('<span class="glyph session-glyph" data-tone="danger" aria-hidden="true">');
+  });
+
   it("marks the active tile as the current one", () => {
     expect(draw({}, "s")).toContain('aria-current="true"');
     expect(draw({})).not.toContain("aria-current");

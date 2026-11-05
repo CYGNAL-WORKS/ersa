@@ -146,7 +146,7 @@ function Mark({ view }: { view: TileView }) {
         </span>
       );
     case "working":
-      return <span className="glyph session-glyph" data-tone="accent" role="img" aria-label={view.markLabel} />;
+      return <span className="glyph session-glyph" data-tone={view.tone} role="img" aria-label={view.markLabel} />;
     case "needsYou":
       // A mark, not a control, until the shelf is built (LAY-SHELL, Built so far).
       return (
@@ -154,10 +154,10 @@ function Mark({ view }: { view: TileView }) {
           <Icon icon={ChevronRight} size="icon-sm" />
         </span>
       );
+    // Line two names these, so their marks are hidden from assistive technology.
     case "disconnected":
-      return <span className="glyph session-glyph" data-tone="hollow" aria-hidden="true" />;
     case "error":
-      return <span className="glyph session-glyph" data-tone="danger" aria-hidden="true" />;
+      return <span className="glyph session-glyph" data-tone={view.tone} aria-hidden="true" />;
     default:
       return null;
   }

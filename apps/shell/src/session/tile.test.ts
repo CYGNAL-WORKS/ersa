@@ -129,8 +129,10 @@ describe("a tile's values as reported", () => {
 
 describe("the context ring near full (LAY-SHELL, Context)", () => {
   it("is near full from 85 percent", () => {
-    expect(nearFull(0.849)).toBe(false);
+    expect(nearFull(0.844)).toBe(false);
     expect(nearFull(0.85)).toBe(true);
+    // Read in whole percent, as the readout shows it: what reads "85%" is near full.
+    expect(nearFull(0.846)).toBe(true);
     expect(nearFull(1)).toBe(true);
     expect(nearFull(undefined)).toBe(false);
   });

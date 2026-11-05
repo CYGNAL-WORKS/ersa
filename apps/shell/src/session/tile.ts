@@ -97,5 +97,8 @@ export function contextUsed(tile: Tile): number | undefined {
   return Math.min(Math.max(tokens / window, 0), 1);
 }
 
-/** The context ring is near full from 85 percent (LAY-SHELL, Context), on a tile and in the session controls. */
-export const nearFull = (used: number | undefined): boolean => used !== undefined && used >= 0.85;
+/**
+ * The context ring is near full from 85 percent (LAY-SHELL, Context), on a tile and in the session controls. It is
+ * read in whole percent, as the ring's readout and name round it, so "85 percent used" is always near full.
+ */
+export const nearFull = (used: number | undefined): boolean => used !== undefined && Math.round(used * 100) >= 85;

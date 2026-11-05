@@ -10,8 +10,7 @@
     "The new-session screen",
     "The projects",
     "The sessions",
-    "This session",
-    "Untitled session"
+    "This session"
   ],
   "components/AddProject.tsx": [
     "Add",
