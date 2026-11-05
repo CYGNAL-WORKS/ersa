@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 
-import { ciRefusals, commitsSinceReview, latestChecks, main, refusals } from "./merge-pr.mjs";
+import { ciRefusals, commitsSinceReview, latestChecks, main, openInboxEntries, refusals } from "./merge-pr.mjs";
 
 const check = (over) => ({ name: "CI", status: "COMPLETED", conclusion: "SUCCESS", startedAt: "2026-11-03T10:00:00Z", ...over });
 const facts = (over = {}) => ({
@@ -32,6 +32,13 @@ test("a closed, draft or conflicting pull request may not merge", () => {
   assert.deepEqual(refusals(facts({ pr: { isDraft: true } })), ["it is a draft"]);
   assert.deepEqual(refusals(facts({ pr: { mergeable: "CONFLICTING" } })), ["GitHub reports it conflicting"]);
   assert.deepEqual(refusals(facts({ pr: { mergeable: "UNKNOWN" } })), ["GitHub reports it unknown"]);
+});
+
+test("open inbox entries hold the merge until a planning pass closes them", () => {
+  assert.equal(openInboxEntries("# Inbox\n\n## Open\n\n- [ ] a\r\n  - [ ] b\n- [x] done\nnot - [ ] a line\n"), 2);
+  assert.equal(openInboxEntries("# Inbox\n\n## Open\n\n"), 0);
+  assert.deepEqual(refusals(facts({ openInbox: 1 })), ["1 open inbox entry needs a planning pass"]);
+  assert.deepEqual(refusals(facts({ openInbox: 3 })), ["3 open inbox entries need a planning pass"]);
 });
 
 test("CI must have run, finished and passed", () => {
@@ -219,7 +226,7 @@ test("an octopus merge never reads as clean, even when git prints no remerge-dif
 // main() against the real repository, with GitHub stood in for: gh answers
 // from `pr` (or `view`), git fetch does nothing, and origin/main points at
 // `originMain`.
-function gate(r, argv, { head, originMain, pr = {}, view, merged = true, fetched = true, unknownFirst = false }) {
+function gate(r, argv, { head, originMain, pr = {}, view, merged = true, fetched = true, unknownFirst = false, inbox }) {
   r.git(["update-ref", "refs/remotes/origin/main", originMain]);
   const gh = [];
   const waits = [];
@@ -233,6 +240,9 @@ function gate(r, argv, { head, originMain, pr = {}, view, merged = true, fetched
       return merged ? ok() : { ok: false, out: "", err: "head moved" };
     }
     if (args[0] === "fetch") return fetched ? ok() : { ok: false, out: "", err: "network down" };
+    // The test repository has no inbox; `inbox` stands one in at the head.
+    if (inbox !== undefined && args[0] === "ls-tree") return ok("100644 blob x\tdocs/briefs/INBOX.md");
+    if (inbox !== undefined && args[0] === "show" && args[1].endsWith(":docs/briefs/INBOX.md")) return ok(inbox);
     return r.git(args);
   };
   return { ...main(argv, { run, wait: (ms) => waits.push(ms) }), gh, waits };
@@ -283,6 +293,9 @@ test("the gate refuses with exit 1 and never calls merge", () => {
   refused(["5", "--reviewed", r.reviewed], { head: r.conflicted, originMain: r.main2 }, /resolved a conflict by hand/);
   refused(["5", "--reviewed", r.clean], { head: r.reviewed, originMain: r.main1 }, /not in the branch's history/);
   refused(["5", "--reviewed", r.reviewed], { head: r.clean, originMain: r.main1, pr: { isDraft: true } }, /draft/);
+  refused(["5", "--reviewed", r.reviewed], { head: r.clean, originMain: r.main1, inbox: "## Open\n\n- [ ] a gap\n" }, /1 open inbox entry needs a planning pass/);
+  // An inbox with no open entry passes.
+  assert.equal(gate(r, ["5", "--reviewed", r.reviewed, "--dry-run"], { head: r.clean, originMain: r.main1, inbox: "## Open\n\n" }).code, 0);
 });
 
 test("a usage or tool error exits 2 before anything merges", () => {

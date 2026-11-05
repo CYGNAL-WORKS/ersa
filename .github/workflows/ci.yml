@@ -99,7 +99,9 @@ jobs:
         run: node --test scripts/*.test.mjs
 
       - name: Manifest
-        run: node scripts/manifest.mjs --check
+        # Open inbox entries fail only the merge queue's merge and main: on a
+        # pull request the merge gate holds them, and CI stays green (ADR 0025).
+        run: node scripts/manifest.mjs --check ${{ github.event_name != 'pull_request' && '--inbox' || '' }}
 
       # ADR 0015. These read the one Cargo.lock, which covers the Shell too.
       # dependencies.yml also runs them daily on main.
