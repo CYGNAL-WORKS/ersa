@@ -17,41 +17,60 @@ The fixed structure of the Ersa window: a rail on the left, the transcript in th
 +----------+----------------------------+-----------+
 | rail     |                            |           |
 |  project |        transcript          | workbench |
-|   ws     |                            |  (panes)  |
-|    tile  |                            |           |
-|    tile >|  shelf (pulls out from a   |           |
-|   ws     |  tile; answer here)        |           |
-|    tile  +----------------------------+           |
+|   tile   |                            |  (panes)  |
+|   tile  >|  shelf (pulls out from a   |           |
+|  project |  tile; answer here)        |           |
+|   tile   +----------------------------+           |
 |          |         composer           |           |
 +----------+----------------------------+-----------+
 ```
 
-The rail lists projects, each project's workspaces, and each workspace's sessions as tiles. A tile shows title, backend icon, activity state, a context ring, and cost as reported. When a session needs the user, its tile marks that (an edge or glyph, never a filled row) and a shelf pulls out from it holding the request with its controls, so permissions and questions are handled without changing the active session. The transcript shows the active session; the workbench holds Files, Diff, Terminal, Browser, and Developer panes.
+The rail lists projects and, under each, its sessions as tiles (The rail, below). When a session needs the user, its tile says so and a shelf pulls out from it holding the request with its controls, so permissions and questions are handled without changing the active session. The transcript shows the active session; the workbench holds Files, Diff, Terminal, Browser, and Developer panes.
 
 With no active session, or when the user chooses New session, the transcript area shows the new-session screen: the Ersa wordmark above the composer and nothing else, so the first message is the first act. Beneath the composer, on the new-session screen and on every session, sit the session controls: a row of chips for host, project, workspace (a new isolated workspace or the project's root workspace), backend, model, effort and permission mode, with the context ring at the row's end. Before a session starts the chips set it up; during a session they show its values. The backend chip appears when the host has more than one backend, and also when its only backend is missing or failed, so that status is seen (FLOW-NEW-SESSION-R07); with one available backend it is hidden. There is no setup card or form before the composer. The reference is the owner's sketch of 2026-11-02 (FLOW-NEW-SESSION).
 
 The transcript header shows the active session's title. The title is renamed in place: a double-click on it, or Enter or F2 while it has focus, turns it into the rename field; Enter saves and Escape restores it. There is no rename button (owner, 2026-11-02).
 
+## The rail
+
+From top to bottom: New session, the projects with their sessions, Add project, and the foot. `docs/design/RAIL.md` says how each part and each state looks.
+
+- **New session** opens the new-session screen.
+- **Projects.** Each project is a project heading with its sessions beneath it as tiles, newest first; the projects are in the order Core lists them. A project with no sessions shows its heading alone. The heading names the project, and its host when the project is not on the local machine. Workspaces are not a level in the rail: the session controls name a session's workspace. A session whose project Ersa can't tell sits at the end of the tree under no heading, so a session is never missing from the rail.
+- **Collapsing.** A heading collapses and expands its sessions, and stays as the user left it while the window is open. Collapsed, it says how many sessions it holds, with a mark when any of them needs the user.
+- **A heading's actions** appear under the pointer or keyboard focus: New session, which opens the new-session screen for that project, and More, which holds trusting the project or withdrawing its trust. A project the user has not trusted says so on its heading, collapsed or not.
+- **Tiles.** A tile shows the backend's icon, the session's title, a mark for its state, the context ring and the cost as reported. The cost appears once the backend has reported one, and the ring once it has reported both the tokens used and a context window larger than nothing; a session with no title yet is named as untitled. Choosing a tile makes its session the active one. The active session's tile is visibly distinct, quietly.
+- **State.** A tile tells starting, working, error and disconnected apart by its mark, and names in words every state but working and idle. An idle or ended session has no mark. A state Ersa doesn't know reads as idle.
+- **Needs you.** A session with a pending permission request or question shows the shelf's handle in place of its state mark, in the tone of what it wants, and names the want: a permission request, a question, or how many requests when more than one is pending. With both kinds pending, the tone is the permission request's, and a request of a kind Ersa doesn't know reads as needing the user in that tone too. The pending requests decide this, whatever state Core reports: a session reported as waiting on the user with nothing pending reads as idle.
+- **Unseen.** When Core reports a session that is not the active one as idle after working, the session is unseen, and its tile says so, until the user makes it active. Ersa keeps this while the window is open only.
+- **Context.** The context ring is near full from 85 percent of the context window, on a tile and in the session controls alike, and never shows more than full.
+- **Add project** sits at the end of the tree and opens the way to add one.
+- **Loading, empty and failed.** While the projects are being read the tree says so; with no projects it says how to add one. When the projects, a project's workspaces or the sessions can't be read, the tree says so with the reason, and shows what it could read.
+- **The foot** is empty while all is well, and while Ersa first connects, when the tree says it is loading. When Ersa can't reach Core, the foot says so in the user's terms, with the reason when Ersa has one, and the tree is empty. While Ersa is trying again the foot says that; once it has stopped trying, the foot offers Retry. New session and Add project are unavailable until Ersa has connected. A debug build attached to a labeled endpoint names the label there (Development).
 ## Development
 
-A debug build attaches to a labeled Core endpoint, such as a replay, only when told to: `ERSA_ATTACH=<label>` makes it attach there and never launch a Core, and the Core tile reads "Attached to <label>". A release build ignores the variable and always uses the user's own Core.
+A debug build attaches to a labeled Core endpoint, such as a replay, only when told to: `ERSA_ATTACH=<label>` makes it attach there and never launch a Core, and the rail's foot reads "Attached to <label>". A release build ignores the variable and always uses the user's own Core.
 
 ## Open questions
 
-- Whether the context ring takes a caution or danger tone near full, or stays one tone with the arc alone saying how much.
 - Minimum window size, and which region collapses first when narrow.
 - Whether the workbench shows one pane at a time (tabs) or allows splits.
 - Whether the shelf overlays the transcript or pushes it, and how several pending shelves queue.
-- Where global status (connected hosts, usage today) lives.
+- Where global status (connected hosts, usage today) lives, and where Core's version and API version are shown now that the rail's foot is silent while all is well.
+- What a tile's More menu holds (Rename, Stop and Remove are drawn), and what Stop and Remove do to the session's workspace.
+- Whether collapsed headings and unseen sessions are remembered when Ersa restarts, and whether a turn too short for a tile to show as working should still leave its session unseen.
+- Where the control that collapses the rail lives, and the one that shows it again.
+- How a list that could not be read is read again while Core stays reachable. Today the lists are read when Ersa connects and after the user changes one.
 - Keyboard model: which shortcuts the shell owns versus the active pane.
 - Whether the user can reorder the rail's tiles or change its sort order; today it lists sessions newest first. DESIGN.md says how tiles move if so.
 
 ## Built so far
 
-The rail is one list of sessions grouped under a heading per workspace: the project's name, then the branch or "Root workspace". Projects are not yet a level of their own, so the projects, workspaces and sessions tree is still to build.
+The rail is a list of projects above one list of sessions grouped under a heading per workspace, with a Core tile at its foot; the rail described above is still to build. Until the shelf is built, a tile's chevron is a mark, not a control, and a request is answered in the transcript.
 
 ## Changes
 
+- 2026-11-05: the rail specified from the owner-reviewed mockup (The rail): projects are headings with their sessions beneath and workspaces are not a level; a tile's contents and states; the shelf's handle on a session that needs the user; unseen sessions; what the tree says when a list can't be read; a foot that is silent while all is well. The context ring is near full from 85 percent, which closes that open question; FLOW-NEW-SESSION-R12 replaces R09 for where a new session's tile sits. No requirement IDs changed.
 - 2026-11-02: the context-ring open question no longer points at DESIGN.md's gauge vocabulary, which ADR 0019 removed. Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: from #55 inbox: Built so far added: sessions grouped by workspace, the tree still to build. No requirement IDs changed.
 

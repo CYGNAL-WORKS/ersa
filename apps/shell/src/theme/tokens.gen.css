@@ -35,13 +35,17 @@
   --space-xxxl: 48px;
   --line-hairline: 1px;
   --size-rail: 288px;
-  --size-tile-min: 288px;
   --size-measure: 720px;
   --size-bubble-max: 80%;
   --size-card-max: 224px;
   --size-glyph: 8px;
   --size-option-mark: 4px;
   --size-ring: 16px;
+  --size-control: 28px;
+  --size-control-sm: 20px;
+  --size-icon: 16px;
+  --size-icon-sm: 14px;
+  --size-icon-xs: 12px;
   --stack-menu: 10;
   --motion-instant: 80ms;
   --motion-quick: 160ms;
@@ -69,7 +73,7 @@
   --color-accent: #2F61E0;
   --color-accent-ink: #FFFFFF;
   --color-positive: #217D4C;
-  --color-caution: #966413;
+  --color-caution: #7A5E00;
   --color-danger: #BE4539;
   --color-wash-primary: #3D6BFF0F;
   --color-wash-secondary: #8FA6FF0D;
@@ -79,8 +83,9 @@
   --material-primary: linear-gradient(to bottom, color-mix(in oklab, var(--color-accent) 84%, white), var(--color-accent));
   --material-composer: linear-gradient(to bottom, var(--color-surface), var(--color-surface-raised));
   --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
+  --material-hover: color-mix(in oklab, var(--color-ink) 4%, transparent);
+  --material-pressed: color-mix(in oklab, var(--color-ink) 9%, transparent);
   --glow-focal: 0 0 0 1px var(--color-accent), 0 0 0 4px color-mix(in oklab, var(--color-accent) 16%, transparent), 0 0 12px 2px color-mix(in oklab, var(--color-accent) 20%, transparent);
-  --glow-attention: 0 0 5px color-mix(in oklab, var(--color-accent) 45%, transparent);
   --shadow-transient: 0 4px 12px -4px color-mix(in oklab, var(--color-ink) 14%, transparent);
 }
 
@@ -97,7 +102,7 @@
     --color-accent: #739EFF;
     --color-accent-ink: #0B0D10;
     --color-positive: #32A166;
-    --color-caution: #BD8326;
+    --color-caution: #E6B93A;
     --color-danger: #E66858;
     --color-wash-primary: #3D6BFF14;
     --color-wash-secondary: #8FA6FF12;
@@ -107,8 +112,9 @@
     --material-primary: linear-gradient(to bottom, color-mix(in oklab, var(--color-accent) 84%, white), var(--color-accent));
     --material-composer: linear-gradient(to bottom, var(--color-surface), var(--color-surface-raised));
     --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
+    --material-hover: color-mix(in oklab, var(--color-ink) 4%, transparent);
+    --material-pressed: color-mix(in oklab, var(--color-ink) 9%, transparent);
     --glow-focal: 0 0 0 1px var(--color-accent), 0 0 16px -4px color-mix(in oklab, var(--color-accent) 32%, transparent);
-    --glow-attention: 0 0 5px color-mix(in oklab, var(--color-accent) 45%, transparent);
     --shadow-transient: 0 4px 12px -4px color-mix(in oklab, black 60%, transparent);
   }
 }
@@ -125,7 +131,7 @@
   --color-accent: #739EFF;
   --color-accent-ink: #0B0D10;
   --color-positive: #32A166;
-  --color-caution: #BD8326;
+  --color-caution: #E6B93A;
   --color-danger: #E66858;
   --color-wash-primary: #3D6BFF14;
   --color-wash-secondary: #8FA6FF12;
@@ -135,7 +141,8 @@
   --material-primary: linear-gradient(to bottom, color-mix(in oklab, var(--color-accent) 84%, white), var(--color-accent));
   --material-composer: linear-gradient(to bottom, var(--color-surface), var(--color-surface-raised));
   --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
+  --material-hover: color-mix(in oklab, var(--color-ink) 4%, transparent);
+  --material-pressed: color-mix(in oklab, var(--color-ink) 9%, transparent);
   --glow-focal: 0 0 0 1px var(--color-accent), 0 0 16px -4px color-mix(in oklab, var(--color-accent) 32%, transparent);
-  --glow-attention: 0 0 5px color-mix(in oklab, var(--color-accent) 45%, transparent);
   --shadow-transient: 0 4px 12px -4px color-mix(in oklab, black 60%, transparent);
 }
