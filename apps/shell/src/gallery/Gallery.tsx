@@ -4,7 +4,7 @@
 // A component built for the window gets an entry here in the same change.
 
 import { ChevronDown, ChevronRight, Plus, ShieldAlert, X } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { AddProject } from "../components/AddProject";
 import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
@@ -76,25 +76,26 @@ const coreViews: [string, CoreView][] = [
     {
       phase: "failed",
       message:
-        "Ersa's background process stopped before it was ready. It ended with exit code: 1.\nersa-core: cannot open the database at C:\\Users\\me\\AppData\\Local\\Ersa\\ersa.db",
+        "Ersa's background process stopped before it was ready. It ended (exit code: 1).\nersa-core: cannot open the database at C:\\Users\\me\\AppData\\Local\\Ersa\\ersa.db",
     },
   ],
 ];
 
 /**
  * The foot as Retry drives it, for the browser tests: Ersa connects for a moment, then the first Retry fails again
- * and the next one reaches the sessions.
+ * and the next one reaches the sessions. As in the window, Retry only counts an attempt, and connecting starts in an
+ * effect after the foot has drawn once more with Retry still there.
  */
 function RetryingFoot({ view }: { view: CoreView }) {
   const [shown, setShown] = useState(view);
   const [tries, setTries] = useState(0);
-  const retry = () => {
-    const next = tries === 0 ? view : connected;
-    setTries(tries + 1);
+  useEffect(() => {
+    if (tries === 0) return;
     setShown({ phase: "connecting" });
-    setTimeout(() => setShown(next), 500);
-  };
-  return <RailFoot view={shown} onRetry={retry} />;
+    const timer = setTimeout(() => setShown(tries === 1 ? view : connected), 500);
+    return () => clearTimeout(timer);
+  }, [tries, view]);
+  return <RailFoot view={shown} onRetry={() => setTries((n) => n + 1)} />;
 }
 
 const session = (id: string, title: string, created_at: string, tile: Session["tile"]): Session => ({
@@ -341,7 +342,7 @@ const entries: Entry[] = [
       ["Quitting", <QuitQuestion busy={3} onQuit={() => {}} onCancel={() => {}} takeFocus={false} quitting />],
       [
         "Quit failed",
-        <QuitQuestion busy={2} onQuit={() => {}} onCancel={() => {}} takeFocus={false} failed="Ersa did not quit: not attached to Core" />,
+        <QuitQuestion busy={2} onQuit={() => {}} onCancel={() => {}} takeFocus={false} failed="Ersa did not quit: Ersa isn't connected." />,
       ],
     ],
   },
