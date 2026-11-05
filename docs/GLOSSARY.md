@@ -40,7 +40,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Tray icon**: the Shell's icon in the system tray. Closing the window hides it there; the icon reopens the window and carries Quit.
 - **Quit**: stopping Ersa entirely: the Shell asks Core to stop every session and exit, then exits itself. Closing the window is not quitting.
 - **Interface**: the TypeScript application in the Shell's webview. *Not: frontend.*
-- **Core**: the Rust process that owns sessions, adapters, transports, workspaces, packs, modes, the harness tools server, and persistence. *Not: daemon.*
+- **Core**: the Rust process that owns sessions, adapters, transports, workspaces, packs, modes, the harness tools server, and persistence. Interface copy never names it (CONTENT.md); where a message has to refer to it, it is "Ersa's background process". *Not: daemon.*
 - **Core API**: the request/response protocol between Interface and Core.
 - **App log**: Core's log of its own operational records (process started, exited, failed to start, Core restarted). Not part of any session record; Core reads it back at startup for each session's first and last facts.
 - **Harness tools server**: the MCP tools Core exposes to every session's backend: cross-session messaging, session metadata, user-defined tools, and interface-driving tools. Never permission prompting.

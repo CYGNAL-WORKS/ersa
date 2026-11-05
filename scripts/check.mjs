@@ -5,12 +5,10 @@
 //   node scripts/check.mjs          run every check, then summarise
 //   node scripts/check.mjs --quick  skip the full test run (fmt, clippy, manifest only)
 //
-// Exit 0 when everything passes. The manifest check may fail only because of
-// open inbox entries the branch added; that is reported as a warning, since a
-// planning pass clears those before merge (docs/briefs/README.md, Roles).
+// Exit 0 when everything passes.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -40,27 +38,16 @@ const checks = [
         { name: "interface catalog export", cmd: "node", args: ["scripts/gen-catalog.mjs", "--check"], cwd: join(ROOT, "apps", "shell") },
       ]
     : []),
-  { name: "manifest", cmd: "node", args: ["scripts/manifest.mjs", "--check"], manifest: true },
+  { name: "manifest", cmd: "node", args: ["scripts/manifest.mjs", "--check"] },
 ];
 
 const results = [];
 for (const check of checks) {
   process.stdout.write(`\n== ${check.name}: ${check.cmd} ${check.args.join(" ")}\n`);
   const run = spawnSync(check.cmd, check.args, { cwd: check.cwd ?? ROOT, stdio: "inherit", shell: process.platform === "win32" });
-  let status = run.status === 0 ? "pass" : "FAIL";
-  if (status === "FAIL" && check.manifest && onlyInboxProblems()) status = "warn (open inbox entries only)";
-  results.push({ name: check.name, status });
+  results.push({ name: check.name, status: run.status === 0 ? "pass" : "FAIL" });
 }
 
 process.stdout.write("\n== summary\n");
-for (const r of results) process.stdout.write(`${r.status.padEnd(32)} ${r.name}\n`);
+for (const r of results) process.stdout.write(`${r.status.padEnd(6)} ${r.name}\n`);
 process.exit(results.some((r) => r.status === "FAIL") ? 1 : 0);
-
-// The manifest lists its problems under "## Problems"; inbox entries are one
-// line of their own. Anything else there is a real failure.
-function onlyInboxProblems() {
-  const text = readFileSync(join(ROOT, "docs", "MANIFEST.md"), "utf8");
-  const section = text.split("## Problems")[1] ?? "";
-  const problems = section.split("\n").filter((l) => l.startsWith("- "));
-  return problems.length > 0 && problems.every((l) => /open inbox entr(y|ies) need a planning pass/.test(l));
-}
