@@ -98,7 +98,7 @@ async fn core_attach(
         shell
             .quitting
             .load(Ordering::SeqCst)
-            .then(|| BridgeError::unavailable("Ersa is quitting"))
+            .then(|| BridgeError::unavailable("Ersa is quitting."))
     };
     // After Quit, the Interface sees its connection drop and attaches again;
     // that must never launch a new Core behind the one shutting down.

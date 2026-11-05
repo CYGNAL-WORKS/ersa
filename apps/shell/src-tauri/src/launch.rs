@@ -65,7 +65,7 @@ pub enum LaunchError {
     #[error("Ersa can't start its background process. {program}: {source}")]
     Spawn { program: String, source: io::Error },
     /// The launched Core exited before serving. `log` is the end of its output.
-    #[error("Ersa's background process stopped before it was ready. It ended with {status}.{log}")]
+    #[error("Ersa's background process stopped before it was ready. It ended ({status}).{log}")]
     Exited { status: ExitStatus, log: String },
     #[error(
         "Ersa's background process wasn't ready in time. Nothing answered at {endpoint} within {timeout:?}."
@@ -73,7 +73,7 @@ pub enum LaunchError {
     Timeout { endpoint: String, timeout: Duration },
     /// The location may not launch, and nothing serves it.
     #[error(
-        "Nothing is serving the endpoint Ersa is attached to. Start it first: {endpoint} (a replay: ersa-core replay --fixture <path>)"
+        "Nothing is serving the endpoint Ersa was told to attach to. Start it first: {endpoint} (a replay: ersa-core replay --fixture <path>)"
     )]
     NotServing { endpoint: String },
 }
