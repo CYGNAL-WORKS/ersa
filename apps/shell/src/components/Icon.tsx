@@ -12,8 +12,8 @@ export type IconSize = "icon" | "icon-sm" | "icon-xs";
  */
 export function Icon({ icon: Glyph, size = "icon" }: { icon: LucideIcon; size?: IconSize }) {
   // The size reaches the element through CSS, from the token, so a changed token changes every icon. The stroke
-  // is left to scale with the icon (Lucide draws it 2 units wide in a 24-unit box).
-  return <Glyph className="icon" data-size={size} strokeWidth={2} aria-hidden="true" />;
+  // is Lucide's own, 2 units on its 24-unit grid, and scales with the icon (DESIGN.md, Iconography).
+  return <Glyph className="icon" data-size={size} aria-hidden="true" />;
 }
 
 type IconButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "aria-label" | "title"> & {
