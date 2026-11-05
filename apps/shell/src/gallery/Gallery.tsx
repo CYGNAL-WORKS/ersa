@@ -10,12 +10,12 @@ import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
 import { ContextRing } from "../components/ContextRing";
 import { Composer } from "../components/Composer";
-import { CoreStatus } from "../components/CoreStatus";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { Icon, IconButton } from "../components/Icon";
 import { NewSessionScreen } from "../components/NewSessionScreen";
 import { ProjectList } from "../components/ProjectList";
 import { QuitQuestion } from "../components/QuitQuestion";
+import { RailFoot } from "../components/RailFoot";
 import { SessionControls } from "../components/SessionControls";
 import { SessionList } from "../components/SessionList";
 import { SessionTitle } from "../components/SessionTitle";
@@ -44,9 +44,10 @@ const projects: Project[] = [
 ];
 
 const coreViews: [string, CoreView][] = [
+  // The first two draw nothing: the foot is silent while all is well.
   ["Connecting", { phase: "connecting" }],
   [
-    "Started",
+    "Connected",
     {
       phase: "connected",
       link: 1,
@@ -56,10 +57,6 @@ const coreViews: [string, CoreView][] = [
       projects: { state: "loading" },
       sessions: { state: "loading" },
     },
-  ],
-  [
-    "Attached, before status",
-    { phase: "connected", link: 1, how: "attached", hello, projects: { state: "loading" }, sessions: { state: "loading" } },
   ],
   [
     "Attached to a label",
@@ -73,9 +70,10 @@ const coreViews: [string, CoreView][] = [
       sessions: { state: "loading" },
     },
   ],
-  ["Lost, reconnecting", { phase: "lost", reason: "Core closed the connection", hello }],
+  ["Reconnecting", { phase: "lost", reason: "The connection closed.", hello }],
+  ["Reconnecting, no reason", { phase: "lost", reason: "", hello }],
   [
-    "Unavailable",
+    "Unreachable",
     {
       phase: "failed",
       message:
@@ -310,8 +308,8 @@ interface Entry {
 
 const entries: Entry[] = [
   {
-    name: "CoreStatus",
-    states: coreViews.map(([label, view]) => [label, <CoreStatus view={view} onRetry={() => {}} />]),
+    name: "RailFoot",
+    states: coreViews.map(([label, view]) => [label, <RailFoot view={view} onRetry={() => {}} />]),
   },
   {
     name: "QuitQuestion",
