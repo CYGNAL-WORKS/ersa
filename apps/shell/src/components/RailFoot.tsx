@@ -1,4 +1,4 @@
-import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { type MouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import { t } from "../catalog";
 import type { CoreView } from "../core/connection";
 import { footOf } from "../core/foot";
@@ -28,19 +28,20 @@ export function RailFoot({ view, onRetry }: RailFootProps) {
     setReconnected(true);
   }
 
-  // Retry pressed from the keyboard: if it comes back, so does focus, rather than falling to the window.
-  const retryButton = useRef<HTMLButtonElement>(null);
-  const [refocus, setRefocus] = useState(false);
-  if (refocus && view.phase === "connected") setRefocus(false);
-  const retryShown = foot.kind === "unreachable";
+  // Retry pressed from the keyboard: when a new Retry button appears after the attempt, focus goes back to it,
+  // rather than falling to the window, unless the user has put focus somewhere else meanwhile.
+  const refocus = useRef(false);
   useEffect(() => {
-    if (refocus && retryShown) {
-      retryButton.current?.focus();
-      setRefocus(false);
-    }
-  }, [refocus, retryShown]);
+    if (view.phase === "connected") refocus.current = false;
+  }, [view.phase]);
+  // Stable, so it runs only as a Retry button mounts, not on each render of the one already there.
+  const retryMounted = useCallback((button: HTMLButtonElement | null) => {
+    if (!button || !refocus.current) return;
+    refocus.current = false;
+    if (document.activeElement === null || document.activeElement === document.body) button.focus();
+  }, []);
   const retry = (event: MouseEvent<HTMLButtonElement>) => {
-    setRefocus(event.currentTarget.matches(":focus-visible"));
+    refocus.current = event.currentTarget.matches(":focus-visible");
     onRetry();
   };
 
@@ -61,7 +62,7 @@ export function RailFoot({ view, onRetry }: RailFootProps) {
         <div className="rail-foot" role="alert">
           <p className="problem">{t("rail.foot.unreachableError")}</p>
           {foot.reason && <p className="rail-foot-reason">{foot.reason}</p>}
-          <Button ref={retryButton} onClick={retry}>
+          <Button ref={retryMounted} onClick={retry}>
             {t("rail.foot.retryButton")}
           </Button>
         </div>

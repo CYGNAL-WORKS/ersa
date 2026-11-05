@@ -301,6 +301,24 @@ test("Retry in the rail's foot attaches again, keeps keyboard focus, and says wh
   expect((box?.width ?? 0) * (box?.height ?? 0)).toBeLessThanOrEqual(1);
 });
 
+test("Retry in the rail's foot leaves focus where the user put it while Ersa was connecting", async ({ page }) => {
+  await page.goto("/gallery.html?component=RailFoot&theme=light");
+  const foot = page.locator("figure").filter({ has: page.locator("figcaption", { hasText: /^Unreachable$/ }) });
+  const retry = foot.getByRole("button", { name: "Retry" });
+  await retry.focus();
+  await page.keyboard.press("Enter");
+  await expect(retry).toHaveCount(0);
+  // Elsewhere in the window, such as the composer.
+  await page.evaluate(() => {
+    const input = document.createElement("input");
+    input.id = "elsewhere";
+    document.body.appendChild(input);
+    input.focus();
+  });
+  await expect(retry).toBeVisible();
+  await expect(page.locator("#elsewhere")).toBeFocused();
+});
+
 // RAIL.md: with reduced motion on, the foot's ring holds still and the foot appears without its fade.
 test("the rail's foot holds still with reduced motion on", async ({ page }) => {
   const animations = async () => {
