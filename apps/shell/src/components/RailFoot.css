@@ -21,6 +21,11 @@
   white-space: nowrap;
 }
 
+/* What sits beneath the note starts under its words, not under its glyph. */
+.rail-foot > :not(.problem) {
+  margin-inline-start: calc(var(--size-glyph) + var(--space-sm));
+}
+
 .rail-foot-reason {
   margin: 0;
   color: var(--color-ink-muted);

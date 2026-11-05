@@ -69,6 +69,12 @@ impl BridgeError {
     }
 }
 
+/// What a request that timed out tells the window, and what the link's close
+/// tells it when a new connection got no answer either.
+const NO_ANSWER: &str = "Ersa got no answer in time.";
+const NO_ANSWER_ANYWHERE: &str =
+    "Ersa got no answer in time, and a new connection got no answer either.";
+
 /// Something Core sent that nobody asked for.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LinkEvent {
@@ -241,19 +247,16 @@ impl CoreLink {
             }
             Err(_) => {
                 // Only this request fails, unless the probe finds Core wedged.
+                // Which request and how long are for the log: the reason
+                // reaches the window, which speaks in the user's terms.
                 self.forget(id);
-                let message = format!("Ersa got no answer in time. {method} waited {timeout:?}");
+                eprintln!("ersa: {method} got no answer in {timeout:?}");
                 if let Some(endpoint) = &self.shared.options.probe_endpoint
                     && !Box::pin(alive(endpoint)).await
                 {
-                    close(
-                        &self.shared,
-                        Some(format!(
-                            "{message}, and a new connection got no answer either."
-                        )),
-                    );
+                    close(&self.shared, Some(NO_ANSWER_ANYWHERE.to_owned()));
                 }
-                Err(BridgeError::unavailable(message))
+                Err(BridgeError::unavailable(NO_ANSWER))
             }
         }
     }
@@ -510,9 +513,10 @@ mod link_tests {
     async fn a_slow_request_fails_alone() {
         let (link, mut core, _events) = open_fake(short()).await;
         let slow = link.request("core.status", None).await;
-        assert!(
-            matches!(slow, Err(BridgeError::Unavailable { .. })),
-            "{slow:?}"
+        // The whole reason: it names no method and no duration.
+        assert_eq!(
+            slow,
+            Err(BridgeError::unavailable("Ersa got no answer in time."))
         );
         assert!(!link.is_closed(), "one slow request must not drop the link");
 
@@ -538,15 +542,18 @@ mod link_tests {
         };
         let (link, _core, mut events) = open_fake(options).await;
         let result = link.request("core.status", None).await;
-        assert!(
-            matches!(result, Err(BridgeError::Unavailable { .. })),
-            "{result:?}"
+        assert_eq!(
+            result,
+            Err(BridgeError::unavailable("Ersa got no answer in time."))
         );
         assert!(link.is_closed(), "the next attach must connect anew");
-        assert!(matches!(
+        assert_eq!(
             events.recv().await,
-            Some(LinkEvent::Closed { .. })
-        ));
+            Some(LinkEvent::Closed {
+                reason: "Ersa got no answer in time, and a new connection got no answer either."
+                    .to_owned()
+            })
+        );
     }
 
     #[tokio::test]
