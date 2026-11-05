@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 // Every component section in the gallery, photographed in both themes. Each is
 // photographed on a page showing it alone, so its baseline depends only on it.
 const components = [
-  "CoreStatus",
+  "RailFoot",
   "QuitQuestion",
   "ProjectList",
   "AddProject",

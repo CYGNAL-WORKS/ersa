@@ -1,0 +1,41 @@
+/* The rail's foot: a note after a danger glyph, with no tile and no fill (docs/design/RAIL.md, The foot's problem). */
+
+.rail-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+  animation: rail-foot-in var(--motion-settle) var(--motion-ease-out);
+}
+
+.rail-foot-reason {
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  overflow-wrap: anywhere;
+  /* The reason can carry a failed launch's own output, line by line. */
+  white-space: pre-wrap;
+}
+
+.rail-foot-attached {
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  overflow-wrap: anywhere;
+}
+
+@keyframes rail-foot-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-foot {
+    animation: none;
+  }
+}

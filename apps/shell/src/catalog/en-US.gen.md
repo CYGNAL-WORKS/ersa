@@ -4,6 +4,26 @@
 
 ## `rail`
 
+### `rail.foot.attachedLabel`
+
+Attached to {label}
+
+### `rail.foot.reconnectingError`
+
+Ersa can't reach your sessions. It's trying again.
+
+### `rail.foot.unreachableError`
+
+Ersa can't reach your sessions.
+
+### `rail.foot.retryButton`
+
+Retry
+
+### `rail.foot.boundaryName`
+
+The connection status
+
 ## `transcript`
 
 ## `composer`

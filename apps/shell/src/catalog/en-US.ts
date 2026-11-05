@@ -12,7 +12,16 @@
 import type { Section } from "./lookup";
 
 export const enUS = {
-  rail: {},
+  rail: {
+    foot: {
+      attachedLabel: "Attached to {label}",
+      reconnectingError: "Ersa can't reach your sessions. It's trying again.",
+      unreachableError: "Ersa can't reach your sessions.",
+      retryButton: "Retry",
+      // Names the foot when it fails to draw: "The connection status could not be shown:".
+      boundaryName: "The connection status",
+    },
+  },
   transcript: {},
   composer: {},
   newSession: {},
