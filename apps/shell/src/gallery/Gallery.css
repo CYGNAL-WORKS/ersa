@@ -82,3 +82,9 @@
 .gallery-room {
   padding-bottom: var(--size-card-max);
 }
+
+.gallery-icon-row {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
