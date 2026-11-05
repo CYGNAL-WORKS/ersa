@@ -17,6 +17,7 @@ import { type Connection, type CoreView, type ProjectsView, type SessionsView, c
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { Project, Session, Workspace } from "./protocol/core-api.gen";
 import { type BackendChoices, type SessionValues, sessionShown } from "./session/controls";
+import { contextUsed } from "./session/tile";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { readChoices, rememberPatch, startSession } from "./session/start";
@@ -312,8 +313,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const listedWorkspace = listed && workspaces[listed.workspace_id];
   const listedProject = listedWorkspace && projectById.get(listedWorkspace.project_id);
   const sessionControls = listed && listedWorkspace && sessionShown(listed, listedWorkspace, backends[listed.host_id] ?? []);
-  const contextUsed =
-    listed?.tile.context_tokens !== undefined && listed.tile.context_window ? listed.tile.context_tokens / listed.tile.context_window : undefined;
+  const used = listed && contextUsed(listed.tile);
 
   return (
     <div className="app">
@@ -325,7 +325,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             </ProjectList>
           </ErrorBoundary>
           <ErrorBoundary what="The sessions" resetKey={sessionsVersion}>
-            <SessionList view={sessions} activeId={composing ? undefined : activeId} onSelect={select} workspaces={workspaceNames} />
+            <SessionList view={sessions} activeId={composing ? undefined : activeId} onSelect={select} workspaces={workspaceNames} backends={backends} />
           </ErrorBoundary>
         </div>
         <div className="rail-core">
@@ -376,7 +376,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                   workspaceLabel={sessionControls.workspaceLabel}
                   onChoose={() => {}}
                   disabled
-                  used={contextUsed}
+                  used={used}
                 />
               </div>
             )}
