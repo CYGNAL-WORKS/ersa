@@ -28,6 +28,22 @@
   overflow-wrap: anywhere;
 }
 
+/* While Ersa is trying again, the glyph before the line is a turning ring, not the danger dot: the arc is
+   ink-muted on a line-coloured track, one turn per motion-loop-ring. The ring holds still with reduced motion. */
+.problem.rail-foot-trying::before {
+  box-sizing: border-box;
+  background: none;
+  border: var(--line-hairline) solid var(--color-line);
+  border-top-color: var(--color-ink-muted);
+  animation: rail-foot-turn var(--motion-loop-ring) var(--motion-linear) infinite;
+}
+
+@keyframes rail-foot-turn {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
 @keyframes rail-foot-in {
   from {
     opacity: 0;
@@ -35,7 +51,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rail-foot {
+  .rail-foot,
+  .problem.rail-foot-trying::before {
     animation: none;
   }
 }
