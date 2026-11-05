@@ -4,18 +4,18 @@
 // A component built for the window gets an entry here in the same change.
 
 import { ChevronDown, ChevronRight, Plus, ShieldAlert, X } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { AddProject } from "../components/AddProject";
 import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
 import { ContextRing } from "../components/ContextRing";
 import { Composer } from "../components/Composer";
-import { CoreStatus } from "../components/CoreStatus";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { Icon, IconButton } from "../components/Icon";
 import { NewSessionScreen } from "../components/NewSessionScreen";
 import { ProjectList } from "../components/ProjectList";
 import { QuitQuestion } from "../components/QuitQuestion";
+import { RailFoot } from "../components/RailFoot";
 import { SessionControls } from "../components/SessionControls";
 import { SessionList } from "../components/SessionList";
 import { SessionTitle } from "../components/SessionTitle";
@@ -43,24 +43,20 @@ const projects: Project[] = [
   { id: "p4", host_id: "local", path: "D:\\Clones\\stranger", name: "stranger", vcs: "git", trusted: false },
 ];
 
+const connected: CoreView = {
+  phase: "connected",
+  link: 1,
+  how: "launched",
+  hello,
+  status: { sessions_running: 3, sessions_waiting: 1, uptime_s: 42, db_path: "" },
+  projects: { state: "loading" },
+  sessions: { state: "loading" },
+};
+
 const coreViews: [string, CoreView][] = [
+  // The first two draw nothing: the foot is silent while all is well.
   ["Connecting", { phase: "connecting" }],
-  [
-    "Started",
-    {
-      phase: "connected",
-      link: 1,
-      how: "launched",
-      hello,
-      status: { sessions_running: 3, sessions_waiting: 1, uptime_s: 42, db_path: "" },
-      projects: { state: "loading" },
-      sessions: { state: "loading" },
-    },
-  ],
-  [
-    "Attached, before status",
-    { phase: "connected", link: 1, how: "attached", hello, projects: { state: "loading" }, sessions: { state: "loading" } },
-  ],
+  ["Connected", connected],
   [
     "Attached to a label",
     {
@@ -73,16 +69,34 @@ const coreViews: [string, CoreView][] = [
       sessions: { state: "loading" },
     },
   ],
-  ["Lost, reconnecting", { phase: "lost", reason: "Core closed the connection", hello }],
+  ["Reconnecting", { phase: "lost", reason: "The connection closed.", hello }],
+  ["Reconnecting, no reason", { phase: "lost", reason: "", hello }],
   [
-    "Unavailable",
+    "Unreachable",
     {
       phase: "failed",
       message:
-        "Core exited before it started serving (exit code: 1):\nersa-core: cannot open the database at C:\\Users\\me\\AppData\\Local\\Ersa\\ersa.db",
+        "Ersa's background process stopped before it was ready. It ended (exit code: 1).\nersa-core: cannot open the database at C:\\Users\\me\\AppData\\Local\\Ersa\\ersa.db",
     },
   ],
 ];
+
+/**
+ * The foot as Retry drives it, for the browser tests: Ersa connects for a moment, then the first Retry fails again
+ * and the next one reaches the sessions. As in the window, Retry only counts an attempt, and connecting starts in an
+ * effect after the foot has drawn once more with Retry still there.
+ */
+function RetryingFoot({ view }: { view: CoreView }) {
+  const [shown, setShown] = useState(view);
+  const [tries, setTries] = useState(0);
+  useEffect(() => {
+    if (tries === 0) return;
+    setShown({ phase: "connecting" });
+    const timer = setTimeout(() => setShown(tries === 1 ? view : connected), 500);
+    return () => clearTimeout(timer);
+  }, [tries, view]);
+  return <RailFoot view={shown} onRetry={() => setTries((n) => n + 1)} />;
+}
 
 const session = (id: string, title: string, created_at: string, tile: Session["tile"]): Session => ({
   id,
@@ -310,8 +324,11 @@ interface Entry {
 
 const entries: Entry[] = [
   {
-    name: "CoreStatus",
-    states: coreViews.map(([label, view]) => [label, <CoreStatus view={view} onRetry={() => {}} />]),
+    name: "RailFoot",
+    states: coreViews.map(([label, view]) => [
+      label,
+      view.phase === "failed" ? <RetryingFoot view={view} /> : <RailFoot view={view} onRetry={() => {}} />,
+    ]),
   },
   {
     name: "QuitQuestion",
@@ -325,7 +342,7 @@ const entries: Entry[] = [
       ["Quitting", <QuitQuestion busy={3} onQuit={() => {}} onCancel={() => {}} takeFocus={false} quitting />],
       [
         "Quit failed",
-        <QuitQuestion busy={2} onQuit={() => {}} onCancel={() => {}} takeFocus={false} failed="Ersa did not quit: not attached to Core" />,
+        <QuitQuestion busy={2} onQuit={() => {}} onCancel={() => {}} takeFocus={false} failed="Ersa did not quit: Ersa isn't connected." />,
       ],
     ],
   },

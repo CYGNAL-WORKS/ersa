@@ -1,5 +1,5 @@
 /* A question that needs the user, so its edge takes the accent, as the trust question's does: a line's
-   colour, never a fill. It sits in the rail just above Core's tile, since quitting stops Core.
+   colour, never a fill. It sits in the rail just above its foot, since quitting stops Core.
    Kept apart from TrustQuestion.css: it rises from below where that one unfolds from above, and the two
    questions are free to differ as they grow. */
 .quit-question {
@@ -11,7 +11,7 @@
   background: var(--color-surface);
   border: var(--line-hairline) solid var(--color-accent);
   border-radius: var(--radius-md);
-  /* It rises from Core's tile, just below. */
+  /* It rises from the rail's foot, just below. */
   animation: quit-question-in var(--motion-quick) var(--motion-ease-out);
 }
 
