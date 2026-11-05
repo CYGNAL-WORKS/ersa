@@ -1,11 +1,9 @@
 {
   "App.tsx": [
     "Core is not connected.",
-    "Core's status",
     "Ersa did not quit:",
     "No session open. Start one from a project in the rail.",
     "Rail",
-    "Retry",
     "Root workspace",
     "Running sessions keep their current settings until they are stopped.",
     "The composer",
@@ -34,14 +32,6 @@
     "Context:",
     "Context: none used yet",
     "percent used"
-  ],
-  "components/CoreStatus.tsx": [
-    "Attached to",
-    "Connecting…",
-    "Core",
-    "Reconnecting…",
-    "Retry",
-    "Unavailable"
   ],
   "components/ErrorBoundary.tsx": [
     "could not be shown:"
