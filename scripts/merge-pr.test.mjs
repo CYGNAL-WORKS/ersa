@@ -241,6 +241,7 @@ function gate(r, argv, { head, originMain, pr = {}, view, merged = true, fetched
     }
     if (args[0] === "fetch") return fetched ? ok() : { ok: false, out: "", err: "network down" };
     // The test repository has no inbox; `inbox` stands one in at the head.
+    if (inbox?.fail === args[0]) return { ok: false, out: "", err: "boom" };
     if (inbox !== undefined && args[0] === "ls-tree") return ok("100644 blob x\tdocs/briefs/INBOX.md");
     if (inbox !== undefined && args[0] === "show" && args[1].endsWith(":docs/briefs/INBOX.md")) return ok(inbox);
     return r.git(args);
@@ -322,4 +323,11 @@ test("a usage or tool error exits 2 before anything merges", () => {
   assert.equal(offline.code, 2);
   assert.match(offline.stderr, /git fetch failed: network down/);
   assert.equal(offline.gh.length, 1);
+  // A failed read of the head's inbox stops the gate; it never reads as no open entries.
+  for (const fail of ["ls-tree", "show"]) {
+    const unread = gate(r, ["5", "--reviewed", r.reviewed], { ...at, inbox: { fail } });
+    assert.equal(unread.code, 2, fail);
+    assert.match(unread.stderr, new RegExp(`git ${fail} .*failed: boom`));
+    assert.equal(unread.gh.length, 1, fail);
+  }
 });

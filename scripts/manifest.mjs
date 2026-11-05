@@ -17,7 +17,7 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "
 import { basename, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { openInboxEntries } from "./merge-pr.mjs";
+import { inboxHold, openInboxEntries } from "./merge-pr.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const BRIEFS_DIR = join(ROOT, "docs", "briefs");
@@ -193,7 +193,7 @@ try {
 // while its inbox has any (ADR 0025), so CI stays green and the review runs.
 // On the merge queue and main they are, so a merge that skips the gate (the
 // owner's) still cannot carry one onto main.
-if (INBOX_BLOCKS && openInbox > 0) problems.push(`${openInbox} open inbox entr${openInbox === 1 ? "y needs" : "ies need"} a planning pass`);
+if (INBOX_BLOCKS && openInbox > 0) problems.push(inboxHold(openInbox));
 
 // ---- Vendored files ----------------------------------------------------------
 // .claude/skills/VENDORED.sha256 pins every third-party file we copied (after our
