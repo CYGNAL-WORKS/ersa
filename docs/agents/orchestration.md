@@ -37,4 +37,9 @@ Planning commits for a pull request go onto its branch, which is checked out in 
 
 ## Train the harness
 
-After each merge, compare what the merge review found with what the implementing session's own review caught. For each defect that got through, ask which part of the harness should have stopped it (a brief requirement, a reviewer agent's prompt, a test convention, a check in `scripts/`, the hook) and change that part in a planning commit, so the lesson outlives the session. Prune at the same time: a rule nobody needs, a duplicated instruction, a stale note.
+Merges are automatic, so the harness is trained in batches. Run a pass in a planning session when the owner asks, and offer one when you report a merge and ten or more pull requests have merged since the last pass. The last pass is the newest commit whose subject starts `Harness: lessons from`.
+
+1. For each pull request merged since then, set what the merge review posted (the reviews that start `<!-- merge-review -->`) against the **Review** section of the pull request's body, which lists what the implementing session's own review caught.
+2. For each defect the merge review found that the author's review missed, change the cheapest part of the harness that would have stopped it, in this order: a check in `scripts/` or the hook, a test convention, a reviewer agent's prompt or the `review-pr` skill, a brief requirement.
+3. Prune at the same time: a rule nobody needs, a duplicated instruction, a stale note.
+4. Commit as `Harness: lessons from #<first>-#<last>`, one body line per change naming the pull requests behind it. That commit is the record of the pass.
