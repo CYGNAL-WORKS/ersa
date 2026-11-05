@@ -80,10 +80,13 @@ test("a remote behind the local head is refused", async () => {
   assert.ok(!f.calls.some((c) => c.startsWith("gh")));
 });
 
-test("uncommitted interface changes are refused before anything starts", async () => {
-  const f = fake({ "git status": { status: 0, stdout: " M apps/shell/src/gallery/Gallery.tsx\n" } });
-  await assert.rejects(go(f, fakeRoot()), /apps\/shell has uncommitted changes/);
+test("uncommitted changes are refused before anything starts, except earlier baselines", async () => {
+  const f = fake({ "git status": { status: 0, stdout: " M pnpm-lock.yaml\n" } });
+  await assert.rejects(go(f, fakeRoot()), /The working tree has uncommitted changes/);
   assert.ok(!f.calls.some((c) => c.startsWith("gh")));
+  const g = fake();
+  await go(g, fakeRoot());
+  assert.ok(g.calls.includes("git status --porcelain -- . :(exclude)apps/shell/e2e/__screenshots__"));
 });
 
 test("a detached head is refused", async () => {

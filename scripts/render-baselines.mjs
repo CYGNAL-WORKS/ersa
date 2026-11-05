@@ -45,10 +45,11 @@ export async function renderBaselines({
   const remote = must("git", ["ls-remote", "origin", `refs/heads/${branch}`], "Reading the pushed branch").split(/\s+/)[0];
   if (!remote) throw new Error(`${branch} is not pushed; push it, then run this again.`);
   if (remote !== head) throw new Error(`origin/${branch} is at ${remote.slice(0, 7)}, not the local head ${head.slice(0, 7)}; push or pull until they match, then run this again.`);
-  // The run renders the pushed head, so uncommitted interface changes would
-  // get baselines that do not match them.
-  if (must("git", ["status", "--porcelain", "--", "apps/shell"], "Reading the working tree")) {
-    throw new Error("apps/shell has uncommitted changes; commit and push them, then run this again.");
+  // The run renders the pushed head, so uncommitted changes would get
+  // baselines that do not match them. A previous run's baselines may stay
+  // uncommitted: this run replaces them.
+  if (must("git", ["status", "--porcelain", "--", ".", `:(exclude)${BASELINES.replaceAll("\\", "/")}`], "Reading the working tree")) {
+    throw new Error("The working tree has uncommitted changes; commit and push them, then run this again.");
   }
 
   const listRuns = () =>
