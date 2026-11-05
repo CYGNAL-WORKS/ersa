@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { t } from "./catalog";
 import "./App.css";
 import { AddProject } from "./components/AddProject";
 import { Button } from "./components/Button";
 import { Composer } from "./components/Composer";
-import { CoreStatus } from "./components/CoreStatus";
+import { RailFoot } from "./components/RailFoot";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { NewSessionScreen } from "./components/NewSessionScreen";
 import { ProjectList } from "./components/ProjectList";
@@ -331,8 +332,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           {quitAsk && (
             <QuitQuestion busy={quitAsk.busy} quitting={quitAsk.quitting} failed={quitAsk.failed} onQuit={quit} onCancel={cancel} />
           )}
-          <ErrorBoundary what="Core's status" resetKey={coreVersion} action={<Button onClick={retry}>Retry</Button>}>
-            <CoreStatus view={view} onRetry={retry} />
+          <ErrorBoundary what={t("rail.foot.boundaryName")} resetKey={coreVersion} action={<Button onClick={retry}>{t("rail.foot.retryButton")}</Button>}>
+            <RailFoot view={view} onRetry={retry} />
           </ErrorBoundary>
         </div>
       </nav>

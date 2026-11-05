@@ -1,0 +1,75 @@
+/* The rail's foot: a note after a glyph, with no tile and no fill (docs/design/RAIL.md, The foot's problem). */
+
+.rail-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+  animation: rail-foot-in var(--motion-settle) var(--motion-ease-out);
+}
+
+/* The status region while it shows nothing: out of the layout and out of sight, but still read by assistive
+   technology, which hears "Reconnected" from it. */
+.rail-foot-unseen {
+  position: absolute;
+  width: var(--line-hairline);
+  height: var(--line-hairline);
+  overflow: hidden;
+  clip-path: circle(0);
+  white-space: nowrap;
+}
+
+/* What sits beneath the note starts under its words, not under its glyph. */
+.rail-foot > :not(.problem) {
+  margin-inline-start: calc(var(--size-glyph) + var(--space-sm));
+}
+
+.rail-foot-reason {
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  overflow-wrap: anywhere;
+  /* The reason can carry a failed launch's own output, line by line. */
+  white-space: pre-wrap;
+}
+
+.rail-foot-attached {
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  overflow-wrap: anywhere;
+}
+
+/* While Ersa is trying again, the glyph before the line is a turning ring, not the danger dot: ink-muted, open by
+   a quarter so its turning shows, one turn per motion-loop-ring. Held still by reduced motion, it still reads as
+   a ring. */
+.problem.rail-foot-trying::before {
+  box-sizing: border-box;
+  background: none;
+  border: var(--line-hairline) solid var(--color-ink-muted);
+  border-top-color: var(--color-line);
+  animation: rail-foot-turn var(--motion-loop-ring) var(--motion-linear) infinite;
+}
+
+@keyframes rail-foot-turn {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+@keyframes rail-foot-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-foot,
+  .problem.rail-foot-trying::before {
+    animation: none;
+  }
+}
