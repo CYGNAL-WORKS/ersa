@@ -18,7 +18,7 @@ test("a high or medium finding blocks, listed or new; lows do not", () => {
   assert.deepEqual(blocking(undefined), []);
 });
 
-test("the owner merges workflows, the review, the gate, the poller, the hooks and every instruction file", () => {
+test("the owner merges workflows, the review, the gate, the poller, the manifest, the hooks and every instruction file", () => {
   const owner = [".github/workflows/ci.yml", "scripts/hooks/guard-briefs.mjs", "scripts/merge-pr.mjs", "scripts/merge-review.mjs", "scripts/merge-review-watch.mjs", "scripts/manifest.mjs", "CLAUDE.md", "crates/core/CLAUDE.md", "apps/CLAUDE.local.md", ".claude/skills/x/SKILL.md", "apps/shell/.claude/settings.json", ".mcp.json", "apps/.mcp.json"];
   const others = ["scripts/check.mjs", "scripts/merge-pr.test.mjs", "scripts/merge-review-watch.test.mjs", "docs/agents/orchestration.md", "docs/CLAUDE.md.txt", "crates/core/src/lib.rs", "github/x"];
   assert.deepEqual(ownerPaths([...owner, ...others]), owner);
