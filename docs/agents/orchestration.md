@@ -4,7 +4,7 @@ How the orchestration session runs the engineering loop: cut tickets, start impl
 
 ## Cut tickets
 
-1. Work from a `ready` brief. Use `to-tickets`: slice into issues sized to one fresh context, each with Brief, Requirements, Area, Test seams, Done when, and blocking links. Two tickets that run in parallel touch different areas; shared contracts go first as their own ticket. Before showing the breakdown, check that every field, id, code and default a ticket's tests will assert is named in a brief; one that is not gets its planning pass first, since an unnamed shape becomes an inbox entry, a planning commit on the branch and a CI rerun. A ticket that would change more than about 500 lines is two tickets: the tickets over 1,000 lines (#55, #56, #57) each took three merge rounds, the small ones one. A manual check that needs the running app or the owner's own configuration is marked "owner check" and is the owner's at merge.
+1. Work from a `ready` brief. Use `to-tickets`: slice into issues sized to one fresh context, each with Brief, Requirements, Area, Test seams, Done when, and blocking links. Two tickets that run in parallel touch different areas; shared contracts go first as their own ticket. Before showing the breakdown, check that every field, id, code and default a ticket's tests will assert is named in a brief; one that is not gets its planning pass first, since an unnamed shape becomes an inbox entry, a wait at the merge gate and a planning commit on the branch. A ticket that would change more than about 500 lines is two tickets: the tickets over 1,000 lines (#55, #56, #57) each took three merge rounds, the small ones one. A manual check that needs the running app or the owner's own configuration is marked "owner check" and is the owner's at merge.
 2. Show the owner the breakdown (titles, areas, blockers) for approval, then publish every issue with the `ready-for-agent` label. The owner does not approve individual issue bodies.
 
 ## Start implementing sessions
@@ -23,7 +23,7 @@ The merge review runs on the owner's machine (ADR 0023). The merge review poller
 
 ## Resolve inbox entries
 
-Planning commits for a pull request go onto its branch, which is checked out in the implementer's worktree. Use a detached worktree:
+The merge gate holds a pull request while its inbox has an open entry (ADR 0025): its review is clean but its status stays pending, naming the entries. Planning commits for a pull request go onto its branch, which is checked out in the implementer's worktree. Use a detached worktree:
 
 1. `git worktree add --detach ../ersa-plan origin/<branch>`, then `node scripts/role.mjs planning` inside it.
 2. `git merge origin/main` if the branch is behind. Briefs, `docs/MANIFEST.md` and the ADR index merge with the union driver (`.gitattributes`), so two planning commits adding a Changes line or a requirement keep both; read the merged section once, then regenerate the manifest.
@@ -37,4 +37,4 @@ Planning commits for a pull request go onto its branch, which is checked out in 
 
 ## Train the harness
 
-After each merge, compare what the merge review found with what the implementing session's own review caught. For each defect that got through, ask which part of the harness should have stopped it (a brief requirement, a reviewer agent's prompt, a test convention, a check in `scripts/`, the hook) and change that part in a planning commit, so the lesson outlives the session. Prune at the same time: a rule nobody needs, a duplicated instruction, a stale note.
+After each merge, compare what the merge review found with what the implementing session's own review caught. For each defect that got through, ask which part of the harness should have stopped it (a brief requirement, a reviewer agent's prompt, a test convention, a check in `scripts/`, the hook) and change that part in a planning commit, so the lesson outlives the session. Prune at the same time: a rule nobody needs, a duplicated instruction, a stale note. Take up the pull request's follow-ups the same way: make each now, or file it as a `needs-triage` issue, so none is lost when the pull request closes.

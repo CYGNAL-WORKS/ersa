@@ -71,6 +71,8 @@ test("a first review reads the whole diff; a re-review reads the commits since t
   assert.match(again, /names no issue/);
   assert.match(again, new RegExp(`git log -p --no-merges ${OLD.slice(0, 7)}\\.\\.HEAD --not origin/main`));
   assert.match(again, /- medium, scripts\/x\.mjs:3: drops the last line\./);
+  const lowOnly = prompt(pr, { head: OLD, findings: [finding({ severity: "low", defect: "a nit." })] });
+  assert.doesNotMatch(lowOnly, /a nit/, "a low was reported once and is not listed again");
   assert.match(again, /step 6/);
   assert.doesNotMatch(again, /steps 1 to 4/);
 });
@@ -91,7 +93,7 @@ const REVIEW_URL = "https://github.com/o/r/pull/7#pullrequestreview-1";
 // review and from `gate` for the gate (which asks for `mergeable`), the reviews
 // list from `reviews`, claude from `claude`, `git diff` from `files` (against
 // main) and `since` (against the previous head).
-function drive(argv, { pr = {}, reviews = [], claude, gate = {}, reviewedMissing = false, ancestors = [], files = "scripts/x.mjs\0scripts/x.test.mjs\0", since = "", mainHas = [], me = { ok: true, out: ME, err: "" }, statusOk = true } = {}) {
+function drive(argv, { pr = {}, reviews = [], claude, gate = {}, reviewedMissing = false, ancestors = [], files = "scripts/x.mjs\0scripts/x.test.mjs\0", since = "", mainHas = [], me = { ok: true, out: ME, err: "" }, statusOk = true, revList = "", show = "" } = {}) {
   const calls = [];
   const ok = (out = "") => ({ ok: true, out, err: "" });
   const no = (err = "no") => ({ ok: false, out: "", err });
@@ -113,7 +115,8 @@ function drive(argv, { pr = {}, reviews = [], claude, gate = {}, reviewedMissing
     if (cmd === "git" && args[0] === "merge-base") return (args[2] === HEAD && !reviewedMissing) || ancestors.includes(args[2]) ? ok() : no("");
     if (cmd === "git" && args[0] === "diff") return ok(args.includes("origin/main...HEAD") ? files : since);
     if (cmd === "git" && args[0] === "cat-file") return mainHas.includes(args[2].replace("origin/main:", "")) ? ok() : no("");
-    if (cmd === "git" && args[0] === "rev-list") return ok("");
+    if (cmd === "git" && args[0] === "rev-list") return ok(revList);
+    if (cmd === "git" && args[0] === "show") return ok(show);
     if (cmd === "claude") return ok(JSON.stringify(claude ?? { structured_output: { findings: [], dismissed: [] }, num_turns: 1, total_cost_usd: 0.5 }));
     return ok();
   };
@@ -194,6 +197,23 @@ test("a head already reviewed is not reviewed or posted again, and a clean one s
   // The retired workflow's review of the same head is another account's and does not count.
   const bot = drive(["7", "--head", HEAD], { reviews: [{ author: "github-actions[bot]", body: body(HEAD) }] });
   assert.equal(bot.reviewed, 1);
+});
+
+test("a head that only merged main cleanly since the review carries its verdict without a run", () => {
+  const MAIN = "c".repeat(40);
+  const reviews = [{ author: ME, body: body(OLD, [finding({ severity: "low" })]) }];
+  const merge = `${"d".repeat(40)} ${OLD} ${MAIN}`;
+  const got = drive(["7", "--head", HEAD], { reviews, ancestors: [OLD, MAIN], revList: merge });
+  assert.equal(got.code, 0, got.stderr);
+  assert.equal(got.reviewed, 0);
+  assert.equal(got.posted.length, 0);
+  assert.equal(got.queued.length, 1);
+  assert.match(got.stdout, /already reviewed/);
+  // A merge that resolved a conflict by hand, or a merge of another branch, is reviewed.
+  const conflict = drive(["7", "--head", HEAD], { reviews, ancestors: [OLD, MAIN], revList: merge, show: "conflict hunk" });
+  assert.equal(conflict.reviewed, 1);
+  const other = drive(["7", "--head", HEAD], { reviews, ancestors: [OLD], revList: merge });
+  assert.equal(other.reviewed, 1);
 });
 
 test("a previous review on an ancestor makes this a re-review", () => {

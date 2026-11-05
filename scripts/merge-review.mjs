@@ -33,7 +33,7 @@ import { fileURLToPath } from "node:url";
 
 // Loaded before the review runs, so an edit to the gate's file during it (a
 // mutation left behind, a test) changes nothing.
-import { MERGE_REVIEW, main as gate } from "./merge-pr.mjs";
+import { MERGE_REVIEW, commitsSinceReview, main as gate } from "./merge-pr.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 export const MARK = "<!-- merge-review -->";
@@ -106,7 +106,9 @@ export function prompt({ number, branch, title, issue, head }, previous) {
       'Return every confirmed finding, low ones included, each with origin "new", and every dismissal with its evidence.',
     ].join("\n\n");
   const range = `${previous.head.slice(0, 7)}..HEAD`;
-  const listed = previous.findings.map((f) => `- ${f.severity}, ${f.location}: ${f.defect} Failure: ${f.scenario}`).join("\n");
+  // Only the blocking ones: a low was reported once, and listing it every
+  // round lengthens each review without changing the verdict.
+  const listed = blocking(previous.findings).map((f) => `- ${f.severity}, ${f.location}: ${f.defect} Failure: ${f.scenario}`).join("\n");
   return [
     ...about,
     `The merge review of ${previous.head.slice(0, 7)} listed these findings:\n\n${listed || "- none"}`,
@@ -229,7 +231,12 @@ function review(argv, run) {
     const isAncestor = (a, b) => run("git", ["merge-base", "--is-ancestor", a, b]).ok;
     const previous = previousReview(reviews, head, isAncestor, [me]);
     const files = must("git", ["diff", "--name-only", "--no-renames", "-z", "origin/main...HEAD"]).split("\0").filter(Boolean);
-    const fresh = previous?.head !== head;
+    // A head whose only commits since the reviewed one merge main without a
+    // hand-resolved conflict changes nothing a reviewer read (ADR 0021), so
+    // the verdict carries over without a run, as the gate already allows.
+    const merged = previous && previous.head !== head ? commitsSinceReview({ reviewed: previous.head, head, git: (a) => run("git", a) }) : [];
+    const onlyCleanMerges = merged.length > 0 && merged.every((c) => c.merge && c.fromMain && c.clean);
+    const fresh = previous?.head !== head && !onlyCleanMerges;
 
     let findings = previous?.findings ?? [];
     let dismissed = [];

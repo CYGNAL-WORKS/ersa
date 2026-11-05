@@ -63,7 +63,7 @@ One testable statement per requirement, written in the form "When X, Ersa shall 
 ## Roles
 
 - **Planning sessions** edit briefs and ADRs. They declare themselves by setting `ERSA_ROLE=planning`; a tool hook blocks edits under `docs/briefs/` and `docs/adr/` otherwise.
-- **Implementing sessions** build tickets. When they find a brief contradicting reality, or make a decision the brief does not cover, they append a line to `docs/briefs/INBOX.md` and continue. The manifest check fails while the inbox has open entries, so a planning pass must clear it before the next merge. An implementing session's pull request may therefore fail the manifest check on its own inbox entries and nothing else; it lists them in the pull request description, and the planning pass that resolves them is a commit pushed to that pull request's branch before merging.
+- **Implementing sessions** build tickets. When they find a brief contradicting reality, or make a decision the brief does not cover, they append a line to `docs/briefs/INBOX.md` and continue; a gap in `CONTENT.md` or `DESIGN.md` goes there too. The merge gate holds a pull request while its inbox has open entries (ADR 0025), so a planning pass clears them before it merges; CI stays green and the merge review runs meanwhile. The session lists its entries in the pull request description, and the planning pass that resolves them is a commit pushed to that pull request's branch. A harness or process proposal no code depends on is not an entry: it is a follow-up in the pull request.
 
 ## Changing a brief
 
