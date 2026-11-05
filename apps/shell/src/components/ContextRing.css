@@ -13,6 +13,17 @@
   height: var(--size-ring);
 }
 
+/* A tile's ring, smaller and with no readout. */
+.context-ring[data-size="ring-sm"] .context-ring-gauge {
+  width: var(--size-ring-sm);
+  height: var(--size-ring-sm);
+}
+
+/* Near full, the arc turns caution (LAY-SHELL, Context). */
+.context-ring[data-near-full] .context-ring-used {
+  stroke: var(--color-caution);
+}
+
 .context-ring-track,
 .context-ring-used {
   fill: none;
