@@ -23,7 +23,7 @@ describe("the stage", () => {
     expect(failed.activeId).toBeUndefined();
   });
 
-  // verifies: FLOW-NEW-SESSION-R09
+  // verifies: FLOW-NEW-SESSION-R12
   it("makes a started session the active one, and shows it once the window follows it", () => {
     const started = run([
       { type: "showNewest", id: "s-old" },
@@ -39,7 +39,7 @@ describe("the stage", () => {
     expect(shown).toMatchObject({ activeId: "s-new", composing: undefined, starting: undefined, opening: undefined });
   });
 
-  // verifies: FLOW-NEW-SESSION-R09
+  // verifies: FLOW-NEW-SESSION-R12
   it("settles the first session ever started, whose tile arrives before its start does", () => {
     // No session yet: the default screen. While the first message is on its way, Core's tile for the new session
     // makes the window read the list again, which offers the newest session before the start has answered.

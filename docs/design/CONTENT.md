@@ -49,11 +49,11 @@ Each rule names the check that enforces it, and says so when the check covers on
 ## Interface patterns
 
 - **Buttons and commands.** Lead with a verb, use sentence case, and end without punctuation, except the ellipsis of a command that asks for more before it acts. Name the action: "Quit", "Allow", "Add project". Never use "OK" or "Yes" for a choice with consequences.
-- **Errors.** Say what failed, then what to do, as sentences ending with a period: "Core isn't connected. Ersa is trying again." Don't blame the person, and don't prefix "Error:".
-- **Empty states.** Say what will appear here and how to make it appear: "Sessions appear once Core is connected."
-- **Progress.** Use a present participle with an ellipsis: "Saving…", "Reconnecting to Core…".
+- **Errors.** Say what failed, then what to do, as sentences ending with a period: "Ersa can't reach your sessions. It's trying again." Say it in the person's terms: interface copy never names Ersa's own parts, such as Core. (Not checked) Don't blame the person, and don't prefix "Error:".
+- **Empty states.** Say what will appear here and how to make it appear: "No projects yet. Add a folder to start a session in it."
+- **Progress.** Use a present participle with an ellipsis: "Saving…", "Reconnecting…".
 - **Confirmations.** The question names the consequence, and the primary button repeats its verb: "Quit Ersa? 2 sessions are running and will stop." with Quit and Cancel.
-- **Status.** One or two words in sentence case: "Running", "Needs you".
+- **Status.** One or two words in sentence case: "Working", "Needs you".
 - **Placeholders.** Say what to write, and never let a placeholder be a field's only label.
 
 ## The string catalog
@@ -61,8 +61,8 @@ Each rule names the check that enforces it, and says so when the check covers on
 Every string the Interface shows lives in the string catalog, including labels only a screen reader hears. Components refer to keys and never hold copy. The component gallery's own sample text is exempt, because it's a development surface; the component copy it renders still comes from the catalog. US English is the source locale; other locales are added beside it.
 
 - **Module.** `apps/shell/src/catalog/en-US.ts`, a typed TypeScript module declared `as const`. Another locale is a sibling file with the same keys.
-- **Keys.** Nested by area, then purpose, in camelCase, with a sub-area where an area needs one: `quit.title`, `rail.core.connectingProgress`. An area is a part of the interface or a flow, named after its glossary term (`rail`, `quit`, `trust`); `errors` holds errors that more than one area shows. A key names a purpose, never the wording, so copy changes without a rename.
-- **Kinds.** A key whose string follows one of the interface patterns ends in that pattern's kind: `Button`, `Error`, `Progress`, `Status`, `Placeholder`, `Empty`, or `Confirmation`. For example, `quit.quitButton` and `rail.core.unreachableError`. Other keys, such as titles and labels, take only the rules that apply to every string.
+- **Keys.** Nested by area, then purpose, in camelCase, with a sub-area where an area needs one: `quit.title`, `rail.foot.reconnectingProgress`. An area is a part of the interface or a flow, named after its glossary term (`rail`, `quit`, `trust`); `errors` holds errors that more than one area shows. A key names a purpose, never the wording, so copy changes without a rename.
+- **Kinds.** A key whose string follows one of the interface patterns ends in that pattern's kind: `Button`, `Error`, `Progress`, `Status`, `Placeholder`, `Empty`, or `Confirmation`. For example, `quit.quitButton` and `rail.foot.unreachableError`. Other keys, such as titles and labels, take only the rules that apply to every string.
 - **Values.** A value is named in braces: `{count}`, `{host}`. The lookup types each string's values from its text, so a missing or misspelled value fails the typecheck. A value may be an element, such as a readout, so styling never splits a sentence.
 - **Plurals.** A string with a count is an object of whole messages keyed by `Intl.PluralRules` category (`one` and `other` in US English) and chosen by `{count}`. Each form is a complete message, so words that agree with the count change with it: "keeps it running", "keeps them running".
 - **No library yet.** The format maps onto ICU MessageFormat, and a translation library is adopted only when a second locale arrives.

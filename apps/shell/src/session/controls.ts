@@ -115,7 +115,7 @@ function holding(choices: readonly Choice[], id: string | undefined): Choice[] {
 }
 
 /**
- * The values a running session shows (FLOW-NEW-SESSION-R09): what `session.list` reports, never what the host offers
+ * The values a running session shows (FLOW-NEW-SESSION-R12): what `session.list` reports, never what the host offers
  * now. A model or effort the session was not given is the backend's own, shown as the choice the backend marks as
  * its default when the host lists it. A value the host no longer lists shows under its id.
  */
