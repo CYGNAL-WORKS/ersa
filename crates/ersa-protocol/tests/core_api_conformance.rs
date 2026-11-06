@@ -158,9 +158,24 @@ fn result_examples() -> Vec<(Method, Value)> {
             }),
         ),
         (Method::ProjectRemove, to_value(&project())),
+        (Method::ProjectFind, to_value(&Some(project()))),
+        (Method::ProjectFind, to_value(&None::<Project>)),
         (Method::WorkspaceList, to_value(&vec![workspace()])),
         (Method::WorkspaceCreate, to_value(&workspace())),
         (Method::WorkspaceRemove, to_value(&workspace())),
+        (
+            Method::BranchList,
+            to_value(&vec![
+                Branch {
+                    name: "feature/rail".into(),
+                    default: false,
+                },
+                Branch {
+                    name: "main".into(),
+                    default: true,
+                },
+            ]),
+        ),
         (Method::SessionList, to_value(&vec![session()])),
         (Method::SessionCreate, to_value(&session())),
         (
@@ -243,7 +258,7 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&HelloParams {
                 client: "ersa-shell".into(),
                 client_version: "0.1.0".into(),
-                api_versions: vec![3],
+                api_versions: vec![4],
             }),
         ),
         (Method::CoreStatus, to_value(&Empty {})),
@@ -285,6 +300,19 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&WorkspaceRemoveParams {
                 id: "w-1".into(),
                 force: Some(true),
+            }),
+        ),
+        (
+            Method::BranchList,
+            to_value(&BranchListParams {
+                project_id: "p-1".into(),
+            }),
+        ),
+        (
+            Method::ProjectFind,
+            to_value(&ProjectFindParams {
+                host_id: "local".into(),
+                path: "D:/code/ersa".into(),
             }),
         ),
         (

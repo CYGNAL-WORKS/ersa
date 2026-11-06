@@ -21,6 +21,12 @@ use crate::transport::{self, Output, RunError};
 /// whole tree, which takes a while for a large repository.
 const GIT_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// How long a quick question to git may take: listing branches, resolving a
+/// base. The Interface waits on these while the user picks, so a repository
+/// that hangs (a network drive, a stuck lock) is reported rather than waited
+/// on.
+const GIT_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// How many times removal is tried, and the wait before the first retry
 /// (doubled each time). On Windows, a process that has just exited (an editor,
 /// an indexer, a session's backend) can hold files in the worktree for a
@@ -75,19 +81,164 @@ impl From<RunError> for VcsError {
 }
 
 /// Creates a git worktree at `path` on a new branch `branch`, starting from
-/// `base` (the repository's HEAD when `None`).
+/// the commit `base`.
 pub async fn git_worktree_add(
     transport: &dyn Transport,
     repo: &str,
     path: &str,
     branch: &str,
-    base: Option<&str>,
+    base: &str,
 ) -> Result<(), VcsError> {
     // `--` ends option parsing, so a path or base can never be read as a flag.
-    let mut args = vec!["worktree", "add", "-b", branch, "--", path];
-    args.extend(base);
+    let args = ["worktree", "add", "-b", branch, "--", path, base];
     let output = git(transport, repo, &args).await?;
     check(output, "git worktree add failed")
+}
+
+/// A repository's local branches, and which one is its default.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LocalBranches {
+    /// Short names (`main`, `feature/rail`), sorted.
+    pub names: Vec<String>,
+    /// The default branch, one of `names`: the one `origin/HEAD` points
+    /// at, else `main`, else `master`, else the checked-out branch. None
+    /// on a detached checkout with none of those.
+    pub default: Option<String>,
+}
+
+/// The local branches of the repository at `repo`, and its default branch.
+/// One git call, given [`GIT_QUERY_TIMEOUT`].
+pub async fn git_local_branches(
+    transport: &dyn Transport,
+    repo: &str,
+) -> Result<LocalBranches, VcsError> {
+    // Each line is `<ref>:<* if checked out>:<target if a symbolic ref>`.
+    // A ref name can never contain `:`, so the split is unambiguous. The
+    // second pattern names `origin/HEAD` exactly, to read where it points.
+    let format = "--format=%(refname):%(HEAD):%(symref)";
+    let args = [
+        "for-each-ref",
+        format,
+        "refs/heads",
+        "refs/remotes/origin/HEAD",
+    ];
+    let output = query(transport, repo, &args, deadline()).await?;
+    if !output.exit.success() {
+        return Err(VcsError::Failed {
+            message: "git could not list the branches".into(),
+            stderr: output.stderr_text(),
+        });
+    }
+    Ok(parse_branches(&output.stdout))
+}
+
+/// Parses `git_local_branches`' `for-each-ref` output and picks the default.
+fn parse_branches(lines: &[String]) -> LocalBranches {
+    let mut names = Vec::new();
+    let mut checked_out = None;
+    let mut origin_head = None;
+    for line in lines {
+        let mut fields = line.splitn(3, ':');
+        let (Some(refname), Some(head), Some(symref)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        if refname == "refs/remotes/origin/HEAD" {
+            origin_head = symref
+                .strip_prefix("refs/remotes/origin/")
+                .map(str::to_string);
+        } else if let Some(name) = refname.strip_prefix("refs/heads/") {
+            if head == "*" {
+                checked_out = Some(name.to_string());
+            }
+            names.push(name.to_string());
+        }
+    }
+    names.sort();
+    // `origin/HEAD` counts only when the branch it names exists locally:
+    // a base is a local branch.
+    let local = |name: &str| names.iter().any(|n| n == name);
+    let default = origin_head
+        .filter(|name| local(name))
+        .or_else(|| {
+            ["main", "master"]
+                .into_iter()
+                .find(|n| local(n))
+                .map(str::to_string)
+        })
+        .or(checked_out);
+    LocalBranches { names, default }
+}
+
+/// The commit `revision` names in the repository at `repo`, or `None`
+/// when git cannot resolve it to a commit. All of it, two git calls at
+/// most, is given [`GIT_QUERY_TIMEOUT`].
+///
+/// The caller refuses a revision that starts with `-`, so git reads it as a
+/// revision, never as an option.
+pub async fn git_resolve_commit(
+    transport: &dyn Transport,
+    repo: &str,
+    revision: &str,
+) -> Result<Option<String>, VcsError> {
+    // `^{commit}` peels a tag to the commit it tags and refuses anything
+    // that is not a commit (a tree, a blob).
+    let peeled = format!("{revision}^{{commit}}");
+    let deadline = deadline();
+    let args = ["rev-parse", "--verify", "--quiet", &peeled];
+    let output = query(transport, repo, &args, deadline).await?;
+    let failed = || VcsError::Failed {
+        message: "git could not resolve the base".into(),
+        stderr: output.stderr_text(),
+    };
+    match output.exit.code {
+        Some(0) => return Ok(output.stdout.first().map(|line| line.trim().to_string())),
+        // `--verify --quiet` usually exits 1 for what it cannot resolve, but
+        // some revisions it cannot resolve exit 128 (a reflog entry past the
+        // reflog's end), the same code as a broken repository; checked below.
+        Some(1 | 128) => {}
+        // Killed, or failing in a way that says nothing about the revision.
+        _ => return Err(failed()),
+    }
+    // The exit code cannot tell an unresolvable revision from a broken
+    // repository: ask git whether the repository itself is usable. If it
+    // is, the revision was the problem.
+    let repository = query(transport, repo, &["rev-parse", "--git-dir"], deadline).await?;
+    if repository.exit.success() {
+        return Ok(None);
+    }
+    Err(failed())
+}
+
+/// When a git query started now must have answered.
+fn deadline() -> tokio::time::Instant {
+    tokio::time::Instant::now() + GIT_QUERY_TIMEOUT
+}
+
+/// Runs a quick git query that must answer by `deadline`, which several
+/// queries for one answer share, so together they stay within
+/// [`GIT_QUERY_TIMEOUT`]. Running out of time is git's failure, reported as
+/// such: a query changes nothing, so there is nothing half done to clean up.
+async fn query(
+    transport: &dyn Transport,
+    dir: &str,
+    args: &[&str],
+    deadline: tokio::time::Instant,
+) -> Result<Output, VcsError> {
+    let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+    match git_within(transport, dir, args, left).await {
+        Err(VcsError::Incomplete(e)) if e.kind() == std::io::ErrorKind::TimedOut => {
+            Err(VcsError::Failed {
+                message: format!(
+                    "git did not answer within {} seconds",
+                    GIT_QUERY_TIMEOUT.as_secs()
+                ),
+                stderr: e.to_string(),
+            })
+        }
+        other => other,
+    }
 }
 
 /// The lock reason `git worktree add` writes while it works and removes
@@ -290,10 +441,12 @@ async fn find(entries: &[WorktreeEntry], path: &str) -> Option<WorktreeEntry> {
     .flatten()
 }
 
-/// The key under which two spellings of one folder compare equal. Blocking.
-fn location_key(path: &str) -> String {
+/// The key under which two spellings of one folder compare equal: the key a
+/// project's folder is stored under, or the path's own text for a folder that
+/// no longer exists. Blocking.
+pub(crate) fn location_key(path: &str) -> String {
     match platform::canonicalize(std::path::Path::new(path)) {
-        Ok(canonical) => platform::path_key(&canonical.display().to_string()),
+        Ok(canonical) => platform::folder_key(&canonical),
         Err(_) => platform::path_key(path),
     }
 }
@@ -306,8 +459,19 @@ async fn exists(path: &str) -> bool {
         .unwrap_or(true)
 }
 
-/// Runs `git -C <dir> <args>` with a fixed environment.
+/// Runs `git -C <dir> <args>` with a fixed environment, under [`GIT_TIMEOUT`].
 async fn git(transport: &dyn Transport, dir: &str, args: &[&str]) -> Result<Output, VcsError> {
+    git_within(transport, dir, args, GIT_TIMEOUT).await
+}
+
+/// Runs `git -C <dir> <args>` with a fixed environment, killing it after
+/// `timeout`.
+async fn git_within(
+    transport: &dyn Transport,
+    dir: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<Output, VcsError> {
     let mut all = vec!["-C".to_string(), dir.to_string()];
     all.extend(args.iter().map(|a| a.to_string()));
     let env = [
@@ -327,7 +491,7 @@ async fn git(transport: &dyn Transport, dir: &str, args: &[&str]) -> Result<Outp
             .collect(),
         ..ProcessSpec::default()
     };
-    Ok(transport::run(transport, spec, GIT_TIMEOUT).await?)
+    Ok(transport::run(transport, spec, timeout).await?)
 }
 
 fn check(output: Output, message: &str) -> Result<(), VcsError> {
@@ -359,6 +523,82 @@ mod tests {
         assert_eq!(entries[1].lock_reason.as_deref(), Some("on a usb drive"));
         assert!(entries[2].locked && entries[2].lock_reason.is_none());
         assert!(entries[2].prunable);
+    }
+
+    // verifies: PROTO-CORE-API-R18
+    #[test]
+    fn main_comes_before_master() {
+        // The socket tests cover each rule alone; this is the one case they
+        // don't: both exist, with another branch checked out.
+        let text = "refs/heads/main: :\nrefs/heads/master: :\nrefs/heads/x:*:";
+        let lines: Vec<String> = text.lines().map(str::to_string).collect();
+        let parsed = parse_branches(&lines);
+        assert_eq!(parsed.names, ["main", "master", "x"]);
+        assert_eq!(parsed.default.as_deref(), Some("main"));
+    }
+
+    /// A transport whose git never answers: its output never ends.
+    fn hanging_git() -> ersa_adapter::fake::FakeTransport {
+        ersa_adapter::fake::FakeTransport::new(Vec::<String>::new()).stdout_outlives_process()
+    }
+
+    /// Asserts `result` is git's failure from running out of time, reached
+    /// exactly at the 10-second limit. The clock is paused, so tokio jumps it
+    /// to each timer and no test waits ten real seconds.
+    fn timed_out_at_ten_seconds<T: std::fmt::Debug>(
+        result: Result<T, VcsError>,
+        started: tokio::time::Instant,
+    ) {
+        assert_eq!(started.elapsed(), Duration::from_secs(10));
+        match result {
+            // `Failed` is what the Core API answers as `vcs_error`.
+            Err(VcsError::Failed { message, .. }) => {
+                assert!(message.contains("10 seconds"), "{message}")
+            }
+            other => panic!("expected a timed-out git failure, got {other:?}"),
+        }
+    }
+
+    // verifies: PROTO-CORE-API-R18
+    #[tokio::test(start_paused = true)]
+    async fn listing_branches_gives_git_ten_seconds() {
+        let started = tokio::time::Instant::now();
+        let result = git_local_branches(&hanging_git(), "repo").await;
+        timed_out_at_ten_seconds(result, started);
+    }
+
+    // verifies: PROTO-CORE-API-R19
+    #[tokio::test(start_paused = true)]
+    async fn resolving_a_base_gives_git_ten_seconds() {
+        let started = tokio::time::Instant::now();
+        let result = git_resolve_commit(&hanging_git(), "repo", "main").await;
+        timed_out_at_ten_seconds(result, started);
+    }
+
+    // verifies: PROTO-CORE-API-R19
+    #[tokio::test(start_paused = true)]
+    async fn resolving_a_base_gives_both_git_calls_ten_seconds_together() {
+        /// The first git exits 128 after six seconds; the second never answers.
+        struct SlowThenHanging(std::sync::atomic::AtomicUsize);
+        #[ersa_adapter::async_trait]
+        impl Transport for SlowThenHanging {
+            async fn spawn(
+                &self,
+                spec: ProcessSpec,
+            ) -> std::io::Result<Box<dyn ersa_adapter::Process>> {
+                if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    tokio::time::sleep(Duration::from_secs(6)).await;
+                    let failing = ersa_adapter::fake::FakeTransport::new(Vec::<String>::new())
+                        .with_exit_code(128);
+                    return failing.spawn(spec).await;
+                }
+                hanging_git().spawn(spec).await
+            }
+        }
+        let transport = SlowThenHanging(Default::default());
+        let started = tokio::time::Instant::now();
+        let result = git_resolve_commit(&transport, "repo", "main@{50}").await;
+        timed_out_at_ten_seconds(result, started);
     }
 
     #[test]

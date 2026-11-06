@@ -36,6 +36,7 @@
   --line-hairline: 1px;
   --size-rail: 288px;
   --size-measure: 720px;
+  --size-menu: 360px;
   --size-bubble-max: 80%;
   --size-card-max: 224px;
   --size-glyph: 8px;
@@ -44,10 +45,15 @@
   --size-ring-sm: 12px;
   --size-control: 28px;
   --size-control-sm: 20px;
+  --size-control-lg: 32px;
   --size-icon: 16px;
   --size-icon-sm: 14px;
   --size-icon-xs: 12px;
+  --size-shelf: 320px;
+  --size-dialog: 360px;
   --stack-menu: 10;
+  --stack-shelf: 20;
+  --stack-dialog: 30;
   --motion-instant: 80ms;
   --motion-quick: 160ms;
   --motion-settle: 260ms;
