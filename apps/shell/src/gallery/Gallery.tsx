@@ -414,7 +414,7 @@ const tallRoom = (node: ReactNode) => <div className="gallery-room gallery-room-
 
 const chipOptions = [
   { id: "isolated", label: "New workspace", status: "Isolated" },
-  { id: "root", label: "Project folder", status: "Shares files with you" },
+  { id: "root", label: "Project folder", status: "Shared" },
 ];
 const chip = { name: "Workspace", value: "isolated", options: chipOptions, onChoose: () => {} };
 const projectChip = {
@@ -744,11 +744,15 @@ const entries: Entry[] = [
       ],
       [
         "Open, the section being read",
-        tallRoom(<Chip {...chip} section={baseSection([], "Reading the branches…")} initialOpen />),
+        tallRoom(<Chip {...chip} section={{ ...baseSection([], "Reading the branches…"), unavailable: true }} initialOpen />),
       ],
       [
         "Open, the section unreadable",
-        tallRoom(<Chip {...chip} section={baseSection([], "Ersa couldn't read this project's branches. The new workspace will start at the default branch.")} initialOpen />),
+        tallRoom(<Chip {...chip} section={{
+              ...baseSection([], "Ersa couldn't read this project's branches. The new workspace will start at the default branch."),
+              unavailable: true,
+              problem: true,
+            }} initialOpen />),
       ],
       [
         "Open, with statuses",
