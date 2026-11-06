@@ -16,12 +16,11 @@ import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { Project, Session, Workspace } from "./protocol/core-api.gen";
-import { type BackendChoices, type SessionValues, sessionShown } from "./session/controls";
+import { type BackendChoices, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
 import { contextUsed } from "./session/tile";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { readChoices, rememberPatch, startSession } from "./session/start";
-import { newestFirst } from "./session/tree";
 import { mergeWorkspaces } from "./session/workspaces";
 
 // The same objects every render, so effects and error-boundary keys that
@@ -146,7 +145,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         // Asked again while open: the count is the fresh one, and Cancel puts the window back in the tray if it
         // was there before either Quit.
         (ask) => ask && setQuitAsk((open) => ({ ...ask, wasHidden: ask.wasHidden || (open?.wasHidden ?? false), quitting: false })),
-        // The Shell no longer quits by itself once the window has heard, so a failed answer is said, never dropped.
+        // Once the window has heard, the Shell waits on it to quit, so a failed answer is said, never dropped.
         (error) => {
           setQuitAsk((open) => ({
             busy: open ? open.busy : knownSessions.current && busySessions(knownSessions.current),
@@ -345,9 +344,14 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The projects as last read, so a screen with a message being written stays while Core is away; sending then
   // fails with the reason, and the message stays in the composer.
   const knownProjects = useRef<Project[] | undefined>(undefined);
+  const orderedBy = useRef<readonly Session[]>([]);
   if (projectList) knownProjects.current = projectList;
   const hello = view.phase === "connected" || view.phase === "lost" ? view.hello : undefined;
-  const screenProjects = projectList ?? (showsScreen({ composing, starting, activeId }, false) ? knownProjects.current : undefined);
+  const knownList = projectList ?? (showsScreen({ composing, starting, activeId }, false) ? knownProjects.current : undefined);
+  // Most recently used first, by the sessions as last listed (FLOW-NEW-SESSION-R14).
+  const order = projectOrder(knownList ?? [], sessions.state === "ready" ? sessions.sessions : undefined, orderedBy.current, workspaces);
+  orderedBy.current = order.kept;
+  const screenProjects = knownList && order.projects;
 
   const projectById = new Map(projectList?.map((p) => [p.id, p]));
 
@@ -428,6 +432,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               <div className="stage-controls">
                 <SessionControls
                   hosts={[hello.host]}
+                  localHostId={hello.host.id}
                   projects={[listedProject]}
                   backends={[sessionControls.backend]}
                   values={sessionControls.values}
@@ -447,6 +452,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               // Drawn afresh on each New session, so its composer takes focus (FLOW-NEW-SESSION-R01).
               key={composing?.key ?? 0}
               hosts={[hello.host]}
+              localHostId={hello.host.id}
               projects={screenProjects}
               backends={backends}
               lastUsed={lastUsed}
