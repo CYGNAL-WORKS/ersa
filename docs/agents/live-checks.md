@@ -36,8 +36,10 @@ Everything from the Interface inward is real: the Interface, the Shell's bridge,
 
 ## Put the screenshots in the pull request
 
-After the run, from the repository root:
+The repository is public, and so is every screenshot you publish. Open each one first. A check that ran the real Claude Code can show the owner's account, folders or conversation: delete those screenshots from `apps/shell/live-results`, or describe them in words instead.
 
-- `node scripts/live-shots.mjs` pushes the screenshots under `apps/shell/live-results` to the branch `live-shots/<your branch>` and prints one Markdown image per screenshot. Paste them into the pull request's **Evidence**.
+Then, from the repository root:
+
+- `node scripts/live-shots.mjs` pushes the screenshots under `apps/shell/live-results` to the branch `live-shots/<your branch>`, on top of the ones published before, and prints one Markdown image per screenshot. Paste them into the pull request's **Evidence**.
 
 Run the live checks whose screenshots you want last, since the script publishes what the latest run left. When a check fails, read `core.log` and `shell.log` beside its screenshots in `apps/shell/live-results`, and the report in `apps/shell/live-report`.

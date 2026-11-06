@@ -13,7 +13,7 @@
 // command, and a file drop by delivering the window's drag-and-drop events as
 // the Shell delivers them. Everything past that boundary is real.
 
-import { type ChildProcess, execFile, spawn } from "node:child_process";
+import { type ChildProcess, execFile, execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createWriteStream, existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
@@ -59,80 +59,110 @@ export interface Ersa {
   shot(name: string): Promise<void>;
 }
 
-/** How long the processes have to come up; a first WebView2 start is slow. */
+/**
+ * How long the start as a whole may take, Core to the loaded window; a first WebView2 start is slow. The start fails
+ * by itself within it, and the fixture's own timeout is longer, so a slow start always reaches the cleanup below:
+ * Playwright waits for a fixture's cleanup only once the fixture has handed over to the test.
+ */
 const START_LIMIT_MS = 60_000;
 
 let counter = 0;
 
+// What this worker started and has not yet ended. If the worker exits without a fixture's cleanup (Ctrl+C, a crash),
+// this ends them as the process exits.
+const started = new Set<ChildProcess>();
+const folders = new Set<string>();
+process.once("exit", () => {
+  for (const child of started) {
+    if (ended(child)) continue;
+    try {
+      execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+    } catch {
+      // Gone already.
+    }
+  }
+  for (const dir of folders) rmSync(dir, { recursive: true, force: true });
+});
+
 export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
   backend: ["stand-in", { option: true }],
 
-  ersa: async ({ backend }, use, testInfo) => {
-    const bin = binaries();
-    // A label is letters, digits, `-` and `_` (PROTO-CORE-API, Transport and framing); random, so a run never meets
-    // the Core or window of another run, or of the owner.
-    const label = `live-${process.pid}-${counter++}-${randomBytes(4).toString("hex")}`;
-    const dir = mkdtempSync(path.join(tmpdir(), "ersa-live-"));
-    const running: ChildProcess[] = [];
-    let browser: Browser | undefined;
-    let unanswered: string[] = [];
-    try {
-      // Logs go beside the screenshots, so they outlive the temporary folder for a failure to be read.
-      const coreEnv: NodeJS.ProcessEnv = { ...process.env };
-      if (backend === "stand-in") {
-        coreEnv.ERSA_CLAUDE = bin.standIn;
-        coreEnv.ERSA_STAND_IN_ANSWER = "1";
-      }
-      running.push(
-        start(bin.core, ["serve", "--endpoint", label, "--data-dir", path.join(dir, "data")], coreEnv, testInfo.outputPath("core.log")),
-      );
-      await waitFor(() => servesLabel(label), "Core to serve its endpoint", running);
+  ersa: [
+    async ({ backend }, use, testInfo) => {
+      const bin = binaries();
+      // A label is letters, digits, `-` and `_` (PROTO-CORE-API, Transport and framing); random, so a run never meets
+      // the Core or window of another run, or of the owner.
+      const label = `live-${process.pid}-${counter++}-${randomBytes(4).toString("hex")}`;
+      const dir = mkdtempSync(path.join(tmpdir(), "ersa-live-"));
+      folders.add(dir);
+      const deadline = Date.now() + START_LIMIT_MS;
+      const running: ChildProcess[] = [];
+      let browser: Browser | undefined;
+      let unanswered: string[] = [];
+      try {
+        // Logs go beside the screenshots, so they outlive the temporary folder for a failure to be read.
+        const coreEnv: NodeJS.ProcessEnv = { ...process.env };
+        if (backend === "stand-in") {
+          coreEnv.ERSA_CLAUDE = bin.standIn;
+          coreEnv.ERSA_STAND_IN_ANSWER = "1";
+        } else {
+          // Core prefers ERSA_CLAUDE to the `claude` on PATH; one inherited from the caller is not the real CLI.
+          delete coreEnv.ERSA_CLAUDE;
+        }
+        running.push(
+          start(bin.core, ["serve", "--endpoint", label, "--data-dir", path.join(dir, "data")], coreEnv, testInfo.outputPath("core.log")),
+        );
+        await waitFor(() => servesLabel(label), "Core to serve its endpoint", running, deadline);
 
-      const port = await freePort();
-      running.push(
-        start(
-          bin.shell,
-          [],
-          {
-            ...process.env,
-            ERSA_ATTACH: label,
-            // WebView2 reads both: the remote debugging port Playwright attaches to, and a profile of the test's own,
-            // so it never shares the browser process of the owner's Ersa or of another run.
-            WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
-            WEBVIEW2_USER_DATA_FOLDER: path.join(dir, "webview"),
+        const port = await freePort();
+        running.push(
+          start(
+            bin.shell,
+            [],
+            {
+              ...process.env,
+              ERSA_ATTACH: label,
+              // WebView2 reads both: the remote debugging port Playwright attaches to, and a profile of the test's own,
+              // so it never shares the browser process of the owner's Ersa or of another run.
+              WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
+              WEBVIEW2_USER_DATA_FOLDER: path.join(dir, "webview"),
+            },
+            testInfo.outputPath("shell.log"),
+          ),
+        );
+        await waitFor(() => debuggerUp(port), "the window's debugging port", running, deadline);
+        browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: remaining(deadline) });
+        const page = await windowPage(browser, deadline);
+        const dialogs = await answerDialogs(page);
+        unanswered = dialogs.unanswered;
+        let shots = 0;
+        await use({
+          page,
+          label,
+          dir,
+          answerDialog: dialogs.answer,
+          drop: (paths, onto) => drop(page, paths, onto),
+          async shot(name) {
+            shots += 1;
+            const file = testInfo.outputPath(`${String(shots).padStart(2, "0")}-${name}.png`);
+            await page.screenshot({ path: file });
+            await testInfo.attach(name, { path: file, contentType: "image/png" });
           },
-          testInfo.outputPath("shell.log"),
-        ),
-      );
-      await waitFor(() => debuggerUp(port), "the window's debugging port", running);
-      browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
-      const page = await windowPage(browser);
-      const dialogs = await answerDialogs(page);
-      unanswered = dialogs.unanswered;
-      let shots = 0;
-      await use({
-        page,
-        label,
-        dir,
-        answerDialog: dialogs.answer,
-        drop: (paths, onto) => drop(page, paths, onto),
-        async shot(name) {
-          shots += 1;
-          const file = testInfo.outputPath(`${String(shots).padStart(2, "0")}-${name}.png`);
-          await page.screenshot({ path: file });
-          await testInfo.attach(name, { path: file, contentType: "image/png" });
-        },
-      });
-    } finally {
-      // Disconnects only; ending the processes below closes the window.
-      await browser?.close().catch(() => {});
-      for (const child of running.reverse()) await endTree(child);
-      rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
-      const left = [...running.filter((child) => alive(child.pid)).map((child) => `process ${child.pid}`), ...(existsSync(dir) ? [dir] : [])];
-      if (left.length > 0) throw new Error(`the live check left behind ${left.join(", ")}`);
-    }
-    if (unanswered.length > 0) throw new Error(`the Interface opened a dialog the test did not answer: ${unanswered.join("; ")}`);
-  },
+        });
+      } finally {
+        // Disconnects only; ending the processes below closes the window.
+        await browser?.close().catch(() => {});
+        for (const child of running.reverse()) await endTree(child);
+        rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+        const left = [...running.filter((child) => !ended(child)).map((child) => `process ${child.pid}`), ...(existsSync(dir) ? [dir] : [])];
+        if (left.length > 0) throw new Error(`the live check left behind ${left.join(", ")}`);
+        folders.delete(dir);
+      }
+      if (unanswered.length > 0) throw new Error(`the Interface opened a dialog the test did not answer: ${unanswered.join("; ")}`);
+    },
+    // A budget of its own, apart from the test's, longer than the start may take plus the cleanup.
+    { timeout: START_LIMIT_MS + 30_000 },
+  ],
 });
 
 export { expect };
@@ -223,7 +253,11 @@ async function drop(page: Page, paths: string[], onto?: Locator): Promise<void> 
 /** Starts `program`, its output appended to `log`. */
 function start(program: string, args: string[], env: NodeJS.ProcessEnv, log: string): ChildProcess {
   const child = spawn(program, args, { env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  started.add(child);
+  child.once("exit", () => started.delete(child));
   const out = createWriteStream(log, { flags: "a" });
+  // A program that cannot start: said in its log, and `waitFor` sees it has no process.
+  child.once("error", (e) => out.write(`live check: cannot start ${program}: ${e.message}\n`));
   child.stdout?.pipe(out);
   child.stderr?.pipe(out);
   return child;
@@ -231,22 +265,20 @@ function start(program: string, args: string[], env: NodeJS.ProcessEnv, log: str
 
 /** Ends the process and everything it started (the window's WebView2 processes, Core's backend CLIs). */
 async function endTree(child: ChildProcess) {
-  if (!alive(child.pid)) return;
-  // Fails when the process is already gone; `alive` below says.
+  if (ended(child)) return;
+  // Fails when the process is already gone; `ended` below says.
   await promisify(execFile)("taskkill", ["/PID", String(child.pid), "/T", "/F"]).catch(() => {});
-  // taskkill returns before the process is gone.
+  // taskkill returns before the process is gone; Node marks it ended once it is.
   const until = Date.now() + 10_000;
-  while (alive(child.pid) && Date.now() < until) await sleep(100);
+  while (!ended(child) && Date.now() < until) await sleep(100);
 }
 
-function alive(pid: number | undefined): boolean {
-  if (pid === undefined) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+/**
+ * Whether the process has ended, or never started, as Node saw it. Never by its process id alone: Windows gives an
+ * ended process's id to the next process, and ending that would end a stranger's.
+ */
+function ended(child: ChildProcess): boolean {
+  return child.pid === undefined || child.exitCode !== null || child.signalCode !== null;
 }
 
 /** Whether Core serves `label`: its pipe is `ersa-core-<user SID>-<label>` (PROTO-CORE-API, Transport and framing). */
@@ -264,15 +296,19 @@ async function debuggerUp(port: number): Promise<boolean> {
 }
 
 /** Waits for `ready`, failing early if one of the processes exits. */
-async function waitFor(ready: () => boolean | Promise<boolean>, what: string, running: ChildProcess[]) {
-  const until = Date.now() + START_LIMIT_MS;
-  while (Date.now() < until) {
+async function waitFor(ready: () => boolean | Promise<boolean>, what: string, running: ChildProcess[], deadline: number) {
+  while (Date.now() < deadline) {
     if (await ready()) return;
-    const exited = running.find((child) => child.exitCode !== null);
+    const exited = running.find(ended);
     if (exited) throw new Error(`waiting for ${what}: ${path.basename(exited.spawnfile)} exited with ${exited.exitCode}; its log is in the test's results`);
     await sleep(100);
   }
-  throw new Error(`${what} did not come up within ${START_LIMIT_MS / 1000} s`);
+  throw new Error(`${what} did not come up within ${START_LIMIT_MS / 1000} s of the start`);
+}
+
+/** What is left of the start's time; at least a moment, so a call fails with its own error. */
+function remaining(deadline: number): number {
+  return Math.max(deadline - Date.now(), 1);
 }
 
 async function freePort(): Promise<number> {
@@ -287,13 +323,12 @@ async function freePort(): Promise<number> {
 }
 
 /** The window's page, once the Interface has loaded in it. */
-async function windowPage(browser: Browser): Promise<Page> {
-  const until = Date.now() + START_LIMIT_MS;
-  while (Date.now() < until) {
+async function windowPage(browser: Browser, deadline: number): Promise<Page> {
+  while (Date.now() < deadline) {
     const page = browser.contexts().flatMap((context) => context.pages())[0];
     if (page) {
       // The window starts on a blank page and then navigates to the Interface embedded in the Shell.
-      await page.waitForURL(/^http:\/\/tauri\.localhost\//, { waitUntil: "load", timeout: START_LIMIT_MS });
+      await page.waitForURL(/^http:\/\/tauri\.localhost\//, { waitUntil: "load", timeout: remaining(deadline) });
       return page;
     }
     await sleep(100);
