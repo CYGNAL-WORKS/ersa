@@ -11,24 +11,32 @@ const FAIL_ON_PURPOSE = "ERSA_LIVE_FAIL_ON_PURPOSE";
 
 test("a failing live check leaves no process or folder behind", async () => {
   test.skip(!!process.env[FAIL_ON_PURPOSE], "this is the run that fails on purpose");
+  // The second run builds (quickly, the build is current) and starts a window of its own.
+  test.setTimeout(5 * 60_000);
   // Outside this run's results folder, which a second Playwright would empty as it starts.
   const elsewhere = mkdtempSync(path.join(tmpdir(), "ersa-live-cleanup-"));
-  const record = path.join(elsewhere, "failed-run.json");
-  let failed = false;
+  let label: string;
+  let dir: string;
   try {
-    const args = ["exec", "playwright", "test", "-c", "playwright.live.config.ts", "live/cleanup.live.ts", "-g", '"fails on purpose"'];
-    execFileSync("pnpm", [...args, "--output", path.join(elsewhere, "results")], {
-      cwd: path.resolve(import.meta.dirname, ".."),
-      env: { ...process.env, [FAIL_ON_PURPOSE]: record },
-      shell: true,
-      stdio: "pipe",
-    });
-  } catch {
-    failed = true;
+    const record = path.join(elsewhere, "failed-run.json");
+    let failed = false;
+    try {
+      const args = ["exec", "playwright", "test", "-c", "playwright.live.config.ts", "live/cleanup.live.ts", "-g", '"fails on purpose"'];
+      execFileSync("pnpm", [...args, "--output", path.join(elsewhere, "results")], {
+        cwd: path.resolve(import.meta.dirname, ".."),
+        env: { ...process.env, [FAIL_ON_PURPOSE]: record },
+        shell: true,
+        stdio: "pipe",
+        timeout: 4 * 60_000,
+      });
+    } catch {
+      failed = true;
+    }
+    expect(failed, "the run that fails on purpose failed").toBe(true);
+    ({ label, dir } = JSON.parse(readFileSync(record, "utf8")) as { label: string; dir: string });
+  } finally {
+    rmSync(elsewhere, { recursive: true, force: true });
   }
-  expect(failed, "the run that fails on purpose failed").toBe(true);
-  const { label, dir } = JSON.parse(readFileSync(record, "utf8")) as { label: string; dir: string };
-  rmSync(elsewhere, { recursive: true, force: true });
   // Core's endpoint and the window's own endpoint are both named after the label; neither is served any more.
   expect(readdirSync("\\\\.\\pipe\\").filter((name) => name.includes(label))).toEqual([]);
   expect(existsSync(dir), `${dir} was removed`).toBe(false);
