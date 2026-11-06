@@ -66,12 +66,6 @@ impl Sending {
     }
 }
 
-/// The key a session's progress line is kept under in the tile hub, beside
-/// its tile: a newline is never part of a session id.
-pub(super) fn progress_key(session_id: &str) -> String {
-    format!("{session_id}\nsend_progress")
-}
-
 /// Cancels the session's send when one is under way and not yet handed
 /// over; says whether it did.
 pub(super) fn cancel(handle: &Handle) -> bool {
@@ -101,7 +95,7 @@ impl Drop for Finish {
         self.ticker.abort();
         lock(&self.handle.sending).take();
         // A progress line not yet delivered would arrive after the answer.
-        self.tiles.forget_key(&progress_key(&self.handle.id));
+        self.tiles.forget_one(&self.handle.id, Latest::SendProgress);
     }
 }
 
@@ -214,12 +208,16 @@ impl SessionManager {
             text,
             attachments: outgoing,
         };
+        // An adapter records each line before writing it, so whether the
+        // sink took a line during the call tells a refusal before writing
+        // from a write that may have reached the backend.
+        let before = live.sink.next_index();
         match bounded(async move { session.send_message(&message).await }).await {
             Ok(()) => copies.keep(),
-            // Refused before anything was written: not sent.
+            // Refused with nothing recorded: not sent.
             Err(
                 e @ SessionError::Adapter(AdapterError::NotRunning | AdapterError::Protocol(_)),
-            ) => {
+            ) if live.sink.next_index() == before => {
                 return Err(e);
             }
             // A write that failed or did not finish in time, or an adapter
@@ -263,13 +261,24 @@ impl SessionManager {
             .get(&row.backend)
             .map(|adapter| adapter.image_limits())
             .unwrap_or_default();
-        let scratch = Arc::clone(&handle.scratch);
+        // One job per session in its scratch folder at a time, even one a
+        // send gave up on that has not noticed yet. Waited for here, never
+        // on a thread: a job stuck on a file system that hangs then holds
+        // one thread, not one per send behind it.
+        let held = tokio::select! {
+            held = tokio::time::timeout(FS_STEP, Arc::clone(&handle.scratch).lock_owned()) => {
+                held.map_err(|_| SessionError::InvalidState(
+                    "an earlier copy into this session's scratch folder has not finished; \
+                     its file system may not be answering"
+                        .into(),
+                ))?
+            }
+            Ok(_) = canceled.wait_for(|c| *c) => return Err(stopped()),
+        };
         let session_id = handle.id.clone();
         let job_work = Arc::clone(&work);
         let mut job = tokio::task::spawn_blocking(move || {
-            // One job per session in its scratch folder at a time, even one
-            // a send gave up on that has not noticed yet.
-            let _held = scratch.blocking_lock();
+            let _held = held;
             let target = Target {
                 workspace: Path::new(&row.cwd),
                 session_id: &session_id,
@@ -342,31 +351,34 @@ fn set_phase(handle: &Handle, phase: SendPhase) {
 async fn report_progress(handle: Weak<Handle>, tiles: Arc<TileHub>, changed: Arc<Notify>) {
     let mut last: Option<(SendProgressParams, Instant)> = None;
     loop {
-        let progress = {
+        {
             let Some(handle) = handle.upgrade() else {
                 return;
             };
+            // Published under the lock the send's end takes, so no line is
+            // left to arrive after its answer.
             let sending = lock(&handle.sending);
             let Some(sending) = sending.as_ref() else {
                 return;
             };
-            sending.progress(&handle.id)
-        };
-        // Due when anything changed (the phase, or the bytes copied), and
-        // every so often regardless.
-        let due = match &last {
-            None => true,
-            Some((before, at)) => *before != progress || at.elapsed() >= PROGRESS_EVERY,
-        };
-        if due {
-            tiles.publish(
-                &progress_key(&progress.session_id),
-                notification_line(
-                    ersa_protocol::core_api::notification::SESSION_SEND_PROGRESS,
-                    &progress,
-                ),
-            );
-            last = Some((progress, Instant::now()));
+            let progress = sending.progress(&handle.id);
+            // Due when anything changed (the phase, or the bytes copied),
+            // and every so often regardless.
+            let due = match &last {
+                None => true,
+                Some((before, at)) => *before != progress || at.elapsed() >= PROGRESS_EVERY,
+            };
+            if due {
+                tiles.publish(
+                    &handle.id,
+                    Latest::SendProgress,
+                    notification_line(
+                        ersa_protocol::core_api::notification::SESSION_SEND_PROGRESS,
+                        &progress,
+                    ),
+                );
+                last = Some((progress, Instant::now()));
+            }
         }
         // Looks again each gap; a phase change wakes it early, but it still
         // waits out the gap after the last line it sent.
