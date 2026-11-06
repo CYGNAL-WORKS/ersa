@@ -117,7 +117,7 @@ fn copies(scratch: &Path) -> Vec<String> {
     names
 }
 
-fn refused(response: &Value, index: u64) -> String {
+fn refused_at(response: &Value, index: u64) -> String {
     let error = &response["error"];
     assert_eq!(kind(error), "attachment_refused", "{response:#}");
     assert_eq!(error["data"]["index"], index, "{response:#}");
@@ -315,7 +315,7 @@ async fn an_attachment_that_cant_be_sent_refuses_the_whole_message() {
         let response = s
             .send(&id, "hi", json!([{ "kind": "file", "path": notes }, bad]))
             .await;
-        let message = refused(&response, 1);
+        let message = refused_at(&response, 1);
         assert!(message.contains(why), "{why}: {message}");
     }
     // Nothing was sent, and nothing copied stays.
@@ -334,7 +334,7 @@ async fn a_scratch_folder_that_is_not_a_real_folder_refuses_the_copy() {
     let response = s
         .send(&id, "", json!([{ "kind": "file", "path": notes }]))
         .await;
-    let message = refused(&response, 0);
+    let message = refused_at(&response, 0);
     assert!(message.contains(".gitignore"), "{message}");
     assert!(s.messages().is_empty());
     assert!(!s.workspace.join(".ersa").join("attachments").exists());
@@ -353,7 +353,7 @@ async fn a_linked_ersa_folder_is_never_written_through() {
     let response = s
         .send(&id, "", json!([{ "kind": "file", "path": notes }]))
         .await;
-    refused(&response, 0);
+    refused_at(&response, 0);
     assert_eq!(std::fs::read_dir(&elsewhere).unwrap().count(), 0);
 }
 
@@ -612,4 +612,26 @@ async fn inspect_refuses_a_pipe_and_reports_a_links_target() {
     assert_eq!(inspected["name"], "link.txt");
     assert_eq!(inspected["target"], path(&target));
     assert_eq!(inspected["lines"], 1);
+}
+
+// verifies: PROTO-CORE-API-R24
+#[cfg(windows)]
+#[tokio::test]
+async fn inspect_and_send_refuse_a_named_pipe_without_opening_it() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    // Core's own endpoint: a pipe something is serving.
+    let pipe = s.core.endpoint.clone();
+    let refused = s
+        .client
+        .error(
+            "attachment.inspect",
+            json!({ "host_id": "local", "path": pipe }),
+        )
+        .await;
+    assert_eq!(refused["code"], -32602, "{refused:#}");
+    let id = s.session().await;
+    let response = s
+        .send(&id, "", json!([{ "kind": "file", "path": pipe }]))
+        .await;
+    assert!(refused_at(&response, 0).contains("pipe or a device"));
 }
