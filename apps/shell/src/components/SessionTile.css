@@ -129,10 +129,6 @@
   }
 }
 
-.session-glyph[data-tone="accent"] {
-  background: var(--color-accent);
-}
-
 /* Disconnected: a hollow ring with a hairline edge in ink-faint. */
 .session-glyph[data-tone="faint"] {
   background: transparent;

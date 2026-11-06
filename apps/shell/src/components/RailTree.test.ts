@@ -82,6 +82,18 @@ describe("the rail's tree", () => {
     expect(render({ keepingTrust: ["ersa"] })).toContain("Running sessions keep their current settings until they are stopped.");
   });
 
+  it("counts a collapsed heading's sessions, and beside Not trusted shows the number while it is still heard as a count", () => {
+    const sessions = { state: "ready" as const, sessions: [session("a", "w-ersa", "One"), session("b", "w-ersa", "Two")] };
+    const workspaces = { "w-ersa": { project_id: "ersa" } };
+    const trusted = render({ sessions, workspaces, collapsed: new Set(["ersa"]) });
+    expect(trusted).toContain('aria-expanded="false"');
+    expect(trusted).toContain('<span class="rail-heading-count">2 sessions</span>');
+    const untrusted = render({ projects: { state: "ready", projects: [project("ersa", { trusted: false })] }, sessions, workspaces, collapsed: new Set(["ersa"]) });
+    expect(untrusted).toContain('<span aria-hidden="true">2</span><span class="rail-heading-heard">2 sessions</span>');
+    // "Not trusted" comes first.
+    expect(untrusted.indexOf("Not trusted")).toBeLessThan(untrusted.indexOf("rail-heading-count"));
+  });
+
   it("is empty when Ersa can't reach the sessions, and loading while it first connects", () => {
     expect(render({ projects: { state: "unavailable" }, sessions: { state: "unavailable" } })).not.toContain("<p");
     expect(render({ projects: { state: "loading" }, sessions: { state: "loading" } })).toContain("Loading…");
