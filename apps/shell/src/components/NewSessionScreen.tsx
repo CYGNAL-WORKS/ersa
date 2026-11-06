@@ -33,8 +33,8 @@ interface NewSessionScreenProps {
    * there; absent while there is no dialog to open, and Add project is then unavailable.
    */
   onChooseFolder?: () => Promise<FolderChoice>;
-  /** Adds the folder as a project on the local host, trusted or not; resolves to the project once Core added it. */
-  onAddProject: (path: string, trusted: boolean) => Promise<Project | undefined>;
+  /** Adds the folder as a trusted project on the local host (FLOW-NEW-SESSION-R25); resolves to the project once Core added it. */
+  onAddProject: (path: string) => Promise<Project | undefined>;
   /** Choosing or adding a folder: on its way, or why it failed. */
   adding?: Sending;
   /** For the gallery: focus not taken, the composer shown focused, a chip shown open or in a state. */
@@ -149,7 +149,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     choosing.current = true;
     try {
       const choice = await onChooseFolder();
-      // A folder already a project is chosen without the question (R18); a new one is asked about first (R16).
+      // A folder already a project is chosen without the question (R18); a new one is asked about first (R27).
       if (choice.kind === "found") {
         // Listed at once, as an added one is, in case the list Core last gave does not have it yet.
         setAdded(choice.project);
@@ -161,15 +161,15 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
       choosing.current = false;
     }
   };
-  // Answered, the project is added with the answer and chosen; canceled, nothing changes (FLOW-NEW-SESSION-R17).
-  const answer = async (trusted: boolean | undefined) => {
+  // Trusted, the project is added and chosen (FLOW-NEW-SESSION-R27); canceled, nothing changes (R17).
+  const answer = async (trust: boolean) => {
     const path = asking;
     setAsking(undefined);
     backToWords();
-    if (path === undefined || trusted === undefined || choosing.current) return;
+    if (path === undefined || !trust || choosing.current) return;
     choosing.current = true;
     try {
-      const project = await onAddProject(path, trusted);
+      const project = await onAddProject(path);
       if (project) {
         setAdded(project);
         chooseProject(project.id);
@@ -235,8 +235,8 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
               name={folderName(asking)}
               path={asking}
               purpose="add"
-              onAnswer={(trusted) => void answer(trusted)}
-              onDismiss={() => void answer(undefined)}
+              onTrust={() => void answer(true)}
+              onDismiss={() => void answer(false)}
               takeFocus={props.initialAsking === undefined}
               forceCancelFocus={props.forceCancelFocus}
             />
