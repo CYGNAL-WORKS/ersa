@@ -8,6 +8,7 @@ const components = [
   "ProjectList",
   "AddProject",
   "SessionList",
+  "Shelf",
   "Transcript",
   "SessionTitle",
   "ErrorBoundary",
