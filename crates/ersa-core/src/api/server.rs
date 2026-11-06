@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ersa_adapter::Adapter;
+use ersa_protocol::core_api::Method;
 use ersa_protocol::core_api::rpc::{ErrorObject, Incoming, Response, code, parse_incoming};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::{Semaphore, mpsc, watch};
@@ -197,6 +198,41 @@ impl Server {
     }
 }
 
+/// One session's lane on a connection: what the next request about that
+/// session waits for before it runs.
+#[derive(Clone)]
+struct Lane {
+    /// Rises when the latest request lets the next one run: once it is
+    /// answered, or, for a `session.send`, as soon as the send has the
+    /// session's slot, so an interrupt or an answer to a question sent
+    /// behind it never waits for its attachments.
+    released: watch::Receiver<bool>,
+    /// Rises when the latest `session.send` is answered. A send also waits
+    /// for it, so pipelined messages reach the backend in the order sent.
+    send_answered: Option<watch::Receiver<bool>>,
+}
+
+impl Lane {
+    /// Waits until a request may run after this lane's latest: a send
+    /// (`sends`) also waits for the sends before it.
+    async fn wait(mut self, sends: bool) {
+        // `Err` from `wait_for` means the earlier task is gone: done too.
+        let _ = self.released.wait_for(|released| *released).await;
+        if sends && let Some(mut answered) = self.send_answered {
+            let _ = answered.wait_for(|answered| *answered).await;
+        }
+    }
+
+    /// Whether nothing in the lane is left to wait for.
+    fn drained(&self) -> bool {
+        *self.released.borrow()
+            && self
+                .send_answered
+                .as_ref()
+                .is_none_or(|answered| *answered.borrow())
+    }
+}
+
 /// Serves one client until it disconnects, the handshake fails or times out,
 /// it sends an unreadable line, or Core shuts down.
 ///
@@ -205,7 +241,9 @@ impl Server {
 /// its own, and answer when done, possibly out of order (responses carry
 /// their request's id). Detached requests about the same session still run
 /// in the order they were sent: each waits for the one before it in its
-/// session's lane. Requests about different sessions overlap; the in-line
+/// session's lane ([`Lane`]), except that a send lets the requests behind it
+/// run once it has its session's slot, and only another send waits for its
+/// answer. Requests about different sessions overlap; the in-line
 /// ones name no session and never wait for the detached ones. A `session.stop` whose
 /// lane does not drain within a grace starts stopping anyway, ending the
 /// requests stuck ahead of it; its answer still keeps its place.
@@ -234,9 +272,8 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
     let mut conn = ConnectionState::new(outbound, kick);
     let mut lines = CappedLines::new(read, core.config.max_line_bytes);
     let queued = Arc::new(Semaphore::new(QUEUED_PER_CONNECTION));
-    // Per session: a flag that rises when the latest request about it has
-    // been answered. The next request about that session waits for it.
-    let mut lanes: HashMap<String, watch::Receiver<bool>> = HashMap::new();
+    // Per session: what the next request about it waits for.
+    let mut lanes: HashMap<String, Lane> = HashMap::new();
     let hello_deadline = tokio::time::Instant::now() + core.config.handshake_timeout;
     let mut shutdown_after = false;
     loop {
@@ -300,17 +337,35 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                 } else {
                     super::stop_target(&request)
                 };
-                let (done, done_rx) = watch::channel(false);
-                let before = super::session_lane(&conn, &request)
-                    .and_then(|session| lanes.insert(session, done_rx));
-                lanes.retain(|_, answered| !*answered.borrow());
+                let (released, released_rx) = watch::channel(false);
+                let released = Arc::new(released);
+                let sends = request.method == Method::SessionSend.name();
+                let (answered, answered_rx) = watch::channel(false);
+                let before = super::session_lane(&conn, &request).and_then(|session| {
+                    let before = lanes.get(&session).cloned();
+                    let sent = if sends {
+                        Some(answered_rx)
+                    } else {
+                        before.as_ref().and_then(|lane| lane.send_answered.clone())
+                    };
+                    lanes.insert(
+                        session,
+                        Lane {
+                            released: released_rx,
+                            send_answered: sent,
+                        },
+                    );
+                    before
+                });
+                lanes.retain(|_, lane| !lane.drained());
                 // Weak, so a request still running does not keep a closed
                 // connection's writer alive; its answer then goes nowhere.
-                let peer = conn.peer();
+                let mut peer = conn.peer();
+                peer.lane = Some(Arc::clone(&released));
                 let core = Arc::clone(&core);
                 let lane = super::session_lane(&conn, &request);
                 tokio::spawn(async move {
-                    if let Some(mut before) = before {
+                    if let Some(before) = before {
                         // `Err` from `wait_for` means the earlier task is
                         // gone: done too. A stop keeps its place behind the
                         // requests sent before it while they move, but not
@@ -318,9 +373,7 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                         // backend that stopped reading: after a grace it
                         // starts stopping, which ends them, and its answer
                         // still comes after theirs.
-                        let waited = async {
-                            let _ = before.wait_for(|answered| *answered).await;
-                        };
+                        let waited = before.wait(sends);
                         tokio::pin!(waited);
                         let mut finished = false;
                         if let Some(session) = &stops {
@@ -344,7 +397,8 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                         let _ = outbound.send(line).await;
                     }
                     peer.after_answer(&method, lane.as_deref());
-                    done.send_replace(true);
+                    released.send_replace(true);
+                    answered.send_replace(true);
                     drop(in_flight);
                 });
                 continue;

@@ -7,6 +7,7 @@ const components = [
   "QuitQuestion",
   "AddProject",
   "RailTree",
+  "Shelf",
   "Transcript",
   "SessionTitle",
   "ErrorBoundary",
@@ -21,6 +22,8 @@ const components = [
 for (const theme of ["light", "dark"]) {
   for (const component of components) {
     test(`${component} in ${theme}`, async ({ page }) => {
+      // The shelf lies beside a rail-wide tile, wider than a theme's column at the default width.
+      if (component === "Shelf") await page.setViewportSize({ width: 1600, height: 900 });
       await page.goto(`/gallery.html?component=${component}&theme=${theme}`);
       const section = page.locator(`[data-theme="${theme}"] [data-component="${component}"]`);
       await expect(section).toHaveScreenshot(`${component}-${theme}.png`);
