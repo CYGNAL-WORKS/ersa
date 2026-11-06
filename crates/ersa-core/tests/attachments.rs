@@ -13,7 +13,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use ersa_adapter::OutgoingAttachment;
-use ersa_core::Adapter;
+use ersa_core::{Adapter, CoreConfig};
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Stats};
 use support::{Client, TestCore, git_repo, kind, start_with_adapters, tempdir};
@@ -34,9 +34,14 @@ struct Setup {
 }
 
 async fn setup(adapter: FakeAdapter) -> Setup {
+    setup_with(adapter, |_| {}).await
+}
+
+/// [`setup`], with `configure` applied to Core's configuration.
+async fn setup_with(adapter: FakeAdapter, configure: impl FnOnce(&mut CoreConfig)) -> Setup {
     let stats = Arc::clone(&adapter.stats);
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
-    let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
+    let core = start_with_adapters(tempdir(), configure, adapters).await;
     let mut client = core.client().await;
     let repo = core.dir.path().join("repo");
     git_repo(&repo);
@@ -634,4 +639,194 @@ async fn inspect_and_send_refuse_a_named_pipe_without_opening_it() {
         .send(&id, "", json!([{ "kind": "file", "path": pipe }]))
         .await;
     assert!(refused_at(&response, 0).contains("pipe or a device"));
+}
+
+/// The entries left in the session's `.partial/`, which a copy is made in.
+fn aside(scratch: &Path) -> Vec<String> {
+    copies(&scratch.join(".partial"))
+}
+
+// verifies: PROTO-CORE-API-R22
+#[tokio::test]
+async fn a_folder_nested_thousands_deep_is_copied_whole() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    let id = s.session().await;
+    let top = s.outside.join("deep");
+    let mut bottom = top.clone();
+    for _ in 0..2000 {
+        bottom.push("d");
+    }
+    std::fs::create_dir_all(&bottom).unwrap();
+    std::fs::write(bottom.join("end.txt"), b"end").unwrap();
+    let response = s
+        .send(&id, "", json!([{ "kind": "folder", "path": path(&top) }]))
+        .await;
+    assert!(response.get("result").is_some(), "{response:#}");
+    let mut copied = s.scratch(&id).join("1").join("deep");
+    for _ in 0..2000 {
+        copied.push("d");
+    }
+    assert_eq!(std::fs::read(copied.join("end.txt")).unwrap(), b"end");
+}
+
+// verifies: PROTO-CORE-API-R25
+#[tokio::test]
+async fn interrupt_cancels_a_send_while_it_copies() {
+    // Each 64 KiB chunk takes 30 ms, so this 16 MiB copy takes about 8 s.
+    const SIZE: usize = 16 * 1024 * 1024;
+    let mut s = setup_with(FakeAdapter::new(1), |config| {
+        config.copy_pause = Duration::from_millis(30);
+    })
+    .await;
+    let id = s.session().await;
+    let big = path(&file(&s.outside, "big.bin", &vec![7u8; SIZE]));
+    let send = s
+        .client
+        .request(
+            "session.send",
+            json!({ "id": id, "text": "hi", "attachments": [{ "kind": "file", "path": big }] }),
+        )
+        .await;
+    let copying = s
+        .client
+        .notification_where(|n| {
+            n["method"] == "session.send_progress" && n["params"]["phase"] == "copying"
+        })
+        .await;
+    assert_eq!(copying["params"]["total_bytes"], SIZE);
+    let interrupted_at = tokio::time::Instant::now();
+    let interrupted = s
+        .client
+        .call("session.interrupt", json!({ "id": id }))
+        .await;
+    assert!(interrupted.get("result").is_some(), "{interrupted:#}");
+    let response = s.client.response(send).await;
+    assert_eq!(kind(&response["error"]), "invalid_state", "{response:#}");
+    // Answered at once, not when the copy would have finished.
+    assert!(
+        interrupted_at.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        interrupted_at.elapsed()
+    );
+    // The copy stops at its next chunk and removes itself.
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let scratch = s.scratch(&id);
+    assert_eq!(aside(&scratch), Vec::<String>::new());
+    assert_eq!(copies(&scratch), Vec::<String>::new());
+    assert!(s.messages().is_empty());
+}
+
+/// Holds `file` so that a copy can't open it: open without sharing on
+/// Windows, unreadable elsewhere. `None` when it stays readable (a test run
+/// as root, say).
+fn unreadable(file: &Path) -> Option<Box<dyn std::any::Any>> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        let held = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(file)
+            .expect("open without sharing");
+        Some(Box::new(held))
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        // Root reads it anyway.
+        std::fs::File::open(file)
+            .is_err()
+            .then(|| Box::new(()) as Box<dyn std::any::Any>)
+    }
+}
+
+// verifies: PROTO-CORE-API-R23
+#[tokio::test]
+async fn a_copy_that_fails_after_others_were_made_leaves_none() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    let id = s.session().await;
+    let notes = path(&file(&s.outside, "notes.md", b"x"));
+    let locked = file(&s.outside, "dir/locked.txt", b"secret");
+    let Some(_held) = unreadable(&locked) else {
+        return;
+    };
+    let response = s
+        .send(
+            &id,
+            "",
+            json!([
+                { "kind": "file", "path": notes },
+                { "kind": "folder", "path": path(&s.outside.join("dir")) },
+            ]),
+        )
+        .await;
+    refused_at(&response, 1);
+    // The first attachment's copy was made and moved into place before the
+    // second failed: neither stays.
+    let scratch = s.scratch(&id);
+    assert_eq!(copies(&scratch), Vec::<String>::new());
+    assert_eq!(aside(&scratch), Vec::<String>::new());
+    assert!(s.messages().is_empty());
+}
+
+// verifies: PROTO-CORE-API-R24
+#[tokio::test]
+async fn lines_are_counted_in_a_text_file_of_at_most_10_mib() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    const LIMIT: usize = 10 * 1024 * 1024;
+    let at_limit = file(&s.outside, "at.txt", &b"a\n".repeat(LIMIT / 2));
+    let past = file(
+        &s.outside,
+        "past.txt",
+        &[b"a\n".repeat(LIMIT / 2), b"a".to_vec()].concat(),
+    );
+    let inspected = s
+        .client
+        .result(
+            "attachment.inspect",
+            json!({ "host_id": "local", "path": path(&at_limit) }),
+        )
+        .await;
+    assert_eq!(inspected["size_bytes"], LIMIT);
+    assert_eq!(inspected["lines"], LIMIT / 2);
+    let inspected = s
+        .client
+        .result(
+            "attachment.inspect",
+            json!({ "host_id": "local", "path": path(&past) }),
+        )
+        .await;
+    assert_eq!(inspected["size_bytes"], LIMIT + 1);
+    assert!(inspected.get("lines").is_none(), "{inspected:#}");
+}
+
+// verifies: PROTO-CORE-API-R26
+#[tokio::test]
+async fn progress_repeats_at_least_every_5_seconds() {
+    let mut s = setup(FakeAdapter::slow_start(Duration::from_secs(9))).await;
+    let id = s.session().await;
+    let send = s
+        .client
+        .request("session.send", json!({ "id": id, "text": "hi" }))
+        .await;
+    // The phase stays `starting` for 9 s; within 7 s it is reported at
+    // least twice, once at once and again within about 5.
+    let began = tokio::time::Instant::now();
+    let deadline = began + Duration::from_secs(7);
+    let mut starting = Vec::new();
+    while let Ok(Some(n)) = tokio::time::timeout_at(deadline, s.client.notification()).await {
+        if n["method"] == "session.send_progress" && n["params"]["phase"] == "starting" {
+            starting.push(began.elapsed());
+        }
+    }
+    assert!(starting.len() >= 2, "{starting:?}");
+    for pair in starting.windows(2) {
+        assert!(
+            pair[1] - pair[0] <= Duration::from_millis(6500),
+            "{starting:?}"
+        );
+    }
+    let response = s.client.response(send).await;
+    assert!(response.get("result").is_some(), "{response:#}");
 }
