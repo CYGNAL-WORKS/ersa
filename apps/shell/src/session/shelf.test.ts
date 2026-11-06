@@ -38,7 +38,6 @@ const viewOf = (events: Event[], more: Partial<SessionView> = {}): SessionView =
   id: "s1",
   transcript: events.map((e, seq) => envelope(e, seq)).reduce(apply, emptyTranscript),
   stream: { state: "live" },
-  answers: {},
   ...more,
 });
 
