@@ -105,5 +105,13 @@ for (const [width, height] of [[700, 520], [660, 440], [640, 400]] as const) {
       expect(box.y + box.height).toBeLessThanOrEqual(height);
     }
     await ersa.shot(`trust-question-${width}x${height}`);
+
+    // The window shrinking while the question is open fits it again: its title stays in view.
+    await page.setViewportSize({ width: 640, height: 400 });
+    await expect(async () => {
+      const box = (await question.getByText("Trust stranger?").boundingBox())!;
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height).toBeLessThanOrEqual(400);
+    }).toPass();
   });
 }

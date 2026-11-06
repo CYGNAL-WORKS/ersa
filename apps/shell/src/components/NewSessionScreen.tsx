@@ -94,7 +94,8 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
       const card = zone?.querySelector<HTMLElement>(".trust-question");
       const body = card?.querySelector<HTMLElement>(".trust-question-body");
       if (!zone || !section || !card || !body) return;
-      // Measured over the room as it is with the question out of the column.
+      // Measured over the room as it is with the question out of the column; a tight screen's scroll is kept.
+      const scrolled = section.scrollTop;
       delete section.dataset.tight;
       card.style.maxHeight = "";
       const style = getComputedStyle(section);
@@ -108,14 +109,35 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
       } else {
         // In the column, capped to the screen's own height, so the title, folder and answers show together at its top.
         section.dataset.tight = "";
-        const below = section.scrollTop + card.getBoundingClientRect().top - section.getBoundingClientRect().top;
+        // Measured before the scroll is restored, so from the column's top.
+        const below = card.getBoundingClientRect().top - section.getBoundingClientRect().top;
         card.style.maxHeight = `${Math.max(least, section.clientHeight - below - (parseFloat(style.paddingBottom) || 0))}px`;
+        section.scrollTop = scrolled;
       }
     };
     fit();
-    window.addEventListener("resize", fit);
+    // The room changes with the window and with the box and the session controls: text that grows the box, chips
+    // that wrap. Only a change of height refits: neither the screen's nor the box column's height changes when the
+    // question is capped, and the scroll bar a tight screen gains changes only widths, so fitting never sets this
+    // off again. (jsdom has no ResizeObserver; the tests there need no layout.)
+    const start = screen.current?.querySelector(".new-session-start");
+    const heights = new Map<Element, number>();
+    const watch =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver((entries) => {
+            let changed = false;
+            for (const entry of entries) {
+              const height = entry.contentRect.height;
+              if (heights.get(entry.target) !== height) changed = true;
+              heights.set(entry.target, height);
+            }
+            if (changed) fit();
+          });
+    if (screen.current) watch?.observe(screen.current);
+    if (start) watch?.observe(start);
     return () => {
-      window.removeEventListener("resize", fit);
+      watch?.disconnect();
       if (screen.current) delete screen.current.dataset.tight;
     };
   }, [asking]);
