@@ -47,7 +47,9 @@
   --size-icon: 16px;
   --size-icon-sm: 14px;
   --size-icon-xs: 12px;
+  --size-dialog: 360px;
   --stack-menu: 10;
+  --stack-dialog: 30;
   --motion-instant: 80ms;
   --motion-quick: 160ms;
   --motion-settle: 260ms;
