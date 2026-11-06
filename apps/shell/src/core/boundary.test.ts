@@ -34,7 +34,7 @@ describe("the Interface's boundary", () => {
     const found: string[] = [];
     for (const { path, text } of files) {
       for (const [, module] of text.matchAll(/from\s+["'](@tauri-apps\/[^"']+)["']/g)) {
-        // The dialog plugin reaches the system's folder dialog, never Core (FLOW-NEW-SESSION-R16).
+        // The dialog plugin reaches the system's folder dialog, never Core (FLOW-NEW-SESSION-R27).
         const allowed = path === BRIDGE && ["@tauri-apps/api/core", "@tauri-apps/api/event", "@tauri-apps/plugin-dialog"].includes(module ?? "");
         if (!allowed) found.push(`${path}: ${module}`);
       }

@@ -89,7 +89,7 @@ describe("adding a project from the project chip", () => {
     });
   };
 
-  // verifies: FLOW-NEW-SESSION-R16
+  // verifies: FLOW-NEW-SESSION-R27
   it("offers the folder dialog only on the local host: a remote host's folders are not this computer's", async () => {
     const remote = { id: "far", name: "buildbox", platform: "linux" as const };
     const faraway: Project = { ...project("faraway"), host_id: "far", path: "/srv/faraway" };
@@ -101,7 +101,7 @@ describe("adding a project from the project chip", () => {
     expect(onChooseFolder).not.toHaveBeenCalled();
   });
 
-  // verifies: FLOW-NEW-SESSION-R16
+  // verifies: FLOW-NEW-SESSION-R27
   it("names a Windows folder by its own name in the trust question", async () => {
     const onChooseFolder = async () => ({ kind: "new", path: "D:\\Clones\\stranger" }) as const;
     render(createElement(NewSessionScreen, props([alpha], { onChooseFolder })));
