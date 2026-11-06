@@ -135,16 +135,16 @@ describe("the shelf and keyboard focus", () => {
     fireEvent.pointerDown(screen.getByRole("button", { name: /^(?!Request from).*Write the notes/ }));
     expect(shelf()).not.toBeNull();
 
-    // A choice that takes no focus closes it too, and focus goes nowhere new.
+    // A press that takes no focus closes it too, and gives focus to nothing: not back to the chevron.
     fireEvent.pointerDown(document.body);
     expect(shelf()).toBeNull();
+    expect(document.activeElement).toBe(document.body);
 
+    // A press on something that takes focus: the press itself places focus, so closing places none.
     fireEvent.click(chevron());
-    const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
-    fireEvent.pointerDown(elsewhere);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Elsewhere" }));
     expect(shelf()).toBeNull();
-    act(() => elsewhere.focus());
-    expect(document.activeElement).toBe(elsewhere);
+    expect(document.activeElement).not.toBe(chevron());
   });
 
   // verifies: FLOW-APPROVE-PERMISSION-R07
