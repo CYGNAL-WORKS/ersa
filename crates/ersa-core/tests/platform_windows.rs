@@ -103,8 +103,8 @@ fn path_keys_ignore_case_and_separators() {
 /// Windows matches environment names without regard to case, so a removal
 /// list written in capitals also removes a variable a parent spelled
 /// otherwise, and the other way round: a lowercase name in the list removes
-/// the capitalised `OS` every Windows process inherits. (From the review of
-/// PR #36; the removal lists themselves are the adapter's to test.)
+/// the capitalised `OS` every Windows process inherits. The removal lists
+/// themselves are the adapter's to test.
 #[tokio::test]
 async fn a_lowercase_name_in_the_removal_list_still_removes_the_variable() {
     assert!(std::env::var_os("OS").is_some(), "OS unset here");

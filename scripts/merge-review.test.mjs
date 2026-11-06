@@ -61,7 +61,7 @@ test("the previous review is the latest one this account posted on this head or 
     { author: "github-actions[bot]", body: body(HEAD) },
     { author: ME, body: "Looks good." },
   ];
-  assert.deepEqual(previousReview(reviews, HEAD, isAncestor, [ME]), { head: OLD, verdict: "blocked", findings: [finding()] }, "another account's review, the retired workflow's included, does not count");
+  assert.deepEqual(previousReview(reviews, HEAD, isAncestor, [ME]), { head: OLD, verdict: "blocked", findings: [finding()] }, "another account's review, a bot's included, does not count");
   assert.equal(previousReview(reviews, HEAD, isAncestor, [ME, "someone"]).head, HEAD);
   assert.equal(previousReview(reviews.slice(0, 1), HEAD, isAncestor, [ME]), null);
   assert.equal(previousReview([], HEAD, isAncestor, [ME]), null);
@@ -242,7 +242,7 @@ test("a head already reviewed is not reviewed or posted again, and a clean one s
   const blocked = drive(["7", "--head", HEAD], { reviews: [{ author: ME, body: body(HEAD, [finding()]) }] });
   assert.equal(blocked.code, 1);
   assert.equal(blocked.reviewed, 0);
-  // The retired workflow's review of the same head is another account's and does not count.
+  // A bot's review of the same head is another account's and does not count.
   const bot = drive(["7", "--head", HEAD], { reviews: [{ author: "github-actions[bot]", body: body(HEAD) }] });
   assert.equal(bot.reviewed, 1);
 });
