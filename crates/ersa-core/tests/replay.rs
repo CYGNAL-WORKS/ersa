@@ -261,19 +261,12 @@ async fn read_only_requests_are_answered_as_core_answers_them() {
         )
         .await;
     assert_eq!(found, projects[0]);
-    // The recording's project has no version control, so Core answers as it
-    // does for any such project, rather than as a replay refusing a change.
+    // The recording's project has no version control, so Core refuses it as
+    // it does any such project: the method runs, read-only, as on a live Core.
     let error = client
         .error("branch.list", json!({ "project_id": projects[0]["id"] }))
         .await;
     assert_eq!(error["data"]["kind"], "invalid_state");
-    assert!(
-        error["message"]
-            .as_str()
-            .unwrap()
-            .contains("workspace adapter"),
-        "{error}"
-    );
     assert_eq!(client.result("settings.get", json!({})).await, json!({}));
 
     // Nothing is played until a client subscribes.

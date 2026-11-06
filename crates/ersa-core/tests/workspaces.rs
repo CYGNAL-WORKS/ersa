@@ -827,6 +827,15 @@ async fn branch_list_needs_a_git_project() {
         .await;
     assert_eq!(kind(&error), "vcs_error");
     assert!(error["data"]["detail"].is_string(), "{error}");
+    // A base can't be resolved there either, and that is git's failure, not
+    // the caller's mistake.
+    let error = client
+        .error(
+            "workspace.create",
+            json!({ "project_id": project["id"], "base": "main" }),
+        )
+        .await;
+    assert_eq!(kind(&error), "vcs_error", "{error}");
 }
 
 // -- A workspace's base -------------------------------------------------------
@@ -872,7 +881,9 @@ async fn a_base_is_any_revision_git_resolves_and_nothing_else() {
     let before = client
         .result("workspace.list", json!({ "project_id": project["id"] }))
         .await;
-    for base in ["no-such-branch", "main~99", "HEAD:README.md"] {
+    // `main@{50}` is past the end of `main`'s reflog, which some git
+    // versions report with the exit code of a broken repository.
+    for base in ["no-such-branch", "main~99", "HEAD:README.md", "main@{50}"] {
         let error = client
             .error(
                 "workspace.create",

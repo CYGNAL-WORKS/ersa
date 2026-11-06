@@ -172,7 +172,8 @@ fn parse_branches(lines: &[String]) -> LocalBranches {
 }
 
 /// The commit `revision` names in the repository at `repo`, or `None`
-/// when git cannot resolve it to a commit. Given [`GIT_QUERY_TIMEOUT`].
+/// when git cannot resolve it to a commit. Each git call is given
+/// [`GIT_QUERY_TIMEOUT`].
 ///
 /// The caller refuses a revision that starts with `-`, so git reads it as a
 /// revision, never as an option.
@@ -190,16 +191,22 @@ pub async fn git_resolve_commit(
         &["rev-parse", "--verify", "--quiet", &peeled],
     )
     .await?;
-    match output.exit.code {
-        Some(0) => Ok(output.stdout.first().map(|line| line.trim().to_string())),
-        // `--verify --quiet` exits 1, silently, for what it cannot resolve;
-        // anything else is git failing.
-        Some(1) => Ok(None),
-        _ => Err(VcsError::Failed {
-            message: "git could not resolve the base".into(),
-            stderr: output.stderr_text(),
-        }),
+    if output.exit.success() {
+        return Ok(output.stdout.first().map(|line| line.trim().to_string()));
     }
+    // `--verify --quiet` usually exits 1 for what it cannot resolve, but
+    // some revisions it cannot resolve exit 128 (a reflog entry past the
+    // reflog's end), the same code as a broken repository. So the exit code
+    // cannot tell the two apart: ask git whether the repository itself is
+    // usable. If it is, the revision was the problem.
+    let repository = query(transport, repo, &["rev-parse", "--git-dir"]).await?;
+    if repository.exit.success() {
+        return Ok(None);
+    }
+    Err(VcsError::Failed {
+        message: "git could not resolve the base".into(),
+        stderr: repository.stderr_text(),
+    })
 }
 
 /// Runs a quick git query under [`GIT_QUERY_TIMEOUT`]. Running out of time
@@ -420,8 +427,10 @@ async fn find(entries: &[WorktreeEntry], path: &str) -> Option<WorktreeEntry> {
     .flatten()
 }
 
-/// The key under which two spellings of one folder compare equal. Blocking.
-fn location_key(path: &str) -> String {
+/// The key under which two spellings of one folder compare equal: the key a
+/// project's folder is stored under, or the path's own text for a folder that
+/// no longer exists. Blocking.
+pub(crate) fn location_key(path: &str) -> String {
     match platform::canonicalize(std::path::Path::new(path)) {
         Ok(canonical) => platform::folder_key(&canonical),
         Err(_) => platform::path_key(path),
@@ -513,6 +522,45 @@ mod tests {
         assert_eq!(parsed.names, ["main", "master", "x"]);
         assert_eq!(parsed.default.as_deref(), Some("main"));
     }
+
+    /// A transport whose git never answers: its output never ends.
+    fn hanging_git() -> ersa_adapter::fake::FakeTransport {
+        ersa_adapter::fake::FakeTransport::new(Vec::<String>::new()).stdout_outlives_process()
+    }
+
+    /// Asserts `result` is git's failure from running out of time, reached
+    /// exactly at the 10-second limit. The clock is paused, so tokio jumps it
+    /// to each timer and no test waits ten real seconds.
+    fn timed_out_at_ten_seconds<T: std::fmt::Debug>(
+        result: Result<T, VcsError>,
+        started: tokio::time::Instant,
+    ) {
+        assert_eq!(started.elapsed(), Duration::from_secs(10));
+        match result {
+            // `Failed` is what the Core API answers as `vcs_error`.
+            Err(VcsError::Failed { message, .. }) => {
+                assert!(message.contains("10 seconds"), "{message}")
+            }
+            other => panic!("expected a timed-out git failure, got {other:?}"),
+        }
+    }
+
+    // verifies: PROTO-CORE-API-R18
+    #[tokio::test(start_paused = true)]
+    async fn listing_branches_gives_git_ten_seconds() {
+        let started = tokio::time::Instant::now();
+        let result = git_local_branches(&hanging_git(), "repo").await;
+        timed_out_at_ten_seconds(result, started);
+    }
+
+    // verifies: PROTO-CORE-API-R19
+    #[tokio::test(start_paused = true)]
+    async fn resolving_a_base_gives_git_ten_seconds() {
+        let started = tokio::time::Instant::now();
+        let result = git_resolve_commit(&hanging_git(), "repo", "main").await;
+        timed_out_at_ten_seconds(result, started);
+    }
+
     #[test]
     fn locked_errors_name_the_reason() {
         let e = VcsError::Locked {
