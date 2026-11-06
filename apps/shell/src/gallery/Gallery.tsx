@@ -181,8 +181,9 @@ const tree: Parameters<typeof RailTree>[0] = {
   workspaces: treeWorkspaces,
   activeId: "s2",
   onSelect: () => {},
-  onNewSession: () => {},
-  onSetTrust: () => {},
+  // The last call a heading made, kept on the page where the gallery test reads it; nothing shows it.
+  onNewSession: (project) => (document.body.dataset.railCall = `newSession ${project.id}`),
+  onSetTrust: (project, trusted) => (document.body.dataset.railCall = `setTrust ${project.id} ${trusted}`),
   localHost: "local",
   hostNames: { local: "WORKSTATION", devbox: "devbox" },
 };
