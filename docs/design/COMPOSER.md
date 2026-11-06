@@ -24,15 +24,15 @@ Their fills and edges change over `motion-quick` with `motion-ease-out`. Send be
 
 ## The status line
 
-One line above the box, `size-control` high at least, showing one message at a time, first that Ersa can't reach the sessions, then a send whose outcome Ersa can't tell, then a refused message, then detecting backends, then a copy's progress; padded `space-sm` at the sides, in `ui-small` and `ink-muted`. It is empty, and keeps no height, while there is nothing to say. The composer keeps its box and session controls where they are: the status line opens upward, growing and fading in over `motion-settle` with `motion-ease-out`, and closes the same way.
+One line above the box, `size-control` high at least, showing one message at a time, first that Ersa can't reach the sessions, then a send whose outcome Ersa can't tell, then a refused message, then detecting backends, then a send on its way; padded `space-sm` at the sides, in `ui-small` and `ink-muted`. It is empty, and keeps no height, while there is nothing to say. The composer keeps its box and session controls where they are: the status line opens upward, growing and fading in over `motion-settle` with `motion-ease-out`, and closes the same way.
 
 | When | It says | Leading mark | The box |
 |---|---|---|---|
-| A message was refused | the reason, in the user's terms | a glyph at `size-glyph` in `danger` | as at rest, the message kept |
 | Ersa can't reach the sessions | that, and that it is trying again | none | unavailable |
-| Backends are being detected | that it is detecting the backends on this host | none | unavailable |
 | Ersa can't tell whether a message was sent | that, and that the transcript shows it if it arrived | a glyph at `size-glyph` in `caution` | as at rest, the message kept |
-| Attachments are being copied | how much is copied, as a share | the ring at `size-ring`, its arc filling to the share over `motion-settle` | as at rest, stop offered |
+| A message was refused | the reason, in the user's terms | a glyph at `size-glyph` in `danger` | as at rest, the message kept |
+| Backends are being detected | that it is detecting the backends on this host | none | unavailable |
+| A message is on its way | how much is copied, as a share, or that the backend is starting | the ring at `size-ring`, its arc filling to the share over `motion-settle` | as at rest, stop offered |
 
 A refused message's line is announced to assistive technology as an alert. When the box becomes unavailable, keyboard focus returns to the words once it is available again. **Unavailable**, the box is `canvas`, the words and their placeholder read `ink-faint`, and attach and send read `ink-faint` with no fill and do not change under the pointer.
 
