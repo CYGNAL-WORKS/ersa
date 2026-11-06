@@ -95,13 +95,28 @@ describe("the status line above the box", () => {
     expect(statusLine()?.textContent).toBe("The session has ended.");
   });
 
-  it("returns focus to the words when the box is available again, if they had it", () => {
+  it("returns focus to the words when the box is available again, if they had it and focus went nowhere since", () => {
     const { rerender } = render(draw());
     words().focus();
     rerender(draw({ unavailable: "reconnecting" }));
-    words().blur();
+    // A browser drops focus from the disabled words to the page; jsdom keeps it there, so the test does it.
+    const passing = document.body.appendChild(document.createElement("button"));
+    passing.focus();
+    passing.remove();
+    expect(document.activeElement).toBe(document.body);
     rerender(draw());
     expect(document.activeElement).toBe(words());
+  });
+
+  it("leaves focus where the user moved it while the box was unavailable", () => {
+    const elsewhere = document.body.appendChild(document.createElement("button"));
+    const { rerender } = render(draw());
+    words().focus();
+    rerender(draw({ unavailable: "reconnecting" }));
+    elsewhere.focus();
+    rerender(draw());
+    expect(document.activeElement).toBe(elsewhere);
+    elsewhere.remove();
   });
 
   // verifies: FLOW-NEW-SESSION-R23

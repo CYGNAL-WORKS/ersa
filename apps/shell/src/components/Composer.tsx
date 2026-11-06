@@ -23,6 +23,8 @@ interface ComposerProps {
   onWrite?: () => void;
   /** Three lines tall, as on the new-session screen; one line otherwise, as under a session. Either grows with the words. */
   tall?: boolean;
+  /** What a screen opens above the box in the status line's place, such as the trust question: the line says nothing meanwhile. */
+  statusTaken?: boolean;
   /** A permission request is open and holds the focal glow, so focus shows on the box's edge alone. */
   quietFocus?: boolean;
   /** For the gallery: text already typed, and a pointer or keyboard state shown without one. */
@@ -38,7 +40,7 @@ interface ComposerProps {
  * Where the user writes to the agent (docs/design/COMPOSER.md): the status line above the box, and the box holding
  * attach, the words and send. Enter sends; Shift+Enter starts a new line (FLOW-SEND-MESSAGE-R01).
  */
-export function Composer({ unavailable, sending, onSend, onWrite, tall, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
+export function Composer({ unavailable, sending, onSend, onWrite, tall, statusTaken, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const words = useRef<HTMLTextAreaElement>(null);
   useImperativeHandle(inputRef, () => words.current as HTMLTextAreaElement);
@@ -57,7 +59,9 @@ export function Composer({ unavailable, sending, onSend, onWrite, tall, quietFoc
   useEffect(() => {
     if (unavailable === undefined && refocus.current) {
       refocus.current = false;
-      words.current?.focus({ preventScroll: true });
+      // Only if focus went nowhere meanwhile: a user who moved on, to the rail say, keeps their place.
+      const at = document.activeElement;
+      if (at === null || at === document.body) words.current?.focus({ preventScroll: true });
     }
   }, [unavailable]);
 
@@ -79,7 +83,7 @@ export function Composer({ unavailable, sending, onSend, onWrite, tall, quietFoc
     <div className="composer">
       {/* Takes no height and grows upward, so the box and the session controls stay where they are. */}
       <div className="composer-status">
-        <StatusLine unavailable={unavailable} sending={sending} />
+        {!statusTaken && <StatusLine unavailable={unavailable} sending={sending} />}
       </div>
       <form
         className="composer-box"

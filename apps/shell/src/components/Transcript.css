@@ -39,7 +39,8 @@
   gap: var(--space-md);
   max-width: var(--size-measure);
   margin: 0 auto;
-  padding: var(--space-xl) var(--space-lg);
+  /* Room at the foot as deep as the fade behind the composer, so the newest words scroll clear of it. */
+  padding: var(--space-xl) var(--space-lg) var(--space-xxxl);
 }
 
 .transcript-text {

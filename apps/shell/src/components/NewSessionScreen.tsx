@@ -36,7 +36,7 @@ interface NewSessionScreenProps {
   /** Adds the folder as a trusted project on the local host (FLOW-NEW-SESSION-R25); resolves to the project once Core added it. */
   onAddProject: (path: string) => Promise<Project | undefined>;
   /** Ersa can't reach the sessions: trying again, or no longer trying (FLOW-SEND-MESSAGE-R06). */
-  away?: "reconnecting" | "unreachable";
+  away?: Extract<Unavailable, "reconnecting" | "unreachable">;
   /** Choosing or adding a folder: on its way, or why it failed. */
   adding?: Sending;
   /** For the gallery: focus not taken, the composer shown focused, a chip shown open or in a state. */
@@ -250,6 +250,10 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
         <Composer
           inputRef={words}
           tall
+          // The trust question, or why a folder could not be added, opens in the status line's place, and the
+          // question holds the focal glow while it is open (docs/design/COMPOSER.md, The trust question).
+          statusTaken={asking !== undefined || adding?.state === "failed"}
+          quietFocus={asking !== undefined}
           autoFocus={props.autoFocus ?? true}
           force={props.forceFocus ? "focus" : undefined}
           initialText={props.initialText}
