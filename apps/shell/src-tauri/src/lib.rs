@@ -359,15 +359,16 @@ fn attach_label() -> Option<String> {
 /// Whether a label-attached debug window opens without taking focus, from
 /// `ERSA_BACKGROUND=1`: the live checks set it so a run does not pull the
 /// owner away from what they are doing. A window the user opens takes focus.
-fn opens_unfocused(label: Option<&str>) -> bool {
-    label.is_some() && std::env::var("ERSA_BACKGROUND").is_ok_and(|v| v == "1")
+fn opens_unfocused(label: Option<&str>, background: Option<&str>) -> bool {
+    label.is_some() && background == Some("1")
 }
 
 /// Opens the window, or shows the window of the Shell already running.
 /// Called by `main`.
 pub fn run() {
     let label = attach_label();
-    let focused = !opens_unfocused(label.as_deref());
+    let background = std::env::var("ERSA_BACKGROUND").ok();
+    let focused = !opens_unfocused(label.as_deref(), background.as_deref());
     // One Shell per user (FLOW-CLOSE-AND-QUIT-R02). An endpoint that cannot
     // be claimed (another user's process holds its name) costs only that.
     let claimed = ersa_core::platform::labelled_endpoint(&instance::label_for(label.as_deref()))
@@ -454,5 +455,14 @@ mod tests {
         assert!(!is_app_origin(&url("https://example.com/")));
         assert!(!is_app_origin(&url("file:///C:/Windows/")));
         assert!(!is_app_origin(&url("http://localhost.example.com/")));
+    }
+
+    #[test]
+    fn only_an_attached_window_opens_in_the_background() {
+        assert!(opens_unfocused(Some("live-1"), Some("1")));
+        // The user's own window, and every release build, has no label.
+        assert!(!opens_unfocused(None, Some("1")));
+        assert!(!opens_unfocused(Some("live-1"), None));
+        assert!(!opens_unfocused(Some("live-1"), Some("0")));
     }
 }
