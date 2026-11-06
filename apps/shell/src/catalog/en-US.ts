@@ -54,6 +54,8 @@ export const enUS = {
       readError: "Ersa can't read this session's requests.",
       retryButton: "Retry",
       unknownNote: "This session is waiting on a request Ersa can't show here.",
+      // Names the shelf's contents when they fail to draw: "This request could not be shown:".
+      boundaryName: "This request",
       denyButton: "Deny",
       allowButton: "Allow",
     },

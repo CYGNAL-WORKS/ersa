@@ -21,6 +21,7 @@ import type { Project, Session, Workspace } from "./protocol/core-api.gen";
 import { type BackendChoices, type SessionValues, sessionShown } from "./session/controls";
 import { contextUsed, tileOf } from "./session/tile";
 import { shelfAfter, shelfFollowing, shelfOf, shelfTone } from "./session/shelf";
+import { sharedSubscriptions } from "./session/subscriptions";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { readChoices, rememberPatch, startSession } from "./session/start";
@@ -93,7 +94,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The session whose shelf is open, and its events, followed while it is open (FLOW-APPROVE-PERMISSION).
   const [shelfId, setShelfId] = useState<string>();
   const [shelfView, setShelfView] = useState<SessionView>();
-  const shelf = useMemo(() => shelfFollowing(client, setShelfView), [client]);
+  // The transcript and the shelf share Core's one subscription per session (session/subscriptions.ts).
+  const shared = useMemo(() => sharedSubscriptions(client), [client]);
+  const shelf = useMemo(() => shelfFollowing(shared, setShelfView), [shared]);
 
   useEffect(() => {
     const running = connect(client, setView, undefined, (notification) => {
@@ -126,14 +129,14 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   useEffect(() => {
     if (activeId === undefined) return;
-    const following = follow(client, activeId, setSession);
+    const following = follow(shared(), activeId, setSession);
     follower.current = following;
     dispatch({ type: "followed", id: activeId });
     return () => {
       following.stop();
       if (follower.current === following) follower.current = null;
     };
-  }, [client, activeId]);
+  }, [shared, activeId]);
 
   // Subscribe on each new connection, from where the transcript left off;
   // without one, the session is offline and answers wait.
@@ -157,9 +160,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     else shelf.detached();
   }, [shelf, link]);
   const connected = link !== undefined;
-  // The transcript follows `activeId` even while the new-session screen hides it, so that is the session whose
-  // subscription the shelf leaves alone on closing.
-  useEffect(() => shelf.follow(openShelf, connected, activeId), [shelf, openShelf]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A change of connection alone is the effect above's to handle.
+  useEffect(() => shelf.follow(openShelf, connected), [shelf, openShelf]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => shelf.follow(undefined, false), [shelf]);
 
   // Quit from the tray icon: confirmed here first when sessions are busy (FLOW-CLOSE-AND-QUIT-R04). The

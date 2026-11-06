@@ -1,5 +1,5 @@
 import { Bot, ChevronRight, LoaderCircle } from "lucide-react";
-import { type ReactNode, useId, useLayoutEffect, useRef } from "react";
+import { type AnimationEvent, type CSSProperties, type ReactNode, useId, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../catalog";
 import type { SessionsView } from "../core/connection";
 import type { Session } from "../protocol/core-api.gen";
@@ -199,6 +199,21 @@ function TileItem({ shelf, children }: { shelf?: OpenShelf; children: (shelfDomI
   const item = useRef<HTMLLIElement>(null);
   const domId = useId();
   const open = shelf !== undefined;
+  const shown = shelf?.render(domId);
+  // The shelf last drawn, kept while it slides back after closing (docs/design/RAIL.md, The shelf: Motion).
+  const last = useRef<ReactNode>(undefined);
+  if (shown !== undefined) last.current = shown;
+  const [closing, setClosing] = useState<ReactNode>();
+  useLayoutEffect(() => {
+    if (open) return setClosing(undefined);
+    // With reduced motion on, it goes at once.
+    const still = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (last.current !== undefined && !still) setClosing(last.current);
+    last.current = undefined;
+  }, [open]);
+  const closed = (event: AnimationEvent) => {
+    if (event.animationName === "shelf-back") setClosing(undefined);
+  };
   useLayoutEffect(() => {
     const li = item.current;
     const layer = li?.querySelector<HTMLElement>(".shelf");
@@ -224,10 +239,25 @@ function TileItem({ shelf, children }: { shelf?: OpenShelf; children: (shelfDomI
       document.removeEventListener("scroll", place, true);
     };
   }, [open]);
+  const layer = shown ?? closing;
+  // Each tile names its own anchor, so a shelf sliding back stays by its tile while another tile's opens.
+  const anchor = `--tile-${domId.replace(/[^\w-]/g, "")}`;
   return (
-    <li ref={item} className="session-item" data-shelf={open || undefined} data-tone={shelf?.tone}>
+    <li
+      ref={item}
+      className="session-item"
+      data-shelf={open || undefined}
+      data-closing={(!open && closing !== undefined) || undefined}
+      data-tone={shelf?.tone}
+      style={layer !== undefined ? ({ anchorName: anchor } as CSSProperties) : undefined}
+    >
       {children(domId)}
-      {shelf?.render(domId)}
+      {/* One layer, open or closing, so the shelf keeps its element, and its measured join, as it slides back. */}
+      {layer !== undefined && (
+        <div className="shelf-layer" inert={!open || undefined} onAnimationEnd={closed} style={{ positionAnchor: anchor } as CSSProperties}>
+          {layer}
+        </div>
+      )}
     </li>
   );
 }

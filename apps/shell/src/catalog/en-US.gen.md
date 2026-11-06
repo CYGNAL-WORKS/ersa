@@ -112,6 +112,10 @@ Retry
 
 This session is waiting on a request Ersa can't show here.
 
+### `rail.shelf.boundaryName`
+
+This request
+
 ### `rail.shelf.denyButton`
 
 Deny

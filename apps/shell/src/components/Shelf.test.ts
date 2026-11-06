@@ -107,7 +107,7 @@ describe("the shelf", () => {
     const rule = css.slice(css.indexOf(".shelf {"), css.indexOf("}", css.indexOf(".shelf {")));
     // Out of the page's flow, so it takes no room from anything, and above the transcript.
     expect(rule).toContain("position: fixed;");
-    expect(rule).toContain("position-anchor: --open-tile;");
+    expect(rule).toContain("position-anchor: inherit;");
     expect(rule).toContain("z-index: var(--stack-shelf);");
     expect(rule).toContain("width: var(--size-shelf);");
   });
