@@ -1,4 +1,4 @@
-import { Plus } from "lucide-react";
+import { Folder, Plus } from "lucide-react";
 import { t } from "../catalog";
 import type { CoreHelloResult, Project } from "../protocol/core-api.gen";
 import { type BackendChoices, type Choice, type SessionValues, type WorkspaceKind, available, showsBackend, workspaceKinds } from "../session/controls";
@@ -88,6 +88,7 @@ export function SessionControls({ hosts, localHostId, projects, backends, values
         />
         <Chip
           name="Project"
+          icon={Folder}
           value={values.project_id}
           options={projects.filter((p) => p.host_id === values.host_id).map(projectOption)}
           // With no project on the host, the chip offers to choose a folder (FLOW-NEW-SESSION-R19).
