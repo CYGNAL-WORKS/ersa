@@ -84,6 +84,8 @@ size:
   rail: 288px
   # The transcript's reading column.
   measure: 720px
+  # The widest a chip's list grows; longer text in it is cut with an ellipsis.
+  menu: 360px
   # The widest a user's message bubble grows, as a share of the reading column.
   bubble-max: 80%
   # The height past which a tool card's output or a long permission field scrolls.
@@ -99,6 +101,8 @@ size:
   control: 28px
   # A small control or mark inside a tile.
   control-sm: 20px
+  # A large control: the composer's attach, send and stop buttons.
+  control-lg: 32px
   # Icons, by the type beside them: `ui`, `ui-small`, and a mark inside a tile.
   icon: 16px
   icon-sm: 14px
@@ -246,6 +250,7 @@ Icons are Lucide, drawn as Lucide draws them: an even stroke with round ends, 2 
 Component style tokens are added here as component briefs reach `ready`. Each component brief (`CMP-*`) lists the tokens it consumes; this section holds the values.
 
 - **The rail, a project heading and a tile**: `docs/design/RAIL.md`. Read it before changing any of them.
+- **The composer and the session controls**: `docs/design/COMPOSER.md`. Read it before changing either.
 
 ## Do's and Don'ts
 

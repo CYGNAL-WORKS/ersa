@@ -1,0 +1,53 @@
+---
+id: FLOW-SEND-MESSAGE
+type: flow
+title: Write to a session
+status: ready
+references: [LAY-SHELL, PROTO-CORE-API]
+adrs: [0011, 0017]
+---
+
+# Write to a session
+
+## Intent
+
+The user writes to the agent in the composer, on the new-session screen and on every session, and can add files, images and folders to a message. A message goes as one turn; while the agent works on it, the composer's send becomes stop, which interrupts the turn. When a message can't be sent, the composer says why above the box and keeps the message, so nothing the user wrote is lost. When Ersa can't reach the sessions, the composer says so and waits.
+
+An attachment is a file, an image or a folder that goes with a message. The user adds one from the composer's attach menu (files, images, or a folder, each through the system's dialog), by pasting an image, or by dropping files, images and folders on the box. Attachments sit in the box above the words, each with its name and a detail (an image's or file's size, a text file's line count, or that it is a folder), and each can be removed before sending. An image goes to the backend as an image the agent sees. A file or folder goes as its path, which the agent reads itself; one from outside the session's workspace is copied into the workspace's scratch folder first, so the agent reads it where it works (PROTO-CORE-API, Turns and attachments). The transcript shows a sent message's attachments with it.
+
+`docs/design/COMPOSER.md` says how the composer looks in each state.
+
+## Requirements
+
+- **FLOW-SEND-MESSAGE-R01**: When the user presses Enter, or chooses send, with words or an attachment in the composer, Ersa shall send them to the active session as one message and clear the composer once the session has accepted it; Shift+Enter shall start a new line.
+- **FLOW-SEND-MESSAGE-R02**: Anything the user writes or attaches while a message is being sent shall stay in the composer after that message is accepted.
+- **FLOW-SEND-MESSAGE-R03**: While the active session's agent is working on a turn, the composer shall offer stop in place of send, and choosing stop shall interrupt the turn.
+- **FLOW-SEND-MESSAGE-R04**: While the agent is working, Enter shall not send, and what the user writes shall stay in the composer for when the turn ends.
+- **FLOW-SEND-MESSAGE-R05**: When a message is refused, Ersa shall show the reason above the composer's box, in the user's terms, and keep the message and its attachments in the composer until the user sends again or changes it.
+- **FLOW-SEND-MESSAGE-R06**: When Ersa can't reach the sessions, the composer shall say so above its box and be unavailable, keeping what the user had written, until Ersa reaches them again.
+- **FLOW-SEND-MESSAGE-R07**: The composer's attach menu shall offer adding files, adding images and adding a folder, each through the system's dialog, and shall say that attachments can also be pasted or dropped on the box.
+- **FLOW-SEND-MESSAGE-R08**: When the user pastes an image into the composer, Ersa shall attach it; when the user drops files, images or folders on the composer's box, Ersa shall attach each of them.
+- **FLOW-SEND-MESSAGE-R09**: Each attachment shall show its name and its detail: the size of an image, the line count of a text file and the size of any other file, or that it is a folder; and each shall offer to remove it before the message is sent.
+- **FLOW-SEND-MESSAGE-R10**: When an attachment is one Ersa can't send (an image of a kind or size the backend does not take, or a path that no longer exists), Ersa shall say why beside it and send nothing until the user removes it.
+- **FLOW-SEND-MESSAGE-R11**: The transcript shall show each message's attachments with it: an image as an image, a file or folder by its name.
+- **FLOW-SEND-MESSAGE-R12**: Adding the same file or folder twice to one message shall attach it once.
+
+## Verification
+
+The replay server refuses `session.send` and `session.interrupt` (PROTO-CORE-API, Conformance), so R01, R03 and R05 run against a fake client in the Interface's tests, and end to end against a real Core with a stand-in backend. The system's dialogs and the clipboard are replaced by stand-ins in the Interface's tests; dropping and pasting in the running app is an owner check.
+
+## Built so far
+
+The composer sends words with Enter, keeps what was typed meanwhile (R01, R02), and shows a refused send's reason beneath its box. Stop, attachments and the states above the box are still to build.
+
+## Open questions
+
+- Dictation: whether the composer takes speech, and through what (the owner's mockup draws a microphone beside the session controls).
+- Whether a message written while the agent works can be queued to send when the turn ends, rather than waiting in the composer.
+- When a workspace's scratch folder is emptied, especially in a root workspace, which is the user's own folder.
+- Whether pasting files copied in the system's file manager attaches them, where the webview gives their contents but not their paths.
+- How the user sends Enter's newline and send on a keyboard without Shift, and whether Ctrl+Enter sends.
+
+## Changes
+
+- 2026-11-05: created ready from the owner's composer mockup and decisions: send and stop, a refused message kept with its reason, the composer unavailable while Ersa can't reach the sessions, and attachments (the attach menu, paste and drop, removable, images inline and files as paths, copied into the scratch folder from outside the workspace). FLOW-SEND-MESSAGE-R01 to R12 added; R01 and R02 describe what is built.

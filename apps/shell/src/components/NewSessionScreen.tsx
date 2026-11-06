@@ -33,7 +33,7 @@ interface NewSessionScreenProps {
 /**
  * The new-session screen (LAY-SHELL): the Ersa wordmark above the composer, focused, and the session controls
  * beneath it saying where and how the session will run (FLOW-NEW-SESSION-R01). With no project it offers to add
- * one, asking whether the user trusts it first (FLOW-NEW-SESSION-R10).
+ * one, asking whether the user trusts it first (until FLOW-NEW-SESSION-R16 to R20 are built).
  */
 export function NewSessionScreen(props: NewSessionScreenProps) {
   const { hosts, projects, backends, lastUsed = {}, onStart, starting, onAddProject, adding } = props;
