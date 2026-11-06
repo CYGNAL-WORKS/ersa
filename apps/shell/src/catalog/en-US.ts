@@ -13,6 +13,33 @@ import type { Section } from "./lookup";
 
 export const enUS = {
   rail: {
+    // The rail's tree (docs/design/RAIL.md, The rail): its name and its notes.
+    tree: {
+      // The tree's name for assistive technology.
+      label: "Projects and sessions",
+      loadingProgress: "Loading…",
+      noProjectsEmpty: "No projects yet.",
+      // A project is added from the new-session screen (LAY-SHELL, The rail).
+      noProjectsHint: "Start with New session, where you can add one.",
+      projectsError: "Ersa can't read your projects.",
+      sessionsError: "Ersa can't read your sessions.",
+      // Names the tree when it fails to draw: "The projects and sessions could not be shown:".
+      boundaryName: "The projects and sessions",
+    },
+    // A project heading (docs/design/RAIL.md, A project heading) and its More menu.
+    heading: {
+      newSessionLabel: "New session in {project}",
+      moreLabel: "More for {project}",
+      notTrustedStatus: "Not trusted",
+      // In the More menu. Trusting asks first, so it ends in an ellipsis; withdrawing trust does not ask.
+      trustButton: "Trust…",
+      distrustButton: "Don't trust",
+      savingProgress: "Saving…",
+      trustError: "Ersa can't change this project's trust.",
+      workspacesError: "Ersa can't read this project's workspaces.",
+      // Beneath a project whose trust was withdrawn while sessions that started trusted still run.
+      keepTrust: "Running sessions keep their current settings until they are stopped.",
+    },
     foot: {
       attachedLabel: "Attached to {label}",
       reconnectingError: "Ersa can't reach your sessions. It's trying again.",
