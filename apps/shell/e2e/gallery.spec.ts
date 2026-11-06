@@ -263,7 +263,7 @@ test("every session control is reachable and works from the keyboard", async ({ 
   await expect(root).toBeFocused();
 });
 
-// verifies: FLOW-NEW-SESSION-R10
+// The typed folder path that FLOW-NEW-SESSION-R16 to R20 replace; it cites nothing until they are built.
 test("with no project, the new-session screen asks whether the user trusts a folder before adding it", async ({ page }) => {
   await page.goto("/gallery.html");
   const screen = page
