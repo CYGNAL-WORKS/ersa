@@ -173,14 +173,22 @@ function pick(choices: readonly Choice[], wanted: string | undefined): string | 
 export function valuesFor(project: Project, backends: readonly BackendChoices[], wanted?: Partial<SessionValues>): SessionValues {
   const kinds = workspaceKinds(project);
   const workspace = wanted?.workspace && kinds.includes(wanted.workspace) ? wanted.workspace : (kinds[0] ?? "root");
+  return { host_id: project.host_id, project_id: project.id, workspace, ...howFor(backends, wanted) };
+}
+
+/** How a session runs, as `valuesFor` chooses it: the backend and its model, effort and permission mode. */
+type HowValues = Pick<SessionValues, "backend" | "model" | "effort" | "permission_mode">;
+
+/**
+ * The how values alone, from the host's backends: what `valuesFor` gives, and what the session controls show while
+ * the host has no project yet (FLOW-NEW-SESSION-R19).
+ */
+export function howFor(backends: readonly BackendChoices[], wanted?: Partial<SessionValues>): HowValues {
   const runnable = available(backends);
   const backend = runnable.find((b) => b.name === wanted?.backend) ?? runnable[0];
   // A value chosen for another backend means nothing to this one.
   const same = backend !== undefined && backend.name === wanted?.backend;
   return {
-    host_id: project.host_id,
-    project_id: project.id,
-    workspace,
     backend: backend?.name,
     model: backend && pick(backend.models, same ? wanted?.model : undefined),
     effort: backend && pick(backend.efforts, same ? wanted?.effort : undefined),

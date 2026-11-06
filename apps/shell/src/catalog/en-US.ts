@@ -13,6 +13,32 @@ import type { Section } from "./lookup";
 
 export const enUS = {
   rail: {
+    // The rail's tree (docs/design/RAIL.md, The rail): its name and its notes.
+    tree: {
+      // The tree's name for assistive technology.
+      label: "Projects and sessions",
+      loadingProgress: "Loading…",
+      noProjectsEmpty: "No projects yet.",
+      // A project is added from the new-session screen (LAY-SHELL, The rail).
+      noProjectsHint: "Choose a folder in New session to start.",
+      projectsError: "Ersa can't read your projects.",
+      sessionsError: "Ersa can't read your sessions.",
+      // Names the tree when it fails to draw: "The projects and sessions could not be shown:".
+      boundaryName: "The projects and sessions",
+    },
+    // A project heading (docs/design/RAIL.md, A project heading) and its More menu.
+    heading: {
+      newSessionLabel: "New session in {project}",
+      moreLabel: "More for {project}",
+      // In the More menu. Trusting asks first, so it ends in an ellipsis; withdrawing trust does not ask.
+      trustButton: "Trust…",
+      distrustButton: "Don't trust",
+      savingProgress: "Saving…",
+      trustError: "Ersa can't change this project's trust.",
+      workspacesError: "Ersa can't read this project's workspaces.",
+      // Beneath a project whose trust was withdrawn while sessions that started trusted still run.
+      keepTrust: "Running sessions keep their current settings until they are stopped.",
+    },
     foot: {
       attachedLabel: "Attached to {label}",
       reconnectingError: "Ersa can't reach your sessions. It's trying again.",
@@ -28,6 +54,8 @@ export const enUS = {
     // A session's tile (docs/design/RAIL.md, A tile): line two's phrase, and the names of its marks.
     tile: {
       untitledLabel: "Untitled session",
+      // Names a tile when it fails to draw: "This session could not be shown:".
+      boundaryName: "This session",
       startingStatus: "Starting",
       // Heard, not shown: the working mark's name, since line two has no phrase for it.
       workingStatus: "Working",
@@ -82,6 +110,10 @@ export const enUS = {
       withGitKindLabel: "Git",
       withoutGitKindLabel: "Folder",
       addProjectButton: "Add project…",
+      // The keys that choose Add project from anywhere on the new-session screen.
+      addProjectShortcutLabel: "Ctrl+O",
+      // The project chip while the local host has no project: choosing it, or sending, opens the folder dialog.
+      chooseFolderButton: "Choose a folder",
     },
     // The context ring's name, in the session controls and on a tile.
     contextRing: {
@@ -91,8 +123,23 @@ export const enUS = {
   },
   quit: {},
   trust: {
-    // A project the user has not trusted, in the rail's project list and the project chip's list.
+    // A project the user has not trusted, on its heading in the rail and in the project chip's list.
     notTrustedStatus: "Not trusted",
+    // The trust question (ADR 0018), asked when a folder becomes a project and when the user trusts one later. It
+    // says what trust lets run, that it covers every workspace of the project, and that it lasts until withdrawn
+    // (FLOW-NEW-SESSION-R16).
+    question: {
+      title: "Trust {name}?",
+      runsDetail:
+        "A trusted project’s own configuration runs in its sessions: hooks and MCP servers that start programs on this computer, and settings that change what the agent may do without asking.",
+      coversDetail:
+        "Trust covers every workspace of the project and lasts until you withdraw it. Claude Code also records it for the whole repository the project is in, and applies it outside Ersa.",
+      untrustedDetail: "Untrusted, its sessions use only your own settings.",
+      addTrustedButton: "Add, trusted",
+      addUntrustedButton: "Add, not trusted",
+      trustButton: "Trust",
+      cancelButton: "Cancel",
+    },
   },
   errors: {},
 } as const satisfies Section;

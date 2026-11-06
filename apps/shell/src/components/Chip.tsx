@@ -31,6 +31,8 @@ export interface ChipAction {
 interface ChipProps {
   /** What the chip sets, for the accessible name: "Workspace". */
   name: string;
+  /** A where chip's icon, leading it (docs/design/COMPOSER.md, The session controls): a folder for the project. */
+  icon?: LucideIcon;
   /** A muted word before the value, where the value alone would not say what it is: "Effort". */
   prefix?: string;
   /** The chosen option's id; absent when nothing can be chosen. */
@@ -60,7 +62,7 @@ interface ChipProps {
  * with Enter, Space or the arrows, moves with the arrows, chooses with Enter or Space, and Escape closes it with
  * focus back on the chip.
  */
-export function Chip({ name, prefix, value, placeholder, problem, pending, options, onChoose, action, wide, disabled, initialOpen = false, force, forceOption }: ChipProps) {
+export function Chip({ name, icon, prefix, value, placeholder, problem, pending, options, onChoose, action, wide, disabled, initialOpen = false, force, forceOption }: ChipProps) {
   const [open, setOpen] = useState(initialOpen);
   const chip = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -184,6 +186,11 @@ export function Chip({ name, prefix, value, placeholder, problem, pending, optio
       >
         {problem && <span className="glyph" data-tone="danger" aria-hidden="true" />}
         {pending && <span className="glyph" data-tone="pending" aria-hidden="true" />}
+        {icon && (
+          <span className="chip-icon">
+            <Icon icon={icon} size="icon-xs" />
+          </span>
+        )}
         {prefix && <span className="chip-prefix">{prefix}</span>}
         <span className="chip-value">{shown}</span>
       </button>
@@ -229,7 +236,8 @@ export function Chip({ name, prefix, value, placeholder, problem, pending, optio
           ))}
           {action && (
             <>
-              <li className="chip-list-rule" role="presentation" />
+              {/* The hairline parts the action from options above it; alone in the list, it needs none. */}
+              {options.length > 0 && <li className="chip-list-rule" role="presentation" />}
               <li
                 role="option"
                 tabIndex={-1}
