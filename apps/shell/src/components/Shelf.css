@@ -24,6 +24,9 @@
   border-radius: 0 var(--radius-lg) var(--radius-lg) var(--radius-lg);
   box-shadow: var(--shadow-transient);
   animation: shelf-out var(--motion-settle) var(--motion-ease-out);
+  /* Nothing drawn past its edge while its height eases to the next request; its edge, and the join over it, stay. */
+  overflow: clip;
+  overflow-clip-margin: var(--line-hairline);
   --shelf-edge: var(--color-caution);
   /* Where the open tile meets it, measured by the tile; nothing until then. */
   --shelf-join-top: 0;
@@ -100,6 +103,19 @@
 
 @keyframes shelf-next {
   from {
+    opacity: 0;
+  }
+}
+
+/* The last request's contents, over the new ones where the shelf's padding starts, fading out as they fade in. */
+.shelf-contents[data-leaving] {
+  position: absolute;
+  inset: var(--space-md) var(--space-md) auto;
+  animation: shelf-leave var(--motion-quick) var(--motion-ease-out) forwards;
+}
+
+@keyframes shelf-leave {
+  to {
     opacity: 0;
   }
 }
