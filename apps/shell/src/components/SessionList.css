@@ -1,5 +1,5 @@
-/* Session tiles in the rail. The active tile is outlined in the accent; a tile that needs the user
-   shows the accent glyph (DESIGN.md: attention is an edge or glyph, never a filled row). */
+/* Session tiles in the rail (docs/design/RAIL.md, A tile): two lines with no box at rest. The active tile is a
+   quiet neutral highlight; a session that needs the user shows a chevron in the tone of its want, never a filled row. */
 
 .sessions {
   display: flex;
@@ -68,57 +68,55 @@
   line-height: var(--type-ui-small-leading);
 }
 
+
+/* A tile: the backend's icon, the title and the mark on line one; the ring, under the icon, and line two's words
+   beneath. Its edge is kept, transparent, so focus and the active tile change only its color. */
 .session {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: var(--size-icon-sm) minmax(0, 1fr) var(--size-control-sm);
   column-gap: var(--space-sm);
-  align-items: baseline;
+  align-items: center;
   min-width: 0;
-  padding: var(--space-sm) var(--space-md);
+  padding: var(--space-sm);
   font: inherit;
   text-align: left;
   color: var(--color-ink);
-  background: var(--color-surface);
-  border: var(--line-hairline) solid var(--color-line);
+  background: transparent;
+  border: var(--line-hairline) solid transparent;
   border-radius: var(--radius-md);
   cursor: pointer;
+  transition: background var(--motion-quick) var(--motion-ease-out);
 }
 
-.session:hover,
-.session[data-force="hover"] {
-  background: var(--color-surface-raised);
-  border-color: var(--color-ink-faint);
+/* A control without an edge (DESIGN.md, Pointer and press). The active tile is already chosen, so it doesn't
+   change under the pointer or when pressed. */
+.session:hover:not([aria-current]),
+.session[data-force="hover"]:not([aria-current]) {
+  background: var(--material-hover);
 }
 
-.session:active,
-.session[data-force="pressed"] {
-  background: var(--color-canvas);
-  border-color: var(--color-ink-faint);
+.session:active:not([aria-current]),
+.session[data-force="pressed"]:not([aria-current]) {
+  background: var(--material-pressed);
 }
 
-/* The active session is outlined in the accent. */
 .session[aria-current] {
-  border-color: var(--color-accent);
+  background: var(--material-open-session);
+  border-color: var(--color-line);
 }
 
-/* Focus turns the edge to ink and the title to the accent; ink, because the active tile's edge is already
-   the accent and a change to it would show nothing there. */
 .session:focus-visible,
 .session[data-force="focus"] {
   outline: none;
   border-color: var(--color-ink);
 }
 
-.session:focus-visible .session-title,
-.session[data-force="focus"] .session-title {
-  color: var(--color-accent);
-}
-
-/* Glyph beside the title; the cost at the title's end; the state beneath both. */
-.session-glyph {
+.session-backend {
   grid-column: 1;
   grid-row: 1;
-  align-self: center;
+  display: flex;
+  justify-content: center;
+  color: var(--color-ink-muted);
 }
 
 .session-title {
@@ -129,20 +127,88 @@
   white-space: nowrap;
 }
 
-.session-cost {
-  grid-column: 3;
-  grid-row: 1;
+/* Idle and ended sessions rest; no text on a tile is ink-faint, which the fills beneath it would wash out. */
+.session-title[data-muted] {
   color: var(--color-ink-muted);
 }
 
-.session-state {
+/* The trailing edge: one square for the state's mark. */
+.session-mark {
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
+}
+
+.session-ring {
+  grid-column: 1;
+  grid-row: 2;
+  display: flex;
+  justify-content: center;
+}
+
+/* Line two keeps its height when it is empty, so every tile is the same height. */
+.session-detail {
   grid-column: 2 / -1;
   grid-row: 2;
+  min-height: calc(var(--type-ui-small-size) * var(--type-ui-small-leading));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--color-ink-muted);
   font-size: var(--type-ui-small-size);
   line-height: var(--type-ui-small-leading);
+  font-variant-numeric: tabular-nums;
 }
 
-.session[data-needs-you] .session-state {
+/* A want, and its chevron, in the tone of what the session wants. */
+.session-phrase[data-tone="caution"],
+.session-chevron[data-tone="caution"] {
+  color: var(--color-caution);
+}
+
+.session-phrase[data-tone="accent"],
+.session-chevron[data-tone="accent"] {
   color: var(--color-accent);
+}
+
+.session-chevron,
+.session-arc {
+  display: flex;
+}
+
+/* Starting: an arc in the accent, one turn per motion-loop-ring. */
+.session-arc {
+  color: var(--color-accent);
+  animation: session-turn var(--motion-loop-ring) var(--motion-linear) infinite;
+}
+
+@keyframes session-turn {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.session-glyph[data-tone="accent"] {
+  background: var(--color-accent);
+}
+
+/* Disconnected: a hollow ring with a hairline edge in ink-faint. */
+.session-glyph[data-tone="faint"] {
+  background: transparent;
+  border: var(--line-hairline) solid var(--color-ink-faint);
+}
+
+/* With reduced motion on, the arc holds still at full tone, and fills change at once. */
+@media (prefers-reduced-motion: reduce) {
+  .session {
+    transition: none;
+  }
+
+  .session-arc {
+    animation: none;
+  }
 }
