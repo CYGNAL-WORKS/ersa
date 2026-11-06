@@ -24,6 +24,9 @@
   border-radius: 0 var(--radius-lg) var(--radius-lg) var(--radius-lg);
   box-shadow: var(--shadow-transient);
   animation: shelf-out var(--motion-settle) var(--motion-ease-out);
+  /* Nothing drawn past its edge while its height eases to the next request; its edge, and the join over it, stay. */
+  overflow: clip;
+  overflow-clip-margin: var(--line-hairline);
   --shelf-edge: var(--color-caution);
   /* Where the open tile meets it, measured by the tile; nothing until then. */
   --shelf-join-top: 0;
@@ -84,6 +87,48 @@
 
 .shelf-layer[inert] > .shelf {
   animation: shelf-back var(--motion-settle) var(--motion-ease-out) forwards;
+}
+
+/* The contents, one request's: laid out as the shelf's own parts are. Moving to the next request, they cross-fade
+   while the shelf holds still. */
+.shelf-contents {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.shelf-contents[data-next] {
+  animation: shelf-next var(--motion-quick) var(--motion-ease-out);
+}
+
+@keyframes shelf-next {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The last request's contents, over the new ones where the shelf's padding starts, fading out as they fade in. */
+.shelf-contents[data-leaving] {
+  position: absolute;
+  inset: var(--space-md) var(--space-md) auto;
+  animation: shelf-leave var(--motion-quick) var(--motion-ease-out) forwards;
+}
+
+@keyframes shelf-leave {
+  to {
+    opacity: 0;
+  }
+}
+
+/* Heard, not shown: what the shelf moved on to. Kept out of the layout, and out of the gap between its parts. */
+.shelf-said {
+  position: absolute;
+  width: var(--line-hairline);
+  height: var(--line-hairline);
+  margin: 0;
+  overflow: hidden;
+  clip-path: circle(0);
+  white-space: nowrap;
 }
 
 .shelf-heading {
@@ -171,7 +216,8 @@
 /* With reduced motion on, the shelf appears at once. */
 @media (prefers-reduced-motion: reduce) {
   .shelf,
-  .shelf-layer[inert] > .shelf {
+  .shelf-layer[inert] > .shelf,
+  .shelf-contents[data-next] {
     animation: none;
   }
 }

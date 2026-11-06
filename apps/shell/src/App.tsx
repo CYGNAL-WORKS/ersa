@@ -21,7 +21,7 @@ import type { Project, Session, Workspace } from "./protocol/core-api.gen";
 import { type BackendChoices, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
 import { contextUsed, tileOf } from "./session/tile";
 import { type Answers, type Decision, answering } from "./session/answers";
-import { shelfAfter, shelfFollowing, shelfOf, shelfTone } from "./session/shelf";
+import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./session/shelf";
 import { sharedSubscriptions } from "./session/subscriptions";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
@@ -95,6 +95,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The session whose shelf is open, and its events, followed while it is open (FLOW-APPROVE-PERMISSION).
   const [shelfId, setShelfId] = useState<string>();
   const [shelfView, setShelfView] = useState<SessionView>();
+  // The requests the open shelf has shown since it opened, which count toward its place (R09).
+  const [shelfShown, setShelfShown] = useState<ShelfShown>();
   // The transcript and the shelf share Core's one subscription per session (session/subscriptions.ts).
   const shared = useMemo(() => sharedSubscriptions(client), [client]);
   const shelf = useMemo(() => shelfFollowing(shared, setShelfView), [shared]);
@@ -369,18 +371,27 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // The open shelf as the rail draws it: the session's oldest request, with its readouts as its tile shows them.
   const shelfSession = openShelf !== undefined && sessions.state === "ready" ? sessions.sessions.find((s) => s.id === openShelf) : undefined;
+  const shelfShows =
+    shelfSession &&
+    shelfOf(
+      shelfView?.id === shelfSession.id ? shelfView : undefined,
+      shelfSession.tile.pending,
+      shelfShown?.id === shelfSession.id ? shelfShown.requests : undefined,
+    );
+  // Derived as the shelf renders, so the count is right on the render that shows the next request.
+  const nextShown = shownAfter(shelfShown, shelfSession?.id, shelfShows && shownRequest(shelfShows));
+  if (nextShown !== shelfShown) setShelfShown(nextShown);
   const shelfOpen = (() => {
-    if (!shelfSession) return undefined;
+    if (!shelfSession || !shelfShows) return undefined;
     const tile = tileOf(shelfSession, backends);
-    const shows = shelfOf(shelfView?.id === shelfSession.id ? shelfView : undefined, shelfSession.tile.pending);
     return {
       id: shelfSession.id,
-      tone: shelfTone(shows),
+      tone: shelfTone(shelfShows),
       render: (domId: string) => (
         <Shelf
           id={domId}
           tile={tile}
-          shows={shows}
+          shows={shelfShows}
           onRetry={shelf.attached}
           answers={answers[shelfSession.id]}
           live={connected}
