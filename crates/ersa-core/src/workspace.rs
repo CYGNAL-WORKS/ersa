@@ -25,7 +25,7 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(300);
 /// base. The Interface waits on these while the user picks, so a repository
 /// that hangs (a network drive, a stuck lock) is reported rather than waited
 /// on.
-pub const GIT_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+const GIT_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How many times removal is tried, and the wait before the first retry
 /// (doubled each time). On Windows, a process that has just exited (an editor,
@@ -81,17 +81,16 @@ impl From<RunError> for VcsError {
 }
 
 /// Creates a git worktree at `path` on a new branch `branch`, starting from
-/// `base` (the repository's HEAD when `None`).
+/// the commit `base`.
 pub async fn git_worktree_add(
     transport: &dyn Transport,
     repo: &str,
     path: &str,
     branch: &str,
-    base: Option<&str>,
+    base: &str,
 ) -> Result<(), VcsError> {
     // `--` ends option parsing, so a path or base can never be read as a flag.
-    let mut args = vec!["worktree", "add", "-b", branch, "--", path];
-    args.extend(base);
+    let args = ["worktree", "add", "-b", branch, "--", path, base];
     let output = git(transport, repo, &args).await?;
     check(output, "git worktree add failed")
 }
@@ -503,36 +502,17 @@ mod tests {
         assert!(entries[2].prunable);
     }
 
-    fn lines(text: &str) -> Vec<String> {
-        text.lines().map(str::to_string).collect()
-    }
-
     // verifies: PROTO-CORE-API-R18
     #[test]
-    fn the_default_branch_is_picked_in_order() {
-        let origin = "refs/remotes/origin/HEAD: :refs/remotes/origin/dev";
-        // origin/HEAD's branch, when it exists locally.
-        let text = format!("refs/heads/dev: :\nrefs/heads/main: :\nrefs/heads/x:*:\n{origin}");
-        let parsed = parse_branches(&lines(&text));
-        assert_eq!(parsed.names, ["dev", "main", "x"]);
-        assert_eq!(parsed.default.as_deref(), Some("dev"));
-        // Else main, else master, else the checked-out branch.
-        let text = format!("refs/heads/main: :\nrefs/heads/master: :\nrefs/heads/x:*:\n{origin}");
-        assert_eq!(
-            parse_branches(&lines(&text)).default.as_deref(),
-            Some("main")
-        );
-        let text = "refs/heads/master: :\nrefs/heads/x:*:";
-        assert_eq!(
-            parse_branches(&lines(text)).default.as_deref(),
-            Some("master")
-        );
-        let text = "refs/heads/trunk: :\nrefs/heads/x:*:";
-        assert_eq!(parse_branches(&lines(text)).default.as_deref(), Some("x"));
-        // Detached, with none of them: no default.
-        assert_eq!(parse_branches(&lines("refs/heads/trunk: :")).default, None);
+    fn main_comes_before_master() {
+        // The socket tests cover each rule alone; this is the one case they
+        // don't: both exist, with another branch checked out.
+        let text = "refs/heads/main: :\nrefs/heads/master: :\nrefs/heads/x:*:";
+        let lines: Vec<String> = text.lines().map(str::to_string).collect();
+        let parsed = parse_branches(&lines);
+        assert_eq!(parsed.names, ["main", "master", "x"]);
+        assert_eq!(parsed.default.as_deref(), Some("main"));
     }
-
     #[test]
     fn locked_errors_name_the_reason() {
         let e = VcsError::Locked {

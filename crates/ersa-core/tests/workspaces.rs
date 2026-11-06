@@ -6,7 +6,7 @@ mod support;
 use std::path::Path;
 
 use serde_json::{Value, json};
-use support::{Client, TestCore, git, git_repo, kind, normalized, start};
+use support::{Client, TestCore, git, git_repo, git_repo_on, kind, normalized, start};
 
 /// A started Core with a client, a git repository, and `workspaces.root`
 /// pointed into the test's temporary directory.
@@ -678,16 +678,25 @@ async fn a_folder_git_does_not_list_is_refused_not_reported_removed() {
 
 // -- Branches for a base ------------------------------------------------------
 
-/// A git repository at `dir` with one commit on `branch`.
-fn repo_on(dir: &Path, branch: &str) {
-    std::fs::create_dir_all(dir).unwrap();
+/// A clone, at `dir/clone`, of an upstream whose HEAD is `develop`, so the
+/// clone's `origin/HEAD` points at `origin/develop`. The clone has `develop`
+/// checked out.
+fn clone_of_develop_upstream(dir: &Path) -> std::path::PathBuf {
+    let upstream = dir.join("upstream");
+    git_repo_on(&upstream, "main");
+    git(&upstream, &["branch", "develop"]);
+    git(&upstream, &["symbolic-ref", "HEAD", "refs/heads/develop"]);
+    let clone = dir.join("clone");
     git(
         dir,
-        &["init", "--quiet", &format!("--initial-branch={branch}")],
+        &[
+            "clone",
+            "--quiet",
+            &upstream.display().to_string(),
+            &clone.display().to_string(),
+        ],
     );
-    std::fs::write(dir.join("README.md"), "test repository\n").unwrap();
-    git(dir, &["add", "README.md"]);
-    git(dir, &["commit", "--quiet", "-m", "initial"]);
+    clone
 }
 
 /// `branch.list` for the project at `path`, as `(name, default)` pairs.
@@ -717,21 +726,8 @@ fn pairs(expected: &[(&str, bool)]) -> Vec<(String, bool)> {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_default_branch_is_the_one_origin_head_points_at() {
     let (core, mut client, _) = setup().await;
-    // An upstream whose HEAD is `develop`: a clone's `origin/HEAD` points there.
-    let upstream = core.dir.path().join("upstream");
-    repo_on(&upstream, "main");
-    git(&upstream, &["branch", "develop"]);
-    git(&upstream, &["symbolic-ref", "HEAD", "refs/heads/develop"]);
-    let clone = core.dir.path().join("clone");
-    git(
-        core.dir.path(),
-        &[
-            "clone",
-            "--quiet",
-            &upstream.display().to_string(),
-            &clone.display().to_string(),
-        ],
-    );
+    let clone = clone_of_develop_upstream(core.dir.path());
+
     git(&clone, &["branch", "main", "origin/main"]);
     // Checked out elsewhere, and `main` exists: still `develop`.
     git(&clone, &["switch", "--quiet", "-c", "work"]);
@@ -747,20 +743,8 @@ async fn the_default_branch_is_the_one_origin_head_points_at() {
 #[tokio::test(flavor = "multi_thread")]
 async fn without_a_local_branch_for_origin_head_main_is_the_default() {
     let (core, mut client, _) = setup().await;
-    let upstream = core.dir.path().join("upstream");
-    repo_on(&upstream, "main");
-    git(&upstream, &["branch", "develop"]);
-    git(&upstream, &["symbolic-ref", "HEAD", "refs/heads/develop"]);
-    let clone = core.dir.path().join("clone");
-    git(
-        core.dir.path(),
-        &[
-            "clone",
-            "--quiet",
-            &upstream.display().to_string(),
-            &clone.display().to_string(),
-        ],
-    );
+    let clone = clone_of_develop_upstream(core.dir.path());
+
     // `origin/HEAD` still points at `origin/develop`, which has no local
     // branch any more.
     git(&clone, &["switch", "--quiet", "-c", "main", "origin/main"]);
@@ -778,7 +762,7 @@ async fn without_a_local_branch_for_origin_head_main_is_the_default() {
 async fn with_only_master_master_is_the_default_whatever_is_checked_out() {
     let (core, mut client, _) = setup().await;
     let repo = core.dir.path().join("old");
-    repo_on(&repo, "master");
+    git_repo_on(&repo, "master");
     git(&repo, &["switch", "--quiet", "-c", "alpha"]);
 
     assert_eq!(
@@ -792,7 +776,7 @@ async fn with_only_master_master_is_the_default_whatever_is_checked_out() {
 async fn with_none_of_them_the_checked_out_branch_is_the_default() {
     let (core, mut client, _) = setup().await;
     let repo = core.dir.path().join("trunk");
-    repo_on(&repo, "trunk");
+    git_repo_on(&repo, "trunk");
     git(&repo, &["switch", "--quiet", "-c", "topic"]);
 
     assert_eq!(
@@ -806,7 +790,7 @@ async fn with_none_of_them_the_checked_out_branch_is_the_default() {
 async fn a_detached_checkout_with_none_of_them_has_no_default() {
     let (core, mut client, _) = setup().await;
     let repo = core.dir.path().join("trunk");
-    repo_on(&repo, "trunk");
+    git_repo_on(&repo, "trunk");
     git(&repo, &["switch", "--quiet", "--detach"]);
 
     assert_eq!(
@@ -834,7 +818,7 @@ async fn branch_list_needs_a_git_project() {
     // A folder that stopped being a repository after it was added: git's
     // own failure, with its message.
     let gone = core.dir.path().join("gone");
-    repo_on(&gone, "main");
+    git_repo_on(&gone, "main");
     let project = add_project(&mut client, &gone).await;
     std::fs::remove_dir_all(gone.join(".git")).unwrap();
     std::fs::write(gone.join(".git"), "gitdir: nowhere\n").unwrap();
@@ -930,7 +914,7 @@ async fn without_a_base_a_workspace_starts_from_the_default_branch() {
 async fn without_a_base_or_a_default_a_workspace_starts_from_the_checked_out_commit() {
     let (core, mut client, _) = setup().await;
     let repo = core.dir.path().join("trunk");
-    repo_on(&repo, "trunk");
+    git_repo_on(&repo, "trunk");
     git(&repo, &["switch", "--quiet", "--detach"]);
     git(
         &repo,
@@ -983,6 +967,20 @@ async fn project_find_matches_a_folder_as_project_add_compares_them() {
             .await;
         assert_eq!(found, Value::Null, "{}", path.display());
     }
+
+    // A project whose folder has gone is not found there: `project.add`
+    // would refuse that folder too.
+    let gone = core.dir.path().join("gone");
+    std::fs::create_dir_all(&gone).unwrap();
+    add_project(&mut client, &gone).await;
+    std::fs::remove_dir_all(&gone).unwrap();
+    let found = client
+        .result(
+            "project.find",
+            json!({ "host_id": "local", "path": gone.display().to_string() }),
+        )
+        .await;
+    assert_eq!(found, Value::Null);
 
     let error = client
         .error(
