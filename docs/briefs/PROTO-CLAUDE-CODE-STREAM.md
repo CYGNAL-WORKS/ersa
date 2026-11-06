@@ -151,6 +151,8 @@ or `{"behavior":"deny","message":"...","interrupt":false}`. An allow always carr
 
 `parent_tool_use_id` is omitted for the main thread. The SDK types mark it required, but every recorded stdin user message omits it and the CLI accepts that.
 
+A message with attachments (PROTO-CORE-API, Turns and attachments) carries more content blocks, in this order: the user's text block, when there is text; one `image` block per image, `{"type":"image","source":{"type":"base64","media_type":"image/png","data":"..."}}`, in the order attached; then, when there are files or folders, one text block listing their paths relative to the workspace, one per line, each after `file: ` or `folder: `, between an opening `<ersa-attachments>` line and a closing `</ersa-attachments>` line. The CLI takes PNG, JPEG, GIF and WebP images of up to 5 MB each; those are the limits the adapter states. Projecting a record entry, the adapter reads an `image` block, and a text block that is exactly such a list, as the message's attachments, never as its text, so neither reaches the transcript's words. Listing leaves them out of a prompt's text too, so a message of attachments alone titles nothing and the title rule moves on; what the CLI itself writes as `last-prompt` or `ai-title` for such a message is not yet recorded. The shape follows the SDK types; record a fixture of a message with an image and a list when the adapter implements it.
+
 ### control_cancel_request and keep_alive
 
 Either side may send `{"type":"control_cancel_request","request_id":"..."}` to withdraw one of its own in-flight control requests; the receiver stops working on it and ignores any late answer. From the CLI it typically withdraws a pending `can_use_tool` prompt (after an interrupt, say), so the adapter treats the request as no longer pending and the shelf drops it. `{"type":"keep_alive"}` is a heartbeat with no meaning beyond liveness. Both are modeled from the SDK types and not yet recorded; record a fixture when the adapter implements interrupt.
@@ -223,6 +225,9 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R22**: When renaming a session, the adapter shall send a `rename_session` control request if its CLI process for that session is live, and otherwise append one `custom-title` entry to the session record; it shall write nothing else to a session record.
 - **PROTO-CLAUDE-CODE-STREAM-R23**: The adapter shall project a `system/local_command` entry of the session record to the same events as the synthetic `assistant` message with the same `uuid` on the stream, except that each block id is the entry's `uuid` and the block's index, and shall project an entry whose `content` carries no output tag to nothing.
 - **PROTO-CLAUDE-CODE-STREAM-R24**: When the session's project is trusted, the adapter shall send `workspaceTrust` with `accepted: true` and the project's root as `directory` in the `initialize` request, and otherwise shall send no `workspaceTrust`.
+- **PROTO-CLAUDE-CODE-STREAM-R25**: When a user message has attachments, the adapter shall send each image as a base64 `image` content block and the files and folders as one `<ersa-attachments>` text block of `file: ` and `folder: ` lines, after the user's text block.
+- **PROTO-CLAUDE-CODE-STREAM-R26**: When projecting a user entry, the adapter shall project its `image` blocks and an `<ersa-attachments>` text block to the `user.message` event's attachments, and shall leave them out of its text.
+- **PROTO-CLAUDE-CODE-STREAM-R27**: When listing sessions, the adapter shall take a prompt's text without its `image` blocks and `<ersa-attachments>` block, and shall pass over a prompt with no other text when choosing a title.
 
 ## Out of scope
 
@@ -239,6 +244,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 ## Changes
 
+- 2026-11-05: for FLOW-SEND-MESSAGE: a user message's attachments go as `image` blocks and an `<ersa-attachments>` list of paths, which projection reads back as attachments (User message). PROTO-CLAUDE-CODE-STREAM-R25 to R27 added.
 - 2026-11-04: from #141 inbox: the encoded-cwd example uses the recordings' placeholder path instead of the owner's, since the repository is public. No requirement IDs changed.
 - 2026-11-02: owner: the invocation drops `-p`, matching the VS Code extension; verified by fixture 2.1.316/06-invocation-without-print. No requirement IDs changed.
 - 2026-11-02: from #54 inbox: Core asks the live-session registry before appending a title too, and a rename gives both open-elsewhere notices (PROTO-AGENT-EVENTS-R15). No requirement IDs changed.
