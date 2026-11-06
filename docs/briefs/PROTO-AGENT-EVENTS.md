@@ -46,7 +46,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 
 ### User
 
-- `user.message`: `text`, `origin` one of `human`, `peer_session`, `system`; `peer` (optional: `{ session_id, name }`). Projected from a user message in the session record, or emitted by Core when it sends one.
+- `user.message`: `text`, `origin` one of `human`, `peer_session`, `system`; `peer` (optional: `{ session_id, name }`); `attachments` (optional: in the order sent, each `{ kind: image, media_type, data }` with base64 `data`, or `{ kind: file | folder, path }` with the path as the agent was given it, relative to the workspace; PROTO-CORE-API, Turns and attachments). Projected from a user message in the session record, or emitted by Core when it sends one.
 
 ### Assistant
 
@@ -154,6 +154,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 ## Changes
 
+- 2026-11-05: for FLOW-SEND-MESSAGE: `user.message` carries the message's `attachments`, a change of shape, so `v` is bumped with it; the Claude Code adapter's projection version changes when it projects them (PROTO-CLAUDE-CODE-STREAM-R26). No requirement IDs changed.
 - 2026-11-04: from #136 inbox: PROTO-AGENT-EVENTS-R17 takes each message's highest count, not its latest, since Claude Code can send an `assistant` line with a lower partial count after a `message_delta` for the same message; synthetic `assistant` messages add nothing to the count.
 - 2026-11-02: `usage.updated.turn_output_tokens` added for the working mark's token count beside the elapsed time; PROTO-AGENT-EVENTS-R17 added: the count belongs to one turn and takes each message's latest count. A shape change, so `v` is bumped. Elapsed time needs no field: it is the `turn.started` envelope's `ts` while the turn runs and `turn.completed.duration_ms` after.
 - 2026-11-02: from #54 inbox: the open-elsewhere notices also precede a title appended to the record of a session Core is not running (PROTO-AGENT-EVENTS-R15 added), at `warning` for `session_open_elsewhere` and `info` for `session_open_check_failed` (R16 added). A Core-made notice lives only in the view open when it is emitted, by design. PROTO-AGENT-EVENTS-R14 is unchanged and is verified with Core's resume (M1).
