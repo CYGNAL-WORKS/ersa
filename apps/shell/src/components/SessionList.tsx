@@ -289,7 +289,11 @@ function TileItem({
   useEffect(() => {
     if (!open) return;
     const away = (event: PointerEvent) => {
-      if (event.target instanceof Node && !item.current?.contains(event.target)) close?.(id);
+      if (!(event.target instanceof Node) || item.current?.contains(event.target)) return;
+      // Focus is the user's to place, or to leave, with this press: closing gives none back (R07). A press that takes
+      // no focus, such as on a scrollbar, leaves it to fall from the shelf as it goes.
+      focusInShelf.current = false;
+      close?.(id);
     };
     document.addEventListener("pointerdown", away, true);
     return () => document.removeEventListener("pointerdown", away, true);
