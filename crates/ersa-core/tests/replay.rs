@@ -254,6 +254,26 @@ async fn read_only_requests_are_answered_as_core_answers_them() {
         .result("workspace.list", json!({ "project_id": projects[0]["id"] }))
         .await;
     assert_eq!(workspaces[0]["id"], session["workspace_id"]);
+    let found = client
+        .result(
+            "project.find",
+            json!({ "host_id": "local", "path": projects[0]["path"] }),
+        )
+        .await;
+    assert_eq!(found, projects[0]);
+    // The recording's project has no version control, so Core answers as it
+    // does for any such project, rather than as a replay refusing a change.
+    let error = client
+        .error("branch.list", json!({ "project_id": projects[0]["id"] }))
+        .await;
+    assert_eq!(error["data"]["kind"], "invalid_state");
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("workspace adapter"),
+        "{error}"
+    );
     assert_eq!(client.result("settings.get", json!({})).await, json!({}));
 
     // Nothing is played until a client subscribes.
