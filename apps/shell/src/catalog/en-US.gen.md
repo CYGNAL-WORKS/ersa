@@ -40,10 +40,6 @@ New session in {project}
 
 More for {project}
 
-### `rail.heading.notTrustedStatus`
-
-Not trusted
-
 ### `rail.heading.trustButton`
 
 Trust…
@@ -152,6 +148,26 @@ Needs you · {count}
 
 ## `sessionControls`
 
+### `sessionControls.localHostLabel`
+
+Local
+
+### `sessionControls.noProjectsStatus`
+
+No projects
+
+### `sessionControls.project.withGitKindLabel`
+
+Git
+
+### `sessionControls.project.withoutGitKindLabel`
+
+Folder
+
+### `sessionControls.project.addProjectButton`
+
+Add project…
+
 ### `sessionControls.contextRing.noneLabel`
 
 Context: none used yet
@@ -163,5 +179,9 @@ Context: {percent} percent used
 ## `quit`
 
 ## `trust`
+
+### `trust.notTrustedStatus`
+
+Not trusted
 
 ## `errors`
