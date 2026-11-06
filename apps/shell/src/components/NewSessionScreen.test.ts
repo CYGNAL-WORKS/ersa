@@ -158,6 +158,16 @@ describe("the new-session screen", () => {
     expect(html).toMatch(/<textarea[^>]*disabled/);
   });
 
+  // verifies: FLOW-NEW-SESSION-R07
+  it("names a backend that failed detection, by its label, when none can run", () => {
+    const copilot: BackendChoices = { ...claude("missing"), name: "copilot", label: "GitHub Copilot" };
+    const html = render({ backends: { local: [copilot, { ...claude("error"), label: "Claude Code" }] } });
+    // The markup escapes the apostrophes.
+    expect(html.replaceAll("&#x27;", "'")).toContain("Claude Code isn't working on this host. Check that it's installed and signed in, then open New session again.");
+    expect(html).not.toContain("Install Claude Code or GitHub Copilot");
+    expect(html).toMatch(/<textarea[^>]*disabled/);
+  });
+
   it("hides the backend chip when the host has one backend", () => {
     expect(chips(render({})).some((c) => c.startsWith("Backend"))).toBe(false);
   });

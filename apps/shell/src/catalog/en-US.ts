@@ -112,8 +112,10 @@ export const enUS = {
     attachButton: "Attach",
     sendButton: "Send",
     detectingProgress: "Detecting the backends on this host…",
-    // The host has no backend to run: on the status line, and as why a start is refused.
+    // The host has no backend to run: none installed, on the status line and as why a start is refused; or one
+    // that failed detection, by the label backend.list gives it.
     noBackendError: "No backend is available on this host. Install Claude Code or GitHub Copilot on it to start a session.",
+    backendFailedError: "{label} isn't working on this host. Check that it's installed and signed in, then open New session again.",
   },
   newSession: {},
   sessionControls: {
