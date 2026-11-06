@@ -54,9 +54,13 @@ export function TrustQuestion({ name, path, purpose, onAnswer, onDismiss, takeFo
     >
       <p className="trust-question-title">{title}</p>
       {path !== undefined && <p className="trust-question-path mono">{path}</p>}
-      <p className="trust-question-detail">{t("trust.question.runsDetail")}</p>
-      <p className="trust-question-detail">{t("trust.question.coversDetail")}</p>
-      <p className="trust-question-detail">{t("trust.question.untrustedDetail")}</p>
+      {/* The explanation scrolls when the question has less room than it needs; the title, the folder and the
+          answers above and below it always show. */}
+      <div className="trust-question-body">
+        <p className="trust-question-detail">{t("trust.question.runsDetail")}</p>
+        <p className="trust-question-detail">{t("trust.question.coversDetail")}</p>
+        <p className="trust-question-detail">{t("trust.question.untrustedDetail")}</p>
+      </div>
       <div className="trust-question-actions">
         {/* Neither answer is the primary one: Ersa does not lean towards trust. */}
         {purpose === "add" ? (

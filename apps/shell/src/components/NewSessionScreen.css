@@ -5,7 +5,8 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  /* Safe: a column taller than the stage starts at its top, so nothing in it is out of reach. */
+  justify-content: safe center;
   gap: var(--space-xl);
   /* It fills the stage it is placed in, and centres within it. */
   flex: 1;
@@ -48,6 +49,16 @@
   flex-direction: column;
   justify-content: flex-end;
   height: 0;
+}
+
+/* Too little room above the box for the question's title, folder and answers: it takes its place in the column and
+   the box moves down, and a column taller than the stage scrolls. */
+.new-session[data-tight] {
+  overflow-y: auto;
+}
+
+.new-session[data-tight] .new-session-above {
+  height: auto;
 }
 
 /* Why choosing or adding a folder failed, in the status line's place above the box. */

@@ -71,3 +71,39 @@ test("Add project… opens the folder dialog, asks about trust, and cancels leav
   await chip.click();
   await ersa.shot("found-without-question");
 });
+
+// In a short window the question is capped to the room above the box, or takes its place in the column when even its
+// title, folder and answers would not fit there: either way the folder being trusted is in view (#218 merge review).
+for (const [width, height] of [[700, 520], [660, 440], [640, 400]] as const) {
+  test(`the trust question shows its title, folder and answers in a ${width}x${height} window`, async ({ ersa }) => {
+    const { page } = ersa;
+    await page.setViewportSize({ width, height });
+    const stranger = path.join(ersa.dir, "stranger");
+    mkdirSync(stranger);
+    const screen = page.getByRole("region", { name: "New session" });
+    // From the chip, as a pointer would; the first test covers Ctrl+O.
+    await screen.getByRole("button", { name: "Project: Choose a folder" }).click();
+    const answered = ersa.answerDialog(stranger);
+    await screen.getByRole("option", { name: /Add project…/ }).click();
+    await answered;
+    const question = screen.getByRole("region", { name: "Trust stranger?" });
+    await expect(question).toBeVisible();
+    // Wait out the opening motion, so the places read are where the question rests.
+    await page.waitForFunction(() => document.getAnimations().length === 0);
+    const inView = async (part: import("@playwright/test").Locator) => {
+      await part.scrollIntoViewIfNeeded();
+      const box = (await part.boundingBox())!;
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height).toBeLessThanOrEqual(height);
+    };
+    await inView(question.getByText("Trust stranger?"));
+    // The folder and the answers must show together with the title, without scrolling between them.
+    const title = (await question.getByText("Trust stranger?").boundingBox())!;
+    for (const part of [question.getByText(stranger), question.getByRole("button", { name: "Add, trusted" }), question.getByRole("button", { name: "Cancel" })]) {
+      const box = (await part.boundingBox())!;
+      expect(box.y).toBeGreaterThanOrEqual(title.y);
+      expect(box.y + box.height).toBeLessThanOrEqual(height);
+    }
+    await ersa.shot(`trust-question-${width}x${height}`);
+  });
+}
