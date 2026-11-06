@@ -71,10 +71,17 @@ test("publishShots pushes the screenshots alone to live-shots/<branch> and links
   const pushed = git(bare, "rev-parse", "refs/heads/live-shots/feature");
   assert.equal(markdown, `![smoke/01-new-session.png](https://raw.githubusercontent.com/owner/name/${pushed}/smoke/01-new-session.png)`);
   assert.equal(git(bare, "ls-tree", "-r", "--name-only", pushed), "smoke/01-new-session.png");
-  assert.equal(git(bare, "rev-list", "--count", pushed), "1", "no history");
+  assert.equal(git(bare, "rev-list", "--count", pushed), "1", "none of the pull request's own history");
   // The checkout's index and branch are as they were.
   assert.equal(git(work, "status", "--porcelain", "--untracked-files=no"), "");
   assert.equal(git(work, "rev-list", "--count", "HEAD"), "1");
+
+  // Publishing again builds on the first commit, so links to it keep resolving.
+  writeFileSync(join(work, RESULTS, "smoke", "01-new-session.png"), "png again");
+  publishShots({ root: work });
+  const second = git(bare, "rev-parse", "refs/heads/live-shots/feature");
+  assert.notEqual(second, pushed);
+  assert.equal(git(bare, "rev-parse", `${second}^`), pushed);
 });
 
 test("publishShots refuses when there is nothing to publish", () => {

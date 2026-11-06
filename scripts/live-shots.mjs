@@ -5,10 +5,12 @@
 //   node scripts/live-shots.mjs
 //
 // Commits every PNG under apps/shell/live-results, as the last live-check run
-// left them, to a branch of its own, `live-shots/<current branch>`, with no
-// history and without touching the working tree or the index, pushes it to
-// origin (replacing that branch), and prints one image link per screenshot,
-// pinned to the commit, so a later run never changes what a body shows.
+// left them, to a branch of its own, `live-shots/<current branch>`, on top of
+// that branch's earlier screenshots and without touching the working tree or
+// the index, pushes it to origin, and prints one image link per screenshot,
+// pinned to the commit. Every earlier commit stays on the branch, so a link in
+// an older body keeps working. The repository is public: what you publish,
+// anyone can see.
 
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
@@ -68,8 +70,12 @@ export function publishShots({ root = ROOT, remote = "origin" } = {}) {
       git(["update-index", "--add", "--cacheinfo", `100644,${blob},${shot}`], env);
     }
     const tree = git(["write-tree"], env);
-    const commit = git(["commit-tree", tree, "-m", `Live-check screenshots for ${branch}`]);
-    git(["push", "--force", remote, `${commit}:refs/heads/live-shots/${branch}`]);
+    const ref = `refs/heads/live-shots/${branch}`;
+    // The branch's tip, if it has one, becomes the parent: a link to an earlier commit must keep resolving.
+    const tip = git(["ls-remote", remote, ref]).split(/\s+/)[0];
+    if (tip) git(["fetch", "--quiet", remote, ref]);
+    const commit = git(["commit-tree", tree, ...(tip ? ["-p", tip] : []), "-m", `Live-check screenshots for ${branch}`]);
+    git(["push", remote, `${commit}:${ref}`]);
     return shots.map((shot) => `![${shot}](https://raw.githubusercontent.com/${repo}/${commit}/${shot})`).join("\n");
   } finally {
     rmSync(scratch, { recursive: true, force: true });
