@@ -177,7 +177,7 @@ export function valuesFor(project: Project, backends: readonly BackendChoices[],
 }
 
 /** How a session runs, as `valuesFor` chooses it: the backend and its model, effort and permission mode. */
-export type HowValues = Pick<SessionValues, "backend" | "model" | "effort" | "permission_mode">;
+type HowValues = Pick<SessionValues, "backend" | "model" | "effort" | "permission_mode">;
 
 /**
  * The how values alone, from the host's backends: what `valuesFor` gives, and what the session controls show while

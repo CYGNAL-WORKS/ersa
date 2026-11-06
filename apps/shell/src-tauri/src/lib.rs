@@ -219,10 +219,15 @@ async fn shell_pick_folder(app: AppHandle) -> Result<Option<String>, String> {
         .map_err(|_| "The folder dialog closed without an answer.".to_string())?;
     match picked {
         None => Ok(None),
+        // A path that is not valid Unicode is refused rather than changed, so
+        // Core is never told of a folder other than the one picked.
         Some(path) => path
             .into_path()
-            .map(|p| Some(p.to_string_lossy().into_owned()))
-            .map_err(|e| format!("Ersa can't read the folder's path. {e}")),
+            .map_err(|e| format!("Ersa can't read the folder's path. {e}"))?
+            .into_os_string()
+            .into_string()
+            .map(Some)
+            .map_err(|_| "Ersa can't use this folder: its path has characters it can't read.".to_string()),
     }
 }
 

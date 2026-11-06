@@ -56,7 +56,7 @@ interface NewSessionScreenProps {
  */
 export function NewSessionScreen(props: NewSessionScreenProps) {
   const { hosts, localHostId, backends, lastUsed = {}, onStart, starting, onChooseFolder, onAddProject, adding } = props;
-  // A project just added is chosen at once, before Core's list is read again with it (FLOW-NEW-SESSION-R16).
+  // A project just added or found is chosen at once, before Core's list is read again with it (FLOW-NEW-SESSION-R16).
   const [added, setAdded] = useState<Project>();
   const projects = added && !props.projects.some((p) => p.id === added.id) ? [added, ...props.projects] : props.projects;
   const first = startingProject(projects, localHostId, props.projectId);
@@ -88,7 +88,11 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     try {
       const choice = await onChooseFolder();
       // A folder already a project is chosen without the question (R18); a new one is asked about first (R16).
-      if (choice.kind === "found") chooseProject(choice.project.id);
+      if (choice.kind === "found") {
+        // Listed at once, as an added one is, in case the list Core last gave does not have it yet.
+        setAdded(choice.project);
+        chooseProject(choice.project.id);
+      }
       if (choice.kind === "new") setAsking(choice.path);
       else backToWords();
     } finally {
@@ -167,7 +171,6 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
             name={folderName(asking)}
             path={asking}
             purpose="add"
-            place="composer"
             onAnswer={(trusted) => void answer(trusted)}
             onDismiss={() => void answer(undefined)}
             takeFocus={props.initialAsking === undefined}
