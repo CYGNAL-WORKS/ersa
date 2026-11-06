@@ -6,7 +6,6 @@ const components = [
   "RailFoot",
   "QuitQuestion",
   "ProjectList",
-  "AddProject",
   "SessionList",
   "Transcript",
   "SessionTitle",
