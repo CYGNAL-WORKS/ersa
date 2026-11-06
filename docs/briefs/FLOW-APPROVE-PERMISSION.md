@@ -19,7 +19,7 @@ The shelf is for sessions other than the active one. The active session's reques
 
 The answers are the ones the request carries: what the backend accepts for it, as the agent offered them. For a permission request that is allowing, denying, and the request's own suggestions; for a question, its options, the user's own words where the question takes them, or declining to answer. Ersa invents no answer of its own.
 
-What the shelf reads comes from the session's events (`PROTO-AGENT-EVENTS`, Permission and Question): Ersa follows the session's events while its shelf is open (`PROTO-CORE-API`, `session.subscribe`) and stops when it closes, and answers with `session.decide_permission` and `session.answer_question`. The tile's pending list says that a session waits and for how many requests; the events say what each request is, and their order is the requests' order. A request with no place in that order, because its kind is unknown or its event is not held, is the oldest when Core has let go of the session's earliest events, where its event must have been, and otherwise the newest, since its event has not arrived yet.
+What the shelf reads comes from the session's events (`PROTO-AGENT-EVENTS`, Permission and Question): Ersa follows the session's events while its shelf is open (`PROTO-CORE-API`, `session.subscribe`) and stops when it closes, and answers with `session.decide_permission` and `session.answer_question`. The tile's pending list says that a session waits and for how many requests; the events say what each request is, and their order is the requests' order. A request the shelf can't show, because its kind is unknown or its event is not held, is the oldest when Core has let go of the session's earliest events, and otherwise the newest (R29).
 
 ## Requirements
 
@@ -74,7 +74,7 @@ Assistive technology
 
 - How much of each backend's native permission vocabulary is surfaced versus normalized: a reason with Deny (`message`) and editing the input before allowing (`updated_input`) are not offered yet.
 - Keyboard-only path: a shortcut that opens the oldest pending shelf across sessions, and moves to the next session's once one is done.
-- Whether a request the shelf can't show should hold the shelf when requests behind it can be shown. Today they are answered on the transcript's cards.
+- Whether a request the shelf can't show should hold the shelf when requests behind it can be shown. Today the requests behind it are answered on the transcript's cards.
 - Whether Core should carry each pending request's details on the tile, so that opening a shelf does not read the session's whole event history first.
 
 ## Changes

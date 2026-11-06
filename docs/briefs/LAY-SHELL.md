@@ -79,7 +79,7 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 
 ## Built so far
 
-Of the rail described above, the tree is built grouped by project, sessions newest first, with the foot; the arrange button and menu, the other groupings, sections, pins and a tile's menu are still to build, and until the project chip is built a form beneath the tree adds a project. The shelf is built: a tile's chevron is the shelf's handle on every tile but the active one's.
+Of the rail described above, what is built is the tree grouped by project, with sessions newest first, each project heading with New session and trusting the project, the tiles, and the foot; the rest is still to build, and until the project chip is built a form beneath the tree adds a project. The shelf is built: a tile's chevron is the shelf's handle on every tile but the active one's.
 
 ## Changes
 
