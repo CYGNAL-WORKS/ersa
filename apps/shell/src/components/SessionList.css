@@ -132,6 +132,11 @@
   color: var(--color-ink-muted);
 }
 
+/* Unseen: finished a turn while the user looked elsewhere, so the title reads at the heading weight in ink. */
+.session-title[data-unseen] {
+  font-weight: var(--type-heading-weight);
+}
+
 /* The trailing edge: one square for the state's mark. */
 .session-mark {
   grid-column: 3;
