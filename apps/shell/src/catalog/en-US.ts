@@ -127,7 +127,7 @@ export const enUS = {
     notTrustedStatus: "Not trusted",
     // The trust question (ADR 0018), asked when a folder becomes a project and when the user trusts one later. It
     // says what trust lets run, that it covers every workspace of the project, and that it lasts until withdrawn
-    // (FLOW-NEW-SESSION-R16, retired; #226 builds its replacement).
+    // (FLOW-NEW-SESSION-R16, retired; ticket 226 builds its replacement).
     question: {
       title: "Trust {name}?",
       runsDetail:
