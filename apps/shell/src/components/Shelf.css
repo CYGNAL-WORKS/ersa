@@ -158,27 +158,6 @@
   margin-inline-start: calc(var(--size-glyph) + var(--space-sm));
 }
 
-.shelf-answers {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-}
-
-/* A suggestion is as wide as the shelf, its label cut with an ellipsis. */
-.shelf-suggestion {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
-}
-
-/* Deny at the leading edge, Allow at the trailing edge. */
-.shelf-answer-row {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-sm);
-}
-
 /* With reduced motion on, the shelf appears at once. */
 @media (prefers-reduced-motion: reduce) {
   .shelf,

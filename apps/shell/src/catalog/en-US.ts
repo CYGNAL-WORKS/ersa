@@ -56,8 +56,12 @@ export const enUS = {
       unknownNote: "This session is waiting on a request Ersa can't show here.",
       // Names the shelf's contents when they fail to draw: "This request could not be shown:".
       boundaryName: "This request",
+      // A permission request's answers: the transcript's permission card offers the same ones (R27).
       denyButton: "Deny",
       allowButton: "Allow",
+      // Followed by Core's reason, beneath.
+      answerRefusedError: "Your answer wasn't accepted.",
+      reconnectingNote: "Reconnecting to Core…",
     },
   },
   transcript: {},

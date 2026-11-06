@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "./harness";
 
@@ -75,4 +75,40 @@ test("the chevron opens the shelf with the oldest permission request, leaving th
   await expect(shelf).toHaveCount(0);
   await expect(rail.getByRole("button", { name: /^Request from / })).toHaveCount(0);
   await ersa.shot("made-active");
+});
+
+test("an answer from the shelf reaches the session, which goes on, and the shelf closes once nothing is pending", async ({ ersa }) => {
+  test.setTimeout(300_000);
+  const { page } = ersa;
+  const folder = path.join(ersa.dir, "shelf-answer");
+  mkdirSync(folder);
+  const rail = page.getByRole("navigation", { name: "Rail" });
+
+  await rail.getByRole("textbox", { name: "Project folder" }).fill(folder);
+  await rail.getByRole("button", { name: "Add", exact: true }).click();
+  await page.getByRole("button", { name: "Add, not trusted" }).click();
+
+  await rail.getByRole("button", { name: "New session" }).click();
+  await page.getByRole("textbox", { name: "Message" }).fill("Use the Write tool to create answered.txt containing the word probe. Do nothing else.");
+  await page.keyboard.press("Enter");
+  await expect(rail.getByText("Needs permission")).toBeVisible({ timeout: 180_000 });
+
+  await rail.getByRole("button", { name: "New session" }).click();
+  await page.getByRole("textbox", { name: "Message" }).fill("Reply with the single word ready.");
+  await page.keyboard.press("Enter");
+  const chevron = rail.getByRole("button", { name: /^Request from / });
+  await expect(chevron).toBeVisible({ timeout: 60_000 });
+  await chevron.click();
+  const shelf = page.getByRole("dialog", { name: /^Request from / });
+  await expect(shelf.getByText("Permission request")).toBeVisible({ timeout: 30_000 });
+  // Claude Code offers a suggestion for a write; the shelf offers it beside Deny and Allow (R12).
+  await expect(shelf.getByRole("button")).not.toHaveCount(2);
+  await ersa.shot("shelf-answers");
+
+  await shelf.getByRole("button", { name: "Allow", exact: true }).click();
+  // The session goes on, its request answered: the shelf closes, and the file is written (R13).
+  await expect(chevron).toHaveCount(0, { timeout: 60_000 });
+  await expect(page.locator(".shelf")).toHaveCount(0);
+  await expect.poll(() => existsSync(path.join(folder, "answered.txt")), { timeout: 120_000 }).toBe(true);
+  await ersa.shot("shelf-answered");
 });

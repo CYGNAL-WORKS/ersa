@@ -5,9 +5,10 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { PermissionAnswers } from "../components/PermissionAnswers";
 import { Revealed, Transcript as TranscriptView } from "../components/Transcript";
 import type { Envelope, Event } from "../protocol/agent-events.gen";
-import type { SessionView } from "./follow";
+import type { Answer } from "./answers";
 import { events } from "./replays";
 import { EVENT_VERSION, type Transcript, apply, emptyTranscript, isOpen } from "./transcript";
 
@@ -33,11 +34,12 @@ const envelope = (seq: number, event: Event): Envelope => ({
   event,
 });
 
-const render = (transcript: Transcript, answers: SessionView["answers"] = {}) =>
+const render = (transcript: Transcript, answers: Record<string, Answer> = {}) =>
   renderToStaticMarkup(
     createElement(TranscriptView, {
       title: "replay",
-      view: { id: "s-replay", transcript, stream: { state: "live" }, answers },
+      view: { id: "s-replay", transcript, stream: { state: "live" } },
+      answers,
       onDecide: () => {},
     }),
   );
@@ -101,12 +103,23 @@ describe("a permission request (replay 11-stream-permission-prompt-tool-stdio)",
 
   it("shows an answer on its way, and why one was refused", () => {
     const id = replay[requested]?.event.type === "permission.requested" ? replay[requested].event.request_id : "";
-    expect(render(beforeAnswer, { [id]: { state: "sending" } })).toContain("Sending…");
-    const refused = render(beforeAnswer, {
-      [id]: { state: "failed", message: "session.decide_permission: the session is a replay of a recording and cannot change" },
-    });
+    expect(render(beforeAnswer, { [id]: { state: "sending", decision: "allow" } })).toMatch(/<button[^>]*disabled=""[^>]*><span class="answers-ring"/);
+    const refused = render(beforeAnswer, { [id]: { state: "failed", message: "the session is a replay of a recording and cannot change" } });
     expect(refused).toContain("cannot change");
-    expect(refused).toMatch(/<button[^>]*>Allow<\/button>/);
+    expect(refused).toMatch(/<button type="button" data-variant="primary" class="button">Allow<\/button>/);
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R27
+  it("offers the answers the shelf would, with the same primary", () => {
+    const event = replay[requested]?.event;
+    if (event?.type !== "permission.requested") throw new Error("the replay has no permission request");
+    const suggestions = [{ kind: "allow_rule" as const, label: "Allow echo commands in this project", payload: {} }];
+    for (const flags of [event.flags, { ...event.flags, default_to_no: true }, { ...event.flags, suppress_always_allow: true }]) {
+      const request = { ...event, suggestions, flags };
+      const transcript = play([...replay.slice(0, requested), { ...replay[requested]!, event: request }]);
+      const answers = renderToStaticMarkup(createElement(PermissionAnswers, { request, live: true, onDecide: () => {} }));
+      expect(render(transcript)).toContain(answers);
+    }
   });
 });
 
