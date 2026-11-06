@@ -204,12 +204,14 @@ function useMovingOn(root: { current: HTMLElement | null }, key: string, moved: 
   useEffect(() => {
     const el = root.current;
     if (!el) return;
-    // Focus that goes nowhere (the element holding it is gone) leaves this as it was.
+    // An element removed while it holds focus sends no focusout, so the answer that goes with the last request
+    // leaves this true. Focus the user moves elsewhere, or out of the window, does send one; coming back sends a
+    // focusin.
     const focusIn = () => {
       focused.current = true;
     };
     const focusOut = (event: FocusEvent) => {
-      if (event.relatedTarget !== null) focused.current = el.contains(event.relatedTarget as Node);
+      focused.current = event.relatedTarget instanceof Node && el.contains(event.relatedTarget);
     };
     el.addEventListener("focusin", focusIn);
     el.addEventListener("focusout", focusOut);
@@ -223,14 +225,20 @@ function useMovingOn(root: { current: HTMLElement | null }, key: string, moved: 
     if (!el) return;
     const changed = lastKey.current !== key;
     lastKey.current = key;
-    if (changed && moved && focused.current && !el.contains(document.activeElement)) el.focus();
+    if (!changed) {
+      // Another render of the same request leaves a running ease alone; otherwise its height is the one to ease
+      // from next.
+      if (!easing.current) height.current = el.getBoundingClientRect().height;
+      return;
+    }
+    if (moved && focused.current && !el.contains(document.activeElement)) el.focus();
     // An ease still running starts the next from where it has got to, and the new height is measured without it.
     const from = easing.current ? el.getBoundingClientRect().height : height.current;
     easing.current?.cancel();
     easing.current = undefined;
     const to = el.getBoundingClientRect().height;
     height.current = to;
-    if (!changed || !moved || from === undefined || from === to || typeof el.animate !== "function" || reducedMotion()) return;
+    if (!moved || from === undefined || from === to || typeof el.animate !== "function" || reducedMotion()) return;
     // The duration and curve are the motion tokens, read from the page so the tokens stay the one source.
     const style = getComputedStyle(el);
     const duration = milliseconds(style.getPropertyValue("--motion-settle"));
@@ -239,7 +247,9 @@ function useMovingOn(root: { current: HTMLElement | null }, key: string, moved: 
     const animation = el.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration, easing: curve });
     easing.current = animation;
     animation.onfinish = () => {
-      if (easing.current === animation) easing.current = undefined;
+      if (easing.current !== animation) return;
+      easing.current = undefined;
+      height.current = el.getBoundingClientRect().height;
     };
   });
 }
