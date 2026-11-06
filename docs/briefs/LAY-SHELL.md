@@ -49,7 +49,7 @@ From top to bottom: New session, the projects with their sessions, Add project, 
 - **The foot** is empty while all is well, and while Ersa first connects, when the tree says it is loading. When Ersa can't reach Core, the foot says so in the user's terms, with the reason when Ersa has one, and the tree is empty. While Ersa is trying again the foot says that; once it has stopped trying, the foot offers Retry. Assistive technology is told when the problem appears and when Ersa reaches the sessions again. When Retry was pressed from the keyboard and the foot offers it again, keyboard focus returns to it unless the user has moved it. New session and Add project are unavailable until Ersa has connected. A debug build attached to a labeled endpoint names the label there (Development).
 ## The shelf
 
-The shelf pulls out of the tile it belongs to, at the tile's height, and lies over the edge of the transcript: it never pushes the transcript aside, narrows it, or scrolls it. It is the width the design documents give it, and when it would run past the foot of the window it rises to fit. One shelf is open at a time, and only the user opens it, from the tile's chevron. With several requests pending on one session, it holds the oldest and says its place among them; answered, it moves to the next, and closes when none is left. `FLOW-APPROVE-PERMISSION` says what it holds, how it opens and closes, and how it answers.
+The shelf pulls out of the tile it belongs to, at the tile's height, and lies over the edge of the transcript: it never pushes the transcript aside, narrows it, or scrolls it. It is the width the design documents give it, and when it would run past the foot of the window it rises to fit. `FLOW-APPROVE-PERMISSION` says when it opens and closes, what it holds, and how it answers.
 
 ## Development
 
@@ -78,7 +78,7 @@ The rail is a list of projects above one list of sessions grouped under a headin
 
 ## Changes
 
-- 2026-11-05: the shelf specified from the owner's decisions (The shelf): it overlays the transcript's edge and never pushes it, one is open at a time, only the chevron opens it, and several requests on one session are shown oldest first with their place. This closes the open question on overlay or push and queueing. No requirement IDs changed.
+- 2026-11-05: where the shelf sits (The shelf), from the owner's decisions; its behavior is FLOW-APPROVE-PERMISSION's. This closes the open question on overlay or push and queueing. No requirement IDs changed.
 
 - 2026-11-05: from #155 merge review: whether the foot shows a try after Retry, and how much of a failed start's output it shows and reads, are open questions. No requirement IDs changed.
 - 2026-11-05: from #155 inbox: the foot tells assistive technology when the problem appears and when it ends, and gives keyboard focus back to Retry (The foot); the open question on focus after Retry narrows to a retry that succeeds, and how long the word of reconnecting stays is a new one. No requirement IDs changed.
