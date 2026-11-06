@@ -205,7 +205,7 @@ describe("adding a project from the new-session screen", () => {
     expect(document.activeElement).toBe(words());
   });
 
-  // The untrusted answer of ADR 0018, which #226 removes (FLOW-NEW-SESSION-R25); it cites nothing meanwhile.
+  // The untrusted answer of ADR 0018, which ticket 226 removes (FLOW-NEW-SESSION-R25); it cites nothing meanwhile.
   it("adds the folder not trusted when the user says so", async () => {
     const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"));
     await addFromChip();
