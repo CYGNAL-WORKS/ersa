@@ -12,116 +12,21 @@ import {
   useState,
 } from "react";
 import { t } from "../catalog";
-import type { SessionsView } from "../core/connection";
 import type { Session } from "../protocol/core-api.gen";
-import { type BackendChoices, newestFirst } from "../session/controls";
+import type { BackendChoices } from "../session/controls";
 import { type TileView, tileOf } from "../session/tile";
 import { ContextRing } from "./ContextRing";
 import { Icon } from "./Icon";
-import "./SessionList.css";
+import "./SessionTile.css";
 
 /** Each host's backends, by host id, as `backend.list` gives them. */
-type Backends = Readonly<Record<string, readonly BackendChoices[]>>;
-
-interface SessionListProps {
-  view: SessionsView;
-  activeId?: string;
-  onSelect: (id: string) => void;
-  force?: ForcedTile;
-  /** Each workspace's name, by id: given, the tiles sit under their workspace (LAY-SHELL); else one list. */
-  workspaces?: Readonly<Record<string, WorkspaceName>>;
-  /** Each host's backends, to name a tile's backend by its own name; until they are read, it is named by its id. */
-  backends?: Backends;
-  /** The unseen sessions' ids (LAY-SHELL, Unseen): their titles read strong until they are made active. */
-  unseen?: ReadonlySet<string>;
-  /** The open shelf: its session, its tone, and the shelf itself, which is drawn beside that session's tile. */
-  shelf?: OpenShelf;
-  /** The user chose a tile's chevron (FLOW-APPROVE-PERMISSION-R01). */
-  onChevron?: (id: string) => void;
-  /** The user closed a session's shelf: Escape, or a choice or focus outside it and its tile (R06, R07). */
-  onCloseShelf?: (id: string) => void;
-}
+export type Backends = Readonly<Record<string, readonly BackendChoices[]>>;
 
 /** The open shelf, as the rail draws it beside its tile. `render` is given the element id the chevron controls. */
 export interface OpenShelf {
   id: string;
   tone: "accent" | "caution";
   render: (domId: string) => ReactNode;
-}
-
-/** What the rail calls a workspace: its project, and the branch or "Root workspace". */
-export interface WorkspaceName {
-  project: string;
-  name: string;
-  /** The name is a path, and is set as one. */
-  path?: boolean;
-}
-
-/** The sessions Core runs, as tiles: newest first, the active one quietly highlighted. */
-export function SessionList({ view, activeId, onSelect, force, workspaces, backends, unseen, shelf, onChevron, onCloseShelf }: SessionListProps) {
-  const tile = (s: Session) => {
-    const open = shelf?.id === s.id ? shelf : undefined;
-    return (
-      <TileItem key={s.id} id={s.id} shelf={open} onClose={onCloseShelf}>
-        {(shelfDomId) => (
-          <SessionTile
-            session={s}
-            backends={backends}
-            active={s.id === activeId}
-            unseen={unseen?.has(s.id) ?? false}
-            force={force?.id === s.id ? force.state : undefined}
-            onSelect={onSelect}
-            shelf={open && { tone: open.tone, domId: shelfDomId }}
-            onChevron={onChevron}
-          />
-        )}
-      </TileItem>
-    );
-  };
-  return (
-    <section className="sessions" aria-label="Sessions">
-      <h2 className="sessions-header">
-        <span>Sessions</span>
-        {view.state === "ready" && <span className="readout">{view.sessions.length}</span>}
-      </h2>
-      {view.state === "loading" && <p className="sessions-note">Loading…</p>}
-      {view.state === "unavailable" && <p className="sessions-note">Sessions appear once Core is connected.</p>}
-      {view.state === "error" && (
-        <p className="problem" role="alert">
-          {view.message}
-        </p>
-      )}
-      {view.state === "ready" && view.sessions.length === 0 && (
-        <p className="sessions-note">
-          No sessions yet.
-          <span className="sessions-note-hint">Start one from a project above.</span>
-        </p>
-      )}
-      {view.state === "ready" && view.sessions.length > 0 && !workspaces && <ul className="sessions-list">{newestFirst(view.sessions).map(tile)}</ul>}
-      {view.state === "ready" &&
-        view.sessions.length > 0 &&
-        workspaces &&
-        byWorkspace(view.sessions).map(([id, sessions]) => {
-          const name = workspaces[id];
-          return (
-            <section key={id} className="sessions-workspace" aria-label={name ? `${name.project}, ${name.name}` : "Workspace"}>
-              {/* Its line is kept while the name is still being read, so the tiles never move when it arrives. */}
-              <h3 className="sessions-workspace-name" aria-hidden={name ? undefined : true}>
-                {name ? (
-                  <>
-                    <span className="sessions-workspace-project">{name.project}</span>{" "}
-                    <span className={name.path ? "mono" : undefined}>{name.name}</span>
-                  </>
-                ) : (
-                  " "
-                )}
-              </h3>
-              <ul className="sessions-list">{sessions.map(tile)}</ul>
-            </section>
-          );
-        })}
-    </section>
-  );
 }
 
 /** For the gallery: show a pointer or keyboard state on one tile without one. */
@@ -132,7 +37,7 @@ export type ForcedTile = { id: string; state: "hover" | "focus" | "pressed" };
  * and the state's mark; line two the context ring, under the icon, then a phrase and the cost. `tileOf` decides
  * what each shows; this only lays it out. The mark has the trailing edge to itself, one square on line one.
  */
-function SessionTile({
+export function SessionTile({
   session,
   backends,
   active,
@@ -208,7 +113,7 @@ function SessionTile({
  * shelf is placed by, and tells the shelf where the two join, so they read as one shape (docs/design/RAIL.md, The
  * shelf: One shape).
  */
-function TileItem({
+export function TileItem({
   id,
   shelf,
   onClose: close,
@@ -368,11 +273,3 @@ function Mark({ view }: { view: TileView }) {
       return null;
   }
 }
-
-/** The sessions by workspace, newest first within each, and the workspace with the newest session first. */
-export function byWorkspace(sessions: Session[]): [string, Session[]][] {
-  const groups = new Map<string, Session[]>();
-  for (const s of newestFirst(sessions)) groups.set(s.workspace_id, [...(groups.get(s.workspace_id) ?? []), s]);
-  return [...groups];
-}
-
