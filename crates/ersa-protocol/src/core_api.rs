@@ -25,7 +25,7 @@ use crate::events::{Answer, Envelope, LifecycleState, PermissionBehavior};
 /// The Core API version this build speaks. Negotiated in `core.hello`; bumped
 /// only for removals or changes of meaning, never for additions. The schema
 /// file records the same number as `x-api-version`; a test checks they agree.
-pub const API_VERSION: u32 = 3;
+pub const API_VERSION: u32 = 4;
 
 /// Every Core API version this build can speak, for the handshake.
 pub const SUPPORTED_API_VERSIONS: &[u32] = &[API_VERSION];
@@ -74,9 +74,11 @@ methods! {
     ProjectAdd => "project.add",
     ProjectSetTrust => "project.set_trust",
     ProjectRemove => "project.remove",
+    ProjectFind => "project.find",
     WorkspaceList => "workspace.list",
     WorkspaceCreate => "workspace.create",
     WorkspaceRemove => "workspace.remove",
+    BranchList => "branch.list",
     SessionList => "session.list",
     SessionCreate => "session.create",
     SessionStart => "session.start",
@@ -370,6 +372,16 @@ pub struct ProjectAddParams {
     pub trusted: bool,
 }
 
+/// `project.find` params: the folder to look for on a host. The answer is
+/// the project at that folder, compared as `project.add` compares folders,
+/// or null.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectFindParams {
+    pub host_id: String,
+    pub path: String,
+}
+
 /// `project.set_trust` params.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -428,7 +440,9 @@ pub struct WorkspaceCreateParams {
     /// The branch name for a git worktree; Core picks one when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// The commit-ish the workspace starts from; the project's HEAD when absent.
+    /// Any revision git resolves (a branch, tag, commit, `main~1`) that the
+    /// workspace starts from; the default branch `branch.list` marks, else
+    /// the checked-out commit, when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base: Option<String>,
 }
@@ -441,6 +455,22 @@ pub struct WorkspaceRemoveParams {
     /// Remove even with uncommitted changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub force: Option<bool>,
+}
+
+/// `branch.list` params.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BranchListParams {
+    pub project_id: String,
+}
+
+/// One of a project's local branches, as `branch.list` reports it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Branch {
+    pub name: String,
+    /// Whether this is the repository's default branch; at most one is.
+    pub default: bool,
 }
 
 // ---------------------------------------------------------------------------
