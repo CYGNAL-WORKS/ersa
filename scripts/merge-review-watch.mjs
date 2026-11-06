@@ -20,11 +20,11 @@
 // an older one waiting. Each tick starts a review in every free slot (SLOTS of
 // them, each with its own checkout) and leaves it running: in a terminal the
 // next tick fills a slot whose review has ended. --once does the same while
-// its reviews run, starting none after its first hour, then waits for them,
-// so a run ends within the two hours the task allows it.
-// A pull request under review waits for that review to end, whatever its head
-// now. An hour at most goes on heads whose checkout cannot be prepared (each
-// is logged and the next head takes the slot). A tick with no head to review
+// its reviews run, starting none after its first START_WINDOW_MS, then waits
+// for them, so a run ends within the two hours the task allows it. A pull
+// request under review waits for that review to end, whatever its head now. A
+// head whose checkout cannot be prepared tries each free slot, is logged, and
+// the next head goes; in a terminal a tick gives such heads an hour at most. A tick with no head to review
 // logs each open pull request it passed over and why, so a quiet log says
 // what it waits for. A head without the status that
 // GitHub would merge on its own (auto-merge armed by a review of an earlier
@@ -79,13 +79,17 @@ export const SLOTS = 2;
 // A pending status older than this belongs to a run that is over: longer than
 // the review's claude runs (38 and 4 minutes) and its tool calls at their
 // usual pace. A lock gets three times that, past the two hours the task
-// allows a tick: a tick is at most an hour of heads that cannot start plus the
-// reviews it started, which run side by side, each with every tool call
-// stalled to its two-minute limit, and the task's
+// allows a run: a run is at most START_WINDOW_MS of heads that cannot start
+// plus the reviews it started, which run side by side, each with every tool
+// call stalled to its two-minute limit, and the task's
 // stop may end only the shell while the review runs on, so a live tick must
 // never be taken over.
 export const STALE_MS = 60 * 60 * 1000;
 export const LOCK_STALE_MS = 3 * STALE_MS;
+// How long a run of the scheduled task starts reviews for, counted from its
+// start, heads that cannot be prepared included: a review takes about an hour,
+// so the last one it starts ends within the two hours the task allows it.
+export const START_WINDOW_MS = 45 * 60 * 1000;
 const FIELDS = "number,isDraft,isCrossRepository,headRefOid,labels,autoMergeRequest,statusCheckRollup";
 
 // What a head's merge review status says, for the line that tells why the
@@ -255,8 +259,8 @@ function prepare(run, dir, n, head) {
 // slot, taking the heads due in order. `running` maps each pull request under
 // review to its slot's checkout and the review's end. A head whose checkout
 // cannot be prepared is reported and the next head takes the slot, so one bad
-// head does not hold the rest, for an hour at most.
-function tick(run, start, dirs, log, now, running) {
+// head does not hold the rest; no head is taken up after `until`.
+function tick(run, start, dirs, log, now, running, until) {
   const list = run("gh", ["pr", "list", "--state", "open", "--limit", "100", "--json", FIELDS]);
   if (!list.ok) fail(`gh pr list failed: ${list.err}`);
   const { review, disarm, skip } = select(JSON.parse(list.out), now());
@@ -269,11 +273,10 @@ function tick(run, start, dirs, log, now, running) {
   const due = review.filter((p) => !running.has(p.number));
   if (!due.length && !running.size) return log(`nothing to review${skip.length ? `: ${skip.map((p) => `#${p.number} (${p.why})`).join("; ")}` : ""}`.replace(/\s+/g, " "));
   const free = dirs.filter((d) => ![...running.values()].some((x) => x.dir === d));
-  const started = now();
   for (const [i, { number: n, head }] of due.entries()) {
     const later = due.slice(i + 1).map((p) => `#${p.number}`);
     if (!free.length) return log(`${[`#${n}`, ...later].join(", ")} wait for a free slot`);
-    if (now() - started > STALE_MS) return log(`the tick is an hour old; ${[`#${n}`, ...later].join(", ")} wait for the next`);
+    if (now() > until) return log(`out of time; ${[`#${n}`, ...later].join(", ")} wait for the next run`);
     log(`#${n} at ${head.slice(0, 7)}: reviewing${later.length ? `; ${later.join(", ")} next` : ""}`);
     // The head tries each free slot in turn: the fault may be one checkout's, not the head's.
     const dir = free.find((d) => {
@@ -320,17 +323,18 @@ export async function main(argv, { run: r = run, start = startReview, sleep = pa
     const began = now();
     try {
       for (;;) {
-        // In a terminal a tool that is down for one tick is not the end of
-        // the loop; a single tick, the task's, says so and ends.
+        // A tool that is down for one tick is not the end of the loop, or of
+        // a task's run with reviews to wait for; a task's run with none says
+        // so and ends. In a terminal a tick gives heads that cannot be
+        // prepared an hour; a task's run starts nothing after its window.
         try {
-          tick(r, start, dirs, log, now, running);
+          tick(r, start, dirs, log, now, running, once ? began + START_WINDOW_MS : now() + STALE_MS);
         } catch (e) {
-          if (once || !(e instanceof ToolError)) throw e;
+          if ((once && !running.size) || !(e instanceof ToolError)) throw e;
           log(e.message);
         }
         // The task's run ticks on while its reviews run, so a slot that frees
-        // up is filled; it ticks for an hour at most, so it ends within the
-        // two hours the task allows it.
+        // up is filled.
         if (once && !running.size) return { code: 0 };
         await sleep(INTERVAL_MS);
         // The lock's age says the loop is alive; a lock that is gone or
@@ -344,7 +348,6 @@ export async function main(argv, { run: r = run, start = startReview, sleep = pa
         }
         if (holder !== String(process.pid)) fail(`the lock at ${lockPath} is ${holder ? `another tick's (pid ${holder})` : "gone"}, so this loop stops`);
         utimesSync(lockPath, new Date(now()), new Date(now()));
-        if (once && now() - began > STALE_MS) return { code: 0 };
       }
     } finally {
       // The lock stays until every review this process started has ended, so
