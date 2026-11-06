@@ -74,6 +74,46 @@ describe("the shelf moving to the next request", () => {
     expect(document.activeElement).toBe(screen.getByRole("dialog"));
   });
 
+  // verifies: FLOW-APPROVE-PERMISSION-R10
+  it("leaves focus the user took out of the shelf where it is as the shelf moves on", () => {
+    const { rerender } = render(shelf({ state: "permission", request: request("r1", "Run the tests"), place: { n: 1, m: 2 } }));
+    const deny = screen.getByRole("button", { name: "Deny" });
+    act(() => deny.focus());
+    // Clicking text that takes no focus: focus leaves for nowhere.
+    act(() => deny.blur());
+    rerender(shelf({ state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 2 } }));
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("eases its height once per move, and leaves a running ease alone as it renders again", () => {
+    const eases: { cancelled: boolean }[] = [];
+    const [animate, box, style] = [HTMLElement.prototype.animate, HTMLElement.prototype.getBoundingClientRect, window.getComputedStyle];
+    HTMLElement.prototype.animate = function () {
+      const ease = { cancelled: false, onfinish: null, cancel: () => (ease.cancelled = true) };
+      eases.push(ease);
+      return ease as unknown as Animation;
+    };
+    let tall = false;
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      return { height: tall ? 300 : 200 } as DOMRect;
+    };
+    window.getComputedStyle = (() => ({ getPropertyValue: (name: string) => (name === "--motion-settle" ? "260ms" : "ease") })) as unknown as typeof getComputedStyle;
+    try {
+      const { rerender } = render(shelf({ state: "permission", request: request("r1", "Run the tests"), place: { n: 1, m: 2 } }));
+      tall = true;
+      rerender(shelf({ state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 2 } }));
+      expect(eases).toHaveLength(1);
+      // Rendering the same request again, as the leaving copy goes, keeps the ease running.
+      rerender(createElement(Shelf, { tile: { title: "Fix the build" }, shows: { state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 2 } }, live: false, onDecide: () => {} }));
+      expect(eases).toHaveLength(1);
+      expect(eases[0]?.cancelled).toBe(false);
+    } finally {
+      HTMLElement.prototype.animate = animate;
+      HTMLElement.prototype.getBoundingClientRect = box;
+      window.getComputedStyle = style;
+    }
+  });
+
   it("fades the last request's contents out over the next, out of reach, and not with reduced motion", () => {
     const { rerender } = render(shelf({ state: "permission", request: request("r1", "Run the tests"), place: { n: 1, m: 3 } }));
     rerender(shelf({ state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 3 } }));
