@@ -15,7 +15,7 @@ The rail shows the user's sessions the way they want them: pinned ones first, th
 
 ## Trigger
 
-The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu beside New session (Group by, Sort by, Show, New section, Reset to defaults, View all). `LAY-SHELL` (The rail) says where each control is and how it looks.
+The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu beside New session (Group by, Sort by, Show, New section, Reset to defaults, All sessions). `LAY-SHELL` (The rail) says where each control is and how it looks.
 
 ## Steps
 
@@ -27,7 +27,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 6. The user collapses a group's heading. It stays collapsed in that grouping, and only that one.
 7. **Reset to defaults** returns the grouping, sort, filter and collapsed groups to their defaults. Pins and sections stay.
 8. Ersa restarts. The rail shows the same arrangement, pins and sections.
-9. The user chooses **View all**. The transcript area shows the sessions page: every session in one list, whatever the rail's grouping, filter or collapsed groups, with Active and Archived tabs, a search field and New session. Choosing a session makes it the active session and the page gives way to its transcript; choosing a tile or New session in the rail leaves the page too.
+9. The user chooses **All sessions**. The transcript area shows the sessions page: every session in one list, whatever the rail's grouping, filter or collapsed groups, with Active and Archived tabs, a search field and New session. Choosing a session makes it the active session and the page gives way to its transcript; choosing a tile or New session in the rail leaves the page too.
 
 ## Variations and errors
 
@@ -57,7 +57,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 - **FLOW-ORGANIZE-SESSIONS-R12**: When the user collapses or expands a group, Ersa shall keep that for the grouping in use, so the same group in another grouping is unaffected.
 - **FLOW-ORGANIZE-SESSIONS-R13**: Pins, sections and their membership, the grouping, the sort, the filter and the collapsed groups shall survive a restart of Ersa and of Core.
 - **FLOW-ORGANIZE-SESSIONS-R14**: When the user chooses Reset to defaults, Ersa shall group by project, sort by date created, show active sessions and expand every group, and shall keep pins and sections.
-- **FLOW-ORGANIZE-SESSIONS-R16**: When the user chooses View all, Ersa shall show the sessions page in the transcript area, listing every session that is archived or not according to its tab (Active first), whatever the rail's grouping, filter and collapsed groups, newest last activity first, else newest created.
+- **FLOW-ORGANIZE-SESSIONS-R16**: When the user chooses All sessions, Ersa shall show the sessions page in the transcript area, listing every session that is archived or not according to its tab (Active first), whatever the rail's grouping, filter and collapsed groups, newest first by last activity, taking a session's creation for its last activity until it has one.
 - **FLOW-ORGANIZE-SESSIONS-R17**: While the user types in the sessions page's search field, Ersa shall list only the sessions whose title contains the text, ignoring case.
 - **FLOW-ORGANIZE-SESSIONS-R18**: When the user chooses a session on the sessions page, Ersa shall make it the active session and show its transcript in place of the page.
 - **FLOW-ORGANIZE-SESSIONS-R15**: When Core refuses or fails a change to the arrangement, Ersa shall show the rail as Core has it and say why.
@@ -74,6 +74,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 
 ## Changes
 
-- 2026-11-05: owner: View all opens the sessions page, as the desktop harness's does. R16 to R18 added.
+- 2026-11-05: from #174 merge review: the menu item is All sessions, not View all, so it doesn't read like Show ▸ All; R16's order takes creation for a session with no activity yet. Reworded before it shipped.
+- 2026-11-05: owner: All sessions opens the sessions page, as the desktop harness's does. R16 to R18 added.
 - 2026-11-05: owner, before this shipped: date groups go by creation, so a session never changes group as it works. R07 reworded; no test cites it.
 - 2026-11-05: created from the owner's decisions of 2026-11-05: pins, sections, grouping, sorting, filtering, collapsed groups kept across restarts (ADR 0026). R01 to R15 added.

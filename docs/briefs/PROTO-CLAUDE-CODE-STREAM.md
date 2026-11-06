@@ -109,7 +109,7 @@ A session's title is the backend's, so renaming a session from Ersa renames it i
 
 ### Deleting
 
-When the user deletes a session (FLOW-ARCHIVE-DELETE-SESSION), the adapter deletes its record file, `<session id>.jsonl`, and the folder of the same name beside it, which holds the session's subagent transcripts and stored tool results; it deletes nothing else of the CLI's. It deletes only when the live-session registry shows no process other than Core's own has the session open, never when the registry cannot say, and a record already gone counts as deleted. PROTO-CORE-API-R28 is the requirement. This and appending a `custom-title` entry (R22) are the only changes the adapter makes to the CLI's files.
+When the user deletes a session (FLOW-ARCHIVE-DELETE-SESSION), the adapter deletes its record file, `<session id>.jsonl`, and the folder of the same name beside it, which holds the session's subagent transcripts and stored tool results; it deletes nothing else of the CLI's. It deletes only when the live-session registry shows no process other than Core's own has the session open, never when the registry cannot say, and a record already gone counts as deleted. PROTO-CLAUDE-CODE-STREAM-R31 to R33. This and appending a `custom-title` entry (R22) are the only changes the adapter makes to the CLI's files.
 
 ### Live-session registry
 
@@ -229,6 +229,9 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R23**: The adapter shall project a `system/local_command` entry of the session record to the same events as the synthetic `assistant` message with the same `uuid` on the stream, except that each block id is the entry's `uuid` and the block's index, and shall project an entry whose `content` carries no output tag to nothing.
 - **PROTO-CLAUDE-CODE-STREAM-R24**: When the session's project is trusted, the adapter shall send `workspaceTrust` with `accepted: true` and the project's root as `directory` in the `initialize` request, and otherwise shall send no `workspaceTrust`.
 - **PROTO-CLAUDE-CODE-STREAM-R28**: When forking a session, the adapter shall start the CLI in the original's stored workspace path with `--resume` and the original's backend session id and `--fork-session`, store the `session_id` the new process reports as the fork's, and write nothing to the original's record.
+- **PROTO-CLAUDE-CODE-STREAM-R31**: When deleting a session, the adapter shall delete its record file and the folder of the same name beside it, and nothing else of the CLI's.
+- **PROTO-CLAUDE-CODE-STREAM-R32**: The adapter shall delete a session's record only when the live-session registry shows no process other than Core's own has the session open, and shall refuse when the registry cannot say.
+- **PROTO-CLAUDE-CODE-STREAM-R33**: When the record of a session being deleted is already gone, the adapter shall count it as deleted.
 
 ## Out of scope
 
@@ -245,6 +248,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 ## Changes
 
+- 2026-11-05: Deleting's rules made testable: PROTO-CLAUDE-CODE-STREAM-R31 to R33 added (R29 and R30 are the shelf pass's).
 - 2026-11-05: Deleting added under Session record: the adapter deletes a session's record file and its folder when the user deletes the session (owner). No requirement IDs changed.
 - 2026-11-05: forking with `--resume <id> --fork-session` (FLOW-FORK-SESSION), to be recorded as a fixture; PROTO-CLAUDE-CODE-STREAM-R28 added.
 - 2026-11-04: from #141 inbox: the encoded-cwd example uses the recordings' placeholder path instead of the owner's, since the repository is public. No requirement IDs changed.
