@@ -18,6 +18,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::time::Duration;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -58,6 +59,9 @@ pub struct Work {
     copying: AtomicBool,
     copied: AtomicU64,
     total: AtomicU64,
+    /// A pause after each chunk a copy writes: zero, except for tests that
+    /// need a copy to take a while ([`crate::CoreConfig::copy_pause`]).
+    chunk_pause: Duration,
     /// For tests: stop at this step (counting from 1), as a cancel arriving
     /// then would. 0 never stops.
     #[cfg(test)]
@@ -65,6 +69,14 @@ pub struct Work {
 }
 
 impl Work {
+    /// A job that pauses `chunk_pause` after each chunk it copies.
+    pub fn pausing(chunk_pause: Duration) -> Self {
+        Work {
+            chunk_pause,
+            ..Work::default()
+        }
+    }
+
     /// Tells the job to stop at its next step.
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
@@ -599,28 +611,36 @@ impl Copy<'_> {
             dest.write_all(&buffer[..read])?;
             self.work.copied.fetch_add(read as u64, Ordering::SeqCst);
             self.work.step()?;
+            if !self.work.chunk_pause.is_zero() {
+                std::thread::sleep(self.work.chunk_pause);
+            }
         }
         dest.sync_all()?;
         Ok(())
     }
 
     /// Copies a folder, leaving out its links (and anything that is neither
-    /// a file nor a folder), never following them.
+    /// a file nor a folder), never following them. Folders wait on a list
+    /// of their own rather than in nested calls, so a folder nested
+    /// thousands deep never runs the thread out of stack.
     fn folder(&mut self, from: &Path, to: &Path) -> Result<(), Fail> {
-        self.count_entry()?;
-        fs::create_dir(to)?;
-        for entry in fs::read_dir(from)? {
-            let entry = entry?;
-            let kind = entry.file_type()?;
-            self.work.step()?;
-            if kind.is_symlink() {
-                continue;
-            }
-            let dest = to.join(entry.file_name());
-            if kind.is_dir() {
-                self.folder(&entry.path(), &dest)?;
-            } else if kind.is_file() {
-                self.file(&entry.path(), &dest)?;
+        let mut folders = vec![(from.to_path_buf(), to.to_path_buf())];
+        while let Some((from, to)) = folders.pop() {
+            self.count_entry()?;
+            fs::create_dir(&to)?;
+            for entry in fs::read_dir(&from)? {
+                let entry = entry?;
+                let kind = entry.file_type()?;
+                self.work.step()?;
+                if kind.is_symlink() {
+                    continue;
+                }
+                let dest = to.join(entry.file_name());
+                if kind.is_dir() {
+                    folders.push((entry.path(), dest));
+                } else if kind.is_file() {
+                    self.file(&entry.path(), &dest)?;
+                }
             }
         }
         Ok(())

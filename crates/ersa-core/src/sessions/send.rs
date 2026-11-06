@@ -256,7 +256,7 @@ impl SessionManager {
         attachments: Vec<Attachment>,
         canceled: &mut watch::Receiver<bool>,
     ) -> Result<Prepared, SessionError> {
-        let work = Arc::new(Work::default());
+        let work = Arc::new(Work::pausing(self.copy_pause));
         if let Some(sending) = lock(&handle.sending).as_mut() {
             sending.work = Some(Arc::clone(&work));
         }
