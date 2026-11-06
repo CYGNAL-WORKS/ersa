@@ -16,6 +16,8 @@ type Pending = Session["tile"]["pending"][number];
 export type ShelfChange =
   /** The user chose a tile's chevron. */
   | { type: "chevron"; id: string; activeId?: string }
+  /** The user closed a session's shelf without its chevron: Escape, or a choice or focus elsewhere (R06, R07). */
+  | { type: "close"; id: string }
   /** The sessions as Core lists them now, and the active session. */
   | { type: "sessions"; sessions: readonly Session[]; activeId?: string };
 
@@ -29,6 +31,9 @@ export function shelfAfter(open: string | undefined, change: ShelfChange): strin
     case "chevron":
       if (change.id === change.activeId) return open;
       return change.id === open ? undefined : change.id;
+    case "close":
+      // Only the shelf named: a close that comes after another shelf opened leaves that one open.
+      return change.id === open ? undefined : open;
     case "sessions": {
       if (open === undefined) return undefined;
       // Making the session active closes its shelf (R26); so does it having nothing left to ask, or going.
