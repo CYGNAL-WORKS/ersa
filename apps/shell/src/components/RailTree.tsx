@@ -268,7 +268,10 @@ function ProjectGroup({
                     {project.trusted ? (
                       t("rail.heading.sessionCountStatus", { count: folded.count })
                     ) : (
-                      <span aria-label={t("rail.heading.sessionCountStatus", { count: folded.count })}>{folded.count}</span>
+                      <>
+                        <span aria-hidden="true">{folded.count}</span>
+                        <span className="rail-heading-heard">{t("rail.heading.sessionCountStatus", { count: folded.count })}</span>
+                      </>
                     )}
                   </span>
                 )}

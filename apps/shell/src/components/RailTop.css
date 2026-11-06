@@ -12,8 +12,3 @@
   gap: var(--space-sm);
   min-width: 0;
 }
-
-/* Unavailable, its icon reads with its label. */
-.rail-new-session:disabled .icon {
-  color: inherit;
-}
