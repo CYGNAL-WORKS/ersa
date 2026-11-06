@@ -423,7 +423,7 @@ async fn find(entries: &[WorktreeEntry], path: &str) -> Option<WorktreeEntry> {
 /// The key under which two spellings of one folder compare equal. Blocking.
 fn location_key(path: &str) -> String {
     match platform::canonicalize(std::path::Path::new(path)) {
-        Ok(canonical) => platform::path_key(&canonical.display().to_string()),
+        Ok(canonical) => platform::folder_key(&canonical),
         Err(_) => platform::path_key(path),
     }
 }
