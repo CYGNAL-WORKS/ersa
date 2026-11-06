@@ -386,7 +386,7 @@ describe("the base branch App gives a new workspace", () => {
     fireEvent.click(workspaceChip());
     const list = screen.getByRole("listbox", { name: "Workspace" });
     expect(within(list).getByRole("option", { name: /New workspace/ }).textContent).toContain("Isolated");
-    expect(within(list).getByRole("option", { name: /Project folder/ }).textContent).toContain("Shares files with you");
+    expect(within(list).getByRole("option", { name: /Project folder/ }).textContent).toContain("Shared");
     const search = within(list).getByRole("searchbox", { name: "Search branches" });
     expect(document.activeElement).toBe(search);
     const base = within(list).getByRole("group", { name: "Base branch" });
@@ -441,8 +441,39 @@ describe("the base branch App gives a new workspace", () => {
     expect(methods(core)).not.toContain("workspace.create");
   });
 
-  // verifies: FLOW-NEW-SESSION-R21
-  it("says why the branches could not be read, and leaves the base to Core's default", async () => {
+  // R28 (on #230 until it merges): says while the branches are read or why they cannot be.
+  it("says while the branches are read, with nothing to search, and leaves the base to Core's default", async () => {
+    // Core has not answered branch.list yet.
+    const core = await screenWith([project("alpha")], undefined, { ...starting, "branch.list": () => new Promise(() => {}) });
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace");
+    fireEvent.click(workspaceChip());
+    const list = screen.getByRole("listbox", { name: "Workspace" });
+    expect(list.querySelector(".chip-section-note")?.textContent).toBe("Reading the branches…");
+    expect(list.querySelector(".chip-section-note .glyph")).toBeNull();
+    expect((within(list).getByRole("searchbox") as HTMLInputElement).disabled).toBe(true);
+    // Focus goes to the chosen option, since the search box cannot be used.
+    expect(document.activeElement).toBe(within(list).getByRole("option", { name: /New workspace/ }));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await send("Fix the build");
+    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha" });
+  });
+
+  it("grows to hold the branches when they arrive while the list is open, and the search box can then be used", async () => {
+    let answer: (listed: typeof branches) => void = () => {};
+    await screenWith([project("alpha")], undefined, { ...starting, "branch.list": () => new Promise((r) => (answer = r)) });
+    fireEvent.click(workspaceChip());
+    const group = () => screen.getByRole("group", { name: "Base branch" });
+    expect(group().hasAttribute("data-grow")).toBe(false);
+    await act(async () => answer(branches));
+    await settle();
+    expect(group().hasAttribute("data-grow")).toBe(true);
+    expect(within(group()).getAllByRole("option")).toHaveLength(3);
+    expect((screen.getByRole("searchbox") as HTMLInputElement).disabled).toBe(false);
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from main");
+  });
+
+  // R28 (on #230 until it merges): says while the branches are read or why they cannot be.
+  it("says the branches could not be read, and leaves the base to Core's default", async () => {
     const core = await screenWith([project("alpha")], undefined, {
       ...starting,
       "branch.list": () => {
@@ -451,8 +482,13 @@ describe("the base branch App gives a new workspace", () => {
     });
     expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace");
     fireEvent.click(workspaceChip());
-    expect(screen.getByRole("listbox", { name: "Workspace" }).textContent).toContain("Ersa couldn't read this project's branches. The new workspace will start at the default branch.");
-    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" });
+    const list = screen.getByRole("listbox", { name: "Workspace" });
+    const note = list.querySelector(".chip-section-note");
+    expect(note?.textContent).toBe("Ersa couldn't read this project's branches. The new workspace will start at the default branch.");
+    expect(note?.querySelector('.glyph[data-tone="danger"]')).not.toBeNull();
+    expect((within(list).getByRole("searchbox") as HTMLInputElement).disabled).toBe(true);
+    expect(document.activeElement).toBe(within(list).getByRole("option", { name: /New workspace/ }));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     await send("Fix the build");
     expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha" });
   });
