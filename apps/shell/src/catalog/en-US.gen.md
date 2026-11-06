@@ -110,6 +110,30 @@ The connection status
 
 Untitled session
 
+### `rail.tile.moreLabel`
+
+More for {title}
+
+### `rail.tile.renameButton`
+
+Rename
+
+### `rail.tile.renameKey`
+
+F2
+
+### `rail.tile.renameStartingReason`
+
+Available once the session has started
+
+### `rail.tile.renameOfflineReason`
+
+Available once Ersa reaches your sessions
+
+### `rail.tile.titleLabel`
+
+Session title
+
 ### `rail.tile.boundaryName`
 
 This session

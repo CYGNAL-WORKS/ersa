@@ -94,7 +94,7 @@
 }
 
 /* The heading holds its menu, so the pointer over the open menu is not over the heading. */
-.rail-heading:hover:not(:has(.rail-menu:hover)),
+.rail-heading:hover:not(:has(.menu:hover)),
 .rail-heading[data-force="hover"] {
   color: var(--color-ink);
   background: var(--material-hover);
@@ -293,102 +293,6 @@
   background: var(--material-pressed);
 }
 
-/* More's menu: a floating layer in the top layer (a popover), above the rail and its scrolling, anchored below
-   More and aligned to its trailing edge; with no room below, it opens above (RAIL.md, Menus). */
-.rail-menu {
-  /* The popover's own placement and look give way to the layer's. */
-  position: fixed;
-  inset: auto;
-  position-area: block-end span-inline-start;
-  position-try-fallbacks: flip-block;
-  outline: none;
-  z-index: var(--stack-menu);
-  display: flex;
-  flex-direction: column;
-  min-width: max-content;
-  margin: var(--space-xs) 0;
-  padding: var(--space-xs);
-  list-style: none;
-  color: var(--color-ink);
-  background: var(--color-surface);
-  border: var(--line-hairline) solid var(--color-line);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-transient);
-  overflow: visible;
-  animation: rail-menu-in var(--motion-quick) var(--motion-ease-out);
-}
-
-/* Closing, it fades out the same way, then goes. */
-.rail-menu[data-closing] {
-  opacity: 0;
-  animation: rail-menu-out var(--motion-quick) var(--motion-ease-out);
-}
-
-/* Each item stretches to the menu's width. */
-.rail-menu > li {
-  display: grid;
-}
-
-/* A menu opens and closes with a fade alone. */
-@keyframes rail-menu-in {
-  from {
-    opacity: 0;
-  }
-}
-
-@keyframes rail-menu-out {
-  from {
-    opacity: 1;
-  }
-}
-
-/* An item: a row size-control high, padded space-sm, in ui, radius-md within the layer's radius-lg; a control
-   without an edge (RAIL.md, Menus). */
-.rail-menu-item {
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-height: var(--size-control);
-  padding: 0 var(--space-sm);
-  font: inherit;
-  font-size: var(--type-ui-size);
-  line-height: var(--type-ui-leading);
-  text-align: left;
-  color: var(--color-ink);
-  background: transparent;
-  border: var(--line-hairline) solid transparent;
-  border-radius: var(--radius-md);
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background var(--motion-quick) var(--motion-ease-out);
-}
-
-.rail-menu-item:hover:not([aria-disabled]),
-.rail-menu-item:focus-visible:not([aria-disabled]) {
-  background: var(--material-hover);
-}
-
-.rail-menu-item:active:not([aria-disabled]) {
-  background: var(--material-pressed);
-}
-
-.rail-menu-item:focus-visible {
-  outline: none;
-}
-
-.rail-menu-item[aria-disabled] {
-  color: var(--color-ink-faint);
-  cursor: default;
-}
-
-/* An unavailable item's reason, beneath its label, grows the row to hold it. */
-.rail-menu-reason {
-  color: var(--color-ink-muted);
-  font-size: var(--type-ui-small-size);
-  line-height: var(--type-ui-small-leading);
-}
-
 /* The heading's buttons fit inside its hairline edge, so their fills and focus edges stay within the heading. */
 .rail-heading-actions .icon-button {
   box-sizing: border-box;
@@ -403,13 +307,7 @@
   .rail-heading-trust,
   .rail-heading-count,
   .rail-heading-tip,
-  .rail-heading-actions,
-  .rail-menu-item {
+  .rail-heading-actions {
     transition: none;
-  }
-
-  .rail-menu,
-  .rail-menu[data-closing] {
-    animation: none;
   }
 }

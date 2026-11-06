@@ -397,3 +397,81 @@ describe("the rail's New session and collapsing", () => {
     expect(toggle("beta").closest(".rail-project")?.hasAttribute("data-collapsed")).toBe(false);
   });
 });
+
+// FLOW-ORGANIZE-SESSIONS (step 2; Variations and errors); docs/design/RAIL.md (A tile: More; Menus).
+describe("a tile's menu, and renaming on the tile", () => {
+  const titled = sessions.map((s, i) => ({ ...s, title: i === 0 ? "Fix the build" : "Write the notes" }));
+  const rail = () => screen.getByRole("navigation", { name: "Rail" });
+  // A tile is named by its backend first, then its title; More is named for it too, so the tile is found by its class.
+  const tile = (title: string) => [...rail().querySelectorAll<HTMLElement>(".session")].find((el) => el.textContent?.includes(title)) as HTMLElement;
+  const field = () => screen.queryByRole("textbox", { name: "Session title" }) as HTMLInputElement | null;
+  const renames = (core: ReturnType<typeof fakeCore>) => core.calls.filter((c) => c.method === "session.set_title").map((c) => c.params);
+  async function open(more: Parameters<typeof fakeCore>[0] = {}) {
+    const core = fakeCore({ "session.list": () => titled, ...more });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    return core;
+  }
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R02
+  it("renames the session through session.set_title when Rename is chosen and Enter pressed", async () => {
+    const core = await open({ "session.set_title": (params: { title: string }) => ({ title: params.title }) });
+    fireEvent.click(within(rail()).getByRole("button", { name: "More for Fix the build" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Rename/ }));
+    expect(field()?.value).toBe("Fix the build");
+    expect(document.activeElement).toBe(field());
+    fireEvent.change(field() as HTMLInputElement, { target: { value: "Fix the flaky build" } });
+    fireEvent.keyDown(field() as HTMLInputElement, { key: "Enter" });
+    await settle();
+    expect(renames(core)).toEqual([{ id: "s1", title: "Fix the flaky build" }]);
+    expect(field()).toBeNull();
+  });
+
+  it("turns the title into a field with F2, and Escape restores it, sending nothing", async () => {
+    const core = await open();
+    fireEvent.keyDown(tile("Write the notes"), { key: "F2" });
+    fireEvent.change(field() as HTMLInputElement, { target: { value: "Something else" } });
+    fireEvent.keyDown(field() as HTMLInputElement, { key: "Escape" });
+    expect(field()).toBeNull();
+    expect(tile("Write the notes")).toBeTruthy();
+    expect(renames(core)).toEqual([]);
+  });
+
+  it("keeps the field open with the reason when the backend refuses the title", async () => {
+    await open({
+      "session.set_title": () => {
+        // Core refuses a session whose record is gone with invalid_state (PROTO-CORE-API, Methods).
+        throw { kind: "rpc", error: { code: -32010, message: "session.set_title: Claude Code has no record of this session any more." } };
+      },
+    });
+    fireEvent.keyDown(tile("Fix the build"), { key: "F2" });
+    fireEvent.change(field() as HTMLInputElement, { target: { value: "Fix it" } });
+    fireEvent.keyDown(field() as HTMLInputElement, { key: "Enter" });
+    await settle();
+    expect(field()?.value).toBe("Fix it");
+    // Said beneath the tile, which the field points to.
+    const reason = document.getElementById(field()?.getAttribute("aria-errormessage") ?? "");
+    expect(reason?.getAttribute("role")).toBe("alert");
+    expect(reason?.textContent).toContain("no record of this session");
+  });
+
+  it("opens the same menu by right-click, the context-menu key and Shift+F10, and gives focus back to the tile", async () => {
+    await open();
+    const menu = () => screen.queryByRole("menu", { name: "More for Fix the build" });
+    fireEvent.contextMenu(tile("Fix the build"), { clientX: 40, clientY: 80 });
+    expect(menu()).toBeTruthy();
+    // From the pointer, focus goes to the menu.
+    expect(document.activeElement).toBe(menu());
+    fireEvent.keyDown(menu() as HTMLElement, { key: "Escape" });
+    expect(document.activeElement).toBe(tile("Fix the build"));
+
+    for (const press of [{ key: "ContextMenu" }, { key: "F10", shiftKey: true }]) {
+      fireEvent.keyDown(tile("Fix the build"), press);
+      // From the keyboard, focus goes to the first item.
+      expect(document.activeElement?.textContent).toMatch(/^Rename/);
+      fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
+      expect(document.activeElement).toBe(tile("Fix the build"));
+    }
+  });
+});
