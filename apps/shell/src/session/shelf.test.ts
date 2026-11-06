@@ -164,6 +164,7 @@ describe("what the shelf shows", () => {
   });
 
   // verifies: FLOW-APPROVE-PERMISSION-R25
+  // verifies: FLOW-APPROVE-PERMISSION-R29
   it("says a request can't be shown when its kind is unknown or Core no longer holds its event", () => {
     // A kind a newer Core may report, which this window doesn't know.
     const unknownKind = [{ kind: "approval" as Kind, request_id: "r7" }];
@@ -176,6 +177,12 @@ describe("what the shelf shows", () => {
     const late = apply(afterGap.transcript, envelope(permission("r2"), 41));
     expect(shelfOf({ ...afterGap, transcript: late }, pending(["permission", "r1"], ["permission", "r2"]))).toEqual({
       state: "unknown",
+      place: { n: 1, m: 2 },
+    });
+    // With no gap, the request it can't show is newer than every one it can, so the one it can show comes first.
+    expect(shelfOf(viewOf([permission("r2")]), pending(["permission", "r1"], ["permission", "r2"]))).toMatchObject({
+      state: "permission",
+      request: { request_id: "r2" },
       place: { n: 1, m: 2 },
     });
     // With nothing held about it at all, it can't be shown either.
