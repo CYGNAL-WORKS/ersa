@@ -42,10 +42,10 @@ The project chip on the new-session screen is the only place a project is added;
 - **FLOW-NEW-SESSION-R21**: When a git project has a new workspace chosen, the workspace chip shall offer the project's local branches as the base branch, with a search box that narrows them, and shall start at the repository's default branch for every new session, or, when the repository has none, at the checked-out commit; R04 shall create the workspace from the chosen base branch.
 - **FLOW-NEW-SESSION-R22**: The workspace chip shall name the workspace a session will start in: a new workspace with its base branch, or the project folder.
 - **FLOW-NEW-SESSION-R23**: While the backends on the chosen host are being detected, the new-session screen shall say so above the composer, and the composer shall be unavailable until detection ends.
-- **FLOW-NEW-SESSION-R28**: While a git project's branches are being read, the workspace chip shall say so in place of the branches; when they cannot be read, it shall say so and that the new workspace will start at the default branch. In both cases the chip shall name a new workspace without a base branch, in place of R22's name, and R04 shall create the workspace from the default branch Core finds.
 - **FLOW-NEW-SESSION-R24**: The trust question shall show the folder's path, ask whether it is a project the user created or one they trust (their own code, a well-known open source project, or their team's work) and to review the folder first if not, and say that agents will be able to read, edit and run files there.
 - **FLOW-NEW-SESSION-R25**: The trust question shall offer two answers, Cancel first and then Trust, with keyboard focus on Cancel when it opens; Trust shall add the project as trusted, and Ersa shall offer no way to add a project that is not trusted.
 - **FLOW-NEW-SESSION-R27**: When the user chooses Add project, or presses Ctrl+O on the new-session screen, with the local host chosen, Ersa shall open the system's folder dialog; once the user picks a folder that is not yet a project, Ersa shall ask the trust question (R24), and once they answer Trust, add the project as R25 says and choose it in the session controls.
+- **FLOW-NEW-SESSION-R28**: While a git project's branches are being read, the workspace chip shall say so in place of the branches; when they cannot be read, it shall say so and that the new workspace will start at the default branch. In both cases the chip shall name a new workspace without a base branch, in place of R22's name, and R04 shall create the workspace from the default branch Core finds.
 
 ## Verification
 
@@ -67,7 +67,7 @@ A project is added by typing its folder path in the rail and answering the trust
 
 ## Changes
 
-- 2026-11-06: from #229 inbox: what the workspace chip shows while the branches are read and when they can't be, and that the new workspace then starts at the default branch (R28; R24 to R27 are allocated on another branch). No other requirement IDs changed.
+- 2026-11-06: from #229 inbox: what the workspace chip shows while the branches are read and when they can't be, and that the new workspace then starts at the default branch (R28). No other requirement IDs changed.
 - 2026-11-06: owner's decision to match the Claude Code CLI's folder-trust prompt (ADR 0028, superseding 0018): the trust question shows the folder's path, a safety check and what agents can do there (R24), and its answers are Cancel, first and focused, and Trust; a project is no longer added untrusted (R25). R16 retired for R27, which drops what the question said beyond the CLI's prompt (what else trust lets run, every workspace, until withdrawn); tests that cite R16 move to R27. Open question on the security guide link.
 - 2026-11-05: R13 reworded for the rail's arrangement (FLOW-ORGANIZE-SESSIONS): a new tile sits where the arrangement puts it, under its project by default. Meaning unchanged for the default arrangement.
 - 2026-11-05: from #173 merge review, before any of it shipped: an existing project is found before the trust question (R18), the trust question says what trust covers (R16), and the no-projects offer is the local host's (R19).
