@@ -49,7 +49,7 @@ The replay server refuses every request that would create or change a session (P
 
 ## Built so far
 
-A project is added by typing its folder path in the rail and answering the trust question; R14 to R20 replace that. New session shows the new-session screen and creates nothing until the first message (R01 to R05, R08, R12). Until the open question on changing values mid-session is answered, the session controls under a running session show its values read-only. A host whose backend listing fails reads as having no backend available, which R11 replaces. The rail still groups sessions under a heading per workspace, so R13 is still to build (LAY-SHELL). Workspaces are made from the project folder's checked-out branch until R21 is built. With no session chosen, the window shows the newest.
+A project is added by typing its folder path in the rail and answering the trust question; R14 to R20 replace that. New session shows the new-session screen and creates nothing until the first message (R01 to R05, R08, R12). Until the open question on changing values mid-session is answered, the session controls under a running session show its values read-only. A host whose backend listing fails reads as having no backend available, which R11 replaces. The rail still groups sessions under a heading per workspace, so R13 is still to build (LAY-SHELL). With no session chosen, the window shows the newest.
 
 ## Open questions
 
@@ -62,6 +62,7 @@ A project is added by typing its folder path in the rail and answering the trust
 
 ## Changes
 
+- 2026-11-06: Built so far follows #184: new workspaces start from the chosen base branch (R21, R22). No requirement IDs changed.
 - 2026-11-05: R13 reworded for the rail's arrangement (FLOW-ORGANIZE-SESSIONS): a new tile sits where the arrangement puts it, under its project by default. Meaning unchanged for the default arrangement.
 - 2026-11-05: from #173 merge review, before any of it shipped: an existing project is found before the trust question (R18), the trust question says what trust covers (R16), and the no-projects offer is the local host's (R19).
 - 2026-11-05: owner's decisions on where a session runs: a project is added from the project chip through the system's folder dialog, and no path is typed (R10 retired; R14 to R20 added); the project chip lists projects most recently used first with path, kind and trust; a new workspace is made from a base branch that starts at the repository's default branch (R21, R22); the screen says when backends are being detected (R23). Open questions on a remote host's folder picker and on other kinds of base.
