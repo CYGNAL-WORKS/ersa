@@ -246,6 +246,14 @@ Folder
 
 Add project…
 
+### `sessionControls.project.addProjectShortcutLabel`
+
+Ctrl+O
+
+### `sessionControls.project.chooseFolderButton`
+
+Choose a folder
+
 ### `sessionControls.contextRing.noneLabel`
 
 Context: none used yet
@@ -261,5 +269,37 @@ Context: {percent} percent used
 ### `trust.notTrustedStatus`
 
 Not trusted
+
+### `trust.question.title`
+
+Trust {name}?
+
+### `trust.question.runsDetail`
+
+A trusted project’s own configuration runs in its sessions: hooks and MCP servers that start programs on this computer, and settings that change what the agent may do without asking.
+
+### `trust.question.coversDetail`
+
+Trust covers every workspace of the project and lasts until you withdraw it. Claude Code also records it for the whole repository the project is in, and applies it outside Ersa.
+
+### `trust.question.untrustedDetail`
+
+Untrusted, its sessions use only your own settings.
+
+### `trust.question.addTrustedButton`
+
+Add, trusted
+
+### `trust.question.addUntrustedButton`
+
+Add, not trusted
+
+### `trust.question.trustButton`
+
+Trust
+
+### `trust.question.cancelButton`
+
+Cancel
 
 ## `errors`

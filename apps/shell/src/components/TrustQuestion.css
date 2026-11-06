@@ -46,9 +46,56 @@
   line-height: var(--type-ui-small-leading);
 }
 
+/* The explanation, the one part that gives up room: it scrolls inside the question when the question is capped. */
+.trust-question-body {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.trust-question-title,
+.trust-question-path,
+.trust-question-actions {
+  flex-shrink: 0;
+}
+
 .trust-question-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-sm);
   margin-top: var(--space-xs);
+}
+
+/* Above the composer's box on the new-session screen (docs/design/COMPOSER.md, The trust question): a card on the
+   tile material that holds the screen's one focal glow while it is open, and opens upward from the box over
+   motion-settle, as the status line does. */
+.trust-question[data-place="composer"] {
+  gap: var(--space-sm);
+  padding: var(--space-lg);
+  background: var(--material-tile);
+  border-color: var(--color-line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glow-focal);
+  animation: trust-question-rise var(--motion-settle) var(--motion-ease-out);
+}
+
+.trust-question[data-place="composer"] .trust-question-title {
+  font-family: var(--type-ui-family);
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+}
+
+@keyframes trust-question-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-xs));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trust-question[data-place="composer"] {
+    animation: none;
+  }
 }

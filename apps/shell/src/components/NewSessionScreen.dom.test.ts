@@ -4,7 +4,7 @@
 
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Project } from "../protocol/core-api.gen";
 import type { BackendChoices, Choice } from "../session/controls";
 import { NewSessionScreen } from "./NewSessionScreen";
@@ -32,7 +32,7 @@ const props = (projects: Project[], more: Partial<Props> = {}): Props => ({
   projects,
   backends: { local: [claude] },
   onStart: async () => false,
-  onAddProject: async () => false,
+  onAddProject: async () => undefined,
   ...more,
 });
 
@@ -77,5 +77,45 @@ describe("where the new-session screen stays while the projects' order arrives",
     });
     rerender(createElement(NewSessionScreen, props([beta, alpha], { initialText: "Fix the build" })));
     expect(chosen()).toBe("Project: alpha");
+  });
+});
+
+describe("adding a project from the project chip", () => {
+  /** Chooses Add project… from the open project chip, and lets the dialog answer. */
+  const addFromChip = async () => {
+    fireEvent.click(screen.getByRole("button", { name: /^Project:/ }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("option", { name: /Add project…/ }));
+    });
+  };
+
+  // verifies: FLOW-NEW-SESSION-R16
+  it("offers the folder dialog only on the local host: a remote host's folders are not this computer's", async () => {
+    const remote = { id: "far", name: "buildbox", platform: "linux" as const };
+    const faraway: Project = { ...project("faraway"), host_id: "far", path: "/srv/faraway" };
+    const onChooseFolder = vi.fn(async () => ({ kind: "canceled" }) as const);
+    render(createElement(NewSessionScreen, props([faraway, alpha], { hosts: [host, remote], projectId: "faraway", onChooseFolder })));
+    await addFromChip();
+    expect(screen.getByRole("option", { name: /Add project…/ }).getAttribute("aria-disabled")).toBe("true");
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "o", ctrlKey: true });
+    expect(onChooseFolder).not.toHaveBeenCalled();
+  });
+
+  // verifies: FLOW-NEW-SESSION-R16
+  it("names a Windows folder by its own name in the trust question", async () => {
+    const onChooseFolder = async () => ({ kind: "new", path: "D:\\Clones\\stranger" }) as const;
+    render(createElement(NewSessionScreen, props([alpha], { onChooseFolder })));
+    await addFromChip();
+    const question = screen.getByRole("region", { name: "Trust stranger?" });
+    expect(question.textContent).toContain("D:\\Clones\\stranger");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R18
+  it("chooses a found project even before Core's list has it", async () => {
+    const beyond: Project = project("beyond");
+    const onChooseFolder = async () => ({ kind: "found", project: beyond }) as const;
+    render(createElement(NewSessionScreen, props([alpha], { onChooseFolder })));
+    await addFromChip();
+    expect(chosen()).toBe("Project: beyond");
   });
 });

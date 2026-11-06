@@ -397,6 +397,9 @@ pub fn run() {
     };
     tauri::Builder::default()
         .manage(shell)
+        // The system's folder dialog, which adds a project from the project
+        // chip (FLOW-NEW-SESSION-R16). The capability allows only `open`.
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             core_attach,
             core_request,
