@@ -16,7 +16,7 @@ export type Answer = { state: "sending"; decision: Decision } | { state: "failed
 export type Answers = Readonly<Record<string, Readonly<Record<string, Answer>>>>;
 
 /** What Core is sent for a decision: no message or updated input (R13). */
-export function decideParams(id: string, requestId: string, decision: Decision): Params<"session.decide_permission"> {
+function decideParams(id: string, requestId: string, decision: Decision): Params<"session.decide_permission"> {
   if (typeof decision === "object") return { id, request_id: requestId, behavior: "allow", apply_suggestions: [decision.suggestion] };
   return { id, request_id: requestId, behavior: decision };
 }
@@ -32,10 +32,12 @@ export function answering(client: CoreClient, change: (update: (answers: Answers
   // What is on its way, kept here as well as in the window's state, so a second choice before React renders the
   // first is still refused.
   const onItsWay = new Set<string>();
-  const set = (id: string, requestId: string, answer: Answer | undefined) =>
+  // `onlyHeld`: change the answer only while one is recorded, so a refusal that comes after the decision arrived
+  // leaves nothing behind.
+  const set = (id: string, requestId: string, answer: Answer | undefined, onlyHeld = false) =>
     change((answers) => {
       // Nothing to settle: the same record, so nothing renders again.
-      if (!answer && !answers[id]?.[requestId]) return answers;
+      if ((!answer || onlyHeld) && !answers[id]?.[requestId]) return answers;
       const session = { ...answers[id] };
       if (answer) session[requestId] = answer;
       else delete session[requestId];
@@ -56,7 +58,7 @@ export function answering(client: CoreClient, change: (update: (answers: Answers
         (error) => {
           onItsWay.delete(key);
           // Refused: say why, and offer the answers again (R19).
-          set(id, requestId, { state: "failed", message: describeError(error) });
+          set(id, requestId, { state: "failed", message: describeError(error) }, true);
         },
       );
     },

@@ -13,6 +13,8 @@ interface PermissionAnswersProps {
   answer?: Answer;
   /** Whether answers can reach Core now. */
   live: boolean;
+  /** Says Ersa is reconnecting while it can't reach Core, unless the surface around it already does. */
+  reconnectingNote?: boolean;
   onDecide: (decision: Decision) => void;
 }
 
@@ -22,7 +24,7 @@ interface PermissionAnswersProps {
  * transcript's permission card both offer them so (R27). docs/design/RAIL.md, The shelf: the answers, notes and
  * unavailable answers.
  */
-export function PermissionAnswers({ request, answer, live, onDecide }: PermissionAnswersProps) {
+export function PermissionAnswers({ request, answer, live, reconnectingNote = true, onDecide }: PermissionAnswersProps) {
   const denyFirst = request.flags.default_to_no;
   const suggestions = request.flags.suppress_always_allow ? [] : request.suggestions;
   const sending = answer?.state === "sending" ? answer.decision : undefined;
@@ -38,7 +40,7 @@ export function PermissionAnswers({ request, answer, live, onDecide }: Permissio
     );
   return (
     <div className="answers" aria-busy={sending !== undefined || undefined}>
-      {!live && (
+      {!live && reconnectingNote && (
         <p className="answers-note" role="status">
           {t("rail.shelf.reconnectingNote")}
         </p>

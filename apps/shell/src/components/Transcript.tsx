@@ -247,8 +247,16 @@ function PermissionCard({
         </p>
       )}
       {/* The answers the shelf would offer, with the same primary (FLOW-APPROVE-PERMISSION-R27). None is focused by
-          default, and Enter never approves. */}
-      {open && <PermissionAnswers request={request} answer={answer} live={live} onDecide={(decision) => onDecide(request.request_id, decision)} />}
+          default, and Enter never approves. The transcript says it is reconnecting above, once. */}
+      {open && (
+        <PermissionAnswers
+          request={request}
+          answer={answer}
+          live={live}
+          reconnectingNote={false}
+          onDecide={(decision) => onDecide(request.request_id, decision)}
+        />
+      )}
     </section>
   );
 }

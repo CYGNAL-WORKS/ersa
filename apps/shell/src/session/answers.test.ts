@@ -78,4 +78,14 @@ describe("answering a permission request", () => {
     expect(calls).toHaveLength(2);
     expect(answers()).toEqual({ s: { r1: { state: "sending", decision: "deny" } } });
   });
+
+  it("keeps nothing of a refusal that comes after the decision arrived", async () => {
+    let refuse: (error: unknown) => void = () => {};
+    const { sending, answers } = setup(() => new Promise((_, reject) => (refuse = reject)));
+    sending.decide("s", "r1", "allow");
+    sending.receive(decided("s", "r1"));
+    refuse(refusal);
+    await settle();
+    expect(answers()).toEqual({});
+  });
 });
