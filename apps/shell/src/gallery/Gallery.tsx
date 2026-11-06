@@ -407,7 +407,7 @@ function ShelfOpen({ shows, more = {} }: { shows: ShelfShows; more?: ShelfMore }
             id: open.id,
             tone: shelfTone(shows),
             render: (domId) => (
-              <Shelf id={domId} tile={tile} shows={shows} onRetry={() => {}} answer={answer} live={live} onDecide={() => {}} />
+              <Shelf id={domId} tile={tile} shows={shows} onRetry={() => {}} answers={answer && { [shelfRequest.request_id]: answer }} live={live} onDecide={() => {}} />
             ),
           }}
         />

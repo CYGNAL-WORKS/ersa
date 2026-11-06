@@ -16,8 +16,8 @@ interface ShelfProps {
   shows: ShelfShows;
   /** Reads the session's events again after reading them failed (R21). */
   onRetry?: () => void;
-  /** The shown request's answer on its way, or refused (R18, R19). */
-  answer?: Answer;
+  /** The session's answers on their way or refused, by request id (R18, R19). */
+  answers?: Readonly<Record<string, Answer>>;
   /** Whether answers can reach Core now (R20). */
   live: boolean;
   /** Answers the shown permission request (R13). */
@@ -30,12 +30,12 @@ interface ShelfProps {
  * kind, what is asked, its details, the session's readouts, then the answers (R23). `shelfOf` decides what it
  * shows; this only lays it out.
  */
-export function Shelf({ id, tile, shows, onRetry, answer, live, onDecide }: ShelfProps) {
+export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide }: ShelfProps) {
   return (
     <div id={id} className="shelf" role="dialog" aria-label={t("rail.shelf.nameLabel", { title: tile.title })} data-tone={shelfTone(shows)}>
       {/* A request it can't draw is said here, in the shelf, and leaves the rail as it was. */}
       <ErrorBoundary what={t("rail.shelf.boundaryName")} resetKey={shownKey(shows)}>
-        <Contents shows={shows} ring={tile.ring} cost={tile.cost} onRetry={onRetry} answer={answer} live={live} onDecide={onDecide} />
+        <Contents shows={shows} ring={tile.ring} cost={tile.cost} onRetry={onRetry} answers={answers} live={live} onDecide={onDecide} />
       </ErrorBoundary>
     </div>
   );
@@ -46,10 +46,10 @@ function Contents({
   ring,
   cost,
   onRetry,
-  answer,
+  answers,
   live,
   onDecide,
-}: Pick<ShelfProps, "shows" | "onRetry" | "answer" | "live" | "onDecide"> & { ring?: number; cost?: string }) {
+}: Pick<ShelfProps, "shows" | "onRetry" | "answers" | "live" | "onDecide"> & { ring?: number; cost?: string }) {
   switch (shows.state) {
     case "loading":
       return (
@@ -99,7 +99,7 @@ function Contents({
             </p>
           )}
           <Readouts ring={ring} cost={cost} />
-          <PermissionAnswers request={request} answer={answer} live={live} onDecide={(decision) => onDecide(request.request_id, decision)} />
+          <PermissionAnswers request={request} answer={answers?.[request.request_id]} live={live} onDecide={(decision) => onDecide(request.request_id, decision)} />
         </>
       );
     }

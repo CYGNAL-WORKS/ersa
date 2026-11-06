@@ -31,7 +31,7 @@ const draw = (shows: ShelfShows, more: { ring?: number; cost?: string; onRetry?:
       tile: { title: "Fix the flaky reconnect test", ring: more.ring, cost: more.cost },
       shows,
       onRetry: more.onRetry,
-      answer: more.answer,
+      answers: more.answer && { [request.request_id]: more.answer },
       live: more.live ?? true,
       onDecide: () => {},
     }),
@@ -131,7 +131,7 @@ describe("the shelf", () => {
   // verifies: FLOW-APPROVE-PERMISSION-R19
   it("says why Core refused an answer, and offers the answers again", () => {
     const html = draw({ state: "permission", request }, { answer: { state: "failed", message: "the session has ended" } });
-    expect(html).toContain('<div class="answers-refused" role="alert"><p class="problem">Ersa couldn&#x27;t send your answer.</p><p class="answers-reason">the session has ended</p></div>');
+    expect(html).toContain('<div class="answers-refused" role="alert"><p class="problem">Your answer wasn&#x27;t accepted.</p><p class="answers-reason">the session has ended</p></div>');
     expect(html).not.toContain("disabled");
   });
 

@@ -60,7 +60,7 @@ export const enUS = {
       denyButton: "Deny",
       allowButton: "Allow",
       // Followed by Core's reason, beneath.
-      answerRefusedError: "Ersa couldn't send your answer.",
+      answerRefusedError: "Your answer wasn't accepted.",
       reconnectingNote: "Reconnecting to Core…",
     },
   },
