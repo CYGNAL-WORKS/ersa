@@ -131,8 +131,8 @@ export const enUS = {
       defaultBranchStatus: "Default",
       noBranchMatchesEmpty: "No branch matches.",
       readingBranchesProgress: "Reading the branches…",
-      // Core could not list the project's branches; the new workspace starts at the default branch.
-      branchesFailedNote: "Ersa couldn't read the branches: {reason}",
+      // The project's branches could not be listed; the new workspace starts at the repository's default branch.
+      branchesFailedError: "Ersa couldn't read this project's branches. The new workspace will start at the default branch.",
     },
     // The context ring's name, in the session controls and on a tile.
     contextRing: {

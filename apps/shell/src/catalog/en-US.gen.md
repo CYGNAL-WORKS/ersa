@@ -280,9 +280,9 @@ No branch matches.
 
 Reading the branches…
 
-### `sessionControls.workspace.branchesFailedNote`
+### `sessionControls.workspace.branchesFailedError`
 
-Ersa couldn't read the branches: {reason}
+Ersa couldn't read this project's branches. The new workspace will start at the default branch.
 
 ### `sessionControls.contextRing.noneLabel`
 

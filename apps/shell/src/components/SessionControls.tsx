@@ -73,7 +73,7 @@ function baseSection(branches: Branches, base: string | undefined, onChoose: (id
       branches.state === "reading"
         ? t("sessionControls.workspace.readingBranchesProgress")
         : branches.state === "failed"
-          ? t("sessionControls.workspace.branchesFailedNote", { reason: branches.message })
+          ? t("sessionControls.workspace.branchesFailedError")
           : t("sessionControls.workspace.noBranchMatchesEmpty"),
   };
 }
