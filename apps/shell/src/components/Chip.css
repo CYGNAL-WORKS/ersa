@@ -304,6 +304,10 @@
   outline: none;
 }
 
+.chip-search-input:disabled {
+  cursor: default;
+}
+
 .chip-search-input::placeholder {
   color: var(--color-ink-faint);
 }
@@ -334,14 +338,33 @@
 .chip-section-note {
   contain: inline-size;
   margin: 0;
+  /* Room for the danger glyph that leads it when the options cannot be read. */
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-xs);
   padding: var(--space-xs) var(--space-sm);
   font-size: var(--type-ui-small-size);
   line-height: var(--type-ui-small-leading);
   color: var(--color-ink-muted);
 }
 
+/* The options arriving while the list is open: it grows to hold them. */
+.chip-section-options > ul[data-grow] {
+  animation: chip-section-grow var(--motion-quick) var(--motion-ease-out);
+}
+
+@keyframes chip-section-grow {
+  from {
+    max-height: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chip-search {
     transition: none;
+  }
+
+  .chip-section-options > ul[data-grow] {
+    animation: none;
   }
 }

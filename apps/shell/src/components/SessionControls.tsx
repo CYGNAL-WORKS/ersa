@@ -50,7 +50,7 @@ interface SessionControlsProps {
 const workspaceOption = (kind: WorkspaceKind): ChipOption =>
   kind === "isolated"
     ? { id: kind, label: t("sessionControls.workspace.newWorkspaceLabel"), status: t("sessionControls.workspace.isolatedStatus") }
-    : { id: kind, label: t("sessionControls.workspace.projectFolderLabel"), status: t("sessionControls.workspace.sharesFilesDescription") };
+    : { id: kind, label: t("sessionControls.workspace.projectFolderLabel"), status: t("sessionControls.workspace.sharedStatus") };
 
 /**
  * The base branch beneath a new workspace (FLOW-NEW-SESSION-R21): the project's branches narrowed by the search box,
@@ -69,6 +69,9 @@ function baseSection(branches: Branches, base: string | undefined, onChoose: (id
       })),
     value: base,
     onChoose,
+    // While they are read or when they cannot be, there is nothing to search (FLOW-NEW-SESSION-R28).
+    unavailable: branches.state !== "read",
+    problem: branches.state === "failed",
     empty:
       branches.state === "reading"
         ? t("sessionControls.workspace.readingBranchesProgress")

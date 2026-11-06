@@ -128,7 +128,7 @@ export const enUS = {
       newWorkspaceLabel: "New workspace",
       isolatedStatus: "Isolated",
       projectFolderLabel: "Project folder",
-      sharesFilesDescription: "Shares files with you",
+      sharedStatus: "Shared",
       // What the chip reads with a new workspace and its base branch chosen.
       newFromLabel: "New workspace from {branch}",
       baseBranchHeading: "Base branch",

@@ -43,6 +43,13 @@ export interface ChipSection {
   onChoose: (id: string) => void;
   /** Said in place of the options when none match; also what is said while there are none to list at all. */
   empty: string;
+  /**
+   * The options are not there to search: being read, or not readable. The search box is unavailable, and opening
+   * the list focuses the chosen option. When they arrive while the list is open, it grows to hold them.
+   */
+  unavailable?: boolean;
+  /** `empty` says why there are none: it leads with the danger glyph. */
+  problem?: boolean;
 }
 
 interface ChipProps {
@@ -104,7 +111,7 @@ export function Chip({ name, icon, prefix, value, reads, placeholder, problem, p
     if (!open || !focusOnOpen.current) return;
     focusOnOpen.current = false;
     // A list with a search box opens with focus in it, so typing narrows at once.
-    if (search.current) return search.current.focus({ preventScroll: true });
+    if (search.current && !search.current.disabled) return search.current.focus({ preventScroll: true });
     const items = optionsIn(list.current);
     (items.find((el) => el.dataset.id === value) ?? items[0])?.focus({ preventScroll: true });
   }, [open, value]);
@@ -129,8 +136,11 @@ export function Chip({ name, icon, prefix, value, reads, placeholder, problem, p
     if (disabled) setOpen(false);
   }, [disabled]);
 
+  // Whether the list opened before its section's options arrived, so it grows to hold them when they do.
+  const [openedWaiting, setOpenedWaiting] = useState(initialOpen && section?.unavailable === true);
   const show = () => {
     focusOnOpen.current = true;
+    setOpenedWaiting(section?.unavailable === true);
     setOpen(true);
   };
   // An arrow on the chip while its list is already open goes into the list at once.
@@ -301,7 +311,9 @@ export function Chip({ name, icon, prefix, value, reads, placeholder, problem, p
                     ref={search}
                     className="chip-search-input"
                     type="search"
-                    data-item=""
+                    // Reached by the arrows only while it can be used.
+                    data-item={section.unavailable ? undefined : ""}
+                    disabled={section.unavailable}
                     aria-label={section.placeholder}
                     placeholder={section.placeholder}
                     value={query}
@@ -310,7 +322,7 @@ export function Chip({ name, icon, prefix, value, reads, placeholder, problem, p
                 </span>
               </li>
               <li className="chip-section-options" role="presentation">
-                <ul role="group" aria-labelledby={`${listId}-section`}>
+                <ul role="group" aria-labelledby={`${listId}-section`} data-grow={(openedWaiting && !section.unavailable) || undefined}>
                   {narrowed.map((option) => (
                     <li
                       key={option.id}
@@ -329,7 +341,12 @@ export function Chip({ name, icon, prefix, value, reads, placeholder, problem, p
                     </li>
                   ))}
                 </ul>
-                {narrowed.length === 0 && <p className="chip-section-note">{section.empty}</p>}
+                {narrowed.length === 0 && (
+                  <p className="chip-section-note">
+                    {section.problem && <span className="glyph" data-tone="danger" aria-hidden="true" />}
+                    {section.empty}
+                  </p>
+                )}
               </li>
             </>
           )}

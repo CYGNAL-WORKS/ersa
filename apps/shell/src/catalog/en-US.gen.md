@@ -266,9 +266,9 @@ Isolated
 
 Project folder
 
-### `sessionControls.workspace.sharesFilesDescription`
+### `sessionControls.workspace.sharedStatus`
 
-Shares files with you
+Shared
 
 ### `sessionControls.workspace.newFromLabel`
 
