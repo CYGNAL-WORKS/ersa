@@ -52,6 +52,94 @@ export function workspaceKinds(project: Project): WorkspaceKind[] {
   return WORKSPACE_ADAPTERS.includes(project.vcs) ? ["isolated", "root"] : ["root"];
 }
 
+/**
+ * The sessions newest first, by `created_at`: the rail's order, and the project list's (FLOW-NEW-SESSION-R14).
+ * Core issues `created_at` as RFC 3339 in UTC, so the strings sort as times do.
+ */
+export function newestFirst<S extends Pick<Session, "created_at">>(sessions: readonly S[]): S[] {
+  return sessions.slice().sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
+}
+
+/**
+ * The projects most recently used first (FLOW-NEW-SESSION-R14): by the creation time of each project's newest session
+ * in `session.list`, a session's project read through its workspace. A project with no session it can be traced to
+ * comes after the used ones, and those keep the order Core lists them in.
+ */
+export function recentFirst(
+  projects: readonly Project[],
+  sessions: readonly Pick<Session, "workspace_id" | "created_at">[],
+  workspaces: Readonly<Record<string, Pick<Workspace, "project_id">>>,
+): Project[] {
+  // Walking the sessions newest first, a project's first session met is its newest, so the order met is the order.
+  const rank = new Map<string, number>();
+  for (const s of newestFirst(sessions)) {
+    const project = workspaces[s.workspace_id]?.project_id;
+    if (project !== undefined && !rank.has(project)) rank.set(project, rank.size);
+  }
+  // Array.prototype.sort is stable, so unused projects keep Core's order.
+  return [...projects].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity) || 0);
+}
+
+/**
+ * The project list's order as the window shows it (FLOW-NEW-SESSION-R14): `recentFirst` by `listed`, the sessions
+ * `session.list` gave, or, while that list is reloading or Core is away (`listed` absent), by `kept`, the sessions
+ * it gave last, so the order and the project the screen starts at do not jump back to Core's order meanwhile.
+ * Returns the order and the sessions to keep for next time.
+ */
+export function projectOrder(
+  projects: readonly Project[],
+  listed: readonly Session[] | undefined,
+  kept: readonly Session[],
+  workspaces: Readonly<Record<string, Pick<Workspace, "project_id">>>,
+): { projects: Project[]; kept: readonly Session[] } {
+  const by = listed ?? kept;
+  return { projects: recentFirst(projects, by, workspaces), kept: by };
+}
+
+/** Where the new-session screen starts, and what the user has chosen on it since. */
+export interface ScreenSeed {
+  /** The project New session was chosen for, if any. */
+  shownFor?: string;
+  /** The last-used values the screen started from. */
+  seededWith?: SessionValues;
+  /** The user has chosen, written or sent on the screen: nothing re-seeds it after that. */
+  touched: boolean;
+  /** What the user has chosen; the controls show it where the project and its host offer it. */
+  wanted: Partial<SessionValues>;
+}
+
+/**
+ * The screen's seed as of this render: `prev` while nothing calls for a fresh start, else a fresh start at `first`
+ * with what was last used there (FLOW-NEW-SESSION-R02). A fresh start comes when New session is chosen for another
+ * project, and, until the user touches the screen, when last-used values arrive or the starting project itself
+ * changes: the sessions and workspaces that order the projects arrive after the screen opens at launch
+ * (FLOW-NEW-SESSION-R15). Returns `prev` itself when it stands, so a caller can tell nothing changed.
+ */
+export function seedScreen(
+  prev: ScreenSeed | undefined,
+  first: Project | undefined,
+  projectId: string | undefined,
+  lastUsed: Readonly<Record<string, SessionValues>>,
+): ScreenSeed {
+  const fresh: () => ScreenSeed = () => ({
+    shownFor: projectId,
+    seededWith: first && lastUsed[first.id],
+    touched: false,
+    wanted: first ? { ...lastUsed[first.id], project_id: first.id } : {},
+  });
+  if (prev === undefined || prev.shownFor !== projectId) return fresh();
+  if (!prev.touched && first && (lastUsed[first.id] !== prev.seededWith || first.id !== prev.wanted.project_id)) return fresh();
+  return prev;
+}
+
+/**
+ * The project the new-session screen starts at: the one New session was chosen for, else the most recently used
+ * project on `hostId` (FLOW-NEW-SESSION-R15), else the most recently used of all. `ordered` is `recentFirst`'s order.
+ */
+export function startingProject(ordered: readonly Project[], hostId: string, projectId?: string): Project | undefined {
+  return ordered.find((p) => p.id === projectId) ?? ordered.find((p) => p.host_id === hostId) ?? ordered[0];
+}
+
 /** The backends a session can start with: those detected as available. */
 export function available(backends: readonly BackendChoices[]): BackendChoices[] {
   return backends.filter((b) => b.status === "available");
