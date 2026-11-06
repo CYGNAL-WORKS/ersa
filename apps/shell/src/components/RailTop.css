@@ -1,0 +1,14 @@
+/* The rail's top row: New session fills it, with room at its trailing side for the arrange button. */
+.rail-top {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+/* The button every other surface uses, with a plus at size-icon before its label. */
+.rail-new-session {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
