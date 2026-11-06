@@ -62,7 +62,7 @@ export function SessionList({ view, activeId, onSelect, force, workspaces, backe
   const tile = (s: Session) => {
     const open = shelf?.id === s.id ? shelf : undefined;
     return (
-      <TileItem key={s.id} shelf={open} onClose={() => onCloseShelf?.(s.id)}>
+      <TileItem key={s.id} id={s.id} shelf={open} onClose={onCloseShelf}>
         {(shelfDomId) => (
           <SessionTile
             session={s}
@@ -208,7 +208,18 @@ function SessionTile({
  * shelf is placed by, and tells the shelf where the two join, so they read as one shape (docs/design/RAIL.md, The
  * shelf: One shape).
  */
-function TileItem({ shelf, onClose, children }: { shelf?: OpenShelf; onClose: () => void; children: (shelfDomId: string) => ReactNode }) {
+function TileItem({
+  id,
+  shelf,
+  onClose: close,
+  children,
+}: {
+  id: string;
+  shelf?: OpenShelf;
+  onClose?: (id: string) => void;
+  children: (shelfDomId: string) => ReactNode;
+}) {
+  const onClose = () => close?.(id);
   const item = useRef<HTMLLIElement>(null);
   const domId = useId();
   const open = shelf !== undefined;
@@ -278,11 +289,11 @@ function TileItem({ shelf, onClose, children }: { shelf?: OpenShelf; onClose: ()
   useEffect(() => {
     if (!open) return;
     const away = (event: PointerEvent) => {
-      if (event.target instanceof Node && !item.current?.contains(event.target)) onClose();
+      if (event.target instanceof Node && !item.current?.contains(event.target)) close?.(id);
     };
     document.addEventListener("pointerdown", away, true);
     return () => document.removeEventListener("pointerdown", away, true);
-  }, [open, onClose]);
+  }, [open, id, close]);
   const focusIn = (event: FocusEvent) => {
     focusInShelf.current = inShelf(event.target);
   };
