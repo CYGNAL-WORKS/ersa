@@ -19,6 +19,7 @@
 pub mod adapters;
 pub mod api;
 pub mod app_log;
+pub mod attachments;
 pub mod harness_tools;
 pub mod modes;
 pub mod packs;

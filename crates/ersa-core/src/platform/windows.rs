@@ -75,6 +75,44 @@ pub fn host_name() -> String {
     std::env::var("COMPUTERNAME").unwrap_or_else(|_| "localhost".to_string())
 }
 
+/// Whether `path` names a named pipe or a device: one in the `\\.\` or
+/// non-drive `\\?\` namespaces, any host's `pipe` share
+/// (`\\localhost\pipe\x`), or a reserved device name (`NUL`, `COM1`, `NUL:`,
+/// with any extension) in any folder. Windows reports such a path as a
+/// file, and asking about it connects to whatever serves it, so it is told
+/// by its name alone.
+pub fn names_device(path: &Path) -> bool {
+    path.components().any(|component| match component {
+        Component::Prefix(prefix) => match prefix.kind() {
+            Prefix::DeviceNS(_) | Prefix::Verbatim(_) => true,
+            Prefix::UNC(_, share) | Prefix::VerbatimUNC(_, share) => {
+                share.eq_ignore_ascii_case("pipe")
+            }
+            _ => false,
+        },
+        Component::Normal(part) => {
+            let part = part.to_string_lossy().to_uppercase();
+            // The name before any extension or stream, without the spaces
+            // Windows ignores.
+            let stem = part.split(['.', ':']).next().unwrap_or("").trim_end();
+            // COM and LPT take 1 to 9, and the superscripts 1, 2 and 3.
+            let numbered = |name: &str| {
+                stem.strip_prefix(name).is_some_and(|digit| {
+                    let mut chars = digit.chars();
+                    matches!(
+                        (chars.next(), chars.next()),
+                        (Some('1'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None)
+                    )
+                })
+            };
+            matches!(stem, "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
+                || numbered("COM")
+                || numbered("LPT")
+        }
+        _ => false,
+    })
+}
+
 /// The canonical form of an existing path: absolute, with `.`, `..`, and
 /// links resolved, and the letter case the file system stores.
 ///

@@ -13,6 +13,9 @@
 //!   endpoint the current user serves.
 //! - [`canonicalize`] and [`path_key`]: one spelling of a local path, and the
 //!   key under which two spellings of the same folder compare equal.
+//! - [`names_device`]: whether a path names a pipe or a device by its
+//!   name alone (only Windows has such names), for refusing one before
+//!   anything opens it.
 //! - [`ProcessTree`]: a child process and everything it starts, killed as one
 //!   unit (a job object on Windows, a process group elsewhere) and started
 //!   without a console window; [`resolve_program`] finds the file to start,
@@ -34,12 +37,12 @@ mod windows;
 #[cfg(unix)]
 pub use self::unix::{
     Listener, ProcessTree, canonicalize, connect, default_data_dir, default_endpoint, host_name,
-    labelled_endpoint, path_key, resolve_program,
+    labelled_endpoint, names_device, path_key, resolve_program,
 };
 #[cfg(windows)]
 pub use self::windows::{
     Listener, ProcessTree, canonicalize, connect, default_data_dir, default_endpoint, host_name,
-    labelled_endpoint, path_key, resolve_program,
+    labelled_endpoint, names_device, path_key, resolve_program,
 };
 
 /// The key a project's folder is stored and compared under: its canonical

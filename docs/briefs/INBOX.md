@@ -8,6 +8,5 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-06 LAY-SHELL: The rail holds a merge's leftovers that contradict each other: two opening lines, an "Add project sits at the end of the tree" bullet, and three versions each of Loading, empty and failed and of The foot (two under The shelf), whose empty-tree notes differ ("how to add one", "to start with New session", "to choose a folder in New session"). #156 built the tree to the issue and the 2026-11-05 change log: no Add project row in the tree, and the empty tree says to start with New session; the existing add-project form stays beneath the tree until the project-chip ticket.
 
 ## Resolved recently (optional, trimmed in planning passes)

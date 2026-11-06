@@ -572,7 +572,7 @@ async fn an_adapter_that_panics_while_starting_fails_the_session_cleanly() {
         .await;
     let events = client.events_until("session.ended").await;
     assert_eq!(events.last().unwrap()["event"]["reason"], "error");
-    // Not live any more: it can be removed.
+    // It has ended: it can be removed.
     client.result("session.remove", json!({ "id": id })).await;
 }
 

@@ -7,7 +7,7 @@ import type { Sending } from "../session/follow";
 import { treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Icon, IconButton } from "./Icon";
-import { type Backends, type ForcedTile, SessionTile } from "./SessionTile";
+import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem } from "./SessionTile";
 import { TrustQuestion } from "./TrustQuestion";
 import "./RailTree.css";
 
@@ -38,6 +38,12 @@ interface RailTreeProps {
   backends?: Backends;
   /** The unseen sessions' ids (LAY-SHELL, Unseen): their titles read strong until they are made active. */
   unseen?: ReadonlySet<string>;
+  /** The open shelf: its session, its tone, and the shelf itself, which is drawn beside that session's tile. */
+  shelf?: OpenShelf;
+  /** The user chose a tile's chevron (FLOW-APPROVE-PERMISSION-R01). */
+  onChevron?: (id: string) => void;
+  /** The user closed a session's shelf: Escape, or a choice or focus outside it and its tile (R06, R07). */
+  onCloseShelf?: (id: string) => void;
   /** For the gallery: a pointer or keyboard state on one tile or one heading, the menu open, the trust question asked. */
   force?: ForcedTile;
   forceHeading?: { id: string; state: "hover" | "focus" | "pressed" };
@@ -47,27 +53,34 @@ interface RailTreeProps {
 
 /** The rail's tree (LAY-SHELL, The rail): each project's heading with its sessions beneath it, and their notes. */
 export function RailTree(props: RailTreeProps) {
-  const { projects, sessions, workspaces, placing, activeId, onSelect, backends, unseen, force } = props;
+  const { projects, sessions, workspaces, placing, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
   const listed = projects.state === "ready" ? projects.projects : [];
   const tree = treeOf(listed, workspaces, sessions.state === "ready" ? sessions.sessions : []);
   // A session waits to be placed while the projects or their workspaces are still being read, so it does not
   // sit at the end and then move. When the projects could not be read, every session sits at the end.
   const looseShown = projects.state === "error" || (projects.state === "ready" && !placing);
-  const tile = (s: Session) => (
-    <li key={s.id}>
-      {/* A tile that fails to draw takes only itself down; a new listing of the session tries again. */}
-      <ErrorBoundary what={t("rail.tile.boundaryName")} resetKey={JSON.stringify(s)}>
-        <SessionTile
-          session={s}
-          backends={backends}
-          active={s.id === activeId}
-          unseen={unseen?.has(s.id) ?? false}
-          force={force?.id === s.id ? force.state : undefined}
-          onSelect={onSelect}
-        />
-      </ErrorBoundary>
-    </li>
-  );
+  const tile = (s: Session) => {
+    const open = shelf?.id === s.id ? shelf : undefined;
+    return (
+      <TileItem key={s.id} id={s.id} shelf={open} onClose={onCloseShelf}>
+        {(shelfDomId) => (
+          // A tile that fails to draw takes only itself down; a new listing of the session tries again.
+          <ErrorBoundary what={t("rail.tile.boundaryName")} resetKey={JSON.stringify(s)}>
+            <SessionTile
+              session={s}
+              backends={backends}
+              active={s.id === activeId}
+              unseen={unseen?.has(s.id) ?? false}
+              force={force?.id === s.id ? force.state : undefined}
+              onSelect={onSelect}
+              shelf={open && { tone: open.tone, domId: shelfDomId }}
+              onChevron={onChevron}
+            />
+          </ErrorBoundary>
+        )}
+      </TileItem>
+    );
+  };
   return (
     <section className="rail-tree" aria-label={t("rail.tree.label")}>
       {projects.state === "loading" && <p className="rail-note">{t("rail.tree.loadingProgress")}</p>}

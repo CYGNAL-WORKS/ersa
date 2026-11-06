@@ -20,7 +20,7 @@ export const enUS = {
       loadingProgress: "Loading…",
       noProjectsEmpty: "No projects yet.",
       // A project is added from the new-session screen (LAY-SHELL, The rail).
-      noProjectsHint: "Start with New session, where you can add one.",
+      noProjectsHint: "Choose a folder in New session to start.",
       projectsError: "Ersa can't read your projects.",
       sessionsError: "Ersa can't read your sessions.",
       // Names the tree when it fails to draw: "The projects and sessions could not be shown:".
@@ -68,6 +68,32 @@ export const enUS = {
       questionWant: "Has a question",
       needsYouWant: "Needs you",
       needsYouCountWant: "Needs you · {count}",
+    },
+    // The shelf (docs/design/RAIL.md, The shelf; FLOW-APPROVE-PERMISSION): a session's request, pulled out of its tile.
+    shelf: {
+      // Heard, not shown: the shelf's name, and its chevron's.
+      nameLabel: "Request from {title}",
+      permissionHeading: "Permission request",
+      questionHeading: "Question",
+      // The shown request's place among the session's requests, at the heading line's trailing end.
+      placeLabel: "{n} of {m}",
+      // Heard, not shown, as the shelf moves to the next request: "Permission request, 2 of 3: Run the tests".
+      nextLabel: "{kind}, {n} of {m}: {asked}",
+      // Heard as the shelf moves to a request it can't show: "2 of 3: This session is waiting on…".
+      nextUnknownLabel: "{n} of {m}: {note}",
+      pathLabel: "Path:",
+      loadingProgress: "Loading…",
+      readError: "Ersa can't read this session's requests.",
+      retryButton: "Retry",
+      unknownNote: "This session is waiting on a request Ersa can't show here.",
+      // Names the shelf's contents when they fail to draw: "This request could not be shown:".
+      boundaryName: "This request",
+      // A permission request's answers: the transcript's permission card offers the same ones (R27).
+      denyButton: "Deny",
+      allowButton: "Allow",
+      // Followed by Core's reason, beneath.
+      answerRefusedError: "Your answer wasn't accepted.",
+      reconnectingNote: "Reconnecting to Core…",
     },
   },
   transcript: {},

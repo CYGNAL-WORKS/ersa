@@ -18,7 +18,7 @@ No projects yet.
 
 ### `rail.tree.noProjectsHint`
 
-Start with New session, where you can add one.
+Choose a folder in New session to start.
 
 ### `rail.tree.projectsError`
 
@@ -139,6 +139,70 @@ Needs you
 ### `rail.tile.needsYouCountWant`
 
 Needs you · {count}
+
+### `rail.shelf.nameLabel`
+
+Request from {title}
+
+### `rail.shelf.permissionHeading`
+
+Permission request
+
+### `rail.shelf.questionHeading`
+
+Question
+
+### `rail.shelf.placeLabel`
+
+{n} of {m}
+
+### `rail.shelf.nextLabel`
+
+{kind}, {n} of {m}: {asked}
+
+### `rail.shelf.nextUnknownLabel`
+
+{n} of {m}: {note}
+
+### `rail.shelf.pathLabel`
+
+Path:
+
+### `rail.shelf.loadingProgress`
+
+Loading…
+
+### `rail.shelf.readError`
+
+Ersa can't read this session's requests.
+
+### `rail.shelf.retryButton`
+
+Retry
+
+### `rail.shelf.unknownNote`
+
+This session is waiting on a request Ersa can't show here.
+
+### `rail.shelf.boundaryName`
+
+This request
+
+### `rail.shelf.denyButton`
+
+Deny
+
+### `rail.shelf.allowButton`
+
+Allow
+
+### `rail.shelf.answerRefusedError`
+
+Your answer wasn't accepted.
+
+### `rail.shelf.reconnectingNote`
+
+Reconnecting to Core…
 
 ## `transcript`
 

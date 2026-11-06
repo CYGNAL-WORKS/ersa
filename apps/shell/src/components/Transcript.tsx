@@ -1,19 +1,23 @@
 import { type ReactNode, memo, useLayoutEffect, useRef } from "react";
-import type { ToolInput } from "../protocol/agent-events.gen";
+import type { PermissionRequested, ToolInput } from "../protocol/agent-events.gen";
+import type { Answer, Decision } from "../session/answers";
 import type { SessionView, Sending } from "../session/follow";
 import { stateText } from "../session/states";
 import { type Item, isOpen } from "../session/transcript";
 import { Button } from "./Button";
+import { PermissionAnswers } from "./PermissionAnswers";
 import { SessionTitle } from "./SessionTitle";
 import "./Transcript.css";
 
-type Decide = (requestId: string, behavior: "allow" | "deny") => void;
+type Decide = (requestId: string, decision: Decision) => void;
 
 interface TranscriptProps {
   title: string;
   /** The title is a placeholder; see SessionTitle. */
   untitled?: boolean;
   view: SessionView;
+  /** The session's answers on their way or refused, by request id (answers.ts). */
+  answers?: Readonly<Record<string, Answer>>;
   /** Kept stable across renders, so streaming text does not re-render every block. */
   onDecide: Decide;
   /** Subscribes again after subscribing failed. */
@@ -26,8 +30,8 @@ interface TranscriptProps {
 }
 
 /** The active session as a document: the user's and the agent's words, tool cards, and permission requests to answer. */
-export function Transcript({ title, untitled, view, onDecide, onRetry, onRename, renaming, onRenameReset, renameDisabled }: TranscriptProps) {
-  const { transcript, stream, answers } = view;
+export function Transcript({ title, untitled, view, answers = {}, onDecide, onRetry, onRename, renaming, onRenameReset, renameDisabled }: TranscriptProps) {
+  const { transcript, stream } = view;
   const scroller = useRef<HTMLDivElement>(null);
   // Whether the reader is at the end; new content keeps them there, and
   // leaves them alone when they have scrolled back to read.
@@ -97,7 +101,7 @@ export function Transcript({ title, untitled, view, onDecide, onRetry, onRename,
 
 interface BlockProps {
   item: Item;
-  answer?: Sending;
+  answer?: Answer;
   /** A tool card whose permission request waits for the user. */
   waiting: boolean;
   /** Whether answers can reach Core now. */
@@ -200,20 +204,16 @@ function PermissionCard({
   onDecide,
 }: {
   item: Extract<Item, { kind: "permission" }>;
-  answer?: Sending;
+  answer?: Answer;
   live: boolean;
   onDecide: Decide;
 }) {
   const { request, decision } = item;
   const name = request.display_name ?? request.tool_name;
-  const sending = answer?.state === "sending";
   const open = isOpen(item);
-  // The description is shown once: as the card's detail, not again as a field.
-  const fields = Object.entries(request.input as Record<string, unknown>).filter(
-    ([key, value]) => !(key === "description" && value === request.description),
-  );
   return (
-    <section className="transcript-card transcript-permission" data-open={open || undefined} aria-label={`Permission: ${name}`}>
+    // Focusable outside the tab order, so focus moves to the card as an answer makes its answers unavailable.
+    <section tabIndex={-1} className="transcript-card transcript-permission" data-open={open || undefined} aria-label={`Permission: ${name}`}>
       <div className="transcript-card-head">
         <span className="transcript-card-title">
           {open ? "Allow " : ""}
@@ -238,18 +238,7 @@ function PermissionCard({
         </p>
       )}
       {/* Every field of the input, whole while the request is open: the user approves exactly what will run. */}
-      <dl className="transcript-fields">
-        {fields.map(([key, value]) => (
-          <div key={key} className="transcript-field">
-            <dt>
-              <Revealed text={key} />
-            </dt>
-            <dd className="mono">
-              <Revealed text={typeof value === "string" ? value : JSON.stringify(value, null, 2)} />
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <PermissionInput request={request} />
       {request.blocked_path && (
         <p className="transcript-card-detail">
           Path:{" "}
@@ -258,25 +247,43 @@ function PermissionCard({
           </span>
         </p>
       )}
+      {/* The answers the shelf would offer, with the same primary (FLOW-APPROVE-PERMISSION-R27). None is focused by
+          default, and Enter never approves. The transcript says it is reconnecting above, once. */}
       {open && (
-        <div className="transcript-actions">
-          {/* Neither is focused by default, and Enter never approves. */}
-          <Button variant="primary" onClick={() => onDecide(request.request_id, "allow")} disabled={sending || !live}>
-            Allow
-          </Button>
-          <Button onClick={() => onDecide(request.request_id, "deny")} disabled={sending || !live}>
-            Deny
-          </Button>
-          {sending && <Status tone="pending">Sending…</Status>}
-          {!sending && !live && <Status tone="attention">Answer once Core is connected</Status>}
-        </div>
-      )}
-      {open && answer?.state === "failed" && (
-        <p className="problem" role="alert">
-          {answer.message}
-        </p>
+        <PermissionAnswers
+          request={request}
+          answer={answer}
+          live={live}
+          reconnectingNote={false}
+          onDecide={(decision) => onDecide(request.request_id, decision)}
+        />
       )}
     </section>
+  );
+}
+
+/**
+ * A permission request's input, field by field, with every hidden character marked: the transcript's permission
+ * card and the shelf both show it so (FLOW-APPROVE-PERMISSION-R11). The description is shown once, as the request's
+ * own detail, not again as a field.
+ */
+export function PermissionInput({ request }: { request: PermissionRequested }) {
+  const fields = Object.entries(request.input as Record<string, unknown>).filter(
+    ([key, value]) => !(key === "description" && value === request.description),
+  );
+  return (
+    <dl className="transcript-fields">
+      {fields.map(([key, value]) => (
+        <div key={key} className="transcript-field">
+          <dt>
+            <Revealed text={key} />
+          </dt>
+          <dd className="mono">
+            <Revealed text={typeof value === "string" ? value : JSON.stringify(value, null, 2)} />
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
