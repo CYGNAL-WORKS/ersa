@@ -94,6 +94,8 @@ export const START_WINDOW_MS = 45 * 60 * 1000;
 // hour; one started at the end of the window and ended here still finishes
 // within the task's two hours.
 export const REVIEW_LIMIT_MS = 70 * 60 * 1000;
+// What a review that was ended at its limit resolves to.
+export const ENDED = "nothing: it ran past its time limit and was ended";
 const FIELDS = "number,isDraft,isCrossRepository,headRefOid,labels,autoMergeRequest,statusCheckRollup";
 
 // What a head's merge review status says, for the line that tells why the
@@ -223,8 +225,9 @@ function run(cmd, args, cwd = ROOT) {
 // with every process it started: a run waits for its reviews and keeps its
 // lock fresh meanwhile, so one that never ended would hold every other head.
 // A process the review left behind can hold its output open after it exits,
-// so the exit, not the end of the output, ends it.
-export function startReview(n, head, dir, log, limit = REVIEW_LIMIT_MS) {
+// so the exit, not the end of the output, ends it. `launch` stands in for
+// spawn, so a test can hand it a process that behaves any way.
+export function startReview(n, head, dir, log, { limit = REVIEW_LIMIT_MS, launch = spawn } = {}) {
   return new Promise((resolve) => {
     let timer;
     const done = (status) => {
@@ -232,12 +235,12 @@ export function startReview(n, head, dir, log, limit = REVIEW_LIMIT_MS) {
       resolve(status);
     };
     // Outside Windows the review leads its own process group, so it can be ended whole.
-    const child = spawn("node", ["scripts/merge-review.mjs", String(n), "--head", head], { cwd: dir, env: ENV, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+    const child = launch("node", ["scripts/merge-review.mjs", String(n), "--head", head], { cwd: dir, env: ENV, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
     // Control characters go, so the pull request's own output cannot redraw the log.
     for (const out of [child.stdout, child.stderr]) createInterface({ input: out }).on("line", (l) => log(`#${n} | ${l.replace(/[\x00-\x1f\x7f]/g, "")}`));
     timer = setTimeout(() => {
       endTree(child.pid);
-      done(`nothing after ${Math.round(limit / 60000)} minutes, so it was ended`);
+      done(ENDED);
     }, limit);
     child.on("error", (e) => done(e.message));
     // Output still in the pipe gets a moment to reach the log.
@@ -337,6 +340,12 @@ function tick(run, start, dirs, log, now, running, until) {
       .then((status) => {
         running.delete(n);
         log(`#${n} at ${head.slice(0, 7)}: the review exited ${status}`);
+        // An ended review never set its verdict, and its pending status would
+        // go stale and send the head round again; an error is the owner's.
+        if (status !== ENDED) return;
+        const description = `The review ran past ${REVIEW_LIMIT_MS / 60000} minutes and was ended; the poller's log says what it was doing.`;
+        const r = run("gh", ["api", `repos/{owner}/{repo}/statuses/${head}`, "-f", "state=error", "-f", `context=${MERGE_REVIEW}`, "-f", `description=${description}`]);
+        if (!r.ok) log(`#${n} at ${head.slice(0, 7)}: could not mark the head's merge review as failed: ${r.err}`);
       });
     running.set(n, { dir, done });
   }
