@@ -2,7 +2,7 @@
 
 How the rail, a project heading and a tile look, token by token. `LAY-SHELL` (The rail) says what the rail contains and how it behaves; `DESIGN.md` holds the tokens and the rules every surface follows. Read this before changing any of the three.
 
-The owner reviewed this design as a mockup. Its renders are in `reference/`: `rail-states-dark.png` and `rail-states-light.png` show the states, and `shell-dark.png` shows the rail in the window. The renders also draw parts that are not specified yet: the shelf, a tile's More menu, and the title bar with the Ersa menu at the top of the rail. Build what this page and `LAY-SHELL` describe; where a render and this page differ, this page wins. Once the gallery shows a state, the gallery is the reference for it, and the renders are deleted when it shows them all.
+The owner reviewed this design as a mockup. Its renders are in `reference/`: `rail-states-dark.png` and `rail-states-light.png` show the states, and `shell-dark.png` shows the rail in the window. The renders also draw parts that are not specified yet: a tile's More menu, and the title bar with the Ersa menu at the top of the rail. Build what this page and `LAY-SHELL` describe; where a render and this page differ, this page wins. Once the gallery shows a state, the gallery is the reference for it, and the renders are deleted when it shows them all.
 
 ## The rail
 
@@ -54,3 +54,21 @@ A tile is two lines with no box at rest, padded `space-sm`. Line two keeps its h
 **The active session's tile** takes `material-open-session` and a `line` edge, and does not change under the pointer or when pressed: it is already chosen. With keyboard focus its edge turns `ink`, as any tile's does.
 
 With reduced motion on, nothing here moves or fades: the arc, the foot's ring and the working glyph hold still at full tone, a chevron appears without its breath, and a heading's tiles and buttons appear and go at once.
+
+## The shelf
+
+The shelf is drawn in the Rail mockup's state "the shelf, pulled out of its tile". `FLOW-APPROVE-PERMISSION` says what it holds and when it opens and closes. Its tone is the want's: `caution` for a permission request, `accent` for a question.
+
+- **One shape.** While its shelf is open, the tile takes `surface` and a `hairline` edge in the tone, open at its trailing side where the shelf joins it, and its trailing corners are square. The shelf starts at the tile's top edge and continues the shape: `surface`, the same edge, `radius-lg` corners except the one that meets the tile, which is square. When the shelf rises to fit the window, that corner is `radius-lg` too.
+- **The layer.** The shelf is `size-shelf` wide, stacks at `stack-shelf`, and casts `shadow-transient`, as a transient layer does. It carries no focal glow: its edge in the tone is its mark, and the screen's one glow stays where it was. Its parts are padded and spaced `space-md`.
+- **The chevron** turns to point back toward the rail while its shelf is open, and takes `material-pressed`.
+- **The heading line** is `ui-small` in `ink-muted`: the kind of request, a middle dot, the workspace folder's name; and at its trailing end, when more than one request is pending, the place ("1 of 3") in tabular figures.
+- **What is asked** is `ui` at the heading weight in `ink`. A question's text is `ui` in `ink`.
+- **The details** (a permission request's input) are `mono` on `canvas` with a `line` edge and `radius-sm` corners, padded `space-sm` and `space-md`, and scroll past `card-max`. The blocked path and the reason sit beneath in `ui-small`, `ink-muted`.
+- **The readouts** are the context ring at `size-ring`, its percentage, a middle dot, and the cost, in `ui-small` with tabular figures in `ink-muted`; each appears only when the tile shows it.
+- **The answers** are the button every other surface uses, `space-sm` apart, on one row at the shelf's foot: Deny at the leading edge, Allow at the trailing edge, and the primary answer is `material-primary`. A suggestion is a button above that row, as wide as the shelf, its label cut with an ellipsis. Answer, for a question, sits at the trailing edge as the primary.
+- **A question's options** are the rows a floating layer's options use (`size-control` high, `radius-md`); a chosen one shows a check icon at `size-icon-sm` in `accent`. A question with no options takes the text field every other surface uses.
+- **Notes** in the shelf (loading, reconnecting, a refused answer and why) are the rail's notes; a refused answer or a read that failed leads with a danger glyph at `size-glyph`, with Retry beneath it when reading failed.
+- **Unavailable** answers, while one is on its way or while Ersa can't reach Core, read `ink-faint` and do not change under the pointer.
+
+**Motion.** The shelf slides out from under the tile's trailing edge and fades in over `motion-settle` with `motion-ease-out`, and slides back and fades the same way when it closes. The chevron turns over `motion-quick` with `motion-ease-out`. When the shelf moves to the next request, its contents cross-fade over `motion-quick` with `motion-ease-out` while the shelf itself holds still, and its height eases to the new contents over `motion-settle`. With reduced motion on, the shelf appears and goes at once, the chevron points its new way without turning, and the next request replaces the last at once.

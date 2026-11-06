@@ -25,7 +25,7 @@ The fixed structure of the Ersa window: a rail on the left, the transcript in th
 +----------+----------------------------+-----------+
 ```
 
-The rail lists projects and, under each, its sessions as tiles (The rail, below). When a session needs the user, its tile says so and a shelf pulls out from it holding the request with its controls, so permissions and questions are handled without changing the active session. The transcript shows the active session; the workbench holds Files, Diff, Terminal, Browser, and Developer panes.
+The rail lists projects and, under each, its sessions as tiles (The rail, below). When a session needs the user, its tile says so, and choosing the tile's chevron pulls a shelf out of it holding the request with its controls, so permissions and questions are handled without changing the active session (The shelf, below). The transcript shows the active session; the workbench holds Files, Diff, Terminal, Browser, and Developer panes.
 
 With no active session, or when the user chooses New session, the transcript area shows the new-session screen: the Ersa wordmark above the composer and nothing else, so the first message is the first act. Beneath the composer, on the new-session screen and on every session, sit the session controls: a row of chips for host, project, workspace (a new isolated workspace or the project's root workspace), backend, model, effort and permission mode, with the context ring at the row's end. Before a session starts the chips set it up; during a session they show its values. The backend chip appears when the host has more than one backend, and also when its only backend is missing or failed, so that status is seen (FLOW-NEW-SESSION-R07); with one available backend it is hidden. There is no setup card or form before the composer. The reference is the owner's sketch of 2026-11-02 (FLOW-NEW-SESSION).
 
@@ -47,6 +47,10 @@ From top to bottom: New session, the projects with their sessions, Add project, 
 - **Add project** sits at the end of the tree and opens the way to add one.
 - **Loading, empty and failed.** While the projects are being read the tree says so; with no projects it says how to add one. When the projects, a project's workspaces or the sessions can't be read, the tree says so with the reason, and shows what it could read.
 - **The foot** is empty while all is well, and while Ersa first connects, when the tree says it is loading. When Ersa can't reach Core, the foot says so in the user's terms, with the reason when Ersa has one, and the tree is empty. While Ersa is trying again the foot says that; once it has stopped trying, the foot offers Retry. Assistive technology is told when the problem appears and when Ersa reaches the sessions again. When Retry was pressed from the keyboard and the foot offers it again, keyboard focus returns to it unless the user has moved it. New session and Add project are unavailable until Ersa has connected. A debug build attached to a labeled endpoint names the label there (Development).
+## The shelf
+
+The shelf pulls out of the tile it belongs to, at the tile's height, and lies over the edge of the transcript: it never pushes the transcript aside, narrows it, or scrolls it. It is the width the design documents give it, and when it would run past the foot of the window it rises to fit. One shelf is open at a time, and only the user opens it, from the tile's chevron. With several requests pending on one session, it holds the oldest and says its place among them; answered, it moves to the next, and closes when none is left. `FLOW-APPROVE-PERMISSION` says what it holds, how it opens and closes, and how it answers.
+
 ## Development
 
 A debug build attaches to a labeled Core endpoint, such as a replay, only when told to: `ERSA_ATTACH=<label>` makes it attach there and never launch a Core, and the rail's foot reads "Attached to <label>". A release build ignores the variable and always uses the user's own Core.
@@ -55,7 +59,6 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 
 - Minimum window size, and which region collapses first when narrow.
 - Whether the workbench shows one pane at a time (tabs) or allows splits.
-- Whether the shelf overlays the transcript or pushes it, and how several pending shelves queue.
 - Where global status (connected hosts, usage today) lives, and where Core's version and API version are shown now that the rail's foot is silent while all is well.
 - What a tile's More menu holds (Rename, Stop and Remove are drawn), and what Stop and Remove do to the session's workspace.
 - Whether collapsed headings and unseen sessions are remembered when Ersa restarts, and whether a turn too short for a tile to show as working, or one that finishes while Ersa can't reach Core, should still leave its session unseen.
@@ -74,6 +77,8 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 The rail is a list of projects above one list of sessions grouped under a heading per workspace. Of the rail described above, the foot is built and the rest is still to build. Until the shelf is built, a tile's chevron is a mark, not a control, and a request is answered in the transcript.
 
 ## Changes
+
+- 2026-11-05: the shelf specified from the owner's decisions (The shelf): it overlays the transcript's edge and never pushes it, one is open at a time, only the chevron opens it, and several requests on one session are shown oldest first with their place. This closes the open question on overlay or push and queueing. No requirement IDs changed.
 
 - 2026-11-05: from #155 merge review: whether the foot shows a try after Retry, and how much of a failed start's output it shows and reads, are open questions. No requirement IDs changed.
 - 2026-11-05: from #155 inbox: the foot tells assistive technology when the problem appears and when it ends, and gives keyboard focus back to Retry (The foot); the open question on focus after Retry narrows to a retry that succeeds, and how long the word of reconnecting stays is a new one. No requirement IDs changed.

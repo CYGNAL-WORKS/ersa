@@ -103,9 +103,13 @@ size:
   icon: 16px
   icon-sm: 14px
   icon-xs: 12px
+  # The shelf's width, beside the tile it pulls out of.
+  shelf: 320px
 stack:
   # Custom group. Stacking orders, lowest first: a menu sits above the page it opens over.
   menu: 10
+  # The shelf lies over the transcript and above a menu.
+  shelf: 20
 material:
   # Custom group. Gradients and fills that give surfaces and controls their material (see Elevation & Depth).
   # `{colors.<role>}` names a color role, so each value follows the theme and the palette.
@@ -230,7 +234,7 @@ Shadows are kept for transient layers (menus, popovers, drag previews), soft and
 - **Work in progress** loops only while it runs. Work of unknown length, such as a running tool call, shows a ring that turns once per `motion-loop-ring` at constant speed (`motion-linear`), a duration within Material's, MUI's, and Fluent's. Work whose progress can be measured shows a bar that fills to its value, easing each change over `motion-settle` with `motion-ease-out`; it doesn't loop. A text shimmer was tried and is not used: it is a skeleton-loading pattern, not a sign of work under way.
 - **A working session's glyph** in the rail breathes: its tone swells and softens on a `motion-breath` loop with `motion-ease-in-out` for as long as the session works. The breath is the glyph's own tone, not a glow, so the screen's one focal glow stays where it is. It never blinks or ripples outward; shimmering titles and pulse rings were rejected.
 - **Status never moves a tile.** Nothing reorders the rail on its own: a session that comes to need the user shows its chevron, which breathes once where it is, one swell and fade of its tone over `motion-breathe-once` with `motion-ease-in-out`. If the rail can ever be reordered or re-sorted by the user (an open question in `LAY-SHELL`), each tile slides to its new position over `motion-settle` with `motion-ease-in-out`, so the eye can follow it. A new session's tile slides in at the top over `motion-slow` with `motion-ease-out`, while the others make room over the same duration and easing.
-- **The shelf** slides out from the tile it belongs to over `motion-settle` with `motion-ease-out`, and slides back the same way when answered.
+- **The shelf** slides out from the tile it belongs to over `motion-settle` with `motion-ease-out`, and slides back the same way when it closes. `RAIL.md` (The shelf) has the rest of its motion.
 - **The working mark**, the animated mark at the foot of a turn beside the elapsed time and tokens, is open: it is to be designed as a family of marks.
 
 ## Shapes
