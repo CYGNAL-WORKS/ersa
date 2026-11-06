@@ -2442,6 +2442,66 @@ mod tests {
         assert_eq!(adapter.forgets.load(Ordering::SeqCst), 3);
     }
 
+    /// Makes `s-gated` live by hand, as the session task does, and returns
+    /// its sink and the sender that marks it finished.
+    fn make_live(manager: &SessionManager) -> (Arc<CoreSink>, watch::Sender<bool>) {
+        let handle = manager.handle("s-gated").unwrap();
+        let sink = Arc::new(CoreSink::new(
+            "s-gated",
+            Arc::clone(&manager.app_log),
+            mpsc::unbounded_channel().0,
+        ));
+        let finished = watch::Sender::new(false);
+        let live = Live {
+            sink: Arc::clone(&sink),
+            started: watch::channel(Started::Pending).1,
+            cancel: watch::Sender::new(false),
+            progress: watch::channel(Progress::default()).1,
+            finished: finished.subscribe(),
+        };
+        *lock(&handle.live) = Some(Arc::new(live));
+        (sink, finished)
+    }
+
+    // Paused time: the wind-down below takes as long as the test says.
+    #[tokio::test(start_paused = true)]
+    async fn a_session_whose_end_was_announced_is_removed_once_it_winds_down() {
+        let adapter = Arc::new(GatedReads::default());
+        // The two ways a session ends: its process exits, or its start fails.
+        let endings: [fn(&CoreSink); 2] = [
+            |sink| {
+                sink.start_finished(Ok(()));
+                sink.process_exited(Ok(ProcessExit { code: Some(0) }));
+            },
+            |sink| {
+                sink.start_finished(Err(StartFailure {
+                    message: "no".into(),
+                    stopped_by_user: false,
+                }))
+            },
+        ];
+        for end in endings {
+            let dir = tempfile::tempdir().unwrap();
+            let manager = gated_manager(dir.path(), &adapter);
+            let (sink, finished) = make_live(&manager);
+            // Running and not ended: refused.
+            assert!(matches!(
+                manager.remove("s-gated").await,
+                Err(SessionError::InvalidState(_))
+            ));
+            // Its end is queued, so a client may have seen `session.ended`,
+            // while Core still holds it live for a while.
+            end(&sink);
+            let handle = manager.handle("s-gated").unwrap();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                *lock(&handle.live) = None;
+                finished.send_replace(true);
+            });
+            manager.remove("s-gated").await.unwrap();
+        }
+    }
+
     #[tokio::test]
     async fn a_read_that_ends_after_its_session_is_removed_lets_go_of_what_it_kept() {
         let removed = AtomicBool::new(false);
