@@ -41,6 +41,7 @@ A tile is two lines with no box at rest, padded `space-sm`. Line two keeps its h
 |---|---|---|
 | Starting | an arc in `accent` at `size-icon-xs`, turning once per `motion-loop-ring` | "Starting" |
 | Being deleted | the same arc in `ink-muted` | "Deleting" |
+| Deletion failed | the Error mark | "Couldn't delete" |
 | Working | a glyph at `size-glyph` in `accent`, breathing (`DESIGN.md`, Motion) | none |
 | Needs you | a chevron at `size-icon-sm` pointing right: `caution` for a permission request, `accent` for a question | the want, in the chevron's tone |
 | Idle | nothing | none |
