@@ -2,7 +2,7 @@
 
 How the composer and the session controls look, token by token. `FLOW-SEND-MESSAGE` says how the composer behaves, `FLOW-NEW-SESSION` how the session controls choose where and how a session runs, and `LAY-SHELL` where both sit; `DESIGN.md` holds the tokens and the rules every surface follows. Read this before changing the composer or the session controls.
 
-The owner reviewed this design as mockups on the design canvas: the Composer board draws the composer's states, and the Place picker board draws the project and workspace lists, the no-projects state and the trust question. Build what this page and the briefs describe; where a board and this page differ, this page wins. Once the gallery shows a state, the gallery is the reference for it. The Composer board also draws a microphone for dictation, which is not specified (FLOW-SEND-MESSAGE, Open questions): leave it out.
+The owner reviewed this design as mockups on the design canvas: the Composer board draws the composer's states, and the Place picker board draws the project and workspace lists, the no-projects state and the trust question. Build what this page and the briefs describe; where a board, the built components or the gallery differ from this page, this page wins. The chips built before this page have an edge; the ticket that restyles the session controls changes them, and the gallery follows. The Composer board also draws a microphone for dictation, which is not specified (FLOW-SEND-MESSAGE, Open questions): leave it out.
 
 ## The composer
 
@@ -12,7 +12,7 @@ The composer is one column, `size-measure` wide at most and centered, holding fr
 - **The words** are `prose` in `ink`, padded `space-xs` by `space-sm`, with no edge of their own; the placeholder is `ink-faint`. The field is three lines tall on the new-session screen and one line in a session, and grows with the words.
 - **Attach** is a quiet icon button, `size-control-lg` square, `radius-md`, with a plus icon at `size-icon` in `ink-muted`. It is a control without an edge (`DESIGN.md`, Pointer and press): under the pointer it takes `material-hover` and reads `ink`, pressed or while its menu is open it takes `material-pressed` and reads `ink`, and with keyboard focus its edge turns `ink`.
 - **Send** is the primary button made square: `size-control-lg`, `radius-md`, `material-primary`, with an up arrow at `size-icon` in `accent-ink`. Under the pointer `material-hover` lies over its fill, and pressed `material-pressed`; with keyboard focus it takes an `ink` edge. With nothing to send it has no fill, a `line` edge and an `ink-faint` arrow, and does not change under the pointer.
-- **Stop** takes send's place while the agent works: the same square on `material-tile` with a `line` edge, holding a filled square at `size-icon-sm` in `ink`. Its pointer, press and focus are send's.
+- **Stop** takes send's place from the moment the user sends until the turn ends: the same square on `material-tile` with a `line` edge, holding a filled square at `size-icon-sm` in `ink`. It is a control with an edge (`DESIGN.md`, Pointer and press), and with keyboard focus its edge turns `ink`. When stop turns back into send, keyboard focus stays on the button.
 
 Their fills and edges change over `motion-quick` with `motion-ease-out`. Send becoming stop and back crossfades over `motion-quick`.
 
@@ -24,15 +24,17 @@ Their fills and edges change over `motion-quick` with `motion-ease-out`. Send be
 
 ## The status line
 
-One line above the box, `size-control` high at least, padded `space-sm` at the sides, in `ui-small` and `ink-muted`. It is empty, and keeps no height, while there is nothing to say. The composer keeps its box and session controls where they are: the status line opens upward, growing and fading in over `motion-settle` with `motion-ease-out`, and closes the same way.
+One line above the box, `size-control` high at least, showing one message at a time, first that Ersa can't reach the sessions, then a send whose outcome Ersa can't tell, then a refused message, then detecting backends, then a copy's progress; padded `space-sm` at the sides, in `ui-small` and `ink-muted`. It is empty, and keeps no height, while there is nothing to say. The composer keeps its box and session controls where they are: the status line opens upward, growing and fading in over `motion-settle` with `motion-ease-out`, and closes the same way.
 
 | When | It says | Leading mark | The box |
 |---|---|---|---|
 | A message was refused | the reason, in the user's terms | a glyph at `size-glyph` in `danger` | as at rest, the message kept |
 | Ersa can't reach the sessions | that, and that it is trying again | none | unavailable |
 | Backends are being detected | that it is detecting the backends on this host | none | unavailable |
+| Ersa can't tell whether a message was sent | that, and that the transcript shows it if it arrived | a glyph at `size-glyph` in `caution` | as at rest, the message kept |
+| Attachments are being copied | how much is copied, as a share | the ring at `size-ring`, its arc filling to the share over `motion-settle` | as at rest, stop offered |
 
-A refused message's line is announced to assistive technology as an alert. **Unavailable**, the box is `canvas`, the words and their placeholder read `ink-faint`, and attach and send read `ink-faint` with no fill and do not change under the pointer.
+A refused message's line is announced to assistive technology as an alert. When the box becomes unavailable, keyboard focus returns to the words once it is available again. **Unavailable**, the box is `canvas`, the words and their placeholder read `ink-faint`, and attach and send read `ink-faint` with no fill and do not change under the pointer.
 
 ## Attachments
 
@@ -40,6 +42,7 @@ Attachments sit in the box above the words, across its full width, wrapping, `sp
 
 - **An attachment** is `size-control-lg` high on `material-tile`, with a `line` edge and `radius-md`, padded `space-sm` at the leading edge and `space-xs` at the trailing one, its parts `space-sm` apart, in `ui-small`. From the leading edge: its icon at `size-icon-sm` in `ink-muted` (an image, a file or a folder), its name in `ink` cut with an ellipsis, its detail in `ink-faint` (a size such as 84 KB, a line count such as 212 lines, or "folder"), and remove.
 - **Remove** is an icon button `size-control-sm` square, `radius-sm`, with a cross at `size-icon-xs` in `ink-faint`; under the pointer it takes `material-hover` and reads `ink`, pressed `material-pressed`, and with keyboard focus its edge turns `ink`. Removing one moves keyboard focus to the next attachment's remove, else to the words.
+- **One from outside the workspace** says, after its detail, that it will be copied to the workspace's `.ersa` folder, in `ink-faint`.
 - **One Ersa can't send** shows a glyph at `size-glyph` in `danger` in place of its icon, and its detail gives the reason in `danger`.
 - **Dragging over the box**, its edge is `accent`, with no glow, until the drop or the drag leaves.
 - An attachment fades in over `motion-quick` as it is added and out as it is removed.
@@ -64,7 +67,7 @@ A chip's list floats `space-xs` from its chip, beneath it where the window has r
 
 Opening a list moves keyboard focus to its chosen option, or to the workspace list's search box; the arrow keys move among the options, Enter chooses one, and choosing or Escape closes the list and returns focus to its chip. The attach menu does the same, returning focus to attach.
 
-- **An option** is `size-control` high, `radius-md`, padded `space-sm` at the sides, in `ui`: the option mark, its label in `ink`, and a status at its trailing edge in `ui-small` and `ink-faint`. The chosen option's mark is a dot at `size-option-mark` in `accent`; the others leave its place empty. An option is a control without an edge: under the pointer it takes `material-hover`, pressed `material-pressed`, and with keyboard focus an `ink` edge, so the focused option stays distinct from the one under the pointer.
+- **An option** is `size-control` high, `radius-md`, padded `space-sm` at the sides, in `ui`: the option mark, its label in `ink`, and a status at its trailing edge in `ui-small` and `ink-faint`. An unavailable option reads `ink-faint`, keeps its status, and does not change under the pointer. The chosen option's mark is a dot at `size-option-mark` in `accent`; the others leave its place empty. An option is a control without an edge: under the pointer it takes `material-hover`, pressed `material-pressed`, and with keyboard focus an `ink` edge, so the focused option stays distinct from the one under the pointer.
 - **An action at the end of a list**, such as Add project…, sits below a `line` hairline with `space-xs` above and below it, and leads with a plus icon at `size-icon-sm` in `ink-muted` in the mark's place. Its shortcut, Ctrl+O, sits at the trailing edge in `ui-small` and `ink-faint`.
 
 ## The project list
@@ -88,6 +91,6 @@ The chip reads the choice: "New workspace from" and the branch, or "Project fold
 
 ## The trust question
 
-After a folder is picked, the trust question Ersa asks when a project is added opens above the composer's box, in the status line's place: a card on `material-tile` with a `line` edge, `radius-lg`, padded `space-lg`, its title in `ui` at the heading weight, the folder's path in `mono` and `ink-muted`, its explanation in `ui-small` and `ink-muted`, and its answers in a row at its foot, none of them primary. While it is open it holds the focal glow and the box shows its focus by its edge alone. It opens upward as the status line does, fading and growing over `motion-settle` with `motion-ease-out`, and leaves the same way; keyboard focus moves to Cancel. Once it is answered or canceled, and when the folder dialog is canceled, keyboard focus returns to the composer's words.
+After a folder is picked, the trust question Ersa asks when a project is added opens above the composer's box, in the status line's place: a card on `material-tile` with a `line` edge, `radius-lg`, padded `space-lg`, its title in `ui` at the heading weight, the folder's path in `mono` and `ink-muted`, its explanation in `ui-small` and `ink-muted`, and its answers in a row at its foot, none of them primary. While it is open it holds the focal glow and the box shows its focus by its edge alone. It opens upward as the status line does, fading and growing over `motion-settle` with `motion-ease-out`, and leaves the same way; keyboard focus moves to Cancel, and Escape cancels it. Once it is answered or canceled, and when the folder dialog is canceled, keyboard focus returns to the composer's words.
 
 With reduced motion on, nothing here moves or fades: the glow, the status line, attachments and lists appear and go at once, and the detecting ring holds still at full tone.
