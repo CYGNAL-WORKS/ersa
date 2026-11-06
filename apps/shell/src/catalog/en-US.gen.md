@@ -4,6 +4,66 @@
 
 ## `rail`
 
+### `rail.tree.label`
+
+Projects and sessions
+
+### `rail.tree.loadingProgress`
+
+Loading…
+
+### `rail.tree.noProjectsEmpty`
+
+No projects yet.
+
+### `rail.tree.noProjectsHint`
+
+Choose a folder in New session to start.
+
+### `rail.tree.projectsError`
+
+Ersa can't read your projects.
+
+### `rail.tree.sessionsError`
+
+Ersa can't read your sessions.
+
+### `rail.tree.boundaryName`
+
+The projects and sessions
+
+### `rail.heading.newSessionLabel`
+
+New session in {project}
+
+### `rail.heading.moreLabel`
+
+More for {project}
+
+### `rail.heading.trustButton`
+
+Trust…
+
+### `rail.heading.distrustButton`
+
+Don't trust
+
+### `rail.heading.savingProgress`
+
+Saving…
+
+### `rail.heading.trustError`
+
+Ersa can't change this project's trust.
+
+### `rail.heading.workspacesError`
+
+Ersa can't read this project's workspaces.
+
+### `rail.heading.keepTrust`
+
+Running sessions keep their current settings until they are stopped.
+
 ### `rail.foot.attachedLabel`
 
 Attached to {label}
@@ -35,6 +95,10 @@ The connection status
 ### `rail.tile.untitledLabel`
 
 Untitled session
+
+### `rail.tile.boundaryName`
+
+This session
 
 ### `rail.tile.startingStatus`
 
@@ -75,6 +139,70 @@ Needs you
 ### `rail.tile.needsYouCountWant`
 
 Needs you · {count}
+
+### `rail.shelf.nameLabel`
+
+Request from {title}
+
+### `rail.shelf.permissionHeading`
+
+Permission request
+
+### `rail.shelf.questionHeading`
+
+Question
+
+### `rail.shelf.placeLabel`
+
+{n} of {m}
+
+### `rail.shelf.nextLabel`
+
+{kind}, {n} of {m}: {asked}
+
+### `rail.shelf.nextUnknownLabel`
+
+{n} of {m}: {note}
+
+### `rail.shelf.pathLabel`
+
+Path:
+
+### `rail.shelf.loadingProgress`
+
+Loading…
+
+### `rail.shelf.readError`
+
+Ersa can't read this session's requests.
+
+### `rail.shelf.retryButton`
+
+Retry
+
+### `rail.shelf.unknownNote`
+
+This session is waiting on a request Ersa can't show here.
+
+### `rail.shelf.boundaryName`
+
+This request
+
+### `rail.shelf.denyButton`
+
+Deny
+
+### `rail.shelf.allowButton`
+
+Allow
+
+### `rail.shelf.answerRefusedError`
+
+Your answer wasn't accepted.
+
+### `rail.shelf.reconnectingNote`
+
+Reconnecting to Core…
 
 ## `transcript`
 

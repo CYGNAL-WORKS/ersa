@@ -1,74 +1,6 @@
 /* Session tiles in the rail (docs/design/RAIL.md, A tile): two lines with no box at rest. The active tile is a
    quiet neutral highlight; a session that needs the user shows a chevron in the tone of its want, never a filled row. */
 
-.sessions {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-sm);
-  min-height: 0;
-}
-
-.sessions-header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin: 0;
-  color: var(--color-ink-muted);
-  font-size: var(--type-ui-small-size);
-  line-height: var(--type-ui-small-leading);
-  font-weight: var(--type-heading-weight);
-}
-
-.sessions-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* A workspace's tiles under its name: the project in ink, the branch or root beside it, muted. */
-.sessions-workspace {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-}
-
-.sessions-workspace-name {
-  /* One line tall even before its name is read, so the tiles below never move when it arrives. */
-  min-height: calc(var(--type-ui-small-size) * var(--type-ui-small-leading));
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-ink-muted);
-  font-size: var(--type-ui-small-size);
-  line-height: var(--type-ui-small-leading);
-  font-weight: var(--type-heading-weight);
-}
-
-.sessions-workspace-project {
-  color: var(--color-ink);
-}
-
-/* Each tile is a grid item, so it stretches to the rail's width. */
-.sessions-list > li {
-  display: grid;
-}
-
-.sessions-note {
-  margin: 0;
-  color: var(--color-ink-muted);
-}
-
-.sessions-note-hint {
-  display: block;
-  font-size: var(--type-ui-small-size);
-  line-height: var(--type-ui-small-leading);
-}
-
-
 /* A tile: the backend's icon, the title and the mark on line one; the ring, under the icon, and line two's words
    beneath. Its edge is kept, transparent, so focus and the active tile change only its color. */
 .session {
@@ -207,9 +139,99 @@
   border: var(--line-hairline) solid var(--color-ink-faint);
 }
 
+/* The chevron of a session that needs the user and is not the active one: the shelf's handle, a control of its own
+   laid over the tile's trailing square (FLOW-APPROVE-PERMISSION-R22). Tile and chevron share the item's one cell. */
+.session-item > .session {
+  grid-area: 1 / 1;
+}
+
+.session-chevron-button {
+  grid-area: 1 / 1;
+  justify-self: end;
+  align-self: start;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Over the tile's mark square: inside its edge and its padding. */
+  margin: calc(var(--line-hairline) + var(--space-sm));
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: var(--line-hairline) solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--motion-quick) var(--motion-ease-out);
+}
+
+.session-chevron-button:hover {
+  background: var(--material-hover);
+}
+
+.session-chevron-button:active {
+  background: var(--material-pressed);
+}
+
+.session-chevron-button:focus-visible {
+  outline: none;
+  border-color: var(--color-ink);
+}
+
+.session-chevron-button > * {
+  transition: transform var(--motion-quick) var(--motion-ease-out);
+}
+
+/* Its shelf is open: the chevron points back toward the rail and stays pressed, under the pointer too. */
+.session-chevron-button[aria-expanded="true"],
+.session-chevron-button[aria-expanded="true"]:hover {
+  background: var(--material-pressed);
+}
+
+.session-chevron-button[aria-expanded="true"] > * {
+  transform: rotate(180deg);
+}
+
+.session-chevron-button[data-tone="caution"] {
+  color: var(--color-caution);
+}
+
+.session-chevron-button[data-tone="accent"] {
+  color: var(--color-accent);
+}
+
+/* The open tile and its shelf are one shape (docs/design/RAIL.md, The shelf): the tile takes the surface and an
+   edge in the shelf's tone, open and square at its trailing side where the shelf joins it, and holds still under
+   the pointer. */
+.session-item[data-shelf] > .session,
+.session-item[data-shelf] > .session:hover,
+.session-item[data-shelf] > .session:active {
+  background: var(--color-surface);
+  border-color: var(--color-caution);
+  border-right-color: transparent;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.session-item[data-shelf][data-tone="accent"] > .session {
+  border-color: var(--color-accent);
+  border-right-color: transparent;
+}
+
+/* Keyboard focus on the open tile shows as on any tile: its edge turns ink; so does focus on its shelf itself, since
+   the two are one shape. */
+.session-item[data-shelf] > .session:focus-visible,
+.session-item[data-shelf]:has(> .shelf-layer > .shelf:focus-visible) > .session,
+.session-item[data-shelf]:has(> .shelf-layer > .shelf[data-force="focus"]) > .session {
+  border-color: var(--color-ink);
+  border-right-color: transparent;
+}
+
 /* With reduced motion on, the arc holds still at full tone, and fills change at once. */
 @media (prefers-reduced-motion: reduce) {
-  .session {
+  .session,
+  .session-chevron-button,
+  .session-chevron-button > * {
     transition: none;
   }
 

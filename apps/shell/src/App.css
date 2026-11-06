@@ -8,22 +8,27 @@
   grid-template-columns: var(--size-rail) 1fr;
 }
 
+/* The rail: on material-rail, a hairline where it meets the transcript, its parts padded and spaced space-sm
+   (docs/design/RAIL.md, The rail). */
 .rail {
   display: flex;
   flex-direction: column;
-  gap: var(--space-xl);
+  gap: var(--space-sm);
   min-width: 0;
-  padding: var(--space-lg);
-  overflow: auto;
-  background: var(--color-surface);
+  min-height: 0;
+  padding: var(--space-sm);
+  background: var(--material-rail);
   border-right: var(--line-hairline) solid var(--color-line);
 }
 
-.rail-lists {
+/* The tree, and the way to add a project beneath it, scroll between the rail's top and its foot. */
+.rail-body {
   display: flex;
   flex-direction: column;
-  gap: var(--space-xl);
+  gap: var(--space-sm);
   flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 
 /* The rail's foot, with the quit question above it while it is open. */

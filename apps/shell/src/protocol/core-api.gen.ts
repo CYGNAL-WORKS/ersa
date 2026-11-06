@@ -160,6 +160,12 @@ export type Request =
   | {
       jsonrpc: "2.0";
       id: RequestId;
+      method: "attachment.inspect";
+      params: AttachmentInspectParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
       method: "session.decide_permission";
       params: SessionDecidePermissionParams;
     }
@@ -274,6 +280,19 @@ export type RequestId = string | number;
  */
 export type Id = string;
 /**
+ * A file, image or folder sent with a message: by absolute path on the session's host, or a pasted image as base64 data.
+ */
+export type Attachment =
+  | {
+      kind: "image" | "file" | "folder";
+      path: string;
+    }
+  | {
+      kind: "image";
+      media_type: string;
+      data: string;
+    };
+/**
  * Core's answer to one request. Validate `result` against the `<method>.result` definition of the request's method.
  */
 export type Response =
@@ -301,6 +320,11 @@ export type Notification =
     }
   | {
       jsonrpc: "2.0";
+      method: "session.send_progress";
+      params: SessionSendProgressNotification;
+    }
+  | {
+      jsonrpc: "2.0";
       method: "session.tile";
       params: SessionTileNotification;
     }
@@ -319,7 +343,15 @@ export type Notification =
       method: "terminal.output";
       params: TerminalOutputNotification;
     };
+/**
+ * Where a send is: checking its attachments, copying them into the session's scratch folder, waiting for a starting backend, or handing the message to the backend.
+ */
+export type SendPhase = "checking" | "copying" | "starting" | "handing_over";
 export type HostStatus = "connected" | "disconnected" | "unknown";
+/**
+ * Where a send is: checking its attachments, copying them into the session's scratch folder, waiting for a starting backend, or handing the message to the backend.
+ */
+export type SendPhase1 = "checking" | "copying" | "starting" | "handing_over";
 export type HostListResult = Host[];
 export type ProjectListResult = Project[];
 /**
@@ -457,9 +489,17 @@ export interface SessionRemoveParams {
 export interface SessionSendParams {
   id: Id;
   text: string;
+  /**
+   * In the order the user added them.
+   */
+  attachments?: Attachment[];
 }
 export interface SessionInterruptParams {
   id: Id;
+}
+export interface AttachmentInspectParams {
+  host_id: Id;
+  path: string;
 }
 export interface SessionDecidePermissionParams {
   id: Id;
@@ -573,12 +613,30 @@ export interface ErrorData {
     | "vcs_error"
     | "transport_error"
     | "permission"
-    | "internal";
+    | "internal"
+    | "attachment_refused"
+    | "delivery_unknown";
   detail?: string;
+  /**
+   * With attachment_refused: the place in session.send's attachments of the attachment refused.
+   */
+  index?: number;
 }
 export interface SessionEventNotification {
   session_id: Id;
   event: AgentEvents.Envelope;
+}
+export interface SessionSendProgressNotification {
+  session_id: Id;
+  phase: SendPhase;
+  /**
+   * While copying.
+   */
+  copied_bytes?: number;
+  /**
+   * While copying.
+   */
+  total_bytes?: number;
 }
 export interface SessionTileNotification {
   session_id: Id;
@@ -742,6 +800,7 @@ export interface Session {
    */
   last_event_seq?: number;
   tile: Tile;
+  sending?: SendPhase1;
 }
 export interface RawLogEntry {
   index: number;
@@ -909,6 +968,7 @@ export interface Session1 {
    */
   last_event_seq?: number;
   tile: Tile;
+  sending?: SendPhase1;
 }
 export interface Session2 {
   id: Id;
@@ -936,6 +996,7 @@ export interface Session2 {
    */
   last_event_seq?: number;
   tile: Tile;
+  sending?: SendPhase1;
 }
 export interface Session3 {
   id: Id;
@@ -963,6 +1024,7 @@ export interface Session3 {
    */
   last_event_seq?: number;
   tile: Tile;
+  sending?: SendPhase1;
 }
 export interface Session4 {
   id: Id;
@@ -990,6 +1052,7 @@ export interface Session4 {
    */
   last_event_seq?: number;
   tile: Tile;
+  sending?: SendPhase1;
 }
 export interface Session5 {
   id: Id;
@@ -1017,9 +1080,13 @@ export interface Session5 {
    */
   last_event_seq?: number;
   tile: Tile;
+  sending?: SendPhase1;
 }
 export interface SessionSendResult {
-  turn: number;
+  /**
+   * The turn the message starts or joins; absent when Core has not projected the message yet.
+   */
+  turn?: number;
 }
 export interface Session6 {
   id: Id;
@@ -1047,6 +1114,28 @@ export interface Session6 {
    */
   last_event_seq?: number;
   tile: Tile;
+  sending?: SendPhase1;
+}
+export interface AttachmentInspectResult {
+  path: string;
+  name: string;
+  kind: "file" | "image" | "folder";
+  /**
+   * For a file or image.
+   */
+  size_bytes?: number;
+  /**
+   * A text file's line count, for one of at most 10 MB.
+   */
+  lines?: number;
+  /**
+   * For an image, told by its first bytes.
+   */
+  media_type?: string;
+  /**
+   * Where a link points.
+   */
+  target?: string;
 }
 export interface Session7 {
   id: Id;
@@ -1074,6 +1163,7 @@ export interface Session7 {
    */
   last_event_seq?: number;
   tile: Tile;
+  sending?: SendPhase1;
 }
 export interface Session8 {
   id: Id;
@@ -1101,6 +1191,7 @@ export interface Session8 {
    */
   last_event_seq?: number;
   tile: Tile;
+  sending?: SendPhase1;
 }
 export interface Session9 {
   id: Id;
@@ -1128,6 +1219,7 @@ export interface Session9 {
    */
   last_event_seq?: number;
   tile: Tile;
+  sending?: SendPhase1;
 }
 export interface Session10 {
   id: Id;
@@ -1155,6 +1247,7 @@ export interface Session10 {
    */
   last_event_seq?: number;
   tile: Tile;
+  sending?: SendPhase1;
 }
 export interface SessionSubscribeResult {
   /**
@@ -1269,6 +1362,7 @@ export interface CoreApiMethods {
   "session.remove": { params: SessionRemoveParams; result: SessionRemoveResult };
   "session.send": { params: SessionSendParams; result: SessionSendResult };
   "session.interrupt": { params: SessionInterruptParams; result: SessionInterruptResult };
+  "attachment.inspect": { params: AttachmentInspectParams; result: AttachmentInspectResult };
   "session.decide_permission": { params: SessionDecidePermissionParams; result: SessionDecidePermissionResult };
   "session.answer_question": { params: SessionAnswerQuestionParams; result: SessionAnswerQuestionResult };
   "session.set_title": { params: SessionSetTitleParams; result: SessionSetTitleResult };
@@ -1292,6 +1386,7 @@ export interface CoreApiMethods {
 /** Every notification Core sends, with its params type. */
 export interface CoreApiNotifications {
   "session.event": SessionEventNotification;
+  "session.send_progress": SessionSendProgressNotification;
   "session.tile": SessionTileNotification;
   "host.status": HostStatusNotification;
   "core.notice": CoreNoticeNotification;

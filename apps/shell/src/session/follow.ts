@@ -1,13 +1,17 @@
 // Following one session: subscribe to its events, apply them to its
 // transcript, subscribe again from where it left off whenever the window
-// attaches anew, and send the user's messages and answers. What the window
-// shows of the session comes only from the events Core projects; a message
-// or an answer appears once Core records it, never before.
+// attaches anew, and send the user's messages (answers are the window's, not
+// one follower's: answers.ts). What the window shows of the session comes
+// only from the events Core projects; a message or an answer appears once
+// Core records it, never before.
 
 import type { Envelope } from "../protocol/agent-events.gen";
 import { hasSeq } from "../core/checks";
 import { type CoreClient, describeError } from "../core/client";
 import { type Transcript, apply, emptyTranscript } from "./transcript";
+
+/** The key that starts the notice saying Core no longer holds a session's earliest events. */
+export const EARLIER = "earlier:";
 
 /** The state of something the user sent: on its way, or refused with a reason. */
 export type Sending = { state: "sending" } | { state: "failed"; message: string };
@@ -28,8 +32,6 @@ export interface SessionView {
     | { state: "failed"; message: string; gap?: true };
   /** The composer's message, while it is on its way or after it was refused. */
   message?: Sending;
-  /** Answers to permission requests, by request id, until the decision arrives as an event. */
-  answers: Record<string, Sending>;
 }
 
 export interface Follower {
@@ -41,13 +43,12 @@ export interface Follower {
   detached(): void;
   /** Sends the user's message. Resolves true once Core accepted it. */
   send(text: string): Promise<boolean>;
-  decide(requestId: string, behavior: "allow" | "deny"): void;
   /** Stops following; `update` is never called again. */
   stop(): void;
 }
 
 export function follow(client: CoreClient, id: string, update: (view: SessionView) => void): Follower {
-  let view: SessionView = { id, transcript: emptyTranscript, stream: { state: "subscribing" }, answers: {} };
+  let view: SessionView = { id, transcript: emptyTranscript, stream: { state: "subscribing" } };
   let stopped = false;
   // Each subscribe gets a number; only the latest one's answer counts.
   let generation = 0;
@@ -61,14 +62,6 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
     update(view);
   };
 
-  const withAnswer = (requestId: string, answer: Sending | undefined) =>
-    set((v) => {
-      const answers = { ...v.answers };
-      if (answer) answers[requestId] = answer;
-      else delete answers[requestId];
-      return { ...v, answers };
-    });
-
   update(view);
 
   // The view (one projection of the session, as Core names it) the events
@@ -80,9 +73,9 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
     const transcript = { ...emptyTranscript, lastSeq: first - 1 };
     const items =
       first > 0
-        ? [{ kind: "notice" as const, key: `earlier:${first}`, message: "Earlier events of this session are no longer held." }]
+        ? [{ kind: "notice" as const, key: `${EARLIER}${first}`, message: "Earlier events of this session are no longer held." }]
         : [];
-    set((v) => ({ ...v, transcript: { ...transcript, items }, answers: {} }));
+    set((v) => ({ ...v, transcript: { ...transcript, items } }));
     resumedAt = undefined;
   };
 
@@ -128,7 +121,7 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         }
         if (answered !== undefined) shownView = answered;
         if (last < from - 1) {
-          set((v) => ({ ...v, transcript: emptyTranscript, answers: {} }));
+          set((v) => ({ ...v, transcript: emptyTranscript }));
           resumedAt = undefined;
           attached();
           return;
@@ -166,16 +159,9 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
       set((v) => {
         const transcript = apply(v.transcript, envelope);
         if (transcript === v.transcript) return v;
-        // A decision that arrived settles the answer that was on its way.
-        // `apply` has checked the event; one it could not read has no type here.
-        const event = (envelope as { event?: unknown }).event as Envelope["event"] | undefined;
-        const answers =
-          event?.type === "permission.decided" && event.request_id in v.answers
-            ? Object.fromEntries(Object.entries(v.answers).filter(([key]) => key !== event.request_id))
-            : v.answers;
         // The missing event arrived after all: the stream is live again.
         const stream = v.stream.state === "failed" && v.stream.gap ? { state: "live" as const } : v.stream;
-        return { ...v, transcript, answers, stream };
+        return { ...v, transcript, stream };
       });
     },
 
@@ -196,16 +182,6 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         set((v) => ({ ...v, message: { state: "failed", message: describeError(error) } }));
         return false;
       }
-    },
-
-    decide(requestId, behavior) {
-      withAnswer(requestId, { state: "sending" });
-      client.call("session.decide_permission", { id, request_id: requestId, behavior }).then(
-        // Core answered; the answer settles when its `permission.decided`
-        // arrives. If that came first, there is nothing left to settle.
-        () => {},
-        (error) => withAnswer(requestId, { state: "failed", message: describeError(error) }),
-      );
     },
 
     stop() {

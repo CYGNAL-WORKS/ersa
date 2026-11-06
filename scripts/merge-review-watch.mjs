@@ -2,7 +2,8 @@
 // The merge review poller (ADR 0023): on the owner's machine, with the owner's
 // gh and Claude Code logins, it finds every open pull request from this
 // repository whose CI passed on a head that carries no merge review yet, and
-// runs scripts/merge-review.mjs on one of them per tick.
+// runs scripts/merge-review.mjs on up to two of them at once, the head whose
+// CI passed first leading.
 //
 //   node scripts/merge-review-watch.mjs [--once] [--checkout <dir>]
 //
@@ -14,12 +15,18 @@
 // as it starts on a head. A head with the status is reviewed, being reviewed,
 // or clean and waiting for the gate; a pending status older than an hour is
 // one of the last two gone stale (a run that died with the machine, a gate
-// that may pass now), and the head is taken up again. One review per tick,
-// and an hour at most spent on heads whose checkout cannot be prepared (each
-// is logged and the next head gets the tick), so a tick ends within the two
-// hours the task allows it. A tick with no head to review logs each open pull
-// request it passed over and why, so a quiet log says what it waits for. A
-// head without the status that
+// that may pass now), and the head is taken up again. Heads are due in the
+// order their CI passed, so a pull request pushed again and again never keeps
+// an older one waiting. Each tick starts a review in every free slot (SLOTS of
+// them, each with its own checkout) and leaves it running: in a terminal the
+// next tick fills a slot whose review has ended. --once does the same while
+// its reviews run, starting none after its first START_WINDOW_MS, then waits
+// for them, so a run ends within the two hours the task allows it. A pull
+// request under review waits for that review to end, whatever its head now. A
+// head whose checkout cannot be prepared tries each free slot, is logged, and
+// the next head goes; in a terminal a tick gives such heads an hour at most. A tick with no head to review
+// logs each open pull request it passed over and why, so a quiet log says
+// what it waits for. A head without the status that
 // GitHub would merge on its own (auto-merge armed by a review of an earlier
 // head, which a push by the owner's account does not disarm), or any head of a
 // pull request labeled `hold`, gets auto-merge disabled first, so nothing
@@ -27,9 +34,10 @@
 // of the running tick, so two ticks never overlap; a lock whose process is gone
 // or that is three hours old is taken over.
 //
-// Each review runs in its own checkout, a detached worktree of this repository
-// at <dir> (by default a sibling folder named after this one with "-review"
-// appended), reset to the head with the review script and the gate taken from
+// Each review runs in its slot's checkout, a detached worktree of this
+// repository at <dir> for the first slot (by default a sibling folder named
+// after this one with "-review" appended) and <dir>-2 for the second, reset to
+// the head with the review script and the gate taken from
 // main, and every file under a .claude folder removed, ignored ones included;
 // the review script takes the hooks and the instruction files from main itself. The review runs the pull request's own
 // tests as the owner, with the owner's gh login in the environment: that is
@@ -40,7 +48,8 @@
 // The scheduled task, registered once from a PowerShell prompt in the
 // repository, with node, gh and claude on the user's PATH. It runs only while
 // the owner is logged on, since both logins are theirs, and appends the
-// poller's lines and each review's output to .scratch\merge-review-watch.log,
+// poller's lines and each review's output, every line marked with its pull
+// request, to .scratch\merge-review-watch.log,
 // making the folder first on a fresh clone (cmd would bind the `&` inside an
 // `if`, so the mkdir runs unconditionally and its complaint is dropped):
 //
@@ -52,9 +61,10 @@
 // Exit 0 after a tick, or at once when another tick holds the lock; 2 on a
 // usage or tool error.
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import { MERGE_REVIEW, ciRefusals, normalizeChecks } from "./merge-pr.mjs";
@@ -63,23 +73,37 @@ const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const LOCK = join(ROOT, ".scratch", "merge-review-watch.lock");
 const CHECKOUT = join(ROOT, "..", `${basename(ROOT)}-review`);
 export const INTERVAL_MS = 5 * 60 * 1000;
+// Reviews that run at once. Each builds and tests a pull request on this
+// machine, so more would slow every one of them down.
+export const SLOTS = 2;
 // A pending status older than this belongs to a run that is over: longer than
 // the review's claude runs (38 and 4 minutes) and its tool calls at their
 // usual pace. A lock gets three times that, past the two hours the task
-// allows a tick: a tick is at most an hour of heads that cannot start plus one
-// review whose every tool call stalled to its two-minute limit, and the task's
+// allows a run: a run is at most START_WINDOW_MS of heads that cannot start
+// plus the reviews it started, which run side by side, each with every tool
+// call stalled to its two-minute limit, and the task's
 // stop may end only the shell while the review runs on, so a live tick must
 // never be taken over.
 export const STALE_MS = 60 * 60 * 1000;
 export const LOCK_STALE_MS = 3 * STALE_MS;
+// How long a run of the scheduled task starts reviews for, counted from its
+// start, heads that cannot be prepared included: a review takes about an hour,
+// so the last one it starts ends within the two hours the task allows it.
+export const START_WINDOW_MS = 45 * 60 * 1000;
+// How long a review may run before it is ended. A review takes up to about an
+// hour; one started at the end of the window and ended here still finishes
+// within the task's two hours.
+export const REVIEW_LIMIT_MS = 70 * 60 * 1000;
+// What a review that was ended at its limit resolves to.
+export const ENDED = "nothing: it ran past its time limit and was ended";
 const FIELDS = "number,isDraft,isCrossRepository,headRefOid,labels,autoMergeRequest,statusCheckRollup";
 
 // What a head's merge review status says, for the line that tells why the
 // head is not reviewed again.
 const VERDICT = { SUCCESS: "passed", FAILURE: "blocks the merge", ERROR: "failed to run", PENDING: "is running or waits for the gate" };
 
-// Which pull requests a tick acts on: `review` the heads to review, in list
-// order, `disarm` the numbers whose auto-merge must go, and `skip` every other
+// Which pull requests a tick acts on: `review` the heads to review, the one
+// whose CI passed first leading, `disarm` the numbers whose auto-merge must go, and `skip` every other
 // open pull request with why it is not reviewed, so a tick with nothing to
 // review says what it is waiting for. Pure, so a test can drive every case
 // with gh's JSON alone.
@@ -101,9 +125,21 @@ export function select(prs, now = Date.now()) {
     const ci = ciRefusals(pr.statusCheckRollup);
     if (reviewed) skip.push({ number: pr.number, why: `its merge review ${VERDICT[mark.status === "COMPLETED" ? mark.conclusion : "PENDING"] ?? "has a status this poller cannot read"}${held ? ", and it is on hold" : ""}` });
     else if (ci.length) skip.push({ number: pr.number, why: ci.join(", and ") });
-    else review.push({ number: pr.number, head: pr.headRefOid });
+    else review.push({ number: pr.number, head: pr.headRefOid, since: passedAt(pr.statusCheckRollup, now) });
   }
-  return { review, disarm, skip };
+  review.sort((a, b) => a.since - b.since || a.number - b.number);
+  return { review: review.map(({ number, head }) => ({ number, head })), disarm, skip };
+}
+
+// When a head's CI passed: the end of its last check to finish, among those gh
+// gave a time for. A head with no time at all counts as passing now, so a
+// missing time neither jumps the line nor keeps a head at its back for good.
+function passedAt(rollup, now) {
+  const times = normalizeChecks(rollup)
+    .filter((c) => c.name !== MERGE_REVIEW)
+    .map((c) => Date.parse(c.completedAt ?? c.startedAt ?? ""))
+    .filter(Number.isFinite);
+  return times.length ? Math.max(...times) : now;
 }
 
 // Takes the lock for this process and returns what releases it, or null when
@@ -174,21 +210,59 @@ function isAlive(pid) {
   }
 }
 
-// Git and gh stall on a prompt or a dead network; the review itself has its
-// own limits and runs with the console, so its output is seen live.
-function run(cmd, args, cwd = ROOT, { live = false } = {}) {
-  const r = spawnSync(cmd, args, {
-    cwd,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-    timeout: live ? undefined : 2 * 60 * 1000,
-    stdio: live ? "inherit" : "pipe",
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" },
-  });
+const ENV = { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" };
+
+// Git and gh stall on a prompt or a dead network.
+function run(cmd, args, cwd = ROOT) {
+  const r = spawnSync(cmd, args, { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 2 * 60 * 1000, env: ENV });
   return { ok: r.status === 0, status: r.status, out: (r.stdout ?? "").trim(), err: [(r.stderr ?? "").trim(), r.error?.message].filter(Boolean).join("; ") };
 }
 
-const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+// Starts the review of pull request `n` at `head` in `dir` and resolves to its
+// exit code, or why it could not start or did not end. Its output goes to
+// `log` a line at a time, each marked with the pull request, so two reviews'
+// lines stay readable side by side. A review that runs past `limit` is ended
+// with every process it started: a run waits for its reviews and keeps its
+// lock fresh meanwhile, so one that never ended would hold every other head.
+// A process the review left behind can hold its output open after it exits,
+// so the exit, not the end of the output, ends it. `launch` stands in for
+// spawn, so a test can hand it a process that behaves any way.
+export function startReview(n, head, dir, log, { limit = REVIEW_LIMIT_MS, launch = spawn } = {}) {
+  return new Promise((resolve) => {
+    let timer;
+    const done = (status) => {
+      clearTimeout(timer);
+      resolve(status);
+    };
+    // Outside Windows the review leads its own process group, so it can be ended whole.
+    const child = launch("node", ["scripts/merge-review.mjs", String(n), "--head", head], { cwd: dir, env: ENV, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
+    // Control characters go, so the pull request's own output cannot redraw the log.
+    for (const out of [child.stdout, child.stderr]) createInterface({ input: out }).on("line", (l) => log(`#${n} | ${l.replace(/[\x00-\x1f\x7f]/g, "")}`));
+    timer = setTimeout(() => {
+      endTree(child.pid);
+      done(ENDED);
+    }, limit);
+    child.on("error", (e) => done(e.message));
+    // Output still in the pipe gets a moment to reach the log.
+    child.on("exit", (code, signal) => {
+      const status = code ?? signal;
+      child.on("close", () => done(status));
+      setTimeout(() => done(status), 2000).unref();
+    });
+  });
+}
+
+// Ends a process and every process it started.
+function endTree(pid) {
+  if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore" });
+  else {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {}
+  }
+}
+
+const pause = (ms) => new Promise((wake) => setTimeout(wake, ms));
 const stamp = () => new Date().toISOString().replace(/\.\d+Z$/, "Z");
 
 class ToolError extends Error {}
@@ -218,42 +292,71 @@ function prepare(run, dir, n, head) {
   must(["checkout", "-q", "origin/main", "--", "scripts/merge-review.mjs", "scripts/merge-pr.mjs"], dir);
 }
 
-// One pass: disarm what must not merge, then review the first head due. A
-// head whose checkout cannot be prepared is reported and the next head gets
-// the tick, so one bad head does not hold the rest, for an hour at most; the
-// first review run, whatever its exit code, ends the tick.
-function tick(run, dir, log, now) {
+// One pass: disarm what must not merge, then start a review in each free
+// slot, taking the heads due in order. `running` maps each pull request under
+// review to its slot's checkout and the review's end. A head whose checkout
+// cannot be prepared is reported and the next head takes the slot, so one bad
+// head does not hold the rest; no head is taken up after `until`.
+function tick(run, start, dirs, log, now, running, until) {
   const list = run("gh", ["pr", "list", "--state", "open", "--limit", "100", "--json", FIELDS]);
   if (!list.ok) fail(`gh pr list failed: ${list.err}`);
-  const { review, disarm, skip } = select(JSON.parse(list.out), now());
+  let prs;
+  try {
+    prs = JSON.parse(list.out);
+  } catch (e) {
+    fail(`gh pr list gave output that is not JSON: ${e.message}`);
+  }
+  const { review, disarm, skip } = select(prs, now());
   for (const n of disarm) {
     const r = run("gh", ["pr", "merge", String(n), "--disable-auto"]);
     log(`#${n}: auto-merge was on for an unreviewed or held head; ${r.ok ? "disabled it" : `could not disable it: ${r.err}`}`);
   }
   // Check names come from the pull request's own workflows: one line, whatever they hold.
-  if (!review.length) return log(`nothing to review${skip.length ? `: ${skip.map((p) => `#${p.number} (${p.why})`).join("; ")}` : ""}`.replace(/\s+/g, " "));
-  const started = now();
-  for (const [i, { number: n, head }] of review.entries()) {
-    const later = review.slice(i + 1);
-    if (now() - started > STALE_MS) return log(`the tick is an hour old; ${[n, ...later.map((p) => p.number)].map((x) => `#${x}`).join(", ")} wait for the next`);
-    log(`#${n} at ${head.slice(0, 7)}: reviewing${later.length ? `; ${later.map((p) => `#${p.number}`).join(", ")} next` : ""}`);
-    try {
-      prepare(run, dir, n, head);
-    } catch (e) {
-      log(`#${n} at ${head.slice(0, 7)}: ${e.message}`);
-      continue;
-    }
-    const r = run("node", ["scripts/merge-review.mjs", String(n), "--head", head], dir, { live: true });
-    return log(`#${n} at ${head.slice(0, 7)}: the review exited ${r.status ?? r.err}`);
+  // A pull request under review waits for that review to end, whatever its head now.
+  const due = review.filter((p) => !running.has(p.number));
+  if (!due.length && !running.size) return log(`nothing to review${skip.length ? `: ${skip.map((p) => `#${p.number} (${p.why})`).join("; ")}` : ""}`.replace(/\s+/g, " "));
+  const free = dirs.filter((d) => ![...running.values()].some((x) => x.dir === d));
+  for (const [i, { number: n, head }] of due.entries()) {
+    const later = due.slice(i + 1).map((p) => `#${p.number}`);
+    if (!free.length) return log(`${[`#${n}`, ...later].join(", ")} wait for a free slot`);
+    if (now() > until) return log(`out of time; ${[`#${n}`, ...later].join(", ")} wait for the next run`);
+    log(`#${n} at ${head.slice(0, 7)}: reviewing${later.length ? `; ${later.join(", ")} next` : ""}`);
+    // The head tries each free slot in turn: the fault may be one checkout's, not the head's.
+    const dir = free.find((d) => {
+      try {
+        prepare(run, d, n, head);
+        return true;
+      } catch (e) {
+        log(`#${n} at ${head.slice(0, 7)}: ${e.message}`);
+        return false;
+      }
+    });
+    if (!dir) continue;
+    free.splice(free.indexOf(dir), 1);
+    // A review that could not start ends like one that failed, so its slot and the lock are freed.
+    const done = Promise.resolve()
+      .then(() => start(n, head, dir, log))
+      .catch((e) => e?.message ?? String(e))
+      .then((status) => {
+        running.delete(n);
+        log(`#${n} at ${head.slice(0, 7)}: the review exited ${status}`);
+        // An ended review never set its verdict, and its pending status would
+        // go stale and send the head round again; an error is the owner's.
+        if (status !== ENDED) return;
+        const description = `The review ran past ${REVIEW_LIMIT_MS / 60000} minutes and was ended; the poller's log says what it was doing.`;
+        const r = run("gh", ["api", `repos/{owner}/{repo}/statuses/${head}`, "-f", "state=error", "-f", `context=${MERGE_REVIEW}`, "-f", `description=${description}`]);
+        if (!r.ok) log(`#${n} at ${head.slice(0, 7)}: could not mark the head's merge review as failed: ${r.err}`);
+      });
+    running.set(n, { dir, done });
   }
 }
 
 const USAGE = "usage: node scripts/merge-review-watch.mjs [--once] [--checkout <dir>]";
 
-// Runs the poller for argv. `run` runs one command, `sleep` waits between
-// ticks, `now` tells the time and `log` takes each line, so a test can stand
-// in for every tool and the clock.
-export function main(argv, { run: r = run, sleep = pause, now = Date.now, log = (l) => process.stdout.write(`${stamp()} ${l}\n`), lockPath = LOCK, alive } = {}) {
+// Runs the poller for argv. `run` runs one command, `start` starts a review,
+// `sleep` waits between ticks, `now` tells the time and `log` takes each line,
+// so a test can stand in for every tool and the clock.
+export async function main(argv, { run: r = run, start = startReview, sleep = pause, now = Date.now, log = (l) => process.stdout.write(`${stamp()} ${l}\n`), lockPath = LOCK, alive } = {}) {
   let once = false;
   let dir = CHECKOUT;
   try {
@@ -264,18 +367,25 @@ export function main(argv, { run: r = run, sleep = pause, now = Date.now, log = 
     }
     const release = lock(lockPath, { now, ...(alive ? { alive } : {}) });
     if (!release) return { code: 0, stdout: `another tick holds ${lockPath}; nothing to do\n` };
+    const dirs = Array.from({ length: SLOTS }, (_, i) => (i ? `${dir}-${i + 1}` : dir));
+    const running = new Map();
+    const began = now();
     try {
       for (;;) {
-        // In a terminal a tool that is down for one tick is not the end of
-        // the loop; a single tick, the task's, says so and ends.
+        // A tool that is down for one tick is not the end of the loop, or of
+        // a task's run with reviews to wait for; a task's run with none says
+        // so and ends. In a terminal a tick gives heads that cannot be
+        // prepared an hour; a task's run starts nothing after its window.
         try {
-          tick(r, dir, log, now);
+          tick(r, start, dirs, log, now, running, once ? began + START_WINDOW_MS : now() + STALE_MS);
         } catch (e) {
-          if (once || !(e instanceof ToolError)) throw e;
+          if ((once && !running.size) || !(e instanceof ToolError)) throw e;
           log(e.message);
         }
-        if (once) return { code: 0 };
-        sleep(INTERVAL_MS);
+        // The task's run ticks on while its reviews run, so a slot that frees
+        // up is filled.
+        if (once && !running.size) return { code: 0 };
+        await sleep(INTERVAL_MS);
         // The lock's age says the loop is alive; a lock that is gone or
         // another tick's was taken over or removed by hand, and this loop
         // stops rather than run beside it.
@@ -289,6 +399,9 @@ export function main(argv, { run: r = run, sleep = pause, now = Date.now, log = 
         utimesSync(lockPath, new Date(now()), new Date(now()));
       }
     } finally {
+      // The lock stays until every review this process started has ended, so
+      // no other tick takes up a head still under review.
+      await Promise.all([...running.values()].map((x) => x.done));
       release();
     }
   } catch (e) {
@@ -297,7 +410,7 @@ export function main(argv, { run: r = run, sleep = pause, now = Date.now, log = 
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { code, stdout, stderr } = main(process.argv.slice(2));
+  const { code, stdout, stderr } = await main(process.argv.slice(2));
   if (stdout) process.stdout.write(stdout);
   if (stderr) process.stderr.write(stderr);
   process.exit(code);

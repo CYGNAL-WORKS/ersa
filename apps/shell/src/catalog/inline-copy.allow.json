@@ -4,12 +4,8 @@
     "Ersa did not quit:",
     "No session open. Start one from a project in the rail.",
     "Rail",
-    "Root workspace",
-    "Running sessions keep their current settings until they are stopped.",
     "The composer",
     "The new-session screen",
-    "The projects",
-    "The sessions",
     "This session"
   ],
   "components/Composer.tsx": [
@@ -28,18 +24,6 @@
     "Ersa",
     "New session",
     "No backend is available on this host."
-  ],
-  "components/ProjectList.tsx": [
-    "Don’t trust",
-    "Loading…",
-    "New session",
-    "No projects yet.",
-    "Projects",
-    "Projects added to Core appear here.",
-    "Projects appear once Core is connected.",
-    "Saving…",
-    "Trusted",
-    "Trust…"
   ],
   "components/QuitQuestion.tsx": [
     "Cancel",
@@ -70,14 +54,6 @@
     "Session controls",
     "Workspace"
   ],
-  "components/SessionList.tsx": [
-    "Loading…",
-    "No sessions yet.",
-    "Sessions",
-    "Sessions appear once Core is connected.",
-    "Start one from a project above.",
-    "Workspace"
-  ],
   "components/SessionTitle.tsx": [
     "Cancel",
     "Double-click, or press Enter or F2, to rename",
@@ -89,8 +65,6 @@
   "components/Transcript.tsx": [
     "Allow",
     "An invisible character",
-    "Answer once Core is connected",
-    "Deny",
     "Done",
     "Failed",
     "Invisible characters",
@@ -105,7 +79,6 @@
     "Reconnecting to Core…",
     "Retry",
     "Running…",
-    "Sending…",
     "Thinking…",
     "Thought",
     "Transcript",
