@@ -13,11 +13,6 @@ interface TrustQuestionProps {
    * trusting is the one answer, since not trusting it is leaving it as it is.
    */
   purpose: "add" | "change";
-  /**
-   * Where it opens: in the rail, under the project it asks about; or above the composer's box on the new-session
-   * screen, as a card that holds the screen's focal glow (docs/design/COMPOSER.md, The trust question).
-   */
-  place?: "rail" | "composer";
   /** The user's answer: whether the project's own configuration may run in its sessions. */
   onAnswer: (trusted: boolean) => void;
   /** Closes the question without an answer: Cancel, or Escape. */
@@ -32,7 +27,7 @@ interface TrustQuestionProps {
  * Asks whether the user trusts a project, saying plainly what trust lets run, that it covers every workspace of the
  * project, and that it lasts until withdrawn (ADR 0018, FLOW-NEW-SESSION-R16).
  */
-export function TrustQuestion({ name, path, purpose, place = "rail", onAnswer, onDismiss, takeFocus = true, forceCancelFocus }: TrustQuestionProps) {
+export function TrustQuestion({ name, path, purpose, onAnswer, onDismiss, takeFocus = true, forceCancelFocus }: TrustQuestionProps) {
   // The control that opened the question is disabled or elsewhere while it shows, so focus moves here rather than
   // to the page: to Cancel, so a second Enter cancels and never trusts by accident.
   const cancel = useRef<HTMLButtonElement>(null);
@@ -45,7 +40,9 @@ export function TrustQuestion({ name, path, purpose, place = "rail", onAnswer, o
   return (
     <section
       className="trust-question"
-      data-place={place}
+      // Adding opens above the composer's box as a card that holds the screen's focal glow (docs/design/COMPOSER.md,
+      // The trust question); changing an added project's trust opens in the rail, under the project.
+      data-place={purpose === "add" ? "composer" : "rail"}
       aria-label={title}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
@@ -80,5 +77,6 @@ export function TrustQuestion({ name, path, purpose, place = "rail", onAnswer, o
 
 /** A folder's last name, for a question about a project not yet added. */
 export function folderName(path: string): string {
-  return path.split(/[\/]/).filter(Boolean).pop() ?? path;
+  // Windows paths separate with a backslash, others with a slash.
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
