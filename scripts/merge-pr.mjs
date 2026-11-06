@@ -69,12 +69,15 @@ export const cleanMergeOfMain = (c) => c.merge && c.fromMain && c.clean;
 // How many open entries (`- [ ]` lines) an inbox file's text holds.
 export const openInboxEntries = (text) => text.split(/\r?\n/).filter((l) => /^\s*-\s*\[ \]/.test(l)).length;
 
+// The one wording of an inbox hold, shared with the manifest's --inbox problem.
+export const inboxHold = (n) => `${n} open inbox entr${n === 1 ? "y needs" : "ies need"} a planning pass`;
+
 // Why the pull request may not merge; empty when it may. `sinceReview` lists
 // the commits on the branch after the reviewed one that main does not have;
 // `openInbox` counts the head's open inbox entries.
 export function refusals({ pr, reviewedInBranch, sinceReview, openInbox = 0 }) {
   const out = [];
-  if (openInbox) out.push(`${openInbox} open inbox entr${openInbox === 1 ? "y needs" : "ies need"} a planning pass`);
+  if (openInbox) out.push(inboxHold(openInbox));
   if (pr.state !== "OPEN") out.push(`it is ${pr.state.toLowerCase()}`);
   if (pr.isDraft) out.push("it is a draft");
   if (pr.mergeable !== "MERGEABLE") out.push(`GitHub reports it ${pr.mergeable.toLowerCase()}`);
@@ -86,12 +89,9 @@ export function refusals({ pr, reviewedInBranch, sinceReview, openInbox = 0 }) {
   if (review && ["FAILURE", "ERROR"].includes(review.conclusion)) out.push("the merge review blocks the merge; see the review on the pull request");
 
   if (!reviewedInBranch) out.push("the reviewed commit is not in the branch's history; review the head");
-  for (const c of sinceReview ?? []) {
-    const short = c.sha.slice(0, 7);
-    if (cleanMergeOfMain(c)) continue;
-    if (!c.merge) out.push(`${short}, after the review, is not a merge; review the head`);
-    else if (!c.fromMain) out.push(`${short}, after the review, merges a branch other than main; review the head`);
-    else if (!c.clean) out.push(`${short}, after the review, resolved a conflict by hand; review the head`);
+  for (const c of (sinceReview ?? []).filter((x) => !cleanMergeOfMain(x))) {
+    const why = !c.merge ? "is not a merge" : !c.fromMain ? "merges a branch other than main" : "resolved a conflict by hand";
+    out.push(`${c.sha.slice(0, 7)}, after the review, ${why}; review the head`);
   }
   return out;
 }
