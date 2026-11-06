@@ -768,6 +768,7 @@ const entries: Entry[] = [
       ["Can't reach the sessions", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="unreachable" />)],
       ["Detecting backends", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="detecting" />)],
       ["No backend", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="no-backend" />)],
+      ["A backend not working", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable={{ failedBackend: "Claude Code" }} />)],
     ],
   },
   {

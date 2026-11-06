@@ -220,8 +220,17 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
 
   // The box is unavailable while Ersa can't reach the sessions, while the host's backends are being detected
   // (FLOW-NEW-SESSION-R23), and while the host has no backend to run.
+  // With none to run, the line names a backend that failed detection, else says none is installed (R07).
+  const failed = hostBackends?.find((b) => b.status === "error");
   const unavailable: Unavailable | undefined =
-    props.away ?? (hostBackends === undefined ? "detecting" : available(hostBackends).length === 0 ? "no-backend" : undefined);
+    props.away ??
+    (hostBackends === undefined
+      ? "detecting"
+      : available(hostBackends).length > 0
+        ? undefined
+        : failed
+          ? { failedBackend: failed.label }
+          : "no-backend");
 
   return (
     <section ref={screen} className="new-session" aria-label="New session">
