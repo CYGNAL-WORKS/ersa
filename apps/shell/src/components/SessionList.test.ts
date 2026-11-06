@@ -89,12 +89,52 @@ describe("a session's tile", () => {
       }),
     );
 
-  it("is one control: its chevron is a named mark, not a button", () => {
+  // verifies: FLOW-APPROVE-PERMISSION-R22
+  it("makes the chevron of a session that isn't the active one a button named for its shelf, saying whether it is open", () => {
     const html = draw({ state: "waiting_user", pending: [{ kind: "permission", request_id: "r" }] });
+    expect(html).toContain(
+      '<button type="button" class="session-chevron-button" data-tone="caution" aria-label="Request from Fix the build" aria-haspopup="dialog" aria-expanded="false">',
+    );
+    // The chevron's name no longer says the want, so line two's is read with the tile.
+    expect(html).toContain('<span class="session-phrase" data-tone="caution">Needs permission</span>');
+    const open = renderToStaticMarkup(
+      createElement(SessionList, {
+        view: { state: "ready", sessions: [{ ...at("s", "2026-11-01T09:00:00.000Z"), title: "Fix the build", tile: { state: "waiting_user", pending: [{ kind: "permission", request_id: "r" }] } }] },
+        onSelect: () => {},
+        shelf: { id: "s", tone: "caution", render: (domId: string) => createElement("div", { id: domId, className: "shelf" }) },
+      }),
+    );
+    expect(open).toMatch(/aria-expanded="true" aria-controls="([^"]+)">.*<div id="\1" class="shelf">/);
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R26
+  it("leaves the active session's chevron a named mark that opens nothing", () => {
+    const html = draw({ state: "waiting_user", pending: [{ kind: "permission", request_id: "r" }] }, "s");
     expect(html.match(/<button/g)).toHaveLength(1);
     expect(html).toContain('<span class="session-chevron" data-tone="caution" role="img" aria-label="Needs permission">');
     // The want on line two is named by the chevron already, so it isn't read twice.
     expect(html).toContain('<span class="session-phrase" data-tone="caution" aria-hidden="true">Needs permission</span>');
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R03
+  it("draws one shelf, beside its own tile, which takes the shelf's tone", () => {
+    const waiting = (id: string, created: string) => ({
+      ...at(id, created),
+      title: id,
+      tile: { state: "waiting_user" as const, pending: [{ kind: "question" as const, request_id: `r-${id}` }] },
+    });
+    const html = renderToStaticMarkup(
+      createElement(SessionList, {
+        view: { state: "ready", sessions: [waiting("a", "2026-11-01T09:00:00.000Z"), waiting("b", "2026-11-01T10:00:00.000Z")] },
+        onSelect: () => {},
+        shelf: { id: "a", tone: "caution", render: () => createElement("div", { className: "shelf" }) },
+      }),
+    );
+    expect(html.match(/class="shelf"/g)).toHaveLength(1);
+    expect(html.match(/<li class="session-item" data-shelf="true" data-tone="caution">.*?<\/li>/)?.[0]).toContain('aria-label="Request from a"');
+    // A question's tile is the accent, until its shelf shows something in the caution tone.
+    expect(html).toContain('data-tone="caution" aria-label="Request from a"');
+    expect(html).toContain('data-tone="accent" aria-label="Request from b"');
   });
 
   it("names the backend's icon", () => {

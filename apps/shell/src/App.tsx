@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { t } from "./catalog";
 import "./App.css";
 import { AddProject } from "./components/AddProject";
@@ -12,13 +12,15 @@ import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionControls } from "./components/SessionControls";
 import { noneUnseen, unseenAfter } from "./session/unseen";
 import { SessionList, type WorkspaceName, newestFirst } from "./components/SessionList";
+import { Shelf } from "./components/Shelf";
 import { Transcript } from "./components/Transcript";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { Project, Session, Workspace } from "./protocol/core-api.gen";
 import { type BackendChoices, type SessionValues, sessionShown } from "./session/controls";
-import { contextUsed } from "./session/tile";
+import { contextUsed, tileOf } from "./session/tile";
+import { shelfAfter, shelfFollowing, shelfOf, shelfTone } from "./session/shelf";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { readChoices, rememberPatch, startSession } from "./session/start";
@@ -88,14 +90,21 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The quit question, while it is open: how many sessions would stop, and whether Quit was chosen.
   const [quitAsk, setQuitAsk] = useState<QuitAsk & { quitting: boolean; failed?: string }>();
   const [renaming, setRenaming] = useState<Record<string, Sending>>({});
+  // The session whose shelf is open, and its events, followed while it is open (FLOW-APPROVE-PERMISSION).
+  const [shelfId, setShelfId] = useState<string>();
+  const [shelfView, setShelfView] = useState<SessionView>();
+  const shelf = useMemo(() => shelfFollowing(client, setShelfView), [client]);
 
   useEffect(() => {
     const running = connect(client, setView, undefined, (notification) => {
-      if (notification.method === "session.event") follower.current?.receive(notification.params.event);
+      if (notification.method !== "session.event") return;
+      // Each follower takes only its own session's events.
+      follower.current?.receive(notification.params.event);
+      shelf.receive(notification.params.event);
     });
     connection.current = running;
     return () => running.stop();
-  }, [client, attempt]);
+  }, [client, shelf, attempt]);
 
   // With no session chosen, show the newest: reopening the window shows the
   // session that was running when it closed.
@@ -133,6 +142,23 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     if (link !== undefined) follower.current?.attached();
     else follower.current?.detached();
   }, [link, activeId]);
+
+  // The shelf is never open for the active session (FLOW-APPROVE-PERMISSION-R26): making its session active, by
+  // any way, closes it at once, and so does its session having nothing left to ask.
+  const openShelf = shelfId !== undefined && shelfId !== shownId ? shelfId : undefined;
+  useEffect(() => {
+    if (sessions.state === "ready") setShelfId((open) => shelfAfter(open, { type: "sessions", sessions: sessions.sessions, activeId: shownId }));
+  }, [sessions, shownId]);
+  const chevron = (id: string) => setShelfId((open) => shelfAfter(open, { type: "chevron", id, activeId: shownId }));
+  // Its session is followed while the shelf is open, and no longer once it closes. The connection's changes come
+  // first, so a shelf opened with a new connection subscribes on it once.
+  useEffect(() => {
+    if (link !== undefined) shelf.attached();
+    else shelf.detached();
+  }, [shelf, link]);
+  const connected = link !== undefined;
+  useEffect(() => shelf.follow(openShelf, connected), [shelf, openShelf]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => shelf.follow(undefined, false), [shelf]);
 
   // Quit from the tray icon: confirmed here first when sessions are busy (FLOW-CLOSE-AND-QUIT-R04). The
   // sessions are read afresh then; the rail's list stands in when Core cannot be asked.
@@ -324,6 +350,19 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const sessionControls = listed && listedWorkspace && sessionShown(listed, listedWorkspace, backends[listed.host_id] ?? []);
   const used = listed && contextUsed(listed.tile);
 
+  // The open shelf as the rail draws it: the session's oldest request, with its readouts as its tile shows them.
+  const shelfSession = openShelf !== undefined && sessions.state === "ready" ? sessions.sessions.find((s) => s.id === openShelf) : undefined;
+  const shelfOpen = (() => {
+    if (!shelfSession) return undefined;
+    const tile = tileOf(shelfSession, backends);
+    const shows = shelfOf(shelfView?.id === shelfSession.id ? shelfView : undefined, shelfSession.tile.pending);
+    return {
+      id: shelfSession.id,
+      tone: shelfTone(shows),
+      render: (domId: string) => <Shelf id={domId} title={tile.title} shows={shows} ring={tile.ring} cost={tile.cost} onRetry={shelf.retry} />,
+    };
+  })();
+
   return (
     <div className="app">
       <nav className="rail" aria-label="Rail">
@@ -334,7 +373,16 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             </ProjectList>
           </ErrorBoundary>
           <ErrorBoundary what="The sessions" resetKey={sessionsVersion}>
-            <SessionList view={sessions} activeId={shownId} onSelect={select} workspaces={workspaceNames} backends={backends} unseen={unseen.ids} />
+            <SessionList
+              view={sessions}
+              activeId={shownId}
+              onSelect={select}
+              workspaces={workspaceNames}
+              backends={backends}
+              unseen={unseen.ids}
+              shelf={shelfOpen}
+              onChevron={chevron}
+            />
           </ErrorBoundary>
         </div>
         <div className="rail-core">

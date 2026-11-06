@@ -1,0 +1,164 @@
+/* The shelf (docs/design/RAIL.md, The shelf): a transient layer pulled out of its tile over the transcript's edge.
+   It is placed beside the open tile by anchor positioning, so it never moves, narrows or scrolls the transcript
+   (FLOW-APPROVE-PERMISSION-R04), and stays beside the tile as the rail scrolls. The open tile names the anchor. */
+
+.shelf {
+  position: fixed;
+  position-anchor: --open-tile;
+  top: anchor(top);
+  left: anchor(right);
+  /* Past the window's foot, it rises to fit. */
+  position-try-fallbacks: --shelf-rise;
+  z-index: var(--stack-shelf);
+  box-sizing: border-box;
+  width: var(--size-shelf);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--shelf-edge);
+  /* Square where it meets the tile; rounded everywhere else. */
+  border-radius: 0 var(--radius-lg) var(--radius-lg) var(--radius-lg);
+  box-shadow: var(--shadow-transient);
+  animation: shelf-out var(--motion-settle) var(--motion-ease-out);
+  --shelf-edge: var(--color-caution);
+  /* Where the open tile meets it, measured by the tile; nothing until then. */
+  --shelf-join-top: 0;
+  --shelf-join-height: 0;
+}
+
+.shelf[data-tone="accent"] {
+  --shelf-edge: var(--color-accent);
+}
+
+/* Risen to fit: the corner that met the tile no longer does, so it rounds too. */
+.shelf[data-risen] {
+  border-radius: var(--radius-lg);
+}
+
+/* Its edge where it joins the tile is open, so tile and shelf read as one shape: a cover the shelf's own surface,
+   over its leading edge for the tile's height. The open tile sets where that is. */
+.shelf::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * var(--line-hairline));
+  top: var(--shelf-join-top);
+  width: var(--line-hairline);
+  height: var(--shelf-join-height);
+  background: var(--color-surface);
+}
+
+@position-try --shelf-rise {
+  top: auto;
+  bottom: 0;
+}
+
+/* Slides out from under the tile's trailing edge and fades in. */
+@keyframes shelf-out {
+  from {
+    opacity: 0;
+    transform: translateX(calc(-1 * var(--space-md)));
+  }
+}
+
+.shelf-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.shelf-asked {
+  margin: 0;
+  font-weight: var(--type-heading-weight);
+  overflow-wrap: anywhere;
+}
+
+/* The request's input as the transcript's card shows it, on the canvas; past card-max it scrolls. */
+.shelf-details {
+  max-height: var(--size-card-max);
+  overflow: auto;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-canvas);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-sm);
+}
+
+.shelf-detail,
+.shelf-reason,
+.shelf-readouts {
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  overflow-wrap: anywhere;
+}
+
+.shelf-readouts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.shelf-question {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.shelf-question-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The rail's notes: loading and a request Ersa can't show, and a failed read with its reason and Retry. */
+.shelf-note {
+  margin: 0;
+  color: var(--color-ink-muted);
+}
+
+.shelf-failed {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+}
+
+/* What sits beneath the problem starts under its words, not under its glyph. */
+.shelf-failed > :not(.problem) {
+  margin-inline-start: calc(var(--size-glyph) + var(--space-sm));
+}
+
+.shelf-answers {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+/* A suggestion is as wide as the shelf, its label cut with an ellipsis. */
+.shelf-suggestion {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+/* Deny at the leading edge, Allow at the trailing edge. */
+.shelf-answer-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+/* With reduced motion on, the shelf appears at once. */
+@media (prefers-reduced-motion: reduce) {
+  .shelf {
+    animation: none;
+  }
+}
