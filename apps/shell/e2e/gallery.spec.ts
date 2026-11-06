@@ -241,6 +241,37 @@ test("a project heading's actions show with keyboard focus, and More's menu work
   await expect(heading.getByRole("menu")).toHaveCount(0);
 });
 
+// What a heading's actions do (LAY-SHELL, A heading's actions): New session opens the screen for its own project,
+// and More withdraws trust at once but asks before trusting (ADR 0018). The gallery keeps each call on the page.
+test("a project heading's New session and More act on that project, and trusting asks first", async ({ page }) => {
+  await page.goto("/gallery.html?component=RailTree&theme=light");
+  const tree = page.getByRole("figure", { name: "Projects", exact: true });
+  const call = () => page.evaluate(() => document.body.dataset.railCall);
+
+  await tree.getByRole("button", { name: "New session in runner" }).click();
+  expect(await call()).toBe("newSession p5");
+
+  await tree.getByRole("button", { name: "More for ersa" }).click();
+  // Opened with the pointer, focus is on the menu, not its item (RAIL.md, Menus).
+  await expect(tree.getByRole("menu", { name: "More for ersa" })).toBeFocused();
+  await tree.getByRole("menuitem", { name: "Don't trust" }).click();
+  expect(await call()).toBe("setTrust p1 false");
+
+  await tree.getByRole("button", { name: "More for stranger" }).click();
+  await tree.getByRole("menuitem", { name: "Trust…" }).click();
+  const question = tree.getByRole("region", { name: "Trust stranger?" });
+  await expect(question).toBeVisible();
+  expect(await call()).toBe("setTrust p1 false");
+  await question.getByRole("button", { name: "Cancel" }).click();
+  expect(await call()).toBe("setTrust p1 false");
+  await expect(tree.getByRole("button", { name: "More for stranger" })).toBeFocused();
+
+  await tree.getByRole("button", { name: "More for stranger" }).click();
+  await tree.getByRole("menuitem", { name: "Trust…" }).click();
+  await question.getByRole("button", { name: "Trust", exact: true }).click();
+  expect(await call()).toBe("setTrust p4 true");
+});
+
 // The session controls from the keyboard (FLOW-NEW-SESSION-R01): every chip on the way from the composer, each
 // opening its choices, Escape closing them with focus back on the chip, and a choice taking effect.
 test("every session control is reachable and works from the keyboard", async ({ page }) => {
