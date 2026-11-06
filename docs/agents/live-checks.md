@@ -10,7 +10,7 @@ From `apps/shell`, on Windows, with `pnpm install` done:
 
 Each run first builds what it drives from this checkout: the Interface (`pnpm build`), then Core, the stand-in backend, and a debug `ersa` with the Interface embedded, into `target/live-check`. The first build takes a few minutes; later runs take seconds.
 
-Each test gets its own Core (`ersa-core serve` on a random endpoint label, with a data folder in a new temporary folder) and its own window attached to that label. Your own Ersa and Core keep running and are never touched. When the test ends, passed or failed, the harness ends both process trees, removes the temporary folder, and fails the test if anything is left. `live/cleanup.live.ts` checks this.
+Each test gets its own Core (`ersa-core serve` on a random endpoint label, with a data folder in a new temporary folder) and its own window attached to that label. Your own Ersa and Core keep running and are never touched. The window opens without taking focus, so you can keep working while a run goes. When the test ends, passed or failed, the harness ends both process trees, removes the temporary folder, and fails the test if anything is left. `live/cleanup.live.ts` checks this.
 
 ## Write one
 
