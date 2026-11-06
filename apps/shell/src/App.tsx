@@ -380,11 +380,11 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               hostNames={hostNames}
               backends={backends}
               unseen={unseen.ids}
-            >
-              {/* The way to add a project stays beneath the tree until the new-session screen's project chip has it. */}
-              {view.phase === "connected" && <AddProject onAdd={addProject} adding={adding} />}
-            </RailTree>
+            />
           </ErrorBoundary>
+          {/* The way to add a project stays beneath the tree until the new-session screen's project chip has it,
+              outside the tree's boundary so it survives a tree that fails to draw. */}
+          {view.phase === "connected" && <AddProject onAdd={addProject} adding={adding} />}
         </div>
         <div className="rail-core">
           {quitAsk && (

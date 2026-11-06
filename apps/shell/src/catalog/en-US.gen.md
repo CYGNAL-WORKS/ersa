@@ -100,6 +100,10 @@ The connection status
 
 Untitled session
 
+### `rail.tile.boundaryName`
+
+This session
+
 ### `rail.tile.startingStatus`
 
 Starting

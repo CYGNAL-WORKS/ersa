@@ -272,6 +272,33 @@ test("a project heading's New session and More act on that project, and trusting
   expect(await call()).toBe("setTrust p4 true");
 });
 
+// More's menu floats above the rail (RAIL.md, Menus): at the bottom of the window it opens above More, in full
+// view, and it takes no room in the rail, so nothing beneath it scrolls.
+test("a project heading's menu at the window's foot opens above More, in view", async ({ page }) => {
+  await page.goto("/gallery.html?component=RailTree&theme=light");
+  const tree = page.getByRole("figure", { name: "Projects", exact: true });
+  const more = tree.getByRole("button", { name: "More for stranger" });
+  // The window ends just below More, so the menu has no room beneath it.
+  const at = await more.boundingBox();
+  await page.setViewportSize({ width: 1280, height: Math.ceil(at!.y + at!.height) + 4 });
+  const heightBefore = await tree.evaluate((el) => el.scrollHeight);
+  await more.click();
+  const menu = tree.getByRole("menu", { name: "More for stranger" });
+  await expect(menu).toBeVisible();
+  const [m, b, viewport] = [await menu.boundingBox(), await more.boundingBox(), page.viewportSize()];
+  expect(m && b && viewport).toBeTruthy();
+  expect(m!.y + m!.height).toBeLessThanOrEqual(viewport!.height);
+  expect(m!.y + m!.height).toBeLessThanOrEqual(b!.y);
+  // Aligned to More's trailing edge.
+  expect(Math.abs(m!.x + m!.width - (b!.x + b!.width))).toBeLessThan(1);
+  expect(await tree.evaluate((el) => el.scrollHeight)).toBe(heightBefore);
+
+  // It fades out as it closes, then goes.
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(more).toBeFocused();
+});
+
 // The session controls from the keyboard (FLOW-NEW-SESSION-R01): every chip on the way from the composer, each
 // opening its choices, Escape closing them with focus back on the chip, and a choice taking effect.
 test("every session control is reachable and works from the keyboard", async ({ page }) => {

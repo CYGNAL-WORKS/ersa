@@ -76,7 +76,6 @@
 /* A heading: one row, size-control high, in ui-small at the heading weight and ink-muted; a control without an
    edge (DESIGN.md, Pointer and press). */
 .rail-heading {
-  position: relative;
   /* size-control high, its edge included. */
   box-sizing: border-box;
   display: flex;
@@ -195,25 +194,35 @@
   background: var(--material-pressed);
 }
 
-/* More's menu: a transient layer beneath the heading's trailing edge, as a chip's list is beneath its chip. */
+/* More's menu: a floating layer in the top layer (a popover), above the rail and its scrolling, anchored below
+   More and aligned to its trailing edge; with no room below, it opens above (RAIL.md, Menus). */
 .rail-menu {
-  position: absolute;
+  /* The popover's own placement and look give way to the layer's. */
+  position: fixed;
+  inset: auto;
+  position-area: block-end span-inline-start;
+  position-try-fallbacks: flip-block;
   outline: none;
-  /* Beneath the heading's row: measured from inside its edge. */
-  top: calc(var(--size-control) - var(--line-hairline));
-  right: 0;
   z-index: var(--stack-menu);
   display: flex;
   flex-direction: column;
   min-width: max-content;
-  margin: var(--space-xs) 0 0;
+  margin: var(--space-xs) 0;
   padding: var(--space-xs);
   list-style: none;
+  color: var(--color-ink);
   background: var(--color-surface);
   border: var(--line-hairline) solid var(--color-line);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-transient);
+  overflow: visible;
   animation: rail-menu-in var(--motion-quick) var(--motion-ease-out);
+}
+
+/* Closing, it fades out the same way, then goes. */
+.rail-menu[data-closing] {
+  opacity: 0;
+  animation: rail-menu-out var(--motion-quick) var(--motion-ease-out);
 }
 
 /* Each item stretches to the menu's width. */
@@ -221,10 +230,16 @@
   display: grid;
 }
 
-/* A menu opens with a fade alone. */
+/* A menu opens and closes with a fade alone. */
 @keyframes rail-menu-in {
   from {
     opacity: 0;
+  }
+}
+
+@keyframes rail-menu-out {
+  from {
+    opacity: 1;
   }
 }
 
@@ -233,7 +248,8 @@
 .rail-menu-item {
   box-sizing: border-box;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  justify-content: center;
   min-height: var(--size-control);
   padding: 0 var(--space-sm);
   font: inherit;
@@ -267,6 +283,20 @@
   cursor: default;
 }
 
+/* An unavailable item's reason, beneath its label, grows the row to hold it. */
+.rail-menu-reason {
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+/* The heading's buttons fit inside its hairline edge, so their fills and focus edges stay within the heading. */
+.rail-heading-actions .icon-button {
+  box-sizing: border-box;
+  width: calc(var(--size-control) - var(--line-hairline) - var(--line-hairline));
+  height: calc(var(--size-control) - var(--line-hairline) - var(--line-hairline));
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rail-heading,
   .rail-heading-actions,
@@ -274,7 +304,8 @@
     transition: none;
   }
 
-  .rail-menu {
+  .rail-menu,
+  .rail-menu[data-closing] {
     animation: none;
   }
 }
