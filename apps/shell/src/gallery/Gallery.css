@@ -88,6 +88,12 @@
   padding-bottom: var(--size-card-max);
 }
 
+/* A menu the gallery opens at once is laid out while its state is off screen, where it would flip above its
+   button and stay there; in the room made for it, it always opens below. */
+.gallery-room .rail-menu {
+  position-try-fallbacks: none;
+}
+
 .gallery-icon-row {
   display: inline-flex;
   align-items: center;
