@@ -79,11 +79,10 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 
 ## Built so far
 
-Of the rail described above, what is built is the tree grouped by project, with sessions newest first, New session at the rail's top, each project heading with New session and trusting the project, group headings that collapse and then count their sessions with the mark in the tone of what they want, the tiles, and the foot; collapsed headings are kept only while the window is open; the rest is still to build, and until the project chip is built a form beneath the tree adds a project. The shelf is built: a tile's chevron is the shelf's handle on every tile but the active one's.
+Of the rail described above, what is built is the tree grouped by project, with sessions newest first, each project heading with New session and trusting the project, the tiles, and the foot; the rest is still to build, and until the project chip is built a form beneath the tree adds a project. The shelf is built: a tile's chevron is the shelf's handle on every tile but the active one's.
 
 ## Changes
 
-- 2026-11-06: from #227 inbox: Built so far follows #158, which builds New session at the rail's top and collapsing group headings; RAIL.md's collapsed project heading that is not trusted shows the shield alone, an exception DESIGN.md's Icons now names. No requirement IDs changed.
 - 2026-11-06: from #214 and #215 inbox: Built so far follows the rail tree and the shelf. No requirement IDs changed.
 - 2026-11-06: the union merges of #173, #174 and #171 left two or three versions of the rail's opening, Add project, "Loading, empty and failed" and "The foot", some under The shelf; one of each kept, as the owner's decisions of 2026-11-05 say. Meaning unchanged; no requirement IDs changed.
 - 2026-11-05: where the shelf sits (The shelf), from the owner's decisions; its behavior is FLOW-APPROVE-PERMISSION's. This closes the open question on overlay or push and queueing. No requirement IDs changed.

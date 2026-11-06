@@ -250,7 +250,7 @@ Corners come from a small set of radii assigned by role, so things of one kind s
 
 ## Iconography
 
-Icons are Lucide, drawn as Lucide draws them: an even stroke with round ends, 2 units wide on Lucide's 24-unit grid, so the stroke scales with the icon and stays in step with the type beside it. Each icon is sized to that type. Which Lucide package the interface takes is decided by the first ticket that draws an icon, under ADR 0015. An icon sits beside a label unless it is universally understood (close, copy, search), and then it has a tooltip and an accessible name. Icons take ink colors, except a mark that carries state: a tile's chevron, and the shield on a project that is not trusted. That shield is also the one icon that stands without its label though it isn't universally understood: on a collapsed project heading, where the rail has no room for "Not trusted" (`RAIL.md`), with "Not trusted" as its tooltip and in its accessible name.
+Icons are Lucide, drawn as Lucide draws them: an even stroke with round ends, 2 units wide on Lucide's 24-unit grid, so the stroke scales with the icon and stays in step with the type beside it. Each icon is sized to that type. Which Lucide package the interface takes is decided by the first ticket that draws an icon, under ADR 0015. An icon sits beside a label unless it is universally understood (close, copy, search), and then it has a tooltip and an accessible name. Icons take ink colors, except a mark that carries state: a tile's chevron, and the shield on a project that is not trusted. That shield is also the one icon that stands without its label though it isn't universally understood, on a collapsed project heading; `RAIL.md` gives the rule.
 
 ## Components
 
