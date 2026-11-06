@@ -214,7 +214,9 @@ async fn shell_pick_folder(app: AppHandle) -> Result<Option<String>, String> {
         // The receiver is gone only if the Interface stopped waiting.
         let _ = answer.send(picked);
     });
-    let picked = answered.await.map_err(|_| "The folder dialog closed without an answer.".to_string())?;
+    let picked = answered
+        .await
+        .map_err(|_| "The folder dialog closed without an answer.".to_string())?;
     match picked {
         None => Ok(None),
         Some(path) => path
