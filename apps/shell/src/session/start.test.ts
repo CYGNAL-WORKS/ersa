@@ -62,6 +62,13 @@ describe("starting a session from the new-session screen", () => {
     expect(outcome).toMatchObject({ ok: true, session: { id: "s1" } });
   });
 
+  // verifies: FLOW-NEW-SESSION-R21
+  it("creates the workspace from the chosen base branch", async () => {
+    const { client, calls } = fakeClient(working);
+    await startSession(client, { ...values("isolated"), base: "release/1.0" }, "Fix the build");
+    expect(calls[0]).toEqual({ method: "workspace.create", params: { project_id: "p1", base: "release/1.0" } });
+  });
+
   // verifies: FLOW-NEW-SESSION-R05
   it("starts the session in the project's root workspace and creates no workspace", async () => {
     const { client, calls, methods } = fakeClient(working);
@@ -230,6 +237,13 @@ describe("the values remembered for a project", () => {
     const patch = rememberPatch({ ...values("root"), model: undefined, effort: undefined });
     expect(patch.new_session.last_used.p1).toMatchObject({ model: null, effort: null, permission_mode: "default" });
     expect(lastUsedFrom(patch).p1).toEqual({ ...values("root"), model: undefined, effort: undefined });
+  });
+
+  // verifies: FLOW-NEW-SESSION-R21
+  it("never hold the base branch: each new session starts at the default branch", () => {
+    const patch = rememberPatch({ ...values("isolated"), base: "release/1.0" });
+    expect(patch.new_session.last_used.p1).not.toHaveProperty("base");
+    expect(lastUsedFrom({ new_session: { last_used: { p1: { ...values("isolated"), base: "release/1.0" } } } }).p1).toEqual(values("isolated"));
   });
 
   it("read as none from settings that hold none, or hold something unreadable", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Project } from "../protocol/core-api.gen";
 import type { Session } from "../protocol/core-api.gen";
-import { type BackendChoices, type Choice, type SessionValues, projectOrder, recentFirst, seedScreen, sessionShown, showsBackend, startingProject, valuesFor, workspaceKinds } from "./controls";
+import { type BackendChoices, type Choice, type SessionValues, baseFor, branchesMatching, projectOrder, recentFirst, seedScreen, sessionShown, showsBackend, startingProject, valuesFor, workspaceKinds } from "./controls";
 
 const project = (vcs: Project["vcs"]): Project => ({ id: "p1", host_id: "local", path: "D:\\Projects\\p", name: "p", vcs, trusted: true });
 
@@ -209,5 +209,35 @@ describe("where the new-session screen starts", () => {
     const touched = { ...seedScreen(undefined, named("a"), undefined, {}), touched: true };
     const next = seedScreen(touched, named("c"), "c", { c: used("c") });
     expect(next).toEqual({ shownFor: "c", seededWith: used("c"), touched: false, wanted: { ...used("c"), project_id: "c" } });
+  });
+});
+
+describe("the base branch a new workspace starts from", () => {
+  const branches = [
+    { name: "feature/rail", default: false },
+    { name: "main", default: true },
+    { name: "release/1.0", default: false },
+  ];
+
+  // verifies: FLOW-NEW-SESSION-R21
+  it("starts at the repository's default branch, and keeps a branch chosen since while the project still has it", () => {
+    expect(baseFor(branches)).toBe("main");
+    expect(baseFor(branches, "release/1.0")).toBe("release/1.0");
+    expect(baseFor(branches, "gone")).toBe("main");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R21
+  it("is none with no default branch listed, or none read yet, so Core starts at the checked-out commit", () => {
+    expect(baseFor([{ name: "topic", default: false }])).toBeUndefined();
+    expect(baseFor(undefined, "main")).toBeUndefined();
+  });
+
+  // verifies: FLOW-NEW-SESSION-R21
+  it("narrows to the branches whose names hold what is typed, whatever its case, in the order listed", () => {
+    expect(branchesMatching(branches, "")).toEqual(branches);
+    expect(branchesMatching(branches, "  ")).toEqual(branches);
+    expect(branchesMatching(branches, "RE").map((b) => b.name)).toEqual(["feature/rail", "release/1.0"]);
+    expect(branchesMatching(branches, " rail ").map((b) => b.name)).toEqual(["feature/rail"]);
+    expect(branchesMatching(branches, "nothing")).toEqual([]);
   });
 });

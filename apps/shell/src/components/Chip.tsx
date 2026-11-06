@@ -1,4 +1,4 @@
-import { type LucideIcon, ShieldAlert } from "lucide-react";
+import { type LucideIcon, Search, ShieldAlert } from "lucide-react";
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import "./Chip.css";
@@ -28,6 +28,23 @@ export interface ChipAction {
   onChoose?: () => void;
 }
 
+/**
+ * A second group of choices below a hairline, under a heading, narrowed by a search box: the workspace list's base
+ * branch (docs/design/COMPOSER.md, The workspace list). Opening the list puts keyboard focus in its search box.
+ */
+export interface ChipSection {
+  heading: string;
+  /** The search box's placeholder, and its accessible name. */
+  placeholder: string;
+  /** The options matching what is typed, in order. */
+  narrow: (query: string) => ChipOption[];
+  /** The chosen option's id. */
+  value?: string;
+  onChoose: (id: string) => void;
+  /** Said in place of the options when none match; also what is said while there are none to list at all. */
+  empty: string;
+}
+
 interface ChipProps {
   /** What the chip sets, for the accessible name: "Workspace". */
   name: string;
@@ -37,6 +54,8 @@ interface ChipProps {
   prefix?: string;
   /** The chosen option's id; absent when nothing can be chosen. */
   value?: string;
+  /** What the chip reads in place of the chosen option's label: "New workspace from main". */
+  reads?: string;
   /** Shown in place of a value when `value` is absent: "No backend". */
   placeholder?: string;
   /** The value reads as a problem: the danger glyph before it. */
@@ -47,6 +66,8 @@ interface ChipProps {
   onChoose: (id: string) => void;
   /** Ends the list. */
   action?: ChipAction;
+  /** Follows the options, below a hairline. */
+  section?: ChipSection;
   /** The list is `size-menu` wide, for options with a second line. */
   wide?: boolean;
   disabled?: boolean;
@@ -55,6 +76,8 @@ interface ChipProps {
   force?: "hover" | "focus" | "pressed";
   /** For the gallery: one option of an open list shown hovered or pressed. */
   forceOption?: { id: string; state: "hover" | "pressed" };
+  /** For the gallery: what an open list's search box holds. */
+  initialQuery?: string;
 }
 
 /**
@@ -62,14 +85,17 @@ interface ChipProps {
  * with Enter, Space or the arrows, moves with the arrows, chooses with Enter or Space, and Escape closes it with
  * focus back on the chip.
  */
-export function Chip({ name, icon, prefix, value, placeholder, problem, pending, options, onChoose, action, wide, disabled, initialOpen = false, force, forceOption }: ChipProps) {
+export function Chip({ name, icon, prefix, value, reads, placeholder, problem, pending, options, onChoose, action, section, wide, disabled, initialOpen = false, force, forceOption, initialQuery = "" }: ChipProps) {
   const [open, setOpen] = useState(initialOpen);
   const chip = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const listId = useId();
   const chosen = options.find((o) => o.id === value);
-  const shown = chosen?.label ?? placeholder ?? "";
+  const shown = reads ?? chosen?.label ?? placeholder ?? "";
+  const [query, setQuery] = useState(initialQuery);
+  const narrowed = section?.narrow(query) ?? [];
+  const search = useRef<HTMLInputElement>(null);
 
   // Focus the chosen option as the list opens from the keyboard or a click, so the arrows start from it.
   // The gallery's open chip does not take focus.
@@ -77,9 +103,16 @@ export function Chip({ name, icon, prefix, value, placeholder, problem, pending,
   useEffect(() => {
     if (!open || !focusOnOpen.current) return;
     focusOnOpen.current = false;
+    // A list with a search box opens with focus in it, so typing narrows at once.
+    if (search.current) return search.current.focus({ preventScroll: true });
     const items = optionsIn(list.current);
     (items.find((el) => el.dataset.id === value) ?? items[0])?.focus({ preventScroll: true });
   }, [open, value]);
+
+  // Each opening starts with the search box empty.
+  useEffect(() => {
+    if (!open) setQuery("");
+  }, [open]);
 
   // A press anywhere outside closes the list, leaving focus where the press put it.
   useEffect(() => {
@@ -114,6 +147,11 @@ export function Chip({ name, icon, prefix, value, placeholder, problem, pending,
     if (option.id !== value) onChoose(option.id);
     close();
   };
+  const chooseIn = (option: ChipOption) => {
+    if (!section || option.unavailable || disabled) return;
+    if (option.id !== section.value) section.onChoose(option.id);
+    close();
+  };
   const take = () => {
     if (!action?.onChoose || disabled) return;
     close();
@@ -135,6 +173,15 @@ export function Chip({ name, icon, prefix, value, placeholder, problem, pending,
   const onListKey = (event: KeyboardEvent<HTMLUListElement>) => {
     const items = optionsIn(list.current);
     const at = items.indexOf(document.activeElement as HTMLElement);
+    // In the search box the keys that edit text are its own; Enter chooses the first match.
+    const typing = event.target === search.current;
+    if (typing && (event.key === " " || event.key === "Home" || event.key === "End")) return;
+    if (typing && event.key === "Enter") {
+      event.preventDefault();
+      const first = narrowed[0];
+      if (first) chooseIn(first);
+      return;
+    }
     const move = (to: number) => {
       event.preventDefault();
       items[(to + items.length) % items.length]?.focus({ preventScroll: true });
@@ -161,6 +208,11 @@ export function Chip({ name, icon, prefix, value, placeholder, problem, pending,
       case " ": {
         event.preventDefault();
         if (items[at]?.dataset.action !== undefined) return take();
+        if (items[at]?.dataset.section !== undefined) {
+          const inSection = narrowed.find((o) => o.id === items[at]?.dataset.id);
+          if (inSection) chooseIn(inSection);
+          return;
+        }
         const option = options.find((o) => o.id === items[at]?.dataset.id);
         if (option) choose(option);
       }
@@ -234,6 +286,53 @@ export function Chip({ name, icon, prefix, value, placeholder, problem, pending,
               )}
             </li>
           ))}
+          {section && (
+            <>
+              <li className="chip-list-rule" role="presentation" />
+              <li className="chip-section" role="presentation">
+                <span className="chip-section-heading" id={`${listId}-section`}>
+                  {section.heading}
+                </span>
+                <span className="chip-search">
+                  <span className="chip-search-icon">
+                    <Icon icon={Search} size="icon-sm" />
+                  </span>
+                  <input
+                    ref={search}
+                    className="chip-search-input"
+                    type="search"
+                    data-item=""
+                    aria-label={section.placeholder}
+                    placeholder={section.placeholder}
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                  />
+                </span>
+              </li>
+              <li className="chip-section-options" role="presentation">
+                <ul role="group" aria-labelledby={`${listId}-section`}>
+                  {narrowed.map((option) => (
+                    <li
+                      key={option.id}
+                      role="option"
+                      tabIndex={-1}
+                      className="chip-option"
+                      data-id={option.id}
+                      data-section=""
+                      aria-selected={option.id === section.value}
+                      aria-disabled={option.unavailable || undefined}
+                      onClick={() => chooseIn(option)}
+                    >
+                      <span className="chip-option-mark" aria-hidden="true" />
+                      <span className="chip-option-label">{option.label}</span>
+                      {option.status && <span className="chip-option-status">{option.status}</span>}
+                    </li>
+                  ))}
+                </ul>
+                {narrowed.length === 0 && <p className="chip-section-note">{section.empty}</p>}
+              </li>
+            </>
+          )}
           {action && (
             <>
               {/* The hairline parts the action from options above it; alone in the list, it needs none. */}
@@ -261,7 +360,10 @@ export function Chip({ name, icon, prefix, value, placeholder, problem, pending,
   );
 }
 
-/** The list's options in order. An unavailable one is still reached, so its status can be read. */
+/**
+ * The list's options in order, with a section's search box among them, so the arrows reach it. An unavailable option
+ * is still reached, so its status can be read.
+ */
 function optionsIn(list: HTMLUListElement | null): HTMLElement[] {
-  return list ? [...list.querySelectorAll<HTMLElement>("[role=option]")] : [];
+  return list ? [...list.querySelectorAll<HTMLElement>("[role=option], [data-item]")] : [];
 }

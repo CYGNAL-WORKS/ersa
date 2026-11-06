@@ -1,15 +1,25 @@
 import { Folder, Plus } from "lucide-react";
 import { t } from "../catalog";
 import type { CoreHelloResult, Project } from "../protocol/core-api.gen";
-import { type BackendChoices, type Choice, type SessionValues, type WorkspaceKind, available, showsBackend, workspaceKinds } from "../session/controls";
-import { Chip, type ChipOption } from "./Chip";
+import {
+  type BackendChoices,
+  type Branches,
+  type Choice,
+  type SessionValues,
+  type WorkspaceKind,
+  available,
+  branchesMatching,
+  showsBackend,
+  workspaceKinds,
+} from "../session/controls";
+import { Chip, type ChipOption, type ChipSection } from "./Chip";
 import { ContextRing } from "./ContextRing";
 import "./SessionControls.css";
 
 export type Host = CoreHelloResult["host"];
 
 /** The chips, by the value each sets. */
-export type ControlKey = "host" | "project" | "workspace" | "backend" | "model" | "effort" | "permission_mode";
+export type ControlKey = "host" | "project" | "workspace" | "base" | "backend" | "model" | "effort" | "permission_mode";
 
 interface SessionControlsProps {
   hosts: readonly Host[];
@@ -20,6 +30,8 @@ interface SessionControlsProps {
   /** The backends on the values' host, from `backend.list`; absent while Core is still detecting them. */
   backends?: readonly BackendChoices[];
   values: SessionValues;
+  /** The project's branches, for a new workspace's base branch (FLOW-NEW-SESSION-R21); absent for a project without git. */
+  branches?: Branches;
   /** The workspace as a running session's controls name it: its branch, or the root. */
   workspaceLabel?: string;
   onChoose: (key: ControlKey, id: string) => void;
@@ -34,7 +46,37 @@ interface SessionControlsProps {
   force?: { key: ControlKey; state: "hover" | "focus" | "pressed" };
 }
 
-const WORKSPACE_LABELS: Record<WorkspaceKind, string> = { isolated: "New workspace", root: "Root workspace" };
+/** The workspace list's two options, each with what it means (docs/design/COMPOSER.md, The workspace list). */
+const workspaceOption = (kind: WorkspaceKind): ChipOption =>
+  kind === "isolated"
+    ? { id: kind, label: t("sessionControls.workspace.newWorkspaceLabel"), status: t("sessionControls.workspace.isolatedStatus") }
+    : { id: kind, label: t("sessionControls.workspace.projectFolderLabel"), status: t("sessionControls.workspace.sharesFilesDescription") };
+
+/**
+ * The base branch beneath a new workspace (FLOW-NEW-SESSION-R21): the project's branches narrowed by the search box,
+ * the default one marked, or what is said while they are read or could not be.
+ */
+function baseSection(branches: Branches, base: string | undefined, onChoose: (id: string) => void): ChipSection {
+  const listed = branches.state === "read" ? branches.branches : [];
+  return {
+    heading: t("sessionControls.workspace.baseBranchHeading"),
+    placeholder: t("sessionControls.workspace.searchBranchesPlaceholder"),
+    narrow: (query) =>
+      branchesMatching(listed, query).map((b) => ({
+        id: b.name,
+        label: b.name,
+        status: b.default ? t("sessionControls.workspace.defaultBranchStatus") : undefined,
+      })),
+    value: base,
+    onChoose,
+    empty:
+      branches.state === "reading"
+        ? t("sessionControls.workspace.readingBranchesProgress")
+        : branches.state === "failed"
+          ? t("sessionControls.workspace.branchesFailedNote", { reason: branches.message })
+          : t("sessionControls.workspace.noBranchMatchesEmpty"),
+  };
+}
 
 const backendOption = (b: BackendChoices): ChipOption => ({
   id: b.name,
@@ -63,7 +105,7 @@ const choiceOptions = (choices: readonly Choice[]): ChipOption[] => choices.map(
  * permission mode, with the context ring at the row's end (LAY-SHELL). The backend chip shows only when the host
  * has more than one backend, or none to run, and lists a missing backend with its status (FLOW-NEW-SESSION-R07).
  */
-export function SessionControls({ hosts, localHostId, projects, backends, values, workspaceLabel, onChoose, onAddProject, disabled, used, open, force }: SessionControlsProps) {
+export function SessionControls({ hosts, localHostId, projects, backends, values, branches, workspaceLabel, onChoose, onAddProject, disabled, used, open, force }: SessionControlsProps) {
   const project = projects.find((p) => p.id === values.project_id);
   const backend = backends?.find((b) => b.name === values.backend);
   const chip = (key: ControlKey) => ({
@@ -103,18 +145,24 @@ export function SessionControls({ hosts, localHostId, projects, backends, values
           }}
           {...chip("project")}
         />
-        {project && (
-          <Chip
-            name="Workspace"
-            value={values.workspace}
-            options={
-              workspaceLabel === undefined
-                ? workspaceKinds(project).map((kind) => ({ id: kind, label: WORKSPACE_LABELS[kind] }))
-                : [{ id: values.workspace, label: workspaceLabel }]
-            }
-            {...chip("workspace")}
-          />
-        )}
+        {project &&
+          (workspaceLabel === undefined ? (
+            <Chip
+              name="Workspace"
+              value={values.workspace}
+              // It names the workspace the session will start in: a new one with its base branch, or the project folder (R22).
+              reads={
+                values.workspace === "isolated" && values.base !== undefined
+                  ? t("sessionControls.workspace.newFromLabel", { branch: values.base })
+                  : undefined
+              }
+              options={workspaceKinds(project).map(workspaceOption)}
+              section={values.workspace === "isolated" && branches ? baseSection(branches, values.base, (id) => onChoose("base", id)) : undefined}
+              {...chip("workspace")}
+            />
+          ) : (
+            <Chip name="Workspace" value={values.workspace} options={[{ id: values.workspace, label: workspaceLabel }]} {...chip("workspace")} />
+          ))}
         {backends === undefined ? (
           <Chip name="Backend" placeholder="Detecting backends…" pending options={[]} onChoose={() => {}} disabled />
         ) : (
