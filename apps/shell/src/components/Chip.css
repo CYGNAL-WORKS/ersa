@@ -330,8 +330,9 @@
   min-height: var(--size-control);
 }
 
-/* Nothing matches, or nothing to list yet. */
+/* Nothing matches, or nothing to list yet. It wraps to the list's width rather than widening the list. */
 .chip-section-note {
+  contain: inline-size;
   margin: 0;
   padding: var(--space-xs) var(--space-sm);
   font-size: var(--type-ui-small-size);
