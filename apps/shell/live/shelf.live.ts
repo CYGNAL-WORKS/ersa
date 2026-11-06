@@ -18,7 +18,7 @@ test("the chevron opens the shelf with the oldest permission request, leaving th
   await page.getByRole("button", { name: "Add, not trusted" }).click();
 
   // The first session asks to write a file, which Claude Code's default permission mode asks about.
-  await rail.getByRole("button", { name: "New session" }).click();
+  await rail.getByRole("button", { name: /^New session in / }).click();
   await page.getByRole("textbox", { name: "Message" }).fill("Use the Write tool to create shelf-check.txt containing the word probe. Do nothing else.");
   await page.keyboard.press("Enter");
   // While it is the active session, its chevron is a mark: its transcript answers it.
@@ -26,7 +26,7 @@ test("the chevron opens the shelf with the oldest permission request, leaving th
   await expect(rail.getByRole("button", { name: /^Request from / })).toHaveCount(0);
 
   // A second session becomes the active one.
-  await rail.getByRole("button", { name: "New session" }).click();
+  await rail.getByRole("button", { name: /^New session in / }).click();
   await page.getByRole("textbox", { name: "Message" }).fill("Reply with the single word ready.");
   await page.keyboard.press("Enter");
   const chevron = rail.getByRole("button", { name: /^Request from / });
@@ -88,12 +88,12 @@ test("an answer from the shelf reaches the session, which goes on, and the shelf
   await rail.getByRole("button", { name: "Add", exact: true }).click();
   await page.getByRole("button", { name: "Add, not trusted" }).click();
 
-  await rail.getByRole("button", { name: "New session" }).click();
+  await rail.getByRole("button", { name: /^New session in / }).click();
   await page.getByRole("textbox", { name: "Message" }).fill("Use the Write tool to create answered.txt containing the word probe. Do nothing else.");
   await page.keyboard.press("Enter");
   await expect(rail.getByText("Needs permission")).toBeVisible({ timeout: 180_000 });
 
-  await rail.getByRole("button", { name: "New session" }).click();
+  await rail.getByRole("button", { name: /^New session in / }).click();
   await page.getByRole("textbox", { name: "Message" }).fill("Reply with the single word ready.");
   await page.keyboard.press("Enter");
   const chevron = rail.getByRole("button", { name: /^Request from / });

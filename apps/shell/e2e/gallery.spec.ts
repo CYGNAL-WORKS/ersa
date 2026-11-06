@@ -5,9 +5,8 @@ import { expect, test } from "@playwright/test";
 const components = [
   "RailFoot",
   "QuitQuestion",
-  "ProjectList",
   "AddProject",
-  "SessionList",
+  "RailTree",
   "Shelf",
   "Transcript",
   "SessionTitle",
@@ -210,16 +209,97 @@ test("an open chip list floats: a shadow and the floating radius, its options ne
   }
 });
 
-// The rail's workspace headings hold their line before the names arrive, so the tiles never move when they do.
-test("a workspace heading is as tall before its name is read as after", async ({ page }) => {
-  await page.goto("/gallery.html");
-  const headings = page.locator('[data-theme="light"] [data-component="SessionList"] .sessions-workspace-name');
-  const heights = await headings.evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
-  // Two named headings, then the same two unnamed.
-  expect(heights).toHaveLength(4);
-  expect(heights[0]).toBeGreaterThan(0);
-  expect(heights[2]).toBeCloseTo(heights[0] ?? 0, 1);
-  expect(heights[3]).toBeCloseTo(heights[1] ?? 0, 1);
+// A heading's actions from the keyboard (LAY-SHELL, A heading's actions): they show once focus enters the heading,
+// More opens its menu with focus on the item, and Escape closes it with focus back on More.
+test("a project heading's actions show with keyboard focus, and More's menu works from the keyboard", async ({ page }) => {
+  await page.goto("/gallery.html?component=RailTree&theme=light");
+  const tree = page.getByRole("figure", { name: "Projects", exact: true });
+  const heading = tree.locator(".rail-heading").first();
+  const actions = heading.locator(".rail-heading-actions");
+  await expect(actions).toHaveCSS("opacity", "0");
+  await heading.getByRole("button", { name: "ersa", exact: true }).focus();
+  await page.keyboard.press("Tab");
+  await expect(heading.getByRole("button", { name: "New session in ersa" })).toBeFocused();
+  await expect(actions).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Tab");
+  const more = heading.getByRole("button", { name: "More for ersa" });
+  await expect(more).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(heading.getByRole("menuitem", { name: "Don't trust" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(heading.getByRole("menu")).toHaveCount(0);
+  await expect(more).toBeFocused();
+
+  // A press anywhere but on More or the menu closes it, New session's included.
+  await more.click();
+  await expect(heading.getByRole("menu")).toHaveCount(1);
+  await heading.getByRole("button", { name: "New session in ersa" }).click();
+  await expect(heading.getByRole("menu")).toHaveCount(0);
+  await expect(more).toHaveAttribute("aria-expanded", "false");
+
+  // Escape closes it while focus is anywhere in the heading.
+  await more.click();
+  await heading.getByRole("button", { name: "New session in ersa" }).focus();
+  await page.keyboard.press("Escape");
+  await expect(heading.getByRole("menu")).toHaveCount(0);
+});
+
+// What a heading's actions do (LAY-SHELL, A heading's actions): New session opens the screen for its own project,
+// and More withdraws trust at once but asks before trusting (ADR 0018). The gallery keeps each call on the page.
+test("a project heading's New session and More act on that project, and trusting asks first", async ({ page }) => {
+  await page.goto("/gallery.html?component=RailTree&theme=light");
+  const tree = page.getByRole("figure", { name: "Projects", exact: true });
+  const call = () => page.evaluate(() => document.body.dataset.railCall);
+
+  await tree.getByRole("button", { name: "New session in runner" }).click();
+  expect(await call()).toBe("newSession p5");
+
+  await tree.getByRole("button", { name: "More for ersa" }).click();
+  // Opened with the pointer, focus is on the menu, not its item (RAIL.md, Menus).
+  await expect(tree.getByRole("menu", { name: "More for ersa" })).toBeFocused();
+  await tree.getByRole("menuitem", { name: "Don't trust" }).click();
+  expect(await call()).toBe("setTrust p1 false");
+
+  await tree.getByRole("button", { name: "More for stranger" }).click();
+  await tree.getByRole("menuitem", { name: "Trust…" }).click();
+  const question = tree.getByRole("region", { name: "Trust stranger?" });
+  await expect(question).toBeVisible();
+  expect(await call()).toBe("setTrust p1 false");
+  await question.getByRole("button", { name: "Cancel" }).click();
+  expect(await call()).toBe("setTrust p1 false");
+  await expect(tree.getByRole("button", { name: "More for stranger" })).toBeFocused();
+
+  await tree.getByRole("button", { name: "More for stranger" }).click();
+  await tree.getByRole("menuitem", { name: "Trust…" }).click();
+  await question.getByRole("button", { name: "Trust", exact: true }).click();
+  expect(await call()).toBe("setTrust p4 true");
+});
+
+// More's menu floats above the rail (RAIL.md, Menus): at the bottom of the window it opens above More, in full
+// view, and it takes no room in the rail, so nothing beneath it scrolls.
+test("a project heading's menu at the window's foot opens above More, in view", async ({ page }) => {
+  await page.goto("/gallery.html?component=RailTree&theme=light");
+  const tree = page.getByRole("figure", { name: "Projects", exact: true });
+  const more = tree.getByRole("button", { name: "More for stranger" });
+  // The window ends just below More, so the menu has no room beneath it.
+  const at = await more.boundingBox();
+  await page.setViewportSize({ width: 1280, height: Math.ceil(at!.y + at!.height) + 4 });
+  const heightBefore = await tree.evaluate((el) => el.scrollHeight);
+  await more.click();
+  const menu = tree.getByRole("menu", { name: "More for stranger" });
+  await expect(menu).toBeVisible();
+  const [m, b, viewport] = [await menu.boundingBox(), await more.boundingBox(), page.viewportSize()];
+  expect(m && b && viewport).toBeTruthy();
+  expect(m!.y + m!.height).toBeLessThanOrEqual(viewport!.height);
+  expect(m!.y + m!.height).toBeLessThanOrEqual(b!.y);
+  // Aligned to More's trailing edge.
+  expect(Math.abs(m!.x + m!.width - (b!.x + b!.width))).toBeLessThan(1);
+  expect(await tree.evaluate((el) => el.scrollHeight)).toBe(heightBefore);
+
+  // It fades out as it closes, then goes.
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await expect(more).toBeFocused();
 });
 
 // The session controls from the keyboard (FLOW-NEW-SESSION-R01): every chip on the way from the composer, each
