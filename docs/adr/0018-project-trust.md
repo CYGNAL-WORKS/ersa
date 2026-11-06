@@ -1,6 +1,6 @@
 # 0018: The user trusts a project once, when adding it; only a trusted project's own configuration loads
 
-- Status: accepted
+- Status: superseded by 0028
 - Date: 2026-11-01
 - Related briefs: PROTO-CORE-API, PROTO-CLAUDE-CODE-STREAM, FLOW-NEW-SESSION
 
