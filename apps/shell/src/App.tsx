@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { t } from "./catalog";
 import "./App.css";
-import { AddProject } from "./components/AddProject";
 import { Button } from "./components/Button";
 import { Composer } from "./components/Composer";
 import { RailFoot } from "./components/RailFoot";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { NewSessionScreen } from "./components/NewSessionScreen";
+import { type FolderChoice, NewSessionScreen } from "./components/NewSessionScreen";
 import { ProjectList } from "./components/ProjectList";
 import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionControls } from "./components/SessionControls";
@@ -247,17 +246,40 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     }
   };
 
+  // Add project on the new-session screen (FLOW-NEW-SESSION-R16 to R19): the Shell's folder dialog on this computer,
+  // then `project.find`, so a folder that is already a project is chosen without the trust question. Without the
+  // Shell, as in tests that give none, there is no dialog and Add project is unavailable.
+  const pickFolder = shell?.pickFolder;
+  const chooseFolder =
+    pickFolder && view.phase === "connected"
+      ? async (): Promise<FolderChoice> => {
+          const host_id = view.hello.host.id;
+          setAdding(undefined);
+          try {
+            const path = await pickFolder();
+            if (path === null) return { kind: "canceled" };
+            setAdding({ state: "sending" });
+            const found = await client.call("project.find", { host_id, path });
+            setAdding(undefined);
+            return found ? { kind: "found", project: found } : { kind: "new", path };
+          } catch (error) {
+            setAdding({ state: "failed", message: describeError(error) });
+            return { kind: "failed" };
+          }
+        }
+      : undefined;
+
   const addProject = async (path: string, trusted: boolean) => {
-    if (view.phase !== "connected") return false;
+    if (view.phase !== "connected") return undefined;
     setAdding({ state: "sending" });
     try {
-      await client.call("project.add", { host_id: view.hello.host.id, path, trusted });
+      const project = await client.call("project.add", { host_id: view.hello.host.id, path, trusted });
       setAdding(undefined);
       connection.current?.reload("projects");
-      return true;
+      return project;
     } catch (error) {
       setAdding({ state: "failed", message: describeError(error) });
-      return false;
+      return undefined;
     }
   };
 
@@ -334,9 +356,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       <nav className="rail" aria-label="Rail">
         <div className="rail-lists">
           <ErrorBoundary what="The projects" resetKey={projectsVersion}>
-            <ProjectList view={projects} onNewSession={newSession} onSetTrust={setTrust} trusting={trusting} notes={trustNotes}>
-              {view.phase === "connected" && <AddProject onAdd={addProject} adding={adding} />}
-            </ProjectList>
+            <ProjectList view={projects} onNewSession={newSession} onSetTrust={setTrust} trusting={trusting} notes={trustNotes} />
           </ErrorBoundary>
           <ErrorBoundary what="The sessions" resetKey={sessionsVersion}>
             <SessionList view={sessions} activeId={shownId} onSelect={select} workspaces={workspaceNames} backends={backends} unseen={unseen.ids} />
@@ -411,6 +431,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               projectId={composing?.projectId}
               onStart={start}
               starting={starting}
+              onChooseFolder={chooseFolder}
               onAddProject={addProject}
               adding={adding}
             />
