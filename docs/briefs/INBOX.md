@@ -8,5 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-05 PROTO-CORE-API: `session.remove` is refused while the session is live, but the brief does not say whether a session is still live after its `session.ended` event went out. Core now answers a remove that arrives while an ended session is winding down by waiting for it to finish, so a client that has seen `session.ended` can always remove the session; no requirement ID states this, so its tests cite none.
 
 ## Resolved recently (optional, trimmed in planning passes)
