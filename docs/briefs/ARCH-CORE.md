@@ -5,7 +5,7 @@ title: Ersa system architecture
 status: ready
 verified-by: review
 references: [PROTO-CORE-API, PROTO-AGENT-EVENTS, PROTO-CLAUDE-CODE-STREAM, PROTO-COPILOT-SDK, PROTO-HARNESS-TOOLS]
-adrs: [0004, 0006, 0007, 0008, 0009, 0011, 0014, 0017, 0018, 0026]
+adrs: [0004, 0006, 0007, 0008, 0009, 0011, 0014, 0017, 0028, 0026]
 ---
 
 # Ersa system architecture
