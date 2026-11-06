@@ -133,6 +133,12 @@ fn pipes_and_devices_are_told_by_their_names() {
         r"C:\dir\NUL",
         r"C:\dir\com1.txt",
         r"C:\dir\LPT9",
+        r"C:\dir\NUL:",
+        r"C:\dir\com1:",
+        "C:\\dir\\COM\u{b9}",
+        r"\\localhost\pipe\some-pipe",
+        r"\\127.0.0.1\PIPE\some-pipe",
+        r"\\?\UNC\localhost\pipe\some-pipe",
     ] {
         assert!(names_device(Path::new(device)), "{device}");
     }
@@ -143,6 +149,8 @@ fn pipes_and_devices_are_told_by_their_names() {
         r"\\?\C:\dir\notes.txt",
         r"\\server\share\notes.txt",
         r"\\?\UNC\server\share\notes.txt",
+        r"\\server\pipes\notes.txt",
+        r"C:\dir\COM10",
     ] {
         assert!(!names_device(Path::new(file)), "{file}");
     }

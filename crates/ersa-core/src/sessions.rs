@@ -1550,6 +1550,9 @@ struct CoreSink {
 
 struct SinkInner {
     next_index: u64,
+    /// How many lines Core has written to the backend, as the adapter
+    /// recorded them before writing.
+    host_lines: u64,
     /// `None` once Core has closed the sink, which ends the pipeline.
     fed: Option<mpsc::UnboundedSender<Fed>>,
     start_done: bool,
@@ -1573,6 +1576,7 @@ impl CoreSink {
             app_log,
             inner: Mutex::new(SinkInner {
                 next_index: 0,
+                host_lines: 0,
                 fed: Some(fed),
                 start_done: false,
                 deferred_exit: None,
@@ -1602,6 +1606,9 @@ impl CoreSink {
             line,
         };
         inner.next_index += 1;
+        if dir == Direction::Host {
+            inner.host_lines += 1;
+        }
         Self::queue(inner, Fed::Line(raw));
     }
 
@@ -1622,6 +1629,11 @@ impl CoreSink {
     /// The index the next line will get.
     fn next_index(&self) -> u64 {
         lock(&self.inner).next_index
+    }
+
+    /// How many lines have been written to the backend.
+    fn host_lines(&self) -> u64 {
+        lock(&self.inner).host_lines
     }
 
     fn exit_fact(&self, exit: io::Result<ProcessExit>) -> LifecycleFact {

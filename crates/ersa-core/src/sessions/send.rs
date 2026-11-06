@@ -178,6 +178,11 @@ impl SessionManager {
             ready = live.wait_ready() => ready,
             Ok(_) = canceled.wait_for(|c| *c) => return Err(stopped()),
         };
+        // Removed while this send waited: its scratch folder is gone, and
+        // must not be made again.
+        if handle.removed.load(Ordering::SeqCst) {
+            return Err(SessionError::NotFound(handle.id.clone()));
+        }
         let session = match ready {
             Ok(session) => session,
             Err(SessionError::InvalidState(_)) if lock(&handle.start_failure).is_some() => {
@@ -209,15 +214,15 @@ impl SessionManager {
             attachments: outgoing,
         };
         // An adapter records each line before writing it, so whether the
-        // sink took a line during the call tells a refusal before writing
-        // from a write that may have reached the backend.
-        let before = live.sink.next_index();
+        // sink took a line for the backend during the call tells a refusal
+        // before writing from a write that may have reached the backend.
+        let before = live.sink.host_lines();
         match bounded(async move { session.send_message(&message).await }).await {
             Ok(()) => copies.keep(),
             // Refused with nothing recorded: not sent.
             Err(
                 e @ SessionError::Adapter(AdapterError::NotRunning | AdapterError::Protocol(_)),
-            ) if live.sink.next_index() == before => {
+            ) if live.sink.host_lines() == before => {
                 return Err(e);
             }
             // A write that failed or did not finish in time, or an adapter
