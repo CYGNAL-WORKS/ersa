@@ -125,13 +125,13 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 - **PROTO-CORE-API-R16**: `session.create` shall start the backend with the `model` and `effort` it was given, passing nothing for one left out, and with the `permission_mode` given or else the backend's default permission mode, which is always stated to the backend; `session.list` shall report the `model` and `effort` that were given, absent otherwise, and the `permission_mode` the session started with.
 - **PROTO-CORE-API-R17**: Each replay capture shall equal what the replay server sends for its fixture, apart from `ersa_commit`.
 - **PROTO-CORE-API-R14**: `session.subscribe` with `from_seq` shall deliver every event from that sequence number onward, or from `first_seq` when the view no longer holds events before it, in order, with no gaps or duplicates, then continue live.
-- **PROTO-CORE-API-R18**: What `session.arrange` and `session.set_archived` set shall persist across a restart of Core, and `session.list` shall report them.
-- **PROTO-CORE-API-R19**: `session.delete` shall delete the session's isolated workspace and its branch only when no other session uses that workspace and, for an isolated workspace, the token it was given matches what would be lost now, shall never change a root workspace, and shall remove the session, the workspace and record the deleted id in one transaction after the files are gone or kept.
-- **PROTO-CORE-API-R20**: After `session.delete` has removed a session, `session.list` shall not list it again, including after Core restarts and when its backend's record still holds it.
-- **PROTO-CORE-API-R21**: Core shall set a session's `last_activity_at` when one of its turns ends, and at no other time.
-- **PROTO-CORE-API-R22**: `workspace.changes` shall count uncommitted files including untracked ones, ignored files, and commits reachable from the workspace's checkout, branch or reflog that no other local branch or remote-tracking branch holds, and its token shall change whenever any of them changes.
-- **PROTO-CORE-API-R23**: `section.remove` shall leave every session it held in no section.
-- **PROTO-CORE-API-R24**: For a session in an isolated workspace, `session.delete` shall delete no file unless `workspace.changes`, computed after the session has stopped, matches the token the user last confirmed, and shall decide whether the files go when it marks the session deleting, never later; when Core starts with a session marked deleting, it shall continue the deletion and list the session as deleting until it completes.
+- **PROTO-CORE-API-R26**: What `session.arrange` and `session.set_archived` set shall persist across a restart of Core, and `session.list` shall report them.
+- **PROTO-CORE-API-R27**: `session.delete` shall delete the session's isolated workspace and its branch only when no other session uses that workspace and, for an isolated workspace, the token it was given matches what would be lost now, shall never change a root workspace, and shall remove the session, the workspace and record the deleted id in one transaction after the files are gone or kept.
+- **PROTO-CORE-API-R28**: After `session.delete` has removed a session, `session.list` shall not list it again, including after Core restarts and when its backend's record still holds it.
+- **PROTO-CORE-API-R29**: Core shall set a session's `last_activity_at` when one of its turns ends, and at no other time.
+- **PROTO-CORE-API-R30**: `workspace.changes` shall count uncommitted files including untracked ones, ignored files, and commits reachable from the workspace's checkout, branch or reflog that no other local branch or remote-tracking branch holds, and its token shall change whenever any of them changes.
+- **PROTO-CORE-API-R31**: `section.remove` shall leave every session it held in no section.
+- **PROTO-CORE-API-R32**: For a session in an isolated workspace, `session.delete` shall delete no file unless `workspace.changes`, computed after the session has stopped, matches the token the user last confirmed, and shall decide whether the files go when it marks the session deleting, never later; when Core starts with a session marked deleting, it shall continue the deletion and list the session as deleting until it completes.
 
 ## Out of scope
 
@@ -146,7 +146,7 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 
 ## Changes
 
-- 2026-11-05: the user's arrangement of sessions (ADR 0026): `session.list` carries `pinned`, `section_id`, `archived` and `last_activity_at`; `session.arrange`, `session.set_archived`, `session.fork`, `session.delete`, `workspace.changes` and the `section.*` methods added; `rail.*` settings keys named; `session.send` refuses an archived session. All additive. PROTO-CORE-API-R18 to R24 added.
+- 2026-11-05: the user's arrangement of sessions (ADR 0026): `session.list` carries `pinned`, `section_id`, `archived` and `last_activity_at`; `session.arrange`, `session.set_archived`, `session.fork`, `session.delete`, `workspace.changes` and the `section.*` methods added; `rail.*` settings keys named; `session.send` refuses an archived session. All additive. PROTO-CORE-API-R26 to R24 added.
 - 2026-11-05: from #155 merge review: whether the window still reads `core.status` at attach is an open question. No requirement IDs changed.
 - 2026-11-03: from #111 merge review: `session.tile` is coalesced (one tile per projected batch, the newest per session for a busy connection) and never closes a connection, as Core already did; what PROTO-CORE-API-R09 asks of tiles stated. No requirement IDs changed.
 - 2026-11-02: from #55 inbox: `session.send` to a starting backend waits for it, and to one that failed to start answers `invalid_state` with the adapter's reason; settings key `new_session.last_used.<project id>` named. No requirement IDs changed.
