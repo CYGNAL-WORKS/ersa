@@ -29,6 +29,7 @@ function fakes(listed: Session[] | Error | "never", wasHidden = true) {
     show: vi.fn(async () => wasHidden),
     hide: vi.fn(async () => {}),
     quit: vi.fn(async () => {}),
+    pickFolder: vi.fn(async () => null),
   };
   return { client, shell };
 }

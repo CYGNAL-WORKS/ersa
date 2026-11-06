@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PermissionRequested } from "../protocol/agent-events.gen";
 import type { Session } from "../protocol/core-api.gen";
 import { shelfAfter } from "../session/shelf";
-import { SessionList } from "./SessionList";
+import { RailTree } from "./RailTree";
 import { Shelf } from "./Shelf";
 
 const request: PermissionRequested = {
@@ -50,8 +50,10 @@ function Rail() {
   return createElement(
     "div",
     null,
-    createElement(SessionList, {
-      view: { state: "ready", sessions },
+    createElement(RailTree, {
+      projects: { state: "ready", projects: [{ id: "p", host_id: "local", path: "D:/code/p", name: "p", vcs: "git", trusted: true }] },
+      sessions: { state: "ready", sessions },
+      workspaces: { w: { project_id: "p" } },
       activeId: "b",
       onSelect: () => {},
       shelf: open

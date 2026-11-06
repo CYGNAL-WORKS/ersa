@@ -30,11 +30,12 @@ describe("the Interface's boundary", () => {
   });
 
   // verifies: ARCH-CORE-R02
-  it("uses Tauri only for the bridge's invoke and listen, in one module", () => {
+  it("uses Tauri only for the bridge's invoke and listen and the folder dialog, in one module", () => {
     const found: string[] = [];
     for (const { path, text } of files) {
       for (const [, module] of text.matchAll(/from\s+["'](@tauri-apps\/[^"']+)["']/g)) {
-        const allowed = path === BRIDGE && (module === "@tauri-apps/api/core" || module === "@tauri-apps/api/event");
+        // The dialog plugin reaches the system's folder dialog, never Core (FLOW-NEW-SESSION-R16).
+        const allowed = path === BRIDGE && ["@tauri-apps/api/core", "@tauri-apps/api/event", "@tauri-apps/plugin-dialog"].includes(module ?? "");
         if (!allowed) found.push(`${path}: ${module}`);
       }
     }
