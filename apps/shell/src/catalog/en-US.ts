@@ -48,6 +48,8 @@ export const enUS = {
   sessionControls: {
     // The host chip's name for the host Ersa runs on.
     localHostLabel: "Local",
+    // A host in the host chip's list that has no project to start a session in.
+    noProjectsStatus: "No projects",
     // A project in the project chip's list (docs/design/COMPOSER.md, The project list): its kind, and its trust.
     project: {
       gitLabel: "Git",

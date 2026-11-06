@@ -62,16 +62,21 @@ export function recentFirst(
   sessions: readonly Pick<Session, "workspace_id" | "created_at">[],
   workspaces: Readonly<Record<string, Pick<Workspace, "project_id">>>,
 ): Project[] {
-  // Each project's newest session, as milliseconds: parsed, so times with different offsets compare as instants.
-  const newest = new Map<string, number>();
+  // Each project's newest session. Core issues `created_at` as RFC 3339 in UTC, so the strings compare as times
+  // do, as the rail's order does.
+  const newest = new Map<string, string>();
   for (const s of sessions) {
     const project = workspaces[s.workspace_id]?.project_id;
-    const at = Date.parse(s.created_at);
-    if (project === undefined || Number.isNaN(at)) continue;
-    newest.set(project, Math.max(at, newest.get(project) ?? at));
+    if (project === undefined) continue;
+    const known = newest.get(project);
+    if (known === undefined || s.created_at > known) newest.set(project, s.created_at);
   }
-  // Array.prototype.sort is stable, so projects that tie keep Core's order.
-  return [...projects].sort((a, b) => (newest.get(b.id) ?? -Infinity) - (newest.get(a.id) ?? -Infinity) || 0);
+  // A used project before an unused one; Array.prototype.sort is stable, so unused projects keep Core's order.
+  return [...projects].sort((a, b) => {
+    const at = newest.get(a.id) ?? "";
+    const bt = newest.get(b.id) ?? "";
+    return at < bt ? 1 : at > bt ? -1 : 0;
+  });
 }
 
 /**

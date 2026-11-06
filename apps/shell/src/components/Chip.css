@@ -171,7 +171,8 @@
 /* Line one: mark, name, then the trust warning and kind at the trailing edge; line two: the path under the name. */
 .chip-option[data-two-line] {
   display: grid;
-  grid-template-columns: var(--size-option-mark) minmax(0, 1fr) auto auto;
+  /* The mark's column is as wide as the action's icon, so Add project…'s label lines up with the names. */
+  grid-template-columns: var(--size-icon-sm) minmax(0, 1fr) auto auto;
   grid-template-areas:
     "mark label caution status"
     ".    detail detail  detail";
@@ -182,6 +183,7 @@
 
 .chip-option[data-two-line] .chip-option-mark {
   grid-area: mark;
+  justify-self: center;
 }
 
 .chip-option[data-two-line] .chip-option-label {
