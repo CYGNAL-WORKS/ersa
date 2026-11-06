@@ -42,6 +42,13 @@ pub use self::windows::{
     labelled_endpoint, path_key, resolve_program,
 };
 
+/// The key a project's folder is stored and compared under: its canonical
+/// path (from [`canonicalize`]) as [`path_key`] gives it. Every place that
+/// stores or looks up a project by folder uses this, so they compare alike.
+pub fn folder_key(canonical: &std::path::Path) -> String {
+    path_key(&canonical.display().to_string())
+}
+
 /// Checks the label of a [`labelled_endpoint`]: ASCII letters, digits, `-`
 /// and `_`, at most 64 of them. It becomes part of a pipe name or a file
 /// name, so a separator or `..` must never get in.

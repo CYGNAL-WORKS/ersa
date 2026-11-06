@@ -84,6 +84,8 @@ size:
   rail: 288px
   # The transcript's reading column.
   measure: 720px
+  # The widest a chip's list grows; longer text in it is cut with an ellipsis.
+  menu: 360px
   # The widest a user's message bubble grows, as a share of the reading column.
   bubble-max: 80%
   # The height past which a tool card's output or a long permission field scrolls.
@@ -99,13 +101,22 @@ size:
   control: 28px
   # A small control or mark inside a tile.
   control-sm: 20px
+  # A large control: the composer's attach, send and stop buttons.
+  control-lg: 32px
   # Icons, by the type beside them: `ui`, `ui-small`, and a mark inside a tile.
   icon: 16px
   icon-sm: 14px
   icon-xs: 12px
+  # The shelf's width, beside the tile it pulls out of.
+  shelf: 320px
+  # The widest a dialog grows, such as the delete question.
+  dialog: 360px
 stack:
-  # Custom group. Stacking orders, lowest first: a menu sits above the page it opens over.
+  # Custom group. Stacking orders, lowest first: a menu sits above the page it opens over; a dialog above everything.
   menu: 10
+  # The shelf lies over the transcript and above a menu.
+  shelf: 20
+  dialog: 30
 material:
   # Custom group. Gradients and fills that give surfaces and controls their material (see Elevation & Depth).
   # `{colors.<role>}` names a color role, so each value follows the theme and the palette.
@@ -214,12 +225,12 @@ Depth comes from tone and light, not from drop shadows:
 
 - **Material.** Surfaces, cards and primary controls carry a soft top-lit tonal gradient between neighbouring surface steps. It should be felt more than seen.
 - **Wash.** The canvas carries a very faint wash of `wash-primary` from the top right and `wash-secondary` from the bottom left, so it is never purely flat. It is barely there; if it is noticed first, it is too strong.
-- **Focal glow.** The one focused or waiting element (an open permission request or, when none is open, the focused composer) glows in the accent and fades in as it arrives, over `motion-settle` with `motion-ease-out`. In dark it is a soft blur; in light a wide blur reads as a shadow, so it is a tight tinted ring instead.
+- **Focal glow.** The one focused or waiting element (an open permission request, a question the user answers before going on such as whether to trust a folder, or, when neither is open, the focused composer) glows in the accent and fades in as it arrives, over `motion-settle` with `motion-ease-out`. In dark it is a soft blur; in light a wide blur reads as a shadow, so it is a tight tinted ring instead.
 - **Not a halo.** No luminous backdrop or halo around the window: tried, and too strong.
 
-Each of these is a token, built from color roles so it follows the theme and the palette. `material-wash` is the canvas. `material-tile` lights tiles and cards from the top, `material-rail` settles the rail toward the canvas at its foot, `material-primary` is the primary button, and `material-composer` is the composer. The open session's tile is `material-open-session`, a quiet neutral highlight with no accent outline. `material-hover` and `material-pressed` are a veil of ink over whatever is beneath. `glow-focal` is the focal glow. Light and dark set their own glows; the materials are the same in both. While a permission request is open it holds the focal glow, and the focused composer shows its focus by its edge alone, so the screen keeps one focal glow.
+Each of these is a token, built from color roles so it follows the theme and the palette. `material-wash` is the canvas. `material-tile` lights tiles and cards from the top, `material-rail` settles the rail toward the canvas at its foot, `material-primary` is the primary button, and `material-composer` is the composer. The open session's tile is `material-open-session`, a quiet neutral highlight with no accent outline. `material-hover` and `material-pressed` are a veil of ink over whatever is beneath. `glow-focal` is the focal glow. Light and dark set their own glows; the materials are the same in both. While a permission request is open in the transcript it holds the focal glow (the shelf carries none: `RAIL.md`), and the focused composer shows its focus by its edge alone, so the screen keeps one focal glow.
 
-**Pointer and press.** A control with an edge (a button, a chip, an option in a chip's list) shows the pointer by its edge turning `ink-faint` and its fill stepping up a surface, and sinks to `canvas` when pressed. A control without an edge (a tile, a project heading, a quiet row, an icon button) takes `material-hover` under the pointer and `material-pressed` when pressed, inside `radius-md` corners, and with keyboard focus its edge turns `ink`.
+**Pointer and press.** A control with an edge (a button) shows the pointer by its edge turning `ink-faint` and its fill stepping up a surface, and sinks to `canvas` when pressed. A control without an edge (a tile, a project heading, a quiet row, an icon button, a chip, an option in a chip's list) takes `material-hover` under the pointer and `material-pressed` when pressed, inside `radius-md` corners (a chip's are `radius-pill`), and with keyboard focus its edge turns `ink`.
 
 Shadows are kept for transient layers (menus, popovers, drag previews), soft and short: `shadow-transient`, with `radius-lg` corners. A transient layer stacks above the page it opens over by a `stack` token (`stack-menu`), never a bare number.
 
@@ -229,8 +240,8 @@ Shadows are kept for transient layers (menus, popovers, drag previews), soft and
 - **Streaming prose** fades in chunk by chunk, as Claude Desktop's does: each piece of the agent's text fades from transparent to full ink over `motion-stream` with `motion-ease-out` as it arrives, with no movement. Text read from the session record when a session opens appears at once; only text arriving live fades.
 - **Work in progress** loops only while it runs. Work of unknown length, such as a running tool call, shows a ring that turns once per `motion-loop-ring` at constant speed (`motion-linear`), a duration within Material's, MUI's, and Fluent's. Work whose progress can be measured shows a bar that fills to its value, easing each change over `motion-settle` with `motion-ease-out`; it doesn't loop. A text shimmer was tried and is not used: it is a skeleton-loading pattern, not a sign of work under way.
 - **A working session's glyph** in the rail breathes: its tone swells and softens on a `motion-breath` loop with `motion-ease-in-out` for as long as the session works. The breath is the glyph's own tone, not a glow, so the screen's one focal glow stays where it is. It never blinks or ripples outward; shimmering titles and pulse rings were rejected.
-- **Status never moves a tile.** Nothing reorders the rail on its own: a session that comes to need the user shows its chevron, which breathes once where it is, one swell and fade of its tone over `motion-breathe-once` with `motion-ease-in-out`. If the rail can ever be reordered or re-sorted by the user (an open question in `LAY-SHELL`), each tile slides to its new position over `motion-settle` with `motion-ease-in-out`, so the eye can follow it. A new session's tile slides in at the top over `motion-slow` with `motion-ease-out`, while the others make room over the same duration and easing.
-- **The shelf** slides out from the tile it belongs to over `motion-settle` with `motion-ease-out`, and slides back the same way when answered.
+- **Status never moves a tile.** Nothing reorders the rail on its own: a session that comes to need the user shows its chevron, which breathes once where it is, one swell and fade of its tone over `motion-breathe-once` with `motion-ease-in-out`. When the user regroups or re-sorts the rail, pins a session or moves it to a section, or a turn ends while the rail is sorted by last activity, each tile slides to its new position over `motion-settle` with `motion-ease-in-out`, so the eye can follow it. A new session's tile, a fork's included, slides in at its place in the rail over `motion-slow` with `motion-ease-out`, while the others make room over the same duration and easing.
+- **The shelf** slides out from the tile it belongs to and back: `RAIL.md` (The shelf) gives its motion.
 - **The working mark**, the animated mark at the foot of a turn beside the elapsed time and tokens, is open: it is to be designed as a family of marks.
 
 ## Shapes
@@ -246,6 +257,7 @@ Icons are Lucide, drawn as Lucide draws them: an even stroke with round ends, 2 
 Component style tokens are added here as component briefs reach `ready`. Each component brief (`CMP-*`) lists the tokens it consumes; this section holds the values.
 
 - **The rail, a project heading and a tile**: `docs/design/RAIL.md`. Read it before changing any of them.
+- **The composer and the session controls**: `docs/design/COMPOSER.md`. Read it before changing either.
 
 ## Do's and Don'ts
 
