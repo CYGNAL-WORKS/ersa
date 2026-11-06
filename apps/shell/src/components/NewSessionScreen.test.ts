@@ -108,7 +108,7 @@ describe("the new-session screen", () => {
     expect(chips(render({})).some((c) => c.startsWith("Backend"))).toBe(false);
   });
 
-  // verifies: FLOW-NEW-SESSION-R10
+  // The typed folder path that FLOW-NEW-SESSION-R16 to R20 replace; it cites nothing until they are built.
   it("offers to add a project when there is none, and nothing else", () => {
     const html = render({ projects: [] });
     expect(html).toContain('aria-label="Add a project"');

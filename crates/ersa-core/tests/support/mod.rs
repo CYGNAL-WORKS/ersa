@@ -185,7 +185,7 @@ impl Client {
     pub async fn hello(&mut self) -> Value {
         self.result(
             "core.hello",
-            json!({ "client": "ersa-core-tests", "client_version": "0", "api_versions": [3] }),
+            json!({ "client": "ersa-core-tests", "client_version": "0", "api_versions": [4] }),
         )
         .await
     }
@@ -396,8 +396,16 @@ pub fn git(dir: &Path, args: &[&str]) -> String {
 
 /// A new git repository at `dir` with one commit on `main`.
 pub fn git_repo(dir: &Path) {
+    git_repo_on(dir, "main");
+}
+
+/// A git repository at `dir` with one commit on `branch`.
+pub fn git_repo_on(dir: &Path, branch: &str) {
     std::fs::create_dir_all(dir).expect("create repo dir");
-    git(dir, &["init", "--quiet", "--initial-branch=main"]);
+    git(
+        dir,
+        &["init", "--quiet", &format!("--initial-branch={branch}")],
+    );
     std::fs::write(dir.join("README.md"), "test repository\n").expect("write file");
     git(dir, &["add", "README.md"]);
     git(dir, &["commit", "--quiet", "-m", "initial"]);
