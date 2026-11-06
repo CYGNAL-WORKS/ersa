@@ -310,7 +310,6 @@ pub fn names_device(_path: &Path) -> bool {
 }
 
 /// The file to start for `program`: Unix needs no help finding it.
-
 pub fn resolve_program(program: &str, _path: Option<&str>) -> String {
     program.to_string()
 }
