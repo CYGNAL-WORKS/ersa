@@ -145,7 +145,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         // Asked again while open: the count is the fresh one, and Cancel puts the window back in the tray if it
         // was there before either Quit.
         (ask) => ask && setQuitAsk((open) => ({ ...ask, wasHidden: ask.wasHidden || (open?.wasHidden ?? false), quitting: false })),
-        // The Shell no longer quits by itself once the window has heard, so a failed answer is said, never dropped.
+        // Once the window has heard, the Shell waits on it to quit, so a failed answer is said, never dropped.
         (error) => {
           setQuitAsk((open) => ({
             busy: open ? open.busy : knownSessions.current && busySessions(knownSessions.current),
