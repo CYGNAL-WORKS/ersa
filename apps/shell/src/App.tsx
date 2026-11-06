@@ -10,6 +10,7 @@ import { NewSessionScreen } from "./components/NewSessionScreen";
 import { ProjectList } from "./components/ProjectList";
 import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionControls } from "./components/SessionControls";
+import { noneUnseen, unseenAfter } from "./session/unseen";
 import { SessionList, type WorkspaceName, newestFirst } from "./components/SessionList";
 import { Transcript } from "./components/Transcript";
 import { type CoreClient, describeError } from "./core/client";
@@ -105,6 +106,14 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       if (newest) dispatch({ type: "showNewest", id: newest.id });
     }
   }, [activeId, sessions]);
+
+  // The unseen sessions (LAY-SHELL, Unseen), worked out afresh from each list Core reports and each change of the
+  // active session. Kept in memory only: nothing survives the window closing.
+  const shownId = composing ? undefined : activeId;
+  const [unseen, setUnseen] = useState(noneUnseen);
+  useEffect(() => {
+    if (sessions.state === "ready") setUnseen((prev) => unseenAfter(prev, sessions.sessions, shownId));
+  }, [sessions, shownId]);
 
   useEffect(() => {
     if (activeId === undefined) return;
@@ -325,7 +334,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             </ProjectList>
           </ErrorBoundary>
           <ErrorBoundary what="The sessions" resetKey={sessionsVersion}>
-            <SessionList view={sessions} activeId={composing ? undefined : activeId} onSelect={select} workspaces={workspaceNames} backends={backends} />
+            <SessionList view={sessions} activeId={shownId} onSelect={select} workspaces={workspaceNames} backends={backends} unseen={unseen.ids} />
           </ErrorBoundary>
         </div>
         <div className="rail-core">
