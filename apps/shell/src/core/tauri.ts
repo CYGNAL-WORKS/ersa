@@ -39,7 +39,7 @@ export const tauriShell: ShellControl = {
   show: () => invoke<boolean>("shell_show"),
   hide: () => invoke("shell_hide"),
   quit: () => invoke("shell_quit"),
-  // One folder, or null when the user cancels (FLOW-NEW-SESSION-R16, R17).
+  // One folder, or null when the user cancels (FLOW-NEW-SESSION-R27, R17).
   pickFolder: async () => {
     const picked = await open({ directory: true, multiple: false });
     return typeof picked === "string" ? picked : null;
