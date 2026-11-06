@@ -157,7 +157,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     else shelf.detached();
   }, [shelf, link]);
   const connected = link !== undefined;
-  useEffect(() => shelf.follow(openShelf, connected, shownId), [shelf, openShelf]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The transcript follows `activeId` even while the new-session screen hides it, so that is the session whose
+  // subscription the shelf leaves alone on closing.
+  useEffect(() => shelf.follow(openShelf, connected, activeId), [shelf, openShelf]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => shelf.follow(undefined, false), [shelf]);
 
   // Quit from the tray icon: confirmed here first when sessions are busy (FLOW-CLOSE-AND-QUIT-R04). The
