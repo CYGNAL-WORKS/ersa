@@ -383,7 +383,7 @@ function ShelfOpen({ shows, short }: { shows: ShelfShows; short?: boolean }) {
           view={{ state: "ready", sessions: tiles }}
           activeId="h1"
           onSelect={() => {}}
-          shelf={{ id: open.id, tone: shelfTone(shows), render: (domId) => <Shelf id={domId} title={tile.title} shows={shows} ring={tile.ring} cost={tile.cost} onRetry={() => {}} /> }}
+          shelf={{ id: open.id, tone: shelfTone(shows), render: (domId) => <Shelf id={domId} tile={tile} shows={shows} onRetry={() => {}} /> }}
         />
       </div>
     </div>

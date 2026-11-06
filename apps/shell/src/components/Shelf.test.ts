@@ -24,7 +24,7 @@ const request: PermissionRequested = {
 };
 
 const draw = (shows: ShelfShows, more: { ring?: number; cost?: string; onRetry?: () => void } = {}) =>
-  renderToStaticMarkup(createElement(Shelf, { title: "Fix the flaky reconnect test", shows, ...more }));
+  renderToStaticMarkup(createElement(Shelf, { tile: { title: "Fix the flaky reconnect test", ring: more.ring, cost: more.cost }, shows, onRetry: more.onRetry }));
 
 /** The text of `html` in reading order, its tags dropped. */
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replaceAll("&#x27;", "'").replace(/\s+/g, " ").trim();

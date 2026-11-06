@@ -177,7 +177,7 @@ function SessionTile({
           type="button"
           className="session-chevron-button"
           data-tone={tone}
-          aria-label={t("rail.tile.chevronLabel", { title: view.title })}
+          aria-label={t("rail.shelf.nameLabel", { title: view.title })}
           aria-haspopup="dialog"
           aria-expanded={shelf !== undefined}
           aria-controls={shelf?.domId}

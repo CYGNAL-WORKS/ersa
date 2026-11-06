@@ -40,12 +40,10 @@ export const enUS = {
       questionWant: "Has a question",
       needsYouWant: "Needs you",
       needsYouCountWant: "Needs you · {count}",
-      // The chevron of a session that needs the user, which opens its shelf.
-      chevronLabel: "Request from {title}",
     },
     // The shelf (docs/design/RAIL.md, The shelf; FLOW-APPROVE-PERMISSION): a session's request, pulled out of its tile.
     shelf: {
-      // Heard, not shown: the shelf's name.
+      // Heard, not shown: the shelf's name, and its chevron's.
       nameLabel: "Request from {title}",
       permissionHeading: "Permission request",
       questionHeading: "Question",

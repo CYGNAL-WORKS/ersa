@@ -282,6 +282,6 @@ describe("a repeated question", () => {
     const answered = envelope(1, { type: "question.answered", request_id: "q", answers: [], answered_by: "user" });
     const again = { ...asked, seq: 2 };
     const shown = play([asked, answered, again]);
-    expect(shown.items).toEqual([{ kind: "question", key: "question:q", questions: [{ id: "a", text: "Which?", multi_select: false }], answered: true }]);
+    expect(shown.items).toEqual([{ kind: "question", key: "question:q", requestId: "q", questions: [{ id: "a", text: "Which?", multi_select: false }], answered: true }]);
   });
 });
