@@ -31,7 +31,7 @@ The project chip on the new-session screen is the only place a project is added;
 - ~~**FLOW-NEW-SESSION-R10**~~: retired 2026-11-05 (a project is added from the project chip, by the folder dialog), replaced by R16 to R20.
 - **FLOW-NEW-SESSION-R11**: When the project's host cannot list its backends, the session controls shall say that detection failed, with the reason, rather than that no backend is available.
 - **FLOW-NEW-SESSION-R12**: When the session has started, Ersa shall make it the active session and show the session's values in the session controls.
-- **FLOW-NEW-SESSION-R13**: When the session has started, Ersa shall show its tile in the rail under its project.
+- **FLOW-NEW-SESSION-R13**: When the session has started, Ersa shall show its tile in the rail where the rail's arrangement puts it (FLOW-ORGANIZE-SESSIONS).
 - **FLOW-NEW-SESSION-R14**: The project chip shall list the projects on the chosen host, most recently used first (by its newest session), each with its name, its folder's path, its kind (Git or Folder) and, when it is not trusted, that it is not trusted, with the chosen project marked, and shall end the list with Add project.
 - **FLOW-NEW-SESSION-R15**: When the user opens the session controls for no particular project (New session at the top of the rail, or no active session), Ersa shall choose the host's most recently used project.
 - **FLOW-NEW-SESSION-R16**: When the user chooses Add project, or presses Ctrl+O on the new-session screen, with the local host chosen, Ersa shall open the system's folder dialog; once the user picks a folder that is not yet a project, Ersa shall ask whether they trust it, saying what trust lets run, that it covers every workspace of the project, and that it lasts until withdrawn, then add the project with their answer and choose it in the session controls.
@@ -62,6 +62,7 @@ A project is added by typing its folder path in the rail and answering the trust
 
 ## Changes
 
+- 2026-11-05: R13 reworded for the rail's arrangement (FLOW-ORGANIZE-SESSIONS): a new tile sits where the arrangement puts it, under its project by default. Meaning unchanged for the default arrangement.
 - 2026-11-05: from #173 merge review, before any of it shipped: an existing project is found before the trust question (R18), the trust question says what trust covers (R16), and the no-projects offer is the local host's (R19).
 - 2026-11-05: owner's decisions on where a session runs: a project is added from the project chip through the system's folder dialog, and no path is typed (R10 retired; R14 to R20 added); the project chip lists projects most recently used first with path, kind and trust; a new workspace is made from a base branch that starts at the repository's default branch (R21, R22); the screen says when backends are being detected (R23). Open questions on a remote host's folder picker and on other kinds of base.
 - 2026-11-05: R09 retired; R12 and R13 added. R12 keeps the active session and the session controls, and the tests that cited R09 for them cite it. R13 puts a started session's tile under its project, since workspaces are not a level in the rail (LAY-SHELL); it has no test until the rail's tree is built, and the test of workspace headings cites nothing meanwhile. This closes the open question on where a root workspace's sessions sit.
