@@ -3,7 +3,7 @@
 import type * as AgentEvents from "./agent-events.gen";
 
 /** The Core API version these types describe (the schema's `x-api-version`). */
-export const CORE_API_VERSION = 3;
+export const CORE_API_VERSION = 4;
 
 /**
  * Any line on the socket.
@@ -82,6 +82,12 @@ export type Request =
   | {
       jsonrpc: "2.0";
       id: RequestId;
+      method: "project.find";
+      params: ProjectFindParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
       method: "workspace.list";
       params: WorkspaceListParams;
     }
@@ -96,6 +102,12 @@ export type Request =
       id: RequestId;
       method: "workspace.remove";
       params: WorkspaceRemoveParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
+      method: "branch.list";
+      params: BranchListParams;
     }
   | {
       jsonrpc: "2.0";
@@ -310,7 +322,15 @@ export type Notification =
 export type HostStatus = "connected" | "disconnected" | "unknown";
 export type HostListResult = Host[];
 export type ProjectListResult = Project[];
+/**
+ * The project on the host whose folder is path, compared as project.add compares folders, or null.
+ */
+export type ProjectFindResult = Project | null;
 export type WorkspaceListResult = Workspace[];
+/**
+ * The project's local branches, sorted by name.
+ */
+export type BranchListResult = Branch[];
 export type SessionListResult = Session[];
 export type SessionRawLogResult = RawLogEntry[];
 export type BackendListResult = BackendInfo[];
@@ -373,6 +393,10 @@ export interface ProjectSetTrustParams {
 export interface ProjectRemoveParams {
   id: Id;
 }
+export interface ProjectFindParams {
+  host_id: Id;
+  path: string;
+}
 export interface WorkspaceListParams {
   project_id: Id;
 }
@@ -383,7 +407,7 @@ export interface WorkspaceCreateParams {
    */
   name?: string;
   /**
-   * What the workspace starts from (a git commit-ish); the project's current HEAD when absent.
+   * Any revision git resolves (a branch, tag, commit or main~1) that the workspace starts from; the default branch branch.list marks, else the checked-out commit, when absent.
    */
   base?: string;
 }
@@ -393,6 +417,9 @@ export interface WorkspaceRemoveParams {
    * Remove even with uncommitted changes.
    */
   force?: boolean;
+}
+export interface BranchListParams {
+  project_id: Id;
 }
 /**
  * No fields.
@@ -678,6 +705,16 @@ export interface Workspace {
    */
   vcs_ref: string;
   state: "ready" | "creating" | "removing" | "error";
+}
+export interface Branch {
+  /**
+   * The local branch's short name, such as main or feature/rail.
+   */
+  name: string;
+  /**
+   * The repository's default branch: the one origin/HEAD points at, else main, else master, else the checked-out branch. At most one is.
+   */
+  default: boolean;
 }
 export interface Session {
   id: Id;
@@ -1219,9 +1256,11 @@ export interface CoreApiMethods {
   "project.add": { params: ProjectAddParams; result: ProjectAddResult };
   "project.set_trust": { params: ProjectSetTrustParams; result: ProjectSetTrustResult };
   "project.remove": { params: ProjectRemoveParams; result: ProjectRemoveResult };
+  "project.find": { params: ProjectFindParams; result: ProjectFindResult };
   "workspace.list": { params: WorkspaceListParams; result: WorkspaceListResult };
   "workspace.create": { params: WorkspaceCreateParams; result: WorkspaceCreateResult };
   "workspace.remove": { params: WorkspaceRemoveParams; result: WorkspaceRemoveResult };
+  "branch.list": { params: BranchListParams; result: BranchListResult };
   "session.list": { params: SessionListParams; result: SessionListResult };
   "session.create": { params: SessionCreateParams; result: SessionCreateResult };
   "session.start": { params: SessionStartParams; result: SessionStartResult };

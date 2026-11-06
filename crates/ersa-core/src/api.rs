@@ -270,9 +270,11 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         Method::ProjectAdd => to_json(handlers::project_add(core, parse(params)?).await),
         Method::ProjectSetTrust => to_json(handlers::project_set_trust(core, parse(params)?).await),
         Method::ProjectRemove => to_json(handlers::project_remove(core, parse(params)?).await),
+        Method::ProjectFind => to_json(handlers::project_find(core, parse(params)?).await),
         Method::WorkspaceList => to_json(handlers::workspace_list(core, parse(params)?).await),
         Method::WorkspaceCreate => to_json(handlers::workspace_create(core, parse(params)?).await),
         Method::WorkspaceRemove => to_json(handlers::workspace_remove(core, parse(params)?).await),
+        Method::BranchList => to_json(handlers::branch_list(core, parse(params)?).await),
         Method::SettingsGet => to_json(handlers::settings_get(core, parse(params)?).await),
         Method::SettingsSet => to_json(handlers::settings_set(core, parse(params)?).await),
 
