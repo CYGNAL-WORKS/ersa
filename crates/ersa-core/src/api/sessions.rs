@@ -228,6 +228,13 @@ fn well_formed(attachment: &Attachment) -> Result<(), &'static str> {
 /// How long `attachment.inspect` may take.
 const INSPECT_LIMIT: Duration = Duration::from_secs(30);
 
+/// The most inspects that may be reading a path at once, Core-wide. An
+/// inspect answered at its limit leaves its thread waiting on the file
+/// system, holding its place here until the read returns, so a path that
+/// hangs, asked about again and again, takes this many threads, never all
+/// of Core's.
+static INSPECTING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
+
 /// `attachment.inspect` (PROTO-CORE-API-R24), on the local host: the only
 /// one Core reaches yet.
 pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspected, ApiError> {
@@ -236,9 +243,17 @@ pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspec
     }
     let images = core.sessions.image_types();
     let path = params.path;
+    let place = INSPECTING.try_acquire().map_err(|_| {
+        ApiError::invalid_params(
+            "too many paths asked about are not answering; try again once they do",
+        )
+    })?;
     // A blocking thread: a network drive that no longer answers holds that
     // thread, never the request, which is answered at the limit.
-    let job = tokio::task::spawn_blocking(move || attachments::inspect(&path, &images));
+    let job = tokio::task::spawn_blocking(move || {
+        let _place = place;
+        attachments::inspect(&path, &images)
+    });
     match tokio::time::timeout(INSPECT_LIMIT, job).await {
         Ok(Ok(Ok(inspected))) => Ok(inspected),
         Ok(Ok(Err(InspectError::NotFound(message)))) => Err(ApiError::not_found(message)),
