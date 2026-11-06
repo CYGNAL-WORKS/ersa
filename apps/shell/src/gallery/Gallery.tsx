@@ -704,7 +704,7 @@ const entries: Entry[] = [
       // FLOW-NEW-SESSION-R19: with no project the chip offers to choose a folder, and its list holds Add project… alone.
       ["No project", <NewSessionScreen {...newSession} projects={[]} backends={oneBackend} />],
       ["No project, the project chip open", room(<NewSessionScreen {...newSession} projects={[]} backends={oneBackend} open="project" />)],
-      // FLOW-NEW-SESSION-R16: the trust question above the box, holding the focal glow.
+      // FLOW-NEW-SESSION-R27: the trust question above the box, holding the focal glow.
       ["Asking to trust a folder", <NewSessionScreen {...newSession} backends={oneBackend} initialAsking="D:\Clones\stranger" />],
       [
         "Asking, from the keyboard",
