@@ -83,7 +83,6 @@
     "Earlier events of this session are no longer held."
   ],
   "session/start.ts": [
-    "No backend is available on this host.",
     "This project has no root workspace in Core."
   ],
   "session/states.ts": [
