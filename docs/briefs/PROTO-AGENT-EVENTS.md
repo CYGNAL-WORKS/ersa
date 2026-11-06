@@ -67,8 +67,8 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 
 ### Question
 
-- `question.asked`: `request_id`, `questions` (array of `{ id, text, options (optional array of { id, label }), multi_select (boolean) }`).
-- `question.answered`: `request_id`, `answers` (array of `{ id, value }`, where `value` is a string for free text or a single option id, or an array of option ids for multi-select), `answered_by` one of `user`, `timeout`.
+- `question.asked`: `request_id`, `questions` (array of `{ id, text, header (optional short label), options (optional array of { id, label, description (optional) }), multi_select (boolean), takes_text (boolean: the user may answer in their own words beside the options) }`).
+- `question.answered`: `request_id`, `answers` (array of `{ id, value (optional), text (optional) }`, where `value` is a string for free text to a question without options or a single option id, or an array of option ids for multi-select, and `text` is the user's own words to a question that takes them beside its options), `answered_by` one of `user`, `timeout`.
 
 ### Usage
 
@@ -138,6 +138,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - **PROTO-AGENT-EVENTS-R15**: Before appending a title to the record of a session it is not running, Core shall emit a `session.notice` with code `session_open_elsewhere` and the process's `pid` when the adapter reports the session open in another process, and with code `session_open_check_failed` when the adapter cannot tell, and shall rename the session in every case.
 - **PROTO-AGENT-EVENTS-R16**: Core shall emit `session_open_elsewhere` notices at level `warning` and `session_open_check_failed` notices at level `info`.
 - **PROTO-AGENT-EVENTS-R17**: While a turn runs, each Claude Code live line that reports output usage (a partial `message_delta`, or an `assistant` line) shall project to a `usage.updated` whose `turn_output_tokens` is the sum of the output tokens of every API message in the turn so far, counting each message id once at the highest count reported for it, so the sum never decreases within the turn. A synthetic `assistant` message (model `<synthetic>`, made without an API call) adds nothing to the count.
+- **PROTO-AGENT-EVENTS-R18**: A Claude Code `can_use_tool` control request for its question tool shall project to one `question.asked`, and no `permission.requested`, carrying each question's text, header, options with their labels and descriptions, and multi-select, with `takes_text` true (PROTO-CLAUDE-CODE-STREAM, Questions).
 
 ## Out of scope
 
@@ -146,7 +147,6 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 ## Open questions
 
-- Whether `question.*` is projected from a backend tool call (Claude Code's AskUserQuestion arrives as a tool use plus permission request) or needs backend-specific handling in the adapter; first implementation decides and records it.
 - Whether subagent trees get their own `session_id` or stay nested under `parent_tool_use_id`.
 - How history shows a permission decision read from the session record, which keeps no permission prompt or request id, and which turn boundaries history shows without the turn ends the record omits. Claude Code records the decision on the tool result with `decision`, `source` (such as `config` or `user_temporary`), `reasonType`, and `grantScope`; `permission.decided` needs a request id, so no event carries it yet.
 - How record and live input merge once resume exists. Today a live view starts empty and a record view is only for sessions Core does not run, so a message cannot yet reach one view from both. Resume must settle: a live line whose message the record already yielded yields no event, which PROTO-AGENT-EVENTS-R02 will need an exception for; matching the user's prompt, live only as Ersa's host line and without a message id, to its record entry; and partial `assistant.text` events, which carry no message id, of a message still streaming when its record entry was read.
@@ -154,6 +154,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 ## Changes
 
+- 2026-11-05: for FLOW-APPROVE-PERMISSION: Claude Code's question tool projects to `question.asked` in the adapter, which answers the open question on where questions come from; `question.asked` gains optional `header`, option `description` and `takes_text`, and an answer gains optional `text`, all additive. PROTO-AGENT-EVENTS-R18 added.
 - 2026-11-04: from #136 inbox: PROTO-AGENT-EVENTS-R17 takes each message's highest count, not its latest, since Claude Code can send an `assistant` line with a lower partial count after a `message_delta` for the same message; synthetic `assistant` messages add nothing to the count.
 - 2026-11-02: `usage.updated.turn_output_tokens` added for the working mark's token count beside the elapsed time; PROTO-AGENT-EVENTS-R17 added: the count belongs to one turn and takes each message's latest count. A shape change, so `v` is bumped. Elapsed time needs no field: it is the `turn.started` envelope's `ts` while the turn runs and `turn.completed.duration_ms` after.
 - 2026-11-02: from #54 inbox: the open-elsewhere notices also precede a title appended to the record of a session Core is not running (PROTO-AGENT-EVENTS-R15 added), at `warning` for `session_open_elsewhere` and `info` for `session_open_check_failed` (R16 added). A Core-made notice lives only in the view open when it is emitted, by design. PROTO-AGENT-EVENTS-R14 is unchanged and is verified with Core's resume (M1).
