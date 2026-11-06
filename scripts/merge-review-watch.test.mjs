@@ -3,12 +3,14 @@
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { INTERVAL_MS, LOCK_STALE_MS, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select, startReview } from "./merge-review-watch.mjs";
+import { INTERVAL_MS, LOCK_STALE_MS, ENDED, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select, startReview } from "./merge-review-watch.mjs";
 
 const HEAD = "b".repeat(40);
 const NOW = Date.parse("2026-11-04T12:00:00Z");
@@ -543,26 +545,42 @@ test("a review that runs past its limit is ended, with what it started", async (
       "setInterval(() => {}, 1000);",
     ].join("\n")
   );
-  const status = await startReview(5, HEAD, dir, () => {}, 1500);
-  assert.equal(status, "nothing after 0 minutes, so it was ended");
+  const status = await startReview(5, HEAD, dir, () => {}, { limit: 1500 });
+  assert.equal(status, ENDED);
   await new Promise((r) => setTimeout(r, 500));
   for (const pid of readFileSync(join(dir, "pids"), "utf8").split(" ").map(Number)) {
     assert.throws(() => process.kill(pid, 0), /ESRCH/, `process ${pid} still runs`);
   }
 });
 
+
 test("a review whose leftover process holds its output open still ends when it exits", async () => {
-  const dir = stand(
-    [
-      'import { spawn } from "node:child_process";',
-      'spawn(process.execPath, ["-e", "setTimeout(() => {}, 8000)"], { stdio: "inherit" }).unref();',
-      'console.log("done");',
-      "process.exit(0);",
-    ].join("\n")
-  );
+  // A stand-in process that exits but whose output never ends, as when a
+  // process the review started still holds the pipes.
+  const child = new EventEmitter();
+  child.pid = 0;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  const launch = () => {
+    setImmediate(() => {
+      child.stdout.write("done\n");
+      child.emit("exit", 0, null);
+    });
+    return child;
+  };
   const logs = [];
-  const began = Date.now();
-  assert.equal(await startReview(5, HEAD, dir, (l) => logs.push(l), 60_000), 0);
-  assert.ok(Date.now() - began < 6000, "it did not wait for the leftover process");
+  const status = await Promise.race([startReview(5, HEAD, "unused", (l) => logs.push(l), { limit: 60_000, launch }), new Promise((r) => setTimeout(() => r("still waiting"), 5000))]);
+  assert.equal(status, 0, "the exit ends it, without waiting for the output to end");
   assert.deepEqual(logs, ["#5 | done"]);
+});
+
+test("a review ended at its limit marks its head's merge review as failed, so the head is not taken up again", async () => {
+  const got = await drive(["--once", "--checkout", join(tmp(), "r17")], { start: () => Promise.resolve(ENDED) });
+  assert.equal(got.code, 0, got.stderr);
+  const mark = got.gh.find((c) => c.startsWith("api "));
+  assert.ok(mark, "the status is set");
+  assert.match(mark, new RegExp(`^api repos/\\{owner\\}/\\{repo\\}/statuses/${HEAD} -f state=error -f context=Merge review -f description=The review ran past 70 minutes and was ended`));
+  // A review that ends on its own sets its own status.
+  const own = await drive(["--once", "--checkout", join(tmp(), "r18")], { exit: 1 });
+  assert.ok(!own.gh.some((c) => c.startsWith("api ")));
 });
