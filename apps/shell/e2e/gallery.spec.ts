@@ -263,21 +263,6 @@ test("every session control is reachable and works from the keyboard", async ({ 
   await expect(root).toBeFocused();
 });
 
-// The typed folder path that FLOW-NEW-SESSION-R16 to R20 replace; it cites nothing until they are built.
-test("with no project, the new-session screen asks whether the user trusts a folder before adding it", async ({ page }) => {
-  await page.goto("/gallery.html");
-  const screen = page
-    .locator('[data-theme="light"] [data-component="NewSessionScreen"] figure')
-    .filter({ has: page.locator("figcaption", { hasText: /^No project$/ }) });
-  const folder = screen.getByRole("textbox", { name: "Project folder" });
-  await folder.fill("/home/me/clones/stranger");
-  await folder.press("Enter");
-  const question = screen.getByRole("region", { name: "Trust stranger?" });
-  await expect(question).toBeVisible();
-  await expect(question.getByRole("button", { name: "Add, trusted" })).toBeVisible();
-  await expect(question.getByRole("button", { name: "Add, not trusted" })).toBeVisible();
-});
-
 // The rail's foot (LAY-SHELL, The foot; issue #155): Retry attaches again, focus comes back to it when the retry
 // fails, and reaching the sessions again is heard though nothing is shown.
 test("Retry in the rail's foot attaches again, keeps keyboard focus, and says when it reconnects", async ({ page }) => {

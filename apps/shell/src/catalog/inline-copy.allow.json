@@ -12,13 +12,6 @@
     "The sessions",
     "This session"
   ],
-  "components/AddProject.tsx": [
-    "Add",
-    "Add a project",
-    "Adding…",
-    "Folder path",
-    "Project folder"
-  ],
   "components/Composer.tsx": [
     "Composer",
     "Enter to send, Shift+Enter for a new line",
@@ -31,7 +24,6 @@
     "could not be shown:"
   ],
   "components/NewSessionScreen.tsx": [
-    "Add a project to start a session: a folder on this computer.",
     "Detecting the backends on this host…",
     "Ersa",
     "New session",
@@ -121,15 +113,6 @@
     "Waiting for you",
     "You",
     "more invisible characters, each shown as"
-  ],
-  "components/TrustQuestion.tsx": [
-    "A trusted project’s own configuration runs in its sessions: hooks and MCP servers that start programs on this computer, and settings that change what the agent may do without asking.",
-    "Add, not trusted",
-    "Add, trusted",
-    "Cancel",
-    "Claude Code records the trust for the whole repository the project is in, and applies it outside Ersa too.",
-    "Trust",
-    "Untrusted, its sessions use only your own settings."
   ],
   "session/controls.ts": [
     "Root workspace"

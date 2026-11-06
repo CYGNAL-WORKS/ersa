@@ -42,7 +42,7 @@ const render = (props: Partial<Parameters<typeof NewSessionScreen>[0]>) =>
       projects: [ersa, notes],
       backends: { local: [claude()] },
       onStart: async () => false,
-      onAddProject: async () => false,
+      onAddProject: async () => undefined,
       ...props,
     }),
   );
@@ -144,14 +144,6 @@ describe("the new-session screen", () => {
 
   it("hides the backend chip when the host has one backend", () => {
     expect(chips(render({})).some((c) => c.startsWith("Backend"))).toBe(false);
-  });
-
-  // The typed folder path that FLOW-NEW-SESSION-R16 to R20 replace; it cites nothing until they are built.
-  it("offers to add a project when there is none, and nothing else", () => {
-    const html = render({ projects: [] });
-    expect(html).toContain('aria-label="Add a project"');
-    expect(html).not.toContain("<textarea");
-    expect(chips(html)).toEqual([]);
   });
 
   it("leaves out the chip for a choice the backend does not offer", () => {
