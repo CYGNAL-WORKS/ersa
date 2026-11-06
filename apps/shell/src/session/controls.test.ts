@@ -239,5 +239,8 @@ describe("the base branch a new workspace starts from", () => {
     expect(branchesMatching(branches, "RE").map((b) => b.name)).toEqual(["feature/rail", "release/1.0"]);
     expect(branchesMatching(branches, " rail ").map((b) => b.name)).toEqual(["feature/rail"]);
     expect(branchesMatching(branches, "nothing")).toEqual([]);
+    // Capitals in a branch's name match too.
+    const named = [{ name: "Release/1.0", default: false }, { name: "main", default: true }];
+    expect(branchesMatching(named, "rel").map((b) => b.name)).toEqual(["Release/1.0"]);
   });
 });
