@@ -21,9 +21,9 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 
 1. On `LAY-SHELL`, the user chooses **Pin** in a tile's menu. The tile moves to the Pinned group at the top of the rail; its project and section are unchanged. **Unpin** returns it to its group.
 2. The user chooses **Rename** in a tile's menu, or presses F2 on a tile with keyboard focus. The title becomes a field on the tile; Enter saves through the backend, as renaming in the transcript header does, and Escape restores it.
-3. The user chooses **Move to section ▸** and one of: a section, "No section", or "New section…". "New section…" makes a section with a name field in its heading and moves the session into it.
+3. The user chooses **Move to section ▸** and one of: a section, "No section", or "New section…". "New section…" shows a new heading with an empty name field; Enter makes the section and moves the session into it, and Escape, or Enter on a blank name, makes nothing and leaves the session where it was.
 4. From the arrange menu the user chooses **Group by** Project, Section, Date or None; **Sort by** Date created, Last activity or Name; and **Show** Active, Archived or All. The rail regroups at once, each tile sliding to its new place.
-5. **New section** in the arrange menu makes an empty section, named in place in its heading. A section heading's More menu holds Rename and Delete.
+5. **New section** in the arrange menu shows a new heading with a name field, as in step 3, and makes an empty section when named. A section heading's More menu holds Rename and Delete.
 6. The user collapses a group's heading. It stays collapsed in that grouping, and only that one.
 7. **Reset to defaults** returns the grouping, sort, filter and collapsed groups to their defaults. Pins and sections stay.
 8. Ersa restarts. The rail shows the same arrangement, pins and sections.
@@ -33,9 +33,11 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 - **Groups by date** are Today, Yesterday, Previous 7 days and Older, by the session's last activity (the end of its latest turn), else its creation, in the user's local time.
 - **Sections in other groupings.** Sections are seen only when grouping by section. Choosing New section, from either menu, while grouping by something else switches the grouping to Section so the new heading is in view.
 - **Deleting a section** puts its sessions in "No section" and asks nothing, since no session is lost.
-- **A name already taken.** Two sections may not share a name, ignoring case; the name field says so and keeps the name typed.
+- **A name already taken or too long.** Two sections may not share a name, ignoring case, and a name has at most 80 characters; the name field says so and keeps the name typed.
 - **Saving fails.** When Core refuses or can't be reached, the change is undone in the rail and the rail says why. Nothing is kept only in the window.
-- **A rename the backend refuses** (no backend session id yet, or a blank or too-long title) keeps the field open with the reason. A session the backend has not named yet offers Rename as unavailable, with the reason.
+- **A rename the backend refuses** (a blank or too-long title, or a record that is gone) keeps the field open with the reason. A session with no backend session id yet offers Rename as unavailable, with the reason; an untitled session that has one can be renamed.
+- **Nothing to show.** Showing active sessions with every session archived, the rail says there are no active sessions. Changing what is shown never closes the active session, even when its tile leaves the rail.
+- **A project whose sessions are all pinned** keeps its heading, with its tiles in the Pinned group; a collapsed heading counts only the tiles under it.
 - **Last activity** moves a tile only when a turn ends, never while a reply streams, and never because the session's state changed.
 
 ## Requirements
@@ -45,10 +47,10 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 - **FLOW-ORGANIZE-SESSIONS-R03**: When the user moves a session to a section or to "No section", Ersa shall store its membership in Core, and a session shall belong to at most one section.
 - **FLOW-ORGANIZE-SESSIONS-R04**: When grouping by section, Ersa shall show every section, empty or not, in the order they were made, then "No section" for sessions in none.
 - **FLOW-ORGANIZE-SESSIONS-R05**: When the user deletes a section, Ersa shall put its sessions in "No section" and keep every session.
-- **FLOW-ORGANIZE-SESSIONS-R06**: Ersa shall refuse a section name that is blank or that another section already has, ignoring case.
+- **FLOW-ORGANIZE-SESSIONS-R06**: Ersa shall refuse a section name that is blank, longer than 80 characters, or that another section already has, ignoring case.
 - **FLOW-ORGANIZE-SESSIONS-R07**: When grouping by date, Ersa shall put each session in Today, Yesterday, Previous 7 days or Older by the local date of its last activity, else of its creation.
 - **FLOW-ORGANIZE-SESSIONS-R08**: When grouping by project, Ersa shall group as `LAY-SHELL` (The rail) gives; when grouping by none, Ersa shall show one list with no headings after the Pinned group.
-- **FLOW-ORGANIZE-SESSIONS-R09**: Ersa shall sort the tiles within each group by the chosen sort: date created newest first, last activity newest first, or name in the user's locale order, with untitled sessions last.
+- **FLOW-ORGANIZE-SESSIONS-R09**: Ersa shall sort the tiles within each group by the chosen sort: date created newest first; last activity newest first, taking a session's creation for its last activity until it has one; or name in the user's locale order, with untitled sessions last; ties fall back to date created, newest first.
 - **FLOW-ORGANIZE-SESSIONS-R10**: When sorting by last activity, Ersa shall move a tile only when Core reports a new last activity for its session, which Core sets when a turn ends.
 - **FLOW-ORGANIZE-SESSIONS-R11**: When showing Active, Ersa shall leave archived sessions out of the rail; showing Archived, only archived sessions; showing All, both, each archived tile marked as archived.
 - **FLOW-ORGANIZE-SESSIONS-R12**: When the user collapses or expands a group, Ersa shall keep that for the grouping in use, so the same group in another grouping is unaffected.
