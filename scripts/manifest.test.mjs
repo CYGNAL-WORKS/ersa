@@ -1,5 +1,5 @@
-// Tests for manifest.mjs's inbox switch and the CI step that passes it, run on
-// a copy of docs/ so the repository's own generated files are never rewritten.
+// Tests for manifest.mjs's inbox switch, the CI step that passes it, and its
+// repeated-label check, run on a copy of docs/ so the repository's own generated files are never rewritten.
 // Run: node --test scripts/manifest.test.mjs
 
 import assert from "node:assert/strict";
@@ -24,7 +24,9 @@ function copy(entries = "") {
   for (const f of ["manifest.mjs", "merge-pr.mjs"]) cpSync(join(ROOT, "scripts", f), join(dir, "scripts", f));
   writeFileSync(join(dir, "docs", "briefs", "INBOX.md"), `# Inbox\n\n## Open\n\n${entries}`);
   // A manifest that hangs fails this test rather than holding CI until the job's own timeout.
-  return (...args) => spawnSync(process.execPath, [join(dir, "scripts", "manifest.mjs"), ...args], { encoding: "utf8", timeout: 60_000 });
+  const run = (...args) => spawnSync(process.execPath, [join(dir, "scripts", "manifest.mjs"), ...args], { encoding: "utf8", timeout: 60_000 });
+  run.dir = dir;
+  return run;
 }
 
 test("an open inbox entry fails the check only with --inbox", () => {
@@ -43,4 +45,14 @@ test("CI passes --inbox on the merge queue and main, never on a pull request", (
   assert.match(step, /\$\{\{ github\.event_name != 'pull_request' && '--inbox' \|\| '' \}\}/);
   assert.match(ci, /^\s+pull_request:/m);
   assert.match(ci, /^\s+merge_group:/m);
+});
+
+test("a bullet label repeated under one section name fails the check", () => {
+  const run = copy();
+  const brief = join(run.dir, "docs", "briefs", "LAY-SHELL.md");
+  const text = readFileSync(brief, "utf8");
+  // What a union merge leaves: the old and new wording of one bullet, in a section whose heading also repeats.
+  writeFileSync(brief, text.replace("## Development", "- **The foot** says one thing.\n\n## The rail\n\n- **The foot** says another.\n\n## Development"));
+  assert.equal(run("--check").status, 1);
+  assert.match(readFileSync(join(run.dir, "docs", "MANIFEST.md"), "utf8"), /LAY-SHELL: \*\*The foot\*\* appears twice under "The rail"/);
 });

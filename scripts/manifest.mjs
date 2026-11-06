@@ -113,6 +113,19 @@ for (const file of walk(BRIEFS_DIR)) {
   }
   for (const [id, n] of seen) if (n > 1) problems.push(`${fm.id}: requirement ${id} is defined ${n} times`);
 
+  // A union merge keeps both sides of a rewritten bullet, so a bullet label
+  // (bold or code) repeated under one section name is two versions of one rule.
+  let section = "";
+  const labels = new Set();
+  for (const line of text.split(/\r?\n/)) {
+    if (/^#{1,6}\s/.test(line)) section = line;
+    const m = /^-\s*(\*\*.+?\*\*|`[^`]+`)/.exec(line);
+    if (!m || new RegExp(REQ_ID.source).test(m[1])) continue;
+    const key = `${section}\n${m[1]}`;
+    if (labels.has(key)) problems.push(`${fm.id}: ${m[1]} appears twice under "${section.replace(/^#+\s*/, "")}"`);
+    labels.add(key);
+  }
+
   briefs.push({
     id: fm.id,
     type: fm.type ?? "?",
