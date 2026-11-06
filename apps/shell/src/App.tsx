@@ -7,11 +7,10 @@ import { Composer } from "./components/Composer";
 import { RailFoot } from "./components/RailFoot";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { NewSessionScreen } from "./components/NewSessionScreen";
-import { ProjectList } from "./components/ProjectList";
 import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionControls } from "./components/SessionControls";
 import { noneUnseen, unseenAfter } from "./session/unseen";
-import { SessionList, type WorkspaceName, newestFirst } from "./components/SessionList";
+import { RailTree } from "./components/RailTree";
 import { Transcript } from "./components/Transcript";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
@@ -22,6 +21,7 @@ import { contextUsed } from "./session/tile";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { readChoices, rememberPatch, startSession } from "./session/start";
+import { newestFirst } from "./session/tree";
 import { mergeWorkspaces } from "./session/workspaces";
 
 // The same objects every render, so effects and error-boundary keys that
@@ -77,9 +77,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // What the screen offers: each host's backends, and the values each project last started a session with.
   const [backends, setBackends] = useState<Record<string, BackendChoices[]>>({});
   const [lastUsed, setLastUsed] = useState<Record<string, SessionValues>>({});
-  // Every project's workspaces, by id: the rail names them above their sessions, and the session controls read a
-  // session's workspace from them.
+  // Every project's workspaces, by id: the rail puts a session under its workspace's project, and the session
+  // controls read a session's workspace from them. Each project's last read: null once read, else why it failed.
   const [workspaces, setWorkspaces] = useState<Record<string, Workspace>>({});
+  const [workspaceReads, setWorkspaceReads] = useState<Record<string, string | null>>({});
   const [trusting, setTrusting] = useState<Record<string, Sending>>({});
   // The workspaces of each project whose trust the user withdrew here, as they were then. A session running
   // in one of them keeps the configuration it started with.
@@ -185,16 +186,49 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     };
   }, [client, link, hostId]);
 
+  // Each host's name, by id, read on each new connection: the rail names a project's host when it is not this
+  // machine. Best effort: a host not listed, or a read that failed or has not answered, is named by its id.
+  const [hostNames, setHostNames] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (link === undefined) return;
+    let live = true;
+    client.call("host.list").then(
+      (hosts) => live && setHostNames(Object.fromEntries(hosts.map((h) => [h.id, h.name]))),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [client, link]);
+
   // Each list's error boundary tries again whenever the list changes.
   const projects = projectsOf(view);
   const projectList = projects.state === "ready" ? projects.projects : undefined;
   useEffect(() => {
-    if (!projectList) return;
+    // Without a connection nothing has been read on the next one, so its sessions wait to be placed again.
+    if (!projectList) {
+      setWorkspaceReads({});
+      return;
+    }
     let live = true;
-    // Merged into what is known (session/workspaces.ts): a read that answers late never drops a workspace.
-    Promise.all(projectList.map((p) => client.call("workspace.list", { project_id: p.id }).catch(() => undefined))).then(
-      (reads) => live && setWorkspaces((known) => mergeWorkspaces(known, projectList, reads)),
-    );
+    // Each project's read is applied as it answers, so one slow host holds back only its own tiles; a session that
+    // fits no project waits for every read, which the Shell gives up on after its request time limit. Merged
+    // into what is known (session/workspaces.ts): a read that answers late never drops a workspace.
+    for (const p of projectList) {
+      client.call("workspace.list", { project_id: p.id }).then(
+        (read) => {
+          if (!live) return;
+          setWorkspaces((known) => mergeWorkspaces(known, projectList, [read]));
+          setWorkspaceReads((reads) => ({ ...reads, [p.id]: null }));
+        },
+        (error) => {
+          if (!live) return;
+          // What was known is kept, but not for a project no longer listed.
+          setWorkspaces((known) => mergeWorkspaces(known, projectList, []));
+          setWorkspaceReads((reads) => ({ ...reads, [p.id]: describeError(error) }));
+        },
+      );
+    }
     return () => {
       live = false;
     };
@@ -225,7 +259,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     setLastUsed((l) => ({ ...l, [values.project_id]: values }));
     // Best effort: a failure only means the screen starts at these values in this window alone.
     client.call("settings.set", { patch: rememberPatch(values) }).catch(() => {});
-    // Known at once, so the rail names the new session's workspace as its tile appears.
+    // Known at once, so the rail puts the new session's tile under its project as it appears (FLOW-NEW-SESSION-R13).
     setWorkspaces((known) => ({ ...known, [outcome.workspace.id]: outcome.workspace }));
     connection.current?.reload("sessions");
     dispatch({ type: "started", id: outcome.session.id, text, firstSend: outcome.firstSend });
@@ -281,15 +315,18 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Said beneath an untrusted project while a session from before the withdrawal still runs; derived on each
   // render, so it goes once those sessions stop or the project is trusted again. A session's state arrives
   // with its tile (`session.tile`), so that is the state read.
-  const trustNotes: Record<string, string> = {};
+  const keepingTrust: string[] = [];
   if (projects.state === "ready" && sessions.state === "ready") {
     const live = sessions.sessions.filter((s) => s.tile.state !== "ended" && s.tile.state !== "error");
     for (const p of projects.projects) {
-      if (!p.trusted && live.some((s) => withdrawn[p.id]?.includes(s.workspace_id))) {
-        trustNotes[p.id] = "Running sessions keep their current settings until they are stopped.";
-      }
+      if (!p.trusted && live.some((s) => withdrawn[p.id]?.includes(s.workspace_id))) keepingTrust.push(p.id);
     }
   }
+  // Why each project's workspaces could not be read; and whether some project's are still being read, in which
+  // case a session the rail cannot place yet waits rather than sit at the end.
+  const workspaceErrors: Record<string, string> = {};
+  for (const [id, failure] of Object.entries(workspaceReads)) if (failure !== null) workspaceErrors[id] = failure;
+  const placing = projectList?.some((p) => !(p.id in workspaceReads)) ?? false;
 
   // The title as last listed, so the header keeps it while the list reloads
   // or Core is away.
@@ -305,16 +342,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const hello = view.phase === "connected" || view.phase === "lost" ? view.hello : undefined;
   const screenProjects = projectList ?? (showsScreen({ composing, starting, activeId }, false) ? knownProjects.current : undefined);
 
-  // The rail's name for each workspace: its project, and its branch or the root (LAY-SHELL).
   const projectById = new Map(projectList?.map((p) => [p.id, p]));
-  const workspaceNames: Record<string, WorkspaceName> = {};
-  for (const w of Object.values(workspaces)) {
-    const project = projectById.get(w.project_id);
-    if (!project) continue;
-    // A workspace without a branch is named by its path, set as a path is.
-    workspaceNames[w.id] =
-      w.kind === "root" ? { project: project.name, name: "Root workspace" } : w.vcs_ref ? { project: project.name, name: w.vcs_ref } : { project: project.name, name: w.path, path: true };
-  }
 
   // The session controls under the active session show its own values, as Core lists them (FLOW-NEW-SESSION-R12);
   // they change nothing during a session. Absent until the session's workspace and project are known.
@@ -327,14 +355,28 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   return (
     <div className="app">
       <nav className="rail" aria-label="Rail">
-        <div className="rail-lists">
-          <ErrorBoundary what="The projects" resetKey={projectsVersion}>
-            <ProjectList view={projects} onNewSession={newSession} onSetTrust={setTrust} trusting={trusting} notes={trustNotes}>
+        <div className="rail-body">
+          <ErrorBoundary what={t("rail.tree.boundaryName")} resetKey={`${projectsVersion}:${sessionsVersion}`}>
+            <RailTree
+              projects={projects}
+              sessions={sessions}
+              workspaces={workspaces}
+              workspaceErrors={workspaceErrors}
+              placing={placing}
+              activeId={shownId}
+              onSelect={select}
+              onNewSession={newSession}
+              onSetTrust={setTrust}
+              trusting={trusting}
+              keepingTrust={keepingTrust}
+              localHost={hello?.host.id}
+              hostNames={hostNames}
+              backends={backends}
+              unseen={unseen.ids}
+            >
+              {/* The way to add a project stays beneath the tree until the new-session screen's project chip has it. */}
               {view.phase === "connected" && <AddProject onAdd={addProject} adding={adding} />}
-            </ProjectList>
-          </ErrorBoundary>
-          <ErrorBoundary what="The sessions" resetKey={sessionsVersion}>
-            <SessionList view={sessions} activeId={shownId} onSelect={select} workspaces={workspaceNames} backends={backends} unseen={unseen.ids} />
+            </RailTree>
           </ErrorBoundary>
         </div>
         <div className="rail-core">

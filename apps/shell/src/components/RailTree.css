@@ -1,0 +1,278 @@
+/* The rail's tree: project headings with their tiles beneath, and the tree's notes (docs/design/RAIL.md, The rail;
+   A project heading). The tile itself is SessionTile.css. */
+
+.rail-tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+/* Projects sit space-sm apart, and the tiles inside one space-xs apart. */
+.rail-projects,
+.rail-tiles {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rail-projects {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.rail-project,
+.rail-tiles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+/* Each tile is a grid item, so it stretches to the rail's width. */
+.rail-tiles > li {
+  display: grid;
+}
+
+/* Notes: ui text in ink-muted, with a hint or a reason beneath in ui-small. Each starts where a heading's chevron
+   and a tile's icon do: past the hairline edge and the space-sm padding a heading and a tile have. */
+.rail-note {
+  margin: 0;
+  padding-inline: calc(var(--space-sm) + var(--line-hairline));
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+}
+
+.rail-note-detail {
+  display: block;
+  margin: 0;
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  overflow-wrap: anywhere;
+}
+
+/* A reason sits under its line's text, past the danger glyph, and keeps the reason's own lines. */
+.rail-note-reason {
+  padding-inline-start: calc(var(--size-glyph) + var(--space-sm));
+  white-space: pre-wrap;
+}
+
+/* What changing trust says beneath the heading. Empty, it stays in the document, so a screen reader announces the
+   text when it appears, but takes no room. */
+.rail-project-note {
+  margin: 0;
+  padding-inline: calc(var(--space-sm) + var(--line-hairline));
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.rail-project-note:empty {
+  position: absolute;
+}
+
+/* A heading: one row, size-control high, in ui-small at the heading weight and ink-muted; a control without an
+   edge (DESIGN.md, Pointer and press). */
+.rail-heading {
+  position: relative;
+  /* size-control high, its edge included. */
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  height: var(--size-control);
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  /* The edge is always there, clear, so keyboard focus takes no room. */
+  border: var(--line-hairline) solid transparent;
+  border-radius: var(--radius-md);
+  transition:
+    background var(--motion-quick) var(--motion-ease-out),
+    color var(--motion-quick) var(--motion-ease-out);
+}
+
+.rail-heading:hover,
+.rail-heading[data-force="hover"] {
+  color: var(--color-ink);
+  background: var(--material-hover);
+}
+
+.rail-heading:has(.rail-heading-toggle:active),
+.rail-heading[data-force="pressed"] {
+  color: var(--color-ink);
+  background: var(--material-pressed);
+}
+
+.rail-heading:has(.rail-heading-toggle:focus-visible),
+.rail-heading[data-force="focus"] {
+  border-color: var(--color-ink);
+}
+
+.rail-heading-title {
+  display: flex;
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+  margin: 0;
+  font: inherit;
+}
+
+/* The name, the host and the trust word: the chevron lines up with the tiles' icons beneath. */
+.rail-heading-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  padding: 0 var(--space-sm);
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.rail-heading-toggle:focus-visible {
+  outline: none;
+}
+
+.rail-heading-chevron {
+  display: inline-flex;
+  color: var(--color-ink-faint);
+}
+
+.rail-heading-name,
+.rail-heading-host {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The name alone is at the heading weight; the host and the trust word are at the regular weight. */
+.rail-heading-name {
+  font-weight: var(--type-heading-weight);
+}
+
+/* Toward the trailing edge, at the regular weight: the shield in caution before "Not trusted". */
+.rail-heading-trust {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-inline-start: auto;
+  white-space: nowrap;
+}
+
+.rail-heading-trust .icon {
+  color: var(--color-caution);
+}
+
+/* New session and More fade in as the pointer or keyboard focus enters the heading; their place is kept while
+   they are hidden, so nothing in the heading shifts. */
+.rail-heading-actions {
+  display: flex;
+  flex: none;
+  opacity: 0;
+  transition: opacity var(--motion-quick) var(--motion-ease-out);
+}
+
+.rail-heading:hover .rail-heading-actions,
+.rail-heading:focus-within .rail-heading-actions,
+.rail-heading[data-open] .rail-heading-actions,
+.rail-heading[data-force] .rail-heading-actions {
+  opacity: 1;
+}
+
+/* More, while its menu is open, reads ink on material-pressed (RAIL.md, Menus). */
+.rail-heading-actions .icon-button[aria-expanded="true"] {
+  color: var(--color-ink);
+  background: var(--material-pressed);
+}
+
+/* More's menu: a transient layer beneath the heading's trailing edge, as a chip's list is beneath its chip. */
+.rail-menu {
+  position: absolute;
+  /* Beneath the heading's row: measured from inside its edge. */
+  top: calc(var(--size-control) - var(--line-hairline));
+  right: 0;
+  z-index: var(--stack-menu);
+  display: flex;
+  flex-direction: column;
+  min-width: max-content;
+  margin: var(--space-xs) 0 0;
+  padding: var(--space-xs);
+  list-style: none;
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-transient);
+  animation: rail-menu-in var(--motion-quick) var(--motion-ease-out);
+}
+
+/* Each item stretches to the menu's width. */
+.rail-menu > li {
+  display: grid;
+}
+
+/* A menu opens with a fade alone. */
+@keyframes rail-menu-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* An item: a row size-control high, padded space-sm, in ui, radius-md within the layer's radius-lg; a control
+   without an edge (RAIL.md, Menus). */
+.rail-menu-item {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  min-height: var(--size-control);
+  padding: 0 var(--space-sm);
+  font: inherit;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+  text-align: left;
+  color: var(--color-ink);
+  background: transparent;
+  border: var(--line-hairline) solid transparent;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--motion-quick) var(--motion-ease-out);
+}
+
+.rail-menu-item:hover:not([aria-disabled]),
+.rail-menu-item:focus-visible:not([aria-disabled]) {
+  background: var(--material-hover);
+}
+
+.rail-menu-item:active:not([aria-disabled]) {
+  background: var(--material-pressed);
+}
+
+.rail-menu-item:focus-visible {
+  outline: none;
+}
+
+.rail-menu-item[aria-disabled] {
+  color: var(--color-ink-faint);
+  cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-heading,
+  .rail-heading-actions,
+  .rail-menu-item {
+    transition: none;
+  }
+
+  .rail-menu {
+    animation: none;
+  }
+}

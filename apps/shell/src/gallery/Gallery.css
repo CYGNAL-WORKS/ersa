@@ -78,6 +78,11 @@
   border-radius: var(--radius-md);
 }
 
+/* The rail's tree is shown on the rail's own material. */
+.gallery-states-rail .gallery-specimen {
+  background: var(--material-rail);
+}
+
 /* Room beneath a specimen whose chip lies open, so its choices do not cover the next state. */
 .gallery-room {
   padding-bottom: var(--size-card-max);

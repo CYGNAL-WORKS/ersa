@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ErrorBoundary } from "../components/ErrorBoundary";
-import { SessionList } from "../components/SessionList";
+import { RailTree } from "../components/RailTree";
 import type { Envelope } from "../protocol/agent-events.gen";
 import { EVENT_VERSION, apply, emptyTranscript } from "../session/transcript";
 import { checkSessions, checkTile, eventProblem } from "./checks";
@@ -47,7 +47,7 @@ describe("tiles and sessions from Core", () => {
     const sessions = checkSessions([{ id: "s1", created_at: 7, tile: { cost_usd_total: {}, pending: [{ kind: "permission" }] } }, { title: "no id" }]);
     expect(sessions).toHaveLength(1);
     expect(sessions[0]?.tile).toEqual({ state: "error", pending: [] });
-    const html = renderToStaticMarkup(createElement(SessionList, { view: { state: "ready", sessions }, onSelect: () => {} }));
+    const html = renderToStaticMarkup(createElement(RailTree, { projects: { state: "ready", projects: [] }, sessions: { state: "ready", sessions }, workspaces: {}, onSelect: () => {} }));
     expect(html).toContain("Untitled session");
   });
 
