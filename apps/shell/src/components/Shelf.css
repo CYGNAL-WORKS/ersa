@@ -86,6 +86,35 @@
   animation: shelf-back var(--motion-settle) var(--motion-ease-out) forwards;
 }
 
+/* The contents, one request's: laid out as the shelf's own parts are. Moving to the next request, they cross-fade
+   while the shelf holds still. */
+.shelf-contents {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.shelf-contents[data-next] {
+  animation: shelf-next var(--motion-quick) var(--motion-ease-out);
+}
+
+@keyframes shelf-next {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Heard, not shown: what the shelf moved on to. Kept out of the layout, and out of the gap between its parts. */
+.shelf-said {
+  position: absolute;
+  width: var(--line-hairline);
+  height: var(--line-hairline);
+  margin: 0;
+  overflow: hidden;
+  clip-path: circle(0);
+  white-space: nowrap;
+}
+
 .shelf-heading {
   display: flex;
   justify-content: space-between;
@@ -171,7 +200,8 @@
 /* With reduced motion on, the shelf appears at once. */
 @media (prefers-reduced-motion: reduce) {
   .shelf,
-  .shelf-layer[inert] > .shelf {
+  .shelf-layer[inert] > .shelf,
+  .shelf-contents[data-next] {
     animation: none;
   }
 }
