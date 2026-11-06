@@ -515,6 +515,22 @@ describe("a tile's menu, and renaming on the tile", () => {
     }
   });
 
+  it("keeps the field while a rename is on its way, even on Escape, so a refusal still shows its reason", async () => {
+    let refuse: (error: unknown) => void = () => {};
+    const core = await open({ "session.set_title": () => new Promise((_, reject) => (refuse = reject)) });
+    fireEvent.keyDown(tile("Fix the build"), { key: "F2" });
+    fireEvent.change(field() as HTMLInputElement, { target: { value: "Fix it" } });
+    fireEvent.keyDown(field() as HTMLInputElement, { key: "Enter" });
+    await settle();
+    expect(renames(core)).toEqual([{ id: "s1", title: "Fix it" }]);
+    fireEvent.keyDown(field() as HTMLInputElement, { key: "Escape" });
+    expect(field()?.value).toBe("Fix it");
+    await act(async () => refuse({ kind: "rpc", error: { code: -32010, message: "session.set_title: Claude Code has no record of this session any more." } }));
+    await settle();
+    const reason = document.getElementById(field()?.getAttribute("aria-errormessage") ?? "");
+    expect(reason?.textContent).toContain("no record of this session");
+  });
+
   it("offers Rename as unavailable, with the reason, while the session starts, and F2 does nothing", async () => {
     const starting = titled.map((s, i) => (i === 0 ? { ...s, state: "starting" as const, tile: { state: "starting" as const, pending: [] } } : s));
     const core = await open({ "session.list": () => starting });
