@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { t } from "./catalog";
 import "./App.css";
 import { AddProject } from "./components/AddProject";
 import { Button } from "./components/Button";
 import { Composer } from "./components/Composer";
-import { CoreStatus } from "./components/CoreStatus";
+import { RailFoot } from "./components/RailFoot";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { NewSessionScreen } from "./components/NewSessionScreen";
 import { ProjectList } from "./components/ProjectList";
@@ -16,6 +17,7 @@ import { type Connection, type CoreView, type ProjectsView, type SessionsView, c
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { Project, Session, Workspace } from "./protocol/core-api.gen";
 import { type BackendChoices, type SessionValues, sessionShown } from "./session/controls";
+import { contextUsed } from "./session/tile";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { readChoices, rememberPatch, startSession } from "./session/start";
@@ -311,8 +313,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const listedWorkspace = listed && workspaces[listed.workspace_id];
   const listedProject = listedWorkspace && projectById.get(listedWorkspace.project_id);
   const sessionControls = listed && listedWorkspace && sessionShown(listed, listedWorkspace, backends[listed.host_id] ?? []);
-  const contextUsed =
-    listed?.tile.context_tokens !== undefined && listed.tile.context_window ? listed.tile.context_tokens / listed.tile.context_window : undefined;
+  const used = listed && contextUsed(listed.tile);
 
   return (
     <div className="app">
@@ -324,15 +325,15 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             </ProjectList>
           </ErrorBoundary>
           <ErrorBoundary what="The sessions" resetKey={sessionsVersion}>
-            <SessionList view={sessions} activeId={composing ? undefined : activeId} onSelect={select} workspaces={workspaceNames} />
+            <SessionList view={sessions} activeId={composing ? undefined : activeId} onSelect={select} workspaces={workspaceNames} backends={backends} />
           </ErrorBoundary>
         </div>
         <div className="rail-core">
           {quitAsk && (
             <QuitQuestion busy={quitAsk.busy} quitting={quitAsk.quitting} failed={quitAsk.failed} onQuit={quit} onCancel={cancel} />
           )}
-          <ErrorBoundary what="Core's status" resetKey={coreVersion} action={<Button onClick={retry}>Retry</Button>}>
-            <CoreStatus view={view} onRetry={retry} />
+          <ErrorBoundary what={t("rail.foot.boundaryName")} resetKey={coreVersion} action={<Button onClick={retry}>{t("rail.foot.retryButton")}</Button>}>
+            <RailFoot view={view} onRetry={retry} />
           </ErrorBoundary>
         </div>
       </nav>
@@ -342,7 +343,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           <ErrorBoundary what="This session" resetKey={`${shown.id}:${shown.transcript.lastSeq}`}>
             <Transcript
               key={shown.id}
-              title={(activeId && titles.current[activeId]) || "Untitled session"}
+              title={(activeId && titles.current[activeId]) || t("rail.tile.untitledLabel")}
               untitled={!(activeId && titles.current[activeId])}
               view={shown}
               onDecide={decide}
@@ -375,7 +376,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                   workspaceLabel={sessionControls.workspaceLabel}
                   onChoose={() => {}}
                   disabled
-                  used={contextUsed}
+                  used={used}
                 />
               </div>
             )}

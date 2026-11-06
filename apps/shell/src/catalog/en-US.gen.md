@@ -4,6 +4,78 @@
 
 ## `rail`
 
+### `rail.foot.attachedLabel`
+
+Attached to {label}
+
+### `rail.foot.reconnectingError`
+
+Ersa can't reach your sessions. It's trying again.
+
+### `rail.foot.unreachableError`
+
+Ersa can't reach your sessions.
+
+### `rail.foot.retryButton`
+
+Retry
+
+### `rail.foot.reconnectedStatus`
+
+Reconnected
+
+### `rail.foot.handshakeError`
+
+Ersa can't read the connection's handshake. This window may need updating.
+
+### `rail.foot.boundaryName`
+
+The connection status
+
+### `rail.tile.untitledLabel`
+
+Untitled session
+
+### `rail.tile.startingStatus`
+
+Starting
+
+### `rail.tile.workingStatus`
+
+Working
+
+### `rail.tile.disconnectedStatus`
+
+Disconnected
+
+### `rail.tile.errorStatus`
+
+Error
+
+### `rail.tile.endedStatus`
+
+Ended
+
+### `rail.tile.unknownStateStatus`
+
+Unknown state
+
+### `rail.tile.permissionWant`
+
+Needs permission
+
+### `rail.tile.questionWant`
+
+Has a question
+
+### `rail.tile.needsYouWant`
+
+Needs you
+
+### `rail.tile.needsYouCountWant`
+
+Needs you · {count}
+
 ## `transcript`
 
 ## `composer`
@@ -11,6 +83,14 @@
 ## `newSession`
 
 ## `sessionControls`
+
+### `sessionControls.contextRing.noneLabel`
+
+Context: none used yet
+
+### `sessionControls.contextRing.usedLabel`
+
+Context: {percent} percent used
 
 ## `quit`
 

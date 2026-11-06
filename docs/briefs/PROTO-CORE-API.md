@@ -127,9 +127,11 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 
 - Whether to allow more than one Interface attached at once (useful for a second window), and if so whether notifications fan out to all.
 - Whether Core notifies an Interface when a project or session is created, and pushes `core.status` when its counts change; until then the window rereads `session.list` on a `session.tile` for an unknown session and reads the counts at attach.
+- Whether the window still reads `core.status` at attach. Nothing in the window shows its counts now that the rail's foot is silent while all is well.
 
 ## Changes
 
+- 2026-11-05: from #155 merge review: whether the window still reads `core.status` at attach is an open question. No requirement IDs changed.
 - 2026-11-03: from #111 merge review: `session.tile` is coalesced (one tile per projected batch, the newest per session for a busy connection) and never closes a connection, as Core already did; what PROTO-CORE-API-R09 asks of tiles stated. No requirement IDs changed.
 - 2026-11-02: from #55 inbox: `session.send` to a starting backend waits for it, and to one that failed to start answers `invalid_state` with the adapter's reason; settings key `new_session.last_used.<project id>` named. No requirement IDs changed.
 - 2026-11-02: from #64 inbox: the replay capture format described under Conformance; the commit stamp is `ersa_commit`, since Core names the process, not a commit (PROTO-CORE-API-R17 added).
