@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import type { Sending } from "../session/follow";
 import { Button } from "./Button";
 
@@ -39,39 +39,56 @@ export function renameTo(draft: string, title: string, untitled: boolean | undef
   return titleToSave(draft, untitled ? "" : title);
 }
 
-/** The session's title in its header, and renaming it there: the backend keeps the title, so its own tools show it too. */
-export function SessionTitle({ title, untitled, onRename, renaming, onReset, disabled, children, initialDraft, force }: SessionTitleProps) {
+/**
+ * Editing a session's title, wherever it is renamed (the header, a tile): the draft, whether a rename is on its way
+ * or was refused, and editing, saving and closing. Focus goes back to `home` once editing ends, and to `field` after a
+ * refusal, so the user can try again. Renaming goes through the backend (FLOW-ORGANIZE-SESSIONS-R02).
+ */
+export function useTitleDraft({
+  title,
+  untitled,
+  onRename,
+  renaming,
+  onReset,
+  disabled,
+  initialDraft,
+  field,
+  home,
+}: {
+  title: string;
+  untitled?: boolean;
+  onRename?: (title: string) => Promise<boolean>;
+  renaming?: Sending;
+  onReset?: () => void;
+  /** Renaming can't be used now. */
+  disabled?: boolean;
+  initialDraft?: string;
+  field: RefObject<HTMLInputElement | null>;
+  home: RefObject<HTMLElement | null>;
+}) {
   // The text being edited; undefined while the title is only shown.
   const [draft, setDraft] = useState<string | undefined>(initialDraft);
   const busy = renaming?.state === "sending";
-  const heading = useRef<HTMLHeadingElement>(null);
-  const field = useRef<HTMLInputElement>(null);
-  // Focus goes back to the title once editing ends, where the user started it.
+  const refused = renaming?.state === "failed" ? renaming.message : undefined;
+  // Focus goes back to where the user started once editing ends.
   const returnFocus = useRef(false);
-  // The old title is selected when the field first takes focus, to type over; not again, or a refusal's return
-  // to the field would select the draft being corrected.
-  const selected = useRef(false);
-
   useEffect(() => {
     if (draft === undefined && returnFocus.current) {
       returnFocus.current = false;
-      heading.current?.focus();
+      home.current?.focus({ preventScroll: true });
     }
-  }, [draft]);
-
+  }, [draft, home]);
   // A refusal puts the user back in the field to try again: a Save clicked with the pointer was disabled while
   // saving, which dropped focus.
-  const refused = renaming?.state === "failed";
   useEffect(() => {
-    if (refused && initialDraft === undefined) field.current?.focus();
-  }, [refused, initialDraft]);
+    if (refused !== undefined && initialDraft === undefined) field.current?.focus();
+  }, [refused, initialDraft, field]);
 
   const close = () => {
     returnFocus.current = true;
     setDraft(undefined);
     onReset?.();
   };
-
   const save = async () => {
     if (draft === undefined || busy) return;
     const next = renameTo(draft, title, untitled);
@@ -82,14 +99,37 @@ export function SessionTitle({ title, untitled, onRename, renaming, onReset, dis
     }
     if (await onRename?.(next)) close();
   };
-
   // While a rename is still on its way, a second waits for its answer.
   const editable = !!onRename && !disabled && !busy;
   const edit = () => {
     if (!editable) return;
     onReset?.();
-    selected.current = false;
     setDraft(untitled ? "" : title);
+  };
+  return { draft, setDraft, busy, refused, editable, edit, save, close };
+}
+
+/** The session's title in its header, and renaming it there: the backend keeps the title, so its own tools show it too. */
+export function SessionTitle({ title, untitled, onRename, renaming, onReset, disabled, children, initialDraft, force }: SessionTitleProps) {
+  const heading = useRef<HTMLHeadingElement>(null);
+  const field = useRef<HTMLInputElement>(null);
+  const { draft, setDraft, busy, editable, edit: startEdit, save, close } = useTitleDraft({
+    title,
+    untitled,
+    onRename,
+    renaming,
+    onReset,
+    disabled,
+    initialDraft,
+    field,
+    home: heading,
+  });
+  // The old title is selected when the field first takes focus, to type over; not again, or a refusal's return
+  // to the field would select the draft being corrected.
+  const selected = useRef(false);
+  const edit = () => {
+    selected.current = false;
+    startEdit();
   };
 
   if (draft === undefined || !onRename) {
