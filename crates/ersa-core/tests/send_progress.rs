@@ -40,10 +40,20 @@ async fn sent_until(
 #[tokio::test(start_paused = true)]
 async fn unchanged_progress_repeats_every_5_seconds() {
     let (mut pacer, changed) = (Pacer::default(), Notify::new());
-    let sent = sent_until(&mut pacer, &changed, Duration::from_secs(16), |_| {
-        progress(SendPhase::Starting, None)
-    })
-    .await;
+    let began = Instant::now();
+    let starting = progress(SendPhase::Starting, None);
+    assert!(pacer.due(&starting));
+    // The pacer is first asked to wait 300 ms after the report, as a busy
+    // lock would leave it, so its once-a-second looks fall at 1.3 s, 2.3 s
+    // and so on: the repeat at 5 s comes from its deadline, not a look.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let mut sent = vec![Duration::ZERO];
+    while began.elapsed() < Duration::from_secs(16) {
+        pacer.wait(&changed).await;
+        if pacer.due(&starting) {
+            sent.push(began.elapsed());
+        }
+    }
     let secs = |s| Duration::from_secs(s);
     assert_eq!(sent, vec![secs(0), secs(5), secs(10), secs(15)]);
 }
