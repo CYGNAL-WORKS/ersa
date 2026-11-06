@@ -159,6 +159,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     if (sessions.state === "ready") setShelfId((open) => shelfAfter(open, { type: "sessions", sessions: sessions.sessions, activeId: shownId }));
   }, [sessions, shownId]);
   const chevron = (id: string) => setShelfId((open) => shelfAfter(open, { type: "chevron", id, activeId: shownId }));
+  const closeShelf = useCallback((id: string) => setShelfId((open) => shelfAfter(open, { type: "close", id })), []);
   // Its session is followed while the shelf is open, and no longer once it closes. The connection's changes come
   // first, so a shelf opened with a new connection subscribes on it once.
   useEffect(() => {
@@ -408,6 +409,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               unseen={unseen.ids}
               shelf={shelfOpen}
               onChevron={chevron}
+              onCloseShelf={closeShelf}
             />
           </ErrorBoundary>
         </div>

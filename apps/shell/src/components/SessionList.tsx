@@ -1,5 +1,16 @@
 import { Bot, ChevronRight, LoaderCircle } from "lucide-react";
-import { type AnimationEvent, type CSSProperties, type ReactNode, useId, useLayoutEffect, useRef, useState } from "react";
+import {
+  type AnimationEvent,
+  type CSSProperties,
+  type FocusEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { t } from "../catalog";
 import type { SessionsView } from "../core/connection";
 import type { Session } from "../protocol/core-api.gen";
@@ -27,6 +38,8 @@ interface SessionListProps {
   shelf?: OpenShelf;
   /** The user chose a tile's chevron (FLOW-APPROVE-PERMISSION-R01). */
   onChevron?: (id: string) => void;
+  /** The user closed a session's shelf: Escape, or a choice or focus outside it and its tile (R06, R07). */
+  onCloseShelf?: (id: string) => void;
 }
 
 /** The open shelf, as the rail draws it beside its tile. `render` is given the element id the chevron controls. */
@@ -45,11 +58,11 @@ export interface WorkspaceName {
 }
 
 /** The sessions Core runs, as tiles: newest first, the active one quietly highlighted. */
-export function SessionList({ view, activeId, onSelect, force, workspaces, backends, unseen, shelf, onChevron }: SessionListProps) {
+export function SessionList({ view, activeId, onSelect, force, workspaces, backends, unseen, shelf, onChevron, onCloseShelf }: SessionListProps) {
   const tile = (s: Session) => {
     const open = shelf?.id === s.id ? shelf : undefined;
     return (
-      <TileItem key={s.id} shelf={open}>
+      <TileItem key={s.id} shelf={open} onClose={() => onCloseShelf?.(s.id)}>
         {(shelfDomId) => (
           <SessionTile
             session={s}
@@ -195,7 +208,7 @@ function SessionTile({
  * shelf is placed by, and tells the shelf where the two join, so they read as one shape (docs/design/RAIL.md, The
  * shelf: One shape).
  */
-function TileItem({ shelf, children }: { shelf?: OpenShelf; children: (shelfDomId: string) => ReactNode }) {
+function TileItem({ shelf, onClose, children }: { shelf?: OpenShelf; onClose: () => void; children: (shelfDomId: string) => ReactNode }) {
   const item = useRef<HTMLLIElement>(null);
   const domId = useId();
   const open = shelf !== undefined;
@@ -244,6 +257,51 @@ function TileItem({ shelf, children }: { shelf?: OpenShelf; children: (shelfDomI
       document.removeEventListener("scroll", place, true);
     };
   }, [open]);
+  // Whether keyboard focus is in the shelf, kept as focus moves, since a shelf that goes at once takes its focus
+  // with it. Focus that goes nowhere (the window loses it, or the element holding it goes) leaves this as it was.
+  const focusInShelf = useRef(false);
+  const inShelf = (target: EventTarget | null) => target instanceof Node && (item.current?.querySelector(".shelf-layer")?.contains(target) ?? false);
+  // Opening moves focus to the shelf itself, not to an answer (FLOW-APPROVE-PERMISSION-R05). Closing with focus in it
+  // puts focus on the chevron, or on the tile once nothing is pending and the chevron is gone (R06, R08).
+  useLayoutEffect(() => {
+    const li = item.current;
+    if (!li) return;
+    if (open) {
+      li.querySelector<HTMLElement>(".shelf-layer:not([inert]) > .shelf")?.focus();
+      return;
+    }
+    if (!focusInShelf.current) return;
+    focusInShelf.current = false;
+    (li.querySelector<HTMLElement>(".session-chevron-button") ?? li.querySelector<HTMLElement>(".session"))?.focus();
+  }, [open]);
+  // A choice outside the shelf and its tile closes it, and leaves focus where the user put it (R07).
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: PointerEvent) => {
+      if (event.target instanceof Node && !item.current?.contains(event.target)) onClose();
+    };
+    document.addEventListener("pointerdown", away, true);
+    return () => document.removeEventListener("pointerdown", away, true);
+  }, [open, onClose]);
+  const focusIn = (event: FocusEvent) => {
+    focusInShelf.current = inShelf(event.target);
+  };
+  const focusOut = (event: FocusEvent) => {
+    const to = event.relatedTarget;
+    if (to === null) return;
+    focusInShelf.current = inShelf(to);
+    // Focus left the shelf and its tile for somewhere else in the window (R07).
+    if (open && to instanceof Node && !item.current?.contains(to)) onClose();
+  };
+  // Escape in the shelf or on its chevron closes it (R06).
+  const keyDown = (event: KeyboardEvent) => {
+    if (!open || event.key !== "Escape") return;
+    const target = event.target as Element;
+    if (!inShelf(target) && !target.classList.contains("session-chevron-button")) return;
+    event.preventDefault();
+    focusInShelf.current = true;
+    onClose();
+  };
   const layer = shown ?? closing;
   // Each tile names its own anchor, so a shelf sliding back stays by its tile while another tile's opens.
   const anchor = `--tile-${domId.replace(/[^\w-]/g, "")}`;
@@ -254,6 +312,9 @@ function TileItem({ shelf, children }: { shelf?: OpenShelf; children: (shelfDomI
       data-shelf={open || undefined}
       data-tone={shelf?.tone}
       style={layer !== undefined ? ({ anchorName: anchor } as CSSProperties) : undefined}
+      onFocus={focusIn}
+      onBlur={focusOut}
+      onKeyDown={keyDown}
     >
       {children(domId)}
       {/* One layer, open or closing, so the shelf keeps its element, and its measured join, as it slides back. */}

@@ -71,7 +71,7 @@ describe("the shelf", () => {
   // verifies: FLOW-APPROVE-PERMISSION-R23
   it("is a dialog that leaves the window usable, named for its session, read kind, asked, details, readouts, answers", () => {
     const html = draw({ state: "permission", request, place: { n: 1, m: 3 } }, { ring: 0.53, cost: "$0.82" });
-    expect(html).toMatch(/^<div class="shelf" role="dialog" aria-label="Request from Fix the flaky reconnect test"/);
+    expect(html).toMatch(/^<div class="shelf" role="dialog" tabindex="-1" aria-label="Request from Fix the flaky reconnect test"/);
     expect(html).not.toContain("aria-modal");
     const read = text(html);
     const order = ["Permission request", "1 of 3", "Run the reconnect tests", "command", "Path:", "Commands need approval", "53%", "$0.82", "Deny", "Allow"];
