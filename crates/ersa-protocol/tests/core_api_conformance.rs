@@ -97,6 +97,7 @@ fn session() -> Session {
         state: ersa_protocol::events::LifecycleState::WaitingUser,
         created_at: "2026-10-31T12:00:00Z".into(),
         last_event_seq: Some(41),
+        sending: Some(SendPhase::Copying),
         tile: tile(),
     }
 }
@@ -180,7 +181,23 @@ fn result_examples() -> Vec<(Method, Value)> {
         (Method::SessionCreate, to_value(&session())),
         (
             Method::SessionSend,
-            to_value(&SessionSendResult { turn: 2 }),
+            to_value(&SessionSendResult { turn: Some(2) }),
+        ),
+        (
+            Method::SessionSend,
+            to_value(&SessionSendResult { turn: None }),
+        ),
+        (
+            Method::AttachmentInspect,
+            to_value(&Inspected {
+                path: "D:/shots/a.png".into(),
+                name: "a.png".into(),
+                kind: AttachmentKind::Image,
+                size_bytes: Some(1234),
+                lines: None,
+                media_type: Some("image/png".into()),
+                target: Some("D:/elsewhere/a.png".into()),
+            }),
         ),
         (Method::SessionUnsubscribe, to_value(&Empty {})),
         (
@@ -331,6 +348,35 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&SessionSendParams {
                 id: "s-1".into(),
                 text: "hello".into(),
+                attachments: Vec::new(),
+            }),
+        ),
+        (
+            Method::SessionSend,
+            to_value(&SessionSendParams {
+                id: "s-1".into(),
+                text: String::new(),
+                attachments: vec![
+                    Attachment {
+                        kind: AttachmentKind::Folder,
+                        path: Some("D:/work/notes".into()),
+                        media_type: None,
+                        data: None,
+                    },
+                    Attachment {
+                        kind: AttachmentKind::Image,
+                        path: None,
+                        media_type: Some("image/png".into()),
+                        data: Some("iVBORw0KGgo=".into()),
+                    },
+                ],
+            }),
+        ),
+        (
+            Method::AttachmentInspect,
+            to_value(&InspectParams {
+                host_id: "local".into(),
+                path: "D:/shots/a.png".into(),
             }),
         ),
         (
@@ -428,6 +474,16 @@ fn notification_examples() -> Vec<Notification> {
             &SessionTileParams {
                 session_id: "s-1".into(),
                 tile: Tile::starting(),
+            },
+        )
+        .expect("serialize"),
+        Notification::new(
+            notification::SESSION_SEND_PROGRESS,
+            &SendProgressParams {
+                session_id: "s-1".into(),
+                phase: SendPhase::Copying,
+                copied_bytes: Some(10),
+                total_bytes: Some(20),
             },
         )
         .expect("serialize"),
@@ -535,6 +591,15 @@ fn error_responses_validate() {
         Response::failure(
             Some(RequestId::Number(3)),
             ErrorObject::application(ErrorKind::VcsError, "git failed").with_detail("fatal: x"),
+        ),
+        Response::failure(
+            Some(RequestId::Number(4)),
+            ErrorObject::application(ErrorKind::AttachmentRefused, "nothing at the path")
+                .with_index(1),
+        ),
+        Response::failure(
+            Some(RequestId::Number(5)),
+            ErrorObject::application(ErrorKind::DeliveryUnknown, "the backend stopped"),
         ),
         Response::failure(
             None,

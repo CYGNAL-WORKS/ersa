@@ -86,7 +86,8 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::SessionList
         | Method::SessionSubscribe
         | Method::SessionUnsubscribe
-        | Method::SessionRawLog => return None,
+        | Method::SessionRawLog
+        | Method::AttachmentInspect => return None,
         Method::SessionCreate
         | Method::SessionStart
         | Method::SessionStop

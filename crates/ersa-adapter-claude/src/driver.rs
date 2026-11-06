@@ -22,9 +22,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, LineReader,
-    LineWriter, OpenElsewhere, PermissionDecision, Process, ProcessExit, ProcessSpec, Projector,
-    RecordEvent, RecordSummary, SessionConfig, Transport, async_trait,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, ImageLimits,
+    LineReader, LineWriter, OpenElsewhere, PermissionDecision, Process, ProcessExit, ProcessSpec,
+    Projector, RecordEvent, RecordSummary, SessionConfig, Transport, async_trait,
 };
 use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::PermissionBehavior;
@@ -330,6 +330,15 @@ impl Adapter for ClaudeAdapter {
 
     fn tested_versions(&self) -> Option<(&'static str, &'static str)> {
         Some((crate::MIN_TESTED_VERSION, crate::MAX_TESTED_VERSION))
+    }
+
+    /// The CLI takes PNG, JPEG, GIF and WebP images of up to 5 MB each
+    /// (PROTO-CLAUDE-CODE-STREAM, User message).
+    fn image_limits(&self) -> ImageLimits {
+        ImageLimits {
+            media_types: &["image/png", "image/jpeg", "image/gif", "image/webp"],
+            max_bytes: 5 * 1024 * 1024,
+        }
     }
 
     fn choices(&self) -> BackendChoices {
