@@ -890,15 +890,19 @@ impl SessionManager {
     /// Forgets a stopped session. Its record is the backend's, and stays.
     pub async fn remove(&self, id: &str) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
-        let _op = handle.op.lock().await;
         // A session whose ending is already queued is only winding down: a
         // client may have seen `session.ended` before Core let it go, and
-        // can remove it, so wait for it to finish.
+        // can remove it, so wait for it to finish. Waited for before taking
+        // `op`, so nothing else on the session queues behind the wait.
         if let Some(live) = handle.live()
             && live.sink.has_ended()
+            && wait_finished(&live, STOP_TIMEOUT).await.is_err()
         {
-            wait_finished(&live, STOP_TIMEOUT).await?;
+            return Err(SessionError::Internal(format!(
+                "session {id} has ended, but Core has not finished with it within {STOP_TIMEOUT:?}"
+            )));
         }
+        let _op = handle.op.lock().await;
         if handle.live().is_some() {
             return Err(SessionError::InvalidState(format!(
                 "session {id} is running; stop it first"
@@ -2499,6 +2503,32 @@ mod tests {
                 finished.send_replace(true);
             });
             manager.remove("s-gated").await.unwrap();
+        }
+    }
+
+    // Paused time: the wait runs out as soon as nothing else can happen.
+    #[tokio::test(start_paused = true)]
+    async fn an_ended_session_that_never_winds_down_is_refused_without_holding_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let adapter = Arc::new(GatedReads::default());
+        let manager = Arc::new(gated_manager(dir.path(), &adapter));
+        let (sink, _finished) = make_live(&manager);
+        sink.start_finished(Ok(()));
+        sink.process_exited(Ok(ProcessExit { code: Some(0) }));
+        let removing = tokio::spawn({
+            let manager = Arc::clone(&manager);
+            async move { manager.remove("s-gated").await }
+        });
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        // While it waits, the session's other operations are not held up.
+        let handle = manager.handle("s-gated").unwrap();
+        assert!(handle.op.try_lock().is_ok());
+        // Core's own wind-down is what stalled, and the error says so.
+        match removing.await.unwrap() {
+            Err(SessionError::Internal(message)) => {
+                assert!(message.contains("has ended"), "{message}");
+            }
+            other => panic!("expected an internal error, got {other:?}"),
         }
     }
 
