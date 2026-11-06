@@ -79,6 +79,15 @@
   border-top: var(--line-hairline) solid var(--color-line);
 }
 
+/* An answered permission card holds focus while its answer is on its way; keyboard focus shows as an ink edge. */
+.transcript-card:focus {
+  outline: none;
+}
+
+.transcript-card:focus-visible {
+  border-color: var(--color-ink);
+}
+
 .transcript-card {
   display: flex;
   flex-direction: column;
