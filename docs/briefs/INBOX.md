@@ -8,5 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-06 FLOW-APPROVE-PERMISSION: R01 shows the oldest request by its event, but a pending request R25 can't show (unknown kind, or no event among those held) has no known place in that order. Meanwhile the shelf counts it oldest only when the events held start after a gap, where its event must have been, and otherwise shows the showable requests first; with none showable it shows the R25 note.
 
 ## Resolved recently (optional, trimmed in planning passes)
