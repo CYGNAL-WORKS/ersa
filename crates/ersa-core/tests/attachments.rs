@@ -804,26 +804,27 @@ async fn lines_are_counted_in_a_text_file_of_at_most_10_mib() {
 // verifies: PROTO-CORE-API-R26
 #[tokio::test]
 async fn progress_repeats_at_least_every_5_seconds() {
-    let mut s = setup(FakeAdapter::slow_start(Duration::from_secs(9))).await;
+    let mut s = setup(FakeAdapter::slow_start(Duration::from_secs(12))).await;
     let id = s.session().await;
     let send = s
         .client
         .request("session.send", json!({ "id": id, "text": "hi" }))
         .await;
-    // The phase stays `starting` for 9 s; within 7 s it is reported at
-    // least twice, once at once and again within about 5.
+    // The phase stays `starting` for 12 s. Within 11 s it is reported at
+    // once, then every 5 s: three times, each no more than 5 s after the
+    // last. The slack below is the socket's delivery, not Core's timing.
     let began = tokio::time::Instant::now();
-    let deadline = began + Duration::from_secs(7);
+    let deadline = began + Duration::from_secs(11);
     let mut starting = Vec::new();
     while let Ok(Some(n)) = tokio::time::timeout_at(deadline, s.client.notification()).await {
         if n["method"] == "session.send_progress" && n["params"]["phase"] == "starting" {
             starting.push(began.elapsed());
         }
     }
-    assert!(starting.len() >= 2, "{starting:?}");
+    assert!(starting.len() >= 3, "{starting:?}");
     for pair in starting.windows(2) {
         assert!(
-            pair[1] - pair[0] <= Duration::from_millis(6500),
+            pair[1] - pair[0] <= Duration::from_millis(5150),
             "{starting:?}"
         );
     }
