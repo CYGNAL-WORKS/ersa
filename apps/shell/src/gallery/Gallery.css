@@ -83,6 +83,11 @@
   padding-bottom: var(--size-card-max);
 }
 
+/* Room above a specimen for what opens upward over the space above it: the trust question on the new-session screen. */
+.gallery-room-above {
+  padding-top: var(--size-card-max);
+}
+
 .gallery-icon-row {
   display: inline-flex;
   align-items: center;
