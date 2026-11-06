@@ -1,19 +1,16 @@
 {
   "App.tsx": [
     "Core is not connected.",
-    "Core's status",
     "Ersa did not quit:",
     "No session open. Start one from a project in the rail.",
     "Rail",
-    "Retry",
     "Root workspace",
     "Running sessions keep their current settings until they are stopped.",
     "The composer",
     "The new-session screen",
     "The projects",
     "The sessions",
-    "This session",
-    "Untitled session"
+    "This session"
   ],
   "components/AddProject.tsx": [
     "Add",
@@ -29,19 +26,6 @@
     "Send",
     "Sending…",
     "Write to the agent"
-  ],
-  "components/ContextRing.tsx": [
-    "Context:",
-    "Context: none used yet",
-    "percent used"
-  ],
-  "components/CoreStatus.tsx": [
-    "Attached to",
-    "Connecting…",
-    "Core",
-    "Reconnecting…",
-    "Retry",
-    "Unavailable"
   ],
   "components/ErrorBoundary.tsx": [
     "could not be shown:"
@@ -98,12 +82,10 @@
   ],
   "components/SessionList.tsx": [
     "Loading…",
-    "Needs you ·",
     "No sessions yet.",
     "Sessions",
     "Sessions appear once Core is connected.",
     "Start one from a project above.",
-    "Untitled session",
     "Workspace"
   ],
   "components/SessionTitle.tsx": [
@@ -150,9 +132,6 @@
     "Claude Code records the trust for the whole repository the project is in, and applies it outside Ersa too.",
     "Trust",
     "Untrusted, its sessions use only your own settings."
-  ],
-  "core/connection.ts": [
-    "Core's handshake could not be read; this window may be older than Core."
   ],
   "session/controls.ts": [
     "Root workspace"

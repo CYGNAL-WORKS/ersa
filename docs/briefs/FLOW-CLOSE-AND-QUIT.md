@@ -33,9 +33,11 @@ A debug build attached to a labeled endpoint (LAY-SHELL, Development) quits with
 - Whether the first close tells the user once that Ersa is still running in the tray.
 - The macOS equivalent: menu bar icon, and whether the Dock icon stays.
 - Whether Ersa starts at login, hidden in the tray.
+- How the quit question words a quit that failed. Today it shows the Shell's reasons after "Ersa did not quit:", and those still name Core; they wait for the rest of the copy outside the rail (#159).
 
 ## Changes
 
+- 2026-11-05: from #155 inbox: the wording of a failed quit's reason is an open question. No requirement IDs changed.
 - 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: from #32 inbox: R04 says which sessions count (starting, running, waiting on the user; meaning unchanged); the limits of R06 on Linux and macOS recorded as an open question.
 - 2026-11-01: created ready, from the owner's decision that the window closes to the tray and Quit stops Core.

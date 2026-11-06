@@ -4,6 +4,7 @@
 // when the connection drops, attach again on its own with backoff.
 // Kept free of React so the tests drive it with a fake client.
 
+import { t } from "../catalog";
 import type { CoreHelloResult, CoreStatusResult, Project, Session } from "../protocol/core-api.gen";
 import { checkSessions, checkTile, helloReadable } from "./checks";
 import { type AnyNotification, type Attachment, type CoreClient, type CoreEvent, describeError } from "./client";
@@ -12,7 +13,7 @@ export type ProjectsView =
   | { state: "loading" }
   | { state: "ready"; projects: Project[] }
   | { state: "error"; message: string }
-  /** Core is not connected; its status tile already says why. */
+  /** Core is not connected; the rail's foot already says why. */
   | { state: "unavailable" };
 
 export type SessionsView =
@@ -189,7 +190,7 @@ export function connect(
       ({ how, label, hello }) => {
         if (!live()) return;
         if (!helloReadable(hello)) {
-          set({ phase: "failed", message: "Core's handshake could not be read; this window may be older than Core." });
+          set({ phase: "failed", message: t("rail.foot.handshakeError") });
           return;
         }
         if (lostEarly !== null) {
@@ -207,7 +208,7 @@ export function connect(
         });
         client.call("core.status").then(
           (status) => patch((view) => ({ ...view, status })),
-          // The tile shows the handshake without the counts; nothing to report.
+          // Nothing shows the counts while all is well; a failed read has nothing to report.
           () => {},
         );
         listProjects();
