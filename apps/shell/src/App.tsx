@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { t } from "./catalog";
 import "./App.css";
 import { AddProject } from "./components/AddProject";
@@ -11,13 +11,17 @@ import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionControls } from "./components/SessionControls";
 import { noneUnseen, unseenAfter } from "./session/unseen";
 import { RailTree } from "./components/RailTree";
+import { Shelf } from "./components/Shelf";
 import { Transcript } from "./components/Transcript";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { Project, Session, Workspace } from "./protocol/core-api.gen";
 import { type BackendChoices, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
-import { contextUsed } from "./session/tile";
+import { contextUsed, tileOf } from "./session/tile";
+import { type Answers, type Decision, answering } from "./session/answers";
+import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./session/shelf";
+import { sharedSubscriptions } from "./session/subscriptions";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { readChoices, rememberPatch, startSession } from "./session/start";
@@ -88,14 +92,30 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The quit question, while it is open: how many sessions would stop, and whether Quit was chosen.
   const [quitAsk, setQuitAsk] = useState<QuitAsk & { quitting: boolean; failed?: string }>();
   const [renaming, setRenaming] = useState<Record<string, Sending>>({});
+  // The session whose shelf is open, and its events, followed while it is open (FLOW-APPROVE-PERMISSION).
+  const [shelfId, setShelfId] = useState<string>();
+  const [shelfView, setShelfView] = useState<SessionView>();
+  // The requests the open shelf has shown since it opened, which count toward its place (R09).
+  const [shelfShown, setShelfShown] = useState<ShelfShown>();
+  // The transcript and the shelf share Core's one subscription per session (session/subscriptions.ts).
+  const shared = useMemo(() => sharedSubscriptions(client), [client]);
+  const shelf = useMemo(() => shelfFollowing(shared, setShelfView), [shared]);
+  // The user's answers to permission requests, on their way or refused, by session: the shelf and the transcript
+  // read the same ones, so an answer sent from one is still on its way on the other (FLOW-APPROVE-PERMISSION-R18).
+  const [answers, setAnswers] = useState<Answers>({});
+  const sending = useMemo(() => answering(client, setAnswers), [client]);
 
   useEffect(() => {
     const running = connect(client, setView, undefined, (notification) => {
-      if (notification.method === "session.event") follower.current?.receive(notification.params.event);
+      if (notification.method !== "session.event") return;
+      // Each follower takes only its own session's events.
+      follower.current?.receive(notification.params.event);
+      shelf.receive(notification.params.event);
+      sending.receive(notification.params.event);
     });
     connection.current = running;
     return () => running.stop();
-  }, [client, attempt]);
+  }, [client, shelf, sending, attempt]);
 
   // With no session chosen, show the newest: reopening the window shows the
   // session that was running when it closed.
@@ -117,14 +137,14 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   useEffect(() => {
     if (activeId === undefined) return;
-    const following = follow(client, activeId, setSession);
+    const following = follow(shared(), activeId, setSession);
     follower.current = following;
     dispatch({ type: "followed", id: activeId });
     return () => {
       following.stop();
       if (follower.current === following) follower.current = null;
     };
-  }, [client, activeId]);
+  }, [shared, activeId]);
 
   // Subscribe on each new connection, from where the transcript left off;
   // without one, the session is offline and answers wait.
@@ -133,6 +153,25 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     if (link !== undefined) follower.current?.attached();
     else follower.current?.detached();
   }, [link, activeId]);
+
+  // The shelf is never open for the active session (FLOW-APPROVE-PERMISSION-R26): making its session active, by
+  // any way, closes it at once, and so does its session having nothing left to ask.
+  const openShelf = shelfId !== undefined && shelfId !== shownId ? shelfId : undefined;
+  useEffect(() => {
+    if (sessions.state === "ready") setShelfId((open) => shelfAfter(open, { type: "sessions", sessions: sessions.sessions, activeId: shownId }));
+  }, [sessions, shownId]);
+  const chevron = (id: string) => setShelfId((open) => shelfAfter(open, { type: "chevron", id, activeId: shownId }));
+  const closeShelf = useCallback((id: string) => setShelfId((open) => shelfAfter(open, { type: "close", id })), []);
+  // Its session is followed while the shelf is open, and no longer once it closes. The connection's changes come
+  // first, so a shelf opened with a new connection subscribes on it once.
+  useEffect(() => {
+    if (link !== undefined) shelf.attached();
+    else shelf.detached();
+  }, [shelf, link]);
+  const connected = link !== undefined;
+  // A change of connection alone is the effect above's to handle.
+  useEffect(() => shelf.follow(openShelf, connected), [shelf, openShelf]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => shelf.follow(undefined, false), [shelf]);
 
   // Quit from the tray icon: confirmed here first when sessions are busy (FLOW-CLOSE-AND-QUIT-R04). The
   // sessions are read afresh then; the rail's list stands in when Core cannot be asked.
@@ -244,8 +283,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const coreVersion = useVersion(view);
   const retrySubscribe = useCallback(() => follower.current?.attached(), []);
 
-  // Stable, so the transcript's memoised blocks do not re-render for it.
-  const decide = useCallback((requestId: string, behavior: "allow" | "deny") => follower.current?.decide(requestId, behavior), []);
+  // Stable for each session, so the transcript's memoised blocks do not re-render for it.
+  const decide = useCallback((id: string, requestId: string, decision: Decision) => sending.decide(id, requestId, decision), [sending]);
+  const decideShown = useMemo(() => (requestId: string, decision: Decision) => shownId !== undefined && decide(shownId, requestId, decision), [decide, shownId]);
 
   // New session shows the screen; leaving it, by choosing a session, leaves nothing behind (FLOW-NEW-SESSION-R03).
   const newSession = (project: Project) => dispatch({ type: "newSession", projectId: project.id });
@@ -363,6 +403,38 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const sessionControls = listed && listedWorkspace && sessionShown(listed, listedWorkspace, backends[listed.host_id] ?? []);
   const used = listed && contextUsed(listed.tile);
 
+  // The open shelf as the rail draws it: the session's oldest request, with its readouts as its tile shows them.
+  const shelfSession = openShelf !== undefined && sessions.state === "ready" ? sessions.sessions.find((s) => s.id === openShelf) : undefined;
+  const shelfShows =
+    shelfSession &&
+    shelfOf(
+      shelfView?.id === shelfSession.id ? shelfView : undefined,
+      shelfSession.tile.pending,
+      shelfShown?.id === shelfSession.id ? shelfShown.requests : undefined,
+    );
+  // Derived as the shelf renders, so the count is right on the render that shows the next request.
+  const nextShown = shownAfter(shelfShown, shelfSession?.id, shelfShows && shownRequest(shelfShows));
+  if (nextShown !== shelfShown) setShelfShown(nextShown);
+  const shelfOpen = (() => {
+    if (!shelfSession || !shelfShows) return undefined;
+    const tile = tileOf(shelfSession, backends);
+    return {
+      id: shelfSession.id,
+      tone: shelfTone(shelfShows),
+      render: (domId: string) => (
+        <Shelf
+          id={domId}
+          tile={tile}
+          shows={shelfShows}
+          onRetry={shelf.attached}
+          answers={answers[shelfSession.id]}
+          live={connected}
+          onDecide={(requestId, decision) => decide(shelfSession.id, requestId, decision)}
+        />
+      ),
+    };
+  })();
+
   return (
     <div className="app">
       <nav className="rail" aria-label="Rail">
@@ -384,6 +456,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               hostNames={hostNames}
               backends={backends}
               unseen={unseen.ids}
+              shelf={shelfOpen}
+              onChevron={chevron}
+              onCloseShelf={closeShelf}
             />
           </ErrorBoundary>
           {/* The way to add a project stays beneath the tree until the new-session screen's project chip has it,
@@ -408,7 +483,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               title={(activeId && titles.current[activeId]) || t("rail.tile.untitledLabel")}
               untitled={!(activeId && titles.current[activeId])}
               view={shown}
-              onDecide={decide}
+              answers={answers[shown.id]}
+              onDecide={decideShown}
               onRetry={retrySubscribe}
               onRename={(title) => rename(shown.id, title)}
               renaming={renaming[shown.id]}

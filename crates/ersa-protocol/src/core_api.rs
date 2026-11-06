@@ -87,6 +87,7 @@ methods! {
     SessionRemove => "session.remove",
     SessionSend => "session.send",
     SessionInterrupt => "session.interrupt",
+    AttachmentInspect => "attachment.inspect",
     SessionDecidePermission => "session.decide_permission",
     SessionAnswerQuestion => "session.answer_question",
     SessionSetTitle => "session.set_title",
@@ -135,6 +136,7 @@ impl Method {
 /// The notification method names Core sends.
 pub mod notification {
     pub const SESSION_EVENT: &str = "session.event";
+    pub const SESSION_SEND_PROGRESS: &str = "session.send_progress";
     pub const SESSION_TILE: &str = "session.tile";
     pub const HOST_STATUS: &str = "host.status";
     pub const CORE_NOTICE: &str = "core.notice";
@@ -157,6 +159,11 @@ pub enum ErrorKind {
     TransportError,
     Permission,
     Internal,
+    /// `session.send` refused the message for one of its attachments, which
+    /// `data.index` names.
+    AttachmentRefused,
+    /// Core handed the message over but can't tell whether the backend took it.
+    DeliveryUnknown,
 }
 
 // ---------------------------------------------------------------------------
@@ -505,7 +512,24 @@ pub struct Session {
     /// Absent when the session has no events yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_event_seq: Option<u64>,
+    /// Absent unless a send is under way: its phase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sending: Option<SendPhase>,
     pub tile: Tile,
+}
+
+/// Where a send is (`session.send_progress`, and `sending` in `session.list`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SendPhase {
+    /// Checking the attachments.
+    Checking,
+    /// Copying attachments from outside the workspace into its scratch folder.
+    Copying,
+    /// Waiting for a starting backend.
+    Starting,
+    /// Handing the message to the backend.
+    HandingOver,
 }
 
 /// What the rail renders for a session. Usage fields are absent until known.
@@ -575,15 +599,74 @@ pub struct SessionCreateParams {
 #[serde(deny_unknown_fields)]
 pub struct SessionSendParams {
     pub id: String,
+    /// May be empty when there are attachments.
     pub text: String,
+    /// In the order the user added them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
+}
+
+/// One attachment of `session.send`. The schema allows two shapes: `path`
+/// (an image, file or folder on the session's host), or, for an image the
+/// user pasted, `media_type` and base64 `data`. One struct with optional
+/// fields keeps serde simple; Core refuses a mix with `invalid_params`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Attachment {
+    pub kind: AttachmentKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentKind {
+    File,
+    Image,
+    Folder,
 }
 
 /// `session.send` result.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SessionSendResult {
-    /// The 1-based turn the message starts.
-    pub turn: u32,
+    /// The 1-based turn the message starts or joins; absent when Core has
+    /// not projected the message yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<u32>,
+}
+
+/// `attachment.inspect` params.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InspectParams {
+    pub host_id: String,
+    pub path: String,
+}
+
+/// `attachment.inspect` result: what the composer shows for a path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Inspected {
+    pub path: String,
+    pub name: String,
+    pub kind: AttachmentKind,
+    /// For a file or image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    /// A text file's line count, for one of at most 10 MB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lines: Option<u64>,
+    /// For an image, told by its first bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    /// Where a link points.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
 }
 
 /// `session.decide_permission` params.
@@ -707,6 +790,19 @@ pub struct SettingsSetParams {
 pub struct SessionEventParams {
     pub session_id: String,
     pub event: Envelope,
+}
+
+/// `session.send_progress` params.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SendProgressParams {
+    pub session_id: String,
+    pub phase: SendPhase,
+    /// While copying.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copied_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_bytes: Option<u64>,
 }
 
 /// `session.tile` params.
