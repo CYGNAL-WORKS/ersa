@@ -1,9 +1,11 @@
 import { t } from "../catalog";
+import type { Answer, Decision } from "../session/answers";
 import { type ShelfShows, shelfTone } from "../session/shelf";
 import type { TileView } from "../session/tile";
 import { Button } from "./Button";
 import { ContextRing } from "./ContextRing";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { PermissionAnswers } from "./PermissionAnswers";
 import { PermissionInput, Revealed } from "./Transcript";
 import "./Shelf.css";
 
@@ -14,26 +16,40 @@ interface ShelfProps {
   shows: ShelfShows;
   /** Reads the session's events again after reading them failed (R21). */
   onRetry?: () => void;
+  /** The shown request's answer on its way, or refused (R18, R19). */
+  answer?: Answer;
+  /** Whether answers can reach Core now (R20). */
+  live: boolean;
+  /** Answers the shown permission request (R13). */
+  onDecide: (requestId: string, decision: Decision) => void;
 }
 
 /**
  * The shelf (docs/design/RAIL.md, The shelf): a session's oldest pending request, pulled out of its tile over the
  * transcript's edge. A dialog that leaves the rest of the window usable, read in the order it is shown: what
  * kind, what is asked, its details, the session's readouts, then the answers (R23). `shelfOf` decides what it
- * shows; this only lays it out. The answers are drawn here and wired by the answers ticket.
+ * shows; this only lays it out.
  */
-export function Shelf({ id, tile, shows, onRetry }: ShelfProps) {
+export function Shelf({ id, tile, shows, onRetry, answer, live, onDecide }: ShelfProps) {
   return (
     <div id={id} className="shelf" role="dialog" aria-label={t("rail.shelf.nameLabel", { title: tile.title })} data-tone={shelfTone(shows)}>
       {/* A request it can't draw is said here, in the shelf, and leaves the rail as it was. */}
       <ErrorBoundary what={t("rail.shelf.boundaryName")} resetKey={shownKey(shows)}>
-        <Contents shows={shows} ring={tile.ring} cost={tile.cost} onRetry={onRetry} />
+        <Contents shows={shows} ring={tile.ring} cost={tile.cost} onRetry={onRetry} answer={answer} live={live} onDecide={onDecide} />
       </ErrorBoundary>
     </div>
   );
 }
 
-function Contents({ shows, ring, cost, onRetry }: Pick<ShelfProps, "shows" | "onRetry"> & { ring?: number; cost?: string }) {
+function Contents({
+  shows,
+  ring,
+  cost,
+  onRetry,
+  answer,
+  live,
+  onDecide,
+}: Pick<ShelfProps, "shows" | "onRetry" | "answer" | "live" | "onDecide"> & { ring?: number; cost?: string }) {
   switch (shows.state) {
     case "loading":
       return (
@@ -60,9 +76,6 @@ function Contents({ shows, ring, cost, onRetry }: Pick<ShelfProps, "shows" | "on
     case "permission": {
       const { request } = shows;
       const asked = request.description ?? request.display_name ?? request.tool_name;
-      // Deny leads when the request says it defaults to no; Allow otherwise.
-      const denyFirst = request.flags.default_to_no;
-      const suggestions = request.flags.suppress_always_allow ? [] : request.suggestions;
       return (
         <>
           <Heading kind={t("rail.shelf.permissionHeading")} place={shows.place} />
@@ -86,17 +99,7 @@ function Contents({ shows, ring, cost, onRetry }: Pick<ShelfProps, "shows" | "on
             </p>
           )}
           <Readouts ring={ring} cost={cost} />
-          <div className="shelf-answers">
-            {suggestions.map((s, i) => (
-              <Button key={i} className="shelf-suggestion">
-                <Revealed text={s.label} />
-              </Button>
-            ))}
-            <div className="shelf-answer-row">
-              <Button variant={denyFirst ? "primary" : "quiet"}>{t("rail.shelf.denyButton")}</Button>
-              <Button variant={denyFirst ? "quiet" : "primary"}>{t("rail.shelf.allowButton")}</Button>
-            </div>
-          </div>
+          <PermissionAnswers request={request} answer={answer} live={live} onDecide={(decision) => onDecide(request.request_id, decision)} />
         </>
       );
     }

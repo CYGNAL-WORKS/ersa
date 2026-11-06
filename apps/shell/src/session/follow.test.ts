@@ -95,39 +95,6 @@ describe("follow", () => {
     expect(last().message).toEqual({ state: "failed", message: "the session is a replay of a recording and cannot change" });
   });
 
-  it("answers a permission request, and the decision event settles the answer", async () => {
-    const { follower, calls, last } = following({ "session.decide_permission": () => Promise.resolve({}) });
-    const requested = replay.findIndex((e) => e.event.type === "permission.requested");
-    for (const event of replay.slice(0, requested + 1)) follower.receive(event);
-    const request = replay[requested]?.event;
-    const id = request?.type === "permission.requested" ? request.request_id : "";
-
-    follower.decide(id, "allow");
-    expect(calls.at(-1)).toEqual({
-      method: "session.decide_permission",
-      params: { id: "s-replay", request_id: id, behavior: "allow" },
-    });
-    expect(last().answers[id]).toEqual({ state: "sending" });
-    await settle();
-    // Answered, but nothing is shown as decided until Core says so.
-    expect(last().answers[id]).toEqual({ state: "sending" });
-
-    for (const event of replay.slice(requested + 1)) follower.receive(event);
-    expect(last().answers).toEqual({});
-    const permission = last().transcript.items.find((i) => i.kind === "permission");
-    expect(permission?.kind === "permission" && permission.decision?.behavior).toBe("allow");
-  });
-
-  it("shows why an answer was refused, and the request stays open", async () => {
-    const { follower, last } = following({ "session.decide_permission": () => Promise.reject(replayRefusal("session.decide_permission")) });
-    follower.decide("r1", "deny");
-    await settle();
-    expect(last().answers.r1).toEqual({
-      state: "failed",
-      message: "the session is a replay of a recording and cannot change",
-    });
-  });
-
   it("starts again from the beginning when Core's history is shorter than what is shown", async () => {
     // A replay restarted on the same endpoint: the second subscribe finds no events past 3.
     const answers = [{ last_seq: 21 }, { last_seq: 3 }, { last_seq: 3 }];

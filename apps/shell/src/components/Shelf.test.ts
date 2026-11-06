@@ -4,7 +4,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { PermissionRequested } from "../protocol/agent-events.gen";
+import type { Answer } from "../session/answers";
 import type { ShelfShows } from "../session/shelf";
+import { PermissionAnswers } from "./PermissionAnswers";
 import { Shelf } from "./Shelf";
 import { PermissionInput } from "./Transcript";
 
@@ -23,8 +25,17 @@ const request: PermissionRequested = {
   reason: { kind: "rule", text: "Commands need approval in this project." },
 };
 
-const draw = (shows: ShelfShows, more: { ring?: number; cost?: string; onRetry?: () => void } = {}) =>
-  renderToStaticMarkup(createElement(Shelf, { tile: { title: "Fix the flaky reconnect test", ring: more.ring, cost: more.cost }, shows, onRetry: more.onRetry }));
+const draw = (shows: ShelfShows, more: { ring?: number; cost?: string; onRetry?: () => void; answer?: Answer; live?: boolean } = {}) =>
+  renderToStaticMarkup(
+    createElement(Shelf, {
+      tile: { title: "Fix the flaky reconnect test", ring: more.ring, cost: more.cost },
+      shows,
+      onRetry: more.onRetry,
+      answer: more.answer,
+      live: more.live ?? true,
+      onDecide: () => {},
+    }),
+  );
 
 /** The text of `html` in reading order, its tags dropped. */
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replaceAll("&#x27;", "'").replace(/\s+/g, " ").trim();
@@ -85,14 +96,58 @@ describe("the shelf", () => {
     expect(html).toContain('data-tone="caution"');
   });
 
-  it("draws Deny and Allow with the primary as the request says, and its suggestions unless it suppresses them", () => {
-    const suggestions = [{ kind: "allow_rule" as const, label: "Allow pnpm commands in this project for the session", payload: {} }];
+  // verifies: FLOW-APPROVE-PERMISSION-R12
+  it("offers Deny, Allow and one answer per suggestion, labeled with it, and no suggestion when the request suppresses them", () => {
+    const suggestions = [
+      { kind: "allow_rule" as const, label: "Allow pnpm commands in this project for the session", payload: {} },
+      { kind: "set_mode" as const, label: "Switch to acceptEdits mode", payload: {} },
+    ];
     const html = draw({ state: "permission", request: { ...request, suggestions } });
-    expect(html).toContain("Allow pnpm commands in this project for the session");
-    expect(html).toMatch(/data-variant="quiet" class="button">Deny<\/button><button type="button" data-variant="primary" class="button">Allow/);
-    const no = draw({ state: "permission", request: { ...request, suggestions, flags: { ...flags, default_to_no: true, suppress_always_allow: true } } });
-    expect(no).not.toContain("Allow pnpm commands");
+    const buttons = [...html.matchAll(/<button[^>]*>(.*?)<\/button>/g)].map((m) => text(m[1] ?? ""));
+    expect(buttons).toEqual(["Allow pnpm commands in this project for the session", "Switch to acceptEdits mode", "Deny", "Allow"]);
+    const suppressed = draw({ state: "permission", request: { ...request, suggestions, flags: { ...flags, suppress_always_allow: true } } });
+    expect([...suppressed.matchAll(/<button[^>]*>(.*?)<\/button>/g)].map((m) => text(m[1] ?? ""))).toEqual(["Deny", "Allow"]);
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R14
+  it("makes Allow the primary answer, and Deny when the request defaults to no", () => {
+    expect(draw({ state: "permission", request })).toMatch(/data-variant="quiet" class="button">Deny<\/button><button type="button" data-variant="primary" class="button">Allow/);
+    const no = draw({ state: "permission", request: { ...request, flags: { ...flags, default_to_no: true } } });
     expect(no).toMatch(/data-variant="primary" class="button">Deny<\/button><button type="button" data-variant="quiet" class="button">Allow/);
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R18
+  it("makes every answer unavailable while one is on its way, the chosen one led by a ring", () => {
+    const suggestions = [{ kind: "allow_rule" as const, label: "Allow pnpm commands", payload: {} }];
+    const html = draw({ state: "permission", request: { ...request, suggestions } }, { answer: { state: "sending", decision: { suggestion: 0 } } });
+    const buttons = [...html.matchAll(/<button[^>]*>/g)].map((m) => m[0]);
+    expect(buttons).toHaveLength(3);
+    expect(buttons.every((b) => b.includes('disabled=""'))).toBe(true);
+    expect(html).toMatch(/<button[^>]*><span class="answers-ring" aria-hidden="true">.*?<\/span>Allow pnpm commands<\/button>/);
+    expect(html.match(/answers-ring/g)).toHaveLength(1);
+    expect(html).toContain('<div class="answers" aria-busy="true">');
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R19
+  it("says why Core refused an answer, and offers the answers again", () => {
+    const html = draw({ state: "permission", request }, { answer: { state: "failed", message: "the session has ended" } });
+    expect(html).toContain('<div class="answers-refused" role="alert"><p class="problem">Ersa couldn&#x27;t send your answer.</p><p class="answers-reason">the session has ended</p></div>');
+    expect(html).not.toContain("disabled");
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R20
+  it("says Ersa is reconnecting and makes the answers unavailable while it can't reach Core", () => {
+    const html = draw({ state: "permission", request }, { live: false });
+    expect(html).toContain('<p class="answers-note" role="status">Reconnecting to Core…</p>');
+    expect(html.match(/<button[^>]*disabled=""/g)).toHaveLength(2);
+    // Reconnecting says enough: a refusal from before waits until Core is back.
+    expect(draw({ state: "permission", request }, { live: false, answer: { state: "failed", message: "gone" } })).not.toContain("answers-refused");
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R27
+  it("draws its answers with the component the transcript's permission card uses", () => {
+    const answers = renderToStaticMarkup(createElement(PermissionAnswers, { request, live: true, onDecide: () => {} }));
+    expect(draw({ state: "permission", request })).toContain(answers);
   });
 
   it("is the accent for a question, and shows what it asks", () => {
