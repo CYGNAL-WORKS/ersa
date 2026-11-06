@@ -25,7 +25,7 @@ interface TrustQuestionProps {
 
 /**
  * Asks whether the user trusts a project, saying plainly what trust lets run, that it covers every workspace of the
- * project, and that it lasts until withdrawn (ADR 0018, FLOW-NEW-SESSION-R16).
+ * project, and that it lasts until withdrawn (ADR 0018, FLOW-NEW-SESSION-R16, retired; ticket 226 builds its replacement).
  */
 export function TrustQuestion({ name, path, purpose, onAnswer, onDismiss, takeFocus = true, forceCancelFocus }: TrustQuestionProps) {
   // The control that opened the question is disabled or elsewhere while it shows, so focus moves here rather than

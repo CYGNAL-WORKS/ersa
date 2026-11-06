@@ -4,7 +4,7 @@ type: flow
 title: Start a new session
 status: ready
 references: [LAY-SHELL, PROTO-CORE-API, FLOW-RESUME-SESSION, FLOW-SEND-MESSAGE]
-adrs: [0011, 0017, 0018]
+adrs: [0011, 0017, 0028]
 ---
 
 # Start a new session
@@ -15,7 +15,7 @@ A new session begins with the message, not with a form. The user chooses New ses
 
 The session controls lead with where the session runs, three chips fixed once it starts: host, project and workspace. The workspace is an isolated checkout by default (a git worktree for a git project), made from a base branch the user picks, which starts at the repository's default branch, not at whatever the project's folder has checked out (unless the repository has no other). The user can instead run the session in the project's own folder, the root workspace, when isolation is not wanted: a quick question about the code, or a project whose version control Ersa has no workspace adapter for. Sessions in the root workspace share its files with each other and with the user.
 
-The project chip on the new-session screen is the only place a project is added; the rail has no way to add one. Its list ends with Add project, which on the local host opens the system's folder dialog, then asks whether the user trusts the folder (ADR 0018), then chooses the new project. Nobody types a folder path. With no project yet, the project chip offers to choose a folder, and sending opens the same dialog, keeping the message.
+The project chip on the new-session screen is the only place a project is added; the rail has no way to add one. Its list ends with Add project, which on the local host opens the system's folder dialog, then asks whether the user trusts the folder (ADR 0028), then chooses the new project. The trust question reads like the Claude Code CLI's own folder-trust prompt, which users already know, and has two answers: cancel, which it offers first, or trust. A project is never added untrusted; the user withdraws trust later from the project heading's More menu (LAY-SHELL). Nobody types a folder path. With no project yet, the project chip offers to choose a folder, and sending opens the same dialog, keeping the message.
 
 ## Requirements
 
@@ -34,23 +34,26 @@ The project chip on the new-session screen is the only place a project is added;
 - **FLOW-NEW-SESSION-R13**: When the session has started, Ersa shall show its tile in the rail where the rail's arrangement puts it (FLOW-ORGANIZE-SESSIONS).
 - **FLOW-NEW-SESSION-R14**: The project chip shall list the projects on the chosen host, most recently used first (by its newest session), each with its name, its folder's path, its kind (Git or Folder) and, when it is not trusted, that it is not trusted, with the chosen project marked, and shall end the list with Add project.
 - **FLOW-NEW-SESSION-R15**: When the user opens the session controls for no particular project (New session at the top of the rail, or no active session), Ersa shall choose the host's most recently used project.
-- **FLOW-NEW-SESSION-R16**: When the user chooses Add project, or presses Ctrl+O on the new-session screen, with the local host chosen, Ersa shall open the system's folder dialog; once the user picks a folder that is not yet a project, Ersa shall ask whether they trust it, saying what trust lets run, that it covers every workspace of the project, and that it lasts until withdrawn, then add the project with their answer and choose it in the session controls.
+- ~~**FLOW-NEW-SESSION-R16**~~: retired 2026-11-06 (the trust question says only what the CLI's prompt says), replaced by R27.
 - **FLOW-NEW-SESSION-R17**: When the user cancels the folder dialog or the trust question, Ersa shall add no project and leave the session controls and the composer as they were.
 - **FLOW-NEW-SESSION-R18**: When the folder the user picks is already a project on that host, Ersa shall find it before asking anything and choose that project without the trust question.
-- **FLOW-NEW-SESSION-R19**: When the local host is chosen and has no projects, the project chip shall offer to choose a folder, and sending a message shall open the folder dialog as R16 does and keep the message in the composer; once the project is added it is chosen, and the message waits for the user to send it.
+- **FLOW-NEW-SESSION-R19**: When the local host is chosen and has no projects, the project chip shall offer to choose a folder, and sending a message shall open the folder dialog as R27 does and keep the message in the composer; once the project is added it is chosen, and the message waits for the user to send it.
 - **FLOW-NEW-SESSION-R20**: Ersa shall offer no field for typing a project's folder path.
 - **FLOW-NEW-SESSION-R21**: When a git project has a new workspace chosen, the workspace chip shall offer the project's local branches as the base branch, with a search box that narrows them, and shall start at the repository's default branch for every new session, or, when the repository has none, at the checked-out commit; R04 shall create the workspace from the chosen base branch.
 - **FLOW-NEW-SESSION-R22**: The workspace chip shall name the workspace a session will start in: a new workspace with its base branch, or the project folder.
 - **FLOW-NEW-SESSION-R23**: While the backends on the chosen host are being detected, the new-session screen shall say so above the composer, and the composer shall be unavailable until detection ends.
 - **FLOW-NEW-SESSION-R28**: While a git project's branches are being read, the workspace chip shall say so in place of the branches; when they cannot be read, it shall say so and that the new workspace will start at the default branch. In both cases the chip shall name a new workspace without a base branch, in place of R22's name, and R04 shall create the workspace from the default branch Core finds.
+- **FLOW-NEW-SESSION-R24**: The trust question shall show the folder's path, ask whether it is a project the user created or one they trust (their own code, a well-known open source project, or their team's work) and to review the folder first if not, and say that agents will be able to read, edit and run files there.
+- **FLOW-NEW-SESSION-R25**: The trust question shall offer two answers, Cancel first and then Trust, with keyboard focus on Cancel when it opens; Trust shall add the project as trusted, and Ersa shall offer no way to add a project that is not trusted.
+- **FLOW-NEW-SESSION-R27**: When the user chooses Add project, or presses Ctrl+O on the new-session screen, with the local host chosen, Ersa shall open the system's folder dialog; once the user picks a folder that is not yet a project, Ersa shall ask the trust question (R24), and once they answer Trust, add the project as R25 says and choose it in the session controls.
 
 ## Verification
 
-The replay server refuses every request that would create or change a session (PROTO-CORE-API, Conformance), so it cannot run R03 to R08, R12, R13 or the adding of a project in R16, R18 and R19. Those run against a real Core with a stand-in backend that can answer or fail to start; the Interface's own sequence is tested against a fake client, with the system's folder dialog replaced by a stand-in that answers with a folder or a cancel.
+The replay server refuses every request that would create or change a session (PROTO-CORE-API, Conformance), so it cannot run R03 to R08, R12, R13 or the adding of a project in R27, R18 and R19. Those run against a real Core with a stand-in backend that can answer or fail to start; the Interface's own sequence is tested against a fake client, with the system's folder dialog replaced by a stand-in that answers with a folder or a cancel.
 
 ## Built so far
 
-A project is added by typing its folder path in the rail and answering the trust question; R14 to R20 replace that. New session shows the new-session screen and creates nothing until the first message (R01 to R05, R08, R12). Until the open question on changing values mid-session is answered, the session controls under a running session show its values read-only. A host whose backend listing fails reads as having no backend available, which R11 replaces. The rail still groups sessions under a heading per workspace, so R13 is still to build (LAY-SHELL). Workspaces are made from the project folder's checked-out branch until R21 is built. With no session chosen, the window shows the newest.
+A project is added by typing its folder path in the rail and answering the trust question; R14 to R20 replace that. New session shows the new-session screen and creates nothing until the first message (R01 to R05, R08, R12). Until the open question on changing values mid-session is answered, the session controls under a running session show its values read-only. A host whose backend listing fails reads as having no backend available, which R11 replaces. The rail still groups sessions under a heading per workspace, so R13 is still to build (LAY-SHELL). Workspaces are made from the project folder's checked-out branch until R21 is built. With no session chosen, the window shows the newest. The trust question still offers to add a project untrusted, as ADR 0018 had it; R24, R25 and R27 are still to build.
 
 ## Open questions
 
@@ -60,10 +63,12 @@ A project is added by typing its folder path in the rail and answering the trust
 - Which session a reopened window shows when several were running (FLOW-RESUME-SESSION).
 - How the user picks a folder on a remote host, which the system's folder dialog cannot browse (FLOW-REMOTE-SESSION).
 - Whether the base branch can also be a remote branch or a tag, and whether a project remembers a base branch other than the default.
+- What the trust question's security guide link opens, as the CLI's prompt has one. Ersa has no user guide yet, and the CLI's guide is one backend's, so the question has no link until one exists.
 
 ## Changes
 
 - 2026-11-06: from #229 inbox: what the workspace chip shows while the branches are read and when they can't be, and that the new workspace then starts at the default branch (R28; R24 to R27 are allocated on another branch). No other requirement IDs changed.
+- 2026-11-06: owner's decision to match the Claude Code CLI's folder-trust prompt (ADR 0028, superseding 0018): the trust question shows the folder's path, a safety check and what agents can do there (R24), and its answers are Cancel, first and focused, and Trust; a project is no longer added untrusted (R25). R16 retired for R27, which drops what the question said beyond the CLI's prompt (what else trust lets run, every workspace, until withdrawn); tests that cite R16 move to R27. Open question on the security guide link.
 - 2026-11-05: R13 reworded for the rail's arrangement (FLOW-ORGANIZE-SESSIONS): a new tile sits where the arrangement puts it, under its project by default. Meaning unchanged for the default arrangement.
 - 2026-11-05: from #173 merge review, before any of it shipped: an existing project is found before the trust question (R18), the trust question says what trust covers (R16), and the no-projects offer is the local host's (R19).
 - 2026-11-05: owner's decisions on where a session runs: a project is added from the project chip through the system's folder dialog, and no path is typed (R10 retired; R14 to R20 added); the project chip lists projects most recently used first with path, kind and trust; a new workspace is made from a base branch that starts at the repository's default branch (R21, R22); the screen says when backends are being detected (R23). Open questions on a remote host's folder picker and on other kinds of base.
