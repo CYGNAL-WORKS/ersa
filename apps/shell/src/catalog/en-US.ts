@@ -25,11 +25,33 @@ export const enUS = {
       // Names the foot when it fails to draw: "The connection status could not be shown:".
       boundaryName: "The connection status",
     },
+    // A session's tile (docs/design/RAIL.md, A tile): line two's phrase, and the names of its marks.
+    tile: {
+      untitledLabel: "Untitled session",
+      startingStatus: "Starting",
+      // Heard, not shown: the working mark's name, since line two has no phrase for it.
+      workingStatus: "Working",
+      disconnectedStatus: "Disconnected",
+      errorStatus: "Error",
+      endedStatus: "Ended",
+      unknownStateStatus: "Unknown state",
+      // What a session that needs the user wants, in the tone of its chevron.
+      permissionWant: "Needs permission",
+      questionWant: "Has a question",
+      needsYouWant: "Needs you",
+      needsYouCountWant: "Needs you · {count}",
+    },
   },
   transcript: {},
   composer: {},
   newSession: {},
-  sessionControls: {},
+  sessionControls: {
+    // The context ring's name, in the session controls and on a tile.
+    contextRing: {
+      noneLabel: "Context: none used yet",
+      usedLabel: "Context: {percent} percent used",
+    },
+  },
   quit: {},
   trust: {},
   errors: {},

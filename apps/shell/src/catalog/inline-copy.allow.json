@@ -10,8 +10,7 @@
     "The new-session screen",
     "The projects",
     "The sessions",
-    "This session",
-    "Untitled session"
+    "This session"
   ],
   "components/AddProject.tsx": [
     "Add",
@@ -27,11 +26,6 @@
     "Send",
     "Sending…",
     "Write to the agent"
-  ],
-  "components/ContextRing.tsx": [
-    "Context:",
-    "Context: none used yet",
-    "percent used"
   ],
   "components/ErrorBoundary.tsx": [
     "could not be shown:"
@@ -88,12 +82,10 @@
   ],
   "components/SessionList.tsx": [
     "Loading…",
-    "Needs you ·",
     "No sessions yet.",
     "Sessions",
     "Sessions appear once Core is connected.",
     "Start one from a project above.",
-    "Untitled session",
     "Workspace"
   ],
   "components/SessionTitle.tsx": [
