@@ -1,5 +1,5 @@
-// The new-session screen rendered to markup, as the window would first draw it. Opening, choosing and Escape
-// need a browser; the gallery's keyboard test in e2e/ covers them.
+// The new-session screen rendered to markup, as the window would first draw it. What it does as the user acts
+// and data arrives is in NewSessionScreen.dom.test.ts; Escape and the keyboard are in the gallery's test in e2e/.
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
