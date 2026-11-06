@@ -4,7 +4,7 @@ type: layout
 title: Application shell
 status: draft
 references: []
-adrs: [0008]
+adrs: [0008, 0026]
 ---
 
 # Application shell
@@ -33,20 +33,24 @@ The transcript header shows the active session's title. The title is renamed in 
 
 ## The rail
 
-From top to bottom: New session, the projects with their sessions, Add project, and the foot. The design documents say how each part and each state looks.
+From top to bottom: New session with the arrange button beside it, the groups of tiles, and the foot. The design documents say how each part and each state looks. How the user pins, renames and sections sessions, and groups, sorts and filters the rail, is FLOW-ORGANIZE-SESSIONS; archiving and deleting is FLOW-ARCHIVE-DELETE-SESSION; forking is FLOW-FORK-SESSION.
 
 - **New session** opens the new-session screen.
-- **Projects.** Each project is a project heading with its sessions beneath it as tiles, newest first; the projects are in the order Core lists them. A project with no sessions shows its heading alone. The heading names the project, and its host when the project is not on the local machine. Workspaces are not a level in the rail: the session controls name a session's workspace. A session whose project Ersa can't tell sits at the end of the tree under no heading, so a session is never missing from the rail.
-- **Collapsing.** A heading collapses and expands its sessions, and stays as the user left it while the window is open. Collapsed, it says how many sessions it holds, with a mark when any of them needs the user.
+- **The arrange button** is an icon button beside New session that opens the arrange menu: Group by ▸ (Project, Section, Date, None), Sort by ▸ (Date created, Last activity, Name), Show ▸ (Active, Archived, All), each submenu marking the current choice; then New section, and Reset to defaults. The defaults are Project, Date created and Active.
+- **Groups.** Tiles sit in groups under headings, by the arrangement. Pinned sessions lead in a Pinned group, whatever the grouping, which is absent while nothing pinned is shown. Grouped by none, the rest are one list with no heading.
+- **Projects.** Grouped by project, each project is a project heading with its sessions beneath it as tiles, sorted by the arrangement; the projects are in the order Core lists them. A project with no sessions shows its heading alone while the rail shows active sessions; otherwise only projects with a tile to show have a heading. The heading names the project, and its host when the project is not on the local machine. Workspaces are not a level in the rail: the session controls name a session's workspace. A session whose project Ersa can't tell sits at the end of the tree under no heading, so a session is never missing from the rail.
+- **Sections and dates.** Grouped by section, each section is a heading with its name, shown while empty, in the order they were made, then "No section". A section heading's More holds Rename, in place, and Delete. Grouped by date, the headings are Today, Yesterday, Previous 7 days and Older, and only those with tiles show.
+- **Collapsing.** Any group heading collapses and expands its tiles, and stays as the user left it, in that grouping, across restarts. Collapsed, it says how many sessions it holds, with a mark when any of them needs the user.
 - **A heading's actions** appear under the pointer or keyboard focus: New session, which opens the new-session screen for that project, and More, which holds trusting the project or withdrawing its trust. A project the user has not trusted says so on its heading, collapsed or not.
+- **A tile's menu.** A More button fades in at a tile's trailing edge, over its state mark, under the pointer or keyboard focus; a right-click on the tile, the context-menu key or Shift+F10 opens the same menu at the tile. Its items, in order: Pin or Unpin; Rename; Fork; Move to section ▸ (each section, the current one marked, then "No section" and "New section…"); Archive or Unarchive; then, apart from the rest, Delete, in the danger tone. An item the session can't take now is shown unavailable with its reason beneath it. Rename turns the tile's title into a field in place, as F2 on a focused tile does; Enter saves and Escape restores it. Delete asks first, in a dialog that says what will be lost (FLOW-ARCHIVE-DELETE-SESSION).
+- **Archived.** With archived sessions shown, an archived session's tile reads quieter and carries an archive glyph in place of its state mark. Opened, an archived session shows a note in place of the composer, saying it is archived, with Resume.
 - **Tiles.** A tile shows the backend's icon, the session's title, a mark for its state, the context ring and the cost as reported. The cost appears once the backend has reported one, and the ring once it has reported both the tokens used and a context window larger than nothing; a session with no title yet is named as untitled. Choosing a tile makes its session the active one. The active session's tile is visibly distinct, quietly.
 - **State.** A tile tells starting, working, error and disconnected apart by its mark, and names in words every state but working and idle. An idle or ended session has no mark. A state Ersa doesn't know has no mark either, and the tile says in words that Ersa doesn't know it.
 - **Needs you.** A session with a pending permission request or question shows the shelf's handle in place of its state mark, in the tone of what it wants, and names the want: a permission request, a question, or how many requests when more than one is pending. With both kinds pending, the tone is the permission request's, and a request of a kind Ersa doesn't know reads as needing the user in that tone too. The pending requests decide this, whatever state Core reports: a session reported as waiting on the user with nothing pending reads as idle.
 - **Unseen.** When Core reports a session that is not the active one as idle after working, the session is unseen, and its tile says so, until the user makes it active. Ersa keeps this while the window is open only.
 - **Context.** The context ring is near full from 85 percent of the context window, on a tile and in the session controls alike, and never shows more than full.
-- **Add project** sits at the end of the tree and opens the way to add one.
-- **Loading, empty and failed.** While the projects are being read the tree says so; with no projects it says how to add one. When the projects, a project's workspaces or the sessions can't be read, the tree says so with the reason, and shows what it could read.
-- **The foot** is empty while all is well, and while Ersa first connects, when the tree says it is loading. When Ersa can't reach Core, the foot says so in the user's terms, with the reason when Ersa has one, and the tree is empty. While Ersa is trying again the foot says that; once it has stopped trying, the foot offers Retry. Assistive technology is told when the problem appears and when Ersa reaches the sessions again. When Retry was pressed from the keyboard and the foot offers it again, keyboard focus returns to it unless the user has moved it. New session and Add project are unavailable until Ersa has connected. A debug build attached to a labeled endpoint names the label there (Development).
+- **Loading, empty and failed.** While the projects are being read the tree says so; with no projects it says to start with New session, where a project is added. Showing archived sessions with none, it says there are none. When the projects, a project's workspaces or the sessions can't be read, the tree says so with the reason, and shows what it could read.
+- **The foot** is empty while all is well, and while Ersa first connects, when the tree says it is loading. When Ersa can't reach Core, the foot says so in the user's terms, with the reason when Ersa has one, and the tree is empty. While Ersa is trying again the foot says that; once it has stopped trying, the foot offers Retry. Assistive technology is told when the problem appears and when Ersa reaches the sessions again. When Retry was pressed from the keyboard and the foot offers it again, keyboard focus returns to it unless the user has moved it. New session and the arrange button are unavailable until Ersa has connected. A debug build attached to a labeled endpoint names the label there (Development).
 ## Development
 
 A debug build attaches to a labeled Core endpoint, such as a replay, only when told to: `ERSA_ATTACH=<label>` makes it attach there and never launch a Core, and the rail's foot reads "Attached to <label>". A release build ignores the variable and always uses the user's own Core.
@@ -57,8 +61,7 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 - Whether the workbench shows one pane at a time (tabs) or allows splits.
 - Whether the shelf overlays the transcript or pushes it, and how several pending shelves queue.
 - Where global status (connected hosts, usage today) lives, and where Core's version and API version are shown now that the rail's foot is silent while all is well.
-- What a tile's More menu holds (Rename, Stop and Remove are drawn), and what Stop and Remove do to the session's workspace.
-- Whether collapsed headings and unseen sessions are remembered when Ersa restarts, and whether a turn too short for a tile to show as working, or one that finishes while Ersa can't reach Core, should still leave its session unseen.
+- Whether unseen sessions are remembered when Ersa restarts, and whether a turn too short for a tile to show as working, or one that finishes while Ersa can't reach Core, should still leave its session unseen.
 - Whether the tree keeps its tiles, marked as out of date, while Ersa can't reach Core, so a short drop doesn't empty the rail.
 - Where the control that collapses the rail lives, and the one that shows it again.
 - How a list that could not be read is read again while Core stays reachable. Today the lists are read when Ersa connects and after the user changes one.
@@ -67,7 +70,6 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 - Whether the foot shows that Ersa is trying after Retry is pressed. Today it goes away while Ersa connects and comes back unchanged when the try fails, so nothing says a try was made.
 - How much of a failed start's own output the foot shows and assistive technology reads. Today the foot shows its last lines whole, which can push Retry out of sight, and they are read again each time a try fails.
 - Keyboard model: which shortcuts the shell owns versus the active pane.
-- Whether the user can reorder the rail's tiles or change its sort order; today it lists sessions newest first. DESIGN.md says how tiles move if so.
 
 ## Built so far
 
@@ -75,6 +77,7 @@ The rail is a list of projects above one list of sessions grouped under a headin
 
 ## Changes
 
+- 2026-11-05: owner's decisions of 2026-11-05 (The rail): Add project leaves the rail for the new-session screen, and the empty tree points at New session; the arrange button and menu; groups by project, section, date or none, with a leading Pinned group; section headings; collapsed groups kept per grouping across restarts; a tile's menu (Pin, Rename, Fork, Move to section, Archive, Delete) and archived tiles. Closes the open questions on a tile's More menu, on sort order, and on remembering collapsed headings. No requirement IDs changed.
 - 2026-11-05: from #155 merge review: whether the foot shows a try after Retry, and how much of a failed start's output it shows and reads, are open questions. No requirement IDs changed.
 - 2026-11-05: from #155 inbox: the foot tells assistive technology when the problem appears and when it ends, and gives keyboard focus back to Retry (The foot); the open question on focus after Retry narrows to a retry that succeeds, and how long the word of reconnecting stays is a new one. No requirement IDs changed.
 - 2026-11-05: Built so far follows the foot, now built; where keyboard focus lands after Retry is an open question. No requirement IDs changed.

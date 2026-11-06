@@ -20,6 +20,8 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Effort**: how much reasoning a backend spends per turn, in the backend's own levels. Chosen when a session starts.
 - **Permission mode**: a backend's rule for which of the agent's actions ask the user first, in the backend's own names. Chosen when a session starts.
 - **Session**: one conversation with one agent, in one workspace, on one host. An ordinary backend session: its history is the backend's session record, and Ersa stores only what finds it again (host, project, workspace, backend, and the backend's session id) and its mode. Its title is the backend's.
+- **Fork**: a new session that starts from a copy of another session's conversation up to its last finished reply, in the same workspace, and continues on its own. The session it was made from is unchanged.
+- **Archived session**: a session the user has put away: stopped, hidden from the rail unless the user shows archived sessions, and opened read-only until the user resumes or unarchives it. Its record and workspace stay.
 - **Session record**: the backend's own record of a session, which the backend resumes from and its own tools list. The history of a session, whether its turns were taken in Ersa or elsewhere. Retention is the backend's.
 - **Live stream**: what a running backend sends Ersa as it happens. Carries details the session record omits (text as it arrives, permission prompts, turn ends, cost, rate limits), which are shown and not stored.
 - **Host**: a machine where sessions can run. The local machine is a host; an SSH-reachable machine is another. A remote host runs its own Core.
@@ -47,9 +49,14 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 
 ## Interface
 
-- **Rail**: the left column listing projects and, under each, its sessions. *Not: sidebar.*
+- **Rail**: the left column listing sessions as tiles in groups, by project unless the user arranges them otherwise. *Not: sidebar.*
 - **Tile**: a session's entry in the rail: backend icon, title, state, context ring, and cost as reported by the backend.
 - **Project heading**: a project's row in the rail, above the tiles of its sessions. It collapses and expands them.
+- **Group**: a run of tiles in the rail under one heading. The user chooses how the rail groups: by project, section or date, or not at all; pinned sessions lead in their own group whichever is chosen.
+- **Section**: a group the user makes and names to arrange sessions across projects. A session is in one section or in none; a section stays while empty.
+- **Pinned session**: a session the user has pinned, so it leads the rail in the Pinned group whatever the grouping. Pinning changes neither its project nor its section.
+- **Arrangement**: the user's choice of how the rail groups, sorts and filters its tiles, and which groups are collapsed. Set from the arrange menu beside New session and kept across restarts.
+- **Tile menu**: the menu of actions on one session, opened from its tile's More button, a right-click or the context-menu key.
 - **Unseen session**: a session that went idle after working while it was not the active session, until the user makes it active.
 - **Foot**: the bottom of the rail. Empty unless Ersa can't reach Core.
 - **Shelf**: the panel that pulls out from a tile when the session needs the user (a permission request or a question), answerable without changing the active session. The chevron on the tile is its handle. *Not: drawer, flyout.*

@@ -4,7 +4,7 @@ type: protocol
 title: Core request/response API
 status: ready
 references: [PROTO-AGENT-EVENTS]
-adrs: [0011, 0017, 0018]
+adrs: [0011, 0017, 0018, 0026]
 ---
 
 # Core request/response API
@@ -45,13 +45,17 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 ### Workspaces
 
 - `workspace.list { project_id }`, `workspace.create { project_id, name (optional), base (optional) }`, `workspace.remove { id, force (optional) }` (refused with `invalid_state` while the workspace has sessions; it never cascades): `{ id, project_id, kind (root | isolated), path, vcs_ref, state (ready | creating | removing | error) }`. Every project has one root workspace, its own folder, which exists from `project.add` and is listed first; its `vcs_ref` is empty, since that checkout is the user's to change. `workspace.create` makes an isolated workspace (a git worktree for a git project) and is refused with `invalid_state` for a project whose version control has no workspace adapter. `workspace.remove` refuses the root workspace with `invalid_state`, and otherwise returns the workspace as it was claimed for removal, with `state: removing`.
+- `workspace.changes { id }`: what deleting the workspace would lose, for the delete question (FLOW-ARCHIVE-DELETE-SESSION): `{ kind, branch (absent for a root workspace or one without a branch), uncommitted (files with changes not committed), unshared (commits on the branch that no other local branch or remote-tracking branch holds), sessions (how many sessions use the workspace) }`. For a root workspace the counts are absent, since its files are never deleted.
 
 ### Sessions
 
-- `session.list`: `{ id, workspace_id, host_id, backend, model, effort, permission_mode, mode, title, state, created_at, last_event_seq (absent before the first event), tile: { state, context_tokens, context_window, cost_usd_total, pending: [{ kind (permission | question), request_id }] } }`. The `tile` object is what the rail renders; Core keeps it current from events. A session's `title` is its backend's: the title the backend's own tools list for it, which Ersa never stores. Its `created_at` is the time of the first entry in its session record, else the time of the app log's first fact for it. Its `mode` is Ersa's.
+- `session.list`: `{ id, workspace_id, host_id, backend, model, effort, permission_mode, mode, title, state, created_at, last_event_seq (absent before the first event), pinned, section_id (absent when in no section), archived, last_activity_at (absent until a turn has ended), tile: { state, context_tokens, context_window, cost_usd_total, pending: [{ kind (permission | question), request_id }] } }`. The `tile` object is what the rail renders; Core keeps it current from events. A session's `title` is its backend's: the title the backend's own tools list for it, which Ersa never stores. Its `created_at` is the time of the first entry in its session record, else the time of the app log's first fact for it. Its `mode` is Ersa's. `pinned`, `section_id` and `archived` are the user's arrangement, which Core stores (ADR 0026); `last_activity_at` is the time the session's latest turn ended, which Core stores when a turn ends and changes at no other time. A session Core lists for the first time starts with none of them set. A deleted session is never listed again.
 - `session.create { workspace_id, backend, model (optional), effort (optional), permission_mode (optional), mode (optional) }`: creates and starts; it takes no title, since the title is the backend's. `model`, `effort` and `permission_mode` are ids from `backend.list`; Core refuses any other id. A `model` or `effort` left out is left to the backend, and Core stores only what was named: `session.list` reports the named values and leaves the others absent, which means the backend's own default (a replayed session, and a session created before these fields existed, report none). The permission mode is the exception: the backend must always be told one (PROTO-CLAUDE-CODE-STREAM, Invocation), so a `permission_mode` left out becomes the backend's default mode, stored and reported as the mode the session started with. The backend's `default` marks in `backend.list` are the adapter's knowledge of what the backend chooses on its own, for the session controls to show, not a promise of what a given session ran with. `mode` is stored and shown; it takes effect from milestone M3, when modes exist.
-- `session.start { id }`, `session.stop { id }`, `session.resume { id }`, `session.remove { id }`. Restarting a stopped session is `session.resume` (milestone M1); until then `session.start` on a stopped session answers `invalid_state` naming M1. `session.remove` is refused while the session is live.
-- `session.send { id, text }`: sends a user message; returns `{ turn }`. To a session whose backend is still starting, Core sends once it has started. To one whose backend failed to start, Core answers `invalid_state` with "the backend could not be started:" and the adapter's reason, including the backend's own error output, so the new-session screen can show it (FLOW-NEW-SESSION-R08).
+- `session.start { id }`, `session.stop { id }`, `session.resume { id }`. Restarting a stopped session is `session.resume` (milestone M1); until then `session.start` on a stopped session answers `invalid_state` naming M1. `session.resume` on an archived session clears `archived` first.
+- `session.delete { id }`: stops the session, deletes its isolated workspace's folder and, for git, its branch when no other session uses that workspace, then removes the session and remembers its backend session id as deleted. A root workspace is never touched. When the workspace or branch can't be deleted, the session stays, stopped, and Core answers `vcs_error` (or `internal`) with the reason; calling again continues from where it stopped. Returns `{ id, workspace_deleted }`. It replaces `session.remove`, which the Interface used to clean up a session that failed to start.
+- `session.set_pinned { id, pinned }`, `session.set_section { id, section_id }` (`null` for no section; `not_found` for a section that does not exist), `session.set_archived { id, archived }`: the user's arrangement (FLOW-ORGANIZE-SESSIONS, FLOW-ARCHIVE-DELETE-SESSION). Archiving stops a live session first, as `session.stop` does. Each returns the session as `session.list` lists it.
+- `session.fork { id }`: starts a fork (FLOW-FORK-SESSION) in the original's workspace with the original's backend, model, effort and permission mode, and returns the new session as `session.list` lists it. Refused with `invalid_state` while a turn is running in the original, before one of its turns has ended, before its backend has named it, and when the backend cannot fork, each with its own message.
+- `session.send { id, text }`: sends a user message; returns `{ turn }`. To an archived session, Core answers `invalid_state`. To a session whose backend is still starting, Core sends once it has started. To one whose backend failed to start, Core answers `invalid_state` with "the backend could not be started:" and the adapter's reason, including the backend's own error output, so the new-session screen can show it (FLOW-NEW-SESSION-R08).
 - `session.interrupt { id }`.
 - `session.decide_permission { id, request_id, behavior (allow | deny), message (optional), updated_input (optional), apply_suggestions (optional array of indices) }`.
 - `session.answer_question { id, request_id, answers }`.
@@ -61,6 +65,10 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 - `session.unsubscribe { id }`.
 - `session.raw_log { id, from, to }`: the session's raw log for the developer pane, the lines exchanged with its backend since Core opened it (held in memory, never stored): `[{ index, ts, dir (backend | host), line }]`, at most 1000 per call; the client pages on from the last index plus one. Core's lifecycle facts are in the app log, not here.
 
+### Sections
+
+- `section.list`, `section.create { name }`, `section.rename { id, name }`, `section.remove { id }`: `{ id, name, created_at }`, listed in the order they were made. Core trims a name and refuses with `invalid_params` one that is blank, longer than 80 characters, or that another section has, ignoring case. `section.remove` puts its sessions in no section.
+
 ### Backends and modes
 
 - `backend.list { host_id }`: `{ name, label, version (optional, present when available), status (available | missing | error), tested { min, max }, models: [{ id, label, default }], efforts: [{ id, label, default }], permission_modes: [{ id, label, default }] }`. The choices are the adapter's knowledge of its tested versions, not detected on the host; `label` is what the Interface shows (the backend's own, such as "Claude Code") and `default` marks the one a new session starts with.
@@ -68,7 +76,7 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 
 ### Settings
 
-- `settings.get`, `settings.set { patch }`: user settings as a JSON object, patch-merged (RFC 7386). `settings.get` returns only what the user has set; defaults are Core's and are not echoed. Known keys so far: `workspaces.root` (where workspaces are created; default under Core's data directory); `new_session.last_used.<project id>` (`{ host_id, project_id, workspace, backend, model, effort, permission_mode }`, the values that project last started a session with, which the Interface writes after a start and reads to fill the session controls, FLOW-NEW-SESSION-R02; a value left out is sent as null, so the merge clears it).
+- `settings.get`, `settings.set { patch }`: user settings as a JSON object, patch-merged (RFC 7386). `settings.get` returns only what the user has set; defaults are Core's and are not echoed. Known keys so far: `workspaces.root` (where workspaces are created; default under Core's data directory); `new_session.last_used.<project id>` (`{ host_id, project_id, workspace, backend, model, effort, permission_mode }`, the values that project last started a session with, which the Interface writes after a start and reads to fill the session controls, FLOW-NEW-SESSION-R02; a value left out is sent as null, so the merge clears it); the rail's arrangement (FLOW-ORGANIZE-SESSIONS): `rail.group_by` (`project`, `section`, `date` or `none`; default `project`), `rail.sort_by` (`created`, `last_activity` or `name`; default `created`), `rail.show` (`active`, `archived` or `all`; default `active`), and `rail.collapsed.<group_by>` (the keys of the groups collapsed in that grouping: `pinned`, a project or section id, `no_project`, `no_section`, or `today`, `yesterday`, `previous_7_days`, `older`; default none). Reset to defaults sends each `rail.*` key as null.
 
 ### Workbench (milestone M2, reserved)
 
@@ -117,6 +125,12 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 - **PROTO-CORE-API-R16**: `session.create` shall start the backend with the `model` and `effort` it was given, passing nothing for one left out, and with the `permission_mode` given or else the backend's default permission mode, which is always stated to the backend; `session.list` shall report the `model` and `effort` that were given, absent otherwise, and the `permission_mode` the session started with.
 - **PROTO-CORE-API-R17**: Each replay capture shall equal what the replay server sends for its fixture, apart from `ersa_commit`.
 - **PROTO-CORE-API-R14**: `session.subscribe` with `from_seq` shall deliver every event from that sequence number onward, or from `first_seq` when the view no longer holds events before it, in order, with no gaps or duplicates, then continue live.
+- **PROTO-CORE-API-R18**: `session.set_pinned`, `session.set_section` and `session.set_archived` shall persist across a restart of Core, and `session.list` shall report them.
+- **PROTO-CORE-API-R19**: `session.delete` shall delete the session's isolated workspace and its branch only when no other session uses that workspace, shall never change a root workspace, and shall remove the session only after its workspace is deleted or kept.
+- **PROTO-CORE-API-R20**: After `session.delete` has removed a session, `session.list` shall not list it again, including after Core restarts and when its backend's record still holds it.
+- **PROTO-CORE-API-R21**: Core shall set a session's `last_activity_at` when one of its turns ends, and at no other time.
+- **PROTO-CORE-API-R22**: `workspace.changes` shall count files with uncommitted changes, and commits on the workspace's branch that no other local branch or remote-tracking branch holds.
+- **PROTO-CORE-API-R23**: `section.remove` shall leave every session it held in no section.
 
 ## Out of scope
 
@@ -131,6 +145,7 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 
 ## Changes
 
+- 2026-11-05: the user's arrangement of sessions (ADR 0026): `session.list` carries `pinned`, `section_id`, `archived` and `last_activity_at`; `session.set_pinned`, `session.set_section`, `session.set_archived`, `session.fork`, `workspace.changes` and the `section.*` methods added; `rail.*` settings keys named; `session.delete` replaces `session.remove`, a removal, so `api_version` is bumped when it ships; `session.send` refuses an archived session. PROTO-CORE-API-R18 to R23 added.
 - 2026-11-05: from #155 merge review: whether the window still reads `core.status` at attach is an open question. No requirement IDs changed.
 - 2026-11-03: from #111 merge review: `session.tile` is coalesced (one tile per projected batch, the newest per session for a busy connection) and never closes a connection, as Core already did; what PROTO-CORE-API-R09 asks of tiles stated. No requirement IDs changed.
 - 2026-11-02: from #55 inbox: `session.send` to a starting backend waits for it, and to one that failed to start answers `invalid_state` with the adapter's reason; settings key `new_session.last_used.<project id>` named. No requirement IDs changed.
