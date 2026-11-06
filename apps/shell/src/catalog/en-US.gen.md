@@ -4,6 +4,70 @@
 
 ## `rail`
 
+### `rail.tree.label`
+
+Projects and sessions
+
+### `rail.tree.loadingProgress`
+
+Loading…
+
+### `rail.tree.noProjectsEmpty`
+
+No projects yet.
+
+### `rail.tree.noProjectsHint`
+
+Start with New session, where you can add one.
+
+### `rail.tree.projectsError`
+
+Ersa can't read your projects.
+
+### `rail.tree.sessionsError`
+
+Ersa can't read your sessions.
+
+### `rail.tree.boundaryName`
+
+The projects and sessions
+
+### `rail.heading.newSessionLabel`
+
+New session in {project}
+
+### `rail.heading.moreLabel`
+
+More for {project}
+
+### `rail.heading.notTrustedStatus`
+
+Not trusted
+
+### `rail.heading.trustButton`
+
+Trust…
+
+### `rail.heading.distrustButton`
+
+Don't trust
+
+### `rail.heading.savingProgress`
+
+Saving…
+
+### `rail.heading.trustError`
+
+Ersa can't change this project's trust.
+
+### `rail.heading.workspacesError`
+
+Ersa can't read this project's workspaces.
+
+### `rail.heading.keepTrust`
+
+Running sessions keep their current settings until they are stopped.
+
 ### `rail.foot.attachedLabel`
 
 Attached to {label}
