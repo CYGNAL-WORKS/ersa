@@ -39,7 +39,7 @@ Adding a project happens in the project chip, not in the rail: its list ends wit
 - **FLOW-NEW-SESSION-R18**: When the folder the user picks is already a project on that host, Ersa shall choose that project without asking about trust again.
 - **FLOW-NEW-SESSION-R19**: When the chosen host has no projects, the project chip shall offer to choose a folder, and sending a message shall open the folder dialog as R16 does and keep the message in the composer; once the project is added it is chosen, and the message waits for the user to send it.
 - **FLOW-NEW-SESSION-R20**: Ersa shall offer no field for typing a project's folder path.
-- **FLOW-NEW-SESSION-R21**: When a git project has a new workspace chosen, the workspace chip shall offer the project's local branches as the base branch, with a search box that narrows them, and shall start at the repository's default branch for every new session; R04 shall create the workspace from the chosen base branch.
+- **FLOW-NEW-SESSION-R21**: When a git project has a new workspace chosen, the workspace chip shall offer the project's local branches as the base branch, with a search box that narrows them, and shall start at the repository's default branch for every new session, or, when the repository has none, at the checked-out commit; R04 shall create the workspace from the chosen base branch.
 - **FLOW-NEW-SESSION-R22**: The workspace chip shall name the workspace a session will start in: a new workspace with its base branch, or the project folder.
 - **FLOW-NEW-SESSION-R23**: While the backends on the chosen host are being detected, the new-session screen shall say so above the composer, and the composer shall be unavailable until detection ends.
 
