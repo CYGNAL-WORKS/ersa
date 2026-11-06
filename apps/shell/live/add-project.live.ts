@@ -3,7 +3,7 @@ import path from "node:path";
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./harness";
 
-// Adding a project from the new-session screen (#182; FLOW-NEW-SESSION-R16 to R19) in the running app, against a
+// Adding a project from the new-session screen (#182; FLOW-NEW-SESSION-R17 to R19, R27) in the running app, against a
 // real Core: the folder dialog is answered from the test, everything else is real.
 test("Add project… opens the folder dialog, asks about trust, and cancels leave everything as it was", async ({ ersa }) => {
   const { page } = ersa;
