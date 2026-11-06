@@ -224,7 +224,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R22**: When renaming a session, the adapter shall send a `rename_session` control request if its CLI process for that session is live, and otherwise append one `custom-title` entry to the session record; it shall write nothing else to a session record.
 - **PROTO-CLAUDE-CODE-STREAM-R23**: The adapter shall project a `system/local_command` entry of the session record to the same events as the synthetic `assistant` message with the same `uuid` on the stream, except that each block id is the entry's `uuid` and the block's index, and shall project an entry whose `content` carries no output tag to nothing.
 - **PROTO-CLAUDE-CODE-STREAM-R24**: When the session's project is trusted, the adapter shall send `workspaceTrust` with `accepted: true` and the project's root as `directory` in the `initialize` request, and otherwise shall send no `workspaceTrust`.
-- **PROTO-CLAUDE-CODE-STREAM-R25**: When forking a session, the adapter shall start the CLI in the original's stored workspace path with `--resume` and the original's backend session id and `--fork-session`, store the `session_id` the new process reports as the fork's, and write nothing to the original's record.
+- **PROTO-CLAUDE-CODE-STREAM-R28**: When forking a session, the adapter shall start the CLI in the original's stored workspace path with `--resume` and the original's backend session id and `--fork-session`, store the `session_id` the new process reports as the fork's, and write nothing to the original's record.
 
 ## Out of scope
 
@@ -241,7 +241,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 ## Changes
 
-- 2026-11-05: forking with `--resume <id> --fork-session` (FLOW-FORK-SESSION), to be recorded as a fixture; PROTO-CLAUDE-CODE-STREAM-R25 added.
+- 2026-11-05: forking with `--resume <id> --fork-session` (FLOW-FORK-SESSION), to be recorded as a fixture; PROTO-CLAUDE-CODE-STREAM-R28 added.
 - 2026-11-04: from #141 inbox: the encoded-cwd example uses the recordings' placeholder path instead of the owner's, since the repository is public. No requirement IDs changed.
 - 2026-11-02: owner: the invocation drops `-p`, matching the VS Code extension; verified by fixture 2.1.316/06-invocation-without-print. No requirement IDs changed.
 - 2026-11-02: from #54 inbox: Core asks the live-session registry before appending a title too, and a rename gives both open-elsewhere notices (PROTO-AGENT-EVENTS-R15). No requirement IDs changed.
