@@ -1,10 +1,11 @@
-import { type FocusEvent, type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type CSSProperties, type FocusEvent, type KeyboardEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, Ellipsis, Plus, ShieldAlert } from "lucide-react";
 import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
 import { treeOf } from "../session/tree";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { Icon, IconButton } from "./Icon";
 import { type Backends, type ForcedTile, SessionTile } from "./SessionTile";
 import { TrustQuestion } from "./TrustQuestion";
@@ -42,13 +43,11 @@ interface RailTreeProps {
   forceHeading?: { id: string; state: "hover" | "focus" | "pressed" };
   initialMenu?: string;
   initialAsking?: string;
-  /** Shown beneath the tree: the way to add a project. */
-  children?: ReactNode;
 }
 
 /** The rail's tree (LAY-SHELL, The rail): each project's heading with its sessions beneath it, and their notes. */
 export function RailTree(props: RailTreeProps) {
-  const { projects, sessions, workspaces, placing, activeId, onSelect, backends, unseen, force, children } = props;
+  const { projects, sessions, workspaces, placing, activeId, onSelect, backends, unseen, force } = props;
   const listed = projects.state === "ready" ? projects.projects : [];
   const tree = treeOf(listed, workspaces, sessions.state === "ready" ? sessions.sessions : []);
   // A session waits to be placed while the projects or their workspaces are still being read, so it does not
@@ -56,14 +55,17 @@ export function RailTree(props: RailTreeProps) {
   const looseShown = projects.state === "error" || (projects.state === "ready" && !placing);
   const tile = (s: Session) => (
     <li key={s.id}>
-      <SessionTile
-        session={s}
-        backends={backends}
-        active={s.id === activeId}
-        unseen={unseen?.has(s.id) ?? false}
-        force={force?.id === s.id ? force.state : undefined}
-        onSelect={onSelect}
-      />
+      {/* A tile that fails to draw takes only itself down; a new listing of the session tries again. */}
+      <ErrorBoundary what={t("rail.tile.boundaryName")} resetKey={JSON.stringify(s)}>
+        <SessionTile
+          session={s}
+          backends={backends}
+          active={s.id === activeId}
+          unseen={unseen?.has(s.id) ?? false}
+          force={force?.id === s.id ? force.state : undefined}
+          onSelect={onSelect}
+        />
+      </ErrorBoundary>
     </li>
   );
   return (
@@ -87,7 +89,6 @@ export function RailTree(props: RailTreeProps) {
         </ul>
       )}
       {looseShown && tree.loose.length > 0 && <ul className="rail-tiles">{tree.loose.map(tile)}</ul>}
-      {children}
     </section>
   );
 }
@@ -119,8 +120,9 @@ function ProjectGroup({
 }: RailTreeProps & { project: Project; children: ReactNode }) {
   const [menu, setMenu] = useState(initialMenu === project.id);
   const [asking, setAsking] = useState(initialAsking === project.id);
-  const group = useRef<HTMLLIElement>(null);
   const more = useRef<HTMLButtonElement>(null);
+  // The menu floats above the rail in the top layer, anchored to More by this name (RailTree.css, .rail-menu).
+  const anchor = `--rail-more-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const trust = trusting[project.id];
   const saving = trust?.state === "sending";
   const host = localHost !== undefined && project.host_id !== localHost ? (hostNames?.[project.host_id] ?? project.host_id) : undefined;
@@ -138,6 +140,26 @@ function ProjectGroup({
     document.addEventListener("pointerdown", outside);
     return () => document.removeEventListener("pointerdown", outside);
   }, [menu]);
+
+  // The menu stays drawn while it fades out, then goes (RAIL.md, Menus): `shown` outlasts `menu` until its
+  // animations finish, at once when there are none, as with reduced motion.
+  const [shown, setShown] = useState(menu);
+  if (menu && !shown) setShown(true);
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    // A popover that is not open is not drawn; showing it puts it in the top layer, above the rail's scrolling.
+    if (!el.matches(":popover-open")) el.showPopover();
+    if (menu) return;
+    let live = true;
+    Promise.all(el.getAnimations().map((a) => a.finished)).then(
+      () => live && setShown(false),
+      () => live && setShown(false),
+    );
+    return () => {
+      live = false;
+    };
+  }, [menu, shown]);
 
   // The gallery's open menu does not take focus; one the user opens does.
   // Opened from the keyboard, focus goes to the item; from the pointer, to the menu (RAIL.md, Menus).
@@ -185,7 +207,7 @@ function ProjectGroup({
 
   const nameLabel = { project: project.name };
   return (
-    <li ref={group} className="rail-project">
+    <li className="rail-project">
       <div className="rail-heading" data-force={forced} data-open={menu || undefined} onKeyDown={onHeadingKey} onBlur={onHeadingBlur}>
         <h3 className="rail-heading-title">
           {/* Collapsing arrives with its own ticket, and with it aria-expanded; until then every project is expanded. */}
@@ -213,6 +235,7 @@ function ProjectGroup({
               label={t("rail.heading.moreLabel", nameLabel)}
               aria-haspopup="menu"
               aria-expanded={menu}
+              style={{ anchorName: anchor } as CSSProperties}
               onClick={(event) => {
                 // A click the keyboard made (Enter or Space) has no pointer presses to count.
                 focusOnOpen.current = menu ? undefined : event.detail === 0 ? "item" : "menu";
@@ -221,12 +244,17 @@ function ProjectGroup({
             />
           )}
         </span>
-        {menu && onSetTrust && (
+        {shown && onSetTrust && (
           <ul
             ref={list}
             className="rail-menu"
             role="menu"
+            popover="manual"
             tabIndex={-1}
+            data-closing={!menu || undefined}
+            // While it fades out it takes no input.
+            inert={!menu}
+            style={{ positionAnchor: anchor } as CSSProperties}
             // The arrow keys move to the item from the menu itself, which a pointer-opened menu holds.
             onKeyDown={(event) => {
               if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -238,6 +266,8 @@ function ProjectGroup({
             <li role="none">
               <button type="button" role="menuitem" className="rail-menu-item" aria-disabled={saving || undefined} onClick={choose}>
                 {project.trusted ? t("rail.heading.distrustButton") : t("rail.heading.trustButton")}
+                {/* An unavailable item says why beneath its label (RAIL.md, Menus). */}
+                {saving && <span className="rail-menu-reason">{t("rail.heading.savingProgress")}</span>}
               </button>
             </li>
           </ul>

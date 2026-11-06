@@ -21,10 +21,11 @@
   border-right: var(--line-hairline) solid var(--color-line);
 }
 
-/* The tree scrolls between the rail's top and its foot. */
+/* The tree, and the way to add a project beneath it, scroll between the rail's top and its foot. */
 .rail-body {
   display: flex;
   flex-direction: column;
+  gap: var(--space-sm);
   flex: 1;
   min-height: 0;
   overflow: auto;
