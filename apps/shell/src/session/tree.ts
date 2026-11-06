@@ -2,6 +2,7 @@
 // its sessions beneath it, and the sessions whose project the window can't tell. The component only draws this.
 
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
+import { newestFirst } from "./controls";
 
 export interface Tree {
   /** Every project, in the order Core lists them, each with its sessions newest first; a project may have none. */
@@ -28,9 +29,4 @@ export function treeOf(
     else loose.push(s);
   }
   return { projects: projects.map((project) => ({ project, sessions: byProject.get(project.id) ?? [] })), loose };
-}
-
-/** Core issues `created_at` as RFC 3339 in UTC, so the strings sort as times do. */
-export function newestFirst(sessions: readonly Session[]): Session[] {
-  return sessions.slice().sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
 }

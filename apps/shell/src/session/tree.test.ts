@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Project, Session } from "../protocol/core-api.gen";
-import { newestFirst, treeOf } from "./tree";
+import { treeOf } from "./tree";
 
 const project = (id: string): Project => ({ id, host_id: "local", path: `D:\\${id}`, name: id, vcs: "git", trusted: true });
 const session = (id: string, workspace_id: string, created_at: string): Session => ({
@@ -14,14 +14,6 @@ const session = (id: string, workspace_id: string, created_at: string): Session 
   tile: { state: "idle", pending: [] },
 });
 const ids = (sessions: Session[]) => sessions.map((s) => s.id);
-
-describe("newestFirst", () => {
-  it("orders by creation time, newest first, without changing its input", () => {
-    const sessions = [session("a", "w", "2026-11-01T09:00:00.000Z"), session("b", "w", "2026-11-01T10:00:00.000Z"), session("c", "w", "2026-11-01T09:30:00.000Z")];
-    expect(ids(newestFirst(sessions))).toEqual(["b", "c", "a"]);
-    expect(ids(sessions)).toEqual(["a", "b", "c"]);
-  });
-});
 
 describe("the rail's tree", () => {
   const projects = [project("ersa"), project("engine"), project("notes")];

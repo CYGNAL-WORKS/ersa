@@ -220,7 +220,7 @@ function ProjectGroup({
             {!project.trusted && (
               <span className="rail-heading-trust">
                 <Icon icon={ShieldAlert} size="icon-sm" />
-                {t("rail.heading.notTrustedStatus")}
+                {t("trust.notTrustedStatus")}
               </span>
             )}
           </button>
