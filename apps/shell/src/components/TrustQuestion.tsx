@@ -48,8 +48,12 @@ export function TrustQuestion({ name, path, purpose, onTrust, onDismiss, takeFoc
           // The question is the thing Escape closes, not whatever holds it.
           event.stopPropagation();
           onDismiss();
-        } else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
-          // The arrows move between the two answers, as Tab does.
+        } else if (
+          ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key) &&
+          (event.target === cancel.current || event.target === trust.current)
+        ) {
+          // On an answer, the arrows move between the two, as Tab does; elsewhere, such as the explanation when it
+          // scrolls, they keep their own meaning.
           event.preventDefault();
           (document.activeElement === cancel.current ? trust : cancel).current?.focus({ preventScroll: true });
         }
