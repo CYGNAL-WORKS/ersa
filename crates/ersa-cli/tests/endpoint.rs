@@ -197,11 +197,11 @@ async fn a_core_on_an_explicit_endpoint_runs_beside_the_default_one() {
     // Both answer `core.hello`, each on its own endpoint.
     for core in [&default, &explicit] {
         let hello = core.hello().await;
-        assert_eq!(hello["api_version"], json!(3), "{hello}");
+        assert_eq!(hello["api_version"], json!(4), "{hello}");
     }
     // They are two Cores, not one reached twice: stopping the explicit one
     // leaves the default one serving.
     explicit.stop().await;
-    assert_eq!(default.hello().await["api_version"], json!(3));
+    assert_eq!(default.hello().await["api_version"], json!(4));
     default.stop().await;
 }
