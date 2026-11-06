@@ -70,4 +70,5 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 
 ## Changes
 
+- 2026-11-05: owner, before this shipped: date groups go by creation, so a session never changes group as it works. R07 reworded; no test cites it.
 - 2026-11-05: created from the owner's decisions of 2026-11-05: pins, sections, grouping, sorting, filtering, collapsed groups kept across restarts (ADR 0026). R01 to R15 added.
