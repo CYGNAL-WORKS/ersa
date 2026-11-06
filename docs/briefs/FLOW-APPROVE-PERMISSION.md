@@ -36,7 +36,7 @@ Opening and closing
 
 More than one request
 
-- **FLOW-APPROVE-PERMISSION-R09**: The shelf shall show the shown request's place as "n of m" whenever m is more than one, where n counts the requests answered since the shelf opened plus one, and m is n plus the requests still pending after the shown one; a request that arrives while the shelf is open adds to m.
+- **FLOW-APPROVE-PERMISSION-R09**: The shelf shall show the shown request's place as "n of m" whenever m is more than one, where n counts the requests whose details the shelf has shown since it opened that are no longer pending, plus one (a request it can't show, R25, is not one of them), and m is n plus the requests still pending after the shown one; a request that arrives while the shelf is open adds to m, and one answered elsewhere before the shelf showed it takes one from m and adds none to n.
 - **FLOW-APPROVE-PERMISSION-R10**: When the shown request is answered and others are pending, the shelf shall stay open and show the next oldest, with keyboard focus on the shelf itself.
 
 A permission request
@@ -79,6 +79,7 @@ Assistive technology
 
 ## Changes
 
+- 2026-11-06: from #222 inbox: R09's n counts only requests whose details the shelf showed, so one answered elsewhere before it was shown takes one from m and adds none to n (R09 reworded).
 - 2026-11-06: from #215 inbox: where a request the shelf can't show falls in the order (R29 added; R01 reworded to place such a request as R29 says).
 - 2026-11-05: a question can be declined (R28 added), as Claude Code accepts (PROTO-CLAUDE-CODE-STREAM, Questions).
 - 2026-11-05: owner review: the active session has no shelf (R26 added; R27 gives the transcript's permission card the request's own answers; R01 narrowed to other sessions; R18 no longer joins the shelf and the transcript's card); the shelf shows no workspace (R11, R15); the answers are the ones the request carries (R12 reworded); a question shows its header and option descriptions and takes the user's own words where it allows them (R15, R16). Claude Code's questions are projected and answered (PROTO-CLAUDE-CODE-STREAM, Questions).
