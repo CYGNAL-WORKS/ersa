@@ -81,7 +81,13 @@ process.once("exit", () => {
       // Gone already.
     }
   }
-  for (const dir of folders) rmSync(dir, { recursive: true, force: true });
+  for (const dir of folders) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    } catch {
+      // Still held by a process going away; the other folders still go.
+    }
+  }
 });
 
 export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
@@ -133,7 +139,7 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
         await waitFor(() => debuggerUp(port), "the window's debugging port", running, deadline);
         browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: remaining(deadline) });
         const page = await windowPage(browser, deadline);
-        const dialogs = await answerDialogs(page);
+        const dialogs = await within(deadline, answerDialogs(page), "the dialog answers to install");
         unanswered = dialogs.unanswered;
         let shots = 0;
         await use({
@@ -160,8 +166,9 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
       }
       if (unanswered.length > 0) throw new Error(`the Interface opened a dialog the test did not answer: ${unanswered.join("; ")}`);
     },
-    // A budget of its own, apart from the test's, longer than the start may take plus the cleanup.
-    { timeout: START_LIMIT_MS + 30_000 },
+    // A budget of its own, apart from the test's, shared by the start and the cleanup: the start's limit, then a
+    // minute for the cleanup (two process trees of up to 10 s each, and the folder's retries).
+    { timeout: START_LIMIT_MS + 60_000 },
   ],
 });
 
@@ -289,7 +296,8 @@ function servesLabel(label: string): boolean {
 
 async function debuggerUp(port: number): Promise<boolean> {
   try {
-    return (await fetch(`http://127.0.0.1:${port}/json/version`)).ok;
+    // Bounded, so a port that accepts and never answers cannot hold the start past its deadline.
+    return (await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(2_000) })).ok;
   } catch {
     return false;
   }
@@ -304,6 +312,19 @@ async function waitFor(ready: () => boolean | Promise<boolean>, what: string, ru
     await sleep(100);
   }
   throw new Error(`${what} did not come up within ${START_LIMIT_MS / 1000} s of the start`);
+}
+
+/** `work`, or an error once the start's deadline passes, for steps that take no timeout of their own. */
+async function within<T>(deadline: number, work: Promise<T>, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} took past the start's ${START_LIMIT_MS / 1000} s`)), remaining(deadline));
+  });
+  try {
+    return await Promise.race([work, late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** What is left of the start's time; at least a moment, so a call fails with its own error. */

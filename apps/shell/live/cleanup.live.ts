@@ -21,11 +21,14 @@ test("a failing live check leaves no process or folder behind", async () => {
     const record = path.join(elsewhere, "failed-run.json");
     let failed = false;
     try {
-      const args = ["exec", "playwright", "test", "-c", "playwright.live.config.ts", "live/cleanup.live.ts", "-g", '"fails on purpose"'];
-      execFileSync("pnpm", [...args, "--output", path.join(elsewhere, "results")], {
-        cwd: path.resolve(import.meta.dirname, ".."),
+      // Playwright's own CLI under this Node, with no shell between: the timeout below stops the runner itself, and
+      // its worker, losing the runner, exits and ends what it started (harness.ts).
+      const shell = path.resolve(import.meta.dirname, "..");
+      const cli = path.join(shell, "node_modules", "@playwright", "test", "cli.js");
+      const args = [cli, "test", "-c", "playwright.live.config.ts", "live/cleanup.live.ts", "-g", "fails on purpose"];
+      execFileSync(process.execPath, [...args, "--output", path.join(elsewhere, "results")], {
+        cwd: shell,
         env: { ...process.env, [FAIL_ON_PURPOSE]: record },
-        shell: true,
         stdio: "pipe",
         timeout: 4 * 60_000,
       });
