@@ -11,13 +11,13 @@ import { ProjectList } from "./components/ProjectList";
 import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionControls } from "./components/SessionControls";
 import { noneUnseen, unseenAfter } from "./session/unseen";
-import { SessionList, type WorkspaceName, newestFirst } from "./components/SessionList";
+import { SessionList, type WorkspaceName } from "./components/SessionList";
 import { Transcript } from "./components/Transcript";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { Project, Session, Workspace } from "./protocol/core-api.gen";
-import { type BackendChoices, type SessionValues, recentFirst, sessionShown } from "./session/controls";
+import { type BackendChoices, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
 import { contextUsed } from "./session/tile";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
@@ -305,10 +305,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   if (projectList) knownProjects.current = projectList;
   const hello = view.phase === "connected" || view.phase === "lost" ? view.hello : undefined;
   const knownList = projectList ?? (showsScreen({ composing, starting, activeId }, false) ? knownProjects.current : undefined);
-  // Most recently used first (FLOW-NEW-SESSION-R14), by the sessions as last listed: kept while the list reloads,
-  // so the order, and the project the screen starts at, do not jump back to Core's order meanwhile.
-  if (sessions.state === "ready") orderedBy.current = sessions.sessions;
-  const screenProjects = knownList && recentFirst(knownList, orderedBy.current, workspaces);
+  // Most recently used first, by the sessions as last listed (FLOW-NEW-SESSION-R14).
+  const order = projectOrder(knownList ?? [], sessions.state === "ready" ? sessions.sessions : undefined, orderedBy.current, workspaces);
+  orderedBy.current = order.kept;
+  const screenProjects = knownList && order.projects;
 
   // The rail's name for each workspace: its project, and its branch or the root (LAY-SHELL).
   const projectById = new Map(projectList?.map((p) => [p.id, p]));

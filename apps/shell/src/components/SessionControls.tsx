@@ -50,8 +50,8 @@ const projectOption = (p: Project): ChipOption => ({
   id: p.id,
   label: p.name,
   detail: p.path,
-  status: p.vcs === "git" ? t("sessionControls.project.gitLabel") : t("sessionControls.project.folderLabel"),
-  caution: p.trusted ? undefined : t("sessionControls.project.notTrustedStatus"),
+  status: p.vcs === "git" ? t("sessionControls.project.withGitKindLabel") : t("sessionControls.project.withoutGitKindLabel"),
+  caution: p.trusted ? undefined : t("trust.notTrustedStatus"),
 });
 
 const choiceOptions = (choices: readonly Choice[]): ChipOption[] => choices.map(({ id, label }) => ({ id, label }));
@@ -89,8 +89,9 @@ export function SessionControls({ hosts, localHostId, projects, backends, values
           value={values.project_id}
           options={projects.filter((p) => p.host_id === values.host_id).map(projectOption)}
           wide
-          // Shown and unavailable until the folder dialog adds a project from here (FLOW-NEW-SESSION-R16).
-          action={{ label: t("sessionControls.project.addProjectButton"), icon: Plus, shortcut: t("sessionControls.project.addProjectShortcut") }}
+          // Shown and unavailable until the folder dialog adds a project from here, with its shortcut
+          // (FLOW-NEW-SESSION-R16).
+          action={{ label: t("sessionControls.project.addProjectButton"), icon: Plus }}
           {...chip("project")}
         />
         {project && (

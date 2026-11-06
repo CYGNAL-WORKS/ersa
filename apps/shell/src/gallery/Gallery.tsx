@@ -353,6 +353,18 @@ const chipOptions = [
   { id: "root", label: "Root workspace" },
 ];
 const chip = { name: "Workspace", value: "isolated", options: chipOptions, onChoose: () => {} };
+const projectChip = {
+  name: "Project",
+  value: "p1",
+  wide: true,
+  options: [
+    { id: "p1", label: "ersa", detail: projects[0]!.path, status: "Git" },
+    { id: "p2", label: "engine", detail: `${projects[1]!.path}\\Plugins\\Experimental\\Deep`, status: "Folder", caution: "Not trusted" },
+  ],
+  action: { label: "Add project…", icon: Plus, shortcut: "Ctrl+O" },
+  onChoose: () => {},
+  initialOpen: true,
+};
 
 /** Throws while rendering, as a component given data it cannot read would. */
 function Unreadable(): never {
@@ -578,24 +590,9 @@ const entries: Entry[] = [
       ["Open", room(<Chip {...chip} initialOpen />)],
       ["Open, an option hovered", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "hover" }} />)],
       ["Open, an option pressed", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "pressed" }} />)],
-      [
-        "Open, two lines and an action",
-        room(
-          <Chip
-            name="Project"
-            value="p1"
-            wide
-            options={[
-              { id: "p1", label: "ersa", detail: projects[0]!.path, status: "Git" },
-              { id: "p2", label: "engine", detail: `${projects[1]!.path}\\Plugins\\Experimental\\Deep`, status: "Folder", caution: "Not trusted" },
-            ]}
-            action={{ label: "Add project…", icon: Plus, shortcut: "Ctrl+O" }}
-            onChoose={() => {}}
-            initialOpen
-            forceOption={{ id: "p2", state: "hover" }}
-          />,
-        ),
-      ],
+      ["Open, two lines and an action", room(<Chip {...projectChip} forceOption={{ id: "p2", state: "hover" }} />)],
+      // The action as it will be once it can be taken, with its shortcut.
+      ["Open, the action available", room(<Chip {...projectChip} action={{ ...projectChip.action, onChoose: () => {} }} />)],
       [
         "Open, with statuses",
         room(

@@ -92,25 +92,17 @@ Local
 
 No projects
 
-### `sessionControls.project.gitLabel`
+### `sessionControls.project.withGitKindLabel`
 
 Git
 
-### `sessionControls.project.folderLabel`
+### `sessionControls.project.withoutGitKindLabel`
 
 Folder
-
-### `sessionControls.project.notTrustedStatus`
-
-Not trusted
 
 ### `sessionControls.project.addProjectButton`
 
 Add project…
-
-### `sessionControls.project.addProjectShortcut`
-
-Ctrl+O
 
 ### `sessionControls.contextRing.noneLabel`
 
@@ -123,5 +115,9 @@ Context: {percent} percent used
 ## `quit`
 
 ## `trust`
+
+### `trust.notTrustedStatus`
+
+Not trusted
 
 ## `errors`
