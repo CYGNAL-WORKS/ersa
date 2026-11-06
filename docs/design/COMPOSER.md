@@ -91,6 +91,14 @@ The chip reads the choice: "New workspace from" and the branch, or "Project fold
 
 ## The trust question
 
-After a folder is picked, the trust question Ersa asks when a project is added opens above the composer's box, in the status line's place: a card on `material-tile` with a `line` edge, `radius-lg`, padded `space-lg`, its title in `ui` at the heading weight, the folder's path in `mono` and `ink-muted`, its explanation in `ui-small` and `ink-muted`, and its answers in a row at its foot, none of them primary. While it is open it holds the focal glow and the box shows its focus by its edge alone. It opens upward as the status line does, fading and growing over `motion-settle` with `motion-ease-out`, and leaves the same way; keyboard focus moves to Cancel, and Escape cancels it. Once it is answered or canceled, and when the folder dialog is canceled, keyboard focus returns to the composer's words.
+After a folder is picked, the trust question Ersa asks when a project is added opens above the composer's box, in the status line's place. It reads like the Claude Code CLI's folder-trust prompt, in Ersa's words, from top to bottom:
+
+- **Title**: "Trust" and the folder's name, as a question, in `ui` at the heading weight.
+- **Path**: the folder's full path in `mono` and `ink-muted`.
+- **Safety check**: "Is this a project you created or one you trust, like your own code, a well-known open source project, or work from your team? If not, review what's in this folder first."
+- **What agents can do**: "Agents will be able to read, edit, and run files here." Then what else trust lets run, that it covers every workspace of the project, and that it lasts until withdrawn (FLOW-NEW-SESSION-R16).
+- **Answers**, in a row at its foot: Cancel, then Trust. Neither is primary.
+
+The text below the path is `ui-small` in `ink-muted`. The card is on `material-tile` with a `line` edge, `radius-lg`, padded `space-lg`. While it is open it holds the focal glow and the box shows its focus by its edge alone. It opens upward as the status line does, fading and growing over `motion-settle` with `motion-ease-out`, and leaves the same way. Keyboard focus moves to Cancel, so Enter cancels until the user moves to Trust; the arrow keys and Tab move between the answers, and Escape cancels. Once it is answered or canceled, and when the folder dialog is canceled, keyboard focus returns to the composer's words.
 
 With reduced motion on, nothing here moves or fades: the glow, the status line, attachments and lists appear and go at once, and the detecting ring holds still at full tone.
