@@ -9,6 +9,9 @@ import { hasSeq } from "../core/checks";
 import { type CoreClient, describeError } from "../core/client";
 import { type Transcript, apply, emptyTranscript } from "./transcript";
 
+/** The key that starts the notice saying Core no longer holds a session's earliest events. */
+export const EARLIER = "earlier:";
+
 /** The state of something the user sent: on its way, or refused with a reason. */
 export type Sending = { state: "sending" } | { state: "failed"; message: string };
 
@@ -80,7 +83,7 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
     const transcript = { ...emptyTranscript, lastSeq: first - 1 };
     const items =
       first > 0
-        ? [{ kind: "notice" as const, key: `earlier:${first}`, message: "Earlier events of this session are no longer held." }]
+        ? [{ kind: "notice" as const, key: `${EARLIER}${first}`, message: "Earlier events of this session are no longer held." }]
         : [];
     set((v) => ({ ...v, transcript: { ...transcript, items }, answers: {} }));
     resumedAt = undefined;

@@ -1,5 +1,5 @@
 import { type ReactNode, memo, useLayoutEffect, useRef } from "react";
-import type { ToolInput } from "../protocol/agent-events.gen";
+import type { PermissionRequested, ToolInput } from "../protocol/agent-events.gen";
 import type { SessionView, Sending } from "../session/follow";
 import { stateText } from "../session/states";
 import { type Item, isOpen } from "../session/transcript";
@@ -208,10 +208,6 @@ function PermissionCard({
   const name = request.display_name ?? request.tool_name;
   const sending = answer?.state === "sending";
   const open = isOpen(item);
-  // The description is shown once: as the card's detail, not again as a field.
-  const fields = Object.entries(request.input as Record<string, unknown>).filter(
-    ([key, value]) => !(key === "description" && value === request.description),
-  );
   return (
     <section className="transcript-card transcript-permission" data-open={open || undefined} aria-label={`Permission: ${name}`}>
       <div className="transcript-card-head">
@@ -238,18 +234,7 @@ function PermissionCard({
         </p>
       )}
       {/* Every field of the input, whole while the request is open: the user approves exactly what will run. */}
-      <dl className="transcript-fields">
-        {fields.map(([key, value]) => (
-          <div key={key} className="transcript-field">
-            <dt>
-              <Revealed text={key} />
-            </dt>
-            <dd className="mono">
-              <Revealed text={typeof value === "string" ? value : JSON.stringify(value, null, 2)} />
-            </dd>
-          </div>
-        ))}
-      </dl>
+      <PermissionInput request={request} />
       {request.blocked_path && (
         <p className="transcript-card-detail">
           Path:{" "}
@@ -277,6 +262,31 @@ function PermissionCard({
         </p>
       )}
     </section>
+  );
+}
+
+/**
+ * A permission request's input, field by field, with every hidden character marked: the transcript's permission
+ * card and the shelf both show it so (FLOW-APPROVE-PERMISSION-R11). The description is shown once, as the request's
+ * own detail, not again as a field.
+ */
+export function PermissionInput({ request }: { request: PermissionRequested }) {
+  const fields = Object.entries(request.input as Record<string, unknown>).filter(
+    ([key, value]) => !(key === "description" && value === request.description),
+  );
+  return (
+    <dl className="transcript-fields">
+      {fields.map(([key, value]) => (
+        <div key={key} className="transcript-field">
+          <dt>
+            <Revealed text={key} />
+          </dt>
+          <dd className="mono">
+            <Revealed text={typeof value === "string" ? value : JSON.stringify(value, null, 2)} />
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 

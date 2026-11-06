@@ -41,6 +41,24 @@ export const enUS = {
       needsYouWant: "Needs you",
       needsYouCountWant: "Needs you · {count}",
     },
+    // The shelf (docs/design/RAIL.md, The shelf; FLOW-APPROVE-PERMISSION): a session's request, pulled out of its tile.
+    shelf: {
+      // Heard, not shown: the shelf's name, and its chevron's.
+      nameLabel: "Request from {title}",
+      permissionHeading: "Permission request",
+      questionHeading: "Question",
+      // The shown request's place among the session's requests, at the heading line's trailing end.
+      placeLabel: "{n} of {m}",
+      pathLabel: "Path:",
+      loadingProgress: "Loading…",
+      readError: "Ersa can't read this session's requests.",
+      retryButton: "Retry",
+      unknownNote: "This session is waiting on a request Ersa can't show here.",
+      // Names the shelf's contents when they fail to draw: "This request could not be shown:".
+      boundaryName: "This request",
+      denyButton: "Deny",
+      allowButton: "Allow",
+    },
   },
   transcript: {},
   composer: {},

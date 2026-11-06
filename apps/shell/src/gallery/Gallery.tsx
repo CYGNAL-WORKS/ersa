@@ -18,6 +18,7 @@ import { QuitQuestion } from "../components/QuitQuestion";
 import { RailFoot } from "../components/RailFoot";
 import { SessionControls } from "../components/SessionControls";
 import { SessionList } from "../components/SessionList";
+import { Shelf } from "../components/Shelf";
 import { SessionTitle } from "../components/SessionTitle";
 import { Transcript } from "../components/Transcript";
 import type { CoreView } from "../core/connection";
@@ -25,6 +26,8 @@ import type { Envelope, Event } from "../protocol/agent-events.gen";
 import type { CoreHelloResult, Project, Session } from "../protocol/core-api.gen";
 import type { BackendChoices, Choice } from "../session/controls";
 import type { SessionView } from "../session/follow";
+import { type ShelfShows, shelfTone } from "../session/shelf";
+import { tileOf } from "../session/tile";
 import { EVENT_VERSION, apply, emptyTranscript } from "../session/transcript";
 import "./Gallery.css";
 
@@ -366,6 +369,67 @@ const projectChip = {
   initialOpen: true,
 };
 
+/** Three tiles in a rail with the middle one's shelf open beside it, over a strip of the stage, as the window shows it. */
+const shelfTiles: Session[] = [
+  session("h1", "Tidy the gallery", "2026-11-01T10:00:00Z", { state: "running", pending: [], cost_usd_total: 0.19, ...ring }),
+  session("h2", "Fix the flaky reconnect test", "2026-11-01T09:00:00Z", {
+    state: "waiting_user",
+    pending: [{ kind: "permission", request_id: "r1" }],
+    cost_usd_total: 0.82,
+    context_tokens: 106_000,
+    context_window: 200_000,
+  }),
+  session("h3", "Explain the raw log", "2026-11-01T08:00:00Z", { state: "idle", pending: [], cost_usd_total: 12.4, ...ring }),
+];
+
+function ShelfOpen({ shows, short }: { shows: ShelfShows; short?: boolean }) {
+  // The open tile waits on what its shelf shows: a question's tile says it has one.
+  const listed = shelfTiles[1] as Session;
+  const open: Session =
+    shows.state === "question" ? { ...listed, tile: { ...listed.tile, pending: [{ kind: "question", request_id: shows.requestId }] } } : listed;
+  const tiles = [shelfTiles[0] as Session, open, shelfTiles[2] as Session];
+  const tile = tileOf(open);
+  return (
+    <div className="gallery-shelf" data-short={short || undefined}>
+      <div className="gallery-shelf-rail">
+        <SessionList
+          view={{ state: "ready", sessions: tiles }}
+          activeId="h1"
+          onSelect={() => {}}
+          shelf={{ id: open.id, tone: shelfTone(shows), render: (domId) => <Shelf id={domId} tile={tile} shows={shows} onRetry={() => {}} /> }}
+        />
+      </div>
+    </div>
+  );
+}
+
+const shelfRequest = asked.find((e) => e.type === "permission.requested") as Extract<Event, { type: "permission.requested" }>;
+const longCommand = Array.from({ length: 14 }, (_, i) => `cargo test -p ersa-core --test reconnect_${i + 1} -- --nocapture`).join(" &&\n");
+const shelfStates: [string, ShelfShows, short?: boolean][] = [
+  ["A permission request", { state: "permission", request: shelfRequest }],
+  [
+    "With a suggestion, one of three",
+    {
+      state: "permission",
+      request: {
+        ...shelfRequest,
+        suggestions: [{ kind: "allow_rule", label: "Allow echo commands in this project for the rest of the session", payload: {} }],
+        reason: { kind: "rule", text: "Writing outside the workspace needs approval." },
+      },
+      place: { n: 1, m: 3 },
+    },
+  ],
+  ["Defaulting to no", { state: "permission", request: { ...shelfRequest, blocked_path: undefined, flags: { ...flags, default_to_no: true } } }],
+  ["A long input, which scrolls", { state: "permission", request: { ...shelfRequest, description: "Run every reconnect test", input: { command: longCommand } } }],
+  ["A question", { state: "question", requestId: "q1", questions: [{ id: "a", text: "Should the reconnect test retry on Windows only, or everywhere?", multi_select: false }] }],
+  ["Loading", { state: "loading" }],
+  ["Reading failed", { state: "failed", message: "the session's events could not be read" }],
+  ["A request Ersa can't show", { state: "unknown" }],
+  // A request whose flags didn't arrive: the boundary check stops these, and the shelf's own boundary is the last guard.
+  ["A request that can't be drawn", { state: "permission", request: { ...shelfRequest, flags: undefined as never } }],
+  ["Risen to fit a short window", { state: "permission", request: shelfRequest }, true],
+];
+
 /** Throws while rendering, as a component given data it cannot read would. */
 function Unreadable(): never {
   throw new Error("Cannot read properties of undefined (reading 'toFixed')");
@@ -505,6 +569,11 @@ const entries: Entry[] = [
       ["Error", <SessionList view={{ state: "error", message: "Core could not read its database." }} onSelect={() => {}} />],
       ["Core unavailable", <SessionList view={{ state: "unavailable" }} onSelect={() => {}} />],
     ],
+  },
+  {
+    name: "Shelf",
+    wide: true,
+    states: shelfStates.map(([label, shows, short]) => [label, <ShelfOpen shows={shows} short={short} />]),
   },
   {
     name: "Transcript",

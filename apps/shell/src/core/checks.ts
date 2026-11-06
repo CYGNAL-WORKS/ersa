@@ -33,6 +33,10 @@ const eventFields: Record<string, Record<string, (v: unknown) => boolean>> = {
     description: optional(isString),
     blocked_path: optional(isString),
     input: isObject,
+    // What the shelf reads to draw the answers and the reason.
+    suggestions: (v) => Array.isArray(v) && v.every((s) => isObject(s) && isString(s.label)),
+    flags: (v) => isObject(v) && typeof v.default_to_no === "boolean" && typeof v.suppress_always_allow === "boolean",
+    reason: optional((v) => isObject(v) && isString(v.text)),
   },
   "permission.decided": { request_id: isString, behavior: (v) => v === "allow" || v === "deny", decided_by: isString },
   "permission.denied_unanswered": { message: isString },
