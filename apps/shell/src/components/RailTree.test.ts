@@ -82,6 +82,29 @@ describe("the rail's tree", () => {
     expect(render({ keepingTrust: ["ersa"] })).toContain("Running sessions keep their current settings until they are stopped.");
   });
 
+  it("counts a collapsed heading's sessions, and collapsed and not trusted, gives its words to the shield and a tooltip", () => {
+    const sessions = { state: "ready" as const, sessions: [session("a", "w-ersa", "One"), session("b", "w-ersa", "Two")] };
+    const workspaces = { "w-ersa": { project_id: "ersa" } };
+    const trusted = render({ sessions, workspaces, collapsed: new Set(["ersa"]) });
+    expect(trusted).toContain('aria-expanded="false"');
+    expect(trusted).toContain('<span class="rail-heading-count">2 sessions</span>');
+    expect(trusted).not.toContain("rail-heading-shield");
+
+    const untrusted = render({ projects: { state: "ready", projects: [project("ersa", { trusted: false })] }, sessions, workspaces, collapsed: new Set(["ersa"]) });
+    // The shield, named for assistive technology, then the same count every collapsed heading shows.
+    expect(untrusted).toMatch(/<span class="rail-heading-shield" style="[^"]*" role="img" aria-label="Not trusted">/);
+    expect(untrusted).toContain('<span class="rail-heading-count">2 sessions</span>');
+    expect(untrusted.indexOf("rail-heading-shield")).toBeLessThan(untrusted.indexOf("rail-heading-count"));
+    // Its words as a tooltip, which assistive technology does not read twice.
+    expect(untrusted).toMatch(/<span class="rail-heading-tip" aria-hidden="true" style="[^"]*">Not trusted<\/span>/);
+
+    // Expanded, the shield is a plain icon beside its words, and there is no tooltip.
+    const open = render({ projects: { state: "ready", projects: [project("ersa", { trusted: false })] }, sessions, workspaces });
+    expect(open).toMatch(/<span class="rail-heading-shield" style="[^"]*">/);
+    expect(open).toContain('<span class="rail-heading-trust">Not trusted</span>');
+    expect(open).not.toContain("rail-heading-tip");
+  });
+
   it("is empty when Ersa can't reach the sessions, and loading while it first connects", () => {
     expect(render({ projects: { state: "unavailable" }, sessions: { state: "unavailable" } })).not.toContain("<p");
     expect(render({ projects: { state: "loading" }, sessions: { state: "loading" } })).toContain("Loading…");

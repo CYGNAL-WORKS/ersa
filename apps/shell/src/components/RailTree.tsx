@@ -4,7 +4,7 @@ import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
-import { treeOf } from "../session/tree";
+import { type Collapsed, collapsedOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Icon, IconButton } from "./Icon";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem } from "./SessionTile";
@@ -44,6 +44,10 @@ interface RailTreeProps {
   onChevron?: (id: string) => void;
   /** The user closed a session's shelf: Escape, or a choice or focus outside it and its tile (R06, R07). */
   onCloseShelf?: (id: string) => void;
+  /** The projects whose headings the user collapsed (LAY-SHELL, Collapsing); every other one is expanded. */
+  collapsed?: ReadonlySet<string>;
+  /** The user collapsed or expanded a project's heading. */
+  onToggle?: (projectId: string) => void;
   /** For the gallery: a pointer or keyboard state on one tile or one heading, the menu open, the trust question asked. */
   force?: ForcedTile;
   forceHeading?: { id: string; state: "hover" | "focus" | "pressed" };
@@ -94,11 +98,19 @@ export function RailTree(props: RailTreeProps) {
       )}
       {tree.projects.length > 0 && (
         <ul className="rail-projects">
-          {tree.projects.map(({ project, sessions }) => (
-            <ProjectGroup key={project.id} project={project} {...props}>
-              {sessions.length > 0 && <ul className="rail-tiles">{sessions.map(tile)}</ul>}
-            </ProjectGroup>
-          ))}
+          {tree.projects.map(({ project, sessions }) => {
+            const closed = props.collapsed?.has(project.id) ?? false;
+            const toggle = () => {
+              // A shelf whose tile is folded away closes with it.
+              if (!closed && shelf && sessions.some((s) => s.id === shelf.id)) onCloseShelf?.(shelf.id);
+              props.onToggle?.(project.id);
+            };
+            return (
+              <ProjectGroup key={project.id} project={project} {...props} folded={closed} summary={collapsedOf(sessions)} toggle={toggle}>
+                {sessions.length > 0 && <ul className="rail-tiles">{sessions.map(tile)}</ul>}
+              </ProjectGroup>
+            );
+          })}
         </ul>
       )}
       {looseShown && tree.loose.length > 0 && <ul className="rail-tiles">{tree.loose.map(tile)}</ul>}
@@ -129,8 +141,23 @@ function ProjectGroup({
   forceHeading,
   initialMenu,
   initialAsking,
+  folded,
+  summary,
+  toggle,
   children,
-}: RailTreeProps & { project: Project; children: ReactNode }) {
+}: RailTreeProps & {
+  project: Project;
+  /** Collapsed: its tiles are folded away. */
+  folded: boolean;
+  /** What its heading says of the sessions it holds while collapsed. */
+  summary: Collapsed;
+  toggle: () => void;
+  children: ReactNode;
+}) {
+  // The tiles' element, which the heading's toggle says it controls.
+  const tilesId = useId();
+  // The "Not trusted" tooltip is placed by the shield, which names it as its anchor.
+  const shieldAnchor = `--rail-shield-${tilesId.replace(/[^a-zA-Z0-9]/g, "")}`;
   const [menu, setMenu] = useState(initialMenu === project.id);
   const [asking, setAsking] = useState(initialAsking === project.id);
   const more = useRef<HTMLButtonElement>(null);
@@ -220,22 +247,44 @@ function ProjectGroup({
 
   const nameLabel = { project: project.name };
   return (
-    <li className="rail-project">
+    <li className="rail-project" data-collapsed={folded || undefined}>
       <div className="rail-heading" data-force={forced} data-open={menu || undefined} onKeyDown={onHeadingKey} onBlur={onHeadingBlur}>
         <h3 className="rail-heading-title">
-          {/* Collapsing arrives with its own ticket, and with it aria-expanded; until then every project is expanded. */}
-          <button type="button" className="rail-heading-toggle">
+          {/* The heading's name collapses and expands its tiles, and says which it is (LAY-SHELL, Collapsing). */}
+          <button type="button" className="rail-heading-toggle" aria-expanded={!folded} aria-controls={children ? tilesId : undefined} onClick={toggle}>
             <span className="rail-heading-chevron">
               <Icon icon={ChevronDown} size="icon-sm" />
             </span>
             <span className="rail-heading-name">{project.name}</span>
             {host !== undefined && <span className="rail-heading-host">{host}</span>}
-            {!project.trusted && (
-              <span className="rail-heading-trust">
-                <Icon icon={ShieldAlert} size="icon-sm" />
-                {t("trust.notTrustedStatus")}
+            {/* Toward the trailing edge: "Not trusted" after its shield while expanded; collapsed, the shield alone,
+                then how many sessions it holds. The words and the count fade as the heading turns (RailTree.css). */}
+            <span className="rail-heading-status">
+              {!project.trusted && (
+                <span
+                  className="rail-heading-shield"
+                  style={{ anchorName: shieldAnchor } as CSSProperties}
+                  // Collapsed, the shield stands for the words, so it carries them to assistive technology.
+                  role={folded ? "img" : undefined}
+                  aria-label={folded ? t("trust.notTrustedStatus") : undefined}
+                >
+                  <Icon icon={ShieldAlert} size="icon-sm" />
+                </span>
+              )}
+              <span className="rail-heading-swap">
+                {!project.trusted && <span className="rail-heading-trust">{t("trust.notTrustedStatus")}</span>}
+                <span className="rail-heading-count">
+                  {/* Led by a mark in the tone of what they want, when any of them needs the user. */}
+                  {summary.tone && <span className="glyph" data-tone={summary.tone} role="img" aria-label={t("rail.tile.needsYouWant")} />}
+                  {t("rail.heading.sessionCountStatus", { count: summary.count })}
+                </span>
               </span>
-            )}
+              {!project.trusted && folded && (
+                <span className="rail-heading-tip" aria-hidden="true" style={{ positionAnchor: shieldAnchor } as CSSProperties}>
+                  {t("trust.notTrustedStatus")}
+                </span>
+              )}
+            </span>
           </button>
         </h3>
         <span className="rail-heading-actions">
@@ -304,7 +353,12 @@ function ProjectGroup({
       </p>
       {trust?.state === "failed" && <Problem lead={t("rail.heading.trustError")} reason={trust.message} />}
       {workspaceErrors[project.id] !== undefined && <Problem lead={t("rail.heading.workspacesError")} reason={workspaceErrors[project.id] ?? ""} />}
-      {children}
+      {/* The tiles slide closed and open in this frame; folded away, they take no focus and are not read. */}
+      {children && (
+        <div id={tilesId} className="rail-group-tiles" inert={folded || undefined}>
+          <div className="rail-group-tiles-inner">{children}</div>
+        </div>
+      )}
     </li>
   );
 }

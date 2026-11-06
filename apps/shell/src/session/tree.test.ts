@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Project, Session } from "../protocol/core-api.gen";
-import { treeOf } from "./tree";
+import { collapsedOf, treeOf } from "./tree";
 
 const project = (id: string): Project => ({ id, host_id: "local", path: `D:\\${id}`, name: id, vcs: "git", trusted: true });
 const session = (id: string, workspace_id: string, created_at: string): Session => ({
@@ -66,5 +66,31 @@ describe("the rail's tree", () => {
     const tree = treeOf([], workspaces, sessions);
     expect(tree.projects).toEqual([]);
     expect(ids(tree.loose)).toEqual(["engine", "new", "mid", "old"]);
+  });
+});
+
+// LAY-SHELL, Collapsing: a layout brief, so no requirement IDs.
+describe("what a collapsed heading says", () => {
+  const waiting = (id: string, kinds: ("permission" | "question" | "elicitation")[]): Session => ({
+    ...session(id, "w", "2026-11-01T09:00:00.000Z"),
+    tile: { state: "waiting_user", pending: kinds.map((kind, i) => ({ kind, request_id: `${id}-${i}` }) as Session["tile"]["pending"][number]) },
+  });
+
+  it("counts every session it holds, with no mark when none needs the user", () => {
+    expect(collapsedOf([session("a", "w", "x"), session("b", "w", "y"), session("c", "w", "z")])).toEqual({ count: 3, tone: undefined });
+    expect(collapsedOf([])).toEqual({ count: 0, tone: undefined });
+  });
+
+  it("marks the count in the accent when the only wants are questions", () => {
+    expect(collapsedOf([session("a", "w", "x"), waiting("q", ["question"]), waiting("q2", ["question", "question"])])).toEqual({ count: 3, tone: "accent" });
+  });
+
+  it("marks it caution when any session wants a permission, over a question", () => {
+    expect(collapsedOf([waiting("q", ["question"]), waiting("p", ["permission"])])).toEqual({ count: 2, tone: "caution" });
+    expect(collapsedOf([waiting("both", ["question", "permission"])])).toEqual({ count: 1, tone: "caution" });
+  });
+
+  it("marks a kind of request this window doesn't know as caution", () => {
+    expect(collapsedOf([waiting("u", ["elicitation"])])).toEqual({ count: 1, tone: "caution" });
   });
 });
