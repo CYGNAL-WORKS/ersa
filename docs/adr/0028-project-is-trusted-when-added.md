@@ -23,7 +23,7 @@ For the question: it shows the folder's path, asks whether this is a project the
 ## Consequences
 
 - A repository's configuration still never runs before the user has said they trust it.
-- Every project starts trusted. A project is untrusted only because the user withdrew its trust.
+- Every project added from now on starts trusted, and becomes untrusted only when the user withdraws its trust. Projects added untrusted before this decision stay untrusted until the user trusts them.
 - The CLI's prompt links to a security guide. Ersa's question has none until Ersa has a guide of its own to link (FLOW-NEW-SESSION, Open questions).
 - The Core API keeps `trusted` on `project.add`, so Core holds no policy about the question's answers; the Interface always sends `true`.
-- For Claude Code, the trust Ersa records reaches the CLI through `initialize`'s `workspaceTrust` (PROTO-CLAUDE-CODE-STREAM), which the CLI keys to the repository's git root.
+- For Claude Code, the trust Ersa records reaches the CLI through `initialize`'s `workspaceTrust` (PROTO-CLAUDE-CODE-STREAM), which the CLI keys to the repository's git root. So a project added at a subfolder trusts the whole repository in the CLI, and withdrawing trust in Ersa leaves the CLI's record, so terminal sessions there stay trusted. The question says so where the user answers.
