@@ -1,4 +1,3 @@
-import { useRef } from "react";
 import { t } from "../catalog";
 import type { Answer, Decision } from "../session/answers";
 import { type ShelfShows, shelfTone } from "../session/shelf";
@@ -34,19 +33,13 @@ interface ShelfProps {
  * shows; this only lays it out.
  */
 export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, force }: ShelfProps) {
-  const root = useRef<HTMLDivElement>(null);
-  // An answer makes the answers unavailable while it is on its way, so focus moves to the shelf itself rather than
-  // fall out of the shelf with the button that held it (FLOW-APPROVE-PERMISSION-R07, R10).
-  const decide = (requestId: string, decision: Decision) => {
-    onDecide(requestId, decision);
-    root.current?.focus();
-  };
   return (
-    // Focusable, though not in the tab order, so focus can move to the shelf itself (R05).
-    <div ref={root} id={id} className="shelf" role="dialog" tabIndex={-1} data-force={force} aria-label={t("rail.shelf.nameLabel", { title: tile.title })} data-tone={shelfTone(shows)}>
+    // Focusable, though not in the tab order, so focus can move to the shelf itself: as it opens (R05), and as an
+    // answer makes the answers unavailable.
+    <div id={id} className="shelf" role="dialog" tabIndex={-1} data-force={force} aria-label={t("rail.shelf.nameLabel", { title: tile.title })} data-tone={shelfTone(shows)}>
       {/* A request it can't draw is said here, in the shelf, and leaves the rail as it was. */}
       <ErrorBoundary what={t("rail.shelf.boundaryName")} resetKey={shownKey(shows)}>
-        <Contents shows={shows} ring={tile.ring} cost={tile.cost} onRetry={onRetry} answers={answers} live={live} onDecide={decide} />
+        <Contents shows={shows} ring={tile.ring} cost={tile.cost} onRetry={onRetry} answers={answers} live={live} onDecide={onDecide} />
       </ErrorBoundary>
     </div>
   );

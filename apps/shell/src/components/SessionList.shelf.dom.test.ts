@@ -135,10 +135,15 @@ describe("the shelf and keyboard focus", () => {
     fireEvent.pointerDown(screen.getByRole("button", { name: /^(?!Request from).*Write the notes/ }));
     expect(shelf()).not.toBeNull();
 
+    // A choice that takes no focus closes it too, and focus goes nowhere new.
+    fireEvent.pointerDown(document.body);
+    expect(shelf()).toBeNull();
+
+    fireEvent.click(chevron());
     const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
     fireEvent.pointerDown(elsewhere);
-    elsewhere.focus();
     expect(shelf()).toBeNull();
+    act(() => elsewhere.focus());
     expect(document.activeElement).toBe(elsewhere);
   });
 
