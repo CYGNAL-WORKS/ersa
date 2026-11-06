@@ -122,7 +122,7 @@ pub async fn git_local_branches(
         "refs/heads",
         "refs/remotes/origin/HEAD",
     ];
-    let output = query(transport, repo, &args).await?;
+    let output = query(transport, repo, &args, deadline()).await?;
     if !output.exit.success() {
         return Err(VcsError::Failed {
             message: "git could not list the branches".into(),
@@ -172,8 +172,8 @@ fn parse_branches(lines: &[String]) -> LocalBranches {
 }
 
 /// The commit `revision` names in the repository at `repo`, or `None`
-/// when git cannot resolve it to a commit. Each git call is given
-/// [`GIT_QUERY_TIMEOUT`].
+/// when git cannot resolve it to a commit. All of it, two git calls at
+/// most, is given [`GIT_QUERY_TIMEOUT`].
 ///
 /// The caller refuses a revision that starts with `-`, so git reads it as a
 /// revision, never as an option.
@@ -185,35 +185,49 @@ pub async fn git_resolve_commit(
     // `^{commit}` peels a tag to the commit it tags and refuses anything
     // that is not a commit (a tree, a blob).
     let peeled = format!("{revision}^{{commit}}");
-    let output = query(
-        transport,
-        repo,
-        &["rev-parse", "--verify", "--quiet", &peeled],
-    )
-    .await?;
-    if output.exit.success() {
-        return Ok(output.stdout.first().map(|line| line.trim().to_string()));
+    let deadline = deadline();
+    let args = ["rev-parse", "--verify", "--quiet", &peeled];
+    let output = query(transport, repo, &args, deadline).await?;
+    let failed = || VcsError::Failed {
+        message: "git could not resolve the base".into(),
+        stderr: output.stderr_text(),
+    };
+    match output.exit.code {
+        Some(0) => return Ok(output.stdout.first().map(|line| line.trim().to_string())),
+        // `--verify --quiet` usually exits 1 for what it cannot resolve, but
+        // some revisions it cannot resolve exit 128 (a reflog entry past the
+        // reflog's end), the same code as a broken repository; checked below.
+        Some(1 | 128) => {}
+        // Killed, or failing in a way that says nothing about the revision.
+        _ => return Err(failed()),
     }
-    // `--verify --quiet` usually exits 1 for what it cannot resolve, but
-    // some revisions it cannot resolve exit 128 (a reflog entry past the
-    // reflog's end), the same code as a broken repository. So the exit code
-    // cannot tell the two apart: ask git whether the repository itself is
-    // usable. If it is, the revision was the problem.
-    let repository = query(transport, repo, &["rev-parse", "--git-dir"]).await?;
+    // The exit code cannot tell an unresolvable revision from a broken
+    // repository: ask git whether the repository itself is usable. If it
+    // is, the revision was the problem.
+    let repository = query(transport, repo, &["rev-parse", "--git-dir"], deadline).await?;
     if repository.exit.success() {
         return Ok(None);
     }
-    Err(VcsError::Failed {
-        message: "git could not resolve the base".into(),
-        stderr: repository.stderr_text(),
-    })
+    Err(failed())
 }
 
-/// Runs a quick git query under [`GIT_QUERY_TIMEOUT`]. Running out of time
-/// is git's failure, reported as such: a query changes nothing, so there is
-/// nothing half done to clean up.
-async fn query(transport: &dyn Transport, dir: &str, args: &[&str]) -> Result<Output, VcsError> {
-    match git_within(transport, dir, args, GIT_QUERY_TIMEOUT).await {
+/// When a git query started now must have answered.
+fn deadline() -> tokio::time::Instant {
+    tokio::time::Instant::now() + GIT_QUERY_TIMEOUT
+}
+
+/// Runs a quick git query that must answer by `deadline`, which several
+/// queries for one answer share, so together they stay within
+/// [`GIT_QUERY_TIMEOUT`]. Running out of time is git's failure, reported as
+/// such: a query changes nothing, so there is nothing half done to clean up.
+async fn query(
+    transport: &dyn Transport,
+    dir: &str,
+    args: &[&str],
+    deadline: tokio::time::Instant,
+) -> Result<Output, VcsError> {
+    let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+    match git_within(transport, dir, args, left).await {
         Err(VcsError::Incomplete(e)) if e.kind() == std::io::ErrorKind::TimedOut => {
             Err(VcsError::Failed {
                 message: format!(
@@ -558,6 +572,32 @@ mod tests {
     async fn resolving_a_base_gives_git_ten_seconds() {
         let started = tokio::time::Instant::now();
         let result = git_resolve_commit(&hanging_git(), "repo", "main").await;
+        timed_out_at_ten_seconds(result, started);
+    }
+
+    // verifies: PROTO-CORE-API-R19
+    #[tokio::test(start_paused = true)]
+    async fn resolving_a_base_gives_both_git_calls_ten_seconds_together() {
+        /// The first git exits 128 after six seconds; the second never answers.
+        struct SlowThenHanging(std::sync::atomic::AtomicUsize);
+        #[ersa_adapter::async_trait]
+        impl Transport for SlowThenHanging {
+            async fn spawn(
+                &self,
+                spec: ProcessSpec,
+            ) -> std::io::Result<Box<dyn ersa_adapter::Process>> {
+                if self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                    tokio::time::sleep(Duration::from_secs(6)).await;
+                    let failing = ersa_adapter::fake::FakeTransport::new(Vec::<String>::new())
+                        .with_exit_code(128);
+                    return failing.spawn(spec).await;
+                }
+                hanging_git().spawn(spec).await
+            }
+        }
+        let transport = SlowThenHanging(Default::default());
+        let started = tokio::time::Instant::now();
+        let result = git_resolve_commit(&transport, "repo", "main@{50}").await;
         timed_out_at_ten_seconds(result, started);
     }
 
