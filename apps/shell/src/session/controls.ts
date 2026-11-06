@@ -52,6 +52,36 @@ export function workspaceKinds(project: Project): WorkspaceKind[] {
   return WORKSPACE_ADAPTERS.includes(project.vcs) ? ["isolated", "root"] : ["root"];
 }
 
+/**
+ * The projects most recently used first (FLOW-NEW-SESSION-R14): by the creation time of each project's newest session
+ * in `session.list`, a session's project read through its workspace. A project with no session it can be traced to
+ * comes after the used ones, and those keep the order Core lists them in.
+ */
+export function recentFirst(
+  projects: readonly Project[],
+  sessions: readonly Pick<Session, "workspace_id" | "created_at">[],
+  workspaces: Readonly<Record<string, Pick<Workspace, "project_id">>>,
+): Project[] {
+  // Each project's newest session, as milliseconds: parsed, so times with different offsets compare as instants.
+  const newest = new Map<string, number>();
+  for (const s of sessions) {
+    const project = workspaces[s.workspace_id]?.project_id;
+    const at = Date.parse(s.created_at);
+    if (project === undefined || Number.isNaN(at)) continue;
+    newest.set(project, Math.max(at, newest.get(project) ?? at));
+  }
+  // Array.prototype.sort is stable, so projects that tie keep Core's order.
+  return [...projects].sort((a, b) => (newest.get(b.id) ?? -Infinity) - (newest.get(a.id) ?? -Infinity) || 0);
+}
+
+/**
+ * The project the new-session screen starts at: the one New session was chosen for, else the most recently used
+ * project on `hostId` (FLOW-NEW-SESSION-R15), else the most recently used of all. `ordered` is `recentFirst`'s order.
+ */
+export function startingProject(ordered: readonly Project[], hostId: string, projectId?: string): Project | undefined {
+  return ordered.find((p) => p.id === projectId) ?? ordered.find((p) => p.host_id === hostId) ?? ordered[0];
+}
+
 /** The backends a session can start with: those detected as available. */
 export function available(backends: readonly BackendChoices[]): BackendChoices[] {
   return backends.filter((b) => b.status === "available");
