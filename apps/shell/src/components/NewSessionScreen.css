@@ -9,6 +9,8 @@
   gap: var(--space-xl);
   /* It fills the stage it is placed in, and centres within it. */
   flex: 1;
+  /* The full measure whatever it holds, so the box keeps its width as the trust question opens above it. */
+  width: stretch;
   max-width: var(--size-measure);
   margin: 0 auto;
   padding: var(--space-xxl) var(--space-lg);

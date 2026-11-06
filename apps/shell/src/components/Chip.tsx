@@ -229,7 +229,8 @@ export function Chip({ name, prefix, value, placeholder, problem, pending, optio
           ))}
           {action && (
             <>
-              <li className="chip-list-rule" role="presentation" />
+              {/* The hairline parts the action from options above it; alone in the list, it needs none. */}
+              {options.length > 0 && <li className="chip-list-rule" role="presentation" />}
               <li
                 role="option"
                 tabIndex={-1}

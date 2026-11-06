@@ -41,8 +41,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # `tray-icon`: the icon closing the window hides to (FLOW-CLOSE-AND-QUIT).
 tauri = { version = "2", features = ["tray-icon"] }
-# The system's folder dialog, for adding a project (FLOW-NEW-SESSION-R16),
-# opened by the Shell's own `shell_pick_folder` command.
+# The system's folder dialog, for adding a project (FLOW-NEW-SESSION-R16);
+# the Interface opens it through @tauri-apps/plugin-dialog.
 tauri-plugin-dialog = "2"
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }

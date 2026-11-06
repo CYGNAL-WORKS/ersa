@@ -10,7 +10,6 @@ fn main() {
         "shell_hide",
         "shell_quit_heard",
         "shell_quit",
-        "shell_pick_folder",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands))
         .expect("the Tauri build step failed");
