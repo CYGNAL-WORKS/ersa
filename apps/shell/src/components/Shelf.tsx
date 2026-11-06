@@ -37,18 +37,20 @@ interface ShelfProps {
 export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, force }: ShelfProps) {
   const root = useRef<HTMLDivElement>(null);
   const key = shownKey(shows);
-  const place = "place" in shows ? shows.place : undefined;
-  // Moving from one request to the next, its place counting on, is moving on after an answer (R10): the contents
-  // cross-fade (docs/design/RAIL.md, The shelf: Motion), and assistive technology hears what is now shown and its
-  // place, politely (R24). Coming back to a request after loading, as on a reconnect, is not moving on.
-  const [last, setLast] = useState({ key, shows });
+  // A request, or one it can't show: what the shelf counts its place by.
+  const request = shows.state === "permission" || shows.state === "question" || shows.state === "unknown" ? shows : undefined;
+  // Moving to a request whose place counts on from the last one shown, whatever came between (loading, or the last
+  // request settled), is moving on after an answer (R10): the contents cross-fade (docs/design/RAIL.md, The shelf:
+  // Motion), and assistive technology hears what is now shown and its place, politely (R24). Coming back to the
+  // same place after loading, as on a reconnect, is not moving on.
+  const [last, setLast] = useState<{ key: string; shown?: ShelfShows; onScreen: boolean }>({ key, shown: request, onScreen: request !== undefined });
   const [next, setNext] = useState<{ key?: string; said: string; from?: ShelfShows }>();
   if (key !== last.key) {
-    setLast({ key, shows });
-    const lastPlace = "place" in last.shows ? last.shows.place : undefined;
-    if (shownRequest(last.shows) !== undefined && (place?.n ?? 1) > (lastPlace?.n ?? 1)) {
-      // The last request's contents fade out over the new ones, unless reduced motion is on.
-      setNext({ key, said: nextSaid(shows), from: reducedMotion() ? undefined : last.shows });
+    // The last request stays on screen while the shelf settles.
+    setLast({ key, shown: request ?? last.shown, onScreen: request !== undefined || shows.state === "settled" });
+    if (request && last.shown && placeOf(request) > placeOf(last.shown)) {
+      // What was on screen fades out over the new contents, unless reduced motion is on.
+      setNext({ key, said: nextSaid(request), from: reducedMotion() || !last.onScreen ? undefined : last.shown });
     } else {
       // Not moving on: nothing fades, and what was last said stays said.
       setNext((n) => n && { said: n.said });
@@ -56,11 +58,14 @@ export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, force
   }
   const moved = next?.key === key;
   const leaving = moved ? next.from : undefined;
+  // Settled: the last request, its answers unavailable, until the shelf closes; never a "Loading…" nothing is doing.
+  const settled = shows.state === "settled";
+  const display = settled ? last.shown : shows;
   useMovingOn(root, key, moved);
-  const contents = (shown: ShelfShows) => (
+  const contents = (shown: ShelfShows, done = false) => (
     // A request it can't draw is said here, in the shelf, and leaves the rail as it was.
     <ErrorBoundary what={t("rail.shelf.boundaryName")} resetKey={shownKey(shown)}>
-      <Contents shows={shown} ring={tile.ring} cost={tile.cost} onRetry={onRetry} answers={answers} live={live} onDecide={onDecide} />
+      <Contents shows={shown} ring={tile.ring} cost={tile.cost} onRetry={onRetry} answers={answers} live={live} settled={done} onDecide={onDecide} />
     </ErrorBoundary>
   );
   return (
@@ -73,7 +78,7 @@ export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, force
       </p>
       {/* Keyed by the request, so the next one's contents fade in afresh. */}
       <div key={key} className="shelf-contents" data-next={moved || undefined}>
-        {contents(shows)}
+        {display && contents(display, settled)}
       </div>
       {/* The last request's contents, fading out over the new ones; out of reach and unheard meanwhile. */}
       {leaving && (
@@ -85,7 +90,7 @@ export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, force
           aria-hidden="true"
           onAnimationEnd={() => setNext((n) => n && { ...n, from: undefined })}
         >
-          {contents(leaving)}
+          {contents(leaving, true)}
         </div>
       )}
     </div>
@@ -99,9 +104,12 @@ function Contents({
   onRetry,
   answers,
   live,
+  settled,
   onDecide,
-}: Pick<ShelfProps, "shows" | "onRetry" | "answers" | "live" | "onDecide"> & { ring?: number; cost?: string }) {
+}: Pick<ShelfProps, "shows" | "onRetry" | "answers" | "live" | "onDecide"> & { ring?: number; cost?: string; settled: boolean }) {
   switch (shows.state) {
+    case "settled":
+      return null;
     case "loading":
       return (
         <p className="shelf-note" role="status">
@@ -150,7 +158,14 @@ function Contents({
             </p>
           )}
           <Readouts ring={ring} cost={cost} />
-          <PermissionAnswers request={request} answer={answers?.[request.request_id]} live={live} onDecide={(decision) => onDecide(request.request_id, decision)} />
+          <PermissionAnswers
+            request={request}
+            answer={answers?.[request.request_id]}
+            // Answered already, as the shelf settles or as it fades out: nothing to choose, and nothing to reconnect for.
+            live={live && !settled}
+            reconnectingNote={!settled}
+            onDecide={(decision) => onDecide(request.request_id, decision)}
+          />
         </>
       );
     }
@@ -170,6 +185,11 @@ function Contents({
         </>
       );
   }
+}
+
+/** A request's place, n, for telling whether the shelf moved on. */
+function placeOf(shows: ShelfShows): number {
+  return ("place" in shows ? shows.place?.n : undefined) ?? 1;
 }
 
 /** What a permission request asks: its description, else the tool's display name, else its name (R11). */

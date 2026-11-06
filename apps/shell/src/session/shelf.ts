@@ -55,6 +55,9 @@ export interface Place {
 export type ShelfShows =
   /** Reading the session's events (R21). */
   | { state: "loading" }
+  /** Every request it knew of is answered, though the tile still lists them; the shelf closes once Core lists its
+   *  sessions again, and shows the last request meanwhile. */
+  | { state: "settled" }
   /** Reading them failed, and why (R21). */
   | { state: "failed"; message: string }
   /** A request of a kind Ersa doesn't know, or whose event Core no longer holds (R25). */
@@ -109,7 +112,7 @@ export function shelfOf(view: SessionView | undefined, pending: readonly Pending
   const place = m > 1 ? { n: answered + 1, m } : undefined;
   // Every request it knew of is answered, though the tile still lists them: nothing is left to show, and the shelf
   // closes once Core lists its sessions again.
-  if (stillPending.length === 0) return { state: "loading" };
+  if (stillPending.length === 0) return { state: "settled" };
   const oldest = showable[0];
   if (!oldest || (unshowable > 0 && missedEarlier(view))) return { state: "unknown", place };
   if (oldest.kind === "permission") return { state: "permission", request: oldest.request, place };
