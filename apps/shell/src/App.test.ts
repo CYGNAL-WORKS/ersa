@@ -188,16 +188,11 @@ describe("adding a project from the new-session screen", () => {
     expect(shell.pickFolder).toHaveBeenCalledTimes(1);
     expect(paramsOf(core, "project.find")).toEqual({ host_id: "local", path: "D:/clones/stranger" });
 
-    // The question names the folder, says what trust lets run, that it covers every workspace, and that it lasts.
+    // The question is asked before anything is added.
     const question = screen.getByRole("region", { name: "Trust stranger?" });
-    expect(question.textContent).toContain("D:/clones/stranger");
-    expect(question.textContent).toMatch(/hooks and MCP servers/);
-    expect(question.textContent).toMatch(/every workspace of the project/);
-    expect(question.textContent).toMatch(/until you withdraw it/);
-    expect(document.activeElement).toBe(within(question).getByRole("button", { name: "Cancel" }));
     expect(methods(core)).not.toContain("project.add");
 
-    fireEvent.click(within(question).getByRole("button", { name: "Add, trusted" }));
+    fireEvent.click(within(question).getByRole("button", { name: "Trust" }));
     await settle();
     expect(paramsOf(core, "project.add")).toEqual({ host_id: "local", path: "D:/clones/stranger", trusted: true });
     expect(trustQuestion()).toBeNull();
@@ -205,13 +200,52 @@ describe("adding a project from the new-session screen", () => {
     expect(document.activeElement).toBe(words());
   });
 
-  // The untrusted answer of ADR 0018, which ticket 226 removes (FLOW-NEW-SESSION-R25); it cites nothing meanwhile.
-  it("adds the folder not trusted when the user says so", async () => {
-    const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"));
+  // verifies: FLOW-NEW-SESSION-R24
+  it("asks as the CLI does: the folder's path, the safety check, and what agents can do there, and nothing more", async () => {
+    await screenWith([project("alpha")], fakeShell("D:/clones/stranger"));
     await addFromChip();
-    fireEvent.click(screen.getByRole("button", { name: "Add, not trusted" }));
+    const question = screen.getByRole("region", { name: "Trust stranger?" });
+    const lines = [...question.querySelectorAll("p")].map((p) => p.textContent);
+    expect(lines).toEqual([
+      "Trust stranger?",
+      "D:/clones/stranger",
+      "Is this a project you created or one you trust, like your own code, a well-known open source project, or work from your team? If not, review what's in this folder first.",
+      "Agents will be able to read, edit, and run files here.",
+    ]);
+    expect(question.textContent).not.toMatch(/repositor/i);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R25
+  it("offers Cancel, focused, then Trust, which adds the project trusted, and no way to add it untrusted", async () => {
+    const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger", "D:/clones/stranger"));
+    await addFromChip();
+    let question = screen.getByRole("region", { name: "Trust stranger?" });
+    const answers = within(question).getAllByRole("button");
+    expect(answers.map((b) => b.textContent)).toEqual(["Cancel", "Trust"]);
+    // Neither answer is primary: trusting is never the default.
+    expect(answers.map((b) => b.getAttribute("data-variant"))).toEqual(["quiet", "quiet"]);
+    expect(document.activeElement).toBe(answers[0]);
+
+    // The arrows move between the answers; Cancel, as Enter on it does, adds nothing.
+    fireEvent.keyDown(answers[0]!, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(answers[1]);
+    fireEvent.keyDown(answers[1]!, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(answers[0]);
+    // Away from the answers, as in the explanation when it scrolls, the arrows are left alone.
+    fireEvent.keyDown(question.querySelector(".trust-question-body")!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(answers[0]);
+    fireEvent.click(answers[0]!);
     await settle();
-    expect(paramsOf(core, "project.add")).toEqual({ host_id: "local", path: "D:/clones/stranger", trusted: false });
+    expect(trustQuestion()).toBeNull();
+    expect(methods(core)).not.toContain("project.add");
+
+    await addFromChip();
+    question = screen.getByRole("region", { name: "Trust stranger?" });
+    fireEvent.click(within(question).getByRole("button", { name: "Trust" }));
+    await settle();
+    expect(core.calls.filter((c) => c.method === "project.add").map((c) => c.params)).toEqual([
+      { host_id: "local", path: "D:/clones/stranger", trusted: true },
+    ]);
     expect(chipValue()).toBe("Project: stranger");
   });
 
@@ -295,7 +329,7 @@ describe("adding a project from the new-session screen", () => {
     expect(shell.pickFolder).toHaveBeenCalledTimes(1);
     expect(words().value).toBe("Fix the build");
 
-    fireEvent.click(screen.getByRole("button", { name: "Add, trusted" }));
+    fireEvent.click(screen.getByRole("button", { name: "Trust" }));
     await settle();
     expect(chipValue()).toBe("Project: stranger");
     // The message waits for the user to send it: nothing was started.

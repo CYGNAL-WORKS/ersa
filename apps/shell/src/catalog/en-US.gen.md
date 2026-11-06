@@ -318,25 +318,13 @@ Not trusted
 
 Trust {name}?
 
-### `trust.question.runsDetail`
+### `trust.question.safetyDetail`
 
-A trusted project’s own configuration runs in its sessions: hooks and MCP servers that start programs on this computer, and settings that change what the agent may do without asking.
+Is this a project you created or one you trust, like your own code, a well-known open source project, or work from your team? If not, review what's in this folder first.
 
-### `trust.question.coversDetail`
+### `trust.question.agentsDetail`
 
-Trust covers every workspace of the project and lasts until you withdraw it. Claude Code also records it for the whole repository the project is in, and applies it outside Ersa.
-
-### `trust.question.untrustedDetail`
-
-Untrusted, its sessions use only your own settings.
-
-### `trust.question.addTrustedButton`
-
-Add, trusted
-
-### `trust.question.addUntrustedButton`
-
-Add, not trusted
+Agents will be able to read, edit, and run files here.
 
 ### `trust.question.trustButton`
 

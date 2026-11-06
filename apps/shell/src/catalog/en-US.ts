@@ -150,18 +150,14 @@ export const enUS = {
   trust: {
     // A project the user has not trusted, on its heading in the rail and in the project chip's list.
     notTrustedStatus: "Not trusted",
-    // The trust question (ADR 0018), asked when a folder becomes a project and when the user trusts one later. It
-    // says what trust lets run, that it covers every workspace of the project, and that it lasts until withdrawn
-    // (FLOW-NEW-SESSION-R16, retired; ticket 226 builds its replacement).
+    // The trust question (ADR 0028), asked when a folder becomes a project and when the user trusts one later. It reads
+    // like the Claude Code CLI's folder-trust prompt: the safety check and what agents can do there
+    // (FLOW-NEW-SESSION-R24), answered by Cancel or Trust (R25).
     question: {
       title: "Trust {name}?",
-      runsDetail:
-        "A trusted project’s own configuration runs in its sessions: hooks and MCP servers that start programs on this computer, and settings that change what the agent may do without asking.",
-      coversDetail:
-        "Trust covers every workspace of the project and lasts until you withdraw it. Claude Code also records it for the whole repository the project is in, and applies it outside Ersa.",
-      untrustedDetail: "Untrusted, its sessions use only your own settings.",
-      addTrustedButton: "Add, trusted",
-      addUntrustedButton: "Add, not trusted",
+      safetyDetail:
+        "Is this a project you created or one you trust, like your own code, a well-known open source project, or work from your team? If not, review what's in this folder first.",
+      agentsDetail: "Agents will be able to read, edit, and run files here.",
       trustButton: "Trust",
       cancelButton: "Cancel",
     },
