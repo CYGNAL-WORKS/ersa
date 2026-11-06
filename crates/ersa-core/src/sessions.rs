@@ -39,6 +39,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::io;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
@@ -59,6 +60,8 @@ use crate::app_log::{AppLog, Facts, LifecycleFact};
 use crate::persistence::{self, SessionRow, Store, now_rfc3339};
 use crate::projection::View;
 use crate::raw_log::RawLog;
+
+mod send;
 
 /// How many events may wait for one subscriber before it counts as unable
 /// to keep up. Streaming text produces many small events, so this is
@@ -103,6 +106,9 @@ const MAX_VIEW_BYTES: usize = 64 * 1024 * 1024;
 /// the turn it started.
 const SEND_SETTLE: Duration = Duration::from_secs(10);
 
+/// How long `session.remove` waits to remove the session's scratch folder.
+const SCRATCH_REMOVAL: Duration = Duration::from_secs(30);
+
 /// How long reading a session's record may take before the session opens
 /// with an error saying so. Records are local files, normally read in well
 /// under a second; a file system that hangs (a network drive, a synced
@@ -136,6 +142,12 @@ pub enum SessionError {
     Adapter(AdapterError),
     #[error("{0}")]
     Internal(String),
+    /// The attachment at `index` of a `session.send` can't be sent.
+    #[error("attachment {index}: {reason}")]
+    AttachmentRefused { index: usize, reason: String },
+    /// Core handed a message over but can't tell whether the backend took it.
+    #[error("{0}")]
+    DeliveryUnknown(String),
 }
 
 /// Every session Core knows, and the adapters it can start them with.
@@ -194,6 +206,11 @@ struct Handle {
     /// Set when the session is removed, for reads of its record that
     /// outlive it ([`read_unless_removed`]).
     removed: Arc<AtomicBool>,
+    /// The send under way, if any: one at a time per session.
+    sending: Mutex<Option<send::Sending>>,
+    /// Held by whatever works in the session's scratch folder: a send's
+    /// copying, and removing the folder with the session.
+    scratch: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// A read of a session's record: the record's version when the read began,
@@ -509,6 +526,8 @@ impl Handle {
             version_check: tokio::sync::Mutex::new(None),
             summary_read: tokio::sync::Mutex::new(None),
             removed: Arc::default(),
+            sending: Mutex::default(),
+            scratch: Arc::default(),
         }
     }
 
@@ -574,6 +593,7 @@ impl Handle {
             state,
             created_at: presented.created_at,
             last_event_seq: hub.last_seq(),
+            sending: lock(&self.sending).as_ref().map(send::Sending::phase),
             tile,
         }
     }
@@ -685,6 +705,19 @@ impl SessionManager {
     /// session.
     pub fn tile_feed(&self) -> TileFeed {
         self.tiles.feed()
+    }
+
+    /// Every image type some backend on this host takes, for telling an
+    /// image by its first bytes.
+    pub fn image_types(&self) -> Vec<&'static str> {
+        let mut types: Vec<&'static str> = self
+            .adapters
+            .values()
+            .flat_map(|adapter| adapter.image_limits().media_types.iter().copied())
+            .collect();
+        types.sort_unstable();
+        types.dedup();
+        types
     }
 
     fn handle(&self, id: &str) -> Result<Arc<Handle>, SessionError> {
@@ -898,6 +931,30 @@ impl SessionManager {
         }
         let session = handle.describe();
         self.store.delete_session(id.to_string()).await?;
+        // Its scratch folder goes with it (PROTO-CORE-API-R28), once no
+        // copying holds it. Never past a bound: a file system that hangs
+        // leaves the folder behind, which a later look can tidy, rather
+        // than hold up the removal.
+        let cwd = lock(&handle.row).cwd.clone();
+        let scratch = Arc::clone(&handle.scratch);
+        let session_id = id.to_string();
+        let removal = tokio::time::timeout(
+            SCRATCH_REMOVAL,
+            tokio::task::spawn_blocking(move || {
+                let _held = scratch.blocking_lock();
+                crate::attachments::remove_scratch(Path::new(&cwd), &session_id)
+            }),
+        );
+        match removal.await {
+            Ok(Ok(Ok(()))) => {}
+            Ok(Ok(Err(e))) => {
+                tracing::warn!(session = %id, error = %e, "removing the scratch folder failed");
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(session = %id, error = %e, "removing the scratch folder failed")
+            }
+            Err(_) => tracing::warn!(session = %id, "removing the scratch folder took too long"),
+        }
         lock(&self.sessions).remove(id);
         self.app_log.forget(id);
         // What the adapter kept of its record goes too, and what a read
@@ -1010,48 +1067,12 @@ impl SessionManager {
         Ok(handle.describe())
     }
 
-    /// Sends a user message and returns the turn it belongs to.
-    pub async fn send(&self, id: &str, text: &str) -> Result<u32, SessionError> {
-        let handle = self.handle(id)?;
-        let live = handle.live().ok_or_else(|| handle.not_running())?;
-        // A start that failed sets the failure before it lets go of the
-        // start, so the reason is there when the wait ends.
-        let session = match live.wait_ready().await {
-            Ok(session) => session,
-            Err(SessionError::InvalidState(_)) if lock(&handle.start_failure).is_some() => {
-                // The session's run ends just after; answer once it has, so
-                // `session.list` already says the session failed and the
-                // sender can tell a failed start from a slow one by its
-                // state. Bounded: a run that has not ended in time is
-                // answered as it stands.
-                let _ = wait_finished(&live, STOP_TIMEOUT).await;
-                return Err(handle.not_running());
-            }
-            Err(e) => return Err(e),
-        };
-        let text = text.to_string();
-        bounded(async move { session.send_user(&text).await }).await?;
-        // The adapter recorded the message before writing it, so the sink
-        // has it. Wait for the pipeline to project it: the turn it starts
-        // (or joins) is known then.
-        let target = live.sink.next_index();
-        let mut progress = live.progress.clone();
-        let settled = matches!(
-            tokio::time::timeout(SEND_SETTLE, progress.wait_for(|p| p.lines >= target)).await,
-            Ok(Ok(_))
-        );
-        if !settled {
-            // Sent, but not projected in time: the turn is not known, and a
-            // made-up number would hide that the pipeline is falling behind.
-            return Err(SessionError::Internal(
-                "the message was sent, but Core could not project it in time".into(),
-            ));
-        }
-        let turn = progress.borrow().turn;
-        Ok(turn.max(1))
-    }
-
+    /// Interrupts the running turn, or cancels a message not yet handed to
+    /// the backend instead (PROTO-CORE-API-R25).
     pub async fn interrupt(&self, id: &str) -> Result<(), SessionError> {
+        if send::cancel(&*self.handle(id)?) {
+            return Ok(());
+        }
         let live = self.live(id)?;
         let session = live.wait_ready().await?;
         bounded(async move { session.interrupt().await }).await
@@ -1957,8 +1978,9 @@ fn send_tile(tiles: &TileHub, session_id: &str, tile: &Tile) {
     tiles.publish(session_id, notification_line("session.tile", &params));
 }
 
-/// Hands `session.tile` notifications to every attached connection,
-/// keeping only the latest per session for each: a tile is the whole state,
+/// Hands `session.tile` and `session.send_progress` notifications to every
+/// attached connection, keeping only the latest per session (and kind) for
+/// each: a tile is the whole state,
 /// so a connection busy with a long replay gets the newest one when it is
 /// ready, never a backlog, and is never closed for it.
 #[derive(Default)]
@@ -1980,10 +2002,17 @@ impl TileHub {
         TileFeed { inbox }
     }
 
-    /// Drops any tile for `session_id` not yet taken, for a removed session.
+    /// Drops any tile or send progress for `session_id` not yet taken, for a
+    /// removed session.
     fn forget(&self, session_id: &str) {
+        self.forget_key(session_id);
+        self.forget_key(&send::progress_key(session_id));
+    }
+
+    /// Drops the line kept under `key` not yet taken.
+    fn forget_key(&self, key: &str) {
         for inbox in lock(&self.inboxes).iter().filter_map(Weak::upgrade) {
-            lock(&inbox.latest).remove(session_id);
+            lock(&inbox.latest).remove(key);
         }
     }
 

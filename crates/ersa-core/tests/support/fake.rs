@@ -10,6 +10,12 @@
 //! - `ask`: a permission request, answered with `session.decide_permission`.
 //! - `question`: a question for the user.
 //! - `burst <n>`: `n` replies at once, to flood subscribers.
+//! - `broken pipe`: the write fails halfway, so Core can't tell whether the
+//!   backend has the message.
+//!
+//! Every message is kept in [`Stats::messages`] as the fake was given it,
+//! attachments and all; the fake takes PNG and GIF images of up to
+//! [`IMAGE_MAX`] bytes.
 //!
 //! A rename keeps the new title in the record too, as a `custom-title`
 //! entry, which titles the session ahead of its last prompt, as Claude
@@ -22,9 +28,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, OpenElsewhere,
-    PermissionDecision, ProcessExit, Projected, Projector, RawLine, RecordEvent, RecordSummary,
-    SessionConfig, Transport, async_trait,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, ImageLimits,
+    OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit, Projected, Projector, RawLine,
+    RecordEvent, RecordSummary, SessionConfig, Transport, async_trait,
 };
 use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::{
@@ -36,6 +42,9 @@ use ersa_protocol::events::{
 use serde_json::{Map, Value, json};
 
 pub const BACKEND: &str = "fake";
+
+/// The largest image the fake takes.
+pub const IMAGE_MAX: u64 = 1024;
 
 /// What the fake has been asked to do, shared with the test.
 #[derive(Debug, Default)]
@@ -51,6 +60,8 @@ pub struct Stats {
     /// open: the backend's id for it, and how many record renames had
     /// been written by then.
     pub open_checks: Mutex<Vec<(String, usize)>>,
+    /// Every message the fake was given, in order.
+    pub messages: Mutex<Vec<OutgoingMessage>>,
 }
 
 /// The kind of the record entry a rename adds.
@@ -237,6 +248,13 @@ impl Adapter for FakeAdapter {
         }))
     }
 
+    fn image_limits(&self) -> ImageLimits {
+        ImageLimits {
+            media_types: &["image/png", "image/gif"],
+            max_bytes: IMAGE_MAX,
+        }
+    }
+
     fn projector(&self) -> Box<dyn Projector> {
         Box::new(FakeProjector {
             version: self.projector_version,
@@ -388,6 +406,18 @@ impl Drop for FakeSession {
 
 #[async_trait]
 impl AdapterSession for FakeSession {
+    async fn send_message(&self, message: &OutgoingMessage) -> Result<(), AdapterError> {
+        self.running()?;
+        if message.text == "broken pipe" {
+            return Err(AdapterError::Io(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "the backend stopped reading",
+            )));
+        }
+        self.stats.messages.lock().unwrap().push(message.clone());
+        self.send_user(&message.text).await
+    }
+
     async fn send_user(&self, text: &str) -> Result<(), AdapterError> {
         self.running()?;
         self.sink.record(

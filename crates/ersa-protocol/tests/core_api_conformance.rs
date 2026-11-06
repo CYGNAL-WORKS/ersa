@@ -183,7 +183,10 @@ fn result_examples() -> Vec<(Method, Value)> {
             Method::SessionSend,
             to_value(&SessionSendResult { turn: Some(2) }),
         ),
-        (Method::SessionSend, to_value(&SessionSendResult { turn: None })),
+        (
+            Method::SessionSend,
+            to_value(&SessionSendResult { turn: None }),
+        ),
         (
             Method::AttachmentInspect,
             to_value(&Inspected {

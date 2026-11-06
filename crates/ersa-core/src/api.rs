@@ -17,7 +17,7 @@ use ersa_protocol::core_api::{ErrorKind, Method};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -114,6 +114,13 @@ impl From<SessionError> for ApiError {
                 tracing::error!(%message, "session failure");
                 ApiError::internal(message)
             }
+            SessionError::AttachmentRefused { index, reason } => ApiError(
+                ErrorObject::application(ErrorKind::AttachmentRefused, reason)
+                    .with_index(u32::try_from(index).unwrap_or(u32::MAX)),
+            ),
+            SessionError::DeliveryUnknown(message) => {
+                ApiError::new(ErrorKind::DeliveryUnknown, message)
+            }
         }
     }
 }
@@ -154,6 +161,7 @@ impl ConnectionState {
             outbound: self.outbound.downgrade(),
             kick: Arc::clone(&self.kick),
             subscriptions: Arc::clone(&self.subscriptions),
+            lane: None,
         }
     }
 }
@@ -169,9 +177,20 @@ pub struct Peer {
     pub outbound: mpsc::WeakSender<String>,
     pub kick: Kick,
     pub subscriptions: Subscriptions,
+    /// Raised when the request's answer is on the connection, and the next
+    /// request about the same session may run. Set for a detached request.
+    pub lane: Option<Arc<watch::Sender<bool>>>,
 }
 
 impl Peer {
+    /// Lets the next request about the same session run before this one
+    /// answers.
+    pub fn open_lane(&self) {
+        if let Some(lane) = &self.lane {
+            lane.send_replace(true);
+        }
+    }
+
     /// Lets a subscription made by request `method` about `session` send,
     /// now that its answer is on the connection.
     pub fn after_answer(&self, method: &str, session: Option<&str>) {
@@ -284,7 +303,7 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         Method::SessionStop => to_json(sessions::stop(core, parse(params)?).await),
         Method::SessionResume => to_json(sessions::resume(core, parse(params)?).await),
         Method::SessionRemove => to_json(sessions::remove(core, parse(params)?).await),
-        Method::SessionSend => to_json(sessions::send(core, parse(params)?).await),
+        Method::SessionSend => to_json(sessions::send(core, &conn.peer(), parse(params)?).await),
         Method::SessionInterrupt => to_json(sessions::interrupt(core, parse(params)?).await),
         Method::SessionDecidePermission => {
             to_json(sessions::decide_permission(core, parse(params)?).await)
@@ -299,6 +318,7 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         }
         Method::SessionUnsubscribe => to_json(sessions::unsubscribe(&conn.peer(), parse(params)?)),
         Method::SessionRawLog => to_json(sessions::raw_log(core, parse(params)?).await),
+        Method::AttachmentInspect => to_json(sessions::inspect(core, parse(params)?).await),
 
         // Handled above by `reserved_for`; listed so that adding a method
         // without deciding how to answer it is a compile error.
@@ -344,6 +364,8 @@ pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
                     | Method::SessionSubscribe
                     | Method::SessionUnsubscribe
                     | Method::SessionRawLog
+                    // Reads a path that may be slow to answer.
+                    | Method::AttachmentInspect
             )
         )
 }
@@ -405,7 +427,7 @@ pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Resp
             Err((e, _)) => Err(e),
         },
         Some(Method::SessionSend) => match parse(params) {
-            Ok(params) => to_json(sessions::send(core, params).await),
+            Ok(params) => to_json(sessions::send(core, peer, params).await),
             Err((e, _)) => Err(e),
         },
         Some(Method::SessionInterrupt) => match parse(params) {
@@ -446,6 +468,10 @@ pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Resp
         },
         Some(Method::SessionRawLog) => match parse(params) {
             Ok(params) => to_json(sessions::raw_log(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::AttachmentInspect) => match parse(params) {
+            Ok(params) => to_json(sessions::inspect(core, params).await),
             Err((e, _)) => Err(e),
         },
         _ => unreachable!("runs_detached chose a session method"),
