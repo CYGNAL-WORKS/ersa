@@ -37,7 +37,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 - **A name already taken or too long.** Two sections may not share a name, ignoring case, and a name has at most 80 characters; the name field says so and keeps the name typed.
 - **Saving fails.** When Core refuses or can't be reached, the change is undone in the rail and the rail says why. Nothing is kept only in the window.
 - **A rename the backend refuses** (a blank or too-long title, or a record that is gone) keeps the field open with the reason. A session with no backend session id yet offers Rename as unavailable, with the reason; an untitled session that has one can be renamed.
-- **Nothing to show.** Showing active sessions with every session archived, the rail says there are no active sessions. Changing what is shown never closes the active session, even when its tile leaves the rail.
+- **Nothing to show.** Showing active sessions with every session archived, the rail says there are no active sessions. Changing what is shown never closes the active session, even when its tile leaves the rail. Starting a session while showing archived sessions only switches the rail to show active sessions, so the new tile is in view.
 - **A project whose sessions are all pinned** has its tiles in the Pinned group; its heading follows `LAY-SHELL` (Projects), and a collapsed heading counts only the tiles under it.
 - **Last activity** moves a tile only when a turn ends, never while a reply streams, and never because the session's state changed.
 
@@ -62,6 +62,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 - **FLOW-ORGANIZE-SESSIONS-R18**: When the user chooses a session on the sessions page, Ersa shall make it the active session and show its transcript in place of the page.
 - **FLOW-ORGANIZE-SESSIONS-R19**: While the sessions are being read, or when they cannot be read, the sessions page shall say so, with the reason when they cannot be read, and shall not say there are no sessions.
 - **FLOW-ORGANIZE-SESSIONS-R20**: While the sessions page shows, Ersa shall hide the composer, the session controls and the transcript header, keep the active session active with its tile highlighted, and send nothing typed to it.
+- **FLOW-ORGANIZE-SESSIONS-R21**: When a session starts while the rail shows archived sessions only, Ersa shall switch the rail to show active sessions, so the new session's tile is in view.
 - **FLOW-ORGANIZE-SESSIONS-R15**: When Core refuses or fails a change to the arrangement, Ersa shall show the rail as Core has it and say why.
 
 ## Out of scope
@@ -76,6 +77,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 
 ## Changes
 
+- 2026-11-05: from #174 merge review: starting a session while the rail shows archived sessions only switches it to show active sessions (R21), so FLOW-NEW-SESSION-R13 always has a place for the tile.
 - 2026-11-05: from #174 merge review: the menu item is All sessions, not View all, so it doesn't read like Show ▸ All; R16's order takes creation for a session with no activity yet (reworded before it shipped); R19 and R20 added for the page's loading and failed states and what it hides.
 - 2026-11-05: owner: View all opens the sessions page, as the desktop harness's does. R16 to R18 added.
 - 2026-11-05: owner, before this shipped: date groups go by creation, so a session never changes group as it works. R07 reworded; no test cites it.
