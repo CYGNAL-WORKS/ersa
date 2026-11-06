@@ -19,8 +19,9 @@
 // order their CI passed, so a pull request pushed again and again never keeps
 // an older one waiting. Each tick starts a review in every free slot (SLOTS of
 // them, each with its own checkout) and leaves it running: in a terminal the
-// next tick fills a slot whose review has ended, and --once waits for the
-// reviews it started, so a tick ends within the two hours the task allows it.
+// next tick fills a slot whose review has ended. --once does the same while
+// its reviews run, starting none after its first hour, then waits for them,
+// so a run ends within the two hours the task allows it.
 // A pull request under review waits for that review to end, whatever its head
 // now. An hour at most goes on heads whose checkout cannot be prepared (each
 // is logged and the next head takes the slot). A tick with no head to review
@@ -213,7 +214,8 @@ function run(cmd, args, cwd = ROOT) {
 function startReview(n, head, dir, log) {
   return new Promise((done) => {
     const child = spawn("node", ["scripts/merge-review.mjs", String(n), "--head", head], { cwd: dir, env: ENV, stdio: ["ignore", "pipe", "pipe"] });
-    for (const out of [child.stdout, child.stderr]) createInterface({ input: out }).on("line", (l) => log(`#${n} | ${l}`));
+    // Control characters go, so the pull request's own output cannot redraw the log.
+    for (const out of [child.stdout, child.stderr]) createInterface({ input: out }).on("line", (l) => log(`#${n} | ${l.replace(/[\x00-\x1f\x7f]/g, "")}`));
     child.on("error", (e) => done(e.message));
     child.on("close", (code) => done(code));
   });
@@ -273,17 +275,26 @@ function tick(run, start, dirs, log, now, running) {
     if (!free.length) return log(`${[`#${n}`, ...later].join(", ")} wait for a free slot`);
     if (now() - started > STALE_MS) return log(`the tick is an hour old; ${[`#${n}`, ...later].join(", ")} wait for the next`);
     log(`#${n} at ${head.slice(0, 7)}: reviewing${later.length ? `; ${later.join(", ")} next` : ""}`);
-    try {
-      prepare(run, free[0], n, head);
-    } catch (e) {
-      log(`#${n} at ${head.slice(0, 7)}: ${e.message}`);
-      continue;
-    }
-    const dir = free.shift();
-    const done = start(n, head, dir, log).then((status) => {
-      running.delete(n);
-      log(`#${n} at ${head.slice(0, 7)}: the review exited ${status}`);
+    // The head tries each free slot in turn: the fault may be one checkout's, not the head's.
+    const dir = free.find((d) => {
+      try {
+        prepare(run, d, n, head);
+        return true;
+      } catch (e) {
+        log(`#${n} at ${head.slice(0, 7)}: ${e.message}`);
+        return false;
+      }
     });
+    if (!dir) continue;
+    free.splice(free.indexOf(dir), 1);
+    // A review that could not start ends like one that failed, so its slot and the lock are freed.
+    const done = Promise.resolve()
+      .then(() => start(n, head, dir, log))
+      .catch((e) => e?.message ?? String(e))
+      .then((status) => {
+        running.delete(n);
+        log(`#${n} at ${head.slice(0, 7)}: the review exited ${status}`);
+      });
     running.set(n, { dir, done });
   }
 }
@@ -306,6 +317,7 @@ export async function main(argv, { run: r = run, start = startReview, sleep = pa
     if (!release) return { code: 0, stdout: `another tick holds ${lockPath}; nothing to do\n` };
     const dirs = Array.from({ length: SLOTS }, (_, i) => (i ? `${dir}-${i + 1}` : dir));
     const running = new Map();
+    const began = now();
     try {
       for (;;) {
         // In a terminal a tool that is down for one tick is not the end of
@@ -316,7 +328,10 @@ export async function main(argv, { run: r = run, start = startReview, sleep = pa
           if (once || !(e instanceof ToolError)) throw e;
           log(e.message);
         }
-        if (once) return { code: 0 };
+        // The task's run ticks on while its reviews run, so a slot that frees
+        // up is filled; it ticks for an hour at most, so it ends within the
+        // two hours the task allows it.
+        if (once && !running.size) return { code: 0 };
         await sleep(INTERVAL_MS);
         // The lock's age says the loop is alive; a lock that is gone or
         // another tick's was taken over or removed by hand, and this loop
@@ -329,10 +344,11 @@ export async function main(argv, { run: r = run, start = startReview, sleep = pa
         }
         if (holder !== String(process.pid)) fail(`the lock at ${lockPath} is ${holder ? `another tick's (pid ${holder})` : "gone"}, so this loop stops`);
         utimesSync(lockPath, new Date(now()), new Date(now()));
+        if (once && now() - began > STALE_MS) return { code: 0 };
       }
     } finally {
       // The lock stays until every review this process started has ended, so
-      // no other tick takes up a head still under review; --once waits here.
+      // no other tick takes up a head still under review.
       await Promise.all([...running.values()].map((x) => x.done));
       release();
     }
