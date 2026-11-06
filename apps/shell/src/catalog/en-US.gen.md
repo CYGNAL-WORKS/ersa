@@ -76,10 +76,6 @@ Needs you
 
 Needs you · {count}
 
-### `rail.tile.chevronLabel`
-
-Request from {title}
-
 ### `rail.shelf.nameLabel`
 
 Request from {title}

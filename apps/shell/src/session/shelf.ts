@@ -71,15 +71,15 @@ export function shelfTone(shows: ShelfShows): "accent" | "caution" {
  * (Core let go of the earliest ones, where its event must be); otherwise the requests that can be shown go first.
  */
 export function shelfOf(view: SessionView | undefined, pending: readonly Pending[]): ShelfShows {
-  if (!view || (view.stream.state === "subscribing" && view.transcript.lastSeq < 0)) return { state: "loading" };
-  // A gap is only a failure once subscribing again didn't fill it; until then what is held still reads.
-  if (view.stream.state === "failed" && !view.stream.gap) return { state: "failed", message: view.stream.message };
+  if (!view) return { state: "loading" };
+  // Reading failed, including a gap that subscribing again did not fill: what is held may be out of date.
+  if (view.stream.state === "failed") return { state: "failed", message: view.stream.message };
   if (view.stream.state === "subscribing") return { state: "loading" };
 
   const waiting = new Map(pending.map((p) => [p.request_id, p.kind as string]));
   const shown: Item[] = view.transcript.items.filter((item) => {
     if (item.kind === "permission") return isOpen(item) && waiting.get(item.request.request_id) === "permission";
-    if (item.kind === "question") return !item.answered && waiting.get(requestIdOf(item)) === "question";
+    if (item.kind === "question") return !item.answered && waiting.get(item.requestId) === "question";
     return false;
   });
   const unshowable = pending.length - shown.length;
@@ -88,11 +88,9 @@ export function shelfOf(view: SessionView | undefined, pending: readonly Pending
   const oldest = shown[0];
   if (!oldest || (unshowable > 0 && missedEarlier(view))) return { state: "unknown", place };
   if (oldest.kind === "permission") return { state: "permission", request: oldest.request, place };
-  if (oldest.kind === "question") return { state: "question", requestId: requestIdOf(oldest), questions: oldest.questions, place };
+  if (oldest.kind === "question") return { state: "question", requestId: oldest.requestId, questions: oldest.questions, place };
   return { state: "unknown", place };
 }
-
-const requestIdOf = (item: Extract<Item, { kind: "question" }>) => item.key.slice("question:".length);
 
 /** The events held start after a gap: Core let go of the session's earliest events. */
 const missedEarlier = (view: SessionView) => view.transcript.items[0]?.key.startsWith(EARLIER) ?? false;
@@ -100,13 +98,16 @@ const missedEarlier = (view: SessionView) => view.transcript.items[0]?.key.start
 // --- Following the shelf's session ---------------------------------------------------------------------------
 
 export interface ShelfFollowing {
-  /** Follows `id`'s events, or none: the open shelf's session. Following another stops the last. */
-  follow(id: string | undefined, connected: boolean): void;
+  /**
+   * Follows `id`'s events, or none: the open shelf's session. Following another stops the last. `activeId` is the
+   * active session: when the shelf closes because its session became active, the transcript has just subscribed to
+   * it, and Core holds one subscription per session, so the shelf leaves that subscription alone.
+   */
+  follow(id: string | undefined, connected: boolean, activeId?: string): void;
   receive(envelope: Envelope): void;
+  /** Subscribes on a new connection, and again after reading failed (R21, Retry). */
   attached(): void;
   detached(): void;
-  /** Subscribes again after reading failed (R21, Retry). */
-  retry(): void;
 }
 
 /**
@@ -117,9 +118,9 @@ export function shelfFollowing(client: CoreClient, update: (view: SessionView | 
   let current: Follower | undefined;
   let currentId: string | undefined;
   return {
-    follow(id, connected) {
+    follow(id, connected, activeId) {
       if (id === currentId) return;
-      current?.stop();
+      current?.stop(currentId === activeId);
       current = undefined;
       currentId = id;
       update(undefined);
@@ -133,6 +134,5 @@ export function shelfFollowing(client: CoreClient, update: (view: SessionView | 
     receive: (envelope) => current?.receive(envelope),
     attached: () => current?.attached(),
     detached: () => current?.detached(),
-    retry: () => current?.attached(),
   };
 }

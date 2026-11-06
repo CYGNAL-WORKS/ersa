@@ -32,7 +32,7 @@ export type Item =
   /** A permission request, answered once `decision` is set; `unanswered` once the session ended without one. */
   | { kind: "permission"; key: string; request: PermissionRequested; decision?: PermissionDecided; unanswered?: true }
   /** Questions are answered from the shelf (M1); until then the transcript shows them. */
-  | { kind: "question"; key: string; questions: QuestionAsked["questions"]; answered: boolean }
+  | { kind: "question"; key: string; requestId: string; questions: QuestionAsked["questions"]; answered: boolean }
   /** Something went wrong: an `error` event, or a tool the backend denied with nobody to ask. */
   | { kind: "problem"; key: string; message: string }
   | { kind: "notice"; key: string; message: string }
@@ -121,7 +121,7 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
     case "question.asked":
       // Shown once, like a permission request: a repeat must not reopen an answered question.
       if (next.items.some((i) => i.key === `question:${event.request_id}`)) return next;
-      return put(next, { kind: "question", key: `question:${event.request_id}`, questions: event.questions, answered: false });
+      return put(next, { kind: "question", key: `question:${event.request_id}`, requestId: event.request_id, questions: event.questions, answered: false });
     case "question.answered":
       return patch(next, `question:${event.request_id}`, "question", (item) => ({ ...item, answered: true }));
     case "error":

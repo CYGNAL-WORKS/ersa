@@ -59,12 +59,10 @@ const session = (id: string, waiting: [Kind, string][] = []): Session => ({
 describe("which shelf is open", () => {
   const two = [session("a", [["permission", "r1"]]), session("b", [["permission", "r2"]]), session("active", [["permission", "r3"]])];
 
+  // That the active session stays as it was is checked in the running window (live/shelf.live.ts).
   // verifies: FLOW-APPROVE-PERMISSION-R01
-  it("opens the chosen tile's shelf and leaves the active session as it was", () => {
-    const change = { type: "chevron", id: "a", activeId: "active" } as const;
-    expect(shelfAfter(undefined, change)).toBe("a");
-    // The change carries the active session only to read it: nothing returned can make another one active.
-    expect(change.activeId).toBe("active");
+  it("opens the chosen tile's shelf", () => {
+    expect(shelfAfter(undefined, { type: "chevron", id: "a", activeId: "active" })).toBe("a");
   });
 
   // verifies: FLOW-APPROVE-PERMISSION-R02
@@ -141,9 +139,11 @@ describe("what the shelf shows", () => {
     });
   });
 
-  it("keeps showing what it holds while a gap is being filled", () => {
-    const view = viewOf([permission("r1")], { stream: { state: "failed", message: "event 1 never arrived", gap: true } });
-    expect(shelfOf(view, pending(["permission", "r1"]))).toMatchObject({ state: "permission" });
+  // verifies: FLOW-APPROVE-PERMISSION-R21
+  it("says reading failed when a lost event did not arrive on subscribing again, and is loading while it does", () => {
+    const failed = viewOf([permission("r1")], { stream: { state: "failed", message: "event 1 never arrived", gap: true } });
+    expect(shelfOf(failed, pending(["permission", "r1"]))).toEqual({ state: "failed", message: "event 1 never arrived" });
+    expect(shelfOf(viewOf([permission("r1")], { stream: { state: "subscribing" } }), pending(["permission", "r1"]))).toEqual({ state: "loading" });
   });
 
   // verifies: FLOW-APPROVE-PERMISSION-R25
@@ -218,11 +218,24 @@ describe("following the shelf's session", () => {
     expect(last?.transcript.items.map((i) => i.key)).toEqual(["permission:r1"]);
   });
 
+  it("leaves the subscription alone when the shelf closes because its session became active", () => {
+    const { client, calls } = fakeClient();
+    const shelf = shelfFollowing(client, () => {});
+    shelf.follow("a", true, "other");
+    // The transcript subscribes to "a" as it becomes active; the shelf closing must not end that subscription.
+    shelf.follow(undefined, true, "a");
+    expect(calls.filter((c) => c.method === "session.unsubscribe")).toEqual([]);
+    // Closed for any other reason, it unsubscribes.
+    shelf.follow("b", true, "a");
+    shelf.follow(undefined, true, "a");
+    expect(calls.filter((c) => c.method === "session.unsubscribe").map((c) => c.params)).toEqual([{ id: "b" }]);
+  });
+
   it("subscribes again on Retry", () => {
     const { client, calls } = fakeClient();
     const shelf = shelfFollowing(client, () => {});
     shelf.follow("a", true);
-    shelf.retry();
+    shelf.attached();
     expect(calls.filter((c) => c.method === "session.subscribe")).toHaveLength(2);
   });
 });

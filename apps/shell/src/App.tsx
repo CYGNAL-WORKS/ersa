@@ -157,7 +157,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     else shelf.detached();
   }, [shelf, link]);
   const connected = link !== undefined;
-  useEffect(() => shelf.follow(openShelf, connected), [shelf, openShelf]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => shelf.follow(openShelf, connected, shownId), [shelf, openShelf]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => shelf.follow(undefined, false), [shelf]);
 
   // Quit from the tray icon: confirmed here first when sessions are busy (FLOW-CLOSE-AND-QUIT-R04). The
@@ -359,7 +359,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     return {
       id: shelfSession.id,
       tone: shelfTone(shows),
-      render: (domId: string) => <Shelf id={domId} title={tile.title} shows={shows} ring={tile.ring} cost={tile.cost} onRetry={shelf.retry} />,
+      render: (domId: string) => <Shelf id={domId} tile={tile} shows={shows} onRetry={shelf.attached} />,
     };
   })();
 
