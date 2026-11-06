@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Project } from "../protocol/core-api.gen";
-import { type BackendChoices, type Choice, sessionShown, showsBackend, valuesFor, workspaceKinds } from "./controls";
+import type { Session } from "../protocol/core-api.gen";
+import { type BackendChoices, type Choice, type SessionValues, projectOrder, recentFirst, seedScreen, sessionShown, showsBackend, startingProject, valuesFor, workspaceKinds } from "./controls";
 
 const project = (vcs: Project["vcs"]): Project => ({ id: "p1", host_id: "local", path: "D:\\Projects\\p", name: "p", vcs, trusted: true });
 
@@ -120,5 +121,93 @@ describe("the session controls under a running session", () => {
     const shown = sessionShown({ ...running, model: undefined }, { ...branch, kind: "root", vcs_ref: "" }, [backend("claude")]);
     expect(shown.values.model).toBe("claude-large");
     expect(shown.workspaceLabel).toBe("Root workspace");
+  });
+});
+
+describe("the project list's order", () => {
+  const named = (id: string, host_id = "local"): Project => ({ ...project("git"), id, host_id, name: id });
+  const workspaces = { w1: { project_id: "a" }, w2: { project_id: "b" }, w3: { project_id: "b" }, w4: { project_id: "c" } };
+  const session = (workspace_id: string, created_at: string) => ({ workspace_id, created_at });
+
+  // verifies: FLOW-NEW-SESSION-R14
+  it("puts the project whose newest session is newest first", () => {
+    const sessions = [
+      session("w1", "2026-11-01T09:00:00Z"),
+      // b's older session is older than a's, but its newest is newer than a's: the newest session decides.
+      session("w2", "2026-10-01T09:00:00Z"),
+      session("w3", "2026-11-03T09:00:00Z"),
+      session("w4", "2026-11-02T09:00:00Z"),
+    ];
+    expect(recentFirst([named("a"), named("b"), named("c")], sessions, workspaces).map((p) => p.id)).toEqual(["b", "c", "a"]);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R14
+  it("puts projects with no session after the used ones, in the order Core lists them", () => {
+    const sessions = [session("w4", "2026-11-02T09:00:00Z"), session("unknown-workspace", "2026-11-05T09:00:00Z")];
+    expect(recentFirst([named("a"), named("b"), named("c"), named("d")], sessions, workspaces).map((p) => p.id)).toEqual(["c", "a", "b", "d"]);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R15
+  it("starts the screen opened for no particular project at the local host's most recently used project", () => {
+    const ordered = [named("remote", "far"), named("b"), named("a")];
+    expect(startingProject(ordered, "local")?.id).toBe("b");
+    expect(startingProject(ordered, "local", "a")?.id).toBe("a");
+    // A project that is gone, or a host with no project of its own: the most recently used of all.
+    expect(startingProject(ordered, "local", "gone")?.id).toBe("b");
+    expect(startingProject(ordered, "nowhere")?.id).toBe("remote");
+    expect(startingProject([], "local")).toBeUndefined();
+  });
+});
+
+describe("the project list's order as the window keeps it", () => {
+  const named = (id: string): Project => ({ ...project("git"), id, name: id });
+  const workspaces = { w1: { project_id: "a" }, w2: { project_id: "b" } };
+  const session = (workspace_id: string, created_at: string) => ({ workspace_id, created_at }) as Session;
+  const projects = [named("a"), named("b"), named("c")];
+
+  // verifies: FLOW-NEW-SESSION-R14
+  it("orders by the sessions Core lists, and keeps them", () => {
+    const listed = [session("w1", "2026-11-01T09:00:00Z"), session("w2", "2026-11-02T09:00:00Z")];
+    const order = projectOrder(projects, listed, [], workspaces);
+    expect(order.projects.map((p) => p.id)).toEqual(["b", "a", "c"]);
+    expect(order.kept).toBe(listed);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R14
+  it("keeps the last order while the session list reloads, rather than falling back to Core's", () => {
+    const kept = [session("w2", "2026-11-02T09:00:00Z")];
+    const order = projectOrder(projects, undefined, kept, workspaces);
+    expect(order.projects.map((p) => p.id)).toEqual(["b", "a", "c"]);
+    expect(order.kept).toBe(kept);
+  });
+});
+
+describe("where the new-session screen starts", () => {
+  const named = (id: string): Project => ({ ...project("git"), id, name: id });
+  const used = (project_id: string): SessionValues => ({ host_id: "local", project_id, workspace: "root" });
+
+  // verifies: FLOW-NEW-SESSION-R15
+  it("moves to the most recently used project when the order arrives after the screen opened", () => {
+    // At launch the screen opens on Core's first project; the sessions and workspaces arrive, and b comes first.
+    const opened = seedScreen(undefined, named("a"), undefined, {});
+    expect(opened.wanted.project_id).toBe("a");
+    // No last-used values change meanwhile: the starting project alone moves the screen.
+    const later = seedScreen(opened, named("b"), undefined, {});
+    expect(later.wanted).toEqual({ project_id: "b" });
+    // Nothing changed after that: the same seed, so the screen does not render again.
+    expect(seedScreen(later, named("b"), undefined, {})).toBe(later);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R15
+  it("stays where the user saw it once they chose, wrote or sent", () => {
+    const touched = { ...seedScreen(undefined, named("a"), undefined, {}), touched: true };
+    expect(seedScreen(touched, named("b"), undefined, {})).toBe(touched);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R02
+  it("starts afresh when New session is chosen for another project, even after the user chose", () => {
+    const touched = { ...seedScreen(undefined, named("a"), undefined, {}), touched: true };
+    const next = seedScreen(touched, named("c"), "c", { c: used("c") });
+    expect(next).toEqual({ shownFor: "c", seededWith: used("c"), touched: false, wanted: { ...used("c"), project_id: "c" } });
   });
 });
