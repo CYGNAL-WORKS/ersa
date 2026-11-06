@@ -22,7 +22,7 @@ export interface ChipOption {
 export interface ChipAction {
   label: string;
   icon: LucideIcon;
-  /** The keys that do the same from anywhere on the screen, shown at the trailing edge. */
+  /** The keys that do the same from anywhere on the screen, shown at the trailing edge while the action can be taken. */
   shortcut?: string;
   /** Absent while the action is shown but cannot be taken. */
   onChoose?: () => void;
@@ -243,7 +243,7 @@ export function Chip({ name, prefix, value, placeholder, problem, pending, optio
                   <Icon icon={action.icon} size="icon-sm" />
                 </span>
                 <span className="chip-option-label">{action.label}</span>
-                {action.shortcut && <kbd className="chip-action-shortcut">{action.shortcut}</kbd>}
+                {action.shortcut && action.onChoose && <kbd className="chip-action-shortcut">{action.shortcut}</kbd>}
               </li>
             </>
           )}

@@ -99,7 +99,8 @@ describe("the new-session screen", () => {
     expect(second).toContain('aria-selected="true"');
     // Adding a project from the chip comes with the folder dialog (FLOW-NEW-SESSION-R16); until then it is shown, unavailable.
     expect(add).toContain("Add project…");
-    expect(add).toContain("Ctrl+O");
+    // Its shortcut comes with it: nothing is offered that does nothing.
+    expect(add).not.toContain("Ctrl+O");
     expect(add).toContain('aria-disabled="true"');
   });
 
