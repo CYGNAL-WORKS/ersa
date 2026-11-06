@@ -96,10 +96,8 @@ async function askAbout(ersa: { page: Page; dir: string; answerDialog: (path: st
   return { stranger, question, box: screen.locator(".composer") };
 }
 
-/** The question shows its title, folder and answers together in the window, inside the card and clear of the box. */
+/** The question shows its title, folder and answers together in the window as it opens, inside the card and clear of the box. */
 async function showsWhole(page: Page, question: Locator, stranger: string, box: Locator) {
-  // As a user would, the card's top is brought into view; a capped question needs no scrolling.
-  await question.evaluate((card) => card.scrollIntoView({ block: "start" }));
   const height = page.viewportSize()!.height;
   const card = (await question.boundingBox())!;
   const boxTop = (await box.boundingBox())!.y;
