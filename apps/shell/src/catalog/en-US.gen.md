@@ -92,6 +92,14 @@ Question
 
 {n} of {m}
 
+### `rail.shelf.nextLabel`
+
+{kind}, {n} of {m}: {asked}
+
+### `rail.shelf.nextUnknownLabel`
+
+{n} of {m}: {note}
+
 ### `rail.shelf.pathLabel`
 
 Path:
