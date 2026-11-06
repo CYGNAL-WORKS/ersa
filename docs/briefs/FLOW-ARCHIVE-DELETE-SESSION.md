@@ -63,5 +63,6 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 
 ## Changes
 
+- 2026-11-05: from #174 merge review: R01 names the pin and the section it keeps, since Arrangement now covers more. Meaning unchanged.
 - 2026-11-05: owner, before this shipped: Delete deletes the session's conversation and record from the backend, keeps a branch with commits that exist nowhere else, and is unavailable while the session is starting, working or waiting on the user. R04, R05 and R09 reworded; no test cites them.
 - 2026-11-05: created from the owner's decisions of 2026-11-05: Archive stops and hides, opens read-only; Delete removes the session, its isolated workspace and branch after a question that names the work lost, never the root workspace (ADR 0026). R01 to R09 added.
