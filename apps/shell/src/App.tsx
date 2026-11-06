@@ -17,7 +17,7 @@ import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { Project, Session, Workspace } from "./protocol/core-api.gen";
-import { type BackendChoices, type SessionValues, sessionShown } from "./session/controls";
+import { type BackendChoices, type SessionValues, recentFirst, sessionShown } from "./session/controls";
 import { contextUsed } from "./session/tile";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
@@ -303,7 +303,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const knownProjects = useRef<Project[] | undefined>(undefined);
   if (projectList) knownProjects.current = projectList;
   const hello = view.phase === "connected" || view.phase === "lost" ? view.hello : undefined;
-  const screenProjects = projectList ?? (showsScreen({ composing, starting, activeId }, false) ? knownProjects.current : undefined);
+  const knownList = projectList ?? (showsScreen({ composing, starting, activeId }, false) ? knownProjects.current : undefined);
+  // Most recently used first, by the sessions as last listed (FLOW-NEW-SESSION-R14).
+  const screenProjects = knownList && recentFirst(knownList, knownSessions.current ?? [], workspaces);
 
   // The rail's name for each workspace: its project, and its branch or the root (LAY-SHELL).
   const projectById = new Map(projectList?.map((p) => [p.id, p]));
@@ -379,6 +381,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               <div className="stage-controls">
                 <SessionControls
                   hosts={[hello.host]}
+                  localHostId={hello.host.id}
                   projects={[listedProject]}
                   backends={[sessionControls.backend]}
                   values={sessionControls.values}
@@ -398,6 +401,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               // Drawn afresh on each New session, so its composer takes focus (FLOW-NEW-SESSION-R01).
               key={composing?.key ?? 0}
               hosts={[hello.host]}
+              localHostId={hello.host.id}
               projects={screenProjects}
               backends={backends}
               lastUsed={lastUsed}

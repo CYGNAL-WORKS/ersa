@@ -46,6 +46,16 @@ export const enUS = {
   composer: {},
   newSession: {},
   sessionControls: {
+    // The host chip's name for the host Ersa runs on.
+    localHostLabel: "Local",
+    // A project in the project chip's list (docs/design/COMPOSER.md, The project list): its kind, and its trust.
+    project: {
+      gitLabel: "Git",
+      folderLabel: "Folder",
+      notTrustedStatus: "Not trusted",
+      addProjectButton: "Add project…",
+      addProjectShortcut: "Ctrl+O",
+    },
     // The context ring's name, in the session controls and on a tile.
     contextRing: {
       noneLabel: "Context: none used yet",

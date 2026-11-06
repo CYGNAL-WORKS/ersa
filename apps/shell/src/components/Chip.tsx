@@ -1,4 +1,6 @@
+import { type LucideIcon, ShieldAlert } from "lucide-react";
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
+import { Icon } from "./Icon";
 import "./Chip.css";
 
 export interface ChipOption {
@@ -10,6 +12,20 @@ export interface ChipOption {
   failed?: boolean;
   /** Shown with its status but not choosable: a backend that is missing or failed detection. */
   unavailable?: boolean;
+  /** A second line under the label, such as a project's folder, cut at its start so its end stays in view. */
+  detail?: string;
+  /** A warning before the status, behind a shield in the caution tone: "Not trusted". */
+  caution?: string;
+}
+
+/** The action that ends a chip's list, below a hairline: Add project…. */
+export interface ChipAction {
+  label: string;
+  icon: LucideIcon;
+  /** The keys that do the same from anywhere on the screen, shown at the trailing edge. */
+  shortcut?: string;
+  /** Absent while the action is shown but cannot be taken. */
+  onChoose?: () => void;
 }
 
 interface ChipProps {
@@ -27,6 +43,10 @@ interface ChipProps {
   pending?: boolean;
   options: ChipOption[];
   onChoose: (id: string) => void;
+  /** Ends the list. */
+  action?: ChipAction;
+  /** The list is `size-menu` wide, for options with a second line. */
+  wide?: boolean;
   disabled?: boolean;
   /** For the gallery: the choices shown open, and a pointer or keyboard state shown without one. */
   initialOpen?: boolean;
@@ -40,7 +60,7 @@ interface ChipProps {
  * with Enter, Space or the arrows, moves with the arrows, chooses with Enter or Space, and Escape closes it with
  * focus back on the chip.
  */
-export function Chip({ name, prefix, value, placeholder, problem, pending, options, onChoose, disabled, initialOpen = false, force, forceOption }: ChipProps) {
+export function Chip({ name, prefix, value, placeholder, problem, pending, options, onChoose, action, wide, disabled, initialOpen = false, force, forceOption }: ChipProps) {
   const [open, setOpen] = useState(initialOpen);
   const chip = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -92,6 +112,11 @@ export function Chip({ name, prefix, value, placeholder, problem, pending, optio
     if (option.id !== value) onChoose(option.id);
     close();
   };
+  const take = () => {
+    if (!action?.onChoose || disabled) return;
+    close();
+    action.onChoose();
+  };
 
   const onChipKey = (event: KeyboardEvent<HTMLButtonElement>) => {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -133,6 +158,7 @@ export function Chip({ name, prefix, value, placeholder, problem, pending, optio
       case "Enter":
       case " ": {
         event.preventDefault();
+        if (items[at]?.dataset.action !== undefined) return take();
         const option = options.find((o) => o.id === items[at]?.dataset.id);
         if (option) choose(option);
       }
@@ -162,7 +188,7 @@ export function Chip({ name, prefix, value, placeholder, problem, pending, optio
         <span className="chip-value">{shown}</span>
       </button>
       {open && (
-        <ul ref={list} id={listId} className="chip-list" role="listbox" aria-label={name} onKeyDown={onListKey}>
+        <ul ref={list} id={listId} className="chip-list" data-wide={wide || undefined} role="listbox" aria-label={name} onKeyDown={onListKey}>
           {options.map((option) => (
             <li
               key={option.id}
@@ -170,6 +196,7 @@ export function Chip({ name, prefix, value, placeholder, problem, pending, optio
               tabIndex={-1}
               className="chip-option"
               data-id={option.id}
+              data-two-line={option.detail !== undefined || undefined}
               data-force={forceOption?.id === option.id ? forceOption.state : undefined}
               aria-selected={option.id === value}
               aria-disabled={option.unavailable || undefined}
@@ -178,14 +205,48 @@ export function Chip({ name, prefix, value, placeholder, problem, pending, optio
               {/* The chosen option carries a mark in a slot every option keeps, so the labels align. */}
               <span className="chip-option-mark" aria-hidden="true" />
               <span className="chip-option-label">{option.label}</span>
+              {option.caution && (
+                <span className="chip-option-caution">
+                  <span className="chip-option-shield">
+                    <Icon icon={ShieldAlert} size="icon-sm" />
+                  </span>
+                  {option.caution}
+                </span>
+              )}
               {option.status && (
                 <span className="chip-option-status">
                   {option.failed && <span className="glyph" data-tone="danger" aria-hidden="true" />}
                   {option.status}
                 </span>
               )}
+              {option.detail !== undefined && (
+                // Laid out right to left so the ellipsis cuts the path's start; the path itself reads left to right.
+                <span className="chip-option-detail">
+                  <bdi dir="ltr">{option.detail}</bdi>
+                </span>
+              )}
             </li>
           ))}
+          {action && (
+            <>
+              <li className="chip-list-rule" role="presentation" />
+              <li
+                role="option"
+                tabIndex={-1}
+                className="chip-option chip-action"
+                data-action=""
+                aria-selected={false}
+                aria-disabled={action.onChoose === undefined || undefined}
+                onClick={take}
+              >
+                <span className="chip-action-icon">
+                  <Icon icon={action.icon} size="icon-sm" />
+                </span>
+                <span className="chip-option-label">{action.label}</span>
+                {action.shortcut && <kbd className="chip-action-shortcut">{action.shortcut}</kbd>}
+              </li>
+            </>
+          )}
         </ul>
       )}
     </div>

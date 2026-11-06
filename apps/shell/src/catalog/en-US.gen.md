@@ -84,6 +84,30 @@ Needs you · {count}
 
 ## `sessionControls`
 
+### `sessionControls.localHostLabel`
+
+Local
+
+### `sessionControls.project.gitLabel`
+
+Git
+
+### `sessionControls.project.folderLabel`
+
+Folder
+
+### `sessionControls.project.notTrustedStatus`
+
+Not trusted
+
+### `sessionControls.project.addProjectButton`
+
+Add project…
+
+### `sessionControls.project.addProjectShortcut`
+
+Ctrl+O
+
 ### `sessionControls.contextRing.noneLabel`
 
 Context: none used yet

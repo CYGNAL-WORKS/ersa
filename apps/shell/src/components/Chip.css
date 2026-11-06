@@ -161,3 +161,87 @@
 .chip-option[aria-disabled="true"] .chip-option-label {
   color: var(--color-ink-muted);
 }
+
+/* The project list (docs/design/COMPOSER.md, The project list): the widest list, its options two lines tall. */
+.chip-list[data-wide] {
+  width: var(--size-menu);
+  min-width: 0;
+}
+
+/* Line one: mark, name, then the trust warning and kind at the trailing edge; line two: the path under the name. */
+.chip-option[data-two-line] {
+  display: grid;
+  grid-template-columns: var(--size-option-mark) minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "mark label caution status"
+    ".    detail detail  detail";
+  column-gap: var(--space-sm);
+  align-items: center;
+  padding-block: var(--space-xs);
+}
+
+.chip-option[data-two-line] .chip-option-mark {
+  grid-area: mark;
+}
+
+.chip-option[data-two-line] .chip-option-label {
+  grid-area: label;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+}
+
+.chip-option[data-two-line] .chip-option-status {
+  grid-area: status;
+  padding-left: 0;
+  color: var(--color-ink-faint);
+}
+
+.chip-option-caution {
+  grid-area: caution;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--color-ink-muted);
+}
+
+.chip-option-shield {
+  display: inline-flex;
+  color: var(--color-caution);
+}
+
+/* Right to left, so the ellipsis falls at the path's start and the folder's own name stays in view. */
+.chip-option-detail {
+  grid-area: detail;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  color: var(--color-ink-faint);
+}
+
+/* The action that ends a list, below a hairline with room above and below it. */
+.chip-list-rule {
+  height: var(--line-hairline);
+  margin: var(--space-xs) 0;
+  background: var(--color-line);
+}
+
+.chip-action-icon {
+  display: inline-flex;
+  color: var(--color-ink-muted);
+}
+
+.chip-action-shortcut {
+  margin-left: auto;
+  padding-left: var(--space-md);
+  font: inherit;
+  color: var(--color-ink-faint);
+}
+
+/* Shown but not yet to be taken: faint, and quiet under the pointer like any unavailable option. */
+.chip-action[aria-disabled="true"] .chip-option-label,
+.chip-action[aria-disabled="true"] .chip-action-icon {
+  color: var(--color-ink-faint);
+}
