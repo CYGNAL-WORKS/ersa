@@ -33,7 +33,7 @@ import { fileURLToPath } from "node:url";
 
 // Loaded before the review runs, so an edit to the gate's file during it (a
 // mutation left behind, a test) changes nothing.
-import { MERGE_REVIEW, cleanMergeOfMain, commitsSinceReview, main as gate } from "./merge-pr.mjs";
+import { MERGE_REVIEW, cleanMergeOfMain, commitsSinceReview, main as gate, pause } from "./merge-pr.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 export const MARK = "<!-- merge-review -->";
@@ -157,15 +157,14 @@ export const claudeArgs = (text, resume) => [
   "--disallowedTools", ...NEVER, ...(resume ? ["--resume", resume] : []),
 ];
 
-// A stalled git or gh call ends after two minutes; the review itself gets 38
-// and the ask for its result 4, so a run ends within the hour the poller's
-// scheduled task allows it, and a run by hand ends too.
+// A stalled git or gh call ends after two minutes; the review itself gets 38,
+// the ask for its result 4 and posting the review at most 13 (three posts,
+// three reads, two minutes of pauses), so a run ends within the hour the
+// poller's scheduled task allows it, and a run by hand ends too.
 function run(cmd, args, minutes = 2) {
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, timeout: minutes * 60 * 1000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" } });
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: [(r.stderr ?? "").trim(), r.error?.message].filter(Boolean).join("; ") };
 }
-
-const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 class ToolError extends Error {}
 const fail = (m) => {
@@ -263,19 +262,19 @@ function review(argv, run, sleep) {
     else {
       // The owner's pull requests go through the gate too, so one with an
       // open inbox entry or unfinished CI waits rather than reading as ready.
-      const g = gate([n, "--reviewed", head, "--dry-run"], { run });
+      const g = gate([n, "--reviewed", head, "--dry-run"], { run, wait: sleep });
       if (g.code === 0 && owner.length) outcome = `Ready. It changes ${owner.map((p) => `\`${p}\``).join(", ")}, which the owner merges.`;
       else if (g.code === 0) [queue, outcome] = [true, "The merge gate passes; adding it to the merge queue."];
       else if (g.code === 1) [verdict, summary, outcome] = ["pending", `Clean; the merge gate does not pass yet: ${g.reasons.join("; ")}`, `The merge gate does not pass yet; the merge review tries again within the hour, or at once after a push:\n\n${g.stdout}`];
       else [code, verdict, outcome] = [2, "error", `The merge gate could not run:\n\n${g.stderr}`];
     }
-    const url = fresh ? post(run, sleep, n, head, reviewBody({ head, findings, dismissed, outcome })) : "";
+    const url = fresh ? post(run, sleep, me, n, head, reviewBody({ head, findings, dismissed, outcome })) : "";
     if (!block.length && !labels.includes("hold") && owner.length && !labels.includes("needs-owner")) must("gh", ["pr", "edit", n, "--add-label", "needs-owner"]);
     // The enqueue comes before the green status: a run that dies between the
     // two leaves a pending status, which the poller takes up again, rather
     // than a green head that never entered the queue.
     if (queue) {
-      const g = gate([n, "--reviewed", head], { run });
+      const g = gate([n, "--reviewed", head], { run, wait: sleep });
       if (g.code !== 0) fail(`adding it to the merge queue failed after the review was posted: ${g.stdout ?? g.stderr}`);
     }
     status(verdict, summary ?? (block.length ? `${block.length} finding(s) block the merge; see the review.` : outcome.split("\n").filter(Boolean).join(" ")), url);
@@ -332,29 +331,33 @@ function ask(run, text) {
 // Posts the review on the head and returns its address, for the status to
 // point at; an address GitHub did not give leaves the status without one.
 // GitHub answers a post with a 5xx now and then, after the review's whole run
-// is spent, so a failed post is tried again after a pause, POST_TRIES in all.
-// A post that failed may still have landed, so before each retry the head's
-// reviews are read, and one with this body counts as posted.
+// is spent, so a post that fails other than with a 4xx (a server error, a
+// dropped connection, a timeout) is tried again after a pause, POST_TRIES in
+// all. A post that failed may still have landed, so after each failure and
+// its pause the head's reviews are read, and one of this account's with this
+// body counts as posted; a list that cannot be read counts as none.
 export const POST_TRIES = 3;
 export const POST_PAUSE_MS = 20 * 1000;
-function post(run, sleep, n, head, body) {
+function post(run, sleep, me, n, head, body) {
   const dir = mkdtempSync(join(tmpdir(), "merge-review-"));
   const address = (u) => (/^https:\/\//.test(u ?? "") ? u : "");
   try {
     writeFileSync(join(dir, "body.md"), body);
     let r;
-    for (let i = 0; i < POST_TRIES; i++) {
-      if (i) {
-        sleep(POST_PAUSE_MS * i);
-        const list = run("gh", ["api", "--paginate", `repos/{owner}/{repo}/pulls/${n}/reviews?per_page=100`, "--jq", `.[] | select(.commit_id == "${head}") | {body, html_url}`]);
-        const landed = list.ok && list.out.split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((x) => x.body === body);
-        if (landed) return address(landed.html_url);
-      }
-      r = run("gh", ["api", `repos/{owner}/{repo}/pulls/${n}/reviews`, "-f", "event=COMMENT", "-f", `commit_id=${head}`, "-F", `body=@${join(dir, "body.md")}`, "--jq", ".html_url"]);
+    for (let i = 1; ; i++) {
+      const r = run("gh", ["api", `repos/{owner}/{repo}/pulls/${n}/reviews`, "-f", "event=COMMENT", "-f", `commit_id=${head}`, "-F", `body=@${join(dir, "body.md")}`, "--jq", ".html_url"]);
       if (r.ok) return address(r.out);
-      process.stderr.write(`posting the review failed (try ${i + 1} of ${POST_TRIES}): ${r.err}\n`);
+      if (/HTTP 4\d\d/.test(r.err)) fail(`posting the review failed: ${r.err}`);
+      process.stderr.write(`posting the review failed (try ${i} of ${POST_TRIES}): ${r.err}\n`);
+      sleep(POST_PAUSE_MS * i);
+      const list = run("gh", ["api", "--paginate", `repos/{owner}/{repo}/pulls/${n}/reviews?per_page=100`, "--jq", `.[] | select(.commit_id == "${head}" and .user.login == "${me}") | {body, html_url}`]);
+      let landed;
+      try {
+        landed = list.ok && list.out.split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((x) => x.body === body);
+      } catch {}
+      if (landed) return address(landed.html_url);
+      if (i === POST_TRIES) fail(`posting the review failed ${POST_TRIES} times: ${r.err}`);
     }
-    fail(`posting the review failed ${POST_TRIES} times: ${r.err}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
