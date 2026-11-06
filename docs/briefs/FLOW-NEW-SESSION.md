@@ -42,6 +42,7 @@ The project chip on the new-session screen is the only place a project is added;
 - **FLOW-NEW-SESSION-R21**: When a git project has a new workspace chosen, the workspace chip shall offer the project's local branches as the base branch, with a search box that narrows them, and shall start at the repository's default branch for every new session, or, when the repository has none, at the checked-out commit; R04 shall create the workspace from the chosen base branch.
 - **FLOW-NEW-SESSION-R22**: The workspace chip shall name the workspace a session will start in: a new workspace with its base branch, or the project folder.
 - **FLOW-NEW-SESSION-R23**: While the backends on the chosen host are being detected, the new-session screen shall say so above the composer, and the composer shall be unavailable until detection ends.
+- **FLOW-NEW-SESSION-R28**: While a git project's branches are being read, the workspace chip shall say so in place of the branches; when they cannot be read, it shall say so and that the new workspace will start at the default branch, and R04 shall create the workspace from the default branch Core finds.
 
 ## Verification
 
@@ -62,6 +63,7 @@ A project is added by typing its folder path in the rail and answering the trust
 
 ## Changes
 
+- 2026-11-06: from #229 inbox: what the workspace chip shows while the branches are read and when they can't be, and that the new workspace then starts at the default branch (R28; R24 to R27 are allocated on another branch). No other requirement IDs changed.
 - 2026-11-05: R13 reworded for the rail's arrangement (FLOW-ORGANIZE-SESSIONS): a new tile sits where the arrangement puts it, under its project by default. Meaning unchanged for the default arrangement.
 - 2026-11-05: from #173 merge review, before any of it shipped: an existing project is found before the trust question (R18), the trust question says what trust covers (R16), and the no-projects offer is the local host's (R19).
 - 2026-11-05: owner's decisions on where a session runs: a project is added from the project chip through the system's folder dialog, and no path is typed (R10 retired; R14 to R20 added); the project chip lists projects most recently used first with path, kind and trust; a new workspace is made from a base branch that starts at the repository's default branch (R21, R22); the screen says when backends are being detected (R23). Open questions on a remote host's folder picker and on other kinds of base.
