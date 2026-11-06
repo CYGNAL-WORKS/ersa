@@ -13,6 +13,10 @@ import type { Section } from "./lookup";
 
 export const enUS = {
   rail: {
+    // The rail's top row.
+    top: {
+      newSessionButton: "New session",
+    },
     // The rail's tree (docs/design/RAIL.md, The rail): its name and its notes.
     tree: {
       // The tree's name for assistive technology.
@@ -29,6 +33,8 @@ export const enUS = {
     // A project heading (docs/design/RAIL.md, A project heading) and its More menu.
     heading: {
       newSessionLabel: "New session in {project}",
+      // A collapsed heading: how many sessions it holds.
+      sessionCountStatus: { one: "{count} session", other: "{count} sessions" },
       moreLabel: "More for {project}",
       // In the More menu. Trusting asks first, so it ends in an ellipsis; withdrawing trust does not ask.
       trustButton: "Trust…",
