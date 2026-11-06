@@ -173,9 +173,9 @@ test("a clean review is posted on the head, the status points at it, and the hea
   assert.ok(order.findIndex((c) => c.startsWith("gh pr merge")) < order.findIndex((c) => c.includes("state=success")));
 });
 
-test("a post GitHub refuses with a server error is tried again, and the review is not lost", () => {
+test("a post GitHub refuses with a server error or a rate limit is tried again, and the review is not lost", () => {
   const fail502 = { ok: false, out: "", err: "gh: Server Error (HTTP 502)" };
-  const got = drive(["7", "--head", HEAD], { posts: [fail502, fail502] });
+  const got = drive(["7", "--head", HEAD], { posts: [fail502, { ok: false, out: "", err: "gh: You have exceeded a secondary rate limit (HTTP 403)" }] });
   assert.equal(got.code, 0, got.stderr);
   assert.equal(got.reviewed, 1, "the review ran once");
   assert.equal(got.posted.length, 3);
