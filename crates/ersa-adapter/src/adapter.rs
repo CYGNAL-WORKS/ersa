@@ -61,6 +61,13 @@ pub trait Adapter: Send + Sync {
         BackendChoices::default()
     }
 
+    /// The images this backend takes inline with a message: Core refuses any
+    /// other before sending (PROTO-CORE-API, Turns and attachments). The
+    /// default: none.
+    fn image_limits(&self) -> ImageLimits {
+        ImageLimits::default()
+    }
+
     /// A fresh projector for one session's live stream. Core makes one each
     /// time it starts the backend and feeds it every raw line from the first.
     fn projector(&self) -> Box<dyn Projector>;
@@ -203,6 +210,49 @@ pub struct RecordEvent {
     pub event: Event,
 }
 
+/// The images a backend takes inline: their media types, and the most bytes
+/// one may have.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ImageLimits {
+    /// Such as `image/png`. Empty: the backend takes no images.
+    pub media_types: &'static [&'static str],
+    pub max_bytes: u64,
+}
+
+impl ImageLimits {
+    /// Whether an image of this type and size is one the backend takes.
+    pub fn allows(&self, media_type: &str, bytes: u64) -> bool {
+        self.media_types.contains(&media_type) && bytes <= self.max_bytes
+    }
+}
+
+/// A user message as Core hands it to an adapter.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OutgoingMessage {
+    /// May be empty when there are attachments.
+    pub text: String,
+    /// In the order the user added them.
+    pub attachments: Vec<OutgoingAttachment>,
+}
+
+/// One attachment as the adapter puts it into the backend's message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OutgoingAttachment {
+    /// An image the agent sees, as base64 `data`.
+    Image {
+        media_type: String,
+        data: String,
+    },
+    /// A file or folder, by its path relative to the session's workspace,
+    /// with `/` between its parts.
+    File {
+        path: String,
+    },
+    Folder {
+        path: String,
+    },
+}
+
 /// A running backend session, driven by Core.
 ///
 /// Methods take `&self` so Core can call them from any task without holding a
@@ -213,6 +263,21 @@ pub struct RecordEvent {
 pub trait AdapterSession: Send + Sync {
     /// Sends a user message to the backend.
     async fn send_user(&self, text: &str) -> Result<(), AdapterError>;
+
+    /// Sends a user message with its attachments, which Core has already
+    /// checked against [`Adapter::image_limits`] and, for files and folders,
+    /// made paths relative to the workspace. The default sends a message
+    /// without attachments as [`send_user`](Self::send_user) and refuses one
+    /// with them, before writing anything, for a backend that has no way to
+    /// carry them yet.
+    async fn send_message(&self, message: &OutgoingMessage) -> Result<(), AdapterError> {
+        if !message.attachments.is_empty() {
+            return Err(AdapterError::Protocol(
+                "this backend cannot take attachments yet".into(),
+            ));
+        }
+        self.send_user(&message.text).await
+    }
 
     /// Answers the backend's pending permission request `request_id`, the id
     /// carried by its `permission.requested` event.
