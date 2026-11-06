@@ -1,6 +1,6 @@
 # 0017: The backend's own session record is a session's history; Ersa sessions are ordinary backend sessions
 
-- Status: accepted
+- Status: superseded by 0026
 - Date: 2026-11-01
 - Supersedes: 0010
 - Related briefs: ARCH-CORE, PROTO-AGENT-EVENTS, PROTO-CLAUDE-CODE-STREAM, PROTO-COPILOT-SDK, FLOW-RESUME-SESSION
