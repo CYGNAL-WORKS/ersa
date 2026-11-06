@@ -4,6 +4,10 @@
 
 ## `rail`
 
+### `rail.top.newSessionButton`
+
+New session
+
 ### `rail.tree.label`
 
 Projects and sessions
@@ -35,6 +39,16 @@ The projects and sessions
 ### `rail.heading.newSessionLabel`
 
 New session in {project}
+
+### `rail.heading.sessionCountStatus`
+
+#### `one`
+
+{count} session
+
+#### `other`
+
+{count} sessions
 
 ### `rail.heading.moreLabel`
 

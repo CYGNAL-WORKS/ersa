@@ -9,6 +9,7 @@ import { type FolderChoice, NewSessionScreen } from "./components/NewSessionScre
 import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionControls } from "./components/SessionControls";
 import { noneUnseen, unseenAfter } from "./session/unseen";
+import { RailTop } from "./components/RailTop";
 import { RailTree } from "./components/RailTree";
 import { Shelf } from "./components/Shelf";
 import { Transcript } from "./components/Transcript";
@@ -288,6 +289,14 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // New session shows the screen; leaving it, by choosing a session, leaves nothing behind (FLOW-NEW-SESSION-R03).
   const newSession = (project: Project) => dispatch({ type: "newSession", projectId: project.id });
+  // The projects whose headings the user collapsed, kept while the window is open (LAY-SHELL, Collapsing).
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const toggleProject = (id: string) =>
+    setCollapsed((was) => {
+      const next = new Set(was);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
   const select = (id: string) => dispatch({ type: "select", id });
 
   // The first message starts the session; on a failure the screen says why and the composer keeps the message
@@ -468,6 +477,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   return (
     <div className="app">
       <nav className="rail" aria-label="Rail">
+        {/* Unavailable until Ersa has connected (LAY-SHELL, The foot). */}
+        <RailTop onNewSession={() => dispatch({ type: "newSession" })} disabled={view.phase !== "connected"} />
         <div className="rail-body">
           <ErrorBoundary what={t("rail.tree.boundaryName")} resetKey={`${projectsVersion}:${sessionsVersion}`}>
             <RailTree
@@ -479,6 +490,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               activeId={shownId}
               onSelect={select}
               onNewSession={newSession}
+              collapsed={collapsed}
+              onToggle={toggleProject}
               onSetTrust={setTrust}
               trusting={trusting}
               keepingTrust={keepingTrust}

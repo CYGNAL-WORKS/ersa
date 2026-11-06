@@ -14,6 +14,7 @@ import { Icon, IconButton } from "../components/Icon";
 import { NewSessionScreen } from "../components/NewSessionScreen";
 import { QuitQuestion } from "../components/QuitQuestion";
 import { RailFoot } from "../components/RailFoot";
+import { RailTop } from "../components/RailTop";
 import { RailTree } from "../components/RailTree";
 import { SessionControls } from "../components/SessionControls";
 import { Shelf } from "../components/Shelf";
@@ -199,6 +200,17 @@ const ersaOnly: Parameters<typeof RailTree>[0] = {
 const strangerOnly: Parameters<typeof RailTree>[0] = { ...tree, projects: { state: "ready", projects: [projects[3]!] }, sessions: { state: "ready", sessions: [] } };
 /** A resting tile above each forced one, so the two read apart in the screenshot. */
 const pairOnly: Parameters<typeof RailTree>[0] = { ...ersaOnly, sessions: { state: "ready", sessions: pointerPair }, activeId: undefined };
+/** ersa's sessions with a question in place of its permission request, for a collapsed heading in the accent. */
+const askingOnly: Parameters<typeof RailTree>[0] = {
+  ...ersaOnly,
+  sessions: {
+    state: "ready",
+    sessions: treeSessions
+      .filter((s) => s.workspace_id === "w1")
+      .map((s) => (s.tile.pending.length > 0 ? { ...s, tile: { ...s.tile, pending: [{ kind: "question" as const, request_id: "q1" }] } } : s)),
+  },
+};
+const folded = (...ids: string[]) => new Set(ids);
 
 /** A transcript built the way the window builds one: by applying events. */
 function transcriptOf(events: Event[]) {
@@ -516,6 +528,17 @@ interface Entry {
 
 const entries: Entry[] = [
   {
+    name: "RailTop",
+    rail: true,
+    states: [
+      ["At rest", <RailTop onNewSession={() => {}} />],
+      ["Pointer over it", <RailTop onNewSession={() => {}} force="hover" />],
+      ["Pressed", <RailTop onNewSession={() => {}} force="pressed" />],
+      ["Keyboard focus", <RailTop onNewSession={() => {}} force="focus" />],
+      ["Before Ersa connects", <RailTop onNewSession={() => {}} disabled />],
+    ],
+  },
+  {
     name: "RailFoot",
     states: coreViews.map(([label, view]) => [
       label,
@@ -545,6 +568,24 @@ const entries: Entry[] = [
       ["Loading", <RailTree {...tree} projects={{ state: "loading" }} sessions={{ state: "loading" }} />],
       ["No projects", <RailTree {...tree} projects={{ state: "ready", projects: [] }} sessions={{ state: "ready", sessions: [] }} />],
       ["Projects", <RailTree {...tree} />],
+      // ersa holds a session waiting on a permission request; runner's sessions want nothing.
+      ["Collapsed", <RailTree {...tree} collapsed={folded("p1", "p5")} />],
+      ["Collapsed, a question", <RailTree {...askingOnly} collapsed={folded("p1")} />],
+      [
+        "Collapsed, not trusted",
+        <RailTree {...ersaOnly} projects={{ state: "ready", projects: [{ ...projects[0]!, trusted: false }] }} collapsed={folded("p1")} />,
+      ],
+      [
+        "Collapsed, not trusted, keyboard focus",
+        <RailTree
+          {...ersaOnly}
+          projects={{ state: "ready", projects: [{ ...projects[0]!, trusted: false }] }}
+          collapsed={folded("p1")}
+          forceHeading={{ id: "p1", state: "focus" }}
+        />,
+      ],
+      ["Collapsed, pointer over it", <RailTree {...ersaOnly} collapsed={folded("p1")} forceHeading={{ id: "p1", state: "hover" }} />],
+      ["Collapsed, keyboard focus", <RailTree {...ersaOnly} collapsed={folded("p1")} forceHeading={{ id: "p1", state: "focus" }} />],
       ["A session with no project", <RailTree {...ersaOnly} sessions={{ state: "ready", sessions: treeSessions }} />],
       ["Projects not read", <RailTree {...tree} projects={{ state: "error", message: "the database is locked" }} />],
       ["Sessions not read", <RailTree {...tree} sessions={{ state: "error", message: "the database is locked" }} />],
