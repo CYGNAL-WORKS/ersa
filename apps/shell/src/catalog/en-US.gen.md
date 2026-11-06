@@ -132,6 +132,26 @@ Allow
 
 ## `sessionControls`
 
+### `sessionControls.localHostLabel`
+
+Local
+
+### `sessionControls.noProjectsStatus`
+
+No projects
+
+### `sessionControls.project.withGitKindLabel`
+
+Git
+
+### `sessionControls.project.withoutGitKindLabel`
+
+Folder
+
+### `sessionControls.project.addProjectButton`
+
+Add project…
+
 ### `sessionControls.contextRing.noneLabel`
 
 Context: none used yet
@@ -143,5 +163,9 @@ Context: {percent} percent used
 ## `quit`
 
 ## `trust`
+
+### `trust.notTrustedStatus`
+
+Not trusted
 
 ## `errors`

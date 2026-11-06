@@ -9,6 +9,8 @@ interface ComposerProps {
   sending?: Sending;
   /** Sends the text; resolves true once Core accepted it, and the composer clears. */
   onSend: (text: string) => Promise<boolean>;
+  /** The user changed the text. */
+  onWrite?: () => void;
   /** For the gallery: text already typed, and a pointer or keyboard state shown without one. */
   initialText?: string;
   force?: "hover" | "focus";
@@ -17,7 +19,7 @@ interface ComposerProps {
 }
 
 /** Where the user writes to the agent. Enter sends; Shift+Enter starts a new line. */
-export function Composer({ unavailable, sending, onSend, initialText = "", force, autoFocus = true }: ComposerProps) {
+export function Composer({ unavailable, sending, onSend, onWrite, initialText = "", force, autoFocus = true }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const busy = sending?.state === "sending";
   const canSend = !unavailable && !busy && text.trim() !== "";
@@ -54,7 +56,10 @@ export function Composer({ unavailable, sending, onSend, initialText = "", force
         data-force={force}
         value={text}
         disabled={!!unavailable}
-        onChange={(event) => setText(event.target.value)}
+        onChange={(event) => {
+          setText(event.target.value);
+          onWrite?.();
+        }}
         onKeyDown={onKeyDown}
       />
       <div className="composer-foot">

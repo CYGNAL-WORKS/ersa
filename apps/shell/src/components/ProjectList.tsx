@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { t } from "../catalog";
 import type { ProjectsView } from "../core/connection";
 import type { Project } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
@@ -82,7 +83,7 @@ export function ProjectList({
                 <span className="project-path mono" title={p.path}>
                   {p.path}
                 </span>
-                <span className="project-trust">{p.trusted ? "Trusted" : "Not trusted"}</span>
+                <span className="project-trust">{p.trusted ? "Trusted" : t("trust.notTrustedStatus")}</span>
                 {(onNewSession || onSetTrust) && (
                   <div className="project-action">
                     {onNewSession && <Button onClick={() => onNewSession(p)}>New session</Button>}
