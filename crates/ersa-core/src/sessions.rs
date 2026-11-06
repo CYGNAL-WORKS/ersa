@@ -2512,6 +2512,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let adapter = Arc::new(GatedReads::default());
         let manager = Arc::new(gated_manager(dir.path(), &adapter));
+        // Stored too, in a workspace of its own, so a removal shows there.
+        let store = &manager.store;
+        store.ensure_local_host("pc".into()).await.unwrap();
+        let project = ersa_protocol::core_api::Project {
+            id: "p".into(),
+            host_id: persistence::LOCAL_HOST_ID.into(),
+            path: "C:/work".into(),
+            name: "work".into(),
+            vcs: ersa_protocol::core_api::Vcs::Git,
+            trusted: false,
+        };
+        let workspace = store
+            .insert_project(project, "c:/work".into())
+            .await
+            .unwrap();
+        let mut row = lock(&manager.handle("s-gated").unwrap().row).clone();
+        row.workspace_id = workspace.id;
+        store.insert_session(row).await.unwrap();
         let (sink, _finished) = make_live(&manager);
         sink.start_finished(Ok(()));
         sink.process_exited(Ok(ProcessExit { code: Some(0) }));
@@ -2530,6 +2548,18 @@ mod tests {
             }
             other => panic!("expected an internal error, got {other:?}"),
         }
+        // Giving up removed nothing: the session, its row and what the
+        // adapter keeps of its record are all still there.
+        assert!(manager.handle("s-gated").is_ok());
+        assert!(
+            manager
+                .store
+                .session("s-gated".into())
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(adapter.forgets.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
