@@ -361,11 +361,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // A refusal goes; a rename still on its way stays, so its answer is shown.
   const resetRename = (id: string) => setRenaming(({ [id]: was, ...rest }) => (was?.state === "sending" ? { ...rest, [id]: was } : rest));
 
-  const addProject = async (path: string, trusted: boolean) => {
+  // Every project the Interface adds is trusted: Trust is the trust question's one answer that adds (FLOW-NEW-SESSION-R25).
+  const addProject = async (path: string) => {
     if (view.phase !== "connected") return undefined;
     setAdding({ state: "sending" });
     try {
-      const project = await client.call("project.add", { host_id: view.hello.host.id, path, trusted });
+      const project = await client.call("project.add", { host_id: view.hello.host.id, path, trusted: true });
       setAdding(undefined);
       connection.current?.reload("projects");
       return project;

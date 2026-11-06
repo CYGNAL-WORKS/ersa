@@ -246,7 +246,7 @@ test("a project heading's actions show with keyboard focus, and More's menu work
 });
 
 // What a heading's actions do (LAY-SHELL, A heading's actions): New session opens the screen for its own project,
-// and More withdraws trust at once but asks before trusting (ADR 0018). The gallery keeps each call on the page.
+// and More withdraws trust at once but asks before trusting (ADR 0028). The gallery keeps each call on the page.
 test("a project heading's New session and More act on that project, and trusting asks first", async ({ page }) => {
   await page.goto("/gallery.html?component=RailTree&theme=light");
   const tree = page.getByRole("figure", { name: "Projects", exact: true });

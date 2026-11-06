@@ -292,11 +292,12 @@ function ProjectGroup({
       {asking && onSetTrust && (
         <TrustQuestion
           name={project.name}
+          path={project.path}
           purpose="change"
           takeFocus={initialAsking !== project.id}
-          onAnswer={(trusted) => {
+          onTrust={() => {
             closeQuestion();
-            if (trusted) onSetTrust(project, true);
+            onSetTrust(project, true);
           }}
           onDismiss={closeQuestion}
         />
