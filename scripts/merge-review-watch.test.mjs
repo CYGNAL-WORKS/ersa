@@ -50,7 +50,7 @@ test("a pending merge review older than an hour is a run that died, and the head
   assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: undefined })] })], NOW).review, [{ number: 7, head: HEAD }], "a pending status with no time is stale, not reviewed forever");
 });
 
-test("every open pull request not reviewed this tick says why, and a tick with nothing to review logs it", () => {
+test("every open pull request not reviewed this tick says why, and a tick with nothing to review logs it", async () => {
   const prs = [
     pr({ number: 1, isDraft: true }),
     pr({ number: 2, isCrossRepository: true }),
@@ -76,9 +76,9 @@ test("every open pull request not reviewed this tick says why, and a tick with n
   assert.deepEqual(select([pr({ statusCheckRollup: [ci(), { __typename: "CheckRun", name: "Merge review", status: "IN_PROGRESS", conclusion: "", startedAt: ago(1000) }] })], NOW).skip, [{ number: 7, why: "its merge review is running or waits for the gate" }]);
   assert.deepEqual(select([pr({ statusCheckRollup: [ci(), { __typename: "StatusContext", context: "Merge review", startedAt: ago(1000) }] })], NOW).skip, [{ number: 7, why: "its merge review has a status this poller cannot read" }]);
   assert.deepEqual(select([pr()], NOW).skip, [], "a head due for review is not also skipped");
-  assert.deepEqual(drive(["--once"], { prs: prs.slice(2, 4) }).logs, ["nothing to review: #3 (CI is still running: CI); #4 (CI did not pass: CI)"]);
-  assert.deepEqual(drive(["--once"], { prs: [] }).logs, ["nothing to review"]);
-  assert.deepEqual(drive(["--once"], { prs: [pr({ statusCheckRollup: [ci({ name: "a\nb", conclusion: "FAILURE" })] })] }).logs, ["nothing to review: #7 (CI did not pass: a b)"], "a check name cannot break the line");
+  assert.deepEqual((await drive(["--once"], { prs: prs.slice(2, 4) })).logs, ["nothing to review: #3 (CI is still running: CI); #4 (CI did not pass: CI)"]);
+  assert.deepEqual((await drive(["--once"], { prs: [] })).logs, ["nothing to review"]);
+  assert.deepEqual((await drive(["--once"], { prs: [pr({ statusCheckRollup: [ci({ name: "a\nb", conclusion: "FAILURE" })] })] })).logs, ["nothing to review: #7 (CI did not pass: a b)"], "a check name cannot break the line");
 });
 
 test("auto-merge on an unreviewed head is disarmed, reviewed or not yet reviewable; on a reviewed head it is the review's own", () => {
@@ -147,30 +147,39 @@ test("a dead lock another tick replaced between the read and the rename goes bac
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 
 // main() with every tool stood in for: gh lists `prs`, git answers from
-// `git`, the review exits `exit`; `exists` says whether the checkout is there.
-function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list = () => null, lockPath, alive, sleep, now = () => NOW } = {}) {
+// `git`, a review ends with `exit` (or with what `start` resolves to, for a
+// test that holds a review open); `reviews` lists each review started.
+async function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list = () => null, start, lockPath, alive, sleep, now = () => NOW } = {}) {
   const calls = [];
   const logs = [];
+  const reviews = [];
   const ok = (out = "") => ({ ok: true, status: 0, out, err: "" });
-  const run = (cmd, args, cwd, opts) => {
-    calls.push({ cmd, args, cwd, live: opts?.live ?? false });
+  const run = (cmd, args, cwd) => {
+    calls.push({ cmd, args, cwd });
     if (cmd === "gh" && args[1] === "list") return list() ?? ok(JSON.stringify(prs));
     if (cmd === "gh") return ok();
     if (cmd === "git") return { ok: true, status: 0, out: "", err: "", ...git(args, cwd) };
-    if (cmd === "node") {
-      const status = typeof exit === "function" ? exit(args[1]) : exit;
-      return { ok: status === 0, status, out: "", err: "" };
-    }
     throw new Error(`unexpected ${cmd}`);
   };
+  const begin = (n, head, dir, log) => {
+    reviews.push({ n: String(n), head, dir });
+    return start ? start(n, head, dir, log) : Promise.resolve(typeof exit === "function" ? exit(String(n)) : exit);
+  };
   const path = lockPath ?? join(tmp(), `lock-${Math.random().toString(36).slice(2)}`);
-  const got = main(argv, { run, now, log: (l) => logs.push(l), lockPath: path, alive, sleep });
-  return { ...got, calls, logs, lockPath: path, reviews: calls.filter((c) => c.cmd === "node"), gh: calls.filter((c) => c.cmd === "gh").map((c) => c.args.join(" ")) };
+  const got = await main(argv, { run, start: begin, now, log: (l) => logs.push(l), lockPath: path, alive, sleep });
+  return { ...got, calls, logs, reviews, lockPath: path, gh: calls.filter((c) => c.cmd === "gh").map((c) => c.args.join(" ")) };
 }
 
-test("one tick prepares the review checkout at the head, with main's review logic, and runs the review there", () => {
+// A review that ends only when the test says so.
+function held() {
+  let end;
+  const done = new Promise((r) => (end = r));
+  return { done, end };
+}
+
+test("one tick prepares the review checkout at the head, with main's review logic, and runs the review there", async () => {
   const dir = join(tmp(), "review");
-  const got = drive(["--once", "--checkout", dir]);
+  const got = await drive(["--once", "--checkout", dir]);
   assert.equal(got.code, 0, got.stderr);
   const git = got.calls.filter((c) => c.cmd === "git").map((c) => [c.args.join(" "), c.cwd]);
   assert.deepEqual(git, [
@@ -183,42 +192,102 @@ test("one tick prepares the review checkout at the head, with main's review logi
     ["clean -q -ffdx -- :(glob)**/.claude/**", dir],
     ["checkout -q origin/main -- scripts/merge-review.mjs scripts/merge-pr.mjs", dir],
   ]);
-  assert.deepEqual(got.reviews.map((c) => [c.args.join(" "), c.cwd, c.live]), [[`scripts/merge-review.mjs 7 --head ${HEAD}`, dir, true]]);
+  assert.deepEqual(got.reviews, [{ n: "7", head: HEAD, dir }]);
   assert.deepEqual(got.gh, ["pr list --state open --limit 100 --json number,isDraft,isCrossRepository,headRefOid,labels,autoMergeRequest,statusCheckRollup"]);
   assert.match(got.logs.at(-1), /#7 at bbbbbbb: the review exited 0/);
   assert.ok(!existsSync(got.lockPath), "the lock is released");
 });
 
-test("an existing checkout is reused, one head is reviewed per tick, and a review that blocks or fails is reported", () => {
+test("heads are due in the order their CI passed, not the order gh lists them", () => {
+  const passed = (min) => [ci({ startedAt: ago((min + 5) * 60 * 1000), completedAt: ago(min * 60 * 1000) })];
+  // gh lists the newest pull request first; #3's CI passed an hour ago, #9's a minute ago.
+  const prs = [pr({ number: 9, statusCheckRollup: passed(1) }), pr({ number: 5, statusCheckRollup: passed(30) }), pr({ number: 3, statusCheckRollup: passed(60) })];
+  assert.deepEqual(select(prs, NOW).review.map((p) => p.number), [3, 5, 9]);
+  // Its last check to finish says when a head's CI passed.
+  const late = pr({ number: 4, statusCheckRollup: [ci({ completedAt: ago(90 * 60 * 1000) }), ci({ name: "W", completedAt: ago(10 * 60 * 1000) })] });
+  assert.deepEqual(select([late, pr({ number: 6, statusCheckRollup: passed(20) })], NOW).review.map((p) => p.number), [6, 4]);
+  // A check with no time reads as just finished; equal times go by number.
+  assert.deepEqual(select([pr({ number: 2, statusCheckRollup: [ci({ startedAt: undefined })] }), pr({ number: 8, statusCheckRollup: passed(5) }), pr({ number: 1, statusCheckRollup: [ci({ startedAt: undefined })] })], NOW).review.map((p) => p.number), [8, 1, 2]);
+});
+
+test("two heads are reviewed side by side, each in its own slot's checkout, and the rest wait for a free slot", async () => {
   const dir = join(tmp(), "existing");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, ".git"), "gitdir: elsewhere");
-  const got = drive(["--once", "--checkout", dir], { prs: [pr(), pr({ number: 8, headRefOid: "c".repeat(40) })], exit: 1 });
+  const prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) })];
+  const reviews = [held(), held()];
+  let started = 0;
+  const run = drive(["--once", "--checkout", dir], { prs, start: () => reviews[started++].done });
+  // Both reviews are running before either ends.
+  await new Promise((r) => setImmediate(r));
+  assert.equal(started, 2, "the second review starts without waiting for the first");
+  reviews[1].end(1);
+  reviews[0].end(0);
+  const got = await run;
   assert.equal(got.code, 0, got.stderr);
-  assert.ok(!got.calls.some((c) => c.cmd === "git" && c.args[0] === "worktree"));
-  // One review per tick, so a tick ends well within the two hours the task allows; the rest wait for the next.
-  assert.deepEqual(got.reviews.map((c) => c.args[1]), ["7"]);
-  assert.match(got.logs.join("\n"), /#7 at bbbbbbb: reviewing; #8 next\n#7 at bbbbbbb: the review exited 1/);
+  assert.deepEqual(got.reviews.map((r) => [r.n, r.dir]), [["7", dir], ["8", `${dir}-2`]]);
+  // The first slot's checkout is reused; the second slot's is made.
+  assert.deepEqual(got.calls.filter((c) => c.cmd === "git" && c.args[0] === "worktree").map((c) => c.args.join(" ")), ["worktree prune", `worktree add --detach ${dir}-2 origin/main`]);
+  assert.deepEqual(got.logs, ["#7 at bbbbbbb: reviewing; #8, #9 next", "#8 at ccccccc: reviewing; #9 next", "#9 wait for a free slot", "#8 at ccccccc: the review exited 1", "#7 at bbbbbbb: the review exited 0"]);
 });
 
-test("a head whose checkout cannot be prepared gives the tick to the next head; the first review run, whatever its exit, ends the tick", () => {
-  // #7's checkout cannot be prepared; #8's review runs and fails (exit 2, which can come after a whole claude run); #9 waits.
-  const prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) })];
-  const got = drive(["--once", "--checkout", join(tmp(), "r2")], {
+test("with --once the lock is held until every review the tick started has ended", async () => {
+  const review = held();
+  const lockPath = join(tmp(), "once-lock");
+  const run = drive(["--once", "--checkout", join(tmp(), "r9")], { start: () => review.done, lockPath });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(await Promise.race([run, Promise.resolve("running")]), "running", "the tick has not returned while its review runs");
+  assert.ok(existsSync(lockPath), "no other tick can take up the head under review");
+  review.end(0);
+  const got = await run;
+  assert.equal(got.code, 0);
+  assert.ok(!existsSync(lockPath));
+});
+
+test("in a terminal a tick fills a slot whose review ended, and never starts a second review of a pull request under review", async () => {
+  const dir = join(tmp(), "r10");
+  const first = held();
+  const runs = { 7: [first.done, Promise.resolve(0)], 8: [Promise.resolve(0)], 9: [Promise.resolve(0)] };
+  let prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) })];
+  let naps = 0;
+  const got = await drive(["--checkout", dir], {
+    list: () => ({ ok: true, status: 0, out: JSON.stringify(prs), err: "" }),
+    start: (n) => runs[n].shift(),
+    sleep: async () => {
+      naps++;
+      // While #7's review runs, #7 gets a new head and #9 arrives; #8's review has ended.
+      if (naps === 1) prs = [pr({ headRefOid: "e".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) })];
+      if (naps === 2) {
+        prs = [pr({ headRefOid: "e".repeat(40) })];
+        first.end(1);
+      }
+      if (naps === 3) throw new Error("stop");
+      await new Promise((r) => setImmediate(r));
+    },
+  });
+  assert.equal(got.code, 2);
+  // Tick 1: #7 and #8. Tick 2: #8's slot goes to #9; #7, still under review, waits. Tick 3: #7's new head.
+  assert.deepEqual(got.reviews.map((r) => [r.n, r.head.slice(0, 1), r.dir]), [["7", "b", dir], ["8", "c", `${dir}-2`], ["9", "d", `${dir}-2`], ["7", "e", dir]]);
+});
+
+test("a head whose checkout cannot be prepared gives its slot to the next head", async () => {
+  // #7's checkout cannot be prepared; #8 and #9 take the two slots and #10 waits.
+  const prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) }), pr({ number: 10, headRefOid: "e".repeat(40) })];
+  const got = await drive(["--once", "--checkout", join(tmp(), "r2")], {
     prs,
     git: (args) => (args[0] === "fetch" && args.includes("pull/7/head") ? { ok: false, err: "network down" } : {}),
     exit: 2,
   });
   assert.equal(got.code, 0, got.stderr);
-  assert.deepEqual(got.reviews.map((c) => c.args[1]), ["8"]);
-  assert.match(got.logs.join("\n"), /#7 at bbbbbbb: git fetch -q failed: network down\n#8 at ccccccc: reviewing; #9 next\n#8 at ccccccc: the review exited 2$/);
+  assert.deepEqual(got.reviews.map((r) => r.n), ["8", "9"]);
+  assert.match(got.logs.join("\n"), /#7 at bbbbbbb: git fetch -q failed: network down\n#8 at ccccccc: reviewing; #9, #10 next\n#9 at ddddddd: reviewing; #10 next\n#10 wait for a free slot\n/);
 });
 
-test("an hour of heads that cannot start ends the tick, so it stays inside the lock's age", () => {
+test("an hour of heads that cannot start ends the tick, so it stays inside the lock's age", async () => {
   // Each failing prepare takes 25 minutes of the clock; the fourth head finds the hour gone.
   let t = NOW;
   const prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) }), pr({ number: 10, headRefOid: "e".repeat(40) })];
-  const got = drive(["--once", "--checkout", join(tmp(), "r7")], {
+  const got = await drive(["--once", "--checkout", join(tmp(), "r7")], {
     prs,
     git: (args) => (args[0] === "fetch" ? ((t += 25 * 60 * 1000), { ok: false, err: "timed out" }) : {}),
     now: () => t,
@@ -229,50 +298,50 @@ test("an hour of heads that cannot start ends the tick, so it stays inside the l
   assert.match(got.logs.at(-1), /^the tick is an hour old; #10 wait for the next$/);
 });
 
-test("auto-merge on an unreviewed head is disabled before anything else", () => {
-  const got = drive(["--once", "--checkout", join(tmp(), "r3")], { prs: [pr({ autoMergeRequest: { enabledAt: "x" }, statusCheckRollup: [ci({ status: "IN_PROGRESS", conclusion: "" })] })] });
+test("auto-merge on an unreviewed head is disabled before anything else", async () => {
+  const got = await drive(["--once", "--checkout", join(tmp(), "r3")], { prs: [pr({ autoMergeRequest: { enabledAt: "x" }, statusCheckRollup: [ci({ status: "IN_PROGRESS", conclusion: "" })] })] });
   assert.deepEqual(got.gh.slice(1), ["pr merge 7 --disable-auto"]);
   assert.equal(got.reviews.length, 0);
   assert.match(got.logs[0], /#7: auto-merge was on for an unreviewed or held head; disabled it/);
 });
 
-test("two overlapping ticks: the second finds the lock held and does nothing", () => {
+test("two overlapping ticks: the second finds the lock held and does nothing", async () => {
   const path = join(tmp(), "shared-lock");
   writeFileSync(path, "4242");
-  const got = drive(["--once", "--checkout", join(tmp(), "r4")], { lockPath: path, alive: (pid) => pid === 4242 });
+  const got = await drive(["--once", "--checkout", join(tmp(), "r4")], { lockPath: path, alive: (pid) => pid === 4242 });
   assert.equal(got.code, 0);
   assert.match(got.stdout, /another tick holds .*shared-lock; nothing to do/);
   assert.equal(got.calls.length, 0, "no gh, git or review ran");
   assert.equal(readFileSync(path, "utf8"), "4242", "the other tick's lock is untouched");
 });
 
-test("without --once the poller ticks, waits five minutes, and ticks again, through a tool that is down for one tick; stopped, it releases the lock", () => {
+test("without --once the poller ticks, waits five minutes, and ticks again, through a tool that is down for one tick; stopped, it releases the lock", async () => {
   const waits = [];
   const stop = new Error("stop");
   let lists = 0;
-  const got = drive(["--checkout", join(tmp(), "r5")], {
+  const got = await drive(["--checkout", join(tmp(), "r5")], {
     // gh is down on the second tick only.
     list: () => (++lists === 2 ? { ok: false, status: 1, out: "", err: "gh: connection reset" } : null),
-    sleep: (ms) => {
+    sleep: async (ms) => {
       waits.push(ms);
       if (waits.length === 3) throw stop;
     },
   });
   assert.equal(got.code, 2);
   assert.deepEqual(waits, [INTERVAL_MS, INTERVAL_MS, INTERVAL_MS]);
-  assert.equal(got.reviews.length, 2, "one review per tick, none on the tick gh was down");
+  assert.equal(got.reviews.length, 2, "a review on the first and third ticks, none on the tick gh was down");
   assert.match(got.logs.join("\n"), /gh pr list failed: gh: connection reset/);
   assert.ok(!existsSync(got.lockPath));
   assert.equal(INTERVAL_MS, 5 * 60 * 1000);
 });
 
-test("a loop whose lock was taken over stops rather than run beside the new tick, and leaves that tick's lock alone", () => {
+test("a loop whose lock was taken over stops rather than run beside the new tick, and leaves that tick's lock alone", async () => {
   const path = join(tmp(), "taken-lock");
   let naps = 0;
-  const got = drive(["--checkout", join(tmp(), "r8")], {
+  const got = await drive(["--checkout", join(tmp(), "r8")], {
     lockPath: path,
     // Another tick took the lock over while this loop slept; a loop that sleeps again did not notice.
-    sleep: () => {
+    sleep: async () => {
       if (++naps > 1) throw new Error("the loop went on beside the other tick");
       writeFileSync(path, "999");
     },
@@ -284,16 +353,16 @@ test("a loop whose lock was taken over stops rather than run beside the new tick
   rmSync(path);
 });
 
-test("with --once a tool that is down ends the tick with exit 2", () => {
-  const got = drive(["--once", "--checkout", join(tmp(), "r6")], { list: () => ({ ok: false, status: 1, out: "", err: "gh: connection reset" }) });
+test("with --once a tool that is down ends the tick with exit 2", async () => {
+  const got = await drive(["--once", "--checkout", join(tmp(), "r6")], { list: () => ({ ok: false, status: 1, out: "", err: "gh: connection reset" }) });
   assert.equal(got.code, 2);
   assert.match(got.stderr, /gh pr list failed: gh: connection reset/);
   assert.ok(!existsSync(got.lockPath));
 });
 
-test("a usage error exits 2 before anything runs", () => {
+test("a usage error exits 2 before anything runs", async () => {
   for (const argv of [["--twice"], ["--checkout"], ["--once", "extra"]]) {
-    const got = drive(argv);
+    const got = await drive(argv);
     assert.equal(got.code, 2, argv.join(" "));
     assert.match(got.stderr, /usage/);
     assert.equal(got.calls.length, 0);
