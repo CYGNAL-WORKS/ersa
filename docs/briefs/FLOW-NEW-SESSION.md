@@ -42,7 +42,7 @@ The project chip on the new-session screen is the only place a project is added;
 - **FLOW-NEW-SESSION-R21**: When a git project has a new workspace chosen, the workspace chip shall offer the project's local branches as the base branch, with a search box that narrows them, and shall start at the repository's default branch for every new session, or, when the repository has none, at the checked-out commit; R04 shall create the workspace from the chosen base branch.
 - **FLOW-NEW-SESSION-R22**: The workspace chip shall name the workspace a session will start in: a new workspace with its base branch, or the project folder.
 - **FLOW-NEW-SESSION-R23**: While the backends on the chosen host are being detected, the new-session screen shall say so above the composer, and the composer shall be unavailable until detection ends.
-- **FLOW-NEW-SESSION-R28**: While a git project's branches are being read, the workspace chip shall say so in place of the branches; when they cannot be read, it shall say so and that the new workspace will start at the default branch, and R04 shall create the workspace from the default branch Core finds.
+- **FLOW-NEW-SESSION-R28**: While a git project's branches are being read, the workspace chip shall say so in place of the branches; when they cannot be read, it shall say so and that the new workspace will start at the default branch. In both cases the chip shall name a new workspace without a base branch, in place of R22's name, and R04 shall create the workspace from the default branch Core finds.
 
 ## Verification
 

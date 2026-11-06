@@ -86,7 +86,7 @@ size:
   measure: 720px
   # The widest a chip's list grows; longer text in it is cut with an ellipsis.
   menu: 360px
-  # The height past which a chip's list of branches scrolls: eight options of `control`.
+  # The height past which a chip's list scrolls: eight options of `control`.
   list-max: 224px
   # The widest a user's message bubble grows, as a share of the reading column.
   bubble-max: 80%
