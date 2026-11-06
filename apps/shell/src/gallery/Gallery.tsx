@@ -384,12 +384,13 @@ const shelfTiles: Session[] = [
 
 interface ShelfMore {
   short?: boolean;
+  focus?: boolean;
   answer?: Answer;
   live?: boolean;
 }
 
 function ShelfOpen({ shows, more = {} }: { shows: ShelfShows; more?: ShelfMore }) {
-  const { short, answer, live = true } = more;
+  const { short, answer, live = true, focus } = more;
   // The open tile waits on what its shelf shows: a question's tile says it has one.
   const listed = shelfTiles[1] as Session;
   const open: Session =
@@ -407,7 +408,7 @@ function ShelfOpen({ shows, more = {} }: { shows: ShelfShows; more?: ShelfMore }
             id: open.id,
             tone: shelfTone(shows),
             render: (domId) => (
-              <Shelf id={domId} tile={tile} shows={shows} onRetry={() => {}} answers={answer && { [shelfRequest.request_id]: answer }} live={live} onDecide={() => {}} />
+              <Shelf id={domId} tile={tile} shows={shows} onRetry={() => {}} answers={answer && { [shelfRequest.request_id]: answer }} live={live} onDecide={() => {}} force={focus ? "focus" : undefined} />
             ),
           }}
         />
@@ -440,6 +441,7 @@ const shelfStates: [string, ShelfShows, more?: ShelfMore][] = [
   ["A request Ersa can't show", { state: "unknown" }],
   // A request whose flags didn't arrive: the boundary check stops these, and the shelf's own boundary is the last guard.
   ["A request that can't be drawn", { state: "permission", request: { ...shelfRequest, flags: undefined as never } }],
+  ["Keyboard focus on the shelf itself", { state: "permission", request: shelfRequest }, { focus: true }],
   ["An answer on its way", { state: "permission", request: shelfRequest }, { answer: { state: "sending", decision: "allow" } }],
   ["An answer refused", { state: "permission", request: shelfRequest }, { answer: { state: "failed", message: "the session has ended" } }],
   ["While Ersa reconnects", { state: "permission", request: shelfRequest }, { live: false }],

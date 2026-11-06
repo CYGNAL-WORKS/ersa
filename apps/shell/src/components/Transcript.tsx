@@ -212,7 +212,8 @@ function PermissionCard({
   const name = request.display_name ?? request.tool_name;
   const open = isOpen(item);
   return (
-    <section className="transcript-card transcript-permission" data-open={open || undefined} aria-label={`Permission: ${name}`}>
+    // Focusable outside the tab order, so focus moves to the card as an answer makes its answers unavailable.
+    <section tabIndex={-1} className="transcript-card transcript-permission" data-open={open || undefined} aria-label={`Permission: ${name}`}>
       <div className="transcript-card-head">
         <span className="transcript-card-title">
           {open ? "Allow " : ""}

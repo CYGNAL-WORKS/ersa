@@ -286,8 +286,11 @@
   border-right-color: transparent;
 }
 
-/* Keyboard focus on the open tile shows as on any tile: its edge turns ink. */
-.session-item[data-shelf] > .session:focus-visible {
+/* Keyboard focus on the open tile shows as on any tile: its edge turns ink; so does focus on its shelf itself, since
+   the two are one shape. */
+.session-item[data-shelf] > .session:focus-visible,
+.session-item[data-shelf]:has(> .shelf-layer > .shelf:focus-visible) > .session,
+.session-item[data-shelf]:has(> .shelf-layer > .shelf[data-force="focus"]) > .session {
   border-color: var(--color-ink);
   border-right-color: transparent;
 }

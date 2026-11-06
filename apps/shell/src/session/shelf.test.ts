@@ -66,6 +66,13 @@ describe("which shelf is open", () => {
     expect(shelfAfter(undefined, { type: "chevron", id: "a", activeId: "active" })).toBe("a");
   });
 
+  // verifies: FLOW-APPROVE-PERMISSION-R06
+  it("closes the shelf it names, and leaves another that opened meanwhile", () => {
+    expect(shelfAfter("a", { type: "close", id: "a" })).toBeUndefined();
+    expect(shelfAfter("b", { type: "close", id: "a" })).toBe("b");
+    expect(shelfAfter(undefined, { type: "close", id: "a" })).toBeUndefined();
+  });
+
   // verifies: FLOW-APPROVE-PERMISSION-R02
   it("never opens a shelf when a request arrives", () => {
     const arrived = [session("a", [["permission", "r1"], ["question", "r9"]]), session("b", [["permission", "r2"]])];

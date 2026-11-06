@@ -22,6 +22,8 @@ interface ShelfProps {
   live: boolean;
   /** Answers the shown permission request (R13). */
   onDecide: (requestId: string, decision: Decision) => void;
+  /** For the gallery: show keyboard focus on the shelf itself without it. */
+  force?: "focus";
 }
 
 /**
@@ -30,9 +32,11 @@ interface ShelfProps {
  * kind, what is asked, its details, the session's readouts, then the answers (R23). `shelfOf` decides what it
  * shows; this only lays it out.
  */
-export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide }: ShelfProps) {
+export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, force }: ShelfProps) {
   return (
-    <div id={id} className="shelf" role="dialog" aria-label={t("rail.shelf.nameLabel", { title: tile.title })} data-tone={shelfTone(shows)}>
+    // Focusable, though not in the tab order, so focus can move to the shelf itself: as it opens (R05), and as an
+    // answer makes the answers unavailable.
+    <div id={id} className="shelf" role="dialog" tabIndex={-1} data-force={force} aria-label={t("rail.shelf.nameLabel", { title: tile.title })} data-tone={shelfTone(shows)}>
       {/* A request it can't draw is said here, in the shelf, and leaves the rail as it was. */}
       <ErrorBoundary what={t("rail.shelf.boundaryName")} resetKey={shownKey(shows)}>
         <Contents shows={shows} ring={tile.ring} cost={tile.cost} onRetry={onRetry} answers={answers} live={live} onDecide={onDecide} />
