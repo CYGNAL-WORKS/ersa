@@ -95,6 +95,16 @@
   border-color: var(--color-accent);
 }
 
+/* An answered permission card holds focus while its answer is on its way; keyboard focus shows as an ink edge,
+   over the open card's accent. */
+.transcript-permission:focus {
+  outline: none;
+}
+
+.transcript-permission:focus-visible {
+  border-color: var(--color-ink);
+}
+
 .transcript-card-head {
   display: flex;
   align-items: baseline;

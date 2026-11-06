@@ -12,18 +12,21 @@ import { Composer } from "../components/Composer";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { Icon, IconButton } from "../components/Icon";
 import { NewSessionScreen } from "../components/NewSessionScreen";
-import { ProjectList } from "../components/ProjectList";
 import { QuitQuestion } from "../components/QuitQuestion";
 import { RailFoot } from "../components/RailFoot";
+import { RailTree } from "../components/RailTree";
 import { SessionControls } from "../components/SessionControls";
-import { SessionList } from "../components/SessionList";
+import { Shelf } from "../components/Shelf";
 import { SessionTitle } from "../components/SessionTitle";
 import { Transcript } from "../components/Transcript";
 import type { CoreView } from "../core/connection";
 import type { Envelope, Event } from "../protocol/agent-events.gen";
 import type { CoreHelloResult, Project, Session } from "../protocol/core-api.gen";
+import type { Answer } from "../session/answers";
 import type { BackendChoices, Choice } from "../session/controls";
 import type { SessionView } from "../session/follow";
+import { type ShelfShows, shelfTone } from "../session/shelf";
+import { tileOf } from "../session/tile";
 import { EVENT_VERSION, apply, emptyTranscript } from "../session/transcript";
 import "./Gallery.css";
 
@@ -166,12 +169,36 @@ const pointerPair: Session[] = [
   session("p2", "The one in question", "2026-11-01T09:00:00Z", { state: "running", pending: [], cost_usd_total: 0.82, ...ring }),
 ];
 
-/** The same sessions in two workspaces of one project, as the rail shows them once it knows the workspaces. */
-const byWorkspaceSessions = sessions.map((s) => ({ ...s, workspace_id: s.id === "s1" || s.id === "s3" ? "w-root" : "w-fix" }));
-const workspaceNames = {
-  "w-root": { project: "ersa", name: "Root workspace" },
-  "w-fix": { project: "ersa", name: "ersa/fix-reconnect" },
+/** The rail's tree: ersa here with its sessions, a project on another machine with two, and two without any. */
+const treeProjects: Project[] = [
+  projects[0]!,
+  { id: "p5", host_id: "devbox", path: "/home/me/runner", name: "runner", vcs: "git", trusted: true },
+  projects[1]!,
+  projects[3]!,
+];
+const treeWorkspaces = { w1: { project_id: "p1" }, "w-dev": { project_id: "p5" } };
+const treeSessions = sessions.map((s) => (s.id === "s4" || s.id === "s5" ? { ...s, workspace_id: "w-dev" } : s));
+const tree: Parameters<typeof RailTree>[0] = {
+  projects: { state: "ready", projects: treeProjects },
+  sessions: { state: "ready", sessions: treeSessions },
+  workspaces: treeWorkspaces,
+  activeId: "s2",
+  onSelect: () => {},
+  // The last call a heading made, kept on the page where the gallery test reads it; nothing shows it.
+  onNewSession: (project) => (document.body.dataset.railCall = `newSession ${project.id}`),
+  onSetTrust: (project, trusted) => (document.body.dataset.railCall = `setTrust ${project.id} ${trusted}`),
+  localHost: "local",
+  hostNames: { local: "WORKSTATION", devbox: "devbox" },
 };
+/** One project, for the states of a heading and its tiles. */
+const ersaOnly: Parameters<typeof RailTree>[0] = {
+  ...tree,
+  projects: { state: "ready", projects: [projects[0]!] },
+  sessions: { state: "ready", sessions: treeSessions.filter((s) => s.workspace_id === "w1") },
+};
+const strangerOnly: Parameters<typeof RailTree>[0] = { ...tree, projects: { state: "ready", projects: [projects[3]!] }, sessions: { state: "ready", sessions: [] } };
+/** A resting tile above each forced one, so the two read apart in the screenshot. */
+const pairOnly: Parameters<typeof RailTree>[0] = { ...ersaOnly, sessions: { state: "ready", sessions: pointerPair }, activeId: undefined };
 
 /** A transcript built the way the window builds one: by applying events. */
 function transcriptOf(events: Event[]) {
@@ -271,20 +298,19 @@ const sessionView = (events: Event[], more: Partial<SessionView> = {}): SessionV
   id: "s1",
   transcript: transcriptOf(events),
   stream: { state: "live" },
-  answers: {},
   ...more,
 });
 
 // What the user sees of Core's refusal: its message without the method name (describeError).
 const refusal = "the session is a replay of a recording and cannot change";
 
-const transcriptStates: [string, SessionView][] = [
+const transcriptStates: [string, SessionView, answers?: Record<string, Answer>][] = [
   ["Loading", sessionView([], { stream: { state: "subscribing" } })],
   ["Empty", sessionView([])],
   ["Streaming", sessionView(streaming)],
   ["Permission open", sessionView(asked)],
-  ["Permission sending", sessionView(asked, { answers: { r1: { state: "sending" } } })],
-  ["Permission refused", sessionView(asked, { answers: { r1: { state: "failed", message: refusal } } })],
+  ["Permission sending", sessionView(asked), { r1: { state: "sending", decision: "allow" } }],
+  ["Permission refused", sessionView(asked), { r1: { state: "failed", message: refusal } }],
   ["Permission while Core is away", sessionView(asked, { stream: { state: "offline" } })],
   ["Hidden characters", sessionView(hiding)],
   ["Answered", sessionView(answered)],
@@ -367,6 +393,88 @@ const projectChip = {
   initialOpen: true,
 };
 
+/** Three tiles in a rail with the middle one's shelf open beside it, over a strip of the stage, as the window shows it. */
+const shelfTiles: Session[] = [
+  session("h1", "Tidy the gallery", "2026-11-01T10:00:00Z", { state: "running", pending: [], cost_usd_total: 0.19, ...ring }),
+  session("h2", "Fix the flaky reconnect test", "2026-11-01T09:00:00Z", {
+    state: "waiting_user",
+    pending: [{ kind: "permission", request_id: "r1" }],
+    cost_usd_total: 0.82,
+    context_tokens: 106_000,
+    context_window: 200_000,
+  }),
+  session("h3", "Explain the raw log", "2026-11-01T08:00:00Z", { state: "idle", pending: [], cost_usd_total: 12.4, ...ring }),
+];
+
+interface ShelfMore {
+  short?: boolean;
+  focus?: boolean;
+  answer?: Answer;
+  live?: boolean;
+}
+
+function ShelfOpen({ shows, more = {} }: { shows: ShelfShows; more?: ShelfMore }) {
+  const { short, answer, live = true, focus } = more;
+  // The open tile waits on what its shelf shows: a question's tile says it has one.
+  const listed = shelfTiles[1] as Session;
+  const open: Session =
+    shows.state === "question" ? { ...listed, tile: { ...listed.tile, pending: [{ kind: "question", request_id: shows.requestId }] } } : listed;
+  const tiles = [shelfTiles[0] as Session, open, shelfTiles[2] as Session];
+  const tile = tileOf(open);
+  return (
+    <div className="gallery-shelf" data-short={short || undefined}>
+      <div className="gallery-shelf-rail">
+        <RailTree
+          projects={{ state: "ready", projects: [projects[0]!] }}
+          sessions={{ state: "ready", sessions: tiles }}
+          workspaces={{ w1: { project_id: "p1" } }}
+          activeId="h1"
+          onSelect={() => {}}
+          shelf={{
+            id: open.id,
+            tone: shelfTone(shows),
+            render: (domId) => (
+              <Shelf id={domId} tile={tile} shows={shows} onRetry={() => {}} answers={answer && { [shelfRequest.request_id]: answer }} live={live} onDecide={() => {}} force={focus ? "focus" : undefined} />
+            ),
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+const shelfRequest = asked.find((e) => e.type === "permission.requested") as Extract<Event, { type: "permission.requested" }>;
+const longCommand = Array.from({ length: 14 }, (_, i) => `cargo test -p ersa-core --test reconnect_${i + 1} -- --nocapture`).join(" &&\n");
+const shelfStates: [string, ShelfShows, more?: ShelfMore][] = [
+  ["A permission request", { state: "permission", request: shelfRequest }],
+  [
+    "With a suggestion, one of three",
+    {
+      state: "permission",
+      request: {
+        ...shelfRequest,
+        suggestions: [{ kind: "allow_rule", label: "Allow echo commands in this project for the rest of the session", payload: {} }],
+        reason: { kind: "rule", text: "Writing outside the workspace needs approval." },
+      },
+      place: { n: 1, m: 3 },
+    },
+  ],
+  ["The last of three, still counted", { state: "permission", request: { ...shelfRequest, description: "Run the reconnect tests again" }, place: { n: 3, m: 3 } }],
+  ["Defaulting to no", { state: "permission", request: { ...shelfRequest, blocked_path: undefined, flags: { ...flags, default_to_no: true } } }],
+  ["A long input, which scrolls", { state: "permission", request: { ...shelfRequest, description: "Run every reconnect test", input: { command: longCommand } } }],
+  ["A question", { state: "question", requestId: "q1", questions: [{ id: "a", text: "Should the reconnect test retry on Windows only, or everywhere?", multi_select: false }] }],
+  ["Loading", { state: "loading" }],
+  ["Reading failed", { state: "failed", message: "the session's events could not be read" }],
+  ["A request Ersa can't show", { state: "unknown" }],
+  // A request whose flags didn't arrive: the boundary check stops these, and the shelf's own boundary is the last guard.
+  ["A request that can't be drawn", { state: "permission", request: { ...shelfRequest, flags: undefined as never } }],
+  ["Keyboard focus on the shelf itself", { state: "permission", request: shelfRequest }, { focus: true }],
+  ["An answer on its way", { state: "permission", request: shelfRequest }, { answer: { state: "sending", decision: "allow" } }],
+  ["An answer refused", { state: "permission", request: shelfRequest }, { answer: { state: "failed", message: "the session has ended" } }],
+  ["While Ersa reconnects", { state: "permission", request: shelfRequest }, { live: false }],
+  ["Risen to fit a short window", { state: "permission", request: shelfRequest }, { short: true }],
+];
+
 /** Throws while rendering, as a component given data it cannot read would. */
 function Unreadable(): never {
   throw new Error("Cannot read properties of undefined (reading 'toFixed')");
@@ -377,6 +485,8 @@ interface Entry {
   states: [string, ReactNode][];
   /** Shown one state per row, at the stage's width, rather than in rail-width columns. */
   wide?: boolean;
+  /** Shown on the rail's own material. */
+  rail?: boolean;
 }
 
 const entries: Entry[] = [
@@ -404,92 +514,53 @@ const entries: Entry[] = [
     ],
   },
   {
-    name: "ProjectList",
+    name: "RailTree",
+    rail: true,
     states: [
-      ["Loading", <ProjectList view={{ state: "loading" }} />],
-      ["Empty", <ProjectList view={{ state: "ready", projects: [] }} />],
-      ["Projects", <ProjectList view={{ state: "ready", projects }} />],
-      ["Error", <ProjectList view={{ state: "error", message: "Core could not read its database." }} />],
-      ["Core unavailable", <ProjectList view={{ state: "unavailable" }} />],
-      ["New session", <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} />],
-      ["Trust controls", <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} onSetTrust={() => {}} />],
-      [
-        "Asking to trust",
-        <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} onSetTrust={() => {}} initialAsking="p4" />,
-      ],
-      [
-        "Changing trust",
-        <ProjectList
-          view={{ state: "ready", projects }}
-          onNewSession={() => {}}
-          onSetTrust={() => {}}
-          trusting={{ p1: { state: "sending" }, p4: { state: "sending" } }}
-        />,
-      ],
+      ["Loading", <RailTree {...tree} projects={{ state: "loading" }} sessions={{ state: "loading" }} />],
+      ["No projects", <RailTree {...tree} projects={{ state: "ready", projects: [] }} sessions={{ state: "ready", sessions: [] }} />],
+      ["Projects", <RailTree {...tree} />],
+      ["A session with no project", <RailTree {...ersaOnly} sessions={{ state: "ready", sessions: treeSessions }} />],
+      ["Projects not read", <RailTree {...tree} projects={{ state: "error", message: "the database is locked" }} />],
+      ["Sessions not read", <RailTree {...tree} sessions={{ state: "error", message: "the database is locked" }} />],
+      ["Workspaces not read", <RailTree {...tree} workspaces={{ w1: { project_id: "p1" } }} workspaceErrors={{ p5: "the host devbox did not answer" }} />],
+      ["Can't reach the sessions", <RailTree {...tree} projects={{ state: "unavailable" }} sessions={{ state: "unavailable" }} />],
+      ["Heading, pointer over it", <RailTree {...ersaOnly} forceHeading={{ id: "p1", state: "hover" }} />],
+      ["Heading, pressed", <RailTree {...ersaOnly} forceHeading={{ id: "p1", state: "pressed" }} />],
+      ["Heading, keyboard focus", <RailTree {...ersaOnly} forceHeading={{ id: "p1", state: "focus" }} />],
+      ["More, trusted", room(<RailTree {...ersaOnly} initialMenu="p1" />)],
+      ["More, while trust is saved", room(<RailTree {...ersaOnly} initialMenu="p1" trusting={{ p1: { state: "sending" } }} />)],
+      ["More, not trusted", room(<RailTree {...strangerOnly} initialMenu="p4" />)],
+      ["Asking to trust", <RailTree {...strangerOnly} initialAsking="p4" />],
+      ["Saving trust", <RailTree {...ersaOnly} trusting={{ p1: { state: "sending" } }} />],
       [
         "Trust withdrawn, sessions running",
-        <ProjectList
-          view={{ state: "ready", projects: projects.map((p) => (p.id === "p1" ? { ...p, trusted: false } : p)) }}
-          onNewSession={() => {}}
-          onSetTrust={() => {}}
-          notes={{ p1: "Running sessions keep their current settings until they are stopped." }}
-        />,
+        <RailTree {...ersaOnly} projects={{ state: "ready", projects: [{ ...projects[0]!, trusted: false }] }} keepingTrust={["p1"]} />,
       ],
-      [
-        "Trust refused",
-        <ProjectList
-          view={{ state: "ready", projects }}
-          onNewSession={() => {}}
-          onSetTrust={() => {}}
-          trusting={{ p4: { state: "failed", message: "no project p4" } }}
-        />,
-      ],
+      ["Trust refused", <RailTree {...ersaOnly} trusting={{ p1: { state: "failed", message: "no project p1" } }} />],
+      ["Every tile state", <RailTree {...ersaOnly} sessions={{ state: "ready", sessions: everyState }} activeId={undefined} />],
+      ["Tile, pointer over it", <RailTree {...pairOnly} force={{ id: "p2", state: "hover" }} />],
+      ["Tile, pressed", <RailTree {...pairOnly} force={{ id: "p2", state: "pressed" }} />],
+      ["Tile, keyboard focus", <RailTree {...pairOnly} force={{ id: "p2", state: "focus" }} />],
+      // p1 finished a turn while p2 was active: its title reads strong until it is opened.
+      ["Unseen", <RailTree {...pairOnly} activeId="p2" unseen={new Set(["p1"])} />],
+      ["Active tile", <RailTree {...pairOnly} activeId="p2" />],
+      ["Active tile, pointer over it", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "hover" }} />],
+      ["Active tile, pressed", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "pressed" }} />],
+      ["Active tile, keyboard focus", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "focus" }} />],
     ],
   },
   {
-    name: "SessionList",
-    states: [
-      ["Loading", <SessionList view={{ state: "loading" }} onSelect={() => {}} />],
-      ["Empty", <SessionList view={{ state: "ready", sessions: [] }} onSelect={() => {}} />],
-      ["Sessions", <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} />],
-      [
-        "By workspace",
-        <SessionList view={{ state: "ready", sessions: byWorkspaceSessions }} activeId="s2" onSelect={() => {}} workspaces={workspaceNames} />,
-      ],
-      [
-        "By workspace, names still being read",
-        <SessionList view={{ state: "ready", sessions: byWorkspaceSessions }} activeId="s2" onSelect={() => {}} workspaces={{}} />,
-      ],
-      ["Every state", <SessionList view={{ state: "ready", sessions: everyState }} onSelect={() => {}} />],
-      // A resting tile above each forced one, so the two read apart in the screenshot.
-      ["Hover", <SessionList view={{ state: "ready", sessions: pointerPair }} onSelect={() => {}} force={{ id: "p2", state: "hover" }} />],
-      ["Pressed", <SessionList view={{ state: "ready", sessions: pointerPair }} onSelect={() => {}} force={{ id: "p2", state: "pressed" }} />],
-      ["Focus", <SessionList view={{ state: "ready", sessions: pointerPair }} onSelect={() => {}} force={{ id: "p2", state: "focus" }} />],
-      // p1 finished a turn while p2 was active: its title reads strong until it is opened.
-      ["Unseen", <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} unseen={new Set(["p1"])} />],
-      ["Active", <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} />],
-      [
-        "Active, under the pointer",
-        <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} force={{ id: "p2", state: "hover" }} />,
-      ],
-      [
-        "Active, pressed",
-        <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} force={{ id: "p2", state: "pressed" }} />,
-      ],
-      [
-        "Active, focused",
-        <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} force={{ id: "p2", state: "focus" }} />,
-      ],
-      ["Error", <SessionList view={{ state: "error", message: "Core could not read its database." }} onSelect={() => {}} />],
-      ["Core unavailable", <SessionList view={{ state: "unavailable" }} onSelect={() => {}} />],
-    ],
+    name: "Shelf",
+    wide: true,
+    states: shelfStates.map(([label, shows, more]) => [label, <ShelfOpen shows={shows} more={more} />]),
   },
   {
     name: "Transcript",
     wide: true,
-    states: transcriptStates.map(([label, view]) => [
+    states: transcriptStates.map(([label, view, answers]) => [
       label,
-      <Transcript title="Fix the flaky reconnect test" view={view} onDecide={() => {}} onRetry={() => {}} />,
+      <Transcript title="Fix the flaky reconnect test" view={view} answers={answers} onDecide={() => {}} onRetry={() => {}} />,
     ]),
   },
   {
@@ -700,7 +771,7 @@ export function Gallery({ only = {} }: { only?: GalleryFilter }) {
                 <h2 className="gallery-name">{entry.name}</h2>
                 <span className="gallery-theme-name">{theme}</span>
               </div>
-              <div className={entry.wide ? "gallery-states gallery-states-wide" : "gallery-states"}>
+              <div className={["gallery-states", entry.wide && "gallery-states-wide", entry.rail && "gallery-states-rail"].filter(Boolean).join(" ")}>
                 {entry.states.map(([label, node]) => (
                   <figure key={label} className="gallery-state">
                     <figcaption className="gallery-label">{label}</figcaption>
