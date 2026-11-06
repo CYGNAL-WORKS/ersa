@@ -19,6 +19,8 @@ interface SessionListProps {
   workspaces?: Readonly<Record<string, WorkspaceName>>;
   /** Each host's backends, to name a tile's backend by its own name; until they are read, it is named by its id. */
   backends?: Backends;
+  /** The unseen sessions' ids (LAY-SHELL, Unseen): their titles read strong until they are made active. */
+  unseen?: ReadonlySet<string>;
 }
 
 /** What the rail calls a workspace: its project, and the branch or "Root workspace". */
@@ -30,10 +32,10 @@ export interface WorkspaceName {
 }
 
 /** The sessions Core runs, as tiles: newest first, the active one quietly highlighted. */
-export function SessionList({ view, activeId, onSelect, force, workspaces, backends }: SessionListProps) {
+export function SessionList({ view, activeId, onSelect, force, workspaces, backends, unseen }: SessionListProps) {
   const tile = (s: Session) => (
     <li key={s.id}>
-      <SessionTile session={s} backends={backends} active={s.id === activeId} force={force?.id === s.id ? force.state : undefined} onSelect={onSelect} />
+      <SessionTile session={s} backends={backends} active={s.id === activeId} unseen={unseen?.has(s.id) ?? false} force={force?.id === s.id ? force.state : undefined} onSelect={onSelect} />
     </li>
   );
   return (
@@ -94,12 +96,14 @@ function SessionTile({
   session,
   backends,
   active,
+  unseen,
   force,
   onSelect,
 }: {
   session: Session;
   backends?: Backends;
   active: boolean;
+  unseen: boolean;
   force?: ForcedTile["state"];
   onSelect: (id: string) => void;
 }) {
@@ -111,7 +115,7 @@ function SessionTile({
       <span className="session-backend" role="img" aria-label={view.backend}>
         <Icon icon={Bot} size="icon-sm" />
       </span>
-      <span className="session-title" data-muted={view.titleMuted || undefined}>
+      <span className="session-title" data-muted={(view.titleMuted && !unseen) || undefined} data-unseen={unseen || undefined}>
         {view.title}
       </span>
       <span className="session-mark">
