@@ -30,9 +30,8 @@
 // Each review runs in its own checkout, a detached worktree of this repository
 // at <dir> (by default a sibling folder named after this one with "-review"
 // appended), reset to the head with the review script and the gate taken from
-// main, and every file under a .claude folder
-// removed, ignored ones included; the review script takes the hooks and the
-// instruction files from main itself. The review runs the pull request's own
+// main, and every file under a .claude folder removed, ignored ones included;
+// the review script takes the hooks and the instruction files from main itself. The review runs the pull request's own
 // tests as the owner, with the owner's gh login in the environment: that is
 // what "never a fork" protects, and why the repository's default workflow
 // token stays read-only, so a pull request's own workflow cannot post the
