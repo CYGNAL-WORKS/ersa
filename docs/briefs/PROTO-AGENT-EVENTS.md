@@ -67,8 +67,8 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 
 ### Question
 
-- `question.asked`: `request_id`, `questions` (array of `{ id, text, header (optional short label), options (optional array of { id, label, description (optional) }), multi_select (boolean), takes_text (boolean: the user may answer in their own words beside the options) }`).
-- `question.answered`: `request_id`, `answers` (array of `{ id, value (optional), text (optional) }`, where `value` is a string for free text to a question without options or a single option id, or an array of option ids for multi-select, and `text` is the user's own words to a question that takes them beside its options), `answered_by` one of `user`, `timeout`.
+- `question.asked`: `request_id`, `questions` (array of `{ id, text, header (optional short label), options (optional array of { id, label, description (optional) }), multi_select (boolean), takes_text (boolean: the user may answer in their own words beside the options) }`). Each question's `id` is unique within the request.
+- `question.answered`: `request_id`, `answers` (array of `{ id, value, own_words (boolean) }`, one per question, where `value` is the user's own words when `own_words` is true, and otherwise a single option id, or an array of option ids for multi-select; empty when the backend withdrew the question), `answered_by` one of `user`, `timeout`, `backend` (the backend withdrew the question, after an interrupt say).
 
 ### Usage
 
@@ -88,7 +88,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 - A record entry carrying a user's message projects to `user.message` with origin `human` unless the backend wrote it, in which case its origin is `system` and it is never a session's title. For Claude Code the CLI wrote it when the entry has `isMeta` or `isCompactSummary`, an `origin.kind` other than `human`, or text in the CLI's own markup: slash-command and local-command tags, bash input, task notifications, and the interrupted-request marker.
 - When a session is opened, Core projects its record, then appends events projected from the live stream. A message present in both, identified by the backend's message id, yields its events once.
 - Core's lifecycle facts (process started, start failed, process exited with its code and whether the user stopped it, Core restarted while the session was live, which ends it with reason `error`) reach the session only as the `session.state` and `session.ended` events Core emits; Core also writes them to the app log. They are never part of the session record.
-- The raw log holds the live lines in both directions, each tagged: `backend` (what the backend emitted) and `host` (what Ersa wrote to it). Host lines project too (a user message to `user.message`, a permission answer to `permission.decided`).
+- The raw log holds the live lines in both directions, each tagged: `backend` (what the backend emitted) and `host` (what Ersa wrote to it). Host lines project too (a user message to `user.message`, a permission answer to `permission.decided`, the answer to a question to `question.answered`).
 - Every raw log line yields at least one event (possibly only `backend.passthrough`); no line is dropped.
 - A raw line may yield several events (a Claude Code `result` yields `turn.completed` and `usage.updated`).
 - Events never contain backend-specific field names outside `backend.passthrough.payload` and `permission.requested.suggestions[].payload`. Tool data is not backend protocol: `tool.requested.input`, `permission.requested.input`, and structured `tool.result.content` carry the tool's own arguments and output as the tool defines them.
@@ -139,6 +139,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - **PROTO-AGENT-EVENTS-R16**: Core shall emit `session_open_elsewhere` notices at level `warning` and `session_open_check_failed` notices at level `info`.
 - **PROTO-AGENT-EVENTS-R17**: While a turn runs, each Claude Code live line that reports output usage (a partial `message_delta`, or an `assistant` line) shall project to a `usage.updated` whose `turn_output_tokens` is the sum of the output tokens of every API message in the turn so far, counting each message id once at the highest count reported for it, so the sum never decreases within the turn. A synthetic `assistant` message (model `<synthetic>`, made without an API call) adds nothing to the count.
 - **PROTO-AGENT-EVENTS-R18**: A Claude Code `can_use_tool` control request for its question tool shall project to one `question.asked`, and no `permission.requested`, carrying each question's text, header, options with their labels and descriptions, and multi-select, with `takes_text` true (PROTO-CLAUDE-CODE-STREAM, Questions).
+- **PROTO-AGENT-EVENTS-R19**: The host's answer to a Claude Code question shall project to one `question.answered` with `answered_by` `user`, and no `permission.decided`, matching each answer to its question by text and to options by label as PROTO-CLAUDE-CODE-STREAM (Questions) says; the CLI withdrawing a pending question, or the turn ending with it unanswered, shall project to `question.answered` with `answered_by` `backend` and no answers.
 
 ## Out of scope
 
@@ -154,7 +155,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 ## Changes
 
-- 2026-11-05: for FLOW-APPROVE-PERMISSION: Claude Code's question tool projects to `question.asked` in the adapter, which answers the open question on where questions come from; `question.asked` gains optional `header`, option `description` and `takes_text`, and an answer gains optional `text`, all additive. PROTO-AGENT-EVENTS-R18 added.
+- 2026-11-05: for FLOW-APPROVE-PERMISSION: Claude Code's question tool projects to `question.asked` in the adapter, which answers the open question on where questions come from; `question.asked` gains optional `header`, option `description`, and `takes_text`; an answer gains `own_words`, the user's own words moving to `value` with it; `answered_by` gains `backend` for a withdrawn question. A shape change, so `v` is bumped. PROTO-AGENT-EVENTS-R18 and R19 added.
 - 2026-11-04: from #136 inbox: PROTO-AGENT-EVENTS-R17 takes each message's highest count, not its latest, since Claude Code can send an `assistant` line with a lower partial count after a `message_delta` for the same message; synthetic `assistant` messages add nothing to the count.
 - 2026-11-02: `usage.updated.turn_output_tokens` added for the working mark's token count beside the elapsed time; PROTO-AGENT-EVENTS-R17 added: the count belongs to one turn and takes each message's latest count. A shape change, so `v` is bumped. Elapsed time needs no field: it is the `turn.started` envelope's `ts` while the turn runs and `turn.completed.duration_ms` after.
 - 2026-11-02: from #54 inbox: the open-elsewhere notices also precede a title appended to the record of a session Core is not running (PROTO-AGENT-EVENTS-R15 added), at `warning` for `session_open_elsewhere` and `info` for `session_open_check_failed` (R16 added). A Core-made notice lives only in the view open when it is emitted, by design. PROTO-AGENT-EVENTS-R14 is unchanged and is verified with Core's resume (M1).
