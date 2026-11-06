@@ -16,12 +16,12 @@ ADR 0017 limits what Ersa stores per session to what finds it again: host, proje
 
 ## Decision
 
-Option 3. Per session, Core also stores whether it is pinned, its section, whether it is archived, and the time its latest turn ended. Core stores the user's sections, and remembers the backend session ids of sessions the user deleted so they are not listed again. The rail's grouping, sort, filter and collapsed groups are user settings in Core. The title and the history stay the backend's.
+Option 3. Per session, Core also stores whether it is pinned, its section, whether it is archived, and the time its latest turn ended. Core stores the user's sections. The rail's grouping, sort, filter and collapsed groups are user settings in Core. The title and the history stay the backend's.
 
 ## Consequences
 
 - ADR 0017's rule becomes: per session, Ersa stores what finds it again and the user's arrangement of it, never its history or its title.
 - A session started elsewhere and first listed by Ersa (FLOW-RESUME-SESSION) starts with no pin, no section and not archived.
-- Deleting a session in Ersa does not delete the backend's session record, which stays the backend's; Ersa no longer lists it, and the backend's own tools still can.
+- Deleting a session in Ersa deletes it: its record goes from the backend through the adapter, so neither Ersa nor the backend's own tools list it again. This is the one exception to retention being the backend's (ADR 0017), and it is the user's explicit act, after a question.
 - Archive is Ersa's: the backend's own tools still list and resume an archived session.
 - Revisit if a backend's record gains supported fields for pins, folders or archiving, when sharing the arrangement with the backend's own tools would be worth the dependency.
