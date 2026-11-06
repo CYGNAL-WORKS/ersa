@@ -85,7 +85,6 @@ The rail is a list of projects above one list of sessions grouped under a headin
 
 - 2026-11-06: the union merges of #173, #174 and #171 left two or three versions of the rail's opening, Add project, "Loading, empty and failed" and "The foot", some under The shelf; one of each kept, as the owner's decisions of 2026-11-05 say. Meaning unchanged; no requirement IDs changed.
 - 2026-11-05: where the shelf sits (The shelf), from the owner's decisions; its behavior is FLOW-APPROVE-PERMISSION's. This closes the open question on overlay or push and queueing. No requirement IDs changed.
-
 - 2026-11-05: from #174 merge review: the sessions page's loading and failed states, what it hides while it shows, and its rows' mark and time; View all is named All sessions. No requirement IDs changed.
 - 2026-11-05: owner: View all in the arrange menu opens the sessions page. No requirement IDs changed.
 - 2026-11-05: owner: Delete… is unavailable while the session is starting, working or waiting on the user; the arrange menu's items name their current choice. No requirement IDs changed.
@@ -97,13 +96,11 @@ The rail is a list of projects above one list of sessions grouped under a headin
 - 2026-11-05: the rail specified from the owner-reviewed mockup (The rail): projects are headings with their sessions beneath and workspaces are not a level; a tile's contents and states; the shelf's handle on a session that needs the user; unseen sessions; what the tree says when a list can't be read; a foot that is silent while all is well. The context ring is near full from 85 percent, which closes that open question; FLOW-NEW-SESSION-R13 replaces R09 for where a new session's tile sits. No requirement IDs changed.
 - 2026-11-02: the context-ring open question no longer points at DESIGN.md's gauge vocabulary, which ADR 0019 removed. Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: from #55 inbox: Built so far added: sessions grouped by workspace, the tree still to build. No requirement IDs changed.
-
 - 2026-11-02: open question on reordering and sorting the rail, which DESIGN.md's motion rules anticipate. No requirement IDs changed.
 - 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: the title is renamed in place by double-click or keyboard, with no button (owner); open question on the context ring's tone near full.
 - 2026-11-02: from #53 inbox: the backend chip also shows a lone backend that is missing or failed.
 - 2026-11-02: the new-session screen and the session controls beneath the composer, from the owner's sketch (FLOW-NEW-SESSION).
 - 2026-11-01: from #14 inbox: a debug build attaches to a labeled endpoint when told to (Development).
-
 - 2026-10-31: tile contents and shelf behavior added from the owner's description; attention mark specified as edge or glyph.
 - 2026-10-31: created as draft.

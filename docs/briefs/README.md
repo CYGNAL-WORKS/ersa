@@ -71,7 +71,7 @@ Before writing or rewriting a brief for an area, read the matching file under `d
 
 - `draft` briefs may be rewritten freely by planning sessions.
 - `ready` and `built` briefs change in a planning pass that lists the requirement IDs added, retired, or reworded, and updates the tests that cite retired IDs in the same change.
-- Each brief ends with a `## Changes` section, newest first, one line per change. Briefs merge with git's union driver (`.gitattributes`), so two branches that each add a Changes line or a requirement merge by keeping both lines; after such a merge, read the section and run the manifest check, which reports a requirement defined twice and a bullet label (bold or code) repeated under one section name. A rewritten bullet survives such a merge as both its old and new wording; keep the version the brief's newest change says.
+- Each brief ends with a `## Changes` section, newest first, one line per change. Briefs merge with git's union driver (`.gitattributes`), so two branches that each add a Changes line or a requirement merge by keeping both lines; after such a merge, read the section and run the manifest check, which reports a requirement defined twice and a bullet label (bold, or a method name in code) repeated under one section name. A rewritten bullet or paragraph survives such a merge as both its old and new wording, and the check sees only bullets whose label stayed the same; keep the version the brief's newest change says.
 
 ## Manifest
 
