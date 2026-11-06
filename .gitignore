@@ -1,6 +1,9 @@
 # Ephemeral working plans and research notes: uncommitted, gone after merge.
 .scratch/
 
+# VSCode
+.vscode/
+
 # Build output
 /target/
 node_modules/
