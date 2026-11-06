@@ -148,7 +148,6 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 - ~~**PROTO-CORE-API-R15**~~: retired 2026-11-02 (a value not named is the backend's to choose, and Core does not know it), replaced by R16.
 - **PROTO-CORE-API-R16**: `session.create` shall start the backend with the `model` and `effort` it was given, passing nothing for one left out, and with the `permission_mode` given or else the backend's default permission mode, which is always stated to the backend; `session.list` shall report the `model` and `effort` that were given, absent otherwise, and the `permission_mode` the session started with.
 - **PROTO-CORE-API-R17**: Each replay capture shall equal what the replay server sends for its fixture, apart from `ersa_commit`.
-- **PROTO-CORE-API-R33**: `session.answer_question` shall cause the adapter to answer the backend's pending question with the given answers, or to decline it when `declined` is true, and a `question.answered` event shall follow.
 - **PROTO-CORE-API-R18**: `branch.list` shall list the project's local branches and mark as `default` the one `origin/HEAD` points at, else `main`, else `master`, else the checked-out branch, and none on a detached checkout with none of those.
 - **PROTO-CORE-API-R19**: `workspace.create` shall create the isolated workspace from its `base` when given one, refusing with `invalid_params` one git can't resolve, and otherwise from the branch `branch.list` marks default, else the checked-out commit.
 - **PROTO-CORE-API-R20**: `project.add` for a folder already a project on that host shall be refused with `invalid_state` whose `detail` is the existing project's id, and shall add nothing.
@@ -160,6 +159,7 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 - **PROTO-CORE-API-R26**: `session.send` shall answer `{ turn }` once the backend has the message, an error only when the message was not sent, and `delivery_unknown` when Core handed it over but can't tell whether the backend took it; it shall send `session.send_progress` at each phase and at least every 5 seconds until it answers.
 - **PROTO-CORE-API-R27**: `project.find` shall return the project on the host whose folder matches the path as `project.add` compares folders, else null.
 - **PROTO-CORE-API-R28**: `session.remove` shall remove the session's scratch folder without following any link in it, and no copy in it shall be removed while the session exists, except the copies of a message whose send failed.
+- **PROTO-CORE-API-R33**: `session.answer_question` shall cause the adapter to answer the backend's pending question with the given answers, or to decline it when `declined` is true, and a `question.answered` event shall follow.
 - **PROTO-CORE-API-R14**: `session.subscribe` with `from_seq` shall deliver every event from that sequence number onward, or from `first_seq` when the view no longer holds events before it, in order, with no gaps or duplicates, then continue live.
 
 ## Out of scope
