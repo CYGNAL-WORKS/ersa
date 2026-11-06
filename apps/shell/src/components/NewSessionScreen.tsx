@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { Project } from "../protocol/core-api.gen";
-import { type BackendChoices, type SessionValues, available, valuesFor } from "../session/controls";
+import { type BackendChoices, type SessionValues, available, seedScreen, startingProject, valuesFor } from "../session/controls";
 import type { Sending } from "../session/follow";
 import { AddProject } from "./AddProject";
 import { Composer } from "./Composer";
@@ -9,12 +9,15 @@ import "./NewSessionScreen.css";
 
 interface NewSessionScreenProps {
   hosts: readonly Host[];
+  /** The host Ersa runs on: its chip reads Local, and the screen opened for no project starts at its project. */
+  localHostId: string;
+  /** Most recently used first (FLOW-NEW-SESSION-R14). */
   projects: readonly Project[];
   /** Each host's backends from `backend.list`, by host id; a host absent here is still being detected. */
   backends: Readonly<Record<string, readonly BackendChoices[]>>;
   /** The values the user last started a session with, by project id. */
   lastUsed?: Readonly<Record<string, SessionValues>>;
-  /** The project the user chose New session for; else the first. */
+  /** The project the user chose New session for; else the local host's most recently used (FLOW-NEW-SESSION-R15). */
   projectId?: string;
   /** Starts the session with the first message; resolves true once it has started. */
   onStart: (text: string, values: SessionValues) => Promise<boolean>;
@@ -36,26 +39,16 @@ interface NewSessionScreenProps {
  * one, asking whether the user trusts it first (until FLOW-NEW-SESSION-R16 to R20 are built).
  */
 export function NewSessionScreen(props: NewSessionScreenProps) {
-  const { hosts, projects, backends, lastUsed = {}, onStart, starting, onAddProject, adding } = props;
-  const first = projects.find((p) => p.id === props.projectId) ?? projects[0];
-  // What the user has chosen on this screen; the controls show it where the project and its host offer it.
-  const startFrom = () => (first ? { ...lastUsed[first.id], project_id: first.id } : {});
-  const [wanted, setWanted] = useState<Partial<SessionValues>>(startFrom);
-  // New session chosen for another project while the screen shows: start over at that project's values.
-  const [shownFor, setShownFor] = useState(props.projectId);
-  // The last-used values the screen started from, and whether the user has chosen since: values that arrive
-  // after the screen opened still apply, until the user makes a choice of their own (FLOW-NEW-SESSION-R02).
-  const [seededWith, setSeededWith] = useState(first && lastUsed[first.id]);
-  const [touched, setTouched] = useState(false);
-  if (shownFor !== props.projectId) {
-    setShownFor(props.projectId);
-    setSeededWith(first && lastUsed[first.id]);
-    setTouched(false);
-    setWanted(startFrom());
-  } else if (!touched && first && lastUsed[first.id] !== seededWith) {
-    setSeededWith(lastUsed[first.id]);
-    setWanted(startFrom());
-  }
+  const { hosts, localHostId, projects, backends, lastUsed = {}, onStart, starting, onAddProject, adding } = props;
+  const first = startingProject(projects, localHostId, props.projectId);
+  // Where the screen starts and what the user has chosen since; it starts afresh as seedScreen says.
+  const [seed, setSeed] = useState(() => seedScreen(undefined, first, props.projectId, lastUsed));
+  const now = seedScreen(seed, first, props.projectId, lastUsed);
+  if (now !== seed) setSeed(now);
+  const wanted = now.wanted;
+  // A choice, a word written or a message sent holds the screen where the user saw it.
+  const setWanted = (next: Partial<SessionValues>) => setSeed((s) => ({ ...s, touched: true, wanted: next }));
+  const hold = () => setSeed((s) => (s.touched ? s : { ...s, touched: true }));
   const project = projects.find((p) => p.id === wanted.project_id) ?? first;
 
   if (!project) {
@@ -75,10 +68,9 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   const busy = starting?.state === "sending";
 
   const choose = (key: ControlKey, id: string) => {
-    setTouched(true);
     if (key === "host") {
-      // A host's own projects follow it; its first one, at what was last used there.
-      const next = projects.find((p) => p.host_id === id);
+      // A host's own projects follow it; its most recently used one, at what was last used there.
+      const next = startingProject(projects, id);
       if (next) setWanted({ ...lastUsed[next.id], project_id: next.id });
     } else if (key === "project") {
       setWanted({ ...lastUsed[id], project_id: id });
@@ -107,10 +99,15 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           initialText={props.initialText}
           unavailable={unavailable}
           sending={starting}
-          onSend={(text) => onStart(text, values)}
+          onWrite={hold}
+          onSend={(text) => {
+            hold();
+            return onStart(text, values);
+          }}
         />
         <SessionControls
           hosts={hosts}
+          localHostId={localHostId}
           projects={projects}
           backends={hostBackends}
           values={values}

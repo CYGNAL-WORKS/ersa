@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { Session } from "../protocol/core-api.gen";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SessionList, byWorkspace, newestFirst } from "./SessionList";
+import { newestFirst } from "../session/controls";
+import { SessionList, byWorkspace } from "./SessionList";
 
 const at = (id: string, created_at: string): Session => ({
   id,
