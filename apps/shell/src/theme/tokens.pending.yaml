@@ -1,3 +1,0 @@
-size:
-  # The height past which a chip's list of branches scrolls: eight options of size-control.
-  list-max: 224px

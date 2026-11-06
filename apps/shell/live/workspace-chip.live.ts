@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "./harness";
 
-// The workspace chip's base branch (#184; FLOW-NEW-SESSION-R21, R22) in the running app, against a real Core and a
+// The workspace chip's base branch (#184; FLOW-NEW-SESSION-R21, R29) in the running app, against a real Core and a
 // real git repository: the folder dialog is answered from the test, and the backend is the stand-in.
 test("a new workspace starts at the default branch, and is made from the base branch chosen", async ({ ersa }) => {
   const { page } = ersa;
@@ -34,7 +34,7 @@ test("a new workspace starts at the default branch, and is made from the base br
   await page.getByRole("button", { name: "Add, not trusted" }).click();
   await expect(screen.getByRole("button", { name: "Project: repo" })).toBeVisible();
 
-  // R21, R22: the chip names a new workspace from the default branch, not the one the folder has checked out.
+  // R21, R29: the chip names a new workspace from the default branch, not the one the folder has checked out.
   const chip = screen.getByRole("button", { name: /^Workspace:/ });
   await expect(chip).toHaveAccessibleName("Workspace: New workspace from main");
   await chip.click();
