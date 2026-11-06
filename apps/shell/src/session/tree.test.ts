@@ -35,7 +35,7 @@ describe("the rail's tree", () => {
   ];
 
   // verifies: FLOW-NEW-SESSION-R13
-  // verifies: FLOW-ORGANIZE-SESSIONS-R08 (grouped by project; grouping by none arrives with the arrange menu)
+  // FLOW-ORGANIZE-SESSIONS-R08 is cited once grouping by none is built and tested too: these cover grouping by project.
   it("puts each session under its own project, across its workspaces, newest first", () => {
     const tree = treeOf(projects, workspaces, sessions);
     expect(tree.projects.map(({ project, sessions }) => [project.id, ids(sessions)])).toEqual([
@@ -46,13 +46,11 @@ describe("the rail's tree", () => {
     expect(tree.loose).toEqual([]);
   });
 
-  // verifies: FLOW-ORGANIZE-SESSIONS-R08
   it("keeps the projects in the order Core lists them, whatever their sessions", () => {
     const reversed = [...projects].reverse();
     expect(treeOf(reversed, workspaces, sessions).projects.map(({ project }) => project.id)).toEqual(["notes", "engine", "ersa"]);
   });
 
-  // verifies: FLOW-ORGANIZE-SESSIONS-R08
   it("keeps a project with no sessions, and every project before the sessions are read", () => {
     expect(treeOf(projects, workspaces, []).projects.map(({ project, sessions }) => [project.id, sessions.length])).toEqual([
       ["ersa", 0],
@@ -61,7 +59,6 @@ describe("the rail's tree", () => {
     ]);
   });
 
-  // verifies: FLOW-ORGANIZE-SESSIONS-R08
   it("puts a session whose project it can't tell at the end, newest first, rather than drop it", () => {
     // w-gone is not known (its project's workspaces were not read); w-other names a project Core does not list.
     const tree = treeOf(projects, { ...workspaces, "w-other": { project_id: "removed" } }, [

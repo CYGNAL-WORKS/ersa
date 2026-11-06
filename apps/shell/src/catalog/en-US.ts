@@ -55,6 +55,8 @@ export const enUS = {
     // A session's tile (docs/design/RAIL.md, A tile): line two's phrase, and the names of its marks.
     tile: {
       untitledLabel: "Untitled session",
+      // Names a tile when it fails to draw: "This session could not be shown:".
+      boundaryName: "This session",
       startingStatus: "Starting",
       // Heard, not shown: the working mark's name, since line two has no phrase for it.
       workingStatus: "Working",
