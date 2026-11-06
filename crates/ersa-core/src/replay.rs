@@ -149,10 +149,9 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
     };
     // Stored under the key `project.add` would give the folder, so
     // `project.find` answers for it as it does on a live Core.
-    let canonical = platform::canonicalize(&core.config.data_dir)
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|_| path.clone());
-    let key = platform::path_key(&canonical);
+    let key = platform::canonicalize(&core.config.data_dir)
+        .map(|p| platform::folder_key(&p))
+        .unwrap_or_else(|_| platform::path_key(&path));
     // The recording plays in the project's root workspace, its own folder.
     let workspace = core.store.insert_project(project.clone(), key).await?;
 
