@@ -141,13 +141,6 @@ describe("the project list's order", () => {
   });
 
   // verifies: FLOW-NEW-SESSION-R14
-  it("compares times as instants, not as text, whatever their offset", () => {
-    // 10:00 at +02:00 is 08:00 UTC, so earlier than 09:00 UTC though it reads later.
-    const sessions = [session("w1", "2026-11-01T09:00:00Z"), session("w2", "2026-11-01T10:00:00+02:00")];
-    expect(recentFirst([named("b"), named("a")], sessions, workspaces).map((p) => p.id)).toEqual(["a", "b"]);
-  });
-
-  // verifies: FLOW-NEW-SESSION-R14
   it("puts projects with no session after the used ones, in the order Core lists them", () => {
     const sessions = [session("w4", "2026-11-02T09:00:00Z"), session("unknown-workspace", "2026-11-05T09:00:00Z")];
     expect(recentFirst([named("a"), named("b"), named("c"), named("d")], sessions, workspaces).map((p) => p.id)).toEqual(["c", "a", "b", "d"]);

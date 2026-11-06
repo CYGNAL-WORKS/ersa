@@ -301,11 +301,14 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The projects as last read, so a screen with a message being written stays while Core is away; sending then
   // fails with the reason, and the message stays in the composer.
   const knownProjects = useRef<Project[] | undefined>(undefined);
+  const orderedBy = useRef<readonly Session[]>([]);
   if (projectList) knownProjects.current = projectList;
   const hello = view.phase === "connected" || view.phase === "lost" ? view.hello : undefined;
   const knownList = projectList ?? (showsScreen({ composing, starting, activeId }, false) ? knownProjects.current : undefined);
-  // Most recently used first, by the sessions as last listed (FLOW-NEW-SESSION-R14).
-  const screenProjects = knownList && recentFirst(knownList, knownSessions.current ?? [], workspaces);
+  // Most recently used first (FLOW-NEW-SESSION-R14), by the sessions as last listed: kept while the list reloads,
+  // so the order, and the project the screen starts at, do not jump back to Core's order meanwhile.
+  if (sessions.state === "ready") orderedBy.current = sessions.sessions;
+  const screenProjects = knownList && recentFirst(knownList, orderedBy.current, workspaces);
 
   // The rail's name for each workspace: its project, and its branch or the root (LAY-SHELL).
   const projectById = new Map(projectList?.map((p) => [p.id, p]));

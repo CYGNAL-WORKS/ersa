@@ -55,7 +55,9 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     setSeededWith(first && lastUsed[first.id]);
     setTouched(false);
     setWanted(startFrom());
-  } else if (!touched && first && lastUsed[first.id] !== seededWith) {
+  } else if (!touched && first && (lastUsed[first.id] !== seededWith || first.id !== wanted.project_id)) {
+    // Also when the starting project itself changes before the user chooses: the sessions and workspaces that
+    // order the projects arrive after the screen opens at launch (FLOW-NEW-SESSION-R15).
     setSeededWith(lastUsed[first.id]);
     setWanted(startFrom());
   }

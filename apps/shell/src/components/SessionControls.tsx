@@ -80,7 +80,7 @@ export function SessionControls({ hosts, localHostId, projects, backends, values
           // A session runs in a project, so a host with none has nothing to start yet.
           options={hosts.map((h) => {
             const label = h.id === localHostId ? t("sessionControls.localHostLabel") : h.name;
-            return projects.some((p) => p.host_id === h.id) ? { id: h.id, label } : { id: h.id, label, status: "No projects", unavailable: true };
+            return projects.some((p) => p.host_id === h.id) ? { id: h.id, label } : { id: h.id, label, status: t("sessionControls.noProjectsStatus"), unavailable: true };
           })}
           {...chip("host")}
         />

@@ -88,6 +88,10 @@ Needs you · {count}
 
 Local
 
+### `sessionControls.noProjectsStatus`
+
+No projects
+
 ### `sessionControls.project.gitLabel`
 
 Git

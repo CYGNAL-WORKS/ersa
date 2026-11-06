@@ -103,7 +103,7 @@ describe("the new-session screen", () => {
     expect(add).toContain('aria-disabled="true"');
   });
 
-  // verifies: FLOW-NEW-SESSION-R14
+  // The host filter predates the project list's two lines; it cites nothing so R14's tests are the ones this change adds.
   it("lists only the chosen host's projects", () => {
     const far: Project = { ...ersa, id: "p9", host_id: "far", name: "faraway" };
     const html = render({ projects: [ersa, far, notes], open: "project" });
