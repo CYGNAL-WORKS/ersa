@@ -270,11 +270,7 @@
 
 /* The open tile and its shelf are one shape (docs/design/RAIL.md, The shelf): the tile takes the surface and an
    edge in the shelf's tone, open and square at its trailing side where the shelf joins it, and holds still under
-   the pointer. It names the anchor the shelf is placed by. */
-.session-item[data-shelf] {
-  anchor-name: --open-tile;
-}
-
+   the pointer. */
 .session-item[data-shelf] > .session,
 .session-item[data-shelf] > .session:hover,
 .session-item[data-shelf] > .session:active {

@@ -61,6 +61,11 @@ test("the chevron opens the shelf with the oldest permission request, leaving th
 
   // Choosing the chevron again closes it; opening it and then making its session active closes it too (R26).
   await chevron.click();
+  // It slides back and fades before it goes, out of reach meanwhile.
+  const closing = page.locator(".shelf-layer[inert] > .shelf");
+  await expect(closing).toHaveCount(1);
+  expect(await closing.evaluate((el) => getComputedStyle(el).animationName)).toBe("shelf-back");
+  await expect(closing).toHaveCount(0);
   await expect(shelf).toHaveCount(0);
   await chevron.click();
   await expect(shelf).toBeVisible();

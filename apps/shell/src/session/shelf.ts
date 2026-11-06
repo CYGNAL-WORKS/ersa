@@ -3,9 +3,9 @@
 // here; the components only lay it out.
 
 import type { Envelope, PermissionRequested, QuestionAsked } from "../protocol/agent-events.gen";
-import type { CoreClient } from "../core/client";
 import type { Session } from "../protocol/core-api.gen";
 import { EARLIER, type Follower, type SessionView, follow } from "./follow";
+import type { SharedSubscriptions } from "./subscriptions";
 import { type Item, isOpen } from "./transcript";
 
 type Pending = Session["tile"]["pending"][number];
@@ -74,10 +74,12 @@ export function shelfOf(view: SessionView | undefined, pending: readonly Pending
   if (!view) return { state: "loading" };
   // Reading failed, including a gap that subscribing again did not fill: what is held may be out of date.
   if (view.stream.state === "failed") return { state: "failed", message: view.stream.message };
-  if (view.stream.state === "subscribing") return { state: "loading" };
+  // Subscribing, or waiting for a connection before anything was read.
+  if (view.stream.state === "subscribing" || (view.stream.state === "offline" && view.transcript.lastSeq < 0)) return { state: "loading" };
 
   const waiting = new Map(pending.map((p) => [p.request_id, p.kind as string]));
-  const shown: Item[] = view.transcript.items.filter((item) => {
+  type Request = Extract<Item, { kind: "permission" | "question" }>;
+  const shown = view.transcript.items.filter((item): item is Request => {
     if (item.kind === "permission") return isOpen(item) && waiting.get(item.request.request_id) === "permission";
     if (item.kind === "question") return !item.answered && waiting.get(item.requestId) === "question";
     return false;
@@ -88,8 +90,7 @@ export function shelfOf(view: SessionView | undefined, pending: readonly Pending
   const oldest = shown[0];
   if (!oldest || (unshowable > 0 && missedEarlier(view))) return { state: "unknown", place };
   if (oldest.kind === "permission") return { state: "permission", request: oldest.request, place };
-  if (oldest.kind === "question") return { state: "question", requestId: oldest.requestId, questions: oldest.questions, place };
-  return { state: "unknown", place };
+  return { state: "question", requestId: oldest.requestId, questions: oldest.questions, place };
 }
 
 /** The events held start after a gap: Core let go of the session's earliest events. */
@@ -98,12 +99,8 @@ const missedEarlier = (view: SessionView) => view.transcript.items[0]?.key.start
 // --- Following the shelf's session ---------------------------------------------------------------------------
 
 export interface ShelfFollowing {
-  /**
-   * Follows `id`'s events, or none: the open shelf's session. Following another stops the last. `activeId` is the
-   * active session: when the shelf closes because its session became active, the transcript has just subscribed to
-   * it, and Core holds one subscription per session, so the shelf leaves that subscription alone.
-   */
-  follow(id: string | undefined, connected: boolean, activeId?: string): void;
+  /** Follows `id`'s events, or none: the open shelf's session. Following another stops the last. */
+  follow(id: string | undefined, connected: boolean): void;
   receive(envelope: Envelope): void;
   /** Subscribes on a new connection, and again after reading failed (R21, Retry). */
   attached(): void;
@@ -112,21 +109,22 @@ export interface ShelfFollowing {
 
 /**
  * Follows the open shelf's session while it is open, and stops when it closes (FLOW-APPROVE-PERMISSION, Intent).
- * The shelf is never open for the active session, so this never shares or ends the transcript's subscription.
+ * Its clients share Core's subscriptions with the transcript's, so a session both follow stays subscribed until
+ * both let go.
  */
-export function shelfFollowing(client: CoreClient, update: (view: SessionView | undefined) => void): ShelfFollowing {
+export function shelfFollowing(clients: SharedSubscriptions, update: (view: SessionView | undefined) => void): ShelfFollowing {
   let current: Follower | undefined;
   let currentId: string | undefined;
   return {
-    follow(id, connected, activeId) {
+    follow(id, connected) {
       if (id === currentId) return;
-      current?.stop(currentId === activeId);
+      current?.stop();
       current = undefined;
       currentId = id;
       update(undefined);
       if (id === undefined) return;
       // Only the session followed now updates the shelf: a stopped follower is silent anyway, and this keeps it so.
-      const following = follow(client, id, (view) => currentId === id && update(view));
+      const following = follow(clients(), id, (view) => currentId === id && update(view));
       current = following;
       if (connected) following.attached();
       else following.detached();

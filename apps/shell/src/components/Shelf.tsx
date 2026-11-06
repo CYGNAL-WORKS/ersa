@@ -3,6 +3,7 @@ import { type ShelfShows, shelfTone } from "../session/shelf";
 import type { TileView } from "../session/tile";
 import { Button } from "./Button";
 import { ContextRing } from "./ContextRing";
+import { ErrorBoundary } from "./ErrorBoundary";
 import { PermissionInput, Revealed } from "./Transcript";
 import "./Shelf.css";
 
@@ -24,7 +25,10 @@ interface ShelfProps {
 export function Shelf({ id, tile, shows, onRetry }: ShelfProps) {
   return (
     <div id={id} className="shelf" role="dialog" aria-label={t("rail.shelf.nameLabel", { title: tile.title })} data-tone={shelfTone(shows)}>
-      <Contents shows={shows} ring={tile.ring} cost={tile.cost} onRetry={onRetry} />
+      {/* A request it can't draw is said here, in the shelf, and leaves the rail as it was. */}
+      <ErrorBoundary what={t("rail.shelf.boundaryName")} resetKey={shownKey(shows)}>
+        <Contents shows={shows} ring={tile.ring} cost={tile.cost} onRetry={onRetry} />
+      </ErrorBoundary>
     </div>
   );
 }
@@ -114,12 +118,19 @@ function Contents({ shows, ring, cost, onRetry }: Pick<ShelfProps, "shows" | "on
   }
 }
 
+/** Which request is shown, so the error boundary tries again once another one is. */
+function shownKey(shows: ShelfShows): string {
+  if (shows.state === "permission") return `permission:${shows.request.request_id}`;
+  if (shows.state === "question") return `question:${shows.requestId}`;
+  return shows.state;
+}
+
 /** The heading line: the kind of request, and its place at the trailing end when there is more than one. */
 function Heading({ kind, place }: { kind?: string; place?: { n: number; m: number } }) {
   return (
     <p className="shelf-heading">
       <span>{kind}</span>
-      {place && <span className="readout">{t("rail.shelf.placeLabel", { n: place.n, m: place.m })}</span>}
+      {place && <span className="shelf-place">{t("rail.shelf.placeLabel", { n: place.n, m: place.m })}</span>}
     </p>
   );
 }
