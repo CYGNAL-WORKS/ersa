@@ -154,7 +154,7 @@ fn streamed_text_shares_a_block_id_and_ends_with_exactly_one_final() {
     assert_eq!(texts, [(4, "ready", false), (5, "ready", true)]);
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R26
+// verifies: PROTO-CLAUDE-CODE-STREAM-R30
 // verifies: PROTO-AGENT-EVENTS-R04
 #[test]
 fn can_use_tool_projects_to_one_permission_request_and_the_answer_to_a_decision() {

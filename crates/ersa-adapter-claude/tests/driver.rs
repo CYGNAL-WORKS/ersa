@@ -473,7 +473,7 @@ impl std::io::Write for LogWriter {
 /// The round trip the brief's conformance section asks for: a stub CLI built
 /// from fixture 11 answers `initialize`, takes the user message, asks to run
 /// Bash, checks the answer, and finishes the turn.
-// verifies: PROTO-CLAUDE-CODE-STREAM-R26
+// verifies: PROTO-CLAUDE-CODE-STREAM-R30
 // verifies: PROTO-CLAUDE-CODE-STREAM-R07
 #[tokio::test]
 async fn a_permission_round_trips_against_a_stub_of_fixture_11() {
@@ -553,7 +553,7 @@ async fn a_permission_round_trips_against_a_stub_of_fixture_11() {
     assert_eq!(sink.exit_codes(), [Some(0)]);
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R26
+// verifies: PROTO-CLAUDE-CODE-STREAM-R30
 #[tokio::test]
 async fn decisions_carry_edits_suggestions_and_denial_messages() {
     let out = fixture("11-stream-permission-prompt-tool-stdio").stdout;
@@ -933,7 +933,7 @@ async fn an_empty_claude_path_counts_as_unset() {
     session.stop().await.expect("stop");
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R26
+// verifies: PROTO-CLAUDE-CODE-STREAM-R30
 #[tokio::test]
 async fn a_prompt_whose_shape_drifted_can_still_be_answered() {
     let drifted = json!({
