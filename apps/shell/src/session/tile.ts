@@ -50,13 +50,20 @@ export function tileOf(session: Session, backends: Readonly<Record<string, reado
 
 type StateView = Pick<TileView, "titleMuted" | "mark" | "tone" | "markLabel" | "phrase">;
 
+/**
+ * The tone of what a session with pending requests wants: only questions are the accent; a permission request, or a
+ * kind this interface doesn't know, is caution.
+ */
+export function wantTone(pending: Tile["pending"]): "accent" | "caution" {
+  return pending.every((p) => p.kind === "question") ? "accent" : "caution";
+}
+
 // The pending requests decide before the state does: a session with one needs the user whatever Core reports,
 // and one reported as waiting on the user with none is idle.
 function stateOf(tile: Tile): StateView {
   const { pending } = tile;
   if (pending.length > 0) {
-    // Only questions are the accent; a permission request, or a kind this interface doesn't know, is caution.
-    const tone = pending.every((p) => p.kind === "question") ? "accent" : "caution";
+    const tone = wantTone(pending);
     const only = pending.length === 1 ? pending[0]?.kind : undefined;
     const phrase =
       pending.length > 1

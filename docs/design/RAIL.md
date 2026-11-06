@@ -2,7 +2,7 @@
 
 How the rail, its headings, a tile and their menus look, token by token. `LAY-SHELL` (The rail) says what the rail contains and how it behaves; `DESIGN.md` holds the tokens and the rules every surface follows. Read this before changing any of the three.
 
-The owner reviewed this design as a mockup. Its renders are in `reference/`: `rail-states-dark.png` and `rail-states-light.png` show the states, and `shell-dark.png` shows the rail in the window. The renders also draw parts that are not specified yet: the title bar with the Ersa menu at the top of the rail. The owner's design canvas (its Rail menus artboard) draws the arrange menu, a tile's menu with Move to section open, the Pinned group, a section heading and the delete question. Build what this page and `LAY-SHELL` describe; where a render and this page differ, this page wins. Once the gallery shows a state, the gallery is the reference for it, and the renders are deleted when it shows them all.
+The owner reviewed this design as a mockup. The gallery shows every state of the rail built so far, in both themes, and is the reference for them. The mockup also drew a title bar with an Ersa menu at the top of the rail, which is not specified yet. The owner's design canvas (its Rail menus artboard) draws the arrange menu, a tile's menu with Move to section open, the Pinned group, a section heading and the delete question. Build what this page and `LAY-SHELL` describe; where the canvas and this page differ, this page wins.
 
 ## The rail
 
@@ -87,7 +87,7 @@ With reduced motion on, nothing here moves or fades: the arc, the foot's ring an
 
 ## The shelf
 
-The shelf is drawn in the Rail mockup's state "the shelf, pulled out of its tile". `FLOW-APPROVE-PERMISSION` says what it holds and when it opens and closes. Its tone is the shown request's: `accent` for a question, and `caution` for a permission request or one Ersa can't show. While the shelf is open, the tile's chevron and want take that tone too, so the shape has one.
+The gallery's Shelf entry shows the shelf in each of its states. `FLOW-APPROVE-PERMISSION` says what it holds and when it opens and closes. Its tone is the shown request's: `accent` for a question, and `caution` for a permission request or one Ersa can't show. While the shelf is open, the tile's chevron and want take that tone too, so the shape has one.
 
 - **One shape.** While its shelf is open, the tile takes `surface` and a `hairline` edge in the tone, open at its trailing side where the shelf joins it, and its trailing corners are square. The tile does not change under the pointer or when pressed while its shelf is open. The shelf starts at the tile's top edge and continues the shape: `surface`, the same edge, `radius-lg` corners except the one that meets the tile, which is square. When the shelf rises to fit the window, that corner is `radius-lg` too.
 - **The layer.** The shelf is `size-shelf` wide, stacks at `stack-shelf`, and casts `shadow-transient`, as a transient layer does. It carries no focal glow: its edge in the tone is its mark, and the screen's one glow stays where it was. With keyboard focus on the shelf itself, its edge and the open tile's turn `ink`. Its parts are padded and spaced `space-md`.

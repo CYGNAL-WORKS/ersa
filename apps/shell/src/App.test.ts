@@ -39,10 +39,10 @@ const sessions = [session("s1", "alpha", "2026-11-01T09:00:00Z"), session("s2", 
 type Answers = Partial<Record<Method, (params: never) => unknown>>;
 
 /**
- * A Core that answers the reads App makes at launch, attaches once, and can drop the connection. `more` adds or
- * replaces answers; `calls` records every request, in order.
+ * A Core that answers the reads App makes at launch, attaches once (or each time, with `reattach`), and can drop
+ * the connection. `more` adds or replaces answers; `calls` records every request, in order.
  */
-function fakeCore(more: Answers = {}) {
+function fakeCore(more: Answers = {}, { reattach = false } = {}) {
   let onEvent: (event: CoreEvent) => void = () => {};
   let attaches = 0;
   const calls: { method: Method; params: unknown }[] = [];
@@ -59,7 +59,7 @@ function fakeCore(more: Answers = {}) {
     attach: (listener) => {
       onEvent = listener;
       // Attaching again after a loss never answers: Core stays away.
-      return attaches++ === 0 ? Promise.resolve<Attachment>({ how: "attached", hello }) : new Promise(() => {});
+      return attaches++ === 0 || reattach ? Promise.resolve<Attachment>({ how: "attached", hello }) : new Promise(() => {});
     },
     call: (method, params) => {
       calls.push({ method, params });
@@ -349,5 +349,51 @@ describe("the tree App draws in the rail", () => {
     // Every session is placed, so none sits at the end under no heading.
     const tree = screen.getByRole("region", { name: "Projects and sessions" });
     expect(tree.querySelectorAll(":scope > .rail-tiles")).toHaveLength(0);
+  });
+});
+
+// LAY-SHELL, The rail (New session, Collapsing): a layout brief, so no requirement IDs.
+describe("the rail's New session and collapsing", () => {
+  const rail = () => screen.getByRole("navigation", { name: "Rail" });
+  const toggle = (name: string) => within(rail()).getByRole("button", { name: new RegExp(`^${name}`) });
+
+  it("offers New session at the rail's top once Ersa has connected, and opens the new-session screen", async () => {
+    render(createElement(App, { client: fakeCore().client }));
+    const top = within(rail()).getByRole("button", { name: "New session" });
+    expect((top as HTMLButtonElement).disabled).toBe(true);
+    await settle();
+    await settle();
+    expect((top as HTMLButtonElement).disabled).toBe(false);
+    // The newest session shows at launch; New session leaves it for the screen.
+    expect(screen.queryByRole("region", { name: "New session" })).toBeNull();
+    fireEvent.click(top);
+    expect(screen.getByRole("region", { name: "New session" })).toBeTruthy();
+  });
+
+  it("collapses a heading's sessions and expands them again, saying which it is, and keeps it across a reconnect", async () => {
+    const core = fakeCore({}, { reattach: true });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    expect(toggle("beta").getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(toggle("beta"));
+    expect(toggle("beta").getAttribute("aria-expanded")).toBe("false");
+    // Collapsed, it says how many sessions it holds, and its tiles take no focus.
+    expect(toggle("beta").textContent).toContain("1 session");
+    const tiles = document.getElementById(toggle("beta").getAttribute("aria-controls") ?? "");
+    expect(tiles?.hasAttribute("inert")).toBe(true);
+
+    // Ersa loses Core and reaches it again: the tree is read afresh, and beta is still collapsed.
+    core.drop();
+    expect(screen.queryByRole("button", { name: /^beta/ })).toBeNull();
+    await act(() => new Promise((r) => setTimeout(r, 700)));
+    await settle();
+    await settle();
+    expect(toggle("beta").getAttribute("aria-expanded")).toBe("false");
+    expect(toggle("alpha").getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.click(toggle("beta"));
+    expect(toggle("beta").getAttribute("aria-expanded")).toBe("true");
+    expect(toggle("beta").closest(".rail-project")?.hasAttribute("data-collapsed")).toBe(false);
   });
 });
