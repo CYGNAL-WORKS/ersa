@@ -108,6 +108,12 @@ export function Menu({ label, entries, open, place, focus = "item", onClose, ins
   }, [open, nested, onClose, inside]);
 
   const [submenu, setSubmenu] = useState<number | undefined>(initialSubmenu);
+  // A menu opens with its submenus closed, whatever was open when it last closed.
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (!open) setSubmenu(undefined);
+  }
   // A submenu opened from the keyboard takes focus on its first item; one the pointer opens does not.
   const [subFocus, setSubFocus] = useState<"item" | "none">("none");
   const anchors = useId().replace(/[^a-zA-Z0-9]/g, "");

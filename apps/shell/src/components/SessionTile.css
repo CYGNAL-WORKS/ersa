@@ -95,7 +95,8 @@
   opacity: 0;
   transition:
     opacity var(--motion-quick) var(--motion-ease-out),
-    background var(--motion-quick) var(--motion-ease-out);
+    background var(--motion-quick) var(--motion-ease-out),
+    color var(--motion-quick) var(--motion-ease-out);
 }
 
 /* Beside a session that needs the user, More sits before the chevron, in a second square whose place is kept while
@@ -123,7 +124,8 @@
   opacity: 0;
 }
 
-.session-more[aria-expanded="true"] {
+.session-more.icon-button[aria-expanded="true"],
+.session-more.icon-button[aria-expanded="true"]:hover {
   color: var(--color-ink);
   background: var(--material-pressed);
 }
@@ -151,6 +153,11 @@
 .session-title-field:focus {
   outline: none;
   border-color: var(--color-accent);
+}
+
+/* While the title is on its way to the backend, the field takes no typing, and reads so. */
+.session-title-field:read-only {
+  color: var(--color-ink-muted);
 }
 
 /* Why a title was refused, beneath the tile, starting where its icon does. */
