@@ -11,9 +11,9 @@ adrs: [0011, 0017]
 
 ## Intent
 
-The user writes to the agent in the composer, on the new-session screen and on every session, and can add files, images and folders to a message. A message goes as one turn; while the agent works on it, the composer's send becomes stop, which interrupts the turn. When a message can't be sent, the composer says why above the box and keeps the message, so nothing the user wrote is lost. When Ersa can't reach the sessions, the composer says so and waits.
+The user writes to the agent in the composer, on the new-session screen and on every session, and can add files, images and folders to a message. A message goes as one turn; from the moment it is sent until the turn ends, the composer's send becomes stop, which cancels a message that hasn't reached the agent and otherwise interrupts the turn. When a message can't be sent, the composer says why above the box and keeps the message, so nothing the user wrote is lost. When Ersa can't reach the sessions, the composer says so and waits.
 
-An attachment is a file, an image or a folder that goes with a message. The user adds one from the composer's attach menu (files, images, or a folder, each through the system's dialog), by pasting an image, or by dropping files, images and folders on the box. Attachments sit in the box above the words, each with its name and a detail (an image's or file's size, a text file's line count, or that it is a folder), and each can be removed before sending. An image goes to the backend as an image the agent sees. A file or folder goes as its path, which the agent reads itself; one from outside the session's workspace is copied into the workspace's scratch folder first, so the agent reads it where it works (PROTO-CORE-API, Turns and attachments). The transcript shows a sent message's attachments with it.
+An attachment is a file, an image or a folder that goes with a message. The user adds one from the composer's attach menu (files, images, or a folder, each through the system's dialog), by pasting an image, or by dropping files, images and folders on the box. Attachments sit in the box above the words, each with its name and a detail (an image's or file's size, a text file's line count, or that it is a folder), and each can be removed before sending. An image goes to the backend as an image the agent sees. A file or folder goes as its path, which the agent reads itself; one from outside the session's workspace is copied into the session's scratch folder in the workspace first, so the agent reads it where it works (PROTO-CORE-API, Turns and attachments). The transcript shows a sent message's attachments with it.
 
 `docs/design/COMPOSER.md` says how the composer looks in each state.
 
@@ -34,7 +34,7 @@ An attachment is a file, an image or a folder that goes with a message. The user
 - **FLOW-SEND-MESSAGE-R13**: Ersa shall attach only a path the user named: one picked in the system's dialog or dropped on the box.
 - **FLOW-SEND-MESSAGE-R14**: Before the message is sent, an attachment from outside the session's workspace shall say that it will be copied into the workspace, and where.
 - **FLOW-SEND-MESSAGE-R15**: When Ersa can't tell whether a message reached the agent (the session was lost mid-send, or the send got no answer), the composer shall say so above its box and keep the message, and shall not say it failed.
-- **FLOW-SEND-MESSAGE-R16**: While a message's attachments are being copied, the composer shall show how far the copy has come.
+- **FLOW-SEND-MESSAGE-R16**: While a message is on its way to the agent, the composer shall show where it is: how far its attachments are copied, or that the backend is starting.
 
 ## Verification
 
