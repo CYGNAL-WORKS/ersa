@@ -120,3 +120,30 @@ async fn a_lowercase_name_in_the_removal_list_still_removes_the_variable() {
     // cmd leaves an unset variable's reference as it was written.
     assert_eq!(output.stdout[0].trim_end(), "[%OS%]");
 }
+
+/// A named pipe or a device reports itself as a file on Windows, so an
+/// attachment or an inspect refuses it by its name before opening it.
+// verifies: PROTO-CORE-API-R24
+#[test]
+fn pipes_and_devices_are_told_by_their_names() {
+    use ersa_core::platform::names_device;
+    for device in [
+        r"\\.\pipe\some-pipe",
+        r"\\?\pipe\some-pipe",
+        r"C:\dir\NUL",
+        r"C:\dir\com1.txt",
+        r"C:\dir\LPT9",
+    ] {
+        assert!(names_device(Path::new(device)), "{device}");
+    }
+    for file in [
+        r"C:\dir\notes.txt",
+        r"C:\dir\console.txt",
+        r"C:\dir\com0",
+        r"\\?\C:\dir\notes.txt",
+        r"\\server\share\notes.txt",
+        r"\\?\UNC\server\share\notes.txt",
+    ] {
+        assert!(!names_device(Path::new(file)), "{file}");
+    }
+}

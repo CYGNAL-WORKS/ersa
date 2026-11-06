@@ -456,10 +456,31 @@ async fn a_handover_that_breaks_is_delivery_unknown_and_keeps_its_copies() {
         )
         .await;
     assert_eq!(kind(&response["error"]), "delivery_unknown", "{response:#}");
+    // Removing an unsent message's copies happens just after its answer:
+    // wait long enough that a removal would have shown.
+    tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(copies(&s.scratch(&id)), vec!["1"]);
     // The session can send again.
     let again = s.send(&id, "again", json!([])).await;
     assert!(again.get("result").is_some(), "{again:#}");
+}
+
+// verifies: PROTO-CORE-API-R26
+#[tokio::test]
+async fn a_session_found_stopped_after_its_line_was_written_is_delivery_unknown() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    let id = s.session().await;
+    let notes = path(&file(&s.outside, "notes.md", b"x"));
+    let response = s
+        .send(
+            &id,
+            "stopped mid-write",
+            json!([{ "kind": "file", "path": notes }]),
+        )
+        .await;
+    assert_eq!(kind(&response["error"]), "delivery_unknown", "{response:#}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(copies(&s.scratch(&id)), vec!["1"]);
 }
 
 // verifies: PROTO-CORE-API-R28

@@ -12,6 +12,8 @@
 //! - `burst <n>`: `n` replies at once, to flood subscribers.
 //! - `broken pipe`: the write fails halfway, so Core can't tell whether the
 //!   backend has the message.
+//! - `stopped mid-write`: the line is recorded, then the session is found
+//!   stopped, as a kill landing during the write would leave it.
 //!
 //! Every message is kept in [`Stats::messages`] as the fake was given it,
 //! attachments and all; the fake takes PNG and GIF images of up to
@@ -413,6 +415,13 @@ impl AdapterSession for FakeSession {
                 std::io::ErrorKind::BrokenPipe,
                 "the backend stopped reading",
             )));
+        }
+        if message.text == "stopped mid-write" {
+            self.sink.record(
+                Direction::Host,
+                json!({ "t": "user", "text": message.text }).to_string(),
+            );
+            return Err(AdapterError::NotRunning);
         }
         self.stats.messages.lock().unwrap().push(message.clone());
         self.send_user(&message.text).await

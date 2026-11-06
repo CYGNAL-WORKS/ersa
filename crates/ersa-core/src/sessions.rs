@@ -933,18 +933,20 @@ impl SessionManager {
         self.store.delete_session(id.to_string()).await?;
         // Its scratch folder goes with it (PROTO-CORE-API-R28), once no
         // copying holds it. Never past a bound: a file system that hangs
-        // leaves the folder behind, which a later look can tidy, rather
-        // than hold up the removal.
+        // leaves the folder behind, logged, rather than hold up the
+        // removal.
         let cwd = lock(&handle.row).cwd.clone();
         let scratch = Arc::clone(&handle.scratch);
         let session_id = id.to_string();
-        let removal = tokio::time::timeout(
-            SCRATCH_REMOVAL,
+        // The scratch folder is waited for here, never on a thread.
+        let removal = tokio::time::timeout(SCRATCH_REMOVAL, async move {
+            let held = scratch.lock_owned().await;
             tokio::task::spawn_blocking(move || {
-                let _held = scratch.blocking_lock();
+                let _held = held;
                 crate::attachments::remove_scratch(Path::new(&cwd), &session_id)
-            }),
-        );
+            })
+            .await
+        });
         match removal.await {
             Ok(Ok(Ok(()))) => {}
             Ok(Ok(Err(e))) => {
@@ -1975,7 +1977,11 @@ fn send_tile(tiles: &TileHub, session_id: &str, tile: &Tile) {
         session_id: session_id.to_string(),
         tile: tile.clone(),
     };
-    tiles.publish(session_id, notification_line("session.tile", &params));
+    tiles.publish(
+        session_id,
+        Latest::Tile,
+        notification_line("session.tile", &params),
+    );
 }
 
 /// Hands `session.tile` and `session.send_progress` notifications to every
@@ -1990,8 +1996,8 @@ struct TileHub {
 
 #[derive(Default)]
 struct TileInbox {
-    /// The newest tile line per session not yet taken.
-    latest: Mutex<HashMap<String, Arc<String>>>,
+    /// The newest line of each kind per session not yet taken.
+    latest: Mutex<HashMap<(String, Latest), Arc<String>>>,
     ready: Notify,
 }
 
@@ -2005,18 +2011,19 @@ impl TileHub {
     /// Drops any tile or send progress for `session_id` not yet taken, for a
     /// removed session.
     fn forget(&self, session_id: &str) {
-        self.forget_key(session_id);
-        self.forget_key(&send::progress_key(session_id));
+        self.forget_one(session_id, Latest::Tile);
+        self.forget_one(session_id, Latest::SendProgress);
     }
 
-    /// Drops the line kept under `key` not yet taken.
-    fn forget_key(&self, key: &str) {
+    /// Drops the session's line of one kind not yet taken.
+    fn forget_one(&self, session_id: &str, kind: Latest) {
+        let key = (session_id.to_string(), kind);
         for inbox in lock(&self.inboxes).iter().filter_map(Weak::upgrade) {
-            lock(&inbox.latest).remove(key);
+            lock(&inbox.latest).remove(&key);
         }
     }
 
-    fn publish(&self, session_id: &str, line: String) {
+    fn publish(&self, session_id: &str, kind: Latest, line: String) {
         let line = Arc::new(line);
         let mut inboxes = lock(&self.inboxes);
         // A connection that has gone dropped its feed; forget its inbox.
@@ -2024,12 +2031,19 @@ impl TileHub {
             let Some(inbox) = inbox.upgrade() else {
                 return false;
             };
-            lock(&inbox.latest).insert(session_id.to_string(), Arc::clone(&line));
+            lock(&inbox.latest).insert((session_id.to_string(), kind), Arc::clone(&line));
             // Stores a permit when nobody waits, so a wake is never lost.
             inbox.ready.notify_one();
             true
         });
     }
+}
+
+/// The kinds of notification the hub keeps only the newest of, per session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Latest {
+    Tile,
+    SendProgress,
 }
 
 /// One connection's view of tile changes.

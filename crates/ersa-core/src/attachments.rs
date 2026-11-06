@@ -58,6 +58,10 @@ pub struct Work {
     copying: AtomicBool,
     copied: AtomicU64,
     total: AtomicU64,
+    /// For tests: stop at this step (counting from 1), as a cancel arriving
+    /// then would. 0 never stops.
+    #[cfg(test)]
+    stop_at: AtomicU64,
 }
 
 impl Work {
@@ -87,7 +91,11 @@ impl Work {
 
     /// One step done; fails when the job has been told to stop.
     fn step(&self) -> Result<(), Fail> {
-        self.steps.fetch_add(1, Ordering::SeqCst);
+        let _step = self.steps.fetch_add(1, Ordering::SeqCst) + 1;
+        #[cfg(test)]
+        if _step == self.stop_at.load(Ordering::SeqCst) {
+            self.stop();
+        }
         if self.stop.load(Ordering::SeqCst) {
             Err(Fail::Stopped)
         } else {
@@ -109,6 +117,16 @@ pub enum Refused {
 enum Fail {
     Stopped,
     Reason(String),
+}
+
+impl Fail {
+    /// Names the attachment at `index` as the one that failed.
+    fn at(index: usize) -> impl Fn(Fail) -> Refused {
+        move |fail| match fail {
+            Fail::Stopped => Refused::Stopped,
+            Fail::Reason(reason) => Refused::At { index, reason },
+        }
+    }
 }
 
 impl From<io::Error> for Fail {
@@ -157,12 +175,6 @@ pub fn prepare(
     attachments: &[Attachment],
     work: &Work,
 ) -> Result<Prepared, Refused> {
-    let refuse = |index: usize| {
-        move |fail: Fail| match fail {
-            Fail::Stopped => Refused::Stopped,
-            Fail::Reason(reason) => Refused::At { index, reason },
-        }
-    };
     let workspace = fs::canonicalize(target.workspace).map_err(|e| Refused::At {
         index: 0,
         reason: format!("the session's workspace can't be read: {e}"),
@@ -172,9 +184,9 @@ pub fn prepare(
     for (index, attachment) in attachments.iter().enumerate() {
         work.at.store(index, Ordering::SeqCst);
         let one = check(attachment, &workspace, target.images, &mut inline, work)
-            .map_err(refuse(index))?;
+            .map_err(Fail::at(index))?;
         checked.push(one);
-        work.step().map_err(refuse(index))?;
+        work.step().map_err(Fail::at(index))?;
     }
 
     let total: u64 = checked
@@ -260,13 +272,7 @@ fn check(
     let Some(path) = attachment.path.as_deref() else {
         return Err(reason("the attachment has no path".into()));
     };
-    if path.chars().any(char::is_control) {
-        return Err(reason("the path holds a control character".into()));
-    }
-    let given = Path::new(path);
-    if !given.is_absolute() {
-        return Err(reason(format!("{path} is not an absolute path")));
-    }
+    let given = named_path(path).map_err(reason)?;
     // A link is judged by its target: `metadata` follows it.
     let meta = match fs::metadata(given) {
         Ok(meta) => meta,
@@ -389,7 +395,8 @@ fn relative(inside: &Path) -> String {
 /// The bytes a copy of folder `root` would hold, refusing one past the
 /// limits. Links are left out, as the copy leaves them out.
 fn measure(root: &Path, work: &Work) -> Result<u64, Fail> {
-    let (mut bytes, mut entries) = (0u64, 0u64);
+    // The folder itself is an entry of the copy, as the copy counts it.
+    let (mut bytes, mut entries) = (0u64, 1u64);
     let mut folders = vec![root.to_path_buf()];
     while let Some(folder) = folders.pop() {
         for entry in fs::read_dir(&folder)? {
@@ -424,16 +431,10 @@ fn copy_all(
     copies: &mut Vec<PathBuf>,
     work: &Work,
 ) -> Result<(), Refused> {
-    let fail_at = |index: usize| {
-        move |fail: Fail| match fail {
-            Fail::Stopped => Refused::Stopped,
-            Fail::Reason(reason) => Refused::At { index, reason },
-        }
-    };
     work.at.store(first, Ordering::SeqCst);
-    let scratch = scratch_folder(workspace, target.session_id, work).map_err(fail_at(first))?;
+    let scratch = scratch_folder(workspace, target.session_id, work).map_err(Fail::at(first))?;
     let partial = scratch.join(PARTIAL);
-    let mut n = next_number(&scratch).map_err(fail_at(first))?;
+    let mut n = next_number(&scratch).map_err(Fail::at(first))?;
     for (index, one) in checked.iter_mut().enumerate() {
         let Checked::Copy {
             folder,
@@ -461,12 +462,12 @@ fn copy_all(
         })();
         if let Err(fail) = made {
             let _ = remove_entry(&aside);
-            return Err(fail_at(index)(fail));
+            return Err(Fail::at(index)(fail));
         }
         let placed = scratch.join(n.to_string());
         fs::rename(&aside, &placed)
             .map_err(Fail::from)
-            .map_err(fail_at(index))?;
+            .map_err(Fail::at(index))?;
         copies.push(placed);
         let path = format!("{ERSA}/{ATTACHMENTS}/{}/{n}/{name}", target.session_id);
         *one = Checked::Ready(if *folder {
@@ -475,7 +476,7 @@ fn copy_all(
             OutgoingAttachment::File { path }
         });
         n += 1;
-        work.step().map_err(fail_at(index))?;
+        work.step().map_err(Fail::at(index))?;
     }
     Ok(())
 }
@@ -513,11 +514,13 @@ fn scratch_folder(workspace: &Path, session_id: &str, work: &Work) -> Result<Pat
         real_folder(&folder)?;
         work.step()?;
     }
-    // What a crash or a stopped job left aside goes first.
-    for entry in fs::read_dir(&folder)? {
-        remove_entry(&entry?.path())?;
-        work.step()?;
-    }
+    // What a crash or a stopped job left aside goes first: the folder is
+    // removed whole and made again, rather than listed and emptied, so a
+    // link put in its place meanwhile is removed as a link (which
+    // `remove_dir_all` does), never followed.
+    remove_entry(&folder)?;
+    real_folder(&folder)?;
+    work.step()?;
     Ok(folder
         .parent()
         .expect("under the session's folder")
@@ -664,6 +667,34 @@ pub fn remove_scratch(workspace: &Path, session_id: &str) -> io::Result<()> {
     remove_entry(&attachments.join(session_id))
 }
 
+/// A path a user named, checked before anything touches it: absolute, with
+/// no control character, and naming no pipe or device. On Windows a named
+/// pipe or a device (`\\.\pipe\x`, `C:\dir\NUL`) reports itself as a file,
+/// and asking about it connects to whatever serves it, so those are refused
+/// by their names alone. A link is checked by its target too.
+fn named_path(path: &str) -> Result<&Path, String> {
+    if path.chars().any(char::is_control) {
+        return Err("the path holds a control character".into());
+    }
+    let given = Path::new(path);
+    if !given.is_absolute() {
+        return Err(format!("{path} is not an absolute path"));
+    }
+    no_device(given)?;
+    if let Ok(target) = fs::read_link(given) {
+        no_device(&target)?;
+    }
+    Ok(given)
+}
+
+fn no_device(path: &Path) -> Result<(), String> {
+    if crate::platform::names_device(path) {
+        Err(format!("{} is a pipe or a device", path.display()))
+    } else {
+        Ok(())
+    }
+}
+
 /// The image type `bytes` start with, among `media_types`.
 pub fn sniff_image(bytes: &[u8], media_types: &[&'static str]) -> Option<&'static str> {
     let head = &bytes[..bytes.len().min(SNIFF_BYTES)];
@@ -693,17 +724,7 @@ pub enum InspectError {
 /// and, for a text file of at most [`LINE_COUNT_MAX`] bytes, its line count.
 /// An image is told by its first bytes, among `media_types`.
 pub fn inspect(path: &str, media_types: &[&'static str]) -> Result<Inspected, InspectError> {
-    if path.chars().any(char::is_control) {
-        return Err(InspectError::Invalid(
-            "the path holds a control character".into(),
-        ));
-    }
-    let given = Path::new(path);
-    if !given.is_absolute() {
-        return Err(InspectError::Invalid(format!(
-            "{path} is not an absolute path"
-        )));
-    }
+    let given = named_path(path).map_err(InspectError::Invalid)?;
     let not_found = || InspectError::NotFound(format!("nothing is at {path}"));
     let invalid = |e: io::Error| InspectError::Invalid(format!("{path} can't be read: {e}"));
     let own = match fs::symlink_metadata(given) {
@@ -812,6 +833,73 @@ mod tests {
         assert_eq!(count_lines(b"a\nb"), Some(2));
         assert_eq!(count_lines(b"a\0b"), None);
         assert_eq!(count_lines(b"\xff\xfe"), None);
+    }
+
+    /// A send stopped at any step, checking or copying, leaves nothing in
+    /// the scratch folder.
+    // verifies: PROTO-CORE-API-R25
+    #[test]
+    fn a_job_stopped_at_any_step_leaves_no_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let workspace = dir.path().join("workspace");
+        let outside = dir.path().join("outside");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(outside.join("dir").join("sub")).unwrap();
+        fs::write(outside.join("a.txt"), vec![b'a'; 3 * CHUNK]).unwrap();
+        fs::write(outside.join("dir").join("sub").join("b.txt"), b"b").unwrap();
+        let file = |kind, name: &str| Attachment {
+            kind,
+            path: Some(outside.join(name).display().to_string()),
+            media_type: None,
+            data: None,
+        };
+        let attachments = [
+            file(AttachmentKind::File, "a.txt"),
+            file(AttachmentKind::Folder, "dir"),
+        ];
+        let target = Target {
+            workspace: &workspace,
+            session_id: "s-1",
+            images: ImageLimits::default(),
+        };
+        let scratch = workspace.join(ERSA).join(ATTACHMENTS).join("s-1");
+        let entries = |dir: &Path| -> Vec<String> {
+            fs::read_dir(dir)
+                .map(|entries| {
+                    entries
+                        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let mut stopped = 0;
+        for stop_at in 1.. {
+            let work = Work::default();
+            work.stop_at.store(stop_at, Ordering::SeqCst);
+            match prepare(&target, &attachments, &work) {
+                Err(Refused::Stopped) => {
+                    stopped += 1;
+                    // Nothing moved into place, and nothing left aside.
+                    let placed = entries(&scratch);
+                    assert!(
+                        placed.iter().all(|n| n == PARTIAL),
+                        "step {stop_at}: {placed:?}"
+                    );
+                    let aside = entries(&scratch.join(PARTIAL));
+                    assert!(aside.is_empty(), "step {stop_at}: {aside:?}");
+                }
+                Ok(prepared) => {
+                    // Past the last step: the job finished.
+                    assert_eq!(prepared.attachments.len(), 2);
+                    assert!(work.copying().is_some());
+                    break;
+                }
+                Err(other) => panic!("step {stop_at}: {other:?}"),
+            }
+        }
+        // Stops while copying were among them: the file alone takes three
+        // chunks.
+        assert!(stopped > 10, "{stopped}");
     }
 
     #[test]

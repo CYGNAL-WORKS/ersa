@@ -82,6 +82,32 @@ pub fn host_name() -> String {
 /// `\\?\UNC\server\share\repo`), which many tools, git among them, do not
 /// accept. This turns it back into the ordinary form (`C:\repo`,
 /// `\\server\share\repo`).
+/// Whether `path` names a named pipe or a device: one in the `\\.\` or
+/// non-drive `\\?\` namespaces, or a reserved device name (`NUL`, `COM1`,
+/// with any extension) in any folder. Windows reports such a path as a file,
+/// and asking about it connects to whatever serves it, so it is told by its
+/// name alone.
+pub fn names_device(path: &Path) -> bool {
+    path.components().any(|component| match component {
+        Component::Prefix(prefix) => {
+            matches!(prefix.kind(), Prefix::DeviceNS(_) | Prefix::Verbatim(_))
+        }
+        Component::Normal(part) => {
+            let part = part.to_string_lossy().to_ascii_uppercase();
+            let stem = part.split('.').next().unwrap_or("").trim_end();
+            let numbered = |name: &str| {
+                stem.len() == 4
+                    && stem.starts_with(name)
+                    && (b'1'..=b'9').contains(&stem.as_bytes()[3])
+            };
+            matches!(stem, "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
+                || numbered("COM")
+                || numbered("LPT")
+        }
+        _ => false,
+    })
+}
+
 pub fn canonicalize(path: &Path) -> io::Result<PathBuf> {
     let verbatim = std::fs::canonicalize(path)?;
     let mut components = verbatim.components();
