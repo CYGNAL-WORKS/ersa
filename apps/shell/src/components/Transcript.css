@@ -27,6 +27,9 @@
 .transcript-scroll {
   min-height: 0;
   overflow: auto;
+  /* The transcript's last space-xxxl fades out behind the composer, with no line between them
+     (docs/design/COMPOSER.md, The composer). Only the mask's alpha counts, so any opaque colour serves. */
+  mask-image: linear-gradient(to top, transparent, var(--color-ink) var(--space-xxxl));
 }
 
 /* The reading column at the measure; blocks in a turn sit a space-md apart, so a turn reads dense (DESIGN.md, Layout). */

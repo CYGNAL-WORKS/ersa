@@ -430,6 +430,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The session controls under the active session show its own values, as Core lists them (FLOW-NEW-SESSION-R12);
   // they change nothing during a session. Absent until the session's workspace and project are known.
   const listed = sessions.state === "ready" ? sessions.sessions.find((s) => s.id === shown?.id) : undefined;
+  // Ersa can't reach the sessions: the composer says so and is unavailable until it does (FLOW-SEND-MESSAGE-R06).
+  const away = view.phase === "connected" ? undefined : view.phase === "failed" ? "unreachable" : "reconnecting";
   const listedWorkspace = listed && workspaces[listed.workspace_id];
   const listedProject = listedWorkspace && projectById.get(listedWorkspace.project_id);
   const sessionControls = listed && listedWorkspace && sessionShown(listed, listedWorkspace, backends[listed.host_id] ?? []);
@@ -531,7 +533,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           <ErrorBoundary what="The composer" resetKey={shown.id}>
             <Composer
               key={shown.id}
-              unavailable={view.phase === "connected" ? undefined : "Core is not connected."}
+              unavailable={away}
+              // An open permission request holds the focal glow; the box shows focus by its edge alone.
+              quietFocus={listed?.tile.pending.some((p) => p.kind === "permission")}
               // A kept session's first message that did not go through: why, and the text when it is to go again.
               sending={shown.message ?? (firstSendHere && { state: "failed", message: firstSendHere.message })}
               initialText={firstSendHere?.text}
@@ -570,6 +574,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               starting={starting}
               onChooseFolder={chooseFolder}
               onAddProject={addProject}
+              away={away}
               adding={adding}
             />
           </ErrorBoundary>
