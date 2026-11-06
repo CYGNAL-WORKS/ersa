@@ -891,6 +891,14 @@ impl SessionManager {
     pub async fn remove(&self, id: &str) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
         let _op = handle.op.lock().await;
+        // A session whose ending is already queued is only winding down: a
+        // client may have seen `session.ended` before Core let it go, and
+        // can remove it, so wait for it to finish.
+        if let Some(live) = handle.live()
+            && live.sink.has_ended()
+        {
+            wait_finished(&live, STOP_TIMEOUT).await?;
+        }
         if handle.live().is_some() {
             return Err(SessionError::InvalidState(format!(
                 "session {id} is running; stop it first"
@@ -1594,6 +1602,12 @@ impl CoreSink {
 
     fn record_fact(&self, fact: LifecycleFact) {
         self.push_fact(&mut lock(&self.inner), fact);
+    }
+
+    /// Whether the fact that ends the session is queued. Read under the lock
+    /// it is queued under, so it holds for anyone who has seen that fact.
+    fn has_ended(&self) -> bool {
+        lock(&self.inner).ended
     }
 
     /// The index the next line will get.
