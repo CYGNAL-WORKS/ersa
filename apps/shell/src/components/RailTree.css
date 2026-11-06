@@ -140,9 +140,15 @@
   outline: none;
 }
 
+/* The chevron points down while its tiles show and right while they are folded away, turning between the two. */
 .rail-heading-chevron {
   display: inline-flex;
   color: var(--color-ink-faint);
+  transition: transform var(--motion-quick) var(--motion-ease-out);
+}
+
+.rail-project[data-collapsed] .rail-heading-chevron {
+  transform: rotate(-90deg);
 }
 
 .rail-heading-name,
@@ -159,13 +165,58 @@
 }
 
 /* Toward the trailing edge, at the regular weight: the shield in caution before "Not trusted". */
-.rail-heading-trust {
+/* Toward the trailing edge, at the regular weight: "Not trusted", then a collapsed heading's count. */
+.rail-heading-status {
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: var(--space-xs);
+  gap: var(--space-sm);
   margin-inline-start: auto;
   white-space: nowrap;
+}
+
+.rail-heading-trust,
+.rail-heading-count {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.rail-heading-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* The mark that leads the count: the tone of what the sessions in it want. */
+.rail-heading-count .glyph[data-tone="caution"] {
+  background: var(--color-caution);
+}
+
+.rail-heading-count .glyph[data-tone="accent"] {
+  background: var(--color-accent);
+}
+
+/* The tiles under a heading slide closed or open, and fade, as it collapses and expands (RAIL.md, A project heading).
+   The frame's one row eases between the tiles' height and none; it sits in the group's gap while open and takes
+   that gap back while closed, so a collapsed heading is spaced like any other. */
+.rail-group-tiles {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows var(--motion-settle) var(--motion-ease-out),
+    opacity var(--motion-settle) var(--motion-ease-out),
+    margin var(--motion-settle) var(--motion-ease-out);
+}
+
+.rail-group-tiles-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rail-project[data-collapsed] .rail-group-tiles {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  margin-top: calc(-1 * var(--space-xs));
 }
 
 .rail-heading-trust .icon {
@@ -299,6 +350,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .rail-heading,
+  .rail-heading-chevron,
+  .rail-group-tiles,
   .rail-heading-actions,
   .rail-menu-item {
     transition: none;

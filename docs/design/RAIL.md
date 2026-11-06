@@ -2,7 +2,7 @@
 
 How the rail, its headings, a tile and their menus look, token by token. `LAY-SHELL` (The rail) says what the rail contains and how it behaves; `DESIGN.md` holds the tokens and the rules every surface follows. Read this before changing any of the three.
 
-The owner reviewed this design as a mockup. Its renders are in `reference/`: `rail-states-dark.png` and `rail-states-light.png` show the states, and `shell-dark.png` shows the rail in the window. The renders also draw parts that are not specified yet: the title bar with the Ersa menu at the top of the rail. The owner's design canvas (its Rail menus artboard) draws the arrange menu, a tile's menu with Move to section open, the Pinned group, a section heading and the delete question. Build what this page and `LAY-SHELL` describe; where a render and this page differ, this page wins. Once the gallery shows a state, the gallery is the reference for it, and the renders are deleted when it shows them all.
+The owner reviewed this design as a mockup. The gallery shows every state of the rail built so far, in both themes, and is the reference for them. The mockup also drew a title bar with an Ersa menu at the top of the rail, which is not specified yet. The owner's design canvas (its Rail menus artboard) draws the arrange menu, a tile's menu with Move to section open, the Pinned group, a section heading and the delete question. Build what this page and `LAY-SHELL` describe; where the canvas and this page differ, this page wins.
 
 ## The rail
 

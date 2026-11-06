@@ -3,6 +3,7 @@
 
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import { newestFirst } from "./controls";
+import { wantTone } from "./tile";
 
 export interface Tree {
   /** Every project, in the order Core lists them, each with its sessions newest first; a project may have none. */
@@ -29,4 +30,18 @@ export function treeOf(
     else loose.push(s);
   }
   return { projects: projects.map((project) => ({ project, sessions: byProject.get(project.id) ?? [] })), loose };
+}
+
+/** What a collapsed group heading says of the sessions it holds (LAY-SHELL, Collapsing). */
+export interface Collapsed {
+  count: number;
+  /** When any of them needs the user, the tone of what they want: a permission request's over a question's. */
+  tone?: "accent" | "caution";
+}
+
+/** What a collapsed heading says: how many sessions it holds, and the tone of the mark that leads the count. */
+export function collapsedOf(sessions: readonly Session[]): Collapsed {
+  const tones = sessions.filter((s) => s.tile.pending.length > 0).map((s) => wantTone(s.tile.pending));
+  const tone = tones.includes("caution") ? "caution" : tones.length > 0 ? "accent" : undefined;
+  return { count: sessions.length, tone };
 }
