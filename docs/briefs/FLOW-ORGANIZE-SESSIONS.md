@@ -30,7 +30,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 
 ## Variations and errors
 
-- **Groups by date** are Today, Yesterday, Previous 7 days and Older, by the session's last activity (the end of its latest turn), else its creation, in the user's local time.
+- **Groups by date** are Today, Yesterday, Previous 7 days and Older, by when the session was created, in the user's local time, so a session never changes group as it works; only the passing of days moves it.
 - **Sections in other groupings.** Sections are seen only when grouping by section. Choosing New section, from either menu, while grouping by something else switches the grouping to Section so the new heading is in view.
 - **Deleting a section** puts its sessions in "No section" and asks nothing, since no session is lost.
 - **A name already taken or too long.** Two sections may not share a name, ignoring case, and a name has at most 80 characters; the name field says so and keeps the name typed.
@@ -48,7 +48,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 - **FLOW-ORGANIZE-SESSIONS-R04**: When grouping by section, Ersa shall show every section, empty or not, in the order they were made, then "No section" for sessions in none.
 - **FLOW-ORGANIZE-SESSIONS-R05**: When the user deletes a section, Ersa shall put its sessions in "No section" and keep every session.
 - **FLOW-ORGANIZE-SESSIONS-R06**: Ersa shall refuse a section name that is blank, longer than 80 characters, or that another section already has, ignoring case.
-- **FLOW-ORGANIZE-SESSIONS-R07**: When grouping by date, Ersa shall put each session in Today, Yesterday, Previous 7 days or Older by the local date of its last activity, else of its creation.
+- **FLOW-ORGANIZE-SESSIONS-R07**: When grouping by date, Ersa shall put each session in Today, Yesterday, Previous 7 days or Older by the local date it was created.
 - **FLOW-ORGANIZE-SESSIONS-R08**: When grouping by project, Ersa shall group as `LAY-SHELL` (The rail) gives; when grouping by none, Ersa shall show one list with no headings after the Pinned group.
 - **FLOW-ORGANIZE-SESSIONS-R09**: Ersa shall sort the tiles within each group by the chosen sort: date created newest first; last activity newest first, taking a session's creation for its last activity until it has one; or name in the user's locale order, with untitled sessions last; ties fall back to date created, newest first.
 - **FLOW-ORGANIZE-SESSIONS-R10**: When sorting by last activity, Ersa shall move a tile only when Core reports a new last activity for its session, which Core sets when a turn ends.
