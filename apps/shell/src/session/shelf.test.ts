@@ -276,7 +276,7 @@ describe("several requests", () => {
   });
 
   // verifies: FLOW-APPROVE-PERMISSION-R09
-  it("never counts past m: once every request it knew of is answered, it shows nothing while the tile catches up", () => {
+  it("never counts past m: once every request it knew of is answered, it is settled while the tile catches up", () => {
     const [r1, r2] = [permission("r1"), permission("r2")];
     const both: [Kind, string][] = [
       ["permission", "r1"],
@@ -293,7 +293,7 @@ describe("several requests", () => {
       ["r2", { n: 2, m: 2 }],
       [undefined, undefined],
     ]);
-    expect(shelfOf(viewOf([r1, r2, decided("r1"), decided("r2")]), pending(...both))).toEqual({ state: "loading" });
+    expect(shelfOf(viewOf([r1, r2, decided("r1"), decided("r2")]), pending(...both))).toEqual({ state: "settled" });
   });
 
   it("keeps the shown requests while the same shelf is open, and starts afresh for another or after closing", () => {
