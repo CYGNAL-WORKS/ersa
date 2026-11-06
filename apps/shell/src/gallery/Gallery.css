@@ -93,3 +93,28 @@
   display: inline-flex;
   color: var(--color-caution);
 }
+
+/* The shelf beside its tile, over a strip of the stage: the specimen is the window the shelf is placed in, so it
+   stays inside the specimen, rising to fit its foot as it would the window's. */
+.gallery-shelf {
+  position: relative;
+  /* A containing block for the shelf, which is fixed in the window. */
+  transform: translateZ(0);
+  display: flex;
+  min-height: calc(var(--size-shelf) + var(--size-shelf));
+  overflow: hidden;
+  background: var(--color-canvas);
+}
+
+/* A window too short for the shelf below its tile, so it rises to fit. */
+.gallery-shelf[data-short] {
+  min-height: var(--size-shelf);
+}
+
+.gallery-shelf-rail {
+  box-sizing: border-box;
+  width: var(--size-rail);
+  padding: var(--space-lg);
+  background: var(--color-surface);
+  border-right: var(--line-hairline) solid var(--color-line);
+}
