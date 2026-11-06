@@ -259,12 +259,12 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - Exact shapes of `interrupt`, `set_model`, `get_context_usage`, `get_session_cost`, and `mcp_message` responses (to be recorded).
 - A workspace's settings can change the permission mode the CLI runs in; how the effective mode `system/init` reports reaches the Interface, so the user sees the mode a session really has.
 - Whether `permissions.allow` already applies in the session that first attests trust: the CLI logs that it re-applies project settings after recording trust, but its stderr warning is printed before `initialize` is read, and checking needs a tool call. The opt-in live test checks the next session only.
-- What the CLI keys its trust record to for a folder outside any git repository: assumed to be the folder itself (FLOW-NEW-SESSION-R26 says so), but fixture 03-workspace-trust was recorded in a git repository.
+- What the CLI keys its trust record to for a folder outside any git repository: assumed to be the folder itself, but fixture 03-workspace-trust was recorded in a git repository.
 - Whether revoking a project's trust in Ersa, or adding a project at a subfolder, needs a user-facing note, given that the CLI's record covers the whole repository and outlives Ersa's answer (owner).
 
 ## Changes
 
-- 2026-11-06: open question on what the CLI keys its trust record to outside a git repository (FLOW-NEW-SESSION-R26). No requirement IDs changed.
+- 2026-11-06: open question on what the CLI keys its trust record to outside a git repository. No requirement IDs changed.
 - 2026-11-05: Questions recorded on 2.1.316 (answer, interrupt, deny): the request's shape, answers taken as any string, the interrupt's `control_cancel_request`, and a deny as a decline; R29 gains the decline. No other requirement IDs changed.
 - 2026-11-05: for FLOW-APPROVE-PERMISSION: Questions added, from the SDK types and not yet recorded: `AskUserQuestion` projects to `question.asked` and is answered by an allow carrying `answers` (PROTO-CLAUDE-CODE-STREAM-R29 added); R03 retired for R30, which leaves the question tool out of permission requests.
 - 2026-11-05: Deleting's rules made testable: PROTO-CLAUDE-CODE-STREAM-R31 to R33 added (R29 and R30 are the shelf pass's).
