@@ -9,6 +9,5 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 ## Open
 
 - [ ] 2026-11-06 RAIL.md (A project heading): at size-rail a collapsed, untrusted heading cannot hold its name, "Not trusted", "N sessions" and the kept place of New session and More: the name is cut to a letter. #158 shows the count's number alone beside "Not trusted", with the full "N sessions" heard by assistive technology; a trusted collapsed heading shows "N sessions".
-- [ ] 2026-11-06 LAY-SHELL: Built so far does not yet say that New session sits at the rail's top and that group headings collapse, counting their sessions with the mark in the tone of what they want; #158 builds both, with collapsed headings kept while the window is open (across restarts arrives with the arrange menu).
 
 ## Resolved recently (optional, trimmed in planning passes)
