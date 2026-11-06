@@ -1,10 +1,11 @@
 /* The shelf (docs/design/RAIL.md, The shelf): a transient layer pulled out of its tile over the transcript's edge.
    It is placed beside the open tile by anchor positioning, so it never moves, narrows or scrolls the transcript
-   (FLOW-APPROVE-PERMISSION-R04), and stays beside the tile as the rail scrolls. The open tile names the anchor. */
+   (FLOW-APPROVE-PERMISSION-R04), and stays beside the tile as the rail scrolls. */
 
 .shelf {
   position: fixed;
-  position-anchor: --open-tile;
+  /* The anchor its tile names, given to the layer that holds it. */
+  position-anchor: inherit;
   top: anchor(top);
   left: anchor(right);
   /* Past the window's foot, it rises to fit. */
@@ -44,7 +45,8 @@
   content: "";
   position: absolute;
   left: calc(-1 * var(--line-hairline));
-  top: var(--shelf-join-top);
+  /* The join is measured from the shelf's outer edge; the cover sits inside it, past the edge's hairline. */
+  top: calc(var(--shelf-join-top) - var(--line-hairline));
   width: var(--line-hairline);
   height: var(--shelf-join-height);
   background: var(--color-surface);
@@ -55,12 +57,23 @@
   bottom: 0;
 }
 
-/* Slides out from under the tile's trailing edge and fades in. */
+/* Slides out from under the tile's trailing edge and fades in; closing, it slides back and fades the same way. */
 @keyframes shelf-out {
   from {
     opacity: 0;
     transform: translateX(calc(-1 * var(--space-md)));
   }
+}
+
+@keyframes shelf-back {
+  to {
+    opacity: 0;
+    transform: translateX(calc(-1 * var(--space-md)));
+  }
+}
+
+.shelf-layer[inert] > .shelf {
+  animation: shelf-back var(--motion-settle) var(--motion-ease-out) forwards;
 }
 
 .shelf-heading {
@@ -71,6 +84,11 @@
   color: var(--color-ink-muted);
   font-size: var(--type-ui-small-size);
   line-height: var(--type-ui-small-leading);
+}
+
+/* The place, in the heading line's own type, with figures that hold still as it counts. */
+.shelf-place {
+  font-variant-numeric: tabular-nums;
 }
 
 .shelf-asked {
@@ -158,7 +176,8 @@
 
 /* With reduced motion on, the shelf appears at once. */
 @media (prefers-reduced-motion: reduce) {
-  .shelf {
+  .shelf,
+  .shelf-layer[inert] > .shelf {
     animation: none;
   }
 }

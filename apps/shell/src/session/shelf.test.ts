@@ -3,7 +3,9 @@ import type { CoreClient, Method, Params } from "../core/client";
 import type { Envelope, Event } from "../protocol/agent-events.gen";
 import type { Session } from "../protocol/core-api.gen";
 import type { SessionView } from "./follow";
+import { follow } from "./follow";
 import { shelfAfter, shelfFollowing, shelfOf, shelfTone } from "./shelf";
+import { sharedSubscriptions } from "./subscriptions";
 import { EVENT_VERSION, apply, emptyTranscript } from "./transcript";
 
 const flags = { default_to_no: false, suppress_always_allow: false, requires_user_interaction: false, classifier_approvable: false };
@@ -132,6 +134,8 @@ describe("what the shelf shows", () => {
   // verifies: FLOW-APPROVE-PERMISSION-R21
   it("is loading while the events are read, and says why reading them failed", () => {
     expect(shelfOf(undefined, pending(["permission", "r1"]))).toEqual({ state: "loading" });
+    // Opened while Ersa can't reach Core, before anything was read.
+    expect(shelfOf(viewOf([], { stream: { state: "offline" } }), pending(["permission", "r1"]))).toEqual({ state: "loading" });
     expect(shelfOf(viewOf([], { stream: { state: "subscribing" } }), pending(["permission", "r1"]))).toEqual({ state: "loading" });
     expect(shelfOf(viewOf([], { stream: { state: "failed", message: "the session is gone" } }), pending(["permission", "r1"]))).toEqual({
       state: "failed",
@@ -144,6 +148,19 @@ describe("what the shelf shows", () => {
     const failed = viewOf([permission("r1")], { stream: { state: "failed", message: "event 1 never arrived", gap: true } });
     expect(shelfOf(failed, pending(["permission", "r1"]))).toEqual({ state: "failed", message: "event 1 never arrived" });
     expect(shelfOf(viewOf([permission("r1")], { stream: { state: "subscribing" } }), pending(["permission", "r1"]))).toEqual({ state: "loading" });
+  });
+
+  it("never draws a permission request whose answers or reason can't be read", () => {
+    // A request with no flags, one with a suggestion without a label, and one with an unreadable reason: each is
+    // a notice in the transcript, never a request the shelf would draw, so the shelf says it can't show it.
+    const { flags: _, ...noFlags } = permission("r1") as Extract<Event, { type: "permission.requested" }>;
+    const unlabeled = permission("r1", { suggestions: [{ kind: "allow_rule", payload: {} } as never] });
+    const reasonless = permission("r1", { reason: { kind: "rule" } as never });
+    for (const bad of [noFlags as Event, unlabeled, reasonless]) {
+      const view = viewOf([bad]);
+      expect(view.transcript.items.map((i) => i.kind)).toEqual(["notice"]);
+      expect(shelfOf(view, pending(["permission", "r1"]))).toEqual({ state: "unknown", place: undefined });
+    }
   });
 
   // verifies: FLOW-APPROVE-PERMISSION-R25
@@ -193,7 +210,7 @@ describe("following the shelf's session", () => {
   it("follows the open shelf's session, moves with the shelf, and leaves no subscription once it closes", () => {
     const { client, calls } = fakeClient();
     const seen: (SessionView | undefined)[] = [];
-    const shelf = shelfFollowing(client, (v) => seen.push(v));
+    const shelf = shelfFollowing(sharedSubscriptions(client), (v) => seen.push(v));
     shelf.follow("a", true);
     expect(subscriptions(calls)).toEqual(new Set(["a"]));
     shelf.follow("b", true);
@@ -208,7 +225,7 @@ describe("following the shelf's session", () => {
   it("subscribes once the window is connected, and applies only its own session's events", () => {
     const { client, calls } = fakeClient();
     let last: SessionView | undefined;
-    const shelf = shelfFollowing(client, (v) => (last = v));
+    const shelf = shelfFollowing(sharedSubscriptions(client), (v) => (last = v));
     shelf.follow("s1", false);
     expect(calls).toEqual([]);
     shelf.attached();
@@ -218,22 +235,28 @@ describe("following the shelf's session", () => {
     expect(last?.transcript.items.map((i) => i.key)).toEqual(["permission:r1"]);
   });
 
-  it("leaves the subscription alone when the shelf closes because its session became active", () => {
+  it("keeps a session the transcript and the shelf both follow subscribed until both let go", () => {
     const { client, calls } = fakeClient();
-    const shelf = shelfFollowing(client, () => {});
-    shelf.follow("a", true, "other");
-    // The transcript subscribes to "a" as it becomes active; the shelf closing must not end that subscription.
-    shelf.follow(undefined, true, "a");
+    const shared = sharedSubscriptions(client);
+    let shelfView: SessionView | undefined;
+    // The transcript follows "a"; the new-session screen hides it, and the user opens "a"'s shelf.
+    const transcript = follow(shared(), "a", () => {});
+    transcript.attached();
+    const shelf = shelfFollowing(shared, (v) => (shelfView = v));
+    shelf.follow("a", true);
+    // The user picks another session: the transcript stops, and the shelf, still open, keeps the subscription.
+    transcript.stop();
     expect(calls.filter((c) => c.method === "session.unsubscribe")).toEqual([]);
-    // Closed for any other reason, it unsubscribes.
-    shelf.follow("b", true, "a");
-    shelf.follow(undefined, true, "a");
-    expect(calls.filter((c) => c.method === "session.unsubscribe").map((c) => c.params)).toEqual([{ id: "b" }]);
+    shelf.receive(envelope(permission("r1"), 0, "a"));
+    expect(shelfView?.transcript.items.map((i) => i.key)).toEqual(["permission:r1"]);
+    // The shelf closes too: now nobody reads "a", and it is unsubscribed once.
+    shelf.follow(undefined, true);
+    expect(calls.filter((c) => c.method === "session.unsubscribe").map((c) => c.params)).toEqual([{ id: "a" }]);
   });
 
   it("subscribes again on Retry", () => {
     const { client, calls } = fakeClient();
-    const shelf = shelfFollowing(client, () => {});
+    const shelf = shelfFollowing(sharedSubscriptions(client), () => {});
     shelf.follow("a", true);
     shelf.attached();
     expect(calls.filter((c) => c.method === "session.subscribe")).toHaveLength(2);

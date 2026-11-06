@@ -131,7 +131,10 @@ describe("a session's tile", () => {
       }),
     );
     expect(html.match(/class="shelf"/g)).toHaveLength(1);
-    expect(html.match(/<li class="session-item" data-shelf="true" data-tone="caution">.*?<\/li>/)?.[0]).toContain('aria-label="Request from a"');
+    // The open tile names its own anchor, and the shelf's layer is placed by it.
+    const open = html.match(/<li class="session-item" data-shelf="true" data-tone="caution" style="anchor-name:(--[^"]+)">.*?<\/li>/);
+    expect(open?.[0]).toContain('aria-label="Request from a"');
+    expect(open?.[0]).toContain(`<div class="shelf-layer" style="position-anchor:${open?.[1]}">`);
     // A question's tile is the accent, until its shelf shows something in the caution tone.
     expect(html).toContain('data-tone="caution" aria-label="Request from a"');
     expect(html).toContain('data-tone="accent" aria-label="Request from b"');
