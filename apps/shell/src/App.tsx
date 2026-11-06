@@ -16,14 +16,14 @@ import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { Project, Session, Workspace } from "./protocol/core-api.gen";
-import { type BackendChoices, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
+import { type BackendChoices, type Branches, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
 import { contextUsed, tileOf } from "./session/tile";
 import { type Answers, type Decision, answering } from "./session/answers";
 import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./session/shelf";
 import { sharedSubscriptions } from "./session/subscriptions";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
-import { readChoices, rememberPatch, startSession } from "./session/start";
+import { readChoices, rememberPatch, remembered, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
 
 // The same objects every render, so effects and error-boundary keys that
@@ -301,7 +301,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       connection.current?.reload("sessions");
       return false;
     }
-    setLastUsed((l) => ({ ...l, [values.project_id]: values }));
+    setLastUsed((l) => ({ ...l, [values.project_id]: remembered(values) }));
     // Best effort: a failure only means the screen starts at these values in this window alone.
     client.call("settings.set", { patch: rememberPatch(values) }).catch(() => {});
     // Known at once, so the rail puts the new session's tile under its project as it appears (FLOW-NEW-SESSION-R13).
@@ -348,6 +348,16 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           }
         }
       : undefined;
+
+  // A git project's local branches, for the base branch a new workspace starts from (FLOW-NEW-SESSION-R21); why they
+  // could not be read, in Core's words, when it cannot list them.
+  const listBranches = async (projectId: string): Promise<Branches> => {
+    try {
+      return { state: "read", branches: await client.call("branch.list", { project_id: projectId }) };
+    } catch (error) {
+      return { state: "failed", message: describeError(error) };
+    }
+  };
 
   const addProject = async (path: string, trusted: boolean) => {
     if (view.phase !== "connected") return undefined;
@@ -555,6 +565,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onStart={start}
               starting={starting}
               onChooseFolder={chooseFolder}
+              onListBranches={listBranches}
               onAddProject={addProject}
               adding={adding}
             />

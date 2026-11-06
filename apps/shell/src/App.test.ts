@@ -351,3 +351,113 @@ describe("the tree App draws in the rail", () => {
     expect(tree.querySelectorAll(":scope > .rail-tiles")).toHaveLength(0);
   });
 });
+
+// A new workspace's base branch (FLOW-NEW-SESSION-R21, R22): App reads the project's branches with `branch.list` and
+// creates the workspace from the one the workspace chip shows.
+describe("the base branch App gives a new workspace", () => {
+  const branches = [
+    { name: "feature/rail", default: false },
+    { name: "main", default: true },
+    { name: "release/1.0", default: false },
+  ];
+  const starting = {
+    "branch.list": () => branches,
+    "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", vcs_ref: "ersa/new" }),
+    "session.create": (params: { workspace_id: string }) => ({ ...session("s-new", "alpha", "2026-11-03T09:00:00Z"), workspace_id: params.workspace_id }),
+    "session.send": () => ({ turn: 1 }),
+    "settings.set": () => ({}),
+  };
+  const workspaceChip = () => screen.getByRole("button", { name: /^Workspace:/ });
+  const send = async (text: string) => {
+    fireEvent.change(words(), { target: { value: text } });
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    await settle();
+  };
+
+  // verifies: FLOW-NEW-SESSION-R21
+  // verifies: FLOW-NEW-SESSION-R22
+  it("starts at the default branch, narrows the branches by the search box, and creates the workspace from the one chosen", async () => {
+    const core = await screenWith([project("alpha")], undefined, starting);
+    expect(paramsOf(core, "branch.list")).toEqual({ project_id: "alpha" });
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from main");
+
+    // Opened, the list offers both workspaces with what each means, then the base branch, with focus in its search box.
+    fireEvent.click(workspaceChip());
+    const list = screen.getByRole("listbox", { name: "Workspace" });
+    expect(within(list).getByRole("option", { name: /New workspace/ }).textContent).toContain("Isolated");
+    expect(within(list).getByRole("option", { name: /Project folder/ }).textContent).toContain("Shares files with you");
+    const search = within(list).getByRole("searchbox", { name: "Search branches" });
+    expect(document.activeElement).toBe(search);
+    const base = within(list).getByRole("group", { name: "Base branch" });
+    expect(within(base).getAllByRole("option").map((o) => o.textContent)).toEqual(["feature/rail", "mainDefault", "release/1.0"]);
+    expect(within(base).getByRole("option", { name: /main/ }).getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.change(search, { target: { value: "REL" } });
+    expect(within(base).getAllByRole("option").map((o) => o.textContent)).toEqual(["release/1.0"]);
+    fireEvent.change(search, { target: { value: "nothing" } });
+    expect(within(base).queryAllByRole("option")).toEqual([]);
+    expect(list.textContent).toContain("No branch matches.");
+    fireEvent.change(search, { target: { value: "rel" } });
+    fireEvent.click(within(base).getByRole("option", { name: "release/1.0" }));
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from release/1.0");
+
+    await send("Fix the build");
+    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha", base: "release/1.0" });
+  });
+
+  // verifies: FLOW-NEW-SESSION-R21
+  it("chooses the first match with Enter in the search box", async () => {
+    const core = await screenWith([project("alpha")], undefined, starting);
+    fireEvent.click(workspaceChip());
+    const search = screen.getByRole("searchbox", { name: "Search branches" });
+    fireEvent.change(search, { target: { value: "feat" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from feature/rail");
+    expect(document.activeElement).toBe(workspaceChip());
+    await send("Fix the build");
+    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha", base: "feature/rail" });
+  });
+
+  // verifies: FLOW-NEW-SESSION-R22
+  it("names the project folder when it is chosen, and offers no base branch for it", async () => {
+    const core = await screenWith([project("alpha")], undefined, starting);
+    fireEvent.click(workspaceChip());
+    fireEvent.click(screen.getByRole("option", { name: /Project folder/ }));
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: Project folder");
+    fireEvent.click(workspaceChip());
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    await send("What does this do?");
+    expect(methods(core)).not.toContain("workspace.create");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R21
+  it("says why the branches could not be read, and leaves the base to Core's default", async () => {
+    const core = await screenWith([project("alpha")], undefined, {
+      ...starting,
+      "branch.list": () => {
+        throw { kind: "rpc", error: { code: -32000, message: "git is not installed", data: { kind: "invalid_state" } } };
+      },
+    });
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace");
+    fireEvent.click(workspaceChip());
+    expect(screen.getByRole("listbox", { name: "Workspace" }).textContent).toContain("Ersa couldn't read the branches: git is not installed");
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" });
+    await send("Fix the build");
+    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha" });
+  });
+
+  // verifies: FLOW-NEW-SESSION-R21
+  it("starts every new session at the default branch, the base chosen for the last one forgotten", async () => {
+    const core = await screenWith([project("alpha")], undefined, starting);
+    fireEvent.click(workspaceChip());
+    fireEvent.click(screen.getByRole("option", { name: "release/1.0" }));
+    await send("Fix the build");
+    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha", base: "release/1.0" });
+    expect(JSON.stringify(paramsOf(core, "settings.set"))).not.toContain("release/1.0");
+
+    fireEvent.click(screen.getByRole("button", { name: "New session in alpha" }));
+    await settle();
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from main");
+  });
+});

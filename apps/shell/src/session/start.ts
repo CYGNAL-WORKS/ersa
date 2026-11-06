@@ -56,7 +56,8 @@ export async function startSession(client: Pick<CoreClient, "call">, values: Ses
   try {
     let workspace: Workspace;
     if (values.workspace === "isolated") {
-      workspace = made = await client.call("workspace.create", { project_id: values.project_id });
+      // From the chosen base branch; with none, Core starts at the default branch (FLOW-NEW-SESSION-R21).
+      workspace = made = await client.call("workspace.create", values.base ? { project_id: values.project_id, base: values.base } : { project_id: values.project_id });
     } else {
       const root = (await client.call("workspace.list", { project_id: values.project_id })).find((w) => w.kind === "root");
       if (!root) return { ok: false, message: "This project has no root workspace in Core." };
@@ -97,6 +98,14 @@ export async function startSession(client: Pick<CoreClient, "call">, values: Ses
     if (made) await client.call("workspace.remove", { id: made.id }).catch(() => {});
     return { ok: false, message: describeError(error) };
   }
+}
+
+/**
+ * What is remembered of the values a session started with: all but the base branch, since each new session starts at
+ * the repository's default branch (FLOW-NEW-SESSION-R21).
+ */
+export function remembered({ base: _, ...kept }: SessionValues): SessionValues {
+  return kept;
 }
 
 /** Where Core's settings keep the values each project's last session started with: `new_session.last_used`. */
