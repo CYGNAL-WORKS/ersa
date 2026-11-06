@@ -350,11 +350,10 @@ fn set_phase(handle: &Handle, phase: SendPhase) {
     }
 }
 
-/// Publishes the session's `session.send_progress` while its send runs:
-/// when the phase changes and at least every [`PROGRESS_EVERY`], at most
-/// once every [`PROGRESS_GAP`]. Ends when the send does.
+/// Publishes the session's `session.send_progress` while its send runs,
+/// as [`Pacer`] paces it. Ends when the send does.
 async fn report_progress(handle: Weak<Handle>, tiles: Arc<TileHub>, changed: Arc<Notify>) {
-    let mut last: Option<(SendProgressParams, Instant)> = None;
+    let mut pacer = Pacer::default();
     loop {
         {
             let Some(handle) = handle.upgrade() else {
@@ -367,13 +366,7 @@ async fn report_progress(handle: Weak<Handle>, tiles: Arc<TileHub>, changed: Arc
                 return;
             };
             let progress = sending.progress(&handle.id);
-            // Due when anything changed (the phase, or the bytes copied),
-            // and every so often regardless.
-            let due = match &last {
-                None => true,
-                Some((before, at)) => *before != progress || at.elapsed() >= PROGRESS_EVERY,
-            };
-            if due {
+            if pacer.due(&progress) {
                 tiles.publish(
                     &handle.id,
                     Latest::SendProgress,
@@ -382,24 +375,49 @@ async fn report_progress(handle: Weak<Handle>, tiles: Arc<TileHub>, changed: Arc
                         &progress,
                     ),
                 );
-                last = Some((progress, Instant::now()));
             }
         }
-        // Looks again each gap, for bytes copied; a phase change wakes it
-        // early, and the repeat is scheduled for its deadline rather than
-        // found at the next look, so it is never late. It still waits out
-        // the gap after the last line it sent.
-        let repeat = match &last {
-            Some((_, at)) => tokio::time::Instant::from_std(*at + PROGRESS_EVERY),
-            None => tokio::time::Instant::now(),
+        pacer.wait(&changed).await;
+    }
+}
+
+/// When a send's progress goes out (PROTO-CORE-API-R26): whenever it
+/// changes (the phase, or the bytes copied) and at least every
+/// [`PROGRESS_EVERY`] regardless, at most once every [`PROGRESS_GAP`].
+/// Kept apart from the session so a test can drive it on a paused clock.
+#[derive(Debug, Default)]
+pub struct Pacer {
+    /// The last progress sent, and when.
+    last: Option<(SendProgressParams, tokio::time::Instant)>,
+}
+
+impl Pacer {
+    /// Whether `progress` should go out now; when it should, it counts as
+    /// sent.
+    pub fn due(&mut self, progress: &SendProgressParams) -> bool {
+        let due = match &self.last {
+            None => true,
+            Some((before, at)) => before != progress || at.elapsed() >= PROGRESS_EVERY,
+        };
+        if due {
+            self.last = Some((progress.clone(), tokio::time::Instant::now()));
+        }
+        due
+    }
+
+    /// Waits until progress should be looked at again: within a gap, for
+    /// bytes copied; at once when `changed` wakes it; and at the repeat's
+    /// deadline, scheduled rather than found at the next look, so it is
+    /// never late. It still waits out the gap after the last line sent.
+    pub async fn wait(&self, changed: &Notify) {
+        let Some((_, at)) = &self.last else {
+            return;
         };
         tokio::select! {
             () = changed.notified() => {}
             () = tokio::time::sleep(PROGRESS_GAP) => {}
-            () = tokio::time::sleep_until(repeat) => {}
+            () = tokio::time::sleep_until(*at + PROGRESS_EVERY) => {}
         }
-        if let Some((_, at)) = last {
-            tokio::time::sleep(PROGRESS_GAP.saturating_sub(at.elapsed())).await;
-        }
+        tokio::time::sleep_until(*at + PROGRESS_GAP).await;
     }
 }

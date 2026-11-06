@@ -63,6 +63,8 @@ use crate::raw_log::RawLog;
 
 mod send;
 
+pub use send::Pacer;
+
 /// How many events may wait for one subscriber before it counts as unable
 /// to keep up. Streaming text produces many small events, so this is
 /// generous; a client further behind than this is disconnected.
