@@ -18,7 +18,7 @@ test("the chevron opens the shelf with the oldest permission request, leaving th
   const answered = ersa.answerDialog(folder);
   await page.getByRole("option", { name: /Add project…/ }).click();
   await answered;
-  await page.getByRole("button", { name: "Add, not trusted" }).click();
+  await page.getByRole("button", { name: "Trust", exact: true }).click();
   await expect(rail.getByRole("button", { name: /^New session in / })).toBeVisible();
 
   // The first session asks to write a file, which Claude Code's default permission mode asks about.
@@ -93,7 +93,7 @@ test("an answer from the shelf reaches the session, which goes on, and the shelf
   const answered = ersa.answerDialog(folder);
   await page.getByRole("option", { name: /Add project…/ }).click();
   await answered;
-  await page.getByRole("button", { name: "Add, not trusted" }).click();
+  await page.getByRole("button", { name: "Trust", exact: true }).click();
   await expect(rail.getByRole("button", { name: /^New session in / })).toBeVisible();
 
   await rail.getByRole("button", { name: /^New session in / }).click();
