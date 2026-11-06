@@ -126,7 +126,7 @@ Allow
 
 ### `rail.shelf.answerRefusedError`
 
-Ersa couldn't send your answer.
+Your answer wasn't accepted.
 
 ### `rail.shelf.reconnectingNote`
 

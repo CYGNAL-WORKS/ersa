@@ -381,7 +381,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           tile={tile}
           shows={shows}
           onRetry={shelf.attached}
-          answer={shows.state === "permission" ? answers[shelfSession.id]?.[shows.request.request_id] : undefined}
+          answers={answers[shelfSession.id]}
           live={connected}
           onDecide={(requestId, decision) => decide(shelfSession.id, requestId, decision)}
         />
