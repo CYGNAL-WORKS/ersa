@@ -43,8 +43,9 @@ export const MARK = "<!-- merge-review -->";
 export const instructionPaths = (files) => files.filter((f) => /(^|\/)(CLAUDE(\.local)?\.md$|\.claude\/|\.mcp\.json$)/i.test(f));
 
 // Paths whose change the owner merges: the workflows, this review, its gate
-// and its poller, the hooks, and every instruction file.
-export const ownerPaths = (files) => files.filter((f) => /^(\.github\/|scripts\/hooks\/|scripts\/merge-(pr|review|review-watch)\.mjs$)/.test(f) || instructionPaths([f]).length);
+// and its poller, the manifest (its --inbox check guards main), the hooks,
+// and every instruction file.
+export const ownerPaths = (files) => files.filter((f) => /^(\.github\/|scripts\/hooks\/|scripts\/(merge-(pr|review|review-watch)|manifest)\.mjs$)/.test(f) || instructionPaths([f]).length);
 
 // What blocks the merge, listed or new (ADR 0021).
 export const blocking = (findings) => (findings ?? []).filter((f) => f.severity !== "low");
@@ -74,6 +75,10 @@ export function previousReview(reviews, head, isAncestor, authors) {
   );
 }
 
+const RANK = { high: 0, medium: 1, low: 2 };
+// "Medium, blocks the merge": the severity, then what blocking() makes of it.
+const category = (f) => `${f.severity[0].toUpperCase()}${f.severity.slice(1)}, ${blocking([f]).length ? "blocks the merge" : "does not block"}`;
+
 export function reviewBody({ head, findings, dismissed, outcome }) {
   const block = blocking(findings);
   const state = JSON.stringify({ head, verdict: block.length ? "blocked" : "clean", findings }).replace(/--/g, "-\\u002d");
@@ -83,7 +88,9 @@ export function reviewBody({ head, findings, dismissed, outcome }) {
     `<!-- merge-review ${state} -->`,
     `## Merge review of ${head.slice(0, 7)}`,
     block.length ? `**${block.length} finding${block.length > 1 ? "s" : ""} block${block.length > 1 ? "" : "s"} the merge.**` : "**Nothing blocks the merge.**",
-    ...findings.map((f) => `- ${f.plain}`),
+    // Most severe first, each labeled, so a reader who stops at the plain
+    // English still knows which findings block (high, medium) and which do not.
+    ...[...findings].sort((a, b) => RANK[a.severity] - RANK[b.severity]).map((f) => `- **${category(f)}${f.origin === "listed" ? ", still open" : ""}:** ${f.plain}`),
     outcome,
     "<details><summary>Technical findings and dismissals</summary>\n",
     findings.length ? findings.map(line).join("\n") : "No findings.",
