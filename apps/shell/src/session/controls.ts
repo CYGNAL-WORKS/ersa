@@ -2,6 +2,7 @@
 // project, workspace, backend, model, effort and permission mode. The choices come from Core's `project.list`
 // and `backend.list`; the starting values from what the user last chose for the project, else the brief's defaults.
 
+import { t } from "../catalog";
 import type { Branch, Project, Session, Workspace } from "../protocol/core-api.gen";
 
 /** One choice a backend offers: a model, an effort or a permission mode (PROTO-CORE-API, `backend.list`). */
@@ -50,7 +51,7 @@ export interface SessionValues {
 }
 
 /** A project's local branches from `branch.list`, as the workspace chip offers them: being read, read, or not readable. */
-export type Branches = { state: "reading" } | { state: "read"; branches: Branch[] } | { state: "failed"; message: string };
+export type Branches = { state: "reading" } | { state: "read"; branches: Branch[] } | { state: "failed" };
 
 /**
  * The base branch the workspace chip shows (FLOW-NEW-SESSION-R21): `wanted` while the project still has it, else the
@@ -224,7 +225,7 @@ export interface SessionShown {
   values: SessionValues;
   /** The session's backend as `backend.list` lists it, holding every value the session reports. */
   backend: BackendChoices;
-  /** The workspace as the session runs in it: its branch, or the root. */
+  /** The workspace as the session runs in it: its branch, or the project folder. */
   workspaceLabel: string;
 }
 
@@ -263,6 +264,7 @@ export function sessionShown(
       permission_mode: session.permission_mode || undefined,
     },
     backend,
-    workspaceLabel: workspace.kind === "root" ? "Root workspace" : workspace.vcs_ref,
+    // The root workspace by the name the new-session screen gives it (GLOSSARY: the project folder).
+    workspaceLabel: workspace.kind === "root" ? t("sessionControls.workspace.projectFolderLabel") : workspace.vcs_ref,
   };
 }

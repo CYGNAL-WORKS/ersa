@@ -419,6 +419,16 @@ describe("the base branch App gives a new workspace", () => {
     expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha", base: "feature/rail" });
   });
 
+  it("opens with the search box empty each time", async () => {
+    await screenWith([project("alpha")], undefined, starting);
+    fireEvent.click(workspaceChip());
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "rel" } });
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" });
+    fireEvent.click(workspaceChip());
+    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("");
+    expect(within(screen.getByRole("group", { name: "Base branch" })).getAllByRole("option")).toHaveLength(3);
+  });
+
   // verifies: FLOW-NEW-SESSION-R22
   it("names the project folder when it is chosen, and offers no base branch for it", async () => {
     const core = await screenWith([project("alpha")], undefined, starting);
@@ -441,7 +451,7 @@ describe("the base branch App gives a new workspace", () => {
     });
     expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace");
     fireEvent.click(workspaceChip());
-    expect(screen.getByRole("listbox", { name: "Workspace" }).textContent).toContain("Ersa couldn't read the branches: git is not installed");
+    expect(screen.getByRole("listbox", { name: "Workspace" }).textContent).toContain("Ersa couldn't read this project's branches. The new workspace will start at the default branch.");
     fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" });
     await send("Fix the build");
     expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha" });

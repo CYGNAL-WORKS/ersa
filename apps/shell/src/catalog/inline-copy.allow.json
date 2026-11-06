@@ -85,9 +85,6 @@
     "You",
     "more invisible characters, each shown as"
   ],
-  "session/controls.ts": [
-    "Root workspace"
-  ],
   "session/follow.ts": [
     "Earlier events of this session are no longer held."
   ],

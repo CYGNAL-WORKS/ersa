@@ -327,8 +327,10 @@ test("every session control is reachable and works from the keyboard", async ({ 
     await page.keyboard.press("Enter");
     const list = screen.getByRole("listbox");
     await expect(list).toBeVisible();
-    // Focus starts on the chosen option.
-    await expect(list.locator('[aria-selected="true"]')).toBeFocused();
+    // Focus starts in the list's search box where it has one, the workspace list's base branch, else on the chosen option.
+    const search = list.getByRole("searchbox");
+    if ((await search.count()) > 0) await expect(search).toBeFocused();
+    else await expect(list.locator('[aria-selected="true"]')).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(list).toHaveCount(0);
     await expect(chip).toBeFocused();
@@ -336,13 +338,14 @@ test("every session control is reachable and works from the keyboard", async ({ 
   }
 
   // A choice from the keyboard changes the value and leaves focus on the chip.
-  const workspace = screen.getByRole("button", { name: "Workspace: New workspace" });
+  // The workspace list opens in its search box; the option above it is Project folder.
+  const workspace = screen.getByRole("button", { name: "Workspace: New workspace from main" });
   await workspace.focus();
   await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowUp");
   await page.keyboard.press("Enter");
-  const root = screen.getByRole("button", { name: "Workspace: Root workspace" });
-  await expect(root).toBeFocused();
+  const folder = screen.getByRole("button", { name: "Workspace: Project folder" });
+  await expect(folder).toBeFocused();
 });
 
 // The rail's foot (LAY-SHELL, The foot; issue #155): Retry attaches again, focus comes back to it when the retry

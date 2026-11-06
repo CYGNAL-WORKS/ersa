@@ -100,19 +100,19 @@ export async function startSession(client: Pick<CoreClient, "call">, values: Ses
   }
 }
 
-/**
- * What is remembered of the values a session started with: all but the base branch, since each new session starts at
- * the repository's default branch (FLOW-NEW-SESSION-R21).
- */
-export function remembered({ base: _, ...kept }: SessionValues): SessionValues {
-  return kept;
-}
-
 /** Where Core's settings keep the values each project's last session started with: `new_session.last_used`. */
 const KEY = "new_session";
 
 /** Each value's key, so the patch names every one. */
 const FIELDS = ["host_id", "project_id", "workspace", "backend", "model", "effort", "permission_mode"] as const;
+
+/**
+ * What is remembered of the values a session started with, in this window as in Core's settings: the values FIELDS
+ * names, so never the base branch, since each new session starts at the default branch (FLOW-NEW-SESSION-R21).
+ */
+export function remembered(values: SessionValues): SessionValues {
+  return Object.fromEntries(FIELDS.filter((f) => values[f] !== undefined).map((f) => [f, values[f]])) as unknown as SessionValues;
+}
 
 /**
  * The settings patch that remembers `values` as the last its project started a session with (FLOW-NEW-SESSION-R02).

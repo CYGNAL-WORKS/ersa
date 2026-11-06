@@ -117,10 +117,10 @@ describe("the session controls under a running session", () => {
     expect(changed.backend.models.map((c) => c.id)).toContain("retired");
   });
 
-  it("show a value left to the backend as the backend's default, and the root workspace by name", () => {
+  it("show a value left to the backend as the backend's default, and the root workspace as the project folder", () => {
     const shown = sessionShown({ ...running, model: undefined }, { ...branch, kind: "root", vcs_ref: "" }, [backend("claude")]);
     expect(shown.values.model).toBe("claude-large");
-    expect(shown.workspaceLabel).toBe("Root workspace");
+    expect(shown.workspaceLabel).toBe("Project folder");
   });
 });
 
