@@ -36,7 +36,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 - **Deleting a section** puts its sessions in "No section" and asks nothing, since no session is lost.
 - **A name already taken or too long.** Two sections may not share a name, ignoring case, and a name has at most 80 characters; the name field says so and keeps the name typed.
 - **Saving fails.** When Core refuses or can't be reached, the change is undone in the rail and the rail says why. Nothing is kept only in the window.
-- **A rename the backend refuses** (a blank or too-long title, or a record that is gone) keeps the field open with the reason. A starting session offers Rename as unavailable, with the reason: a backend names a session in its first turn, which a new session starts with its first message, so starting is when a session is most likely to have no backend session id. Should the backend not have named it yet at any other time, `session.set_title` refuses with `invalid_state` and the field stays open with the reason, as for any refusal. An untitled session the backend has named can be renamed.
+- **A rename the backend refuses** (a blank or too-long title, a record that is gone, or a session the backend has not named yet) keeps the field open with the reason. A starting session offers Rename as unavailable, with the reason. A new session's backend names it at the opening of its first turn, moments after it stops starting, so a rename in those moments, or after the backend stopped before naming it, is refused as above. An untitled session the backend has named can be renamed.
 - **Nothing to show.** Showing active sessions with every session archived, the rail says there are no active sessions. Changing what is shown never closes the active session, even when its tile leaves the rail. Starting a session while showing archived sessions only switches the rail to show active sessions, so the new tile is in view.
 - **A project whose sessions are all pinned** has its tiles in the Pinned group; its heading follows `LAY-SHELL` (Projects), and a collapsed heading counts only the tiles under it.
 - **Last activity** moves a tile only when a turn ends, never while a reply streams, and never because the session's state changed.
@@ -77,7 +77,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 
 ## Changes
 
-- 2026-11-06: from #231 inbox: Rename is unavailable while a session starts, which is when it has no backend session id; `session.list` gains no field for it. No requirement IDs changed.
+- 2026-11-06: from #231 inbox: Rename is unavailable while a session starts; the moments after, until the backend names the session at the opening of its first turn, fall to the refusal, so `session.list` gains no field for it. No requirement IDs changed.
 - 2026-11-05: from #174 merge review: starting a session while the rail shows archived sessions only switches it to show active sessions (R21), so FLOW-NEW-SESSION-R13 always has a place for the tile.
 - 2026-11-05: from #174 merge review: the menu item is All sessions, not View all, so it doesn't read like Show ▸ All; R16's order takes creation for a session with no activity yet (reworded before it shipped); R19 and R20 added for the page's loading and failed states and what it hides.
 - 2026-11-05: owner: View all opens the sessions page, as the desktop harness's does. R16 to R18 added.
