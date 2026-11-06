@@ -42,27 +42,33 @@ test("Add project… opens the folder dialog, asks about trust, and cancels leav
   expect(await words.boundingBox()).toEqual(box);
   expect(await screen.getByRole("group", { name: "Session controls" }).boundingBox()).toEqual(controls);
   await expect(question).toContainText(stranger);
+  // Cancel first, focused, then Trust (R25): Enter cancels.
+  await expect(question.getByRole("button")).toHaveText(["Cancel", "Trust"]);
+  await expect(question.getByRole("button", { name: "Cancel" })).toBeFocused();
   await ersa.shot("trust-question");
-  await question.getByRole("button", { name: "Cancel" }).click();
+  await page.keyboard.press("Enter");
   await expect(question).toHaveCount(0);
   await expect(chip).toHaveAccessibleName("Project: Choose a folder");
   await expect(words).toHaveValue("Fix the build");
   await expect(words).toBeFocused();
 
-  // Ctrl+O, then Add, trusted: the project is added and chosen, and the message waits (R16, R19).
+  // Ctrl+O, then an arrow to Trust and Enter: the project is added and chosen, and the message waits (R27, R19).
   answered = ersa.answerDialog(stranger);
   await words.press("Control+o");
   await answered;
-  await question.getByRole("button", { name: "Add, trusted" }).click();
+  await expect(question.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await page.keyboard.press("ArrowRight");
+  await expect(question.getByRole("button", { name: "Trust" })).toBeFocused();
+  await page.keyboard.press("Enter");
   await expect(chip).toHaveAccessibleName("Project: stranger");
   await expect(words).toHaveValue("Fix the build");
   await ersa.shot("added-trusted");
 
-  // A second folder, added not trusted, then the first picked again: it is chosen without the question (R18).
+  // A second folder, trusted with a click, then the first picked again: it is chosen without the question (R18).
   answered = ersa.answerDialog(other);
   await words.press("Control+o");
   await answered;
-  await question.getByRole("button", { name: "Add, not trusted" }).click();
+  await question.getByRole("button", { name: "Trust" }).click();
   await expect(chip).toHaveAccessibleName("Project: other");
   answered = ersa.answerDialog(stranger);
   await words.press("Control+o");
@@ -77,7 +83,7 @@ test("Add project… opens the folder dialog, asks about trust, and cancels leav
 // folder, answers and the explanation's first line, it is capped to that room and the box stays put; where it does
 // not, it takes its place in the column, the box moves down and a column taller than the window scrolls. Either way
 // the title, folder and answers show together, inside the card and clear of the box, with some of the explanation.
-// The sizes are measured: at 1400x700 the question fits whole above the box, at 1100x520 the cap binds, at 1100x470
+// The sizes are measured: at 1400x700 the question fits whole above the box, at 1100x540 the cap binds, at 1100x470
 // the room holds all but the explanation's first line, and the rest are short enough for the column.
 
 /** Opens the trust question for a new folder from the project chip, as a pointer would; the first test covers Ctrl+O. */
@@ -104,9 +110,8 @@ async function showsWhole(page: Page, question: Locator, stranger: string, box: 
   const parts = [
     question.getByText("Trust stranger?"),
     question.getByText(stranger),
-    question.getByRole("button", { name: "Add, trusted" }),
-    question.getByRole("button", { name: "Add, not trusted" }),
     question.getByRole("button", { name: "Cancel" }),
+    question.getByRole("button", { name: "Trust" }),
   ];
   for (const part of parts) {
     const at = (await part.boundingBox())!;
@@ -116,6 +121,12 @@ async function showsWhole(page: Page, question: Locator, stranger: string, box: 
     expect(at.y + at.height, "clear of the box").toBeLessThanOrEqual(boxTop);
   }
   expect(card.y + card.height, "the card clear of the box").toBeLessThanOrEqual(boxTop);
+  // Whole, edge and corners, within the screen's padding: the room above the box is measured from there.
+  const screenTop = await question.evaluate((card) => {
+    const screen = card.closest<HTMLElement>(".new-session")!;
+    return screen.getBoundingClientRect().top + parseFloat(getComputedStyle(screen).paddingTop);
+  });
+  expect(card.y, "the card within the screen's padding").toBeGreaterThanOrEqual(screenTop - 0.5);
   // Some of the explanation shows: at least its first paragraph's height.
   const explained = await question.evaluate((card) => {
     const body = card.querySelector<HTMLElement>(".trust-question-body")!;
@@ -126,7 +137,7 @@ async function showsWhole(page: Page, question: Locator, stranger: string, box: 
 
 for (const [width, height, stays] of [
   [1400, 700, true],
-  [1100, 520, true],
+  [1100, 540, true],
   [1100, 470, false],
   [700, 520, false],
   [660, 440, false],
@@ -151,7 +162,7 @@ test("the trust question fits again as the window shrinks, keeping where a tight
   const { stranger, question, box } = await askAbout(ersa);
   // Shrunk until the cap binds, then until the question must take its place in the column.
   for (const [width, height] of [
-    [1100, 520],
+    [1100, 540],
     [640, 400],
   ] as const) {
     await page.setViewportSize({ width, height });
