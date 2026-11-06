@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { INTERVAL_MS, LOCK_STALE_MS, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select } from "./merge-review-watch.mjs";
+import { INTERVAL_MS, LOCK_STALE_MS, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select, startReview } from "./merge-review-watch.mjs";
 
 const HEAD = "b".repeat(40);
 const NOW = Date.parse("2026-11-04T12:00:00Z");
@@ -166,7 +166,7 @@ async function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }),
   };
   const begin = (n, head, dir, log) => {
     reviews.push({ n: String(n), head, dir });
-    return start ? start(n, head, dir, log) : Promise.resolve(typeof exit === "function" ? exit(String(n)) : exit);
+    return start ? start(n, head, dir, log) : Promise.resolve(exit);
   };
   const path = lockPath ?? join(tmp(), `lock-${Math.random().toString(36).slice(2)}`);
   const got = await main(argv, { run, start: begin, now, log: (l) => logs.push(l), lockPath: path, alive, sleep });
@@ -219,8 +219,13 @@ test("heads are due in the order their CI passed, not the order gh lists them", 
   // Its last check to finish says when a head's CI passed.
   const late = pr({ number: 4, statusCheckRollup: [ci({ completedAt: ago(90 * 60 * 1000) }), ci({ name: "W", completedAt: ago(10 * 60 * 1000) })] });
   assert.deepEqual(select([late, pr({ number: 6, statusCheckRollup: passed(20) })], NOW).review.map((p) => p.number), [6, 4]);
-  // A check with no time reads as just finished; equal times go by number.
+  // A head with no time at all passes now; equal times go by number.
   assert.deepEqual(select([pr({ number: 2, statusCheckRollup: [ci({ startedAt: undefined })] }), pr({ number: 8, statusCheckRollup: passed(5) }), pr({ number: 1, statusCheckRollup: [ci({ startedAt: undefined })] })], NOW).review.map((p) => p.number), [8, 1, 2]);
+  // One check with no time does not send a head to the back: the checks with a time say when it passed.
+  assert.deepEqual(select([pr({ number: 9, statusCheckRollup: passed(1) }), pr({ number: 3, statusCheckRollup: [...passed(60), ci({ name: "W", startedAt: undefined })] })], NOW).review.map((p) => p.number), [3, 9]);
+  // The merge review's own status is not CI: #3 passed CI three hours ago and
+  // #9 two, and #3's stale review status from 90 minutes ago does not count.
+  assert.deepEqual(select([pr({ number: 9, statusCheckRollup: passed(120) }), pr({ number: 3, statusCheckRollup: [...passed(180), mark("PENDING", { startedAt: ago(90 * 60 * 1000) })] })], NOW).review.map((p) => p.number), [3, 9]);
 });
 
 test("two heads are reviewed side by side, each in its own slot's checkout, and the rest wait for a free slot", async () => {
@@ -322,6 +327,7 @@ test("a head whose checkout cannot be prepared gives its slot to the next head",
   });
   assert.equal(got.code, 0, got.stderr);
   assert.deepEqual(got.reviews.map((r) => r.n), ["8", "9", "10"], "#10 takes a slot on the next tick");
+  assert.ok(got.logs.includes("#8 at ccccccc: the review exited 2"), "a review that fails is reported with its exit code");
   // #7 tries both slots before the next head goes.
   assert.match(got.logs.join("\n"), /^#7 at bbbbbbb: reviewing; #8, #9, #10 next\n(#7 at bbbbbbb: git fetch -q failed: network down\n){2}#8 at ccccccc: reviewing; #9, #10 next\n#9 at ddddddd: reviewing; #10 next\n#10 wait for a free slot\n/);
 });
@@ -510,4 +516,53 @@ test("the task's window counts from the run's start, not the tick's", async () =
   assert.equal(got.code, 0, got.stderr);
   assert.deepEqual(got.reviews.map((r) => r.n), ["7"]);
   assert.ok(got.logs.includes("out of time; #9 wait for the next run"));
+});
+
+// The real review launcher, on a stand-in review script in a scratch checkout.
+function stand(body) {
+  const dir = mkdtempSync(join(tmp(), "launch-"));
+  mkdirSync(join(dir, "scripts"));
+  writeFileSync(join(dir, "scripts", "merge-review.mjs"), body);
+  return dir;
+}
+
+test("a review's output reaches the log line by line, marked and without control characters, and its exit code ends it", async () => {
+  const dir = stand('console.log("one\\x1b[2Jtwo"); console.error("three"); process.exit(3);');
+  const logs = [];
+  assert.equal(await startReview(5, HEAD, dir, (l) => logs.push(l)), 3);
+  assert.deepEqual(logs.sort(), ["#5 | one[2Jtwo", "#5 | three"]);
+});
+
+test("a review that runs past its limit is ended, with what it started", async () => {
+  const dir = stand(
+    [
+      'import { spawn } from "node:child_process";',
+      'import { writeFileSync } from "node:fs";',
+      'const kid = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });',
+      'writeFileSync("pids", process.pid + " " + kid.pid);',
+      "setInterval(() => {}, 1000);",
+    ].join("\n")
+  );
+  const status = await startReview(5, HEAD, dir, () => {}, 1500);
+  assert.equal(status, "nothing after 0 minutes, so it was ended");
+  await new Promise((r) => setTimeout(r, 500));
+  for (const pid of readFileSync(join(dir, "pids"), "utf8").split(" ").map(Number)) {
+    assert.throws(() => process.kill(pid, 0), /ESRCH/, `process ${pid} still runs`);
+  }
+});
+
+test("a review whose leftover process holds its output open still ends when it exits", async () => {
+  const dir = stand(
+    [
+      'import { spawn } from "node:child_process";',
+      'spawn(process.execPath, ["-e", "setTimeout(() => {}, 8000)"], { stdio: "inherit" }).unref();',
+      'console.log("done");',
+      "process.exit(0);",
+    ].join("\n")
+  );
+  const logs = [];
+  const began = Date.now();
+  assert.equal(await startReview(5, HEAD, dir, (l) => logs.push(l), 60_000), 0);
+  assert.ok(Date.now() - began < 6000, "it did not wait for the leftover process");
+  assert.deepEqual(logs, ["#5 | done"]);
 });
