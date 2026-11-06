@@ -41,6 +41,7 @@ async fn add_project(client: &mut Client, path: &Path) -> Value {
 }
 
 // verifies: PROTO-CORE-API-R06
+// verifies: PROTO-CORE-API-R20
 #[tokio::test(flavor = "multi_thread")]
 async fn project_lifecycle() {
     let (core, mut client, repo) = setup().await;
@@ -176,6 +177,7 @@ async fn a_project_is_trusted_only_when_said_and_stays_so_across_a_restart() {
 }
 
 // verifies: PROTO-CORE-API-R06
+// verifies: PROTO-CORE-API-R19
 #[tokio::test(flavor = "multi_thread")]
 async fn workspace_lifecycle() {
     let (core, mut client, repo) = setup().await;
@@ -326,6 +328,7 @@ async fn a_worktree_deleted_by_hand_is_still_removable() {
 
 /// A project whose version control has no workspace adapter has its root
 /// workspace, and no isolated one.
+// verifies: PROTO-CORE-API-R19
 #[tokio::test(flavor = "multi_thread")]
 async fn workspaces_need_a_git_project_and_safe_names() {
     let (core, mut client, repo) = setup().await;
@@ -368,6 +371,7 @@ async fn workspaces_need_a_git_project_and_safe_names() {
     assert_eq!(kind(&error), "not_found");
 }
 
+// verifies: PROTO-CORE-API-R20
 #[tokio::test(flavor = "multi_thread")]
 async fn project_paths_are_canonical_and_unique_however_spelled() {
     let (core, mut client, repo) = setup().await;
@@ -395,6 +399,11 @@ async fn project_paths_are_canonical_and_unique_however_spelled() {
         assert_eq!(kind(&error), "invalid_state", "{spelling}");
         assert_eq!(error["data"]["detail"], project["id"]);
     }
+    // Refused, so nothing was added.
+    assert_eq!(
+        client.result("project.list", json!({})).await,
+        json!([project])
+    );
 
     // A drive or file system root has no folder name to file workspaces
     // under, so it cannot be a project.
@@ -665,4 +674,328 @@ async fn a_folder_git_does_not_list_is_refused_not_reported_removed() {
         json!([workspace]),
         "kept, in the state it had"
     );
+}
+
+// -- Branches for a base ------------------------------------------------------
+
+/// A git repository at `dir` with one commit on `branch`.
+fn repo_on(dir: &Path, branch: &str) {
+    std::fs::create_dir_all(dir).unwrap();
+    git(
+        dir,
+        &["init", "--quiet", &format!("--initial-branch={branch}")],
+    );
+    std::fs::write(dir.join("README.md"), "test repository\n").unwrap();
+    git(dir, &["add", "README.md"]);
+    git(dir, &["commit", "--quiet", "-m", "initial"]);
+}
+
+/// `branch.list` for the project at `path`, as `(name, default)` pairs.
+async fn branches(client: &mut Client, path: &Path) -> Vec<(String, bool)> {
+    let project = add_project(client, path).await;
+    let listed = client
+        .result("branch.list", json!({ "project_id": project["id"] }))
+        .await;
+    listed
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| {
+            (
+                b["name"].as_str().unwrap().to_string(),
+                b["default"].as_bool().unwrap(),
+            )
+        })
+        .collect()
+}
+
+fn pairs(expected: &[(&str, bool)]) -> Vec<(String, bool)> {
+    expected.iter().map(|(n, d)| (n.to_string(), *d)).collect()
+}
+
+// verifies: PROTO-CORE-API-R18
+#[tokio::test(flavor = "multi_thread")]
+async fn the_default_branch_is_the_one_origin_head_points_at() {
+    let (core, mut client, _) = setup().await;
+    // An upstream whose HEAD is `develop`: a clone's `origin/HEAD` points there.
+    let upstream = core.dir.path().join("upstream");
+    repo_on(&upstream, "main");
+    git(&upstream, &["branch", "develop"]);
+    git(&upstream, &["symbolic-ref", "HEAD", "refs/heads/develop"]);
+    let clone = core.dir.path().join("clone");
+    git(
+        core.dir.path(),
+        &[
+            "clone",
+            "--quiet",
+            &upstream.display().to_string(),
+            &clone.display().to_string(),
+        ],
+    );
+    git(&clone, &["branch", "main", "origin/main"]);
+    // Checked out elsewhere, and `main` exists: still `develop`.
+    git(&clone, &["switch", "--quiet", "-c", "work"]);
+
+    assert_eq!(
+        branches(&mut client, &clone).await,
+        pairs(&[("develop", true), ("main", false), ("work", false)]),
+        "local branches only, sorted by name"
+    );
+}
+
+// verifies: PROTO-CORE-API-R18
+#[tokio::test(flavor = "multi_thread")]
+async fn without_a_local_branch_for_origin_head_main_is_the_default() {
+    let (core, mut client, _) = setup().await;
+    let upstream = core.dir.path().join("upstream");
+    repo_on(&upstream, "main");
+    git(&upstream, &["branch", "develop"]);
+    git(&upstream, &["symbolic-ref", "HEAD", "refs/heads/develop"]);
+    let clone = core.dir.path().join("clone");
+    git(
+        core.dir.path(),
+        &[
+            "clone",
+            "--quiet",
+            &upstream.display().to_string(),
+            &clone.display().to_string(),
+        ],
+    );
+    // `origin/HEAD` still points at `origin/develop`, which has no local
+    // branch any more.
+    git(&clone, &["switch", "--quiet", "-c", "main", "origin/main"]);
+    git(&clone, &["branch", "--quiet", "-D", "develop"]);
+    git(&clone, &["switch", "--quiet", "-c", "aaa"]);
+
+    assert_eq!(
+        branches(&mut client, &clone).await,
+        pairs(&[("aaa", false), ("main", true)])
+    );
+}
+
+// verifies: PROTO-CORE-API-R18
+#[tokio::test(flavor = "multi_thread")]
+async fn with_only_master_master_is_the_default_whatever_is_checked_out() {
+    let (core, mut client, _) = setup().await;
+    let repo = core.dir.path().join("old");
+    repo_on(&repo, "master");
+    git(&repo, &["switch", "--quiet", "-c", "alpha"]);
+
+    assert_eq!(
+        branches(&mut client, &repo).await,
+        pairs(&[("alpha", false), ("master", true)])
+    );
+}
+
+// verifies: PROTO-CORE-API-R18
+#[tokio::test(flavor = "multi_thread")]
+async fn with_none_of_them_the_checked_out_branch_is_the_default() {
+    let (core, mut client, _) = setup().await;
+    let repo = core.dir.path().join("trunk");
+    repo_on(&repo, "trunk");
+    git(&repo, &["switch", "--quiet", "-c", "topic"]);
+
+    assert_eq!(
+        branches(&mut client, &repo).await,
+        pairs(&[("topic", true), ("trunk", false)])
+    );
+}
+
+// verifies: PROTO-CORE-API-R18
+#[tokio::test(flavor = "multi_thread")]
+async fn a_detached_checkout_with_none_of_them_has_no_default() {
+    let (core, mut client, _) = setup().await;
+    let repo = core.dir.path().join("trunk");
+    repo_on(&repo, "trunk");
+    git(&repo, &["switch", "--quiet", "--detach"]);
+
+    assert_eq!(
+        branches(&mut client, &repo).await,
+        pairs(&[("trunk", false)])
+    );
+}
+
+// verifies: PROTO-CORE-API-R18
+#[tokio::test(flavor = "multi_thread")]
+async fn branch_list_needs_a_git_project() {
+    let (core, mut client, _) = setup().await;
+    let plain = core.dir.path().join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    let project = add_project(&mut client, &plain).await;
+    let error = client
+        .error("branch.list", json!({ "project_id": project["id"] }))
+        .await;
+    assert_eq!(kind(&error), "invalid_state");
+    let error = client
+        .error("branch.list", json!({ "project_id": "p-nothing" }))
+        .await;
+    assert_eq!(kind(&error), "not_found");
+
+    // A folder that stopped being a repository after it was added: git's
+    // own failure, with its message.
+    let gone = core.dir.path().join("gone");
+    repo_on(&gone, "main");
+    let project = add_project(&mut client, &gone).await;
+    std::fs::remove_dir_all(gone.join(".git")).unwrap();
+    std::fs::write(gone.join(".git"), "gitdir: nowhere\n").unwrap();
+    let error = client
+        .error("branch.list", json!({ "project_id": project["id"] }))
+        .await;
+    assert_eq!(kind(&error), "vcs_error");
+    assert!(error["data"]["detail"].is_string(), "{error}");
+}
+
+// -- A workspace's base -------------------------------------------------------
+
+/// The commit the workspace's checkout is at.
+fn head_of(workspace: &Value) -> String {
+    git(
+        Path::new(workspace["path"].as_str().unwrap()),
+        &["rev-parse", "HEAD"],
+    )
+}
+
+// verifies: PROTO-CORE-API-R19
+#[tokio::test(flavor = "multi_thread")]
+async fn a_base_is_any_revision_git_resolves_and_nothing_else() {
+    let (_core, mut client, repo) = setup().await;
+    let project = add_project(&mut client, &repo).await;
+    let first = git(&repo, &["rev-parse", "HEAD"]);
+    git(&repo, &["tag", "-a", "-m", "v1", "v1"]);
+    git(
+        &repo,
+        &["commit", "--quiet", "--allow-empty", "-m", "second"],
+    );
+    git(&repo, &["branch", "feature"]);
+
+    for (base, expected) in [
+        ("feature", git(&repo, &["rev-parse", "feature"])),
+        // An annotated tag starts from the commit it tags.
+        ("v1", first.clone()),
+        (first.trim(), first.clone()),
+    ] {
+        let workspace = client
+            .result(
+                "workspace.create",
+                json!({ "project_id": project["id"], "base": base }),
+            )
+            .await;
+        assert_eq!(head_of(&workspace), expected, "{base}");
+    }
+
+    // Something git cannot resolve is the caller's mistake, and leaves no
+    // workspace or branch behind.
+    let before = client
+        .result("workspace.list", json!({ "project_id": project["id"] }))
+        .await;
+    for base in ["no-such-branch", "main~99", "HEAD:README.md"] {
+        let error = client
+            .error(
+                "workspace.create",
+                json!({ "project_id": project["id"], "name": "never", "base": base }),
+            )
+            .await;
+        assert_eq!(error["code"], json!(-32602), "{base}: {error}");
+    }
+    assert_eq!(
+        client
+            .result("workspace.list", json!({ "project_id": project["id"] }))
+            .await,
+        before
+    );
+    assert_eq!(git(&repo, &["branch", "--list", "never"]), "");
+}
+
+// verifies: PROTO-CORE-API-R19
+#[tokio::test(flavor = "multi_thread")]
+async fn without_a_base_a_workspace_starts_from_the_default_branch() {
+    let (_core, mut client, repo) = setup().await;
+    let project = add_project(&mut client, &repo).await;
+    // The project's folder has another branch checked out, a commit ahead.
+    git(&repo, &["switch", "--quiet", "-c", "side"]);
+    git(
+        &repo,
+        &["commit", "--quiet", "--allow-empty", "-m", "on side"],
+    );
+
+    let workspace = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    assert_eq!(head_of(&workspace), git(&repo, &["rev-parse", "main"]));
+    assert_ne!(head_of(&workspace), git(&repo, &["rev-parse", "side"]));
+}
+
+// verifies: PROTO-CORE-API-R19
+#[tokio::test(flavor = "multi_thread")]
+async fn without_a_base_or_a_default_a_workspace_starts_from_the_checked_out_commit() {
+    let (core, mut client, _) = setup().await;
+    let repo = core.dir.path().join("trunk");
+    repo_on(&repo, "trunk");
+    git(&repo, &["switch", "--quiet", "--detach"]);
+    git(
+        &repo,
+        &["commit", "--quiet", "--allow-empty", "-m", "detached"],
+    );
+    let project = add_project(&mut client, &repo).await;
+
+    let workspace = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    assert_eq!(head_of(&workspace), git(&repo, &["rev-parse", "HEAD"]));
+    assert_ne!(head_of(&workspace), git(&repo, &["rev-parse", "trunk"]));
+}
+
+// -- Finding a project by its folder -------------------------------------------
+
+// verifies: PROTO-CORE-API-R27
+#[tokio::test(flavor = "multi_thread")]
+async fn project_find_matches_a_folder_as_project_add_compares_them() {
+    let (core, mut client, repo) = setup().await;
+    let project = add_project(&mut client, &repo).await;
+
+    let mut spellings = vec![
+        repo.display().to_string(),
+        format!("{}/", repo.display()),
+        repo.join("..").join("repo").display().to_string(),
+    ];
+    if cfg!(windows) {
+        spellings.push(repo.display().to_string().to_uppercase());
+    }
+    for spelling in spellings {
+        let found = client
+            .result(
+                "project.find",
+                json!({ "host_id": "local", "path": spelling }),
+            )
+            .await;
+        assert_eq!(found, project, "{spelling}");
+    }
+
+    // A folder that is not a project, or not there at all, is none.
+    let plain = core.dir.path().join("plain");
+    std::fs::create_dir_all(&plain).unwrap();
+    for path in [plain.clone(), core.dir.path().join("missing")] {
+        let found = client
+            .result(
+                "project.find",
+                json!({ "host_id": "local", "path": path.display().to_string() }),
+            )
+            .await;
+        assert_eq!(found, Value::Null, "{}", path.display());
+    }
+
+    let error = client
+        .error(
+            "project.find",
+            json!({ "host_id": "local", "path": "relative/dir" }),
+        )
+        .await;
+    assert_eq!(error["code"], json!(-32602));
+    let error = client
+        .error(
+            "project.find",
+            json!({ "host_id": "nowhere", "path": repo.display().to_string() }),
+        )
+        .await;
+    assert_eq!(kind(&error), "not_found");
 }

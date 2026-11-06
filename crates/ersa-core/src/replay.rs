@@ -33,6 +33,7 @@ use tokio::sync::watch;
 
 use crate::api::ApiError;
 use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
+use crate::platform;
 use crate::sessions::SessionError;
 use crate::state::Core;
 use crate::transport::MAX_PROCESS_LINE_BYTES;
@@ -78,7 +79,9 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::BackendList
         | Method::ModeList
         | Method::ProjectList
+        | Method::ProjectFind
         | Method::WorkspaceList
+        | Method::BranchList
         | Method::SettingsGet
         | Method::SessionList
         | Method::SessionSubscribe
@@ -144,11 +147,14 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         // A recording runs no configuration, so there is nothing to trust.
         trusted: false,
     };
+    // Stored under the key `project.add` would give the folder, so
+    // `project.find` answers for it as it does on a live Core.
+    let canonical = platform::canonicalize(&core.config.data_dir)
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| path.clone());
+    let key = platform::path_key(&canonical);
     // The recording plays in the project's root workspace, its own folder.
-    let workspace = core
-        .store
-        .insert_project(project.clone(), path.clone())
-        .await?;
+    let workspace = core.store.insert_project(project.clone(), key).await?;
 
     let session = SessionRow {
         id: persistence::new_id("s"),

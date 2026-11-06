@@ -4,10 +4,11 @@
 use std::path::{Component, Path};
 
 use ersa_protocol::core_api::{
-    BackendInfo, BackendListParams, Empty, HelloParams, HelloResult, Host, HostKind, HostStatus,
-    IdParams, Project, ProjectAddParams, ProjectSetTrustParams, SUPPORTED_API_VERSIONS,
-    SettingsSetParams, StatusResult, Vcs, Workspace, WorkspaceCreateParams, WorkspaceKind,
-    WorkspaceListParams, WorkspaceRemoveParams, WorkspaceState,
+    BackendInfo, BackendListParams, Branch, BranchListParams, Empty, HelloParams, HelloResult,
+    Host, HostKind, HostStatus, IdParams, Project, ProjectAddParams, ProjectFindParams,
+    ProjectSetTrustParams, SUPPORTED_API_VERSIONS, SettingsSetParams, StatusResult, Vcs, Workspace,
+    WorkspaceCreateParams, WorkspaceKind, WorkspaceListParams, WorkspaceRemoveParams,
+    WorkspaceState,
 };
 use ersa_protocol::events::PROJECTION_VERSION;
 use serde_json::{Map, Value};
@@ -187,6 +188,39 @@ pub(super) async fn project_add(
     Ok(project)
 }
 
+/// The project on the host whose folder is `params.path`, compared as
+/// `project.add` compares folders, or `None` (PROTO-CORE-API-R27).
+pub(super) async fn project_find(
+    core: &Core,
+    params: ProjectFindParams,
+) -> Result<Option<Project>, ApiError> {
+    if core.store.host(params.host_id.clone()).await?.is_none() {
+        return Err(ApiError::not_found(format!("no host {}", params.host_id)));
+    }
+    let raw = params.path.clone();
+    let key = tokio::task::spawn_blocking(move || folder_key(&raw))
+        .await
+        .map_err(|_| ApiError::internal("inspecting the folder panicked"))??;
+    Ok(core.store.project_at(params.host_id, key).await?)
+}
+
+/// The key `project.add` would store for the folder at `raw`: its
+/// canonical path as the file system compares paths. A folder that cannot be
+/// opened falls back to the path's own text, which matches no project
+/// `project.add` could have made from it. Blocking.
+fn folder_key(raw: &str) -> Result<String, ApiError> {
+    let raw = raw.trim();
+    if !Path::new(raw).is_absolute() {
+        return Err(ApiError::invalid_params(format!(
+            "path must be absolute: {raw}"
+        )));
+    }
+    Ok(match platform::canonicalize(Path::new(raw)) {
+        Ok(path) => platform::path_key(&path.display().to_string()),
+        Err(_) => platform::path_key(raw),
+    })
+}
+
 /// A folder about to become a project.
 struct Folder {
     /// Canonical: absolute, links and `..` resolved, the stored letter case.
@@ -303,20 +337,48 @@ pub(super) async fn workspace_list(
     Ok(core.store.workspaces(project.id).await?)
 }
 
+/// The project's local branches, sorted by name, with its default marked
+/// (PROTO-CORE-API-R18).
+pub(super) async fn branch_list(
+    core: &Core,
+    params: BranchListParams,
+) -> Result<Vec<Branch>, ApiError> {
+    let project = find_project(core, &params.project_id).await?;
+    require_workspace_adapter(&project)?;
+    let transport = core
+        .transport_for(&project.host_id)
+        .ok_or_else(|| unreachable_host(&project.host_id))?;
+    let branches = workspace::git_local_branches(transport.as_ref(), &project.path).await?;
+    Ok(branches
+        .names
+        .into_iter()
+        .map(|name| Branch {
+            default: branches.default.as_ref() == Some(&name),
+            name,
+        })
+        .collect())
+}
+
+/// Refuses a project whose version control has no workspace adapter. Git is
+/// the only one so far; a session of any other project runs in its root
+/// workspace.
+fn require_workspace_adapter(project: &Project) -> Result<(), ApiError> {
+    if project.vcs == Vcs::Git {
+        return Ok(());
+    }
+    Err(ApiError::invalid_state(format!(
+        "project {} has no workspace adapter for its version control; \
+         only git projects get isolated workspaces, so run the session in the project's own folder",
+        project.id
+    )))
+}
+
 pub(super) async fn workspace_create(
     core: &Core,
     params: WorkspaceCreateParams,
 ) -> Result<Workspace, ApiError> {
     let project = find_project(core, &params.project_id).await?;
-    // Git is the only version control with a workspace adapter so far; a
-    // session of any other project runs in its root workspace.
-    if project.vcs != Vcs::Git {
-        return Err(ApiError::invalid_state(format!(
-            "project {} has no workspace adapter for its version control; \
-             only git projects get isolated workspaces, so run the session in the project's own folder",
-            project.id
-        )));
-    }
+    require_workspace_adapter(&project)?;
     for (field, value) in [("name", &params.name), ("base", &params.base)] {
         if let Some(value) = value
             && (value.is_empty() || value.starts_with('-'))
@@ -329,6 +391,7 @@ pub(super) async fn workspace_create(
     let transport = core
         .transport_for(&project.host_id)
         .ok_or_else(|| unreachable_host(&project.host_id))?;
+    let base = resolve_base(transport.as_ref(), &project.path, params.base.as_deref()).await?;
 
     let id = persistence::new_id("w");
     let branch = params.name.unwrap_or_else(|| format!("ersa/{id}"));
@@ -368,7 +431,7 @@ pub(super) async fn workspace_create(
         &project.path,
         &path,
         &branch,
-        params.base.as_deref(),
+        Some(&base),
     )
     .await;
     if let Err(e) = created {
@@ -395,6 +458,42 @@ pub(super) async fn workspace_create(
         .await?;
     workspace.state = WorkspaceState::Ready;
     Ok(workspace)
+}
+
+/// The commit a new workspace starts from (PROTO-CORE-API-R19): `base` when
+/// given, refused with `invalid_params` when git cannot resolve it; without
+/// one, the default branch `branch.list` marks, else the checked-out
+/// commit. Resolved to a commit id once, here, so the worktree starts from
+/// exactly what was checked, and git never reads `base` as anything else.
+async fn resolve_base(
+    transport: &dyn ersa_adapter::Transport,
+    repo: &str,
+    base: Option<&str>,
+) -> Result<String, ApiError> {
+    if let Some(base) = base {
+        return workspace::git_resolve_commit(transport, repo, base)
+            .await?
+            .ok_or_else(|| {
+                ApiError::invalid_params(format!("git cannot resolve base {base} to a commit"))
+            });
+    }
+    let default = workspace::git_local_branches(transport, repo)
+        .await?
+        .default;
+    let revision = match &default {
+        Some(name) => format!("refs/heads/{name}"),
+        None => "HEAD".to_string(),
+    };
+    // Nothing the caller gave can be wrong here, so a failure is git's: a
+    // repository with no commit yet, or a branch deleted in between.
+    workspace::git_resolve_commit(transport, repo, &revision)
+        .await?
+        .ok_or_else(|| {
+            ApiError::new(
+                ersa_protocol::core_api::ErrorKind::VcsError,
+                format!("the repository has no commit to start from at {revision}"),
+            )
+        })
 }
 
 pub(super) async fn workspace_remove(
