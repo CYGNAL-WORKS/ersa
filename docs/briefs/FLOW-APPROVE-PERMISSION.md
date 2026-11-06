@@ -25,7 +25,7 @@ What the shelf reads comes from the session's events (`PROTO-AGENT-EVENTS`, Perm
 
 Opening and closing
 
-- **FLOW-APPROVE-PERMISSION-R01**: When the user chooses the chevron of a tile whose session is not the active one and has a pending permission request or question, Ersa shall open that tile's shelf showing the session's oldest pending request, the one whose event came first, and shall leave the active session unchanged.
+- **FLOW-APPROVE-PERMISSION-R01**: When the user chooses the chevron of a tile whose session is not the active one and has a pending permission request or question, Ersa shall open that tile's shelf showing the session's oldest pending request, the one whose event came first, with a request it can't show placed as R29 says, and shall leave the active session unchanged.
 - **FLOW-APPROVE-PERMISSION-R02**: Ersa shall open a shelf only when the user chooses its tile's chevron; a request arriving for any session shall not open a shelf or move keyboard focus.
 - **FLOW-APPROVE-PERMISSION-R03**: When the user opens a shelf while another is open, Ersa shall close the other one, so that at most one shelf is open.
 - **FLOW-APPROVE-PERMISSION-R04**: The open shelf shall overlay the transcript and shall not move, resize or scroll it.
@@ -79,7 +79,7 @@ Assistive technology
 
 ## Changes
 
-- 2026-11-06: from #215 inbox: where a request the shelf can't show falls in the order (R29 added).
+- 2026-11-06: from #215 inbox: where a request the shelf can't show falls in the order (R29 added; R01 reworded to place such a request as R29 says).
 - 2026-11-05: a question can be declined (R28 added), as Claude Code accepts (PROTO-CLAUDE-CODE-STREAM, Questions).
 - 2026-11-05: owner review: the active session has no shelf (R26 added; R27 gives the transcript's permission card the request's own answers; R01 narrowed to other sessions; R18 no longer joins the shelf and the transcript's card); the shelf shows no workspace (R11, R15); the answers are the ones the request carries (R12 reworded); a question shows its header and option descriptions and takes the user's own words where it allows them (R15, R16). Claude Code's questions are projected and answered (PROTO-CLAUDE-CODE-STREAM, Questions).
 - 2026-11-05: specified from the owner's decisions and the Rail mockup's shelf: opened only from the chevron, one at a time, over the transcript's edge, oldest request first with its place, focus in and back, what a permission request and a question show and send, one answer between the shelf and the transcript's card, and what assistive technology hears. Status ready; FLOW-APPROVE-PERMISSION-R01 to R25 added. Closing on the last answer puts focus on the tile rather than on the chevron the owner named, since the chevron goes once nothing is pending (R08). Closes the open questions on an "approve all" option (the request's own suggestions, never offered when it suppresses them) and on large details (they scroll, as the transcript's card's do).

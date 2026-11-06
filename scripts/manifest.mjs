@@ -134,6 +134,8 @@ for (const file of walk(BRIEFS_DIR)) {
       (isRetired ? retired : active).add(id);
     }
   }
+  // An unclosed fence would hide every bullet after it from the check above.
+  if (fence) problems.push(`${fm.id}: a code fence (${fence}) is never closed`);
   for (const [id, n] of seen) if (n > 1) problems.push(`${fm.id}: requirement ${id} is defined ${n} times`);
 
   briefs.push({
