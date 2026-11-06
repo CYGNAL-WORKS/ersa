@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Project } from "../protocol/core-api.gen";
 import { type BackendChoices, type SessionValues, available, howFor, seedScreen, startingProject, valuesFor } from "../session/controls";
 import type { Sending } from "../session/follow";
@@ -79,6 +79,46 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   const words = useRef<HTMLTextAreaElement>(null);
   const backToWords = () => words.current?.focus({ preventScroll: true });
   const chooseProject = (id: string) => setWanted({ ...lastUsed[id], project_id: id });
+
+  // The trust question opens upward over the room above the box, so the box and the session controls stay where they
+  // are (docs/design/COMPOSER.md). It is capped to that room, its explanation scrolling inside; where the room cannot
+  // hold even its title, folder and answers, it takes its place in the column instead and the box moves down, since
+  // a question whose folder is out of sight must never be answered.
+  const screen = useRef<HTMLElement>(null);
+  const above = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (asking === undefined) return;
+    const fit = () => {
+      const zone = above.current;
+      const section = screen.current;
+      const card = zone?.querySelector<HTMLElement>(".trust-question");
+      const body = card?.querySelector<HTMLElement>(".trust-question-body");
+      if (!zone || !section || !card || !body) return;
+      // Measured over the room as it is with the question out of the column.
+      delete section.dataset.tight;
+      card.style.maxHeight = "";
+      const style = getComputedStyle(section);
+      const top = parseFloat(style.paddingTop) || 0;
+      const room = zone.getBoundingClientRect().top - section.getBoundingClientRect().top - top;
+      // What must show: everything but the explanation, and its first line or so.
+      const first = body.firstElementChild;
+      const least = card.offsetHeight - body.offsetHeight + (first instanceof HTMLElement ? first.offsetHeight : 0);
+      if (room >= least) {
+        card.style.maxHeight = `${room}px`;
+      } else {
+        // In the column, capped to the screen's own height, so the title, folder and answers show together at its top.
+        section.dataset.tight = "";
+        const below = section.scrollTop + card.getBoundingClientRect().top - section.getBoundingClientRect().top;
+        card.style.maxHeight = `${Math.max(least, section.clientHeight - below - (parseFloat(style.paddingBottom) || 0))}px`;
+      }
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => {
+      window.removeEventListener("resize", fit);
+      if (screen.current) delete screen.current.dataset.tight;
+    };
+  }, [asking]);
 
   // The folder dialog is the local host's (FLOW-NEW-SESSION-R16, R19): a remote host's folders are not this computer's.
   const canAdd = onChooseFolder !== undefined && hostId === localHostId && !busy && asking === undefined;
@@ -162,12 +202,12 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
         : undefined;
 
   return (
-    <section className="new-session" aria-label="New session">
+    <section ref={screen} className="new-session" aria-label="New session">
       <Wordmark />
       <div className="new-session-start">
         {/* In the status line's place above the box (docs/design/COMPOSER.md, The trust question), opening upward:
             the box and the session controls stay where they are. */}
-        <div className="new-session-above">
+        <div ref={above} className="new-session-above">
           {asking !== undefined && (
             <TrustQuestion
               name={folderName(asking)}

@@ -46,6 +46,21 @@
   line-height: var(--type-ui-small-leading);
 }
 
+/* The explanation, the one part that gives up room: it scrolls inside the question when the question is capped. */
+.trust-question-body {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.trust-question-title,
+.trust-question-path,
+.trust-question-actions {
+  flex-shrink: 0;
+}
+
 .trust-question-actions {
   display: flex;
   flex-wrap: wrap;
