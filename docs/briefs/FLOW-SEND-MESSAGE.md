@@ -28,9 +28,11 @@ An attachment is a file, an image or a folder that goes with a message. The user
 - **FLOW-SEND-MESSAGE-R07**: The composer's attach menu shall offer adding files, adding images and adding a folder, each through the system's dialog, and shall say that attachments can also be pasted or dropped on the box.
 - **FLOW-SEND-MESSAGE-R08**: When the user pastes an image into the composer, Ersa shall attach it; when the user drops files, images or folders on the composer's box, Ersa shall attach each of them.
 - **FLOW-SEND-MESSAGE-R09**: Each attachment shall show its name and its detail: the size of an image, the line count of a text file and the size of any other file, or that it is a folder; and each shall offer to remove it before the message is sent.
-- **FLOW-SEND-MESSAGE-R10**: When an attachment is one Ersa can't send (an image of a kind or size the backend does not take, or a path that no longer exists), Ersa shall say why beside it and send nothing until the user removes it.
+- **FLOW-SEND-MESSAGE-R10**: When an attachment is one Ersa can't send (an image of a kind or size the backend does not take, a folder too large to copy, or a path that no longer exists), Ersa shall say why beside it and send nothing until the user removes it.
 - **FLOW-SEND-MESSAGE-R11**: The transcript shall show each message's attachments with it: an image as an image, a file or folder by its name.
 - **FLOW-SEND-MESSAGE-R12**: Adding the same file or folder twice to one message shall attach it once.
+- **FLOW-SEND-MESSAGE-R13**: Ersa shall attach only a path the user named: one picked in the system's dialog or dropped on the box.
+- **FLOW-SEND-MESSAGE-R14**: An attachment from outside the session's workspace shall say that it will be copied into the workspace.
 
 ## Verification
 
@@ -44,10 +46,10 @@ The composer sends words with Enter, keeps what was typed meanwhile (R01, R02), 
 
 - Dictation: whether the composer takes speech, and through what (the owner's mockup draws a microphone beside the session controls).
 - Whether a message written while the agent works can be queued to send when the turn ends, rather than waiting in the composer.
-- When a workspace's scratch folder is emptied, especially in a root workspace, which is the user's own folder.
+- Whether a block of text the user writes that looks like Ersa's attachment list can be told from Ersa's own (PROTO-CLAUDE-CODE-STREAM, User message).
 - Whether pasting files copied in the system's file manager attaches them, where the webview gives their contents but not their paths.
 - How the user sends Enter's newline and send on a keyboard without Shift, and whether Ctrl+Enter sends.
 
 ## Changes
 
-- 2026-11-05: created ready from the owner's composer mockup and decisions: send and stop, a refused message kept with its reason, the composer unavailable while Ersa can't reach the sessions, and attachments (the attach menu, paste and drop, removable, images inline and files as paths, copied into the scratch folder from outside the workspace). FLOW-SEND-MESSAGE-R01 to R12 added; R01 and R02 describe what is built.
+- 2026-11-05: created ready from the owner's composer mockup and decisions: send and stop, a refused message kept with its reason, the composer unavailable while Ersa can't reach the sessions, and attachments (the attach menu, paste and drop, removable, images inline and files as paths, copied into the scratch folder from outside the workspace). FLOW-SEND-MESSAGE-R01 to R14 added; R01 and R02 describe what is built.
