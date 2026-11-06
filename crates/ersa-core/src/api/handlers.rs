@@ -198,27 +198,33 @@ pub(super) async fn project_find(
         return Err(ApiError::not_found(format!("no host {}", params.host_id)));
     }
     let raw = params.path.clone();
-    let key = tokio::task::spawn_blocking(move || folder_key(&raw))
-        .await
-        .map_err(|_| ApiError::internal("inspecting the folder panicked"))??;
+    // A folder that cannot be opened is no project: `project.add` would
+    // refuse it, so it matches none, even one added there before it went.
+    let key = tokio::task::spawn_blocking(move || {
+        let raw = absolute(&raw)?;
+        Ok::<_, ApiError>(
+            platform::canonicalize(Path::new(raw))
+                .ok()
+                .map(|p| platform::folder_key(&p)),
+        )
+    })
+    .await
+    .map_err(|_| ApiError::internal("inspecting the folder panicked"))??;
+    let Some(key) = key else {
+        return Ok(None);
+    };
     Ok(core.store.project_at(params.host_id, key).await?)
 }
 
-/// The key `project.add` would store for the folder at `raw`: its
-/// canonical path as the file system compares paths. A folder that cannot be
-/// opened falls back to the path's own text, which matches no project
-/// `project.add` could have made from it. Blocking.
-fn folder_key(raw: &str) -> Result<String, ApiError> {
+/// `raw` without surrounding white space, refused unless it is absolute.
+fn absolute(raw: &str) -> Result<&str, ApiError> {
     let raw = raw.trim();
     if !Path::new(raw).is_absolute() {
         return Err(ApiError::invalid_params(format!(
             "path must be absolute: {raw}"
         )));
     }
-    Ok(match platform::canonicalize(Path::new(raw)) {
-        Ok(path) => platform::path_key(&path.display().to_string()),
-        Err(_) => platform::path_key(raw),
-    })
+    Ok(raw)
 }
 
 /// A folder about to become a project.
@@ -235,12 +241,7 @@ struct Folder {
 /// Checks that `raw` names a folder that can be a project, and describes it.
 /// Blocking.
 fn inspect_folder(raw: &str) -> Result<Folder, ApiError> {
-    let raw = raw.trim();
-    if !Path::new(raw).is_absolute() {
-        return Err(ApiError::invalid_params(format!(
-            "path must be absolute: {raw}"
-        )));
-    }
+    let raw = absolute(raw)?;
     let path = platform::canonicalize(Path::new(raw)).map_err(|e| match e.kind() {
         std::io::ErrorKind::PermissionDenied => ApiError::new(
             ersa_protocol::core_api::ErrorKind::Permission,
@@ -261,10 +262,9 @@ fn inspect_folder(raw: &str) -> Result<Folder, ApiError> {
             )));
         }
     };
-    let text = path.display().to_string();
     Ok(Folder {
-        key: platform::path_key(&text),
-        path: text,
+        key: platform::folder_key(&path),
+        path: path.display().to_string(),
         name,
         vcs: detect_vcs(&path),
     })
@@ -426,14 +426,8 @@ pub(super) async fn workspace_create(
     // Recorded as `creating` first, so a listing during a slow checkout shows it.
     core.store.insert_workspace(workspace.clone()).await?;
 
-    let created = workspace::git_worktree_add(
-        transport.as_ref(),
-        &project.path,
-        &path,
-        &branch,
-        Some(&base),
-    )
-    .await;
+    let created =
+        workspace::git_worktree_add(transport.as_ref(), &project.path, &path, &branch, &base).await;
     if let Err(e) = created {
         // When git failed, it cleaned up after itself. When it timed out or
         // its output was lost, a half-made worktree may be on disk: discard
