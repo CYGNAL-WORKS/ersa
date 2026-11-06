@@ -52,11 +52,11 @@ interface NewSessionScreenProps {
  * The new-session screen (LAY-SHELL): the Ersa wordmark above the composer, focused, and the session controls
  * beneath it saying where and how the session will run (FLOW-NEW-SESSION-R01). The project chip's Add project…, or
  * Ctrl+O, adds a project from the folder dialog, asking first whether the user trusts a folder that is not yet one
- * (FLOW-NEW-SESSION-R16 to R20); with no project, the chip and sending both open the dialog.
+ * (FLOW-NEW-SESSION-R17 to R20, R27); with no project, the chip and sending both open the dialog.
  */
 export function NewSessionScreen(props: NewSessionScreenProps) {
   const { hosts, localHostId, backends, lastUsed = {}, onStart, starting, onChooseFolder, onAddProject, adding } = props;
-  // A project just added or found is chosen at once, before Core's list is read again with it (FLOW-NEW-SESSION-R16).
+  // A project just added or found is chosen at once, before Core's list is read again with it (FLOW-NEW-SESSION-R27).
   const [added, setAdded] = useState<Project>();
   const projects = added && !props.projects.some((p) => p.id === added.id) ? [added, ...props.projects] : props.projects;
   const first = startingProject(projects, localHostId, props.projectId);
@@ -142,7 +142,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     };
   }, [asking]);
 
-  // The folder dialog is the local host's (FLOW-NEW-SESSION-R16, R19): a remote host's folders are not this computer's.
+  // The folder dialog is the local host's (FLOW-NEW-SESSION-R27, R19): a remote host's folders are not this computer's.
   const canAdd = onChooseFolder !== undefined && hostId === localHostId && !busy && asking === undefined;
   const addProject = async () => {
     if (!canAdd || choosing.current) return;
@@ -179,7 +179,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     }
   };
 
-  // Ctrl+O chooses Add project from anywhere on the screen (FLOW-NEW-SESSION-R16). The listener is added once and
+  // Ctrl+O chooses Add project from anywhere on the screen (FLOW-NEW-SESSION-R27). The listener is added once and
   // calls the latest `addProject` through a ref.
   const shortcut = useRef(addProject);
   shortcut.current = addProject;

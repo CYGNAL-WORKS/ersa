@@ -41,7 +41,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # `tray-icon`: the icon closing the window hides to (FLOW-CLOSE-AND-QUIT).
 tauri = { version = "2", features = ["tray-icon"] }
-# The system's folder dialog, for adding a project (FLOW-NEW-SESSION-R16);
+# The system's folder dialog, for adding a project (FLOW-NEW-SESSION-R27);
 # the Interface opens it through @tauri-apps/plugin-dialog.
 tauri-plugin-dialog = "2"
 thiserror = "2"
