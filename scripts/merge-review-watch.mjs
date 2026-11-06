@@ -90,6 +90,10 @@ export const LOCK_STALE_MS = 3 * STALE_MS;
 // start, heads that cannot be prepared included: a review takes about an hour,
 // so the last one it starts ends within the two hours the task allows it.
 export const START_WINDOW_MS = 45 * 60 * 1000;
+// How long a review may run before it is ended. A review takes up to about an
+// hour; one started at the end of the window and ended here still finishes
+// within the task's two hours.
+export const REVIEW_LIMIT_MS = 70 * 60 * 1000;
 const FIELDS = "number,isDraft,isCrossRepository,headRefOid,labels,autoMergeRequest,statusCheckRollup";
 
 // What a head's merge review status says, for the line that tells why the
@@ -119,20 +123,21 @@ export function select(prs, now = Date.now()) {
     const ci = ciRefusals(pr.statusCheckRollup);
     if (reviewed) skip.push({ number: pr.number, why: `its merge review ${VERDICT[mark.status === "COMPLETED" ? mark.conclusion : "PENDING"] ?? "has a status this poller cannot read"}${held ? ", and it is on hold" : ""}` });
     else if (ci.length) skip.push({ number: pr.number, why: ci.join(", and ") });
-    else review.push({ number: pr.number, head: pr.headRefOid, since: passedAt(pr.statusCheckRollup) });
+    else review.push({ number: pr.number, head: pr.headRefOid, since: passedAt(pr.statusCheckRollup, now) });
   }
   review.sort((a, b) => a.since - b.since || a.number - b.number);
   return { review: review.map(({ number, head }) => ({ number, head })), disarm, skip };
 }
 
-// When a head's CI passed: the end of its last check to finish. A check gh
-// gave no time for counts as just finished, so a head never jumps the line on
-// a missing time.
-function passedAt(rollup) {
+// When a head's CI passed: the end of its last check to finish, among those gh
+// gave a time for. A head with no time at all counts as passing now, so a
+// missing time neither jumps the line nor keeps a head at its back for good.
+function passedAt(rollup, now) {
   const times = normalizeChecks(rollup)
     .filter((c) => c.name !== MERGE_REVIEW)
-    .map((c) => Date.parse(c.completedAt ?? c.startedAt ?? ""));
-  return times.some((t) => !Number.isFinite(t)) ? Infinity : Math.max(...times);
+    .map((c) => Date.parse(c.completedAt ?? c.startedAt ?? ""))
+    .filter(Number.isFinite);
+  return times.length ? Math.max(...times) : now;
 }
 
 // Takes the lock for this process and returns what releases it, or null when
@@ -212,17 +217,46 @@ function run(cmd, args, cwd = ROOT) {
 }
 
 // Starts the review of pull request `n` at `head` in `dir` and resolves to its
-// exit code, or why it could not start; the review has its own limits. Its
-// output goes to `log` a line at a time, each marked with the pull request,
-// so two reviews' lines stay readable side by side.
-function startReview(n, head, dir, log) {
-  return new Promise((done) => {
-    const child = spawn("node", ["scripts/merge-review.mjs", String(n), "--head", head], { cwd: dir, env: ENV, stdio: ["ignore", "pipe", "pipe"] });
+// exit code, or why it could not start or did not end. Its output goes to
+// `log` a line at a time, each marked with the pull request, so two reviews'
+// lines stay readable side by side. A review that runs past `limit` is ended
+// with every process it started: a run waits for its reviews and keeps its
+// lock fresh meanwhile, so one that never ended would hold every other head.
+// A process the review left behind can hold its output open after it exits,
+// so the exit, not the end of the output, ends it.
+export function startReview(n, head, dir, log, limit = REVIEW_LIMIT_MS) {
+  return new Promise((resolve) => {
+    let timer;
+    const done = (status) => {
+      clearTimeout(timer);
+      resolve(status);
+    };
+    // Outside Windows the review leads its own process group, so it can be ended whole.
+    const child = spawn("node", ["scripts/merge-review.mjs", String(n), "--head", head], { cwd: dir, env: ENV, stdio: ["ignore", "pipe", "pipe"], detached: process.platform !== "win32" });
     // Control characters go, so the pull request's own output cannot redraw the log.
     for (const out of [child.stdout, child.stderr]) createInterface({ input: out }).on("line", (l) => log(`#${n} | ${l.replace(/[\x00-\x1f\x7f]/g, "")}`));
+    timer = setTimeout(() => {
+      endTree(child.pid);
+      done(`nothing after ${Math.round(limit / 60000)} minutes, so it was ended`);
+    }, limit);
     child.on("error", (e) => done(e.message));
-    child.on("close", (code) => done(code));
+    // Output still in the pipe gets a moment to reach the log.
+    child.on("exit", (code, signal) => {
+      const status = code ?? signal;
+      child.on("close", () => done(status));
+      setTimeout(() => done(status), 2000).unref();
+    });
   });
+}
+
+// Ends a process and every process it started.
+function endTree(pid) {
+  if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore" });
+  else {
+    try {
+      process.kill(-pid, "SIGKILL");
+    } catch {}
+  }
 }
 
 const pause = (ms) => new Promise((wake) => setTimeout(wake, ms));
@@ -263,7 +297,13 @@ function prepare(run, dir, n, head) {
 function tick(run, start, dirs, log, now, running, until) {
   const list = run("gh", ["pr", "list", "--state", "open", "--limit", "100", "--json", FIELDS]);
   if (!list.ok) fail(`gh pr list failed: ${list.err}`);
-  const { review, disarm, skip } = select(JSON.parse(list.out), now());
+  let prs;
+  try {
+    prs = JSON.parse(list.out);
+  } catch (e) {
+    fail(`gh pr list gave output that is not JSON: ${e.message}`);
+  }
+  const { review, disarm, skip } = select(prs, now());
   for (const n of disarm) {
     const r = run("gh", ["pr", "merge", String(n), "--disable-auto"]);
     log(`#${n}: auto-merge was on for an unreviewed or held head; ${r.ok ? "disabled it" : `could not disable it: ${r.err}`}`);

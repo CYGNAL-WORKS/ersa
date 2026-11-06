@@ -6,7 +6,7 @@
 
 ## Context
 
-ADR 0023 has the merge review poller review each pull request whose CI passed "one at a time", and the poller took them in the order `gh pr list` returns, newest first. A review takes 5 to 40 minutes. On 2026-11-06, #175's head passed CI at 15:23 and was still waiting at 17:33: four newer pull requests drew blocking findings, were pushed again, and went back to the front each time. The head that waited longest was reviewed last.
+ADR 0023 has the merge review poller review each pull request whose CI passed "one at a time", and the poller took them in the order `gh pr list` returns, newest first. A review takes from 5 minutes to about an hour. On 2026-11-06, #175's head passed CI at 15:23 and was still waiting at 17:33: four newer pull requests drew blocking findings, were pushed again, and went back to the front each time. The head that waited longest was reviewed last.
 
 ## Options considered
 
