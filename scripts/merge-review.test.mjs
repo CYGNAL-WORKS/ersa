@@ -2,9 +2,10 @@
 // Run: node --test scripts/merge-review.test.mjs
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { MARK, blocking, claudeArgs, instructionPaths, main, ownerPaths, parseState, previousReview, prompt, reviewBody } from "./merge-review.mjs";
+import { MARK, POST_PAUSE_MS, POST_TRIES, blocking, claudeArgs, instructionPaths, main, ownerPaths, parseState, previousReview, prompt, reviewBody } from "./merge-review.mjs";
 
 const HEAD = "b".repeat(40);
 const OLD = "a".repeat(40);
@@ -93,8 +94,10 @@ const REVIEW_URL = "https://github.com/o/r/pull/7#pullrequestreview-1";
 // review and from `gate` for the gate (which asks for `mergeable`), the reviews
 // list from `reviews`, claude from `claude`, `git diff` from `files` (against
 // main) and `since` (against the previous head).
-function drive(argv, { pr = {}, reviews = [], claude, gate = {}, reviewedMissing = false, ancestors = [], files = "scripts/x.mjs\0scripts/x.test.mjs\0", since = "", mainHas = [], me = { ok: true, out: ME, err: "" }, statusOk = true, revList = "", show = "" } = {}) {
+function drive(argv, { pr = {}, reviews = [], claude, gate = {}, reviewedMissing = false, ancestors = [], files = "scripts/x.mjs\0scripts/x.test.mjs\0", since = "", mainHas = [], me = { ok: true, out: ME, err: "" }, statusOk = true, revList = "", show = "", posts = [], landed = false } = {}) {
   const calls = [];
+  const slept = [];
+  const postResults = [...posts];
   const ok = (out = "") => ({ ok: true, out, err: "" });
   const no = (err = "no") => ({ ok: false, out: "", err });
   const run = (cmd, args) => {
@@ -106,10 +109,15 @@ function drive(argv, { pr = {}, reviews = [], claude, gate = {}, reviewedMissing
       return gate.view ?? ok(JSON.stringify({ state: "OPEN", isDraft: false, mergeable: "MERGEABLE", headRefOid: HEAD, statusCheckRollup: [{ name: "CI", status: "COMPLETED", conclusion: "SUCCESS" }, ...review], ...gate.pr }));
     }
     if (cmd === "gh" && args[1] === "view") return ok(JSON.stringify({ state: "OPEN", isDraft: false, headRefOid: HEAD, headRefName: "claude/x", isCrossRepository: false, labels: [], title: "T", body: "Fixes #5", author: { login: ME, is_bot: false }, ...pr }));
+    // The check for a post that failed but landed: the body it sent, when `landed`.
+    if (cmd === "gh" && args[0] === "api" && args[1] === "--paginate" && args.at(-1).includes("select(.commit_id")) {
+      const sent = calls.filter((c) => c.includes("event=COMMENT")).at(-1);
+      return ok(landed && sent ? JSON.stringify({ body: readFileSync(sent.find((a) => a.startsWith("body=@")).slice(6), "utf8"), html_url: REVIEW_URL }) : "");
+    }
     if (cmd === "gh" && args[0] === "api" && args[1] === "--paginate") return ok(reviews.map((r) => JSON.stringify(r)).join("\n"));
     if (cmd === "gh" && args[1] === "user") return me;
     if (cmd === "gh" && args[0] === "api" && /\/statuses\//.test(args[1])) return statusOk ? ok(JSON.stringify({ id: 1 })) : no("HTTP 403");
-    if (cmd === "gh" && args[0] === "api" && /\/reviews$/.test(args[1])) return ok(REVIEW_URL);
+    if (cmd === "gh" && args[0] === "api" && /\/reviews$/.test(args[1])) return postResults.shift() ?? ok(REVIEW_URL);
     if (cmd === "gh" && args[0] === "pr" && args[1] === "merge") return gate.merge ?? ok();
     if (cmd === "git" && args[0] === "rev-parse") return ok(HEAD);
     if (cmd === "git" && args[0] === "merge-base") return (args[2] === HEAD && !reviewedMissing) || ancestors.includes(args[2]) ? ok() : no("");
@@ -120,12 +128,13 @@ function drive(argv, { pr = {}, reviews = [], claude, gate = {}, reviewedMissing
     if (cmd === "claude") return ok(JSON.stringify(claude ?? { structured_output: { findings: [], dismissed: [] }, num_turns: 1, total_cost_usd: 0.5 }));
     return ok();
   };
-  const got = main(argv, { run });
-  const of = (cmd, i, v) => calls.filter((c) => c[0] === cmd && c[i] === v);
+  const got = main(argv, { run, sleep: (ms) => slept.push(ms) });
+  const of =(cmd, i, v) => calls.filter((c) => c[0] === cmd && c[i] === v);
   return {
     ...got,
     calls,
-    reviewed: of("claude", 0, "claude").length,
+    slept,
+    reviewed:of("claude", 0, "claude").length,
     posted: calls.filter((c) => c[0] === "gh" && c[1] === "api" && /\/reviews$/.test(c[2]) && c.includes("event=COMMENT")),
     queued: of("gh", 2, "merge"),
     labeled: of("gh", 2, "edit"),
@@ -162,6 +171,31 @@ test("a clean review is posted on the head, the status points at it, and the hea
   assert.ok(order.findIndex((c) => c.startsWith("git checkout")) < order.findIndex((c) => c.startsWith("claude")));
   // The enqueue comes first: a run that dies between the two leaves a pending head the poller takes up again, not a green one that never queued.
   assert.ok(order.findIndex((c) => c.startsWith("gh pr merge")) < order.findIndex((c) => c.includes("state=success")));
+});
+
+test("a post GitHub refuses with a server error is tried again, and the review is not lost", () => {
+  const fail502 = { ok: false, out: "", err: "gh: Server Error (HTTP 502)" };
+  const got = drive(["7", "--head", HEAD], { posts: [fail502, fail502] });
+  assert.equal(got.code, 0, got.stderr);
+  assert.equal(got.reviewed, 1, "the review ran once");
+  assert.equal(got.posted.length, 3);
+  assert.deepEqual(got.slept, [POST_PAUSE_MS, 2 * POST_PAUSE_MS]);
+  assert.deepEqual(got.statuses, ["pending", `success ${REVIEW_URL}`]);
+});
+
+test("a post that failed but landed is not posted twice", () => {
+  const got = drive(["7", "--head", HEAD], { posts: [{ ok: false, out: "", err: "gh: Server Error (HTTP 502)" }], landed: true });
+  assert.equal(got.code, 0, got.stderr);
+  assert.equal(got.posted.length, 1);
+  assert.deepEqual(got.statuses, ["pending", `success ${REVIEW_URL}`]);
+});
+
+test("a post that fails every try fails the run with an error status", () => {
+  const got = drive(["7", "--head", HEAD], { posts: Array(POST_TRIES).fill({ ok: false, out: "", err: "HTTP 502" }) });
+  assert.equal(got.code, 2);
+  assert.equal(got.posted.length, POST_TRIES);
+  assert.match(got.stderr, /posting the review failed 3 times: HTTP 502/);
+  assert.deepEqual(got.statuses, ["pending", "error"]);
 });
 
 test("every instruction file the diff touched goes back to main's version, or away where main has none", () => {
