@@ -78,6 +78,7 @@ The rail is a list of projects above one list of sessions grouped under a headin
 
 ## Changes
 
+- 2026-11-05: owner: Delete… is unavailable while the session is starting, working or waiting on the user; the arrange menu's items name their current choice. No requirement IDs changed.
 - 2026-11-05: owner's decisions of 2026-11-05 (The rail): Add project leaves the rail for the new-session screen, and the empty tree points at New session; the arrange button and menu; groups by project, section, date or none, with a leading Pinned group; section headings; collapsed groups kept per grouping across restarts; a tile's menu (Pin, Rename, Fork, Move to section, Archive, Delete) and archived tiles. Closes the open questions on a tile's More menu, on sort order, and on remembering collapsed headings. No requirement IDs changed.
 - 2026-11-05: from #155 merge review: whether the foot shows a try after Retry, and how much of a failed start's output it shows and reads, are open questions. No requirement IDs changed.
 - 2026-11-05: from #155 inbox: the foot tells assistive technology when the problem appears and when it ends, and gives keyboard focus back to Retry (The foot); the open question on focus after Retry narrows to a retry that succeeds, and how long the word of reconnecting stays is a new one. No requirement IDs changed.
