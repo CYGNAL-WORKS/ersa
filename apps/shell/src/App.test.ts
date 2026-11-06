@@ -115,7 +115,7 @@ describe("the projects App gives the new-session screen", () => {
   });
 });
 
-// Adding a project from the new-session screen (FLOW-NEW-SESSION-R16 to R20): the sequence against a fake Core, with
+// Adding a project from the new-session screen (FLOW-NEW-SESSION-R17 to R20, R27): the sequence against a fake Core, with
 // the Shell's folder dialog replaced by a stand-in that answers each pick in turn with a folder or a cancel (null).
 
 const claude: BackendInfo = {
@@ -180,7 +180,7 @@ async function addFromChip() {
 }
 
 describe("adding a project from the new-session screen", () => {
-  // verifies: FLOW-NEW-SESSION-R16
+  // verifies: FLOW-NEW-SESSION-R27
   it("opens the folder dialog from Add project…, asks about trust for a new folder, then adds it trusted and chooses it", async () => {
     const shell = fakeShell("D:/clones/stranger");
     const core = await screenWith([project("alpha")], shell);
@@ -205,7 +205,7 @@ describe("adding a project from the new-session screen", () => {
     expect(document.activeElement).toBe(words());
   });
 
-  // verifies: FLOW-NEW-SESSION-R16
+  // The untrusted answer of ADR 0018, which ticket 226 removes (FLOW-NEW-SESSION-R25); it cites nothing meanwhile.
   it("adds the folder not trusted when the user says so", async () => {
     const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"));
     await addFromChip();
@@ -215,7 +215,7 @@ describe("adding a project from the new-session screen", () => {
     expect(chipValue()).toBe("Project: stranger");
   });
 
-  // verifies: FLOW-NEW-SESSION-R16
+  // verifies: FLOW-NEW-SESSION-R27
   it("opens the folder dialog on Ctrl+O, the shortcut shown beside Add project…", async () => {
     const shell = fakeShell("D:/clones/stranger");
     await screenWith([project("alpha")], shell);
@@ -227,7 +227,7 @@ describe("adding a project from the new-session screen", () => {
     expect(screen.getByRole("region", { name: "Trust stranger?" })).toBeTruthy();
   });
 
-  // verifies: FLOW-NEW-SESSION-R16
+  // verifies: FLOW-NEW-SESSION-R27
   it("leaves Add project unavailable, without its shortcut, when there is no folder dialog to open", async () => {
     await screenWith([project("alpha")]);
     fireEvent.click(screen.getByRole("button", { name: /^Project:/ }));

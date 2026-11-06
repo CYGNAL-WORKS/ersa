@@ -335,7 +335,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     }
   };
 
-  // Add project on the new-session screen (FLOW-NEW-SESSION-R16 to R19): the Shell's folder dialog on this computer,
+  // Add project on the new-session screen (FLOW-NEW-SESSION-R17 to R19, R27): the Shell's folder dialog on this computer,
   // then `project.find`, so a folder that is already a project is chosen without the trust question. Without the
   // Shell, as in tests that give none, there is no dialog and Add project is unavailable.
   const pickFolder = shell?.pickFolder;

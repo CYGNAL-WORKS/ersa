@@ -4,7 +4,7 @@ type: protocol
 title: Core request/response API
 status: ready
 references: [PROTO-AGENT-EVENTS]
-adrs: [0011, 0017, 0018, 0026]
+adrs: [0011, 0017, 0028, 0026]
 ---
 
 # Core request/response API
@@ -40,7 +40,7 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 
 ### Projects
 
-- `project.list`, `project.add { host_id, path, trusted }`, `project.set_trust { id, trusted }`, `project.remove { id }`: `{ id, host_id, path, name, vcs (git | perforce | none), trusted }`. `project.find { host_id, path }`: the project on that host whose folder is `path`, compared as `project.add` compares folders, or null. The Interface asks it before the trust question, so a folder that is already a project is chosen without one (FLOW-NEW-SESSION-R18). `project.add` for a folder that is already a project on that host is refused with `invalid_state`, and the error's `detail` is that project's id. `trusted` is the user's answer when adding the project, and only a trusted project's own configuration loads in its sessions (ADR 0018). `project.remove` is refused with `invalid_state` while the project has an isolated workspace or a session in its root workspace; it never cascades.
+- `project.list`, `project.add { host_id, path, trusted }`, `project.set_trust { id, trusted }`, `project.remove { id }`: `{ id, host_id, path, name, vcs (git | perforce | none), trusted }`. `project.find { host_id, path }`: the project on that host whose folder is `path`, compared as `project.add` compares folders, or null. The Interface asks it before the trust question, so a folder that is already a project is chosen without one (FLOW-NEW-SESSION-R18). `project.add` for a folder that is already a project on that host is refused with `invalid_state`, and the error's `detail` is that project's id. `trusted` is true for a project the user adds, since adding one is trusting it (FLOW-NEW-SESSION-R25), and only a trusted project's own configuration loads in its sessions (ADR 0028). `project.remove` is refused with `invalid_state` while the project has an isolated workspace or a session in its root workspace; it never cascades.
 
 ### Workspaces
 
@@ -213,7 +213,7 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 - 2026-11-02: for FLOW-NEW-SESSION: every project has a root workspace (`kind`); `workspace.create` refused without a workspace adapter; `session.create` takes `model`, `effort` and `permission_mode`, reported by `session.list`; `backend.list` lists each backend's models, efforts and permission modes with labels and defaults. PROTO-CORE-API-R15 added.
 - 2026-11-01: from #35 inbox: a view holds a bounded amount of events; `session.subscribe` returns `first_seq` once it has let go of its earliest. PROTO-CORE-API-R02 retired, R14 added.
 - 2026-11-01: from #35 inbox: a session's title is its backend's: `session.set_title` renames through the backend (PROTO-CORE-API-R12 added) and `session.create` takes no title; `created_at` is the record's first entry, else the app log's first fact; `session.subscribe` returns `view`, and a client holding events from another view starts over from 0 (PROTO-CORE-API-R13 added); `session.reproject` removed, which bumps `api_version`; the bump ships with the method's removal in code.
-- 2026-11-01: project trust (ADR 0018): `trusted` on projects, `project.add` takes it, `project.set_trust` added; PROTO-CORE-API-R11 added.
+- 2026-11-01: project trust (ADR 0028): `trusted` on projects, `project.add` takes it, `project.set_trust` added; PROTO-CORE-API-R11 added.
 - 2026-11-01: aligned with ADR 0017: `session.raw_log` serves the in-memory raw log, `dir` no longer includes `core` (lifecycle facts go to the app log); `session.reproject` withdrawn. No requirement IDs changed.
 - 2026-11-01: from #14 inbox: notifications for created projects and sessions, and a pushed `core.status`, added as an open question.
 - 2026-11-01: from M0-T7 inbox: the replay server refuses every mutating request with `invalid_state`, keeps a replayed session idle after its last line until `core.shutdown`, and paces by recorded timing by default; from review of PR #27: it never serves the user's own endpoint (default label `replay`), applies Core's line limit, and refuses a recording it cannot read faithfully. No requirement IDs changed.
