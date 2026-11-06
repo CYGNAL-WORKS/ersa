@@ -935,6 +935,18 @@ impl SessionManager {
     /// Forgets a stopped session. Its record is the backend's, and stays.
     pub async fn remove(&self, id: &str) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
+        // A session whose ending is already queued is only winding down: a
+        // client may have seen `session.ended` before Core let it go, and
+        // can remove it, so wait for it to finish. Waited for before taking
+        // `op`, so nothing else on the session queues behind the wait.
+        if let Some(live) = handle.live()
+            && live.sink.has_ended()
+            && wait_finished(&live, STOP_TIMEOUT).await.is_err()
+        {
+            return Err(SessionError::Internal(format!(
+                "session {id} has ended, but Core has not finished with it within {STOP_TIMEOUT:?}"
+            )));
+        }
         let _op = handle.op.lock().await;
         if handle.live().is_some() {
             return Err(SessionError::InvalidState(format!(
@@ -1636,6 +1648,12 @@ impl CoreSink {
 
     fn record_fact(&self, fact: LifecycleFact) {
         self.push_fact(&mut lock(&self.inner), fact);
+    }
+
+    /// Whether the fact that ends the session is queued. Read under the lock
+    /// it is queued under, so it holds for anyone who has seen that fact.
+    fn has_ended(&self) -> bool {
+        lock(&self.inner).ended
     }
 
     /// The index the next line will get.
@@ -2493,6 +2511,124 @@ mod tests {
         adapter.summary.notify_one();
         tokio::time::sleep(Duration::from_millis(1)).await;
         assert_eq!(adapter.forgets.load(Ordering::SeqCst), 3);
+    }
+
+    /// Makes `s-gated` live by hand, as the session task does, and returns
+    /// its sink and the sender that marks it finished.
+    fn make_live(manager: &SessionManager) -> (Arc<CoreSink>, watch::Sender<bool>) {
+        let handle = manager.handle("s-gated").unwrap();
+        let sink = Arc::new(CoreSink::new(
+            "s-gated",
+            Arc::clone(&manager.app_log),
+            mpsc::unbounded_channel().0,
+        ));
+        let finished = watch::Sender::new(false);
+        let live = Live {
+            sink: Arc::clone(&sink),
+            started: watch::channel(Started::Pending).1,
+            cancel: watch::Sender::new(false),
+            progress: watch::channel(Progress::default()).1,
+            finished: finished.subscribe(),
+        };
+        *lock(&handle.live) = Some(Arc::new(live));
+        (sink, finished)
+    }
+
+    // verifies: PROTO-CORE-API-R41
+    // Paused time: the wind-down below takes as long as the test says.
+    #[tokio::test(start_paused = true)]
+    async fn a_session_whose_end_was_announced_is_removed_once_it_winds_down() {
+        let adapter = Arc::new(GatedReads::default());
+        // The two ways a session ends: its process exits, or its start fails.
+        let endings: [fn(&CoreSink); 2] = [
+            |sink| {
+                sink.start_finished(Ok(()));
+                sink.process_exited(Ok(ProcessExit { code: Some(0) }));
+            },
+            |sink| {
+                sink.start_finished(Err(StartFailure {
+                    message: "no".into(),
+                    stopped_by_user: false,
+                }))
+            },
+        ];
+        for end in endings {
+            let dir = tempfile::tempdir().unwrap();
+            let manager = gated_manager(dir.path(), &adapter);
+            let (sink, finished) = make_live(&manager);
+            // Running and not ended: refused.
+            assert!(matches!(
+                manager.remove("s-gated").await,
+                Err(SessionError::InvalidState(_))
+            ));
+            // Its end is queued, so a client may have seen `session.ended`,
+            // while Core still holds it live for a while.
+            end(&sink);
+            let handle = manager.handle("s-gated").unwrap();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                *lock(&handle.live) = None;
+                finished.send_replace(true);
+            });
+            manager.remove("s-gated").await.unwrap();
+        }
+    }
+
+    // verifies: PROTO-CORE-API-R41
+    // Paused time: the wait runs out as soon as nothing else can happen.
+    #[tokio::test(start_paused = true)]
+    async fn an_ended_session_that_never_winds_down_is_refused_without_holding_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let adapter = Arc::new(GatedReads::default());
+        let manager = Arc::new(gated_manager(dir.path(), &adapter));
+        // Stored too, in a workspace of its own, so a removal shows there.
+        let store = &manager.store;
+        store.ensure_local_host("pc".into()).await.unwrap();
+        let project = ersa_protocol::core_api::Project {
+            id: "p".into(),
+            host_id: persistence::LOCAL_HOST_ID.into(),
+            path: "C:/work".into(),
+            name: "work".into(),
+            vcs: ersa_protocol::core_api::Vcs::Git,
+            trusted: false,
+        };
+        let workspace = store
+            .insert_project(project, "c:/work".into())
+            .await
+            .unwrap();
+        let mut row = lock(&manager.handle("s-gated").unwrap().row).clone();
+        row.workspace_id = workspace.id;
+        store.insert_session(row).await.unwrap();
+        let (sink, _finished) = make_live(&manager);
+        sink.start_finished(Ok(()));
+        sink.process_exited(Ok(ProcessExit { code: Some(0) }));
+        let removing = tokio::spawn({
+            let manager = Arc::clone(&manager);
+            async move { manager.remove("s-gated").await }
+        });
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        // While it waits, the session's other operations are not held up.
+        let handle = manager.handle("s-gated").unwrap();
+        assert!(handle.op.try_lock().is_ok());
+        // Core's own wind-down is what stalled, and the error says so.
+        match removing.await.unwrap() {
+            Err(SessionError::Internal(message)) => {
+                assert!(message.contains("has ended"), "{message}");
+            }
+            other => panic!("expected an internal error, got {other:?}"),
+        }
+        // Giving up removed nothing: the session, its row and what the
+        // adapter keeps of its record are all still there.
+        assert!(manager.handle("s-gated").is_ok());
+        assert!(
+            manager
+                .store
+                .session("s-gated".into())
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(adapter.forgets.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
