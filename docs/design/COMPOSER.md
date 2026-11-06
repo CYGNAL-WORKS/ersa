@@ -32,7 +32,7 @@ One line above the box, `size-control` high at least, showing one message at a t
 | Ersa can't tell whether a message was sent | that, and that the transcript shows it if it arrived | a glyph at `size-glyph` in `caution` | as at rest, the message kept |
 | A message was refused | the reason, in the user's terms | a glyph at `size-glyph` in `danger` | as at rest, the message kept |
 | Backends are being detected | that it is detecting the backends on this host | none | unavailable |
-| The host has no backend to run | "No backend is available on this host."; the backend chip shows each one's status (FLOW-NEW-SESSION-R07) | none | unavailable |
+| The host lists its backends and none can run (a failed listing is FLOW-NEW-SESSION-R11's) | "No backend is available on this host. Install Claude Code or GitHub Copilot on it to start a session." | none | unavailable |
 | A message is on its way | how much is copied, as a share, or that the backend is starting | the ring at `size-ring`, its arc filling to the share over `motion-settle` | as at rest, stop offered |
 
 A refused message's line is announced to assistive technology as an alert. When the box becomes unavailable, keyboard focus returns to the words once it is available again. **Unavailable**, the box is `canvas`, the words and their placeholder read `ink-faint`, and attach and send read `ink-faint` with no fill and do not change under the pointer.
