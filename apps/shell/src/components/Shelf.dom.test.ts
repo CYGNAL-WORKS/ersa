@@ -114,6 +114,30 @@ describe("the shelf moving to the next request", () => {
     }
   });
 
+  it("keeps the last request on screen, its answers unavailable, once it is settled, rather than say it is loading", () => {
+    const { rerender } = render(shelf({ state: "permission", request: request("r1", "Run the tests") }));
+    rerender(shelf({ state: "settled" }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain("Run the tests");
+    expect(dialog.textContent).not.toContain("Loading");
+    expect(dialog.textContent).not.toContain("Reconnecting");
+    for (const name of ["Deny", "Allow"]) expect(screen.getByRole("button", { name })).toHaveProperty("disabled", true);
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R24
+  it("says the next request when it arrives after the last was settled, or after it couldn't be shown", () => {
+    const { rerender } = render(shelf({ state: "permission", request: request("r1", "Run the tests") }));
+    rerender(shelf({ state: "settled" }));
+    rerender(shelf({ state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 2 } }));
+    expect(screen.getByRole("status").textContent).toBe("Permission request, 2 of 2: Build the shell");
+    expect(contents().hasAttribute("data-next")).toBe(true);
+
+    rerender(shelf({ state: "loading" }));
+    rerender(shelf({ state: "unknown", place: { n: 3, m: 4 } }));
+    rerender(shelf({ state: "permission", request: request("r4", "Ship it"), place: { n: 4, m: 4 } }));
+    expect(screen.getByRole("status").textContent).toBe("Permission request, 4 of 4: Ship it");
+  });
+
   it("fades the last request's contents out over the next, out of reach, and not with reduced motion", () => {
     const { rerender } = render(shelf({ state: "permission", request: request("r1", "Run the tests"), place: { n: 1, m: 3 } }));
     rerender(shelf({ state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 3 } }));
