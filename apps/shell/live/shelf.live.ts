@@ -65,6 +65,8 @@ test("the chevron opens the shelf with the oldest permission request, leaving th
   const closing = page.locator(".shelf-layer[inert] > .shelf");
   await expect(closing).toHaveCount(1);
   expect(await closing.evaluate((el) => getComputedStyle(el).animationName)).toBe("shelf-back");
+  // The same element that was open, so it keeps the join measured beside its tile as it goes.
+  expect(await closing.evaluate((el) => el.style.getPropertyValue("--shelf-join-height"))).toMatch(/^[1-9]/);
   await expect(closing).toHaveCount(0);
   await expect(shelf).toHaveCount(0);
   await chevron.click();
