@@ -632,6 +632,30 @@
               "$ref": "#/$defs/request_id"
             },
             "method": {
+              "const": "attachment.inspect"
+            },
+            "params": {
+              "$ref": "#/$defs/attachment.inspect.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
               "const": "session.decide_permission"
             },
             "params": {
@@ -1140,6 +1164,26 @@
               "const": "2.0"
             },
             "method": {
+              "const": "session.send_progress"
+            },
+            "params": {
+              "$ref": "#/$defs/session.send_progress.notification"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "method": {
               "const": "session.tile"
             },
             "params": {
@@ -1257,11 +1301,18 @@
             "vcs_error",
             "transport_error",
             "permission",
-            "internal"
+            "internal",
+            "attachment_refused",
+            "delivery_unknown"
           ]
         },
         "detail": {
           "type": "string"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "With attachment_refused: the place in session.send's attachments of the attachment refused."
         }
       }
     },
@@ -1583,6 +1634,10 @@
         },
         "tile": {
           "$ref": "#/$defs/tile"
+        },
+        "sending": {
+          "$ref": "#/$defs/send_phase",
+          "description": "Absent unless a send is under way: its phase."
         }
       }
     },
@@ -1634,6 +1689,62 @@
         }
       },
       "description": "What the rail renders for a session; Core keeps it current from events. Usage fields are absent until known."
+    },
+    "send_phase": {
+      "description": "Where a send is: checking its attachments, copying them into the session's scratch folder, waiting for a starting backend, or handing the message to the backend.",
+      "enum": [
+        "checking",
+        "copying",
+        "starting",
+        "handing_over"
+      ]
+    },
+    "attachment": {
+      "description": "A file, image or folder sent with a message: by absolute path on the session's host, or a pasted image as base64 data.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "path"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "image",
+                "file",
+                "folder"
+              ]
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "media_type",
+            "data"
+          ],
+          "properties": {
+            "kind": {
+              "const": "image"
+            },
+            "media_type": {
+              "type": "string"
+            },
+            "data": {
+              "type": "string",
+              "contentEncoding": "base64"
+            }
+          }
+        }
+      ]
     },
     "raw_log_entry": {
       "type": "object",
@@ -2142,19 +2253,25 @@
         },
         "text": {
           "type": "string"
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/attachment"
+          },
+          "description": "In the order the user added them."
         }
       }
     },
     "session.send.result": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "turn"
-      ],
+      "required": [],
       "properties": {
         "turn": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "description": "The turn the message starts or joins; absent when Core has not projected the message yet."
         }
       }
     },
@@ -2172,6 +2289,65 @@
     },
     "session.interrupt.result": {
       "$ref": "#/$defs/session"
+    },
+    "attachment.inspect.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host_id",
+        "path"
+      ],
+      "properties": {
+        "host_id": {
+          "$ref": "#/$defs/id"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "attachment.inspect.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "name",
+        "kind"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "image",
+            "folder"
+          ]
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "For a file or image."
+        },
+        "lines": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "A text file's line count, for one of at most 10 MB."
+        },
+        "media_type": {
+          "type": "string",
+          "description": "For an image, told by its first bytes."
+        },
+        "target": {
+          "type": "string",
+          "description": "Where a link points."
+        }
+      }
     },
     "session.decide_permission.params": {
       "type": "object",
@@ -2538,6 +2714,32 @@
         },
         "event": {
           "$ref": "agent-events.schema.json#/$defs/envelope"
+        }
+      }
+    },
+    "session.send_progress.notification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "session_id",
+        "phase"
+      ],
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/id"
+        },
+        "phase": {
+          "$ref": "#/$defs/send_phase"
+        },
+        "copied_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "While copying."
+        },
+        "total_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "While copying."
         }
       }
     },
