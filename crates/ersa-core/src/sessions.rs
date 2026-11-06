@@ -2467,6 +2467,7 @@ mod tests {
         (sink, finished)
     }
 
+    // verifies: PROTO-CORE-API-R18
     // Paused time: the wind-down below takes as long as the test says.
     #[tokio::test(start_paused = true)]
     async fn a_session_whose_end_was_announced_is_removed_once_it_winds_down() {
@@ -2506,6 +2507,7 @@ mod tests {
         }
     }
 
+    // verifies: PROTO-CORE-API-R18
     // Paused time: the wait runs out as soon as nothing else can happen.
     #[tokio::test(start_paused = true)]
     async fn an_ended_session_that_never_winds_down_is_refused_without_holding_it() {
