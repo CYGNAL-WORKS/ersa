@@ -79,15 +79,6 @@
   border-top: var(--line-hairline) solid var(--color-line);
 }
 
-/* An answered permission card holds focus while its answer is on its way; keyboard focus shows as an ink edge. */
-.transcript-card:focus {
-  outline: none;
-}
-
-.transcript-card:focus-visible {
-  border-color: var(--color-ink);
-}
-
 .transcript-card {
   display: flex;
   flex-direction: column;
@@ -102,6 +93,16 @@
 /* An open request needs the user: its edge takes the accent (a line's colour, never its width or a fill). */
 .transcript-permission[data-open] {
   border-color: var(--color-accent);
+}
+
+/* An answered permission card holds focus while its answer is on its way; keyboard focus shows as an ink edge,
+   over the open card's accent. */
+.transcript-permission:focus {
+  outline: none;
+}
+
+.transcript-permission:focus-visible {
+  border-color: var(--color-ink);
 }
 
 .transcript-card-head {
