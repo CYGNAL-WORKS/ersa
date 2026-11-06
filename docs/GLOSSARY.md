@@ -14,7 +14,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 ## Work
 
 - **Project**: a repository or root folder the user has added to Ersa, on a particular host.
-- **Trusted project**: a project whose own configuration (settings, hooks, MCP servers, permission rules) the user has agreed may run in its sessions. Every project is trusted when the user adds it, after the trust question; the user can withdraw trust later, and an untrusted project's sessions run with the user's own configuration only.
+- **Trusted project**: a project whose own configuration (settings, hooks, MCP servers, permission rules) the user has agreed may run in its sessions. A project is trusted when the user adds it, after the trust question; the user can withdraw trust later, and an untrusted project's sessions run with the user's own configuration only.
 - **Workspace**: a checkout belonging to a project where one or more sessions do their work: an isolated workspace (a git worktree is one kind; a Perforce workspace is another) or the project's root workspace.
 - **Root workspace**: a project's own folder as a workspace. Every project has one. It is not isolated: its sessions share its files with each other and with the user. A session runs there when the user chooses it over a new workspace. The session controls call it the project folder.
 - **Base branch**: the branch a new isolated workspace is made from. Starts at the repository's default branch: the one `origin/HEAD` names, else main or master, else what the project's folder has checked out.
