@@ -161,6 +161,8 @@ pub struct SessionManager {
     sessions: Mutex<HashMap<String, Arc<Handle>>>,
     /// Where `session.tile` notifications go, for every attached client.
     tiles: Arc<TileHub>,
+    /// A pause after each chunk an attachment's copy writes, for tests.
+    copy_pause: Duration,
     /// Set by [`SessionManager::stop_all`]; no session starts after it.
     /// Read and written under the `sessions` lock.
     closing: AtomicBool,
@@ -610,8 +612,16 @@ impl SessionManager {
             app_log,
             sessions: Mutex::new(HashMap::new()),
             tiles: Arc::default(),
+            copy_pause: Duration::ZERO,
             closing: AtomicBool::new(false),
         }
+    }
+
+    /// The same manager, pausing after each chunk an attachment's copy
+    /// writes ([`crate::CoreConfig::copy_pause`]).
+    pub fn with_copy_pause(mut self, copy_pause: Duration) -> Self {
+        self.copy_pause = copy_pause;
+        self
     }
 
     /// Loads every session at startup, with how each last ended, from
