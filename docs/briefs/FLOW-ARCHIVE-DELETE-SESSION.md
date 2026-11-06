@@ -32,7 +32,8 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 
 - **Deleting fails** (the folder is in use, the branch can't be deleted): the session stays in the rail, stopped, and Ersa says what failed and offers **Try again**, which repeats the deletion from where it stopped.
 - **The workspace changed after the question.** On confirm Core checks that what would be lost is what the question described; when anything changed, even with the same counts, Ersa asks again.
-- **Ersa stops part way through a delete** (a crash, a restart): the session shows as being deleted and Ersa finishes the delete when it starts again.
+- **Ersa stops part way through a delete** (a crash, a restart) after the user confirmed it: the session shows as being deleted and Ersa finishes the delete when it starts again. Stopped before the confirmation was checked, nothing was changed.
+- **Another session leaves the shared workspace** between the question and the confirmation, so deleting this one would now delete the files: Ersa asks again.
 - **Archive or Delete while the session needs the user**: the pending requests are withdrawn with the stop, as when the session is stopped.
 - **The active session** archived or deleted: the transcript area shows the new-session screen.
 - **A session started elsewhere** (FLOW-RESUME-SESSION) is archived and deleted the same way; deleting it does not delete its record from the backend's own tools.
