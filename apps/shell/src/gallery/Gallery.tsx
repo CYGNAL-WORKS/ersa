@@ -412,6 +412,8 @@ const shelfStates: [string, ShelfShows, short?: boolean][] = [
   ["Loading", { state: "loading" }],
   ["Reading failed", { state: "failed", message: "the session's events could not be read" }],
   ["A request Ersa can't show", { state: "unknown" }],
+  // A request whose flags didn't arrive: the boundary check stops these, and the shelf's own boundary is the last guard.
+  ["A request that can't be drawn", { state: "permission", request: { ...shelfRequest, flags: undefined as never } }],
   ["Risen to fit a short window", { state: "permission", request: shelfRequest }, true],
 ];
 

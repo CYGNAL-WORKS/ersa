@@ -135,6 +135,11 @@
   overflow-wrap: anywhere;
 }
 
+/* A request that failed to draw says so inside the shelf's own padding. */
+.shelf .error-boundary {
+  padding: 0;
+}
+
 /* The rail's notes: loading and a request Ersa can't show, and a failed read with its reason and Retry. */
 .shelf-note {
   margin: 0;

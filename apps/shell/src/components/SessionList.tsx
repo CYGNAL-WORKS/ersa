@@ -202,15 +202,20 @@ function TileItem({ shelf, children }: { shelf?: OpenShelf; children: (shelfDomI
   const shown = shelf?.render(domId);
   // The shelf last drawn, kept while it slides back after closing (docs/design/RAIL.md, The shelf: Motion).
   const last = useRef<ReactNode>(undefined);
-  if (shown !== undefined) last.current = shown;
-  const [closing, setClosing] = useState<ReactNode>();
+  // Kept once committed, so a render React discards never slides back.
   useLayoutEffect(() => {
-    if (open) return setClosing(undefined);
+    if (shown !== undefined) last.current = shown;
+  });
+  // Decided in the render that closes it, so the layer never leaves the page for a frame and the shelf keeps its
+  // element, and the join measured on it, as it slides back.
+  const [closing, setClosing] = useState<ReactNode>();
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
     // With reduced motion on, it goes at once.
     const still = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (last.current !== undefined && !still) setClosing(last.current);
-    last.current = undefined;
-  }, [open]);
+    setClosing(open || still ? undefined : last.current);
+  }
   const closed = (event: AnimationEvent) => {
     if (event.animationName === "shelf-back") setClosing(undefined);
   };
@@ -247,7 +252,6 @@ function TileItem({ shelf, children }: { shelf?: OpenShelf; children: (shelfDomI
       ref={item}
       className="session-item"
       data-shelf={open || undefined}
-      data-closing={(!open && closing !== undefined) || undefined}
       data-tone={shelf?.tone}
       style={layer !== undefined ? ({ anchorName: anchor } as CSSProperties) : undefined}
     >
