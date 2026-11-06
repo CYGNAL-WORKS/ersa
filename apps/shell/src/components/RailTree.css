@@ -94,7 +94,8 @@
     color var(--motion-quick) var(--motion-ease-out);
 }
 
-.rail-heading:hover,
+/* The heading holds its menu, so the pointer over the open menu is not over the heading. */
+.rail-heading:hover:not(:has(.rail-menu:hover)),
 .rail-heading[data-force="hover"] {
   color: var(--color-ink);
   background: var(--material-hover);
@@ -197,6 +198,7 @@
 /* More's menu: a transient layer beneath the heading's trailing edge, as a chip's list is beneath its chip. */
 .rail-menu {
   position: absolute;
+  outline: none;
   /* Beneath the heading's row: measured from inside its edge. */
   top: calc(var(--size-control) - var(--line-hairline));
   right: 0;

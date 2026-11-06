@@ -204,6 +204,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Each list's error boundary tries again whenever the list changes.
   const projects = projectsOf(view);
   const projectList = projects.state === "ready" ? projects.projects : undefined;
+  // The workspaces sessions run in that no read has listed, once every project's read has answered: a session made
+  // after the reads, or by another window, has the projects' workspaces read again, so its tile moves under its
+  // project. A workspace no read lists (its project gone) keeps the same key, so it is read again only once.
+  const allRead = projectList !== undefined && projectList.every((p) => p.id in workspaceReads);
+  const unknownWorkspaces =
+    allRead && sessions.state === "ready" ? [...new Set(sessions.sessions.map((s) => s.workspace_id).filter((id) => !(id in workspaces)))].sort().join(" ") : "";
   useEffect(() => {
     // Without a connection nothing has been read on the next one, so its sessions wait to be placed again.
     if (!projectList) {
@@ -218,13 +224,13 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       client.call("workspace.list", { project_id: p.id }).then(
         (read) => {
           if (!live) return;
-          setWorkspaces((known) => mergeWorkspaces(known, projectList, [read]));
+          setWorkspaces((known) => mergeWorkspaces(known, projectList, read));
           setWorkspaceReads((reads) => ({ ...reads, [p.id]: null }));
         },
         (error) => {
           if (!live) return;
           // What was known is kept, but not for a project no longer listed.
-          setWorkspaces((known) => mergeWorkspaces(known, projectList, []));
+          setWorkspaces((known) => mergeWorkspaces(known, projectList, undefined));
           setWorkspaceReads((reads) => ({ ...reads, [p.id]: describeError(error) }));
         },
       );
@@ -232,7 +238,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     return () => {
       live = false;
     };
-  }, [client, projectList]);
+    // unknownWorkspaces is not read here: a change to it is a reason to read again.
+  }, [client, projectList, unknownWorkspaces]);
   const projectsVersion = useVersion(projects);
   const sessionsVersion = useVersion(sessions);
   const coreVersion = useVersion(view);
@@ -326,7 +333,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // case a session the rail cannot place yet waits rather than sit at the end.
   const workspaceErrors: Record<string, string> = {};
   for (const [id, failure] of Object.entries(workspaceReads)) if (failure !== null) workspaceErrors[id] = failure;
-  const placing = projectList?.some((p) => !(p.id in workspaceReads)) ?? false;
+  const placing = projectList !== undefined && !allRead;
 
   // The title as last listed, so the header keeps it while the list reloads
   // or Core is away.

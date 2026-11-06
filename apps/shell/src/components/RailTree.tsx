@@ -139,12 +139,15 @@ function ProjectGroup({
     return () => document.removeEventListener("pointerdown", outside);
   }, [menu]);
 
-  // The gallery's open menu does not take focus; one the user opens focuses its item, so Enter chooses it.
-  const focusOnOpen = useRef(false);
+  // The gallery's open menu does not take focus; one the user opens does.
+  // Opened from the keyboard, focus goes to the item; from the pointer, to the menu (RAIL.md, Menus).
+  const focusOnOpen = useRef<"item" | "menu">(undefined);
   useEffect(() => {
-    if (!menu || !focusOnOpen.current) return;
-    focusOnOpen.current = false;
-    group.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
+    const target = focusOnOpen.current;
+    if (!menu || !target) return;
+    focusOnOpen.current = undefined;
+    const into = target === "item" ? list.current?.querySelector<HTMLElement>('[role="menuitem"]') : list.current;
+    into?.focus({ preventScroll: true });
   }, [menu]);
 
   // Once the menu or the trust question closes, focus goes back to More, which opened it.
@@ -185,8 +188,8 @@ function ProjectGroup({
     <li ref={group} className="rail-project">
       <div className="rail-heading" data-force={forced} data-open={menu || undefined} onKeyDown={onHeadingKey} onBlur={onHeadingBlur}>
         <h3 className="rail-heading-title">
-          {/* Collapsing arrives with its own ticket; until then every project is expanded. */}
-          <button type="button" className="rail-heading-toggle" aria-expanded="true">
+          {/* Collapsing arrives with its own ticket, and with it aria-expanded; until then every project is expanded. */}
+          <button type="button" className="rail-heading-toggle">
             <span className="rail-heading-chevron">
               <Icon icon={ChevronDown} size="icon-sm" />
             </span>
@@ -210,15 +213,28 @@ function ProjectGroup({
               label={t("rail.heading.moreLabel", nameLabel)}
               aria-haspopup="menu"
               aria-expanded={menu}
-              onClick={() => {
-                focusOnOpen.current = !menu;
+              onClick={(event) => {
+                // A click the keyboard made (Enter or Space) has no pointer presses to count.
+                focusOnOpen.current = menu ? undefined : event.detail === 0 ? "item" : "menu";
                 setMenu(!menu);
               }}
             />
           )}
         </span>
         {menu && onSetTrust && (
-          <ul ref={list} className="rail-menu" role="menu" aria-label={t("rail.heading.moreLabel", nameLabel)}>
+          <ul
+            ref={list}
+            className="rail-menu"
+            role="menu"
+            tabIndex={-1}
+            // The arrow keys move to the item from the menu itself, which a pointer-opened menu holds.
+            onKeyDown={(event) => {
+              if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+              event.preventDefault();
+              list.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
+            }}
+            aria-label={t("rail.heading.moreLabel", nameLabel)}
+          >
             <li role="none">
               <button type="button" role="menuitem" className="rail-menu-item" aria-disabled={saving || undefined} onClick={choose}>
                 {project.trusted ? t("rail.heading.distrustButton") : t("rail.heading.trustButton")}
