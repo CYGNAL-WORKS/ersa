@@ -46,6 +46,17 @@ export const enUS = {
   composer: {},
   newSession: {},
   sessionControls: {
+    // The host chip's name for the host Ersa runs on.
+    localHostLabel: "Local",
+    // A host in the host chip's list that has no project to start a session in.
+    noProjectsStatus: "No projects",
+    // A project in the project chip's list (docs/design/COMPOSER.md, The project list): its kind, a git
+    // repository or any other folder, and the action that ends the list.
+    project: {
+      withGitKindLabel: "Git",
+      withoutGitKindLabel: "Folder",
+      addProjectButton: "Add project…",
+    },
     // The context ring's name, in the session controls and on a tile.
     contextRing: {
       noneLabel: "Context: none used yet",
@@ -53,6 +64,9 @@ export const enUS = {
     },
   },
   quit: {},
-  trust: {},
+  trust: {
+    // A project the user has not trusted, in the rail's project list and the project chip's list.
+    notTrustedStatus: "Not trusted",
+  },
   errors: {},
 } as const satisfies Section;
