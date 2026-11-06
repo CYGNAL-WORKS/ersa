@@ -54,8 +54,7 @@ The replay server refuses every request that would create or change a session (P
 
 ## Built so far
 
-A project is added by typing its folder path in the rail and answering the trust question; R14 to R20 replace that. New session shows the new-session screen and creates nothing until the first message (R01 to R05, R08, R12). Until the open question on changing values mid-session is answered, the session controls under a running session show its values read-only. A host whose backend listing fails reads as having no backend available, which R11 replaces. The rail still groups sessions under a heading per workspace, so R13 is still to build (LAY-SHELL). With no session chosen, the window shows the newest.
-A project is added by typing its folder path in the rail and answering the trust question; R14 to R20 replace that. New session shows the new-session screen and creates nothing until the first message (R01 to R05, R08, R12). Until the open question on changing values mid-session is answered, the session controls under a running session show its values read-only. A host whose backend listing fails reads as having no backend available, which R11 replaces. The rail still groups sessions under a heading per workspace, so R13 is still to build (LAY-SHELL). Workspaces are made from the project folder's checked-out branch until R21 is built. With no session chosen, the window shows the newest. The trust question still offers to add a project untrusted, as ADR 0018 had it; R24, R25 and R27 are still to build.
+New session shows the new-session screen and creates nothing until the first message (R01 to R05, R08, R12), and a started session's tile sits under its project (R13). A project is added from the project chip through the system's folder dialog, after the trust question (R14 to R20, R24, R25, R27). A new workspace starts from the base branch the workspace chip offers (R21, R28, R29). Until the open question on changing values mid-session is answered, the session controls under a running session show its values read-only. A host whose backend listing fails reads as having no backend available, which R11 replaces, and the screen does not yet say while backends are being detected (R23). With no session chosen, the window shows the newest.
 
 ## Open questions
 
@@ -69,6 +68,7 @@ A project is added by typing its folder path in the rail and answering the trust
 
 ## Changes
 
+- 2026-11-06: Built so far follows #184 and #226 as one paragraph; a union merge had left two. No requirement IDs changed.
 - 2026-11-06: Built so far follows #184: new workspaces start from the chosen base branch (R21, R22). No requirement IDs changed.
 - 2026-11-06: from #229 inbox: what the workspace chip shows while the branches are read and when they can't be, and that the new workspace then starts at the default branch (R28); R22 retired for R29, which names the base branch only once the branches have been read.
 - 2026-11-06: owner's decision to match the Claude Code CLI's folder-trust prompt (ADR 0028, superseding 0018): the trust question shows the folder's path, a safety check and what agents can do there (R24), and its answers are Cancel, first and focused, and Trust; a project is no longer added untrusted (R25). R16 retired for R27, which drops what the question said beyond the CLI's prompt (what else trust lets run, every workspace, until withdrawn); tests that cite R16 move to R27. Open question on the security guide link.
