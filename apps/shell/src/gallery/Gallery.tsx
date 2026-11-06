@@ -5,7 +5,6 @@
 
 import { ChevronDown, ChevronRight, Plus, ShieldAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { AddProject } from "../components/AddProject";
 import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
 import { ContextRing } from "../components/ContextRing";
@@ -13,11 +12,10 @@ import { Composer } from "../components/Composer";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { Icon, IconButton } from "../components/Icon";
 import { NewSessionScreen } from "../components/NewSessionScreen";
-import { ProjectList } from "../components/ProjectList";
 import { QuitQuestion } from "../components/QuitQuestion";
 import { RailFoot } from "../components/RailFoot";
+import { RailTree } from "../components/RailTree";
 import { SessionControls } from "../components/SessionControls";
-import { SessionList } from "../components/SessionList";
 import { Shelf } from "../components/Shelf";
 import { SessionTitle } from "../components/SessionTitle";
 import { Transcript } from "../components/Transcript";
@@ -171,12 +169,36 @@ const pointerPair: Session[] = [
   session("p2", "The one in question", "2026-11-01T09:00:00Z", { state: "running", pending: [], cost_usd_total: 0.82, ...ring }),
 ];
 
-/** The same sessions in two workspaces of one project, as the rail shows them once it knows the workspaces. */
-const byWorkspaceSessions = sessions.map((s) => ({ ...s, workspace_id: s.id === "s1" || s.id === "s3" ? "w-root" : "w-fix" }));
-const workspaceNames = {
-  "w-root": { project: "ersa", name: "Root workspace" },
-  "w-fix": { project: "ersa", name: "ersa/fix-reconnect" },
+/** The rail's tree: ersa here with its sessions, a project on another machine with two, and two without any. */
+const treeProjects: Project[] = [
+  projects[0]!,
+  { id: "p5", host_id: "devbox", path: "/home/me/runner", name: "runner", vcs: "git", trusted: true },
+  projects[1]!,
+  projects[3]!,
+];
+const treeWorkspaces = { w1: { project_id: "p1" }, "w-dev": { project_id: "p5" } };
+const treeSessions = sessions.map((s) => (s.id === "s4" || s.id === "s5" ? { ...s, workspace_id: "w-dev" } : s));
+const tree: Parameters<typeof RailTree>[0] = {
+  projects: { state: "ready", projects: treeProjects },
+  sessions: { state: "ready", sessions: treeSessions },
+  workspaces: treeWorkspaces,
+  activeId: "s2",
+  onSelect: () => {},
+  // The last call a heading made, kept on the page where the gallery test reads it; nothing shows it.
+  onNewSession: (project) => (document.body.dataset.railCall = `newSession ${project.id}`),
+  onSetTrust: (project, trusted) => (document.body.dataset.railCall = `setTrust ${project.id} ${trusted}`),
+  localHost: "local",
+  hostNames: { local: "WORKSTATION", devbox: "devbox" },
 };
+/** One project, for the states of a heading and its tiles. */
+const ersaOnly: Parameters<typeof RailTree>[0] = {
+  ...tree,
+  projects: { state: "ready", projects: [projects[0]!] },
+  sessions: { state: "ready", sessions: treeSessions.filter((s) => s.workspace_id === "w1") },
+};
+const strangerOnly: Parameters<typeof RailTree>[0] = { ...tree, projects: { state: "ready", projects: [projects[3]!] }, sessions: { state: "ready", sessions: [] } };
+/** A resting tile above each forced one, so the two read apart in the screenshot. */
+const pairOnly: Parameters<typeof RailTree>[0] = { ...ersaOnly, sessions: { state: "ready", sessions: pointerPair }, activeId: undefined };
 
 /** A transcript built the way the window builds one: by applying events. */
 function transcriptOf(events: Event[]) {
@@ -343,7 +365,9 @@ const newSession = {
   projects,
   backends: { local: [claudeCode, copilot("missing")] },
   onStart: async () => false,
-  onAddProject: async () => false,
+  // The folder dialog is there, so Add project… can be taken; in the gallery it is always canceled.
+  onChooseFolder: async () => ({ kind: "canceled" }) as const,
+  onAddProject: async () => undefined,
   autoFocus: false,
 } as const;
 const oneBackend = { local: [claudeCode] };
@@ -400,8 +424,10 @@ function ShelfOpen({ shows, more = {} }: { shows: ShelfShows; more?: ShelfMore }
   return (
     <div className="gallery-shelf" data-short={short || undefined}>
       <div className="gallery-shelf-rail">
-        <SessionList
-          view={{ state: "ready", sessions: tiles }}
+        <RailTree
+          projects={{ state: "ready", projects: [projects[0]!] }}
+          sessions={{ state: "ready", sessions: tiles }}
+          workspaces={{ w1: { project_id: "p1" } }}
           activeId="h1"
           onSelect={() => {}}
           shelf={{
@@ -459,6 +485,8 @@ interface Entry {
   states: [string, ReactNode][];
   /** Shown one state per row, at the stage's width, rather than in rail-width columns. */
   wide?: boolean;
+  /** Shown on the rail's own material. */
+  rail?: boolean;
 }
 
 const entries: Entry[] = [
@@ -486,107 +514,40 @@ const entries: Entry[] = [
     ],
   },
   {
-    name: "ProjectList",
+    name: "RailTree",
+    rail: true,
     states: [
-      ["Loading", <ProjectList view={{ state: "loading" }} />],
-      ["Empty", <ProjectList view={{ state: "ready", projects: [] }} />],
-      ["Projects", <ProjectList view={{ state: "ready", projects }} />],
-      ["Error", <ProjectList view={{ state: "error", message: "Core could not read its database." }} />],
-      ["Core unavailable", <ProjectList view={{ state: "unavailable" }} />],
-      ["New session", <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} />],
-      ["Trust controls", <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} onSetTrust={() => {}} />],
-      [
-        "Asking to trust",
-        <ProjectList view={{ state: "ready", projects }} onNewSession={() => {}} onSetTrust={() => {}} initialAsking="p4" />,
-      ],
-      [
-        "Changing trust",
-        <ProjectList
-          view={{ state: "ready", projects }}
-          onNewSession={() => {}}
-          onSetTrust={() => {}}
-          trusting={{ p1: { state: "sending" }, p4: { state: "sending" } }}
-        />,
-      ],
+      ["Loading", <RailTree {...tree} projects={{ state: "loading" }} sessions={{ state: "loading" }} />],
+      ["No projects", <RailTree {...tree} projects={{ state: "ready", projects: [] }} sessions={{ state: "ready", sessions: [] }} />],
+      ["Projects", <RailTree {...tree} />],
+      ["A session with no project", <RailTree {...ersaOnly} sessions={{ state: "ready", sessions: treeSessions }} />],
+      ["Projects not read", <RailTree {...tree} projects={{ state: "error", message: "the database is locked" }} />],
+      ["Sessions not read", <RailTree {...tree} sessions={{ state: "error", message: "the database is locked" }} />],
+      ["Workspaces not read", <RailTree {...tree} workspaces={{ w1: { project_id: "p1" } }} workspaceErrors={{ p5: "the host devbox did not answer" }} />],
+      ["Can't reach the sessions", <RailTree {...tree} projects={{ state: "unavailable" }} sessions={{ state: "unavailable" }} />],
+      ["Heading, pointer over it", <RailTree {...ersaOnly} forceHeading={{ id: "p1", state: "hover" }} />],
+      ["Heading, pressed", <RailTree {...ersaOnly} forceHeading={{ id: "p1", state: "pressed" }} />],
+      ["Heading, keyboard focus", <RailTree {...ersaOnly} forceHeading={{ id: "p1", state: "focus" }} />],
+      ["More, trusted", room(<RailTree {...ersaOnly} initialMenu="p1" />)],
+      ["More, while trust is saved", room(<RailTree {...ersaOnly} initialMenu="p1" trusting={{ p1: { state: "sending" } }} />)],
+      ["More, not trusted", room(<RailTree {...strangerOnly} initialMenu="p4" />)],
+      ["Asking to trust", <RailTree {...strangerOnly} initialAsking="p4" />],
+      ["Saving trust", <RailTree {...ersaOnly} trusting={{ p1: { state: "sending" } }} />],
       [
         "Trust withdrawn, sessions running",
-        <ProjectList
-          view={{ state: "ready", projects: projects.map((p) => (p.id === "p1" ? { ...p, trusted: false } : p)) }}
-          onNewSession={() => {}}
-          onSetTrust={() => {}}
-          notes={{ p1: "Running sessions keep their current settings until they are stopped." }}
-        />,
+        <RailTree {...ersaOnly} projects={{ state: "ready", projects: [{ ...projects[0]!, trusted: false }] }} keepingTrust={["p1"]} />,
       ],
-      [
-        "Trust refused",
-        <ProjectList
-          view={{ state: "ready", projects }}
-          onNewSession={() => {}}
-          onSetTrust={() => {}}
-          trusting={{ p4: { state: "failed", message: "no project p4" } }}
-        />,
-      ],
-    ],
-  },
-  {
-    name: "AddProject",
-    states: [
-      ["Empty", <AddProject onAdd={async () => false} />],
-      ["Typed", <AddProject onAdd={async () => false} initialPath="C:\Users\me\ersa" />],
-      ["Hover", <AddProject onAdd={async () => false} force="hover" />],
-      ["Focus", <AddProject onAdd={async () => false} initialPath="C:\Users\me\ersa" force="focus" />],
-      ["Asking to trust", <AddProject onAdd={async () => false} initialPath="D:\Clones\stranger" initialAsking />],
-      [
-        "Asking, from the keyboard",
-        <AddProject onAdd={async () => false} initialPath="D:\Clones\stranger" initialAsking forceCancelFocus />,
-      ],
-      ["Adding", <AddProject onAdd={async () => false} initialPath="C:\Users\me\ersa" adding={{ state: "sending" }} />],
-      [
-        "Refused",
-        <AddProject
-          onAdd={async () => false}
-          initialPath="D:\Projects\nowhere"
-          adding={{ state: "failed", message: "D:\\Projects\\nowhere does not exist" }}
-        />,
-      ],
-    ],
-  },
-  {
-    name: "SessionList",
-    states: [
-      ["Loading", <SessionList view={{ state: "loading" }} onSelect={() => {}} />],
-      ["Empty", <SessionList view={{ state: "ready", sessions: [] }} onSelect={() => {}} />],
-      ["Sessions", <SessionList view={{ state: "ready", sessions }} activeId="s2" onSelect={() => {}} />],
-      [
-        "By workspace",
-        <SessionList view={{ state: "ready", sessions: byWorkspaceSessions }} activeId="s2" onSelect={() => {}} workspaces={workspaceNames} />,
-      ],
-      [
-        "By workspace, names still being read",
-        <SessionList view={{ state: "ready", sessions: byWorkspaceSessions }} activeId="s2" onSelect={() => {}} workspaces={{}} />,
-      ],
-      ["Every state", <SessionList view={{ state: "ready", sessions: everyState }} onSelect={() => {}} />],
-      // A resting tile above each forced one, so the two read apart in the screenshot.
-      ["Hover", <SessionList view={{ state: "ready", sessions: pointerPair }} onSelect={() => {}} force={{ id: "p2", state: "hover" }} />],
-      ["Pressed", <SessionList view={{ state: "ready", sessions: pointerPair }} onSelect={() => {}} force={{ id: "p2", state: "pressed" }} />],
-      ["Focus", <SessionList view={{ state: "ready", sessions: pointerPair }} onSelect={() => {}} force={{ id: "p2", state: "focus" }} />],
+      ["Trust refused", <RailTree {...ersaOnly} trusting={{ p1: { state: "failed", message: "no project p1" } }} />],
+      ["Every tile state", <RailTree {...ersaOnly} sessions={{ state: "ready", sessions: everyState }} activeId={undefined} />],
+      ["Tile, pointer over it", <RailTree {...pairOnly} force={{ id: "p2", state: "hover" }} />],
+      ["Tile, pressed", <RailTree {...pairOnly} force={{ id: "p2", state: "pressed" }} />],
+      ["Tile, keyboard focus", <RailTree {...pairOnly} force={{ id: "p2", state: "focus" }} />],
       // p1 finished a turn while p2 was active: its title reads strong until it is opened.
-      ["Unseen", <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} unseen={new Set(["p1"])} />],
-      ["Active", <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} />],
-      [
-        "Active, under the pointer",
-        <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} force={{ id: "p2", state: "hover" }} />,
-      ],
-      [
-        "Active, pressed",
-        <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} force={{ id: "p2", state: "pressed" }} />,
-      ],
-      [
-        "Active, focused",
-        <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} force={{ id: "p2", state: "focus" }} />,
-      ],
-      ["Error", <SessionList view={{ state: "error", message: "Core could not read its database." }} onSelect={() => {}} />],
-      ["Core unavailable", <SessionList view={{ state: "unavailable" }} onSelect={() => {}} />],
+      ["Unseen", <RailTree {...pairOnly} activeId="p2" unseen={new Set(["p1"])} />],
+      ["Active tile", <RailTree {...pairOnly} activeId="p2" />],
+      ["Active tile, pointer over it", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "hover" }} />],
+      ["Active tile, pressed", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "pressed" }} />],
+      ["Active tile, keyboard focus", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "focus" }} />],
     ],
   },
   {
@@ -634,7 +595,19 @@ const entries: Entry[] = [
     name: "NewSessionScreen",
     wide: true,
     states: [
-      ["No project", <NewSessionScreen {...newSession} projects={[]} />],
+      // FLOW-NEW-SESSION-R19: with no project the chip offers to choose a folder, and its list holds Add project… alone.
+      ["No project", <NewSessionScreen {...newSession} projects={[]} backends={oneBackend} />],
+      ["No project, the project chip open", room(<NewSessionScreen {...newSession} projects={[]} backends={oneBackend} open="project" />)],
+      // FLOW-NEW-SESSION-R16: the trust question above the box, holding the focal glow.
+      ["Asking to trust a folder", <NewSessionScreen {...newSession} backends={oneBackend} initialAsking="D:\Clones\stranger" />],
+      [
+        "Asking, from the keyboard",
+        <NewSessionScreen {...newSession} backends={oneBackend} initialAsking="D:\Clones\stranger" forceCancelFocus />,
+      ],
+      [
+        "Adding a folder refused",
+        <NewSessionScreen {...newSession} backends={oneBackend} adding={{ state: "failed", message: "D:\\Projects\\nowhere does not exist" }} />,
+      ],
       ["Ready, at the defaults", <NewSessionScreen {...newSession} backends={oneBackend} forceFocus />],
       ["Project without version control", <NewSessionScreen {...newSession} backends={oneBackend} projectId="p3" />],
       ["Backend missing, beside one available", room(<NewSessionScreen {...newSession} open="backend" />)],
@@ -798,7 +771,7 @@ export function Gallery({ only = {} }: { only?: GalleryFilter }) {
                 <h2 className="gallery-name">{entry.name}</h2>
                 <span className="gallery-theme-name">{theme}</span>
               </div>
-              <div className={entry.wide ? "gallery-states gallery-states-wide" : "gallery-states"}>
+              <div className={["gallery-states", entry.wide && "gallery-states-wide", entry.rail && "gallery-states-rail"].filter(Boolean).join(" ")}>
                 {entry.states.map(([label, node]) => (
                   <figure key={label} className="gallery-state">
                     <figcaption className="gallery-label">{label}</figcaption>

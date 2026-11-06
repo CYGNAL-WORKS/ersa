@@ -26,6 +26,12 @@
   color: var(--color-ink-muted);
 }
 
+/* A where chip's icon leads it, faint beside the value. */
+.chip-icon {
+  display: inline-flex;
+  color: var(--color-ink-faint);
+}
+
 /* :where() adds no specificity, so the pressed and open states below still win. */
 .chip:hover:not(:disabled):not([data-open]):where(:not(:focus-visible)),
 .chip[data-force="hover"] {

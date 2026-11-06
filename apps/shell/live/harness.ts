@@ -128,6 +128,8 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
             {
               ...process.env,
               ERSA_ATTACH: label,
+              // The window opens without taking focus: Playwright drives it over CDP, which needs none.
+              ERSA_BACKGROUND: "1",
               // WebView2 reads both: the remote debugging port Playwright attaches to, and a profile of the test's own,
               // so it never shares the browser process of the owner's Ersa or of another run.
               WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
