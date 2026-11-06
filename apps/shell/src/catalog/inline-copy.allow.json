@@ -97,8 +97,6 @@
   "components/Transcript.tsx": [
     "Allow",
     "An invisible character",
-    "Answer once Core is connected",
-    "Deny",
     "Done",
     "Failed",
     "Invisible characters",
@@ -113,7 +111,6 @@
     "Reconnecting to Core…",
     "Retry",
     "Running…",
-    "Sending…",
     "Thinking…",
     "Thought",
     "Transcript",

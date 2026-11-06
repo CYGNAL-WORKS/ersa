@@ -124,6 +124,14 @@ Deny
 
 Allow
 
+### `rail.shelf.answerRefusedError`
+
+Ersa couldn't send your answer.
+
+### `rail.shelf.reconnectingNote`
+
+Reconnecting to Core…
+
 ## `transcript`
 
 ## `composer`
