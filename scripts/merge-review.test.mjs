@@ -18,8 +18,8 @@ test("a high or medium finding blocks, listed or new; lows do not", () => {
   assert.deepEqual(blocking(undefined), []);
 });
 
-test("the owner merges workflows, the review, the gate, the poller, the hooks and every instruction file", () => {
-  const owner = [".github/workflows/ci.yml", "scripts/hooks/guard-briefs.mjs", "scripts/merge-pr.mjs", "scripts/merge-review.mjs", "scripts/merge-review-watch.mjs", "CLAUDE.md", "crates/core/CLAUDE.md", "apps/CLAUDE.local.md", ".claude/skills/x/SKILL.md", "apps/shell/.claude/settings.json", ".mcp.json", "apps/.mcp.json"];
+test("the owner merges workflows, the review, the gate, the poller, the manifest, the hooks and every instruction file", () => {
+  const owner = [".github/workflows/ci.yml", "scripts/hooks/guard-briefs.mjs", "scripts/merge-pr.mjs", "scripts/merge-review.mjs", "scripts/merge-review-watch.mjs", "scripts/manifest.mjs", "CLAUDE.md", "crates/core/CLAUDE.md", "apps/CLAUDE.local.md", ".claude/skills/x/SKILL.md", "apps/shell/.claude/settings.json", ".mcp.json", "apps/.mcp.json"];
   const others = ["scripts/check.mjs", "scripts/merge-pr.test.mjs", "scripts/merge-review-watch.test.mjs", "docs/agents/orchestration.md", "docs/CLAUDE.md.txt", "crates/core/src/lib.rs", "github/x"];
   assert.deepEqual(ownerPaths([...owner, ...others]), owner);
 });
@@ -39,7 +39,13 @@ test("a review body starts with the marker and carries its state, which round-tr
   assert.deepEqual(parseState(text), { head: HEAD, verdict: "blocked", findings });
   assert.equal(parseState(body(HEAD)).verdict, "clean");
   assert.match(text, /\*\*1 finding blocks the merge\.\*\*/);
-  assert.match(text, /- Arrows -- like this --> vanish\./);
+  assert.match(text, /- \*\*Medium, blocks the merge:\*\* Arrows -- like this --> vanish\./);
+  assert.match(text, /- \*\*Low, does not block, still open:\*\* The last line/);
+  // The plain-English list runs most severe first, whatever order the findings came in.
+  const all = body(HEAD, [finding({ severity: "low", plain: "LOW." }), finding({ severity: "high", plain: "HIGH." }), finding({ plain: "MEDIUM." })]);
+  const sorted = all.slice(all.indexOf("## Merge review"));
+  assert.ok(sorted.indexOf("HIGH.") < sorted.indexOf("MEDIUM.") && sorted.indexOf("MEDIUM.") < sorted.indexOf("LOW."));
+  assert.match(sorted, /- \*\*High, blocks the merge:\*\* HIGH\./);
   assert.match(text, /\*\*low\*\* \(still open\), `scripts\/x\.mjs:3`/);
   assert.equal(parseState("<!-- merge-review -->\nno state"), null);
   assert.equal(parseState("a comment that mentions <!-- merge-review -->"), null);
