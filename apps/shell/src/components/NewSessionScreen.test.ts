@@ -38,6 +38,7 @@ const render = (props: Partial<Parameters<typeof NewSessionScreen>[0]>) =>
   renderToStaticMarkup(
     createElement(NewSessionScreen, {
       hosts: [host],
+      localHostId: "local",
       projects: [ersa, notes],
       backends: { local: [claude()] },
       onStart: async () => false,
@@ -56,7 +57,7 @@ describe("the new-session screen", () => {
     expect(html).toContain(">Ersa</h1>");
     expect(html).toMatch(/<textarea[^>]*autofocus/i);
     expect(chips(html)).toEqual([
-      "Host: WORKSTATION",
+      "Host: Local",
       "Project: ersa",
       "Workspace: New workspace",
       "Model: Opus",
@@ -77,6 +78,42 @@ describe("the new-session screen", () => {
     expect(chips(html)).toContain("Workspace: Root workspace");
     expect(chips(html)).toContain("Model: Sonnet");
     expect(chips(html)).toContain("Permission mode: Accept edits");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R14
+  it("lists the host's projects in the order given, each with its name, path, kind and trust, the chosen one marked, then Add project", () => {
+    const html = render({ projectId: "p2", open: "project" });
+    const list = html.slice(html.indexOf('role="listbox"'));
+    const options = [...list.matchAll(/<li[^>]*role="option"[^>]*>(.*?)<\/li>/g)].map((m) => m[0]);
+    expect(options).toHaveLength(3);
+    const [first, second, add] = options as [string, string, string];
+    expect(first).toContain(">ersa<");
+    expect(first).toContain(`>${ersa.path}<`);
+    expect(first).toContain(">Git<");
+    expect(first).not.toContain("Not trusted");
+    expect(first).toContain('aria-selected="false"');
+    expect(second).toContain(">notes<");
+    expect(second).toContain(`>${notes.path}<`);
+    expect(second).toContain(">Folder<");
+    expect(second).toContain("Not trusted");
+    expect(second).toContain('aria-selected="true"');
+    // Adding a project from the chip comes with the folder dialog (FLOW-NEW-SESSION-R16); until then it is shown, unavailable.
+    expect(add).toContain("Add project…");
+    expect(add).toContain("Ctrl+O");
+    expect(add).toContain('aria-disabled="true"');
+  });
+
+  // verifies: FLOW-NEW-SESSION-R14
+  it("lists only the chosen host's projects", () => {
+    const far: Project = { ...ersa, id: "p9", host_id: "far", name: "faraway" };
+    const html = render({ projects: [ersa, far, notes], open: "project" });
+    expect(html).not.toContain("faraway");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R15
+  it("chooses the local host's first listed project, the most recently used, when opened for no project", () => {
+    const far: Project = { ...ersa, id: "p9", host_id: "far", name: "faraway" };
+    expect(chips(render({ projects: [far, notes, ersa] }))).toContain("Project: notes");
   });
 
   // verifies: FLOW-NEW-SESSION-R06
