@@ -21,4 +21,4 @@ Option 3. Heads are due in the order their CI passed. The poller runs up to two 
 
 ## Consequences
 
-A second review checkout sits beside the first on the owner's disk, with its own build output. The scheduled task's run stays alive while its reviews run, filling a slot that frees up, and starts none after its first hour, so it ends within the task's two-hour limit. Revisit the number of slots if reviews slow each other down, or if the queue still waits on a busy day.
+A second review checkout sits beside the first on the owner's disk, with its own build output. The scheduled task's run stays alive while its reviews run, filling a slot that frees up, and starts none after its first 45 minutes: a review takes about an hour, so the run ends within the task's two-hour limit. Revisit the number of slots if reviews slow each other down, or if the queue still waits on a busy day.

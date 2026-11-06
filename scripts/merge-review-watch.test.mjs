@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { INTERVAL_MS, LOCK_STALE_MS, SLOTS, STALE_MS, lock, main, select } from "./merge-review-watch.mjs";
+import { INTERVAL_MS, LOCK_STALE_MS, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select } from "./merge-review-watch.mjs";
 
 const HEAD = "b".repeat(40);
 const NOW = Date.parse("2026-11-04T12:00:00Z");
@@ -248,9 +248,9 @@ test("two heads are reviewed side by side, each in its own slot's checkout, and 
   assert.ok(got.logs.indexOf("#8 at ccccccc: the review exited 1") < got.logs.indexOf("#9 at ddddddd: reviewing"));
 });
 
-test("the task's run starts no review after its first hour, and then waits for those it started", async () => {
+test("the task's run starts no review after its window, and then waits for those it started", async () => {
   // #7's review runs throughout. Each wait between ticks takes 25 minutes, and
-  // a new head arrives with each: #8 at 25 minutes, #9 at 50, #10 at 75.
+  // a new head arrives with each: #8 at 25 minutes, #9 at 50, past the window.
   let t = NOW;
   let naps = 0;
   const first = held();
@@ -261,14 +261,15 @@ test("the task's run starts no review after its first hour, and then waits for t
     now: () => t,
     sleep: async () => {
       t += 25 * 60 * 1000;
-      if (naps > 4) throw new Error("the run went on past its hour");
+      if (naps > 3) throw new Error("the run went on past its window");
       prs.push(pr({ number: 8 + naps, headRefOid: String(8 + naps).repeat(20) }));
-      if (++naps === 3) first.end(0);
+      if (++naps === 2) first.end(0);
       await settle();
     },
   });
   assert.equal(got.code, 0, got.stderr);
-  assert.deepEqual(got.reviews.map((r) => r.n), ["7", "8", "9"], "#10 arrived after the hour and waits for the next run");
+  assert.deepEqual(got.reviews.map((r) => r.n), ["7", "8"], "#9 arrived after the window and waits for the next run");
+  assert.equal(START_WINDOW_MS, 45 * 60 * 1000, "a review of about an hour still ends inside the task's two hours");
   assert.ok(!existsSync(got.lockPath));
 });
 
@@ -337,8 +338,8 @@ test("a head whose slot's checkout cannot be prepared is reviewed in the other s
   assert.deepEqual(got.reviews.map((r) => [r.n, r.dir]), [["7", `${dir}-2`], ["8", `${dir}-2`]]);
 });
 
-test("an hour of heads that cannot start ends the tick, so it stays inside the lock's age", async () => {
-  // Each failing prepare takes 25 minutes of the clock, and each head tries both slots; the third head finds the hour gone.
+test("heads that cannot start use up the task's window, and in a terminal an hour of a tick", async () => {
+  // Each failing prepare takes 25 minutes of the clock, and each head tries both slots.
   let t = NOW;
   const prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) }), pr({ number: 10, headRefOid: "e".repeat(40) })];
   const got = await drive(["--once", "--checkout", join(tmp(), "r7")], {
@@ -348,8 +349,40 @@ test("an hour of heads that cannot start ends the tick, so it stays inside the l
   });
   assert.equal(got.code, 0, got.stderr);
   assert.equal(got.reviews.length, 0);
-  assert.equal(got.calls.filter((c) => c.cmd === "git" && c.args[0] === "fetch").length, 4, "the third head is not tried");
-  assert.match(got.logs.at(-1), /^the tick is an hour old; #9, #10 wait for the next$/);
+  assert.equal(got.calls.filter((c) => c.cmd === "git" && c.args[0] === "fetch").length, 2, "the second head finds the window gone");
+  assert.match(got.logs.at(-1), /^out of time; #8, #9, #10 wait for the next run$/);
+  // A terminal's tick has an hour, counted from the tick's start: the third head finds it gone.
+  t = NOW;
+  const loop = await drive(["--checkout", join(tmp(), "r7b")], {
+    prs,
+    git: (args) => (args[0] === "fetch" ? ((t += 25 * 60 * 1000), { ok: false, err: "timed out" }) : {}),
+    now: () => t,
+    sleep: async () => {
+      throw new Error("stop");
+    },
+  });
+  assert.equal(loop.calls.filter((c) => c.cmd === "git" && c.args[0] === "fetch").length, 4);
+  assert.ok(loop.logs.includes("out of time; #9, #10 wait for the next run"));
+});
+
+test("a tool that is down on a later tick of the task's run is logged, and the run fills its slots again", async () => {
+  const first = held();
+  const prs = [pr()];
+  let lists = 0;
+  let naps = 0;
+  const got = await drive(["--once", "--checkout", join(tmp(), "r15")], {
+    prs,
+    list: () => (++lists === 2 ? { ok: false, status: 1, out: "", err: "gh: connection reset" } : null),
+    start: (n) => (n === 7 ? first.done : Promise.resolve(0)),
+    sleep: async () => {
+      if (++naps === 2) prs.push(pr({ number: 8, headRefOid: "c".repeat(40) }));
+      if (naps === 3) first.end(0);
+      await settle();
+    },
+  });
+  assert.equal(got.code, 0, got.stderr);
+  assert.ok(got.logs.includes("gh pr list failed: gh: connection reset"));
+  assert.deepEqual(got.reviews.map((r) => r.n), ["7", "8"]);
 });
 
 test("auto-merge on an unreviewed head is disabled before anything else", async () => {
@@ -451,4 +484,30 @@ test("a terminal loop that stops keeps the lock until the reviews it started hav
   const got = await run;
   assert.equal(got.code, 2);
   assert.ok(!existsSync(lockPath));
+});
+
+test("the task's window counts from the run's start, not the tick's", async () => {
+  // #7's review runs throughout. At 25 minutes #8 and #9 arrive; #8's checkout
+  // takes 25 minutes to fail, so #9 comes up at 50 minutes, past the window.
+  let t = NOW;
+  let naps = 0;
+  const first = held();
+  const prs = [pr()];
+  const got = await drive(["--once", "--checkout", join(tmp(), "r16")], {
+    prs,
+    git: (args) => (args[0] === "fetch" && args.includes("pull/8/head") ? ((t += 25 * 60 * 1000), { ok: false, err: "timed out" }) : {}),
+    start: (n) => (n === 7 ? first.done : Promise.resolve(0)),
+    now: () => t,
+    sleep: async () => {
+      if (++naps === 1) {
+        t += 25 * 60 * 1000;
+        prs.push(pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) }));
+      }
+      if (naps === 2) first.end(0);
+      await settle();
+    },
+  });
+  assert.equal(got.code, 0, got.stderr);
+  assert.deepEqual(got.reviews.map((r) => r.n), ["7"]);
+  assert.ok(got.logs.includes("out of time; #9 wait for the next run"));
 });
