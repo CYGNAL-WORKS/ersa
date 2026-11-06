@@ -238,7 +238,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   const chosen: SessionValues = project
     ? valuesFor(project, hostBackends ?? [], wanted)
     : { host_id: localHostId, project_id: "", workspace: "root", ...howFor(hostBackends ?? [], wanted) };
-  // A new workspace starts from the base branch the chip shows: the one chosen, else the default (R21, R22).
+  // A new workspace starts from the base branch the chip shows: the one chosen, else the default (R21, R29).
   const base = chosen.workspace === "isolated" && branches?.state === "read" ? baseFor(branches.branches, wanted.base) : undefined;
   const values: SessionValues = base === undefined ? chosen : { ...chosen, base };
 

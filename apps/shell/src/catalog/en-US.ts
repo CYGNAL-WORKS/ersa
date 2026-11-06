@@ -123,7 +123,7 @@ export const enUS = {
     },
     // The workspace chip (docs/design/COMPOSER.md, The workspace list): a new workspace or the project's own folder,
     // each with what it means, and for a git project the base branch the new workspace starts from
-    // (FLOW-NEW-SESSION-R21, R22).
+    // (FLOW-NEW-SESSION-R21, R28, R29).
     workspace: {
       newWorkspaceLabel: "New workspace",
       isolatedStatus: "Isolated",
