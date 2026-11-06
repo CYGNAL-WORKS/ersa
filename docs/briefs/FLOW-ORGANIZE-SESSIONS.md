@@ -37,7 +37,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 - **Saving fails.** When Core refuses or can't be reached, the change is undone in the rail and the rail says why. Nothing is kept only in the window.
 - **A rename the backend refuses** (a blank or too-long title, or a record that is gone) keeps the field open with the reason. A session with no backend session id yet offers Rename as unavailable, with the reason; an untitled session that has one can be renamed.
 - **Nothing to show.** Showing active sessions with every session archived, the rail says there are no active sessions. Changing what is shown never closes the active session, even when its tile leaves the rail.
-- **A project whose sessions are all pinned** keeps its heading, with its tiles in the Pinned group; a collapsed heading counts only the tiles under it.
+- **A project whose sessions are all pinned** has its tiles in the Pinned group; its heading follows `LAY-SHELL` (Projects), and a collapsed heading counts only the tiles under it.
 - **Last activity** moves a tile only when a turn ends, never while a reply streams, and never because the session's state changed.
 
 ## Requirements
