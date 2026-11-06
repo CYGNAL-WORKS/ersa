@@ -3,10 +3,11 @@
 
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createElement } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { Attachment, CoreClient, CoreEvent, Method } from "./core/client";
-import type { CoreHelloResult, Project, Session, Workspace } from "./protocol/core-api.gen";
+import type { ShellControl } from "./core/shell";
+import type { BackendInfo, CoreHelloResult, Project, Session, Workspace } from "./protocol/core-api.gen";
 
 const hello: CoreHelloResult = {
   core_version: "0.1.0",
@@ -35,17 +36,24 @@ const session = (id: string, project_id: string, created_at: string): Session =>
 const projects = [project("alpha"), project("beta"), project("gamma")];
 const sessions = [session("s1", "alpha", "2026-11-01T09:00:00Z"), session("s2", "beta", "2026-11-02T09:00:00Z")];
 
-/** A Core that answers the reads App makes at launch, attaches once, and can drop the connection. */
-function fakeCore() {
+type Answers = Partial<Record<Method, (params: never) => unknown>>;
+
+/**
+ * A Core that answers the reads App makes at launch, attaches once, and can drop the connection. `more` adds or
+ * replaces answers; `calls` records every request, in order.
+ */
+function fakeCore(more: Answers = {}) {
   let onEvent: (event: CoreEvent) => void = () => {};
   let attaches = 0;
-  const answers: Partial<Record<Method, (params: never) => unknown>> = {
+  const calls: { method: Method; params: unknown }[] = [];
+  const answers: Answers = {
     "core.status": () => ({ sessions_running: 0, sessions_waiting: 0, uptime_s: 1, db_path: "x" }),
     "project.list": () => projects,
     "session.list": () => sessions,
     "workspace.list": (params: { project_id: string }) => [root(params.project_id)],
     "backend.list": () => [],
     "settings.get": () => ({}),
+    ...more,
   };
   const client: CoreClient = {
     attach: (listener) => {
@@ -54,11 +62,14 @@ function fakeCore() {
       return attaches++ === 0 ? Promise.resolve<Attachment>({ how: "attached", hello }) : new Promise(() => {});
     },
     call: (method, params) => {
+      calls.push({ method, params });
       const answer = answers[method];
-      return (answer ? Promise.resolve(answer(params as never)) : Promise.reject({ kind: "unavailable", message: `no answer for ${method}` })) as never;
+      if (!answer) return Promise.reject({ kind: "unavailable", message: `no answer for ${method}` }) as never;
+      // An answer that throws is Core refusing the request.
+      return new Promise((resolve) => resolve(answer(params as never))) as never;
     },
   };
-  return { client, drop: () => act(() => onEvent({ kind: "lost", reason: "gone" })) };
+  return { client, calls, drop: () => act(() => onEvent({ kind: "lost", reason: "gone" })) };
 }
 
 /** Lets every answer the fake gave settle, and the renders they cause. */
@@ -101,6 +112,215 @@ describe("the projects App gives the new-session screen", () => {
     core.drop();
     await settle();
     expect(projectList()).toEqual(["beta", "alpha", "gamma"]);
+  });
+});
+
+// Adding a project from the new-session screen (FLOW-NEW-SESSION-R16 to R20): the sequence against a fake Core, with
+// the Shell's folder dialog replaced by a stand-in that answers each pick in turn with a folder or a cancel (null).
+
+const claude: BackendInfo = {
+  name: "claude-code",
+  label: "Claude Code",
+  version: "2.1.302",
+  status: "available",
+  tested: { min: "2.1.0", max: "2.1.400" },
+  models: [{ id: "opus", label: "Opus", default: true }],
+  efforts: [{ id: "high", label: "High", default: true }],
+  permission_modes: [{ id: "default", label: "Ask before acting", default: true }],
+};
+
+/** A Shell whose folder dialog answers each pick with the next of `picks`, then with a cancel. */
+function fakeShell(...picks: (string | null)[]) {
+  return {
+    onQuitRequested: () => () => {},
+    quitHeard: async () => {},
+    show: async () => false,
+    hide: async () => {},
+    quit: async () => {},
+    pickFolder: vi.fn(async () => picks.shift() ?? null),
+  } satisfies ShellControl;
+}
+
+/**
+ * The new-session screen with `listed` as Core's projects and no sessions, a backend to start with, and the
+ * project.find and project.add answers a real Core gives: a folder added is found and listed after.
+ */
+async function screenWith(listed: Project[], shell?: ShellControl, more: Answers = {}) {
+  const known = [...listed];
+  const core = fakeCore({
+    "project.list": () => known,
+    "session.list": () => [],
+    "backend.list": () => [claude],
+    "project.find": (params: { path: string }) => known.find((p) => p.path === params.path) ?? null,
+    "project.add": (params: { host_id: string; path: string; trusted: boolean }) => {
+      const added: Project = { id: "p-new", host_id: params.host_id, path: params.path, name: "stranger", vcs: "git", trusted: params.trusted };
+      known.push(added);
+      return added;
+    },
+    ...more,
+  });
+  render(createElement(App, { client: core.client, shell }));
+  await settle();
+  await settle();
+  return core;
+}
+
+const chipValue = () => screen.getByRole("button", { name: /^Project:/ }).getAttribute("aria-label");
+const words = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+const methods = (core: { calls: { method: Method }[] }) => core.calls.map((c) => c.method);
+const paramsOf = (core: { calls: { method: Method; params: unknown }[] }, method: Method) => core.calls.find((c) => c.method === method)?.params;
+const trustQuestion = () => screen.queryByRole("region", { name: /^Trust / });
+
+/** Chooses Add project… from the project chip's list, and lets the dialog and Core answer. */
+async function addFromChip() {
+  const chip = screen.getByRole("button", { name: /^Project:/ });
+  if (chip.getAttribute("aria-expanded") !== "true") fireEvent.click(chip);
+  fireEvent.click(screen.getByRole("option", { name: /Add project…/ }));
+  await settle();
+}
+
+describe("adding a project from the new-session screen", () => {
+  // verifies: FLOW-NEW-SESSION-R16
+  it("opens the folder dialog from Add project…, asks about trust for a new folder, then adds it trusted and chooses it", async () => {
+    const shell = fakeShell("D:/clones/stranger");
+    const core = await screenWith([project("alpha")], shell);
+    await addFromChip();
+    expect(shell.pickFolder).toHaveBeenCalledTimes(1);
+    expect(paramsOf(core, "project.find")).toEqual({ host_id: "local", path: "D:/clones/stranger" });
+
+    // The question names the folder, says what trust lets run, that it covers every workspace, and that it lasts.
+    const question = screen.getByRole("region", { name: "Trust stranger?" });
+    expect(question.textContent).toContain("D:/clones/stranger");
+    expect(question.textContent).toMatch(/hooks and MCP servers/);
+    expect(question.textContent).toMatch(/every workspace of the project/);
+    expect(question.textContent).toMatch(/until you withdraw it/);
+    expect(document.activeElement).toBe(within(question).getByRole("button", { name: "Cancel" }));
+    expect(methods(core)).not.toContain("project.add");
+
+    fireEvent.click(within(question).getByRole("button", { name: "Add, trusted" }));
+    await settle();
+    expect(paramsOf(core, "project.add")).toEqual({ host_id: "local", path: "D:/clones/stranger", trusted: true });
+    expect(trustQuestion()).toBeNull();
+    expect(chipValue()).toBe("Project: stranger");
+    expect(document.activeElement).toBe(words());
+  });
+
+  // verifies: FLOW-NEW-SESSION-R16
+  it("adds the folder not trusted when the user says so", async () => {
+    const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"));
+    await addFromChip();
+    fireEvent.click(screen.getByRole("button", { name: "Add, not trusted" }));
+    await settle();
+    expect(paramsOf(core, "project.add")).toEqual({ host_id: "local", path: "D:/clones/stranger", trusted: false });
+    expect(chipValue()).toBe("Project: stranger");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R16
+  it("opens the folder dialog on Ctrl+O, the shortcut shown beside Add project…", async () => {
+    const shell = fakeShell("D:/clones/stranger");
+    await screenWith([project("alpha")], shell);
+    fireEvent.click(screen.getByRole("button", { name: /^Project:/ }));
+    expect(screen.getByRole("option", { name: /Add project…/ }).textContent).toContain("Ctrl+O");
+    fireEvent.keyDown(words(), { key: "o", ctrlKey: true });
+    await settle();
+    expect(shell.pickFolder).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("region", { name: "Trust stranger?" })).toBeTruthy();
+  });
+
+  // verifies: FLOW-NEW-SESSION-R16
+  it("leaves Add project unavailable, without its shortcut, when there is no folder dialog to open", async () => {
+    await screenWith([project("alpha")]);
+    fireEvent.click(screen.getByRole("button", { name: /^Project:/ }));
+    const add = screen.getByRole("option", { name: /Add project…/ });
+    expect(add.getAttribute("aria-disabled")).toBe("true");
+    expect(add.textContent).not.toContain("Ctrl+O");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R17
+  it("changes nothing when the folder dialog is canceled", async () => {
+    const core = await screenWith([project("alpha")], fakeShell(null));
+    fireEvent.change(words(), { target: { value: "Fix the build" } });
+    await addFromChip();
+    expect(methods(core)).not.toContain("project.find");
+    expect(methods(core)).not.toContain("project.add");
+    expect(trustQuestion()).toBeNull();
+    expect(chipValue()).toBe("Project: alpha");
+    expect(words().value).toBe("Fix the build");
+    expect(document.activeElement).toBe(words());
+  });
+
+  // verifies: FLOW-NEW-SESSION-R17
+  it.each([
+    ["Cancel", () => fireEvent.click(screen.getByRole("button", { name: "Cancel" }))],
+    ["Escape", () => fireEvent.keyDown(screen.getByRole("button", { name: "Cancel" }), { key: "Escape" })],
+  ])("changes nothing when the trust question is closed with %s", async (_, close) => {
+    const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"));
+    fireEvent.change(words(), { target: { value: "Fix the build" } });
+    await addFromChip();
+    close();
+    await settle();
+    expect(trustQuestion()).toBeNull();
+    expect(methods(core)).not.toContain("project.add");
+    expect(chipValue()).toBe("Project: alpha");
+    expect(words().value).toBe("Fix the build");
+    expect(document.activeElement).toBe(words());
+  });
+
+  // verifies: FLOW-NEW-SESSION-R18
+  it("chooses a folder that is already a project without asking about trust", async () => {
+    const core = await screenWith([project("alpha"), project("beta")], fakeShell("D:/code/beta"));
+    expect(chipValue()).toBe("Project: alpha");
+    await addFromChip();
+    expect(paramsOf(core, "project.find")).toEqual({ host_id: "local", path: "D:/code/beta" });
+    expect(trustQuestion()).toBeNull();
+    expect(methods(core)).not.toContain("project.add");
+    expect(chipValue()).toBe("Project: beta");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R19
+  it("with no project, offers to choose a folder, and sending opens the dialog and keeps the message", async () => {
+    const shell = fakeShell("D:/clones/stranger");
+    const core = await screenWith([], shell);
+    expect(chipValue()).toBe("Project: Choose a folder");
+    fireEvent.click(screen.getByRole("button", { name: /^Project:/ }));
+    const options = within(screen.getByRole("listbox", { name: "Project" })).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Add project…Ctrl+O"]);
+    fireEvent.click(screen.getByRole("button", { name: /^Project:/ }));
+
+    fireEvent.change(words(), { target: { value: "Fix the build" } });
+    await act(async () => {
+      fireEvent.keyDown(words(), { key: "Enter" });
+    });
+    await settle();
+    expect(shell.pickFolder).toHaveBeenCalledTimes(1);
+    expect(words().value).toBe("Fix the build");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add, trusted" }));
+    await settle();
+    expect(chipValue()).toBe("Project: stranger");
+    // The message waits for the user to send it: nothing was started.
+    expect(words().value).toBe("Fix the build");
+    expect(methods(core)).not.toContain("workspace.create");
+    expect(methods(core)).not.toContain("session.create");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R20
+  it("offers no field for typing a folder path, on the screen or in the rail", async () => {
+    await screenWith([], fakeShell());
+    expect(screen.getAllByRole("textbox").map((t) => t.getAttribute("aria-label"))).toEqual(["Message"]);
+  });
+
+  it("says why when Core can't look the folder up, and adds nothing", async () => {
+    const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"), {
+      "project.find": () => {
+        throw { kind: "rpc", error: { code: -32602, message: "project.find: invalid params", data: { detail: "D:/clones/stranger is not a folder" } } };
+      },
+    });
+    await addFromChip();
+    expect(screen.getByRole("alert").textContent).toBe("D:/clones/stranger is not a folder");
+    expect(trustQuestion()).toBeNull();
+    expect(methods(core)).not.toContain("project.add");
+    expect(chipValue()).toBe("Project: alpha");
   });
 });
 

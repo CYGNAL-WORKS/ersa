@@ -1,9 +1,11 @@
 // The CoreClient the window uses: the Shell's two bridge commands
 // (documented on the Shell's Rust side, in src-tauri/src/lib.rs). Beside it,
-// the Shell's own controls for closing and quitting.
+// the Shell's own controls for closing and quitting, and the system's folder
+// dialog.
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { Attachment, CoreClient, CoreEvent } from "./client";
 import type { ShellControl } from "./shell";
 
@@ -37,4 +39,9 @@ export const tauriShell: ShellControl = {
   show: () => invoke<boolean>("shell_show"),
   hide: () => invoke("shell_hide"),
   quit: () => invoke("shell_quit"),
+  // One folder, or null when the user cancels (FLOW-NEW-SESSION-R16, R17).
+  pickFolder: async () => {
+    const picked = await open({ directory: true, multiple: false });
+    return typeof picked === "string" ? picked : null;
+  },
 };

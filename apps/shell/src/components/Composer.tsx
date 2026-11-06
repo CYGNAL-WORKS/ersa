@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, type Ref, useState } from "react";
 import type { Sending } from "../session/follow";
 import { Button } from "./Button";
 import "./Composer.css";
@@ -16,10 +16,12 @@ interface ComposerProps {
   force?: "hover" | "focus";
   /** Whether the composer takes focus when it appears: when a session opens (FLOW-NEW-SESSION). Off in the gallery. */
   autoFocus?: boolean;
+  /** The words, for a screen that returns focus to them, as after the folder dialog or the trust question. */
+  inputRef?: Ref<HTMLTextAreaElement>;
 }
 
 /** Where the user writes to the agent. Enter sends; Shift+Enter starts a new line. */
-export function Composer({ unavailable, sending, onSend, onWrite, initialText = "", force, autoFocus = true }: ComposerProps) {
+export function Composer({ unavailable, sending, onSend, onWrite, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const busy = sending?.state === "sending";
   const canSend = !unavailable && !busy && text.trim() !== "";
@@ -48,6 +50,7 @@ export function Composer({ unavailable, sending, onSend, onWrite, initialText = 
       }}
     >
       <textarea
+        ref={inputRef}
         className="composer-input"
         aria-label="Message"
         placeholder="Write to the agent"

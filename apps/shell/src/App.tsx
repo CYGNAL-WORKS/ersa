@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { t } from "./catalog";
 import "./App.css";
-import { AddProject } from "./components/AddProject";
 import { Button } from "./components/Button";
 import { Composer } from "./components/Composer";
 import { RailFoot } from "./components/RailFoot";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { NewSessionScreen } from "./components/NewSessionScreen";
+import { type FolderChoice, NewSessionScreen } from "./components/NewSessionScreen";
 import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionControls } from "./components/SessionControls";
 import { noneUnseen, unseenAfter } from "./session/unseen";
@@ -327,17 +326,40 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     }
   };
 
+  // Add project on the new-session screen (FLOW-NEW-SESSION-R16 to R19): the Shell's folder dialog on this computer,
+  // then `project.find`, so a folder that is already a project is chosen without the trust question. Without the
+  // Shell, as in tests that give none, there is no dialog and Add project is unavailable.
+  const pickFolder = shell?.pickFolder;
+  const chooseFolder =
+    pickFolder && view.phase === "connected"
+      ? async (): Promise<FolderChoice> => {
+          const host_id = view.hello.host.id;
+          try {
+            // A canceled dialog leaves everything as it was, an earlier failure's reason included (R17).
+            const path = await pickFolder();
+            if (path === null) return { kind: "canceled" };
+            setAdding({ state: "sending" });
+            const found = await client.call("project.find", { host_id, path });
+            setAdding(undefined);
+            return found ? { kind: "found", project: found } : { kind: "new", path };
+          } catch (error) {
+            setAdding({ state: "failed", message: describeError(error) });
+            return { kind: "failed" };
+          }
+        }
+      : undefined;
+
   const addProject = async (path: string, trusted: boolean) => {
-    if (view.phase !== "connected") return false;
+    if (view.phase !== "connected") return undefined;
     setAdding({ state: "sending" });
     try {
-      await client.call("project.add", { host_id: view.hello.host.id, path, trusted });
+      const project = await client.call("project.add", { host_id: view.hello.host.id, path, trusted });
       setAdding(undefined);
       connection.current?.reload("projects");
-      return true;
+      return project;
     } catch (error) {
       setAdding({ state: "failed", message: describeError(error) });
-      return false;
+      return undefined;
     }
   };
 
@@ -461,9 +483,6 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onCloseShelf={closeShelf}
             />
           </ErrorBoundary>
-          {/* The way to add a project stays beneath the tree until the new-session screen's project chip has it,
-              outside the tree's boundary so it survives a tree that fails to draw. */}
-          {view.phase === "connected" && <AddProject onAdd={addProject} adding={adding} />}
         </div>
         <div className="rail-core">
           {quitAsk && (
@@ -535,6 +554,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               projectId={composing?.projectId}
               onStart={start}
               starting={starting}
+              onChooseFolder={chooseFolder}
               onAddProject={addProject}
               adding={adding}
             />
