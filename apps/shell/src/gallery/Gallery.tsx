@@ -452,9 +452,9 @@ const entries: Entry[] = [
       ["Heading, pointer over it", <RailTree {...ersaOnly} forceHeading={{ id: "p1", state: "hover" }} />],
       ["Heading, pressed", <RailTree {...ersaOnly} forceHeading={{ id: "p1", state: "pressed" }} />],
       ["Heading, keyboard focus", <RailTree {...ersaOnly} forceHeading={{ id: "p1", state: "focus" }} />],
-      ["More, trusted", <RailTree {...ersaOnly} initialMenu="p1" />],
-      ["More, while trust is saved", <RailTree {...ersaOnly} initialMenu="p1" trusting={{ p1: { state: "sending" } }} />],
-      ["More, not trusted", <RailTree {...strangerOnly} initialMenu="p4" />],
+      ["More, trusted", room(<RailTree {...ersaOnly} initialMenu="p1" />)],
+      ["More, while trust is saved", room(<RailTree {...ersaOnly} initialMenu="p1" trusting={{ p1: { state: "sending" } }} />)],
+      ["More, not trusted", room(<RailTree {...strangerOnly} initialMenu="p4" />)],
       ["Asking to trust", <RailTree {...strangerOnly} initialAsking="p4" />],
       ["Saving trust", <RailTree {...ersaOnly} trusting={{ p1: { state: "sending" } }} />],
       [
