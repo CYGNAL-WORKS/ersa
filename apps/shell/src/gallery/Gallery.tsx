@@ -474,6 +474,8 @@ const entries: Entry[] = [
       ["Hover", <SessionList view={{ state: "ready", sessions: pointerPair }} onSelect={() => {}} force={{ id: "p2", state: "hover" }} />],
       ["Pressed", <SessionList view={{ state: "ready", sessions: pointerPair }} onSelect={() => {}} force={{ id: "p2", state: "pressed" }} />],
       ["Focus", <SessionList view={{ state: "ready", sessions: pointerPair }} onSelect={() => {}} force={{ id: "p2", state: "focus" }} />],
+      // p1 finished a turn while p2 was active: its title reads strong until it is opened.
+      ["Unseen", <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} unseen={new Set(["p1"])} />],
       ["Active", <SessionList view={{ state: "ready", sessions: pointerPair }} activeId="p2" onSelect={() => {}} />],
       [
         "Active, under the pointer",
