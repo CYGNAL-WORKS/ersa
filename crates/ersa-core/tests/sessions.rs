@@ -562,6 +562,7 @@ async fn a_message_to_a_backend_that_failed_to_start_is_answered_with_its_reason
     );
 }
 
+// verifies: PROTO-CORE-API-R18
 #[tokio::test(flavor = "multi_thread")]
 async fn an_adapter_that_panics_while_starting_fails_the_session_cleanly() {
     let (core, _) = start_fake(FakeAdapter::panicking()).await;
