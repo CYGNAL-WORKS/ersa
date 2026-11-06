@@ -349,15 +349,13 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         }
       : undefined;
 
-  // A git project's local branches, for the base branch a new workspace starts from (FLOW-NEW-SESSION-R21); why they
-  // could not be read, in Core's words, when it cannot list them.
-  const listBranches = async (projectId: string): Promise<Branches> => {
-    try {
-      return { state: "read", branches: await client.call("branch.list", { project_id: projectId }) };
-    } catch (error) {
-      return { state: "failed", message: describeError(error) };
-    }
-  };
+  // A git project's local branches, for the base branch a new workspace starts from (FLOW-NEW-SESSION-R21). Branches
+  // that cannot be listed leave the base to Core, which starts the workspace at the default branch.
+  const listBranches = (projectId: string): Promise<Branches> =>
+    client.call("branch.list", { project_id: projectId }).then(
+      (branches) => ({ state: "read", branches }),
+      () => ({ state: "failed" }),
+    );
 
   const addProject = async (path: string, trusted: boolean) => {
     if (view.phase !== "connected") return undefined;

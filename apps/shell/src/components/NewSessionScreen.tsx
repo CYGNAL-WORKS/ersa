@@ -219,6 +219,8 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   lister.current = props.onListBranches;
   const listing = props.onListBranches !== undefined;
   useEffect(() => {
+    // A list read for this project before is not shown while it is read again: its branches may have changed.
+    setRead(undefined);
     if (gitProject === undefined || !lister.current) return;
     let current = true;
     void lister.current(gitProject).then((branches) => {

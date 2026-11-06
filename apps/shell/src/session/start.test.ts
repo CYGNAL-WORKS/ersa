@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BridgeError, CoreClient, Method, Params } from "../core/client";
 import type { SessionValues } from "./controls";
-import { lastUsedFrom, readChoices, rememberPatch, startSession } from "./start";
+import { lastUsedFrom, readChoices, rememberPatch, remembered, startSession } from "./start";
 
 /** A client that records each call and answers from `answers`; a method without an answer fails the test. */
 function fakeClient(answers: Partial<Record<Method, (params: never) => unknown>> = {}) {
@@ -243,6 +243,7 @@ describe("the values remembered for a project", () => {
   it("never hold the base branch: each new session starts at the default branch", () => {
     const patch = rememberPatch({ ...values("isolated"), base: "release/1.0" });
     expect(patch.new_session.last_used.p1).not.toHaveProperty("base");
+    expect(remembered({ ...values("isolated"), base: "release/1.0" })).toEqual(values("isolated"));
     expect(lastUsedFrom({ new_session: { last_used: { p1: { ...values("isolated"), base: "release/1.0" } } } }).p1).toEqual(values("isolated"));
   });
 

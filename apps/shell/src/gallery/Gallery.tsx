@@ -23,7 +23,7 @@ import type { CoreView } from "../core/connection";
 import type { Envelope, Event } from "../protocol/agent-events.gen";
 import type { CoreHelloResult, Project, Session } from "../protocol/core-api.gen";
 import type { Answer } from "../session/answers";
-import type { BackendChoices, Choice } from "../session/controls";
+import { type BackendChoices, type Choice, branchesMatching } from "../session/controls";
 import type { SessionView } from "../session/follow";
 import { type ShelfShows, shelfTone } from "../session/shelf";
 import { tileOf } from "../session/tile";
@@ -371,7 +371,10 @@ const branchOptions = galleryBranches.map((b) => ({ id: b.name, label: b.name, s
 const baseSection = (listed: typeof branchOptions, empty = "No branch matches.") => ({
   heading: "Base branch",
   placeholder: "Search branches",
-  narrow: (query: string) => listed.filter((o) => o.label.toLowerCase().includes(query.trim().toLowerCase())),
+  narrow: (query: string) => {
+    const names = new Set(branchesMatching(listed.map((o) => ({ name: o.id, default: false })), query).map((b) => b.name));
+    return listed.filter((o) => names.has(o.id));
+  },
   value: "main",
   onChoose: () => {},
   empty,
@@ -680,6 +683,17 @@ const entries: Entry[] = [
       ["Reads its choice", <Chip {...chip} reads="New workspace from main" />],
       ["Open, a section to search", tallRoom(<Chip {...chip} reads="New workspace from main" section={baseSection(branchOptions)} initialOpen />)],
       [
+        "Open, more branches than fit",
+        tallRoom(
+          <Chip
+            {...chip}
+            reads="New workspace from main"
+            section={baseSection([...branchOptions, ...["a", "b", "c", "d", "e"].map((n) => ({ id: `topic/${n}`, label: `topic/${n}`, status: undefined }))])}
+            initialOpen
+          />,
+        ),
+      ],
+      [
         "Open, the section narrowed",
         tallRoom(<Chip {...chip} reads="New workspace from main" section={baseSection(branchOptions)} initialQuery="feat" initialOpen />),
       ],
@@ -693,7 +707,7 @@ const entries: Entry[] = [
       ],
       [
         "Open, the section unreadable",
-        tallRoom(<Chip {...chip} section={baseSection([], "Ersa couldn't read the branches: git is not installed")} initialOpen />),
+        tallRoom(<Chip {...chip} section={baseSection([], "Ersa couldn't read this project's branches. The new workspace will start at the default branch.")} initialOpen />),
       ],
       [
         "Open, with statuses",

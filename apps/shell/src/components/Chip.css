@@ -323,13 +323,11 @@
   overflow-y: auto;
 }
 
-.chip-section-options .chip-option-label {
-  font-size: var(--type-ui-size);
-  line-height: var(--type-ui-leading);
-}
-
-.chip-section-options .chip-option-status {
-  color: var(--color-ink-faint);
+/* Each branch is size-control high, so eight of them fill size-list-max exactly; they read as the options above
+   them do, so the list keeps one type size and one status tone. */
+.chip-section-options .chip-option {
+  box-sizing: border-box;
+  min-height: var(--size-control);
 }
 
 /* Nothing matches, or nothing to list yet. */
