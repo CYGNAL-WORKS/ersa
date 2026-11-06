@@ -1,7 +1,7 @@
 import { Bot, ChevronRight, LoaderCircle } from "lucide-react";
 import type { SessionsView } from "../core/connection";
 import type { Session } from "../protocol/core-api.gen";
-import type { BackendChoices } from "../session/controls";
+import { type BackendChoices, newestFirst } from "../session/controls";
 import { type TileView, tileOf } from "../session/tile";
 import { ContextRing } from "./ContextRing";
 import { Icon } from "./Icon";
@@ -174,7 +174,3 @@ export function byWorkspace(sessions: Session[]): [string, Session[]][] {
   return [...groups];
 }
 
-/** Core issues `created_at` as RFC 3339 in UTC, so the strings sort as times do. */
-export function newestFirst(sessions: Session[]): Session[] {
-  return sessions.slice().sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
-}
