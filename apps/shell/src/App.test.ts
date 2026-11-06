@@ -223,13 +223,16 @@ describe("adding a project from the new-session screen", () => {
     const answers = within(question).getAllByRole("button");
     expect(answers.map((b) => b.textContent)).toEqual(["Cancel", "Trust"]);
     // Neither answer is primary: trusting is never the default.
-    expect(answers.map((b) => b.className)).toEqual([answers[0]!.className, answers[0]!.className]);
+    expect(answers.map((b) => b.getAttribute("data-variant"))).toEqual(["quiet", "quiet"]);
     expect(document.activeElement).toBe(answers[0]);
 
     // The arrows move between the answers; Cancel, as Enter on it does, adds nothing.
     fireEvent.keyDown(answers[0]!, { key: "ArrowRight" });
     expect(document.activeElement).toBe(answers[1]);
     fireEvent.keyDown(answers[1]!, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(answers[0]);
+    // Away from the answers, as in the explanation when it scrolls, the arrows are left alone.
+    fireEvent.keyDown(question.querySelector(".trust-question-body")!, { key: "ArrowDown" });
     expect(document.activeElement).toBe(answers[0]);
     fireEvent.click(answers[0]!);
     await settle();
