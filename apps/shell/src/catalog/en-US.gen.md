@@ -246,9 +246,9 @@ Send
 
 Detecting the backends on this host…
 
-### `composer.noBackendNote`
+### `composer.noBackendError`
 
-No backend is available on this host.
+No backend is available on this host. Install Claude Code or GitHub Copilot on it to start a session.
 
 ## `newSession`
 

@@ -154,7 +154,7 @@ describe("the new-session screen", () => {
     const html = render({ backends: { local: [claude("missing")] }, open: "backend" });
     expect(chips(html)).toContain("Backend: No backend");
     expect(html).toContain("Not installed");
-    expect(html).toContain("No backend is available on this host.");
+    expect(html).toContain("No backend is available on this host. Install Claude Code or GitHub Copilot on it to start a session.");
     expect(html).toMatch(/<textarea[^>]*disabled/);
   });
 

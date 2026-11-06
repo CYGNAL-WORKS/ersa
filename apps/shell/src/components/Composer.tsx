@@ -140,6 +140,6 @@ function StatusLine({ unavailable, sending }: { unavailable?: Unavailable; sendi
     );
   }
   if (unavailable === "detecting") return <p className="composer-status-line">{t("composer.detectingProgress")}</p>;
-  if (unavailable === "no-backend") return <p className="composer-status-line">{t("composer.noBackendNote")}</p>;
+  if (unavailable === "no-backend") return <p className="composer-status-line">{t("composer.noBackendError")}</p>;
   return null;
 }

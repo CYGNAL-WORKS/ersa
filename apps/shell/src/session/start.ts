@@ -3,6 +3,7 @@
 // its first turn. A start that fails takes back what it made and says why in the backend's own words.
 // Kept free of React so the tests drive it with a fake client.
 
+import { t } from "../catalog";
 import { type BridgeError, type CoreClient, describeError } from "../core/client";
 import type { Session, SessionCreateParams, Workspace } from "../protocol/core-api.gen";
 import type { BackendChoices, SessionValues, WorkspaceKind } from "./controls";
@@ -49,7 +50,7 @@ const NEVER_RAN: readonly Session["state"][] = ["error", "ended"];
  */
 export async function startSession(client: Pick<CoreClient, "call">, values: SessionValues, text: string): Promise<StartOutcome> {
   const { backend } = values;
-  if (!backend) return { ok: false, message: "No backend is available on this host." };
+  if (!backend) return { ok: false, message: t("composer.noBackendError") };
 
   let made: Workspace | undefined;
   let session: Session | undefined;
