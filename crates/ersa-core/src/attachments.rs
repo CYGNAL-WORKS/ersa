@@ -680,11 +680,32 @@ fn named_path(path: &str) -> Result<&Path, String> {
     if !given.is_absolute() {
         return Err(format!("{path} is not an absolute path"));
     }
-    no_device(given)?;
-    if let Ok(target) = fs::read_link(given) {
-        no_device(&target)?;
-    }
+    no_device_through_links(given, 0)?;
     Ok(given)
+}
+
+/// How many links deep a path's check follows them.
+const LINK_DEPTH: usize = 8;
+
+/// Checks `path`, and where a link anywhere along it leads, for a pipe or
+/// a device, following a chain of links up to [`LINK_DEPTH`] deep and
+/// refusing a deeper one.
+fn no_device_through_links(path: &Path, depth: usize) -> Result<(), String> {
+    if depth > LINK_DEPTH {
+        return Err(format!("{} leads through too many links", path.display()));
+    }
+    no_device(path)?;
+    for step in path.ancestors() {
+        if let Ok(target) = fs::read_link(step) {
+            // A relative target is relative to the link's folder.
+            let target = match step.parent() {
+                Some(folder) if target.is_relative() => folder.join(target),
+                _ => target,
+            };
+            no_device_through_links(&target, depth + 1)?;
+        }
+    }
+    Ok(())
 }
 
 fn no_device(path: &Path) -> Result<(), String> {
