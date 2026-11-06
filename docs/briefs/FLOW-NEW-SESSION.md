@@ -15,7 +15,7 @@ A new session begins with the message, not with a form. The user chooses New ses
 
 The session controls lead with where the session runs, three chips fixed once it starts: host, project and workspace. The workspace is an isolated checkout by default (a git worktree for a git project), made from a base branch the user picks, which starts at the repository's default branch, not at whatever the project's folder has checked out (unless the repository has no other). The user can instead run the session in the project's own folder, the root workspace, when isolation is not wanted: a quick question about the code, or a project whose version control Ersa has no workspace adapter for. Sessions in the root workspace share its files with each other and with the user.
 
-Adding a project happens in the project chip, not in the rail: its list ends with Add project, which on the local host opens the system's folder dialog, then asks whether the user trusts the folder (ADR 0018), then chooses the new project. Nobody types a folder path. With no project yet, the project chip offers to choose a folder, and sending opens the same dialog, keeping the message.
+The project chip on the new-session screen is the only place a project is added; the rail has no way to add one. Its list ends with Add project, which on the local host opens the system's folder dialog, then asks whether the user trusts the folder (ADR 0018), then chooses the new project. Nobody types a folder path. With no project yet, the project chip offers to choose a folder, and sending opens the same dialog, keeping the message.
 
 ## Requirements
 
