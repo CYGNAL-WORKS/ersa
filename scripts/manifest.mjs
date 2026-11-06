@@ -106,13 +106,17 @@ for (const file of walk(BRIEFS_DIR)) {
   // not prose.
   let section = "";
   let parent = "";
-  let fenced = false;
+  let fence = "";
   const labels = new Set();
   for (const line of text.split(/\r?\n/)) {
-    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
-    if (fenced) continue;
-    if (/^#{1,6}\s/.test(line)) section = line.replace(/^#+\s*/, "").trim();
-    const b = /^(\s*)[-*]\s+(\*\*.+?\*\*|`[^`]+`)/.exec(line);
+    // A fence closes only on its own marker, at least as long, with nothing after it.
+    const f = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
+    if (f && !fence && !(f[1][0] === "`" && f[2].includes("`"))) fence = f[1];
+    else if (f && fence && f[1][0] === fence[0] && f[1].length >= fence.length && !f[2].trim()) fence = "";
+    const fenced = fence !== "";
+    if (!fenced && /^#{1,6}\s/.test(line)) section = line.replace(/^#+\s*/, "").trim();
+    if (!fenced && /^(#{1,6}|[-*])\s/.test(line)) parent = line;
+    const b = !fenced && /^(\s*)[-*]\s+(\*\*.+?\*\*|`[^`]+`)/.exec(line);
     if (b && !new RegExp(REQ_ID.source).test(b[2])) {
       const label = b[2].replace(/^`(\S[^{]*?)\s*\{.*$/, "`$1`");
       if (!b[1]) parent = label;
