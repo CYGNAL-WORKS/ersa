@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { t } from "./catalog";
 import "./App.css";
 import { Button } from "./components/Button";
@@ -6,18 +6,21 @@ import { Composer } from "./components/Composer";
 import { RailFoot } from "./components/RailFoot";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { type FolderChoice, NewSessionScreen } from "./components/NewSessionScreen";
-import { ProjectList } from "./components/ProjectList";
 import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionControls } from "./components/SessionControls";
 import { noneUnseen, unseenAfter } from "./session/unseen";
-import { SessionList, type WorkspaceName } from "./components/SessionList";
+import { RailTree } from "./components/RailTree";
+import { Shelf } from "./components/Shelf";
 import { Transcript } from "./components/Transcript";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { Project, Session, Workspace } from "./protocol/core-api.gen";
 import { type BackendChoices, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
-import { contextUsed } from "./session/tile";
+import { contextUsed, tileOf } from "./session/tile";
+import { type Answers, type Decision, answering } from "./session/answers";
+import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./session/shelf";
+import { sharedSubscriptions } from "./session/subscriptions";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { readChoices, rememberPatch, startSession } from "./session/start";
@@ -76,9 +79,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // What the screen offers: each host's backends, and the values each project last started a session with.
   const [backends, setBackends] = useState<Record<string, BackendChoices[]>>({});
   const [lastUsed, setLastUsed] = useState<Record<string, SessionValues>>({});
-  // Every project's workspaces, by id: the rail names them above their sessions, and the session controls read a
-  // session's workspace from them.
+  // Every project's workspaces, by id: the rail puts a session under its workspace's project, and the session
+  // controls read a session's workspace from them. Each project's last read: null once read, else why it failed.
   const [workspaces, setWorkspaces] = useState<Record<string, Workspace>>({});
+  const [workspaceReads, setWorkspaceReads] = useState<Record<string, string | null>>({});
   const [trusting, setTrusting] = useState<Record<string, Sending>>({});
   // The workspaces of each project whose trust the user withdrew here, as they were then. A session running
   // in one of them keeps the configuration it started with.
@@ -87,14 +91,30 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The quit question, while it is open: how many sessions would stop, and whether Quit was chosen.
   const [quitAsk, setQuitAsk] = useState<QuitAsk & { quitting: boolean; failed?: string }>();
   const [renaming, setRenaming] = useState<Record<string, Sending>>({});
+  // The session whose shelf is open, and its events, followed while it is open (FLOW-APPROVE-PERMISSION).
+  const [shelfId, setShelfId] = useState<string>();
+  const [shelfView, setShelfView] = useState<SessionView>();
+  // The requests the open shelf has shown since it opened, which count toward its place (R09).
+  const [shelfShown, setShelfShown] = useState<ShelfShown>();
+  // The transcript and the shelf share Core's one subscription per session (session/subscriptions.ts).
+  const shared = useMemo(() => sharedSubscriptions(client), [client]);
+  const shelf = useMemo(() => shelfFollowing(shared, setShelfView), [shared]);
+  // The user's answers to permission requests, on their way or refused, by session: the shelf and the transcript
+  // read the same ones, so an answer sent from one is still on its way on the other (FLOW-APPROVE-PERMISSION-R18).
+  const [answers, setAnswers] = useState<Answers>({});
+  const sending = useMemo(() => answering(client, setAnswers), [client]);
 
   useEffect(() => {
     const running = connect(client, setView, undefined, (notification) => {
-      if (notification.method === "session.event") follower.current?.receive(notification.params.event);
+      if (notification.method !== "session.event") return;
+      // Each follower takes only its own session's events.
+      follower.current?.receive(notification.params.event);
+      shelf.receive(notification.params.event);
+      sending.receive(notification.params.event);
     });
     connection.current = running;
     return () => running.stop();
-  }, [client, attempt]);
+  }, [client, shelf, sending, attempt]);
 
   // With no session chosen, show the newest: reopening the window shows the
   // session that was running when it closed.
@@ -116,14 +136,14 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   useEffect(() => {
     if (activeId === undefined) return;
-    const following = follow(client, activeId, setSession);
+    const following = follow(shared(), activeId, setSession);
     follower.current = following;
     dispatch({ type: "followed", id: activeId });
     return () => {
       following.stop();
       if (follower.current === following) follower.current = null;
     };
-  }, [client, activeId]);
+  }, [shared, activeId]);
 
   // Subscribe on each new connection, from where the transcript left off;
   // without one, the session is offline and answers wait.
@@ -132,6 +152,25 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     if (link !== undefined) follower.current?.attached();
     else follower.current?.detached();
   }, [link, activeId]);
+
+  // The shelf is never open for the active session (FLOW-APPROVE-PERMISSION-R26): making its session active, by
+  // any way, closes it at once, and so does its session having nothing left to ask.
+  const openShelf = shelfId !== undefined && shelfId !== shownId ? shelfId : undefined;
+  useEffect(() => {
+    if (sessions.state === "ready") setShelfId((open) => shelfAfter(open, { type: "sessions", sessions: sessions.sessions, activeId: shownId }));
+  }, [sessions, shownId]);
+  const chevron = (id: string) => setShelfId((open) => shelfAfter(open, { type: "chevron", id, activeId: shownId }));
+  const closeShelf = useCallback((id: string) => setShelfId((open) => shelfAfter(open, { type: "close", id })), []);
+  // Its session is followed while the shelf is open, and no longer once it closes. The connection's changes come
+  // first, so a shelf opened with a new connection subscribes on it once.
+  useEffect(() => {
+    if (link !== undefined) shelf.attached();
+    else shelf.detached();
+  }, [shelf, link]);
+  const connected = link !== undefined;
+  // A change of connection alone is the effect above's to handle.
+  useEffect(() => shelf.follow(openShelf, connected), [shelf, openShelf]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => shelf.follow(undefined, false), [shelf]);
 
   // Quit from the tray icon: confirmed here first when sessions are busy (FLOW-CLOSE-AND-QUIT-R04). The
   // sessions are read afresh then; the rail's list stands in when Core cannot be asked.
@@ -184,27 +223,68 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     };
   }, [client, link, hostId]);
 
-  // Each list's error boundary tries again whenever the list changes.
-  const projects = projectsOf(view);
-  const projectList = projects.state === "ready" ? projects.projects : undefined;
+  // Each host's name, by id, read on each new connection: the rail names a project's host when it is not this
+  // machine. Best effort: a host not listed, or a read that failed or has not answered, is named by its id.
+  const [hostNames, setHostNames] = useState<Record<string, string>>({});
   useEffect(() => {
-    if (!projectList) return;
+    if (link === undefined) return;
     let live = true;
-    // Merged into what is known (session/workspaces.ts): a read that answers late never drops a workspace.
-    Promise.all(projectList.map((p) => client.call("workspace.list", { project_id: p.id }).catch(() => undefined))).then(
-      (reads) => live && setWorkspaces((known) => mergeWorkspaces(known, projectList, reads)),
+    client.call("host.list").then(
+      (hosts) => live && setHostNames(Object.fromEntries(hosts.map((h) => [h.id, h.name]))),
+      () => {},
     );
     return () => {
       live = false;
     };
-  }, [client, projectList]);
+  }, [client, link]);
+
+  // Each list's error boundary tries again whenever the list changes.
+  const projects = projectsOf(view);
+  const projectList = projects.state === "ready" ? projects.projects : undefined;
+  // The workspaces sessions run in that no read has listed, once every project's read has answered: a session made
+  // after the reads, or by another window, has the projects' workspaces read again, so its tile moves under its
+  // project. A workspace no read lists (its project gone) keeps the same key, so it is read again only once.
+  const allRead = projectList !== undefined && projectList.every((p) => p.id in workspaceReads);
+  const unknownWorkspaces =
+    allRead && sessions.state === "ready" ? [...new Set(sessions.sessions.map((s) => s.workspace_id).filter((id) => !(id in workspaces)))].sort().join(" ") : "";
+  useEffect(() => {
+    // Without a connection nothing has been read on the next one, so its sessions wait to be placed again.
+    if (!projectList) {
+      setWorkspaceReads({});
+      return;
+    }
+    let live = true;
+    // Each project's read is applied as it answers, so one slow host holds back only its own tiles; a session that
+    // fits no project waits for every read, which the Shell gives up on after its request time limit. Merged
+    // into what is known (session/workspaces.ts): a read that answers late never drops a workspace.
+    for (const p of projectList) {
+      client.call("workspace.list", { project_id: p.id }).then(
+        (read) => {
+          if (!live) return;
+          setWorkspaces((known) => mergeWorkspaces(known, projectList, read));
+          setWorkspaceReads((reads) => ({ ...reads, [p.id]: null }));
+        },
+        (error) => {
+          if (!live) return;
+          // What was known is kept, but not for a project no longer listed.
+          setWorkspaces((known) => mergeWorkspaces(known, projectList, undefined));
+          setWorkspaceReads((reads) => ({ ...reads, [p.id]: describeError(error) }));
+        },
+      );
+    }
+    return () => {
+      live = false;
+    };
+    // unknownWorkspaces is not read here: a change to it is a reason to read again.
+  }, [client, projectList, unknownWorkspaces]);
   const projectsVersion = useVersion(projects);
   const sessionsVersion = useVersion(sessions);
   const coreVersion = useVersion(view);
   const retrySubscribe = useCallback(() => follower.current?.attached(), []);
 
-  // Stable, so the transcript's memoised blocks do not re-render for it.
-  const decide = useCallback((requestId: string, behavior: "allow" | "deny") => follower.current?.decide(requestId, behavior), []);
+  // Stable for each session, so the transcript's memoised blocks do not re-render for it.
+  const decide = useCallback((id: string, requestId: string, decision: Decision) => sending.decide(id, requestId, decision), [sending]);
+  const decideShown = useMemo(() => (requestId: string, decision: Decision) => shownId !== undefined && decide(shownId, requestId, decision), [decide, shownId]);
 
   // New session shows the screen; leaving it, by choosing a session, leaves nothing behind (FLOW-NEW-SESSION-R03).
   const newSession = (project: Project) => dispatch({ type: "newSession", projectId: project.id });
@@ -224,7 +304,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     setLastUsed((l) => ({ ...l, [values.project_id]: values }));
     // Best effort: a failure only means the screen starts at these values in this window alone.
     client.call("settings.set", { patch: rememberPatch(values) }).catch(() => {});
-    // Known at once, so the rail names the new session's workspace as its tile appears.
+    // Known at once, so the rail puts the new session's tile under its project as it appears (FLOW-NEW-SESSION-R13).
     setWorkspaces((known) => ({ ...known, [outcome.workspace.id]: outcome.workspace }));
     connection.current?.reload("sessions");
     dispatch({ type: "started", id: outcome.session.id, text, firstSend: outcome.firstSend });
@@ -303,15 +383,18 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Said beneath an untrusted project while a session from before the withdrawal still runs; derived on each
   // render, so it goes once those sessions stop or the project is trusted again. A session's state arrives
   // with its tile (`session.tile`), so that is the state read.
-  const trustNotes: Record<string, string> = {};
+  const keepingTrust: string[] = [];
   if (projects.state === "ready" && sessions.state === "ready") {
     const live = sessions.sessions.filter((s) => s.tile.state !== "ended" && s.tile.state !== "error");
     for (const p of projects.projects) {
-      if (!p.trusted && live.some((s) => withdrawn[p.id]?.includes(s.workspace_id))) {
-        trustNotes[p.id] = "Running sessions keep their current settings until they are stopped.";
-      }
+      if (!p.trusted && live.some((s) => withdrawn[p.id]?.includes(s.workspace_id))) keepingTrust.push(p.id);
     }
   }
+  // Why each project's workspaces could not be read; and whether some project's are still being read, in which
+  // case a session the rail cannot place yet waits rather than sit at the end.
+  const workspaceErrors: Record<string, string> = {};
+  for (const [id, failure] of Object.entries(workspaceReads)) if (failure !== null) workspaceErrors[id] = failure;
+  const placing = projectList !== undefined && !allRead;
 
   // The title as last listed, so the header keeps it while the list reloads
   // or Core is away.
@@ -332,16 +415,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   orderedBy.current = order.kept;
   const screenProjects = knownList && order.projects;
 
-  // The rail's name for each workspace: its project, and its branch or the root (LAY-SHELL).
   const projectById = new Map(projectList?.map((p) => [p.id, p]));
-  const workspaceNames: Record<string, WorkspaceName> = {};
-  for (const w of Object.values(workspaces)) {
-    const project = projectById.get(w.project_id);
-    if (!project) continue;
-    // A workspace without a branch is named by its path, set as a path is.
-    workspaceNames[w.id] =
-      w.kind === "root" ? { project: project.name, name: "Root workspace" } : w.vcs_ref ? { project: project.name, name: w.vcs_ref } : { project: project.name, name: w.path, path: true };
-  }
 
   // The session controls under the active session show its own values, as Core lists them (FLOW-NEW-SESSION-R12);
   // they change nothing during a session. Absent until the session's workspace and project are known.
@@ -351,15 +425,63 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const sessionControls = listed && listedWorkspace && sessionShown(listed, listedWorkspace, backends[listed.host_id] ?? []);
   const used = listed && contextUsed(listed.tile);
 
+  // The open shelf as the rail draws it: the session's oldest request, with its readouts as its tile shows them.
+  const shelfSession = openShelf !== undefined && sessions.state === "ready" ? sessions.sessions.find((s) => s.id === openShelf) : undefined;
+  const shelfShows =
+    shelfSession &&
+    shelfOf(
+      shelfView?.id === shelfSession.id ? shelfView : undefined,
+      shelfSession.tile.pending,
+      shelfShown?.id === shelfSession.id ? shelfShown.requests : undefined,
+    );
+  // Derived as the shelf renders, so the count is right on the render that shows the next request.
+  const nextShown = shownAfter(shelfShown, shelfSession?.id, shelfShows && shownRequest(shelfShows));
+  if (nextShown !== shelfShown) setShelfShown(nextShown);
+  const shelfOpen = (() => {
+    if (!shelfSession || !shelfShows) return undefined;
+    const tile = tileOf(shelfSession, backends);
+    return {
+      id: shelfSession.id,
+      tone: shelfTone(shelfShows),
+      render: (domId: string) => (
+        <Shelf
+          id={domId}
+          tile={tile}
+          shows={shelfShows}
+          onRetry={shelf.attached}
+          answers={answers[shelfSession.id]}
+          live={connected}
+          onDecide={(requestId, decision) => decide(shelfSession.id, requestId, decision)}
+        />
+      ),
+    };
+  })();
+
   return (
     <div className="app">
       <nav className="rail" aria-label="Rail">
-        <div className="rail-lists">
-          <ErrorBoundary what="The projects" resetKey={projectsVersion}>
-            <ProjectList view={projects} onNewSession={newSession} onSetTrust={setTrust} trusting={trusting} notes={trustNotes} />
-          </ErrorBoundary>
-          <ErrorBoundary what="The sessions" resetKey={sessionsVersion}>
-            <SessionList view={sessions} activeId={shownId} onSelect={select} workspaces={workspaceNames} backends={backends} unseen={unseen.ids} />
+        <div className="rail-body">
+          <ErrorBoundary what={t("rail.tree.boundaryName")} resetKey={`${projectsVersion}:${sessionsVersion}`}>
+            <RailTree
+              projects={projects}
+              sessions={sessions}
+              workspaces={workspaces}
+              workspaceErrors={workspaceErrors}
+              placing={placing}
+              activeId={shownId}
+              onSelect={select}
+              onNewSession={newSession}
+              onSetTrust={setTrust}
+              trusting={trusting}
+              keepingTrust={keepingTrust}
+              localHost={hello?.host.id}
+              hostNames={hostNames}
+              backends={backends}
+              unseen={unseen.ids}
+              shelf={shelfOpen}
+              onChevron={chevron}
+              onCloseShelf={closeShelf}
+            />
           </ErrorBoundary>
         </div>
         <div className="rail-core">
@@ -380,7 +502,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               title={(activeId && titles.current[activeId]) || t("rail.tile.untitledLabel")}
               untitled={!(activeId && titles.current[activeId])}
               view={shown}
-              onDecide={decide}
+              answers={answers[shown.id]}
+              onDecide={decideShown}
               onRetry={retrySubscribe}
               onRename={(title) => rename(shown.id, title)}
               renaming={renaming[shown.id]}

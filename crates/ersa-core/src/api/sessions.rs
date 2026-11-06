@@ -2,15 +2,19 @@
 //! parsed params and returns the typed result or an [`ApiError`]; the work
 //! is the session manager's.
 
+use std::time::Duration;
+
 use ersa_adapter::{BackendChoices, Direction, PermissionDecision, SessionConfig};
 use ersa_protocol::core_api::{
-    AnswerQuestionParams, Choice, DecidePermissionParams, Empty, IdParams, RawDirection,
-    RawLogEntry, RawLogParams, Session, SessionCreateParams, SessionSendParams, SessionSendResult,
-    SetModeParams, SetTitleParams, SubscribeParams, SubscribeResult, WorkspaceState,
+    AnswerQuestionParams, Attachment, AttachmentKind, Choice, DecidePermissionParams, Empty,
+    IdParams, InspectParams, Inspected, RawDirection, RawLogEntry, RawLogParams, Session,
+    SessionCreateParams, SessionSendParams, SessionSendResult, SetModeParams, SetTitleParams,
+    SubscribeParams, SubscribeResult, WorkspaceState,
 };
 use serde_json::Value;
 
 use super::{ApiError, Peer};
+use crate::attachments::{self, InspectError};
 use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
 use crate::state::Core;
 
@@ -183,13 +187,82 @@ pub(super) async fn remove(core: &Core, params: IdParams) -> Result<Session, Api
     Ok(core.sessions.remove(&params.id).await?)
 }
 
+/// `session.send`. `peer` is the connection's, whose lane for this session
+/// opens once the send has its slot: an interrupt or an answer sent behind
+/// it never waits for its attachments to be checked and copied.
 pub(super) async fn send(
     core: &Core,
+    peer: &Peer,
     params: SessionSendParams,
 ) -> Result<SessionSendResult, ApiError> {
     find(core, &params.id).await?;
-    let turn = core.sessions.send(&params.id, &params.text).await?;
+    for (index, attachment) in params.attachments.iter().enumerate() {
+        well_formed(attachment)
+            .map_err(|e| ApiError::invalid_params(format!("attachments[{index}]: {e}")))?;
+    }
+    let turn = core
+        .sessions
+        .send(&params.id, params.text, params.attachments, || {
+            peer.open_lane()
+        })
+        .await?;
     Ok(SessionSendResult { turn })
+}
+
+/// An attachment of one of the schema's two shapes: a path, or a pasted
+/// image's `media_type` and `data`.
+fn well_formed(attachment: &Attachment) -> Result<(), &'static str> {
+    let pasted = attachment.media_type.is_some() || attachment.data.is_some();
+    match (attachment.kind, &attachment.path, pasted) {
+        (_, Some(_), false) => Ok(()),
+        (AttachmentKind::Image, None, true)
+            if attachment.media_type.is_some() && attachment.data.is_some() =>
+        {
+            Ok(())
+        }
+        (AttachmentKind::Image, _, _) => Err("an image takes a path, or media_type and data"),
+        _ => Err("a file or folder takes a path"),
+    }
+}
+
+/// How long `attachment.inspect` may take.
+const INSPECT_LIMIT: Duration = Duration::from_secs(30);
+
+/// The most inspects that may be reading a path at once, Core-wide. An
+/// inspect answered at its limit leaves its thread waiting on the file
+/// system, holding its place here until the read returns, so a path that
+/// hangs, asked about again and again, takes this many threads, never all
+/// of Core's.
+static INSPECTING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
+
+/// `attachment.inspect` (PROTO-CORE-API-R24), on the local host: the only
+/// one Core reaches yet.
+pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspected, ApiError> {
+    if params.host_id != LOCAL_HOST_ID {
+        return Err(ApiError::not_found(format!("no host {}", params.host_id)));
+    }
+    let images = core.sessions.image_types();
+    let path = params.path;
+    let place = INSPECTING.try_acquire().map_err(|_| {
+        ApiError::invalid_params(
+            "too many paths asked about are not answering; try again once they do",
+        )
+    })?;
+    // A blocking thread: a network drive that no longer answers holds that
+    // thread, never the request, which is answered at the limit.
+    let job = tokio::task::spawn_blocking(move || {
+        let _place = place;
+        attachments::inspect(&path, &images)
+    });
+    match tokio::time::timeout(INSPECT_LIMIT, job).await {
+        Ok(Ok(Ok(inspected))) => Ok(inspected),
+        Ok(Ok(Err(InspectError::NotFound(message)))) => Err(ApiError::not_found(message)),
+        Ok(Ok(Err(InspectError::Invalid(message)))) => Err(ApiError::invalid_params(message)),
+        Ok(Err(e)) => Err(ApiError::internal(format!("inspecting failed: {e}"))),
+        Err(_) => Err(ApiError::invalid_params(format!(
+            "the path did not answer within {INSPECT_LIMIT:?}"
+        ))),
+    }
 }
 
 pub(super) async fn interrupt(core: &Core, params: IdParams) -> Result<Session, ApiError> {

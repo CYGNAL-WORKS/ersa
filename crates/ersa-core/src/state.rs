@@ -39,6 +39,9 @@ pub struct CoreConfig {
     /// that would change anything (see `replay`). Set by
     /// `Server::bind_replay`.
     pub replay: bool,
+    /// A pause after each chunk an attachment's copy writes. Zero, except
+    /// in tests that need a copy to be under way long enough to cancel it.
+    pub copy_pause: Duration,
 }
 
 /// The default for [`CoreConfig::max_line_bytes`]: 16 MiB, far above any
@@ -65,6 +68,7 @@ impl CoreConfig {
             handshake_timeout: HANDSHAKE_TIMEOUT,
             max_line_bytes: MAX_LINE_BYTES,
             replay: false,
+            copy_pause: Duration::ZERO,
         })
     }
 
@@ -113,9 +117,11 @@ impl Core {
         adapters: Vec<Arc<dyn Adapter>>,
         app_log: Arc<AppLog>,
     ) -> Core {
+        let sessions = SessionManager::new(store.clone(), adapters, app_log)
+            .with_copy_pause(config.copy_pause);
         Core {
             config,
-            sessions: SessionManager::new(store.clone(), adapters, app_log),
+            sessions,
             store,
             local_transport: Arc::new(LocalTreeTransport::for_commands()),
             local_session_transport: Arc::new(LocalTreeTransport::new()),

@@ -39,6 +39,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::io;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
@@ -59,6 +60,10 @@ use crate::app_log::{AppLog, Facts, LifecycleFact};
 use crate::persistence::{self, SessionRow, Store, now_rfc3339};
 use crate::projection::View;
 use crate::raw_log::RawLog;
+
+mod send;
+
+pub use send::Pacer;
 
 /// How many events may wait for one subscriber before it counts as unable
 /// to keep up. Streaming text produces many small events, so this is
@@ -103,6 +108,9 @@ const MAX_VIEW_BYTES: usize = 64 * 1024 * 1024;
 /// the turn it started.
 const SEND_SETTLE: Duration = Duration::from_secs(10);
 
+/// How long `session.remove` waits to remove the session's scratch folder.
+const SCRATCH_REMOVAL: Duration = Duration::from_secs(30);
+
 /// How long reading a session's record may take before the session opens
 /// with an error saying so. Records are local files, normally read in well
 /// under a second; a file system that hangs (a network drive, a synced
@@ -136,6 +144,12 @@ pub enum SessionError {
     Adapter(AdapterError),
     #[error("{0}")]
     Internal(String),
+    /// The attachment at `index` of a `session.send` can't be sent.
+    #[error("attachment {index}: {reason}")]
+    AttachmentRefused { index: usize, reason: String },
+    /// Core handed a message over but can't tell whether the backend took it.
+    #[error("{0}")]
+    DeliveryUnknown(String),
 }
 
 /// Every session Core knows, and the adapters it can start them with.
@@ -149,6 +163,8 @@ pub struct SessionManager {
     sessions: Mutex<HashMap<String, Arc<Handle>>>,
     /// Where `session.tile` notifications go, for every attached client.
     tiles: Arc<TileHub>,
+    /// A pause after each chunk an attachment's copy writes, for tests.
+    copy_pause: Duration,
     /// Set by [`SessionManager::stop_all`]; no session starts after it.
     /// Read and written under the `sessions` lock.
     closing: AtomicBool,
@@ -194,6 +210,11 @@ struct Handle {
     /// Set when the session is removed, for reads of its record that
     /// outlive it ([`read_unless_removed`]).
     removed: Arc<AtomicBool>,
+    /// The send under way, if any: one at a time per session.
+    sending: Mutex<Option<send::Sending>>,
+    /// Held by whatever works in the session's scratch folder: a send's
+    /// copying, and removing the folder with the session.
+    scratch: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// A read of a session's record: the record's version when the read began,
@@ -509,6 +530,8 @@ impl Handle {
             version_check: tokio::sync::Mutex::new(None),
             summary_read: tokio::sync::Mutex::new(None),
             removed: Arc::default(),
+            sending: Mutex::default(),
+            scratch: Arc::default(),
         }
     }
 
@@ -574,6 +597,7 @@ impl Handle {
             state,
             created_at: presented.created_at,
             last_event_seq: hub.last_seq(),
+            sending: lock(&self.sending).as_ref().map(send::Sending::phase),
             tile,
         }
     }
@@ -590,8 +614,16 @@ impl SessionManager {
             app_log,
             sessions: Mutex::new(HashMap::new()),
             tiles: Arc::default(),
+            copy_pause: Duration::ZERO,
             closing: AtomicBool::new(false),
         }
+    }
+
+    /// The same manager, pausing after each chunk an attachment's copy
+    /// writes ([`crate::CoreConfig::copy_pause`]).
+    pub fn with_copy_pause(mut self, copy_pause: Duration) -> Self {
+        self.copy_pause = copy_pause;
+        self
     }
 
     /// Loads every session at startup, with how each last ended, from
@@ -685,6 +717,19 @@ impl SessionManager {
     /// session.
     pub fn tile_feed(&self) -> TileFeed {
         self.tiles.feed()
+    }
+
+    /// Every image type some backend on this host takes, for telling an
+    /// image by its first bytes.
+    pub fn image_types(&self) -> Vec<&'static str> {
+        let mut types: Vec<&'static str> = self
+            .adapters
+            .values()
+            .flat_map(|adapter| adapter.image_limits().media_types.iter().copied())
+            .collect();
+        types.sort_unstable();
+        types.dedup();
+        types
     }
 
     fn handle(&self, id: &str) -> Result<Arc<Handle>, SessionError> {
@@ -890,6 +935,18 @@ impl SessionManager {
     /// Forgets a stopped session. Its record is the backend's, and stays.
     pub async fn remove(&self, id: &str) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
+        // A session whose ending is already queued is only winding down: a
+        // client may have seen `session.ended` before Core let it go, and
+        // can remove it, so wait for it to finish. Waited for before taking
+        // `op`, so nothing else on the session queues behind the wait.
+        if let Some(live) = handle.live()
+            && live.sink.has_ended()
+            && wait_finished(&live, STOP_TIMEOUT).await.is_err()
+        {
+            return Err(SessionError::Internal(format!(
+                "session {id} has ended, but Core has not finished with it within {STOP_TIMEOUT:?}"
+            )));
+        }
         let _op = handle.op.lock().await;
         if handle.live().is_some() {
             return Err(SessionError::InvalidState(format!(
@@ -898,6 +955,32 @@ impl SessionManager {
         }
         let session = handle.describe();
         self.store.delete_session(id.to_string()).await?;
+        // Its scratch folder goes with it (PROTO-CORE-API-R28), once no
+        // copying holds it. Never past a bound: a file system that hangs
+        // leaves the folder behind, logged, rather than hold up the
+        // removal.
+        let cwd = lock(&handle.row).cwd.clone();
+        let scratch = Arc::clone(&handle.scratch);
+        let session_id = id.to_string();
+        // The scratch folder is waited for here, never on a thread.
+        let removal = tokio::time::timeout(SCRATCH_REMOVAL, async move {
+            let held = scratch.lock_owned().await;
+            tokio::task::spawn_blocking(move || {
+                let _held = held;
+                crate::attachments::remove_scratch(Path::new(&cwd), &session_id)
+            })
+            .await
+        });
+        match removal.await {
+            Ok(Ok(Ok(()))) => {}
+            Ok(Ok(Err(e))) => {
+                tracing::warn!(session = %id, error = %e, "removing the scratch folder failed");
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(session = %id, error = %e, "removing the scratch folder failed")
+            }
+            Err(_) => tracing::warn!(session = %id, "removing the scratch folder took too long"),
+        }
         lock(&self.sessions).remove(id);
         self.app_log.forget(id);
         // What the adapter kept of its record goes too, and what a read
@@ -1010,48 +1093,12 @@ impl SessionManager {
         Ok(handle.describe())
     }
 
-    /// Sends a user message and returns the turn it belongs to.
-    pub async fn send(&self, id: &str, text: &str) -> Result<u32, SessionError> {
-        let handle = self.handle(id)?;
-        let live = handle.live().ok_or_else(|| handle.not_running())?;
-        // A start that failed sets the failure before it lets go of the
-        // start, so the reason is there when the wait ends.
-        let session = match live.wait_ready().await {
-            Ok(session) => session,
-            Err(SessionError::InvalidState(_)) if lock(&handle.start_failure).is_some() => {
-                // The session's run ends just after; answer once it has, so
-                // `session.list` already says the session failed and the
-                // sender can tell a failed start from a slow one by its
-                // state. Bounded: a run that has not ended in time is
-                // answered as it stands.
-                let _ = wait_finished(&live, STOP_TIMEOUT).await;
-                return Err(handle.not_running());
-            }
-            Err(e) => return Err(e),
-        };
-        let text = text.to_string();
-        bounded(async move { session.send_user(&text).await }).await?;
-        // The adapter recorded the message before writing it, so the sink
-        // has it. Wait for the pipeline to project it: the turn it starts
-        // (or joins) is known then.
-        let target = live.sink.next_index();
-        let mut progress = live.progress.clone();
-        let settled = matches!(
-            tokio::time::timeout(SEND_SETTLE, progress.wait_for(|p| p.lines >= target)).await,
-            Ok(Ok(_))
-        );
-        if !settled {
-            // Sent, but not projected in time: the turn is not known, and a
-            // made-up number would hide that the pipeline is falling behind.
-            return Err(SessionError::Internal(
-                "the message was sent, but Core could not project it in time".into(),
-            ));
-        }
-        let turn = progress.borrow().turn;
-        Ok(turn.max(1))
-    }
-
+    /// Interrupts the running turn, or cancels a message not yet handed to
+    /// the backend instead (PROTO-CORE-API-R25).
     pub async fn interrupt(&self, id: &str) -> Result<(), SessionError> {
+        if send::cancel(&*self.handle(id)?) {
+            return Ok(());
+        }
         let live = self.live(id)?;
         let session = live.wait_ready().await?;
         bounded(async move { session.interrupt().await }).await
@@ -1527,6 +1574,9 @@ struct CoreSink {
 
 struct SinkInner {
     next_index: u64,
+    /// How many lines Core has written to the backend, as the adapter
+    /// recorded them before writing.
+    host_lines: u64,
     /// `None` once Core has closed the sink, which ends the pipeline.
     fed: Option<mpsc::UnboundedSender<Fed>>,
     start_done: bool,
@@ -1550,6 +1600,7 @@ impl CoreSink {
             app_log,
             inner: Mutex::new(SinkInner {
                 next_index: 0,
+                host_lines: 0,
                 fed: Some(fed),
                 start_done: false,
                 deferred_exit: None,
@@ -1579,6 +1630,9 @@ impl CoreSink {
             line,
         };
         inner.next_index += 1;
+        if dir == Direction::Host {
+            inner.host_lines += 1;
+        }
         Self::queue(inner, Fed::Line(raw));
     }
 
@@ -1596,9 +1650,20 @@ impl CoreSink {
         self.push_fact(&mut lock(&self.inner), fact);
     }
 
+    /// Whether the fact that ends the session is queued. Read under the lock
+    /// it is queued under, so it holds for anyone who has seen that fact.
+    fn has_ended(&self) -> bool {
+        lock(&self.inner).ended
+    }
+
     /// The index the next line will get.
     fn next_index(&self) -> u64 {
         lock(&self.inner).next_index
+    }
+
+    /// How many lines have been written to the backend.
+    fn host_lines(&self) -> u64 {
+        lock(&self.inner).host_lines
     }
 
     fn exit_fact(&self, exit: io::Result<ProcessExit>) -> LifecycleFact {
@@ -1954,11 +2019,16 @@ fn send_tile(tiles: &TileHub, session_id: &str, tile: &Tile) {
         session_id: session_id.to_string(),
         tile: tile.clone(),
     };
-    tiles.publish(session_id, notification_line("session.tile", &params));
+    tiles.publish(
+        session_id,
+        Latest::Tile,
+        notification_line("session.tile", &params),
+    );
 }
 
-/// Hands `session.tile` notifications to every attached connection,
-/// keeping only the latest per session for each: a tile is the whole state,
+/// Hands `session.tile` and `session.send_progress` notifications to every
+/// attached connection, keeping only the latest per session (and kind) for
+/// each: a tile is the whole state,
 /// so a connection busy with a long replay gets the newest one when it is
 /// ready, never a backlog, and is never closed for it.
 #[derive(Default)]
@@ -1968,8 +2038,8 @@ struct TileHub {
 
 #[derive(Default)]
 struct TileInbox {
-    /// The newest tile line per session not yet taken.
-    latest: Mutex<HashMap<String, Arc<String>>>,
+    /// The newest line of each kind per session not yet taken.
+    latest: Mutex<HashMap<(String, Latest), Arc<String>>>,
     ready: Notify,
 }
 
@@ -1980,14 +2050,22 @@ impl TileHub {
         TileFeed { inbox }
     }
 
-    /// Drops any tile for `session_id` not yet taken, for a removed session.
+    /// Drops any tile or send progress for `session_id` not yet taken, for a
+    /// removed session.
     fn forget(&self, session_id: &str) {
+        self.forget_one(session_id, Latest::Tile);
+        self.forget_one(session_id, Latest::SendProgress);
+    }
+
+    /// Drops the session's line of one kind not yet taken.
+    fn forget_one(&self, session_id: &str, kind: Latest) {
+        let key = (session_id.to_string(), kind);
         for inbox in lock(&self.inboxes).iter().filter_map(Weak::upgrade) {
-            lock(&inbox.latest).remove(session_id);
+            lock(&inbox.latest).remove(&key);
         }
     }
 
-    fn publish(&self, session_id: &str, line: String) {
+    fn publish(&self, session_id: &str, kind: Latest, line: String) {
         let line = Arc::new(line);
         let mut inboxes = lock(&self.inboxes);
         // A connection that has gone dropped its feed; forget its inbox.
@@ -1995,12 +2073,19 @@ impl TileHub {
             let Some(inbox) = inbox.upgrade() else {
                 return false;
             };
-            lock(&inbox.latest).insert(session_id.to_string(), Arc::clone(&line));
+            lock(&inbox.latest).insert((session_id.to_string(), kind), Arc::clone(&line));
             // Stores a permit when nobody waits, so a wake is never lost.
             inbox.ready.notify_one();
             true
         });
     }
+}
+
+/// The kinds of notification the hub keeps only the newest of, per session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Latest {
+    Tile,
+    SendProgress,
 }
 
 /// One connection's view of tile changes.
@@ -2426,6 +2511,124 @@ mod tests {
         adapter.summary.notify_one();
         tokio::time::sleep(Duration::from_millis(1)).await;
         assert_eq!(adapter.forgets.load(Ordering::SeqCst), 3);
+    }
+
+    /// Makes `s-gated` live by hand, as the session task does, and returns
+    /// its sink and the sender that marks it finished.
+    fn make_live(manager: &SessionManager) -> (Arc<CoreSink>, watch::Sender<bool>) {
+        let handle = manager.handle("s-gated").unwrap();
+        let sink = Arc::new(CoreSink::new(
+            "s-gated",
+            Arc::clone(&manager.app_log),
+            mpsc::unbounded_channel().0,
+        ));
+        let finished = watch::Sender::new(false);
+        let live = Live {
+            sink: Arc::clone(&sink),
+            started: watch::channel(Started::Pending).1,
+            cancel: watch::Sender::new(false),
+            progress: watch::channel(Progress::default()).1,
+            finished: finished.subscribe(),
+        };
+        *lock(&handle.live) = Some(Arc::new(live));
+        (sink, finished)
+    }
+
+    // verifies: PROTO-CORE-API-R41
+    // Paused time: the wind-down below takes as long as the test says.
+    #[tokio::test(start_paused = true)]
+    async fn a_session_whose_end_was_announced_is_removed_once_it_winds_down() {
+        let adapter = Arc::new(GatedReads::default());
+        // The two ways a session ends: its process exits, or its start fails.
+        let endings: [fn(&CoreSink); 2] = [
+            |sink| {
+                sink.start_finished(Ok(()));
+                sink.process_exited(Ok(ProcessExit { code: Some(0) }));
+            },
+            |sink| {
+                sink.start_finished(Err(StartFailure {
+                    message: "no".into(),
+                    stopped_by_user: false,
+                }))
+            },
+        ];
+        for end in endings {
+            let dir = tempfile::tempdir().unwrap();
+            let manager = gated_manager(dir.path(), &adapter);
+            let (sink, finished) = make_live(&manager);
+            // Running and not ended: refused.
+            assert!(matches!(
+                manager.remove("s-gated").await,
+                Err(SessionError::InvalidState(_))
+            ));
+            // Its end is queued, so a client may have seen `session.ended`,
+            // while Core still holds it live for a while.
+            end(&sink);
+            let handle = manager.handle("s-gated").unwrap();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                *lock(&handle.live) = None;
+                finished.send_replace(true);
+            });
+            manager.remove("s-gated").await.unwrap();
+        }
+    }
+
+    // verifies: PROTO-CORE-API-R41
+    // Paused time: the wait runs out as soon as nothing else can happen.
+    #[tokio::test(start_paused = true)]
+    async fn an_ended_session_that_never_winds_down_is_refused_without_holding_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let adapter = Arc::new(GatedReads::default());
+        let manager = Arc::new(gated_manager(dir.path(), &adapter));
+        // Stored too, in a workspace of its own, so a removal shows there.
+        let store = &manager.store;
+        store.ensure_local_host("pc".into()).await.unwrap();
+        let project = ersa_protocol::core_api::Project {
+            id: "p".into(),
+            host_id: persistence::LOCAL_HOST_ID.into(),
+            path: "C:/work".into(),
+            name: "work".into(),
+            vcs: ersa_protocol::core_api::Vcs::Git,
+            trusted: false,
+        };
+        let workspace = store
+            .insert_project(project, "c:/work".into())
+            .await
+            .unwrap();
+        let mut row = lock(&manager.handle("s-gated").unwrap().row).clone();
+        row.workspace_id = workspace.id;
+        store.insert_session(row).await.unwrap();
+        let (sink, _finished) = make_live(&manager);
+        sink.start_finished(Ok(()));
+        sink.process_exited(Ok(ProcessExit { code: Some(0) }));
+        let removing = tokio::spawn({
+            let manager = Arc::clone(&manager);
+            async move { manager.remove("s-gated").await }
+        });
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        // While it waits, the session's other operations are not held up.
+        let handle = manager.handle("s-gated").unwrap();
+        assert!(handle.op.try_lock().is_ok());
+        // Core's own wind-down is what stalled, and the error says so.
+        match removing.await.unwrap() {
+            Err(SessionError::Internal(message)) => {
+                assert!(message.contains("has ended"), "{message}");
+            }
+            other => panic!("expected an internal error, got {other:?}"),
+        }
+        // Giving up removed nothing: the session, its row and what the
+        // adapter keeps of its record are all still there.
+        assert!(manager.handle("s-gated").is_ok());
+        assert!(
+            manager
+                .store
+                .session("s-gated".into())
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(adapter.forgets.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
