@@ -465,13 +465,33 @@ describe("a tile's menu, and renaming on the tile", () => {
     expect(document.activeElement).toBe(menu());
     fireEvent.keyDown(menu() as HTMLElement, { key: "Escape" });
     expect(document.activeElement).toBe(tile("Fix the build"));
+    // It fades out where it was, not under More.
+    expect(menu()?.getAttribute("data-place")).toBe("point");
+    await settle();
 
     for (const press of [{ key: "ContextMenu" }, { key: "F10", shiftKey: true }]) {
       fireEvent.keyDown(tile("Fix the build"), press);
+      // The key may send its own contextmenu event after the keydown: the menu stays at the tile, on its first item.
+      fireEvent.contextMenu(tile("Fix the build"), { clientX: 0, clientY: 0 });
+      expect(menu()?.getAttribute("data-place")).toBe("below");
       // From the keyboard, focus goes to the first item.
       expect(document.activeElement?.textContent).toMatch(/^Rename/);
       fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
       expect(document.activeElement).toBe(tile("Fix the build"));
     }
+  });
+
+  it("offers Rename as unavailable, with the reason, while the session starts, and F2 does nothing", async () => {
+    const starting = titled.map((s, i) => (i === 0 ? { ...s, state: "starting" as const, tile: { state: "starting" as const, pending: [] } } : s));
+    const core = await open({ "session.list": () => starting });
+    fireEvent.click(within(rail()).getByRole("button", { name: "More for Fix the build" }));
+    const item = screen.getByRole("menuitem", { name: /^Rename/ });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.textContent).toContain("Available once the session has started");
+    fireEvent.click(item);
+    expect(field()).toBeNull();
+    fireEvent.keyDown(tile("Fix the build"), { key: "F2" });
+    expect(field()).toBeNull();
+    expect(renames(core)).toEqual([]);
   });
 });

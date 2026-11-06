@@ -22,7 +22,7 @@ import type { Sending } from "../session/follow";
 import { ContextRing } from "./ContextRing";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose, type MenuPlace } from "./Menu";
-import { renameTo } from "./SessionTitle";
+import { useTitleDraft } from "./SessionTitle";
 import "./SessionTile.css";
 
 /** Each host's backends, by host id, as `backend.list` gives them. */
@@ -89,60 +89,40 @@ export function SessionTile({
   const field = useRef<HTMLInputElement>(null);
   // The More button names the anchor the menu opens below.
   const anchor = `--tile-more-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
-  // The tile's menu, while open: where it sits, where focus went, and what opened it, which takes focus back.
-  const [menu, setMenu] = useState<{ place: MenuPlace; focus: "item" | "menu" | "none"; from: "more" | "tile" } | undefined>(
-    initialMenu ? { place: { anchor }, focus: "none", from: "more" } : undefined,
+  // The tile's menu: whether it is open, where it sits, where focus went, and what opened it, which takes focus back.
+  // Kept as it closes, so the menu fades out where it was.
+  const [menu, setMenu] = useState<{ open: boolean; place: MenuPlace; focus: "item" | "menu" | "none"; from: "more" | "tile" }>(
+    { open: initialMenu ?? false, place: { anchor }, focus: "none", from: "more" },
   );
+  const opener = useRef(menu.from);
+  opener.current = menu.from;
   const closeMenu = useCallback((how: MenuClose) => {
-    setMenu((open) => {
-      // Closing gives focus back to what opened it, unless the user put focus somewhere else.
-      if (open && how !== "away") (open.from === "more" ? more.current : tile.current)?.focus({ preventScroll: true });
-      return undefined;
-    });
+    setMenu((was) => ({ ...was, open: false }));
+    // Closing gives focus back to what opened it, unless the user put focus somewhere else.
+    if (how !== "away") (opener.current === "more" ? more.current : tile.current)?.focus({ preventScroll: true });
   }, []);
   const insideMenu = useCallback(() => [more.current], []);
 
   // The title being edited on the tile, in place of the title; undefined while it is only shown.
-  const [draft, setDraft] = useState<string | undefined>(initialDraft);
-  const busy = rename?.renaming?.state === "sending";
-  const refused = rename?.renaming?.state === "failed" ? rename.renaming.message : undefined;
-  const edit = () => {
-    if (!rename || rename.unavailable !== undefined) return;
-    rename.onReset();
-    setDraft(session.title ?? "");
-  };
-  // The field takes focus as it opens, its text selected to type over; a refusal puts focus back in it.
+  // The title being edited on the tile, in place of the title (useTitleDraft, shared with the header).
+  const { draft, setDraft, busy, refused, edit, save, close: endEdit } = useTitleDraft({
+    title: session.title ?? "",
+    untitled: !session.title,
+    onRename: rename?.onSave,
+    renaming: rename?.renaming,
+    onReset: rename?.onReset,
+    disabled: rename?.unavailable !== undefined,
+    initialDraft,
+    field,
+    home: tile,
+  });
+  // The field takes focus as it opens, its text selected to type over.
   const editing = draft !== undefined;
   useEffect(() => {
     if (!editing || initialDraft !== undefined) return;
     field.current?.focus();
     field.current?.select();
   }, [editing, initialDraft]);
-  useEffect(() => {
-    if (refused !== undefined && initialDraft === undefined) field.current?.focus();
-  }, [refused, initialDraft]);
-  // Editing ends with focus back on the tile, where the user started it.
-  const returnFocus = useRef(false);
-  useEffect(() => {
-    if (editing || !returnFocus.current) return;
-    returnFocus.current = false;
-    tile.current?.focus({ preventScroll: true });
-  }, [editing]);
-  const endEdit = () => {
-    returnFocus.current = true;
-    setDraft(undefined);
-    rename?.onReset();
-  };
-  const save = async () => {
-    if (draft === undefined || busy || !rename) return;
-    const title = renameTo(draft, session.title ?? "", false);
-    // A blank title is not sent, and an unchanged one needs no sending.
-    if (title === undefined) {
-      if (draft.trim() !== "") endEdit();
-      return;
-    }
-    if (await rename.onSave(title)) endEdit();
-  };
   const needsYou = view.mark === "needsYou";
   // The chevron is the shelf's handle on every tile but the active one, whose requests the transcript answers
   // (FLOW-APPROVE-PERMISSION-R26); there it stays a mark that names the want.
@@ -161,9 +141,14 @@ export function SessionTile({
         onClick={() => onSelect(session.id)}
         onContextMenu={(event) => {
           if (!rename) return;
-          // A right-click opens the tile's menu at the pointer.
+          // A right-click opens the tile's menu at the pointer. The context-menu key and Shift+F10 may send this
+          // event too, after their own keydown has opened the menu at the tile: that one stays.
           event.preventDefault();
-          setMenu({ place: { x: event.clientX, y: event.clientY }, focus: "menu", from: "tile" });
+          setMenu((was) =>
+            was.open && was.focus === "item" && was.from === "tile"
+              ? was
+              : { open: true, place: { x: event.clientX, y: event.clientY }, focus: "menu", from: "tile" },
+          );
         }}
         onKeyDown={(event) => {
           if (!rename) return;
@@ -173,7 +158,7 @@ export function SessionTile({
           } else if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
             // The context-menu key and Shift+F10 open the same menu, at the tile, with focus on its first item.
             event.preventDefault();
-            setMenu({ place: { anchor }, focus: "item", from: "tile" });
+            setMenu({ open: true, place: { anchor }, focus: "item", from: "tile" });
           }
         }}
       >
@@ -240,11 +225,13 @@ export function SessionTile({
           size="icon-sm"
           label={t("rail.tile.moreLabel", { title: view.title })}
           aria-haspopup="menu"
-          aria-expanded={menu !== undefined}
+          aria-expanded={menu.open}
           data-before-chevron={handle || undefined}
           style={{ anchorName: anchor } as CSSProperties}
           // A click the keyboard made (Enter or Space) has no pointer presses to count.
-          onClick={(event) => setMenu(menu ? undefined : { place: { anchor }, focus: event.detail === 0 ? "item" : "menu", from: "more" })}
+          onClick={(event) =>
+            setMenu(menu.open ? { ...menu, open: false } : { open: true, place: { anchor }, focus: event.detail === 0 ? "item" : "menu", from: "more" })
+          }
         />
       )}
       {rename && (
@@ -259,9 +246,9 @@ export function SessionTile({
               onChoose: edit,
             },
           ]}
-          open={menu !== undefined}
-          place={menu?.place ?? { anchor }}
-          focus={menu?.focus}
+          open={menu.open}
+          place={menu.place}
+          focus={menu.focus}
           inside={insideMenu}
           onClose={closeMenu}
         />

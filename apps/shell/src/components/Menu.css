@@ -93,7 +93,8 @@
 }
 
 .menu-item:active:not([aria-disabled]),
-.menu-item[data-open] {
+.menu-item[data-open],
+.menu-item[data-open]:hover:not([aria-disabled]) {
   background: var(--material-pressed);
 }
 
