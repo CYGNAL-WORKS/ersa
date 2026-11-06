@@ -35,7 +35,6 @@ test("the chevron opens the shelf with the oldest permission request, leaving th
   const transcript = page.getByRole("region", { name: "Transcript" });
   await expect(transcript).toBeVisible();
   const before = await transcript.boundingBox();
-  const activeTitle = await transcript.locator(".transcript-header").innerText();
 
   await chevron.click();
   const shelf = page.getByRole("dialog", { name: /^Request from / });
@@ -45,7 +44,8 @@ test("the chevron opens the shelf with the oldest permission request, leaving th
   await expect(shelf).toContainText("shelf-check.txt");
   await expect(shelf.getByRole("button", { name: "Allow" })).toBeVisible();
   // The active session is unchanged, and the transcript did not move or resize (R01, R04).
-  await expect(transcript.locator(".transcript-header")).toHaveText(activeTitle);
+  await expect(transcript).toContainText("Reply with the single word ready.");
+  await expect(transcript).not.toContainText("shelf-check.txt");
   expect(await transcript.boundingBox()).toEqual(before);
   // The shelf lies beside its tile, over the transcript's edge.
   const shelfBox = (await shelf.boundingBox())!;
