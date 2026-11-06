@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the main window's Interface, loaded from the app itself, may call: the two Core bridge commands, showing the window and quitting (FLOW-CLOSE-AND-QUIT), and listening for the Shell's quit-requested event. Nothing else, and no remote origin.",
+  "description": "What the main window's Interface, loaded from the app itself, may call: the two Core bridge commands, showing the window and quitting (FLOW-CLOSE-AND-QUIT), listening for the Shell's quit-requested event, and opening the system's folder dialog to add a project (FLOW-NEW-SESSION-R16). Nothing else, and no remote origin.",
   "windows": ["main"],
   "local": true,
   "permissions": [
@@ -12,6 +12,7 @@
     "allow-shell-quit-heard",
     "allow-shell-quit",
     "core:event:allow-listen",
-    "core:event:allow-unlisten"
+    "core:event:allow-unlisten",
+    "dialog:allow-open"
   ]
 }
