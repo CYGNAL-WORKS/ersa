@@ -100,7 +100,30 @@ for (const file of walk(BRIEFS_DIR)) {
   const active = new Set();
   const retired = new Set();
   const seen = new Map();
+  // A union merge keeps both sides of a rewritten bullet, so a bullet label
+  // (bold, or a code span without its `{ ... }` parameters) repeated under one
+  // section name and parent bullet is two versions of one rule. Fenced code is
+  // not prose.
+  let section = "";
+  let parent = "";
+  let fence = "";
+  const labels = new Set();
   for (const line of text.split(/\r?\n/)) {
+    // A fence closes only on its own marker, at least as long, with nothing after it.
+    const f = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
+    if (f && !fence && !(f[1][0] === "`" && f[2].includes("`"))) fence = f[1];
+    else if (f && fence && f[1][0] === fence[0] && f[1].length >= fence.length && !f[2].trim()) fence = "";
+    const fenced = fence !== "";
+    if (!fenced && /^#{1,6}\s/.test(line)) section = line.replace(/^#+\s*/, "").trim();
+    if (!fenced && /^(#{1,6}|[-*])\s/.test(line)) parent = line;
+    const b = !fenced && /^(\s*)[-*]\s+(\*\*.+?\*\*|`[^`]+`)/.exec(line);
+    if (b && !new RegExp(REQ_ID.source).test(b[2])) {
+      const label = b[2].replace(/^`(\S[^{]*?)\s*\{.*$/, "`$1`");
+      if (!b[1]) parent = label;
+      const key = [section, b[1] ? parent : "", label].join("\n");
+      if (labels.has(key)) problems.push(`${fm.id}: ${label} appears twice under "${section}"`);
+      labels.add(key);
+    }
     for (const m of line.matchAll(REQ_ID)) {
       const id = m[1];
       if (!id.startsWith(fm.id + "-R")) continue;
@@ -111,6 +134,8 @@ for (const file of walk(BRIEFS_DIR)) {
       (isRetired ? retired : active).add(id);
     }
   }
+  // An unclosed fence would hide every bullet after it from the check above.
+  if (fence) problems.push(`${fm.id}: a code fence (${fence}) is never closed`);
   for (const [id, n] of seen) if (n > 1) problems.push(`${fm.id}: requirement ${id} is defined ${n} times`);
 
   briefs.push({
