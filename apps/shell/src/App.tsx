@@ -20,6 +20,7 @@ import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit }
 import type { Project, Session, Workspace } from "./protocol/core-api.gen";
 import { type BackendChoices, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
 import { contextUsed, tileOf } from "./session/tile";
+import { type Answers, type Decision, answering } from "./session/answers";
 import { shelfAfter, shelfFollowing, shelfOf, shelfTone } from "./session/shelf";
 import { sharedSubscriptions } from "./session/subscriptions";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
@@ -97,6 +98,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The transcript and the shelf share Core's one subscription per session (session/subscriptions.ts).
   const shared = useMemo(() => sharedSubscriptions(client), [client]);
   const shelf = useMemo(() => shelfFollowing(shared, setShelfView), [shared]);
+  // The user's answers to permission requests, on their way or refused, by session: the shelf and the transcript
+  // read the same ones, so an answer sent from one is still on its way on the other (FLOW-APPROVE-PERMISSION-R18).
+  const [answers, setAnswers] = useState<Answers>({});
+  const sending = useMemo(() => answering(client, setAnswers), [client]);
 
   useEffect(() => {
     const running = connect(client, setView, undefined, (notification) => {
@@ -104,10 +109,11 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       // Each follower takes only its own session's events.
       follower.current?.receive(notification.params.event);
       shelf.receive(notification.params.event);
+      sending.receive(notification.params.event);
     });
     connection.current = running;
     return () => running.stop();
-  }, [client, shelf, attempt]);
+  }, [client, shelf, sending, attempt]);
 
   // With no session chosen, show the newest: reopening the window shows the
   // session that was running when it closed.
@@ -234,8 +240,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const coreVersion = useVersion(view);
   const retrySubscribe = useCallback(() => follower.current?.attached(), []);
 
-  // Stable, so the transcript's memoised blocks do not re-render for it.
-  const decide = useCallback((requestId: string, behavior: "allow" | "deny") => follower.current?.decide(requestId, behavior), []);
+  // Stable for each session, so the transcript's memoised blocks do not re-render for it.
+  const decide = useCallback((id: string, requestId: string, decision: Decision) => sending.decide(id, requestId, decision), [sending]);
+  const decideShown = useMemo(() => (requestId: string, decision: Decision) => shownId !== undefined && decide(shownId, requestId, decision), [decide, shownId]);
 
   // New session shows the screen; leaving it, by choosing a session, leaves nothing behind (FLOW-NEW-SESSION-R03).
   const newSession = (project: Project) => dispatch({ type: "newSession", projectId: project.id });
@@ -368,7 +375,17 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     return {
       id: shelfSession.id,
       tone: shelfTone(shows),
-      render: (domId: string) => <Shelf id={domId} tile={tile} shows={shows} onRetry={shelf.attached} />,
+      render: (domId: string) => (
+        <Shelf
+          id={domId}
+          tile={tile}
+          shows={shows}
+          onRetry={shelf.attached}
+          answer={shows.state === "permission" ? answers[shelfSession.id]?.[shows.request.request_id] : undefined}
+          live={connected}
+          onDecide={(requestId, decision) => decide(shelfSession.id, requestId, decision)}
+        />
+      ),
     };
   })();
 
@@ -412,7 +429,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               title={(activeId && titles.current[activeId]) || t("rail.tile.untitledLabel")}
               untitled={!(activeId && titles.current[activeId])}
               view={shown}
-              onDecide={decide}
+              answers={answers[shown.id]}
+              onDecide={decideShown}
               onRetry={retrySubscribe}
               onRename={(title) => rename(shown.id, title)}
               renaming={renaming[shown.id]}

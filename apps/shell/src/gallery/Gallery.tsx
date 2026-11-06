@@ -24,6 +24,7 @@ import { Transcript } from "../components/Transcript";
 import type { CoreView } from "../core/connection";
 import type { Envelope, Event } from "../protocol/agent-events.gen";
 import type { CoreHelloResult, Project, Session } from "../protocol/core-api.gen";
+import type { Answer } from "../session/answers";
 import type { BackendChoices, Choice } from "../session/controls";
 import type { SessionView } from "../session/follow";
 import { type ShelfShows, shelfTone } from "../session/shelf";
@@ -275,20 +276,19 @@ const sessionView = (events: Event[], more: Partial<SessionView> = {}): SessionV
   id: "s1",
   transcript: transcriptOf(events),
   stream: { state: "live" },
-  answers: {},
   ...more,
 });
 
 // What the user sees of Core's refusal: its message without the method name (describeError).
 const refusal = "the session is a replay of a recording and cannot change";
 
-const transcriptStates: [string, SessionView][] = [
+const transcriptStates: [string, SessionView, answers?: Record<string, Answer>][] = [
   ["Loading", sessionView([], { stream: { state: "subscribing" } })],
   ["Empty", sessionView([])],
   ["Streaming", sessionView(streaming)],
   ["Permission open", sessionView(asked)],
-  ["Permission sending", sessionView(asked, { answers: { r1: { state: "sending" } } })],
-  ["Permission refused", sessionView(asked, { answers: { r1: { state: "failed", message: refusal } } })],
+  ["Permission sending", sessionView(asked), { r1: { state: "sending", decision: "allow" } }],
+  ["Permission refused", sessionView(asked), { r1: { state: "failed", message: refusal } }],
   ["Permission while Core is away", sessionView(asked, { stream: { state: "offline" } })],
   ["Hidden characters", sessionView(hiding)],
   ["Answered", sessionView(answered)],
@@ -382,7 +382,14 @@ const shelfTiles: Session[] = [
   session("h3", "Explain the raw log", "2026-11-01T08:00:00Z", { state: "idle", pending: [], cost_usd_total: 12.4, ...ring }),
 ];
 
-function ShelfOpen({ shows, short }: { shows: ShelfShows; short?: boolean }) {
+interface ShelfMore {
+  short?: boolean;
+  answer?: Answer;
+  live?: boolean;
+}
+
+function ShelfOpen({ shows, more = {} }: { shows: ShelfShows; more?: ShelfMore }) {
+  const { short, answer, live = true } = more;
   // The open tile waits on what its shelf shows: a question's tile says it has one.
   const listed = shelfTiles[1] as Session;
   const open: Session =
@@ -396,7 +403,13 @@ function ShelfOpen({ shows, short }: { shows: ShelfShows; short?: boolean }) {
           view={{ state: "ready", sessions: tiles }}
           activeId="h1"
           onSelect={() => {}}
-          shelf={{ id: open.id, tone: shelfTone(shows), render: (domId) => <Shelf id={domId} tile={tile} shows={shows} onRetry={() => {}} /> }}
+          shelf={{
+            id: open.id,
+            tone: shelfTone(shows),
+            render: (domId) => (
+              <Shelf id={domId} tile={tile} shows={shows} onRetry={() => {}} answer={answer} live={live} onDecide={() => {}} />
+            ),
+          }}
         />
       </div>
     </div>
@@ -405,7 +418,7 @@ function ShelfOpen({ shows, short }: { shows: ShelfShows; short?: boolean }) {
 
 const shelfRequest = asked.find((e) => e.type === "permission.requested") as Extract<Event, { type: "permission.requested" }>;
 const longCommand = Array.from({ length: 14 }, (_, i) => `cargo test -p ersa-core --test reconnect_${i + 1} -- --nocapture`).join(" &&\n");
-const shelfStates: [string, ShelfShows, short?: boolean][] = [
+const shelfStates: [string, ShelfShows, more?: ShelfMore][] = [
   ["A permission request", { state: "permission", request: shelfRequest }],
   [
     "With a suggestion, one of three",
@@ -427,7 +440,10 @@ const shelfStates: [string, ShelfShows, short?: boolean][] = [
   ["A request Ersa can't show", { state: "unknown" }],
   // A request whose flags didn't arrive: the boundary check stops these, and the shelf's own boundary is the last guard.
   ["A request that can't be drawn", { state: "permission", request: { ...shelfRequest, flags: undefined as never } }],
-  ["Risen to fit a short window", { state: "permission", request: shelfRequest }, true],
+  ["An answer on its way", { state: "permission", request: shelfRequest }, { answer: { state: "sending", decision: "allow" } }],
+  ["An answer refused", { state: "permission", request: shelfRequest }, { answer: { state: "failed", message: "the session has ended" } }],
+  ["While Ersa reconnects", { state: "permission", request: shelfRequest }, { live: false }],
+  ["Risen to fit a short window", { state: "permission", request: shelfRequest }, { short: true }],
 ];
 
 /** Throws while rendering, as a component given data it cannot read would. */
@@ -573,14 +589,14 @@ const entries: Entry[] = [
   {
     name: "Shelf",
     wide: true,
-    states: shelfStates.map(([label, shows, short]) => [label, <ShelfOpen shows={shows} short={short} />]),
+    states: shelfStates.map(([label, shows, more]) => [label, <ShelfOpen shows={shows} more={more} />]),
   },
   {
     name: "Transcript",
     wide: true,
-    states: transcriptStates.map(([label, view]) => [
+    states: transcriptStates.map(([label, view, answers]) => [
       label,
-      <Transcript title="Fix the flaky reconnect test" view={view} onDecide={() => {}} onRetry={() => {}} />,
+      <Transcript title="Fix the flaky reconnect test" view={view} answers={answers} onDecide={() => {}} onRetry={() => {}} />,
     ]),
   },
   {
