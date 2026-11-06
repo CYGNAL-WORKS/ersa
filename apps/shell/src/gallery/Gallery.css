@@ -88,6 +88,11 @@
   padding-bottom: var(--size-card-max);
 }
 
+/* A list with a section beneath its options, the workspace chip's base branch, is taller. */
+.gallery-room-tall {
+  padding-bottom: var(--size-menu);
+}
+
 /* A menu the gallery opens at once is laid out while its state is off screen, where it would flip above its
    button and stay there; in the room made for it, it always opens below. */
 .gallery-room .rail-menu {

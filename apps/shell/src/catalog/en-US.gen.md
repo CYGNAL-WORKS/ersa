@@ -240,6 +240,50 @@ Ctrl+O
 
 Choose a folder
 
+### `sessionControls.workspace.newWorkspaceLabel`
+
+New workspace
+
+### `sessionControls.workspace.isolatedStatus`
+
+Isolated
+
+### `sessionControls.workspace.projectFolderLabel`
+
+Project folder
+
+### `sessionControls.workspace.sharesFilesDescription`
+
+Shares files with you
+
+### `sessionControls.workspace.newFromLabel`
+
+New workspace from {branch}
+
+### `sessionControls.workspace.baseBranchHeading`
+
+Base branch
+
+### `sessionControls.workspace.searchBranchesPlaceholder`
+
+Search branches
+
+### `sessionControls.workspace.defaultBranchStatus`
+
+Default
+
+### `sessionControls.workspace.noBranchMatchesEmpty`
+
+No branch matches.
+
+### `sessionControls.workspace.readingBranchesProgress`
+
+Reading the branches…
+
+### `sessionControls.workspace.branchesFailedNote`
+
+Ersa couldn't read the branches: {reason}
+
 ### `sessionControls.contextRing.noneLabel`
 
 Context: none used yet

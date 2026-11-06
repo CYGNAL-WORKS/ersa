@@ -1,6 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Project } from "../protocol/core-api.gen";
-import { type BackendChoices, type SessionValues, available, howFor, seedScreen, startingProject, valuesFor } from "../session/controls";
+import {
+  type BackendChoices,
+  type Branches,
+  type SessionValues,
+  available,
+  baseFor,
+  howFor,
+  seedScreen,
+  startingProject,
+  valuesFor,
+} from "../session/controls";
 import type { Sending } from "../session/follow";
 import { Composer } from "./Composer";
 import { type ControlKey, type Host, SessionControls } from "./SessionControls";
@@ -35,6 +45,11 @@ interface NewSessionScreenProps {
   onChooseFolder?: () => Promise<FolderChoice>;
   /** Adds the folder as a project on the local host, trusted or not; resolves to the project once Core added it. */
   onAddProject: (path: string, trusted: boolean) => Promise<Project | undefined>;
+  /**
+   * Reads a git project's local branches, for the base branch a new workspace starts from (FLOW-NEW-SESSION-R21);
+   * resolves to why they could not be read rather than failing. Absent, the workspace chip offers no base branch.
+   */
+  onListBranches?: (projectId: string) => Promise<Branches>;
   /** Choosing or adding a folder: on its way, or why it failed. */
   adding?: Sending;
   /** For the gallery: focus not taken, the composer shown focused, a chip shown open or in a state. */
@@ -195,11 +210,35 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
+  // A git project's branches, read afresh each time the screen shows it, so a new session's base branch starts at the
+  // repository's default branch (FLOW-NEW-SESSION-R21). The latest reader is used, so a new function each render
+  // reads nothing again.
+  const gitProject = project?.vcs === "git" ? project.id : undefined;
+  const [read, setRead] = useState<{ projectId: string; branches: Branches }>();
+  const lister = useRef(props.onListBranches);
+  lister.current = props.onListBranches;
+  const listing = props.onListBranches !== undefined;
+  useEffect(() => {
+    if (gitProject === undefined || !lister.current) return;
+    let current = true;
+    void lister.current(gitProject).then((branches) => {
+      if (current) setRead({ projectId: gitProject, branches });
+    });
+    return () => {
+      current = false;
+    };
+  }, [gitProject, listing]);
+  const branches: Branches | undefined =
+    gitProject === undefined || !listing ? undefined : read?.projectId === gitProject ? read.branches : { state: "reading" };
+
   const hostBackends = backends[hostId];
   // With no project yet, the where values are the local host's alone; the how values still show (R19).
-  const values: SessionValues = project
+  const chosen: SessionValues = project
     ? valuesFor(project, hostBackends ?? [], wanted)
     : { host_id: localHostId, project_id: "", workspace: "root", ...howFor(hostBackends ?? [], wanted) };
+  // A new workspace starts from the base branch the chip shows: the one chosen, else the default (R21, R22).
+  const base = chosen.workspace === "isolated" && branches?.state === "read" ? baseFor(branches.branches, wanted.base) : undefined;
+  const values: SessionValues = base === undefined ? chosen : { ...chosen, base };
 
   const onChoose = (key: ControlKey, id: string) => {
     if (key === "host") {
@@ -271,6 +310,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           projects={projects}
           backends={hostBackends}
           values={values}
+          branches={branches}
           onChoose={onChoose}
           onAddProject={canAdd ? () => void addProject() : undefined}
           disabled={busy || adding?.state === "sending"}
