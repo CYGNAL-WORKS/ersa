@@ -254,8 +254,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     pickFolder && view.phase === "connected"
       ? async (): Promise<FolderChoice> => {
           const host_id = view.hello.host.id;
-          setAdding(undefined);
           try {
+            // A canceled dialog leaves everything as it was, an earlier failure's reason included (R17).
             const path = await pickFolder();
             if (path === null) return { kind: "canceled" };
             setAdding({ state: "sending" });
