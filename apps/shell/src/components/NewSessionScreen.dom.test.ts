@@ -32,7 +32,7 @@ const props = (projects: Project[], more: Partial<Props> = {}): Props => ({
   projects,
   backends: { local: [claude] },
   onStart: async () => false,
-  onAddProject: async () => false,
+  onAddProject: async () => undefined,
   ...more,
 });
 

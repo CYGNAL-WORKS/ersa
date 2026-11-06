@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { t } from "../catalog";
 import type { ProjectsView } from "../core/connection";
 import type { Project } from "../protocol/core-api.gen";
@@ -19,8 +19,6 @@ interface ProjectListProps {
   notes?: Record<string, string>;
   /** For the gallery: the project whose trust question is showing. */
   initialAsking?: string;
-  /** Shown beneath the list: the way to add a project. */
-  children?: ReactNode;
 }
 
 /** The projects Core knows, with their loading, empty and error states. */
@@ -31,7 +29,6 @@ export function ProjectList({
   trusting = {},
   notes = {},
   initialAsking,
-  children,
 }: ProjectListProps) {
   // The project whose trust question is showing, if any.
   const [asking, setAsking] = useState(initialAsking);
@@ -127,7 +124,6 @@ export function ProjectList({
           })}
         </ul>
       )}
-      {children}
     </section>
   );
 }

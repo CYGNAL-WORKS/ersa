@@ -23,6 +23,8 @@ interface SessionControlsProps {
   /** The workspace as a running session's controls name it: its branch, or the root. */
   workspaceLabel?: string;
   onChoose: (key: ControlKey, id: string) => void;
+  /** Add project…, which ends the project chip's list; absent while it cannot be taken, as on a remote host (FLOW-NEW-SESSION-R16). */
+  onAddProject?: () => void;
   /** While the first message is on its way, nothing changes. */
   disabled?: boolean;
   /** The context ring's share used; absent before the session has used any. */
@@ -61,7 +63,7 @@ const choiceOptions = (choices: readonly Choice[]): ChipOption[] => choices.map(
  * permission mode, with the context ring at the row's end (LAY-SHELL). The backend chip shows only when the host
  * has more than one backend, or none to run, and lists a missing backend with its status (FLOW-NEW-SESSION-R07).
  */
-export function SessionControls({ hosts, localHostId, projects, backends, values, workspaceLabel, onChoose, disabled, used, open, force }: SessionControlsProps) {
+export function SessionControls({ hosts, localHostId, projects, backends, values, workspaceLabel, onChoose, onAddProject, disabled, used, open, force }: SessionControlsProps) {
   const project = projects.find((p) => p.id === values.project_id);
   const backend = backends?.find((b) => b.name === values.backend);
   const chip = (key: ControlKey) => ({
@@ -88,10 +90,16 @@ export function SessionControls({ hosts, localHostId, projects, backends, values
           name="Project"
           value={values.project_id}
           options={projects.filter((p) => p.host_id === values.host_id).map(projectOption)}
+          // With no project on the host, the chip offers to choose a folder (FLOW-NEW-SESSION-R19).
+          placeholder={t("sessionControls.project.chooseFolderButton")}
           wide
-          // Shown and unavailable until the folder dialog adds a project from here, with its shortcut
-          // (FLOW-NEW-SESSION-R16).
-          action={{ label: t("sessionControls.project.addProjectButton"), icon: Plus }}
+          // The only way to add a project (FLOW-NEW-SESSION-R16, R20); its shortcut shows while it can be taken.
+          action={{
+            label: t("sessionControls.project.addProjectButton"),
+            icon: Plus,
+            shortcut: t("sessionControls.project.addProjectShortcutLabel"),
+            onChoose: onAddProject,
+          }}
           {...chip("project")}
         />
         {project && (

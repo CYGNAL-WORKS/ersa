@@ -56,6 +56,10 @@ export const enUS = {
       withGitKindLabel: "Git",
       withoutGitKindLabel: "Folder",
       addProjectButton: "Add project…",
+      // The keys that choose Add project from anywhere on the new-session screen.
+      addProjectShortcutLabel: "Ctrl+O",
+      // The project chip while the local host has no project: choosing it, or sending, opens the folder dialog.
+      chooseFolderButton: "Choose a folder",
     },
     // The context ring's name, in the session controls and on a tile.
     contextRing: {
@@ -67,6 +71,21 @@ export const enUS = {
   trust: {
     // A project the user has not trusted, in the rail's project list and the project chip's list.
     notTrustedStatus: "Not trusted",
+    // The trust question (ADR 0018), asked when a folder becomes a project and when the user trusts one later. It
+    // says what trust lets run, that it covers every workspace of the project, and that it lasts until withdrawn
+    // (FLOW-NEW-SESSION-R16).
+    question: {
+      title: "Trust {name}?",
+      runsDetail:
+        "A trusted project’s own configuration runs in its sessions: hooks and MCP servers that start programs on this computer, and settings that change what the agent may do without asking.",
+      coversDetail:
+        "Trust covers every workspace of the project and lasts until you withdraw it. Claude Code also records it for the whole repository the project is in, and applies it outside Ersa.",
+      untrustedDetail: "Untrusted, its sessions use only your own settings.",
+      addTrustedButton: "Add, trusted",
+      addUntrustedButton: "Add, not trusted",
+      trustButton: "Trust",
+      cancelButton: "Cancel",
+    },
   },
   errors: {},
 } as const satisfies Section;

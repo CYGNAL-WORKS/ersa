@@ -196,6 +196,34 @@ async fn shell_quit(app: AppHandle) -> Result<(), ()> {
     Ok(())
 }
 
+/// Opens the system's folder dialog over the window, for Add project on the
+/// new-session screen (FLOW-NEW-SESSION-R16). Answers the folder the user
+/// picked, or `None` when they canceled (R17). The dialog runs on the
+/// window's own thread; this waits for its answer without holding that
+/// thread, so the window keeps drawing meanwhile.
+#[tauri::command]
+async fn shell_pick_folder(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (answer, answered) = tokio::sync::oneshot::channel();
+    let mut dialog = app.dialog().file();
+    if let Some(window) = app.get_webview_window(WINDOW) {
+        // Owned by the window, so it sits over it and the window waits for it.
+        dialog = dialog.set_parent(&window);
+    }
+    dialog.pick_folder(move |picked| {
+        // The receiver is gone only if the Interface stopped waiting.
+        let _ = answer.send(picked);
+    });
+    let picked = answered.await.map_err(|_| "The folder dialog closed without an answer.".to_string())?;
+    match picked {
+        None => Ok(None),
+        Some(path) => path
+            .into_path()
+            .map(|p| Some(p.to_string_lossy().into_owned()))
+            .map_err(|e| format!("Ersa can't read the folder's path. {e}")),
+    }
+}
+
 /// The window's name, as built in [`run`].
 const WINDOW: &str = "main";
 
@@ -388,8 +416,8 @@ pub fn run() {
     };
     tauri::Builder::default()
         .manage(shell)
-        // The system's folder dialog, which adds a project from the project
-        // chip (FLOW-NEW-SESSION-R16). The capability allows only `open`.
+        // The system's folder dialog, which `shell_pick_folder` opens. The
+        // Interface is granted that command alone, none of the plugin's own.
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             core_attach,
@@ -397,7 +425,8 @@ pub fn run() {
             shell_show,
             shell_hide,
             shell_quit_heard,
-            shell_quit
+            shell_quit,
+            shell_pick_folder
         ])
         // The window is built here rather than in tauri.conf.json so it can
         // carry the navigation guard.

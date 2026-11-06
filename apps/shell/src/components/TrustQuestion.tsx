@@ -1,17 +1,23 @@
 import { useEffect, useRef } from "react";
+import { t } from "../catalog";
 import { Button } from "./Button";
 import "./TrustQuestion.css";
 
 interface TrustQuestionProps {
   /** The project's name, as the question names it. */
   name: string;
-  /** The folder as the user typed it, shown when the project is not added yet, so they see exactly what they trust. */
+  /** The folder the user picked, shown when the project is not added yet, so they see exactly what they trust. */
   path?: string;
   /**
    * Adding a project: both answers add it, trusted or not, and the labels say so. Changing an added project's trust:
    * trusting is the one answer, since not trusting it is leaving it as it is.
    */
   purpose: "add" | "change";
+  /**
+   * Where it opens: in the rail, under the project it asks about; or above the composer's box on the new-session
+   * screen, as a card that holds the screen's focal glow (docs/design/COMPOSER.md, The trust question).
+   */
+  place?: "rail" | "composer";
   /** The user's answer: whether the project's own configuration may run in its sessions. */
   onAnswer: (trusted: boolean) => void;
   /** Closes the question without an answer: Cancel, or Escape. */
@@ -22,46 +28,50 @@ interface TrustQuestionProps {
   forceCancelFocus?: boolean;
 }
 
-/** Asks whether the user trusts a project, saying plainly what trust lets run (ADR 0018). */
-export function TrustQuestion({ name, path, purpose, onAnswer, onDismiss, takeFocus = true, forceCancelFocus }: TrustQuestionProps) {
-  // The control that opened the question is disabled while it shows, so focus moves here rather than to the
-  // page: to Cancel, so a second Enter cancels and never trusts by accident.
+/**
+ * Asks whether the user trusts a project, saying plainly what trust lets run, that it covers every workspace of the
+ * project, and that it lasts until withdrawn (ADR 0018, FLOW-NEW-SESSION-R16).
+ */
+export function TrustQuestion({ name, path, purpose, place = "rail", onAnswer, onDismiss, takeFocus = true, forceCancelFocus }: TrustQuestionProps) {
+  // The control that opened the question is disabled or elsewhere while it shows, so focus moves here rather than
+  // to the page: to Cancel, so a second Enter cancels and never trusts by accident.
   const cancel = useRef<HTMLButtonElement>(null);
   // Only as it opens, so the first value of `takeFocus` is the one that counts.
   const focusOnOpen = useRef(takeFocus);
   useEffect(() => {
     if (focusOnOpen.current) cancel.current?.focus({ preventScroll: true });
   }, []);
+  const title = t("trust.question.title", { name });
   return (
     <section
       className="trust-question"
-      aria-label={`Trust ${name}?`}
+      data-place={place}
+      aria-label={title}
       onKeyDown={(event) => {
-        if (event.key === "Escape") onDismiss();
+        if (event.key === "Escape") {
+          // The question is the thing Escape closes, not whatever holds it.
+          event.stopPropagation();
+          onDismiss();
+        }
       }}
     >
-      <p className="trust-question-title">Trust {name}?</p>
+      <p className="trust-question-title">{title}</p>
       {path !== undefined && <p className="trust-question-path mono">{path}</p>}
-      <p className="trust-question-detail">
-        A trusted project’s own configuration runs in its sessions: hooks and MCP servers that start programs on this computer, and
-        settings that change what the agent may do without asking.
-      </p>
-      <p className="trust-question-detail">
-        Claude Code records the trust for the whole repository the project is in, and applies it outside Ersa too.
-      </p>
-      <p className="trust-question-detail">Untrusted, its sessions use only your own settings.</p>
+      <p className="trust-question-detail">{t("trust.question.runsDetail")}</p>
+      <p className="trust-question-detail">{t("trust.question.coversDetail")}</p>
+      <p className="trust-question-detail">{t("trust.question.untrustedDetail")}</p>
       <div className="trust-question-actions">
         {/* Neither answer is the primary one: Ersa does not lean towards trust. */}
         {purpose === "add" ? (
           <>
-            <Button onClick={() => onAnswer(true)}>Add, trusted</Button>
-            <Button onClick={() => onAnswer(false)}>Add, not trusted</Button>
+            <Button onClick={() => onAnswer(true)}>{t("trust.question.addTrustedButton")}</Button>
+            <Button onClick={() => onAnswer(false)}>{t("trust.question.addUntrustedButton")}</Button>
           </>
         ) : (
-          <Button onClick={() => onAnswer(true)}>Trust</Button>
+          <Button onClick={() => onAnswer(true)}>{t("trust.question.trustButton")}</Button>
         )}
         <Button ref={cancel} onClick={onDismiss} force={forceCancelFocus ? "focus" : undefined}>
-          Cancel
+          {t("trust.question.cancelButton")}
         </Button>
       </div>
     </section>
@@ -70,5 +80,5 @@ export function TrustQuestion({ name, path, purpose, onAnswer, onDismiss, takeFo
 
 /** A folder's last name, for a question about a project not yet added. */
 export function folderName(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+  return path.split(/[\/]/).filter(Boolean).pop() ?? path;
 }
