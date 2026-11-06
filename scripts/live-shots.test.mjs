@@ -56,6 +56,8 @@ test("screenshots lists PNGs only, nested, with forward slashes", () => {
   writeFileSync(join(dir, "b-test", "01-x.png"), "");
   writeFileSync(join(dir, "a-test", "01-y.png"), "");
   writeFileSync(join(dir, "a-test", "core.log"), "");
+  mkdirSync(join(dir, "a-test", "attachments"));
+  writeFileSync(join(dir, "a-test", "attachments", "y-0123abcd.png"), "");
   assert.deepEqual(screenshots(dir), ["a-test/01-y.png", "b-test/01-x.png"]);
   assert.deepEqual(screenshots(join(dir, "missing")), []);
 });

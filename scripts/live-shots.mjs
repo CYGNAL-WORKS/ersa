@@ -26,7 +26,10 @@ export function githubRepo(url) {
   return /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(url.trim())?.[1] ?? null;
 }
 
-/** The PNG files under `dir`, relative to it with forward slashes, in order. */
+/**
+ * The PNG files under `dir`, relative to it with forward slashes, in order. Not those in an `attachments` folder:
+ * Playwright copies each screenshot a test attaches there, under a hashed name.
+ */
 export function screenshots(dir) {
   let entries;
   try {
@@ -37,6 +40,7 @@ export function screenshots(dir) {
   return entries
     .filter((e) => e.isFile() && e.name.endsWith(".png"))
     .map((e) => relative(dir, join(e.parentPath, e.name)).replaceAll("\\", "/"))
+    .filter((shot) => !shot.split("/").includes("attachments"))
     .sort();
 }
 
