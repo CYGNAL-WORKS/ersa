@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-// The window's wiring for answering a permission request (FLOW-APPROVE-PERMISSION, Sending an answer): an answer sent
-// from the shelf is the session's, so the transcript's card shows it on its way once the session is made active.
+// The window's wiring for the shelf (FLOW-APPROVE-PERMISSION): closing it from the keyboard, and answering from it.
+// An answer sent from the shelf is the session's, so the transcript's card shows it on its way once the session is
+// made active.
 
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createElement } from "react";
@@ -97,6 +98,28 @@ globalThis.ResizeObserver ??= class {
 };
 
 afterEach(cleanup);
+
+describe("closing the shelf", () => {
+  // verifies: FLOW-APPROVE-PERMISSION-R06
+  it("closes on Escape in the shelf, with focus on its chevron", async () => {
+    const core = fakeCore();
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+
+    const chevron = screen.getByRole("button", { name: /^Request from / });
+    fireEvent.click(chevron);
+    await settle();
+    const shelf = screen.getByRole("dialog", { name: /^Request from / });
+    expect(document.activeElement).toBe(shelf);
+    fireEvent.keyDown(shelf, { key: "Escape" });
+    await settle();
+    expect(chevron.getAttribute("aria-expanded")).toBe("false");
+    // Sliding back, out of reach: the window no longer holds it open.
+    expect(shelf.closest(".shelf-layer")?.hasAttribute("inert")).toBe(true);
+    expect(document.activeElement).toBe(chevron);
+  });
+});
 
 describe("answering from the shelf", () => {
   // verifies: FLOW-APPROVE-PERMISSION-R18
