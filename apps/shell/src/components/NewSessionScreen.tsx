@@ -165,23 +165,26 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     <section className="new-session" aria-label="New session">
       <Wordmark />
       <div className="new-session-start">
-        {/* In the status line's place above the box (docs/design/COMPOSER.md, The trust question). */}
-        {asking !== undefined && (
-          <TrustQuestion
-            name={folderName(asking)}
-            path={asking}
-            purpose="add"
-            onAnswer={(trusted) => void answer(trusted)}
-            onDismiss={() => void answer(undefined)}
-            takeFocus={props.initialAsking === undefined}
-            forceCancelFocus={props.forceCancelFocus}
-          />
-        )}
-        {asking === undefined && adding?.state === "failed" && (
-          <p className="problem new-session-problem" role="alert">
-            {adding.message}
-          </p>
-        )}
+        {/* In the status line's place above the box (docs/design/COMPOSER.md, The trust question), opening upward:
+            the box and the session controls stay where they are. */}
+        <div className="new-session-above">
+          {asking !== undefined && (
+            <TrustQuestion
+              name={folderName(asking)}
+              path={asking}
+              purpose="add"
+              onAnswer={(trusted) => void answer(trusted)}
+              onDismiss={() => void answer(undefined)}
+              takeFocus={props.initialAsking === undefined}
+              forceCancelFocus={props.forceCancelFocus}
+            />
+          )}
+          {asking === undefined && adding?.state === "failed" && (
+            <p className="problem new-session-problem" role="alert">
+              {adding.message}
+            </p>
+          )}
+        </div>
         <Composer
           inputRef={words}
           autoFocus={props.autoFocus ?? true}

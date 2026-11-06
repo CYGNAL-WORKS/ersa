@@ -39,6 +39,17 @@
   border-top: none;
 }
 
+/* What opens above the box: the trust question, or why a folder could not be added. It takes no height, and what
+   it holds grows upward from the box (flex-end on a zero height overflows toward the start), over the space above,
+   so the box and the session controls never move. Positioned, so it paints over the wordmark it may cover. */
+.new-session-above {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 0;
+}
+
 /* Why choosing or adding a folder failed, in the status line's place above the box. */
 .new-session-problem {
   margin: 0;
