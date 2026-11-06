@@ -9,6 +9,10 @@
 node_modules/
 dist/
 
+# Live checks' screenshots, logs and report (apps/shell/playwright.live.config.ts)
+apps/shell/live-results/
+apps/shell/live-report/
+
 # OS / editor
 .DS_Store
 Thumbs.db
