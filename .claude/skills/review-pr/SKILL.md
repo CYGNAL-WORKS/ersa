@@ -31,7 +31,7 @@ Every reviewer's prompt ends with: "Read the diff's hunks and the functions they
 ## Common mistakes
 
 - One combined reviewer in place of the parallel set: it misses what each specialist finds.
-- A finding dismissed as "pre-existing" or "best effort" without a cited line: on #48 the dismissed case was the exact leak the ticket fixed.
-- A fix round that adds a mechanism: #57's round-one truncate drew a round-two finding and was removed in round three; #71's round-one stage reducer drew a high and then a medium.
-- A small diff reviewed by its author alone: #68 skipped the reviewers as 60 test-only lines, and merge review found three defects, among them a build that ignored the ticket's purpose.
-- A known defect rated low because it needs a repeat or a slow peer: #70 listed its leaked blocking thread as a low follow-up, the same shape #58 had just fixed.
+- A finding dismissed as "pre-existing" or "best effort" without a cited line: the dismissed case can be the very defect the ticket exists to fix.
+- A fix round that adds a mechanism: the new mechanism draws findings of its own in the next round and is often removed again, so each round costs more than the smallest fix would have.
+- A small diff reviewed by its author alone: a short or test-only diff still hides defects, including a build that misses the ticket's purpose.
+- A known defect rated low because it needs a repeat or a slow peer: a leak or stall that needs a repeat still happens in use, and a shape already fixed elsewhere is not low here.
