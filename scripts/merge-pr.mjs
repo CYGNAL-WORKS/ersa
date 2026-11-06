@@ -154,7 +154,7 @@ const fail = (message) => {
 
 const USAGE = "usage: node scripts/merge-pr.mjs <n> --reviewed <sha> [--dry-run]";
 
-const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+export const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 // Runs the gate for argv and returns the exit code, what to print and, when
 // the gate refuses, its reasons. `run` runs one git or gh command and `wait`

@@ -129,12 +129,12 @@ function drive(argv, { pr = {}, reviews = [], claude, gate = {}, reviewedMissing
     return ok();
   };
   const got = main(argv, { run, sleep: (ms) => slept.push(ms) });
-  const of =(cmd, i, v) => calls.filter((c) => c[0] === cmd && c[i] === v);
+  const of = (cmd, i, v) => calls.filter((c) => c[0] === cmd && c[i] === v);
   return {
     ...got,
     calls,
     slept,
-    reviewed:of("claude", 0, "claude").length,
+    reviewed: of("claude", 0, "claude").length,
     posted: calls.filter((c) => c[0] === "gh" && c[1] === "api" && /\/reviews$/.test(c[2]) && c.includes("event=COMMENT")),
     queued: of("gh", 2, "merge"),
     labeled: of("gh", 2, "edit"),
@@ -188,6 +188,14 @@ test("a post that failed but landed is not posted twice", () => {
   assert.equal(got.code, 0, got.stderr);
   assert.equal(got.posted.length, 1);
   assert.deepEqual(got.statuses, ["pending", `success ${REVIEW_URL}`]);
+});
+
+test("a post GitHub refuses with a 4xx is not tried again", () => {
+  const got = drive(["7", "--head", HEAD], { posts: [{ ok: false, out: "", err: "gh: Validation Failed (HTTP 422)" }] });
+  assert.equal(got.code, 2);
+  assert.equal(got.posted.length, 1);
+  assert.deepEqual(got.slept, []);
+  assert.deepEqual(got.statuses, ["pending", "error"]);
 });
 
 test("a post that fails every try fails the run with an error status", () => {
