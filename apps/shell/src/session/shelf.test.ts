@@ -4,7 +4,7 @@ import type { Envelope, Event } from "../protocol/agent-events.gen";
 import type { Session } from "../protocol/core-api.gen";
 import type { SessionView } from "./follow";
 import { follow } from "./follow";
-import { shelfAfter, shelfFollowing, shelfOf, shelfTone } from "./shelf";
+import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./shelf";
 import { sharedSubscriptions } from "./subscriptions";
 import { EVENT_VERSION, apply, emptyTranscript } from "./transcript";
 
@@ -218,6 +218,72 @@ const subscriptions = (calls: { method: Method; params: unknown }[]) => {
   }
   return open;
 };
+
+describe("several requests", () => {
+  const decided = (request_id: string): Event => ({ type: "permission.decided", request_id, behavior: "allow", decided_by: "user" });
+
+  /** The shelf across a sequence of the session's views, as the window shows it: what it shows, and its place. */
+  function across(steps: [events: Event[], waiting: [Kind, string][]][]) {
+    let shown: ShelfShown | undefined;
+    return steps.map(([events, waiting]) => {
+      const shows = shelfOf(viewOf(events), pending(...waiting), shown?.requests);
+      shown = shownAfter(shown, "s1", shownRequest(shows));
+      return [shownRequest(shows), "place" in shows ? shows.place : undefined];
+    });
+  }
+
+  // verifies: FLOW-APPROVE-PERMISSION-R09
+  it("counts the shown request's place as answered plus one, of that plus those still waiting, the last reading 3 of 3", () => {
+    const [r1, r2, r3] = [permission("r1"), permission("r2"), permission("r3")];
+    const all: [Kind, string][] = [
+      ["permission", "r1"],
+      ["permission", "r2"],
+      ["permission", "r3"],
+    ];
+    expect(
+      across([
+        [[r1, r2, r3], all],
+        // Answered: its event arrives before the tile stops listing it.
+        [[r1, r2, r3, decided("r1")], all],
+        [[r1, r2, r3, decided("r1")], all.slice(1)],
+        [[r1, r2, r3, decided("r1"), decided("r2")], all.slice(2)],
+      ]),
+    ).toEqual([
+      ["r1", { n: 1, m: 3 }],
+      ["r2", { n: 2, m: 3 }],
+      ["r2", { n: 2, m: 3 }],
+      ["r3", { n: 3, m: 3 }],
+    ]);
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R09
+  it("adds a request that arrives while the shelf is open to m, and takes one answered elsewhere from it", () => {
+    const [r1, r2, r3] = [permission("r1"), permission("r2"), permission("r3")];
+    expect(
+      across([
+        [[r1, r2], [["permission", "r1"], ["permission", "r2"]]],
+        [[r1, r2, r3], [["permission", "r1"], ["permission", "r2"], ["permission", "r3"]]],
+        // r2 is answered elsewhere while r1 is shown: one fewer waits behind it, and r1 is still the first.
+        [[r1, r2, r3, decided("r2")], [["permission", "r1"], ["permission", "r3"]]],
+        [[r1, r2, r3, decided("r2"), decided("r1")], [["permission", "r3"]]],
+      ]),
+    ).toEqual([
+      ["r1", { n: 1, m: 2 }],
+      ["r1", { n: 1, m: 3 }],
+      ["r1", { n: 1, m: 2 }],
+      ["r3", { n: 2, m: 2 }],
+    ]);
+  });
+
+  it("keeps the shown requests while the same shelf is open, and starts afresh for another or after closing", () => {
+    const first = shownAfter(undefined, "s1", "r1");
+    expect(first?.requests).toEqual(new Set(["r1"]));
+    expect(shownAfter(first, "s1", "r1")).toBe(first);
+    expect(shownAfter(first, "s1", "r2")?.requests).toEqual(new Set(["r1", "r2"]));
+    expect(shownAfter(first, "s2", "r9")).toEqual({ id: "s2", requests: new Set(["r9"]) });
+    expect(shownAfter(first, undefined, undefined)).toBeUndefined();
+  });
+});
 
 describe("following the shelf's session", () => {
   it("follows the open shelf's session, moves with the shelf, and leaves no subscription once it closes", () => {

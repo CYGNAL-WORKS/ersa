@@ -49,6 +49,8 @@ export const enUS = {
       questionHeading: "Question",
       // The shown request's place among the session's requests, at the heading line's trailing end.
       placeLabel: "{n} of {m}",
+      // Heard, not shown, as the shelf moves to the next request: "Permission request, 2 of 3: Run the tests".
+      nextLabel: "{kind}, {n} of {m}: {asked}",
       pathLabel: "Path:",
       loadingProgress: "Loading…",
       readError: "Ersa can't read this session's requests.",

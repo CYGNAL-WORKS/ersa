@@ -8,5 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-06 FLOW-APPROVE-PERMISSION: R09's n counts "the requests answered since the shelf opened", but doesn't say whether a request answered elsewhere that the shelf never showed counts. Meanwhile the shelf counts only requests it showed, so one answered elsewhere behind the shown one takes one from m rather than adding one to n ("1 of 3" becomes "1 of 2", not "2 of 3" with the same request still shown).
 
 ## Resolved recently (optional, trimmed in planning passes)
