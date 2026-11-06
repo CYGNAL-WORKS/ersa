@@ -303,6 +303,26 @@ test("a project heading's menu at the window's foot opens above More, in view", 
   await expect(more).toBeFocused();
 });
 
+// A heading's trailing words as it turns (RAIL.md, A project heading): expanded, "Not trusted" after the shield and
+// no count; collapsed, the shield alone and the count, with "Not trusted" as a tooltip under the pointer.
+test("a collapsed heading counts its sessions, and an untrusted one keeps its words in the shield's tooltip", async ({ page }) => {
+  await page.goto("/gallery.html?component=RailTree&theme=light");
+  const open = page.getByRole("figure", { name: "Projects", exact: true });
+  await expect(open.locator(".rail-heading-count").first()).toBeHidden();
+  await expect(open.getByRole("button", { name: /^stranger/ })).toHaveAccessibleName("stranger Not trusted");
+
+  const folded = page.getByRole("figure", { name: "Collapsed, not trusted", exact: true });
+  const heading = folded.getByRole("button", { name: /^ersa/ });
+  await expect(heading).toHaveAccessibleName(/^ersa Not trusted Needs you 3 sessions$/);
+  await expect(folded.locator(".rail-heading-trust")).toBeHidden();
+  await expect(folded.locator(".rail-heading-count")).toBeVisible();
+  const tip = folded.locator(".rail-heading-tip");
+  await expect(tip).toBeHidden();
+  await folded.locator(".rail-heading-shield").hover();
+  await expect(tip).toBeVisible();
+  await expect(tip).toHaveText("Not trusted");
+});
+
 // The session controls from the keyboard (FLOW-NEW-SESSION-R01): every chip on the way from the composer, each
 // opening its choices, Escape closing them with focus back on the chip, and a choice taking effect.
 test("every session control is reachable and works from the keyboard", async ({ page }) => {

@@ -572,6 +572,15 @@ const entries: Entry[] = [
         "Collapsed, not trusted",
         <RailTree {...ersaOnly} projects={{ state: "ready", projects: [{ ...projects[0]!, trusted: false }] }} collapsed={folded("p1")} />,
       ],
+      [
+        "Collapsed, not trusted, keyboard focus",
+        <RailTree
+          {...ersaOnly}
+          projects={{ state: "ready", projects: [{ ...projects[0]!, trusted: false }] }}
+          collapsed={folded("p1")}
+          forceHeading={{ id: "p1", state: "focus" }}
+        />,
+      ],
       ["Collapsed, pointer over it", <RailTree {...ersaOnly} collapsed={folded("p1")} forceHeading={{ id: "p1", state: "hover" }} />],
       ["Collapsed, keyboard focus", <RailTree {...ersaOnly} collapsed={folded("p1")} forceHeading={{ id: "p1", state: "focus" }} />],
       ["A session with no project", <RailTree {...ersaOnly} sessions={{ state: "ready", sessions: treeSessions }} />],
