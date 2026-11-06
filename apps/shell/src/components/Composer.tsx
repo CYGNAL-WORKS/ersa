@@ -8,9 +8,10 @@ import "./Composer.css";
 /**
  * Why the box is unavailable (docs/design/COMPOSER.md, The status line): Ersa can't reach the sessions and is trying
  * again, or has stopped trying (FLOW-SEND-MESSAGE-R06); the host's backends are being detected
- * (FLOW-NEW-SESSION-R23); or the host has no backend to run (FLOW-NEW-SESSION-R07).
+ * (FLOW-NEW-SESSION-R23); or the host has no backend to run, none installed or, by its label, one that failed
+ * detection (FLOW-NEW-SESSION-R07).
  */
-export type Unavailable = "reconnecting" | "unreachable" | "detecting" | "no-backend";
+export type Unavailable = "reconnecting" | "unreachable" | "detecting" | "no-backend" | { failedBackend: string };
 
 interface ComposerProps {
   /** Why the user cannot send now; absent when they can. */
@@ -141,5 +142,8 @@ function StatusLine({ unavailable, sending }: { unavailable?: Unavailable; sendi
   }
   if (unavailable === "detecting") return <p className="composer-status-line">{t("composer.detectingProgress")}</p>;
   if (unavailable === "no-backend") return <p className="composer-status-line">{t("composer.noBackendError")}</p>;
+  if (typeof unavailable === "object") {
+    return <p className="composer-status-line">{t("composer.backendFailedError", { label: unavailable.failedBackend })}</p>;
+  }
   return null;
 }
