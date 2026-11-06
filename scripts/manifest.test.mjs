@@ -47,11 +47,13 @@ test("CI passes --inbox on the merge queue and main, never on a pull request", (
   assert.match(ci, /^\s+merge_group:/m);
 });
 
-// LAY-SHELL with `section` inserted before its Development heading; the check's problems.
-function withSection(section) {
+// A brief (LAY-SHELL unless named) with `section` inserted before its heading `before`; the check's problems.
+function withSection(section, id = "LAY-SHELL", before = "## Development") {
   const run = copy();
-  const brief = join(run.dir, "docs", "briefs", "LAY-SHELL.md");
-  writeFileSync(brief, readFileSync(brief, "utf8").replace("## Development", `${section}\n\n## Development`));
+  const brief = join(run.dir, "docs", "briefs", `${id}.md`);
+  const text = readFileSync(brief, "utf8");
+  assert.ok(text.includes(before), `${id} has ${before}`);
+  writeFileSync(brief, text.replace(before, `${section}\n\n${before}`));
   const status = run("--check").status;
   const problems = readFileSync(join(run.dir, "docs", "MANIFEST.md"), "utf8").split("## Problems")[1];
   return { status, problems };
@@ -75,4 +77,29 @@ test("a bullet label repeated under one section name fails the check", () => {
 test("labels in fenced code, or nested under different bullets, are not repeats", () => {
   const { status, problems } = withSection("## Spare\n\n```\n- **X**\n- **X**\n```\n\n- **P**\n  - **Q** one.\n- **R**\n  - **Q** two.\n- plain\n  - **Q** three.");
   assert.equal(status, 0, problems);
+});
+
+test("a fence closes only on a bare marker of its own kind, at least as long", () => {
+  // Were a shorter marker, or one with text after it, to close the fence, the bullets would repeat
+  // and the last marker would open a fence never closed.
+  const { status, problems } = withSection(
+    "## Spare\n\n````\n```\n- **Y**\n- **Y**\n````\n\n```\n```js\n- **W**\n- **W**\n```\n\n~~~\n```\n- **V**\n- **V**\n~~~",
+  );
+  assert.equal(status, 0, problems);
+});
+
+test("a fence never closed fails the check", () => {
+  const { status, problems } = withSection("## Spare\n\n```\n- **U**\n- **U**");
+  assert.equal(status, 1);
+  assert.match(problems, /LAY-SHELL: a code fence \(```\) is never closed/);
+});
+
+test("a requirement defined inside fenced code still counts", () => {
+  const { status, problems } = withSection(
+    "```\n- **FLOW-APPROVE-PERMISSION-R01**: a second definition.\n```",
+    "FLOW-APPROVE-PERMISSION",
+    "## Open questions",
+  );
+  assert.equal(status, 1);
+  assert.match(problems, /FLOW-APPROVE-PERMISSION: requirement FLOW-APPROVE-PERMISSION-R01 is defined 2 times/);
 });
