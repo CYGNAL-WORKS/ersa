@@ -170,10 +170,14 @@ test("a focused input's edge is the accent, in both themes", async ({ page }) =>
       probe.remove();
       return color;
     });
-    for (const input of [".composer-input[data-force=focus]", ".session-heading-input[data-force=focus]"]) {
+    for (const input of [".composer-box[data-force=focus]", ".session-heading-input[data-force=focus]"]) {
       const edge = await column.locator(input).first().evaluate((el) => getComputedStyle(el).borderTopColor);
       expect(edge, `${input} in ${theme}`).toBe(accent);
     }
+    // The focused box holds the focal glow, unless a permission request holds it (docs/design/COMPOSER.md, Focus).
+    const glow = (selector: string) => column.locator(selector).first().evaluate((el) => getComputedStyle(el).boxShadow);
+    expect(await glow(".composer-box[data-force=focus]:not([data-quiet-focus])"), `the glow in ${theme}`).not.toBe("none");
+    expect(await glow(".composer-box[data-force=focus][data-quiet-focus]"), `no glow in ${theme}`).toBe("none");
   }
 });
 

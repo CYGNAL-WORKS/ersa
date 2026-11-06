@@ -132,6 +132,16 @@ describe("the new-session screen", () => {
     expect(failed).toContain("Detection failed");
   });
 
+  // verifies: FLOW-NEW-SESSION-R23
+  it("says above the box while the host's backends are detected, and the box is unavailable until they are", () => {
+    const detecting = render({ backends: {} });
+    expect(detecting).toContain("Detecting the backends on this host…");
+    expect(detecting).toMatch(/<textarea[^>]*disabled/);
+    const detected = render({});
+    expect(detected).not.toContain("Detecting the backends on this host…");
+    expect(detected).not.toMatch(/<textarea[^>]*disabled/);
+  });
+
   // verifies: FLOW-NEW-SESSION-R07
   it("shows a host's lone backend that is missing, and does not let a message start", () => {
     const html = render({ backends: { local: [claude("missing")] }, open: "backend" });

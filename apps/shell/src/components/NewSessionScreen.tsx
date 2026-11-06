@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Project } from "../protocol/core-api.gen";
 import { type BackendChoices, type SessionValues, available, howFor, seedScreen, startingProject, valuesFor } from "../session/controls";
 import type { Sending } from "../session/follow";
-import { Composer } from "./Composer";
+import { Composer, type Unavailable } from "./Composer";
 import { type ControlKey, type Host, SessionControls } from "./SessionControls";
 import { TrustQuestion, folderName } from "./TrustQuestion";
 import "./NewSessionScreen.css";
@@ -35,6 +35,8 @@ interface NewSessionScreenProps {
   onChooseFolder?: () => Promise<FolderChoice>;
   /** Adds the folder as a trusted project on the local host (FLOW-NEW-SESSION-R25); resolves to the project once Core added it. */
   onAddProject: (path: string) => Promise<Project | undefined>;
+  /** Ersa can't reach the sessions: trying again, or no longer trying (FLOW-SEND-MESSAGE-R06). */
+  away?: "reconnecting" | "unreachable";
   /** Choosing or adding a folder: on its way, or why it failed. */
   adding?: Sending;
   /** For the gallery: focus not taken, the composer shown focused, a chip shown open or in a state. */
@@ -216,12 +218,10 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     }
   };
 
-  const unavailable =
-    hostBackends === undefined
-      ? "Detecting the backends on this host…"
-      : available(hostBackends).length === 0
-        ? "No backend is available on this host."
-        : undefined;
+  // The box is unavailable while Ersa can't reach the sessions, while the host's backends are being detected
+  // (FLOW-NEW-SESSION-R23), and while the host has no backend to run.
+  const unavailable: Unavailable | undefined =
+    props.away ?? (hostBackends === undefined ? "detecting" : available(hostBackends).length === 0 ? "no-backend" : undefined);
 
   return (
     <section ref={screen} className="new-session" aria-label="New session">
@@ -249,6 +249,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
         </div>
         <Composer
           inputRef={words}
+          tall
           autoFocus={props.autoFocus ?? true}
           force={props.forceFocus ? "focus" : undefined}
           initialText={props.initialText}

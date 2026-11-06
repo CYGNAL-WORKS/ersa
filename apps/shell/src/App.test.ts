@@ -431,3 +431,21 @@ describe("the rail's New session and collapsing", () => {
     expect(toggle("beta").closest(".rail-project")?.hasAttribute("data-collapsed")).toBe(false);
   });
 });
+
+// The composer while Ersa can't reach the sessions (FLOW-SEND-MESSAGE-R06): App tells it so whichever view holds it.
+describe("the composer App draws when Core is lost", () => {
+  // verifies: FLOW-SEND-MESSAGE-R06
+  it("says Ersa can't reach the sessions and is unavailable under a session", async () => {
+    const core = fakeCore();
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    // The newest session shows at launch.
+    const message = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    expect(message().disabled).toBe(false);
+    core.drop();
+    await settle();
+    expect(document.querySelector(".composer-status-line")?.textContent).toBe("Ersa can't reach your sessions. It's trying again.");
+    expect(message().disabled).toBe(true);
+  });
+});

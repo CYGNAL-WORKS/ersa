@@ -222,6 +222,34 @@ Reconnecting to Core…
 
 ## `composer`
 
+### `composer.name`
+
+Composer
+
+### `composer.messageLabel`
+
+Message
+
+### `composer.writePlaceholder`
+
+Write to the agent
+
+### `composer.attachButton`
+
+Attach
+
+### `composer.sendButton`
+
+Send
+
+### `composer.detectingProgress`
+
+Detecting the backends on this host…
+
+### `composer.noBackendNote`
+
+No backend is available on this host.
+
 ## `newSession`
 
 ## `sessionControls`

@@ -103,7 +103,17 @@ export const enUS = {
     },
   },
   transcript: {},
-  composer: {},
+  // The composer (docs/design/COMPOSER.md): the box's parts, and the status line's note while backends are detected
+  // (FLOW-NEW-SESSION-R23). That Ersa can't reach the sessions is said in the rail foot's words.
+  composer: {
+    name: "Composer",
+    messageLabel: "Message",
+    writePlaceholder: "Write to the agent",
+    attachButton: "Attach",
+    sendButton: "Send",
+    detectingProgress: "Detecting the backends on this host…",
+    noBackendNote: "No backend is available on this host.",
+  },
   newSession: {},
   sessionControls: {
     // The host chip's name for the host Ersa runs on.
