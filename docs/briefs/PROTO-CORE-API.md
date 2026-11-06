@@ -116,7 +116,7 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 - ~~**PROTO-CORE-API-R15**~~: retired 2026-11-02 (a value not named is the backend's to choose, and Core does not know it), replaced by R16.
 - **PROTO-CORE-API-R16**: `session.create` shall start the backend with the `model` and `effort` it was given, passing nothing for one left out, and with the `permission_mode` given or else the backend's default permission mode, which is always stated to the backend; `session.list` shall report the `model` and `effort` that were given, absent otherwise, and the `permission_mode` the session started with.
 - **PROTO-CORE-API-R17**: Each replay capture shall equal what the replay server sends for its fixture, apart from `ersa_commit`.
-- **PROTO-CORE-API-R18**: `session.answer_question` shall cause the adapter to answer the backend's pending question with the given answers, and a `question.answered` event shall follow.
+- **PROTO-CORE-API-R33**: `session.answer_question` shall cause the adapter to answer the backend's pending question with the given answers, and a `question.answered` event shall follow.
 - **PROTO-CORE-API-R14**: `session.subscribe` with `from_seq` shall deliver every event from that sequence number onward, or from `first_seq` when the view no longer holds events before it, in order, with no gaps or duplicates, then continue live.
 
 ## Out of scope
@@ -132,7 +132,7 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 
 ## Changes
 
-- 2026-11-05: for FLOW-APPROVE-PERMISSION: `session.answer_question` takes answers in `question.answered`'s shape and answers the backend's question (PROTO-CORE-API-R18 added).
+- 2026-11-05: for FLOW-APPROVE-PERMISSION: `session.answer_question` takes answers in `question.answered`'s shape and answers the backend's question (PROTO-CORE-API-R33 added).
 - 2026-11-05: from #155 merge review: whether the window still reads `core.status` at attach is an open question. No requirement IDs changed.
 - 2026-11-03: from #111 merge review: `session.tile` is coalesced (one tile per projected batch, the newest per session for a busy connection) and never closes a connection, as Core already did; what PROTO-CORE-API-R09 asks of tiles stated. No requirement IDs changed.
 - 2026-11-02: from #55 inbox: `session.send` to a starting backend waits for it, and to one that failed to start answers `invalid_state` with the adapter's reason; settings key `new_session.last_used.<project id>` named. No requirement IDs changed.
