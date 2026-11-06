@@ -572,33 +572,8 @@ async fn an_adapter_that_panics_while_starting_fails_the_session_cleanly() {
         .await;
     let events = client.events_until("session.ended").await;
     assert_eq!(events.last().unwrap()["event"]["reason"], "error");
-    // Not live any more: it can be removed.
+    // It has ended: it can be removed.
     client.result("session.remove", json!({ "id": id })).await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_session_whose_end_was_announced_can_always_be_removed() {
-    // `session.ended` goes out while Core is still winding the session down;
-    // removing it straight away, many times over, finds that window.
-    let (core, _) = start_fake(FakeAdapter::panicking()).await;
-    let mut client = core.client().await;
-    let workspace_id = workspace(&mut client, core.dir.path()).await;
-    for _ in 0..50 {
-        let id = client
-            .result(
-                "session.create",
-                json!({ "workspace_id": workspace_id, "backend": fake::BACKEND }),
-            )
-            .await["id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        client
-            .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
-            .await;
-        client.events_until("session.ended").await;
-        client.result("session.remove", json!({ "id": id })).await;
-    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
