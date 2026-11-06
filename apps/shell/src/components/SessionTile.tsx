@@ -105,7 +105,7 @@ export function SessionTile({
 
   // The title being edited on the tile, in place of the title; undefined while it is only shown.
   // The title being edited on the tile, in place of the title (useTitleDraft, shared with the header).
-  const { draft, setDraft, busy, refused, edit, save, close: endEdit } = useTitleDraft({
+  const { draft, setDraft, busy, refused, edit, onFieldKey } = useTitleDraft({
     title: session.title ?? "",
     untitled: !session.title,
     onRename: rename?.onSave,
@@ -136,7 +136,7 @@ export function SessionTile({
         editing={editing}
         className="session"
         data-force={force}
-        data-handle={handle || undefined}
+        data-needs-you={needsYou || undefined}
         aria-current={active || undefined}
         onClick={() => onSelect(session.id)}
         onContextMenu={(event) => {
@@ -179,17 +179,8 @@ export function SessionTile({
               // Typing again leaves an earlier refusal behind.
               if (refused !== undefined) rename?.onReset();
             }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                void save();
-              } else if (event.key === "Escape") {
-                // Escape restores the title as it was (FLOW-ORGANIZE-SESSIONS, step 2).
-                event.preventDefault();
-                event.stopPropagation();
-                endEdit();
-              }
-            }}
+            // Enter saves and Escape restores the title as it was (FLOW-ORGANIZE-SESSIONS, step 2), as in the header.
+            onKeyDown={(event) => onFieldKey(event, { enter: true })}
             // Leaving the field without Enter restores the title too, unless a rename is on its way or was refused.
             onBlur={() => {
               if (!busy && refused === undefined) setDraft(undefined);
@@ -226,7 +217,7 @@ export function SessionTile({
           label={t("rail.tile.moreLabel", { title: view.title })}
           aria-haspopup="menu"
           aria-expanded={menu.open}
-          data-before-chevron={handle || undefined}
+          data-before-chevron={needsYou || undefined}
           style={{ anchorName: anchor } as CSSProperties}
           // A click the keyboard made (Enter or Space) has no pointer presses to count.
           onClick={(event) =>
@@ -451,7 +442,7 @@ function Root({
   editing,
   ref,
   ...rest
-}: HTMLAttributes<HTMLElement> & { editing: boolean; ref: Ref<HTMLElement>; "data-force"?: string; "data-handle"?: boolean }) {
+}: HTMLAttributes<HTMLElement> & { editing: boolean; ref: Ref<HTMLElement>; "data-force"?: string; "data-needs-you"?: boolean }) {
   if (editing) {
     // The box only holds the field: choosing, the menu and its keys belong to the tile when it is a button again.
     const { onClick: _click, onContextMenu: _menu, onKeyDown: _key, ...box } = rest;

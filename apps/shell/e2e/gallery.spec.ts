@@ -323,6 +323,27 @@ test("a collapsed heading counts its sessions, and an untrusted one keeps its wo
   await expect(tip).toHaveText("Not trusted");
 });
 
+// A tile's More and its mark (RAIL.md, A tile: More): a session that needs the user keeps its chevron, active or not,
+// with More before it; while the title is edited, More is not drawn, so the mark stays in its square.
+test("a tile keeps its chevron beside More, and its mark while its title is edited", async ({ page }) => {
+  await page.goto("/gallery.html?component=RailTree&theme=light");
+  const waiting = page.getByRole("figure", { name: "Active, needs you, pointer over it", exact: true });
+  const item = waiting.locator(".session-item").filter({ hasText: "Fix the flaky reconnect test" });
+  await expect(item.locator(".session-mark")).toHaveCSS("opacity", "1");
+  await expect(item.locator(".session-chevron")).toBeVisible();
+  await expect(item.locator(".session-more")).toHaveCSS("opacity", "1");
+  const [more, mark] = [await item.locator(".session-more").boundingBox(), await item.locator(".session-mark").boundingBox()];
+  expect(more!.x + more!.width).toBeLessThanOrEqual(mark!.x + 1);
+
+  const renaming = page.getByRole("figure", { name: "Renaming on the tile", exact: true });
+  const edited = renaming.locator(".session-item").filter({ has: page.getByRole("textbox", { name: "Session title" }) });
+  await edited.getByRole("textbox", { name: "Session title" }).focus();
+  // Read once any fade has had time to finish, so a mark fading out is not taken for one that stays.
+  await page.waitForTimeout(500);
+  expect(await edited.locator(".session-mark").evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+  await expect(edited.locator(".session-more")).toHaveCount(0);
+});
+
 // The session controls from the keyboard (FLOW-NEW-SESSION-R01): every chip on the way from the composer, each
 // opening its choices, Escape closing them with focus back on the chip, and a choice taking effect.
 test("every session control is reachable and works from the keyboard", async ({ page }) => {

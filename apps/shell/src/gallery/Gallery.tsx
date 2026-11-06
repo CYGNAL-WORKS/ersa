@@ -636,6 +636,8 @@ const entries: Entry[] = [
       ["Active tile, keyboard focus", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "focus" }} />],
       // s1 waits on a permission request and is not the active session: More sits before its chevron.
       ["Needs you, pointer over it", <RailTree {...ersaOnly} force={{ id: "s1", state: "hover" }} />],
+      // s1 is the active session and waits on a permission request: its chevron stays a mark, and More sits before it.
+      ["Active, needs you, pointer over it", <RailTree {...ersaOnly} activeId="s1" force={{ id: "s1", state: "hover" }} />],
       ["Tile menu, open", room(<RailTree {...pairOnly} initialTileMenu="p2" />)],
       ["Tile menu, Rename unavailable", room(
           <RailTree

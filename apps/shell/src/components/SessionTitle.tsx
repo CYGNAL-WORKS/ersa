@@ -1,4 +1,4 @@
-import { type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, type RefObject, useEffect, useRef, useState } from "react";
 import type { Sending } from "../session/follow";
 import { Button } from "./Button";
 
@@ -106,14 +106,26 @@ export function useTitleDraft({
     onReset?.();
     setDraft(untitled ? "" : title);
   };
-  return { draft, setDraft, busy, refused, editable, edit, save, close };
+  // The field's keys, the same wherever the title is edited: Escape restores the title, but not while a rename is on
+  // its way, whose answer (a refusal and its reason) would otherwise show nowhere; Enter saves where no form does.
+  const onFieldKey = (event: KeyboardEvent<HTMLInputElement>, { enter = false } = {}) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!busy) close();
+    } else if (enter && event.key === "Enter") {
+      event.preventDefault();
+      void save();
+    }
+  };
+  return { draft, setDraft, busy, refused, editable, edit, save, close, onFieldKey };
 }
 
 /** The session's title in its header, and renaming it there: the backend keeps the title, so its own tools show it too. */
 export function SessionTitle({ title, untitled, onRename, renaming, onReset, disabled, children, initialDraft, force }: SessionTitleProps) {
   const heading = useRef<HTMLHeadingElement>(null);
   const field = useRef<HTMLInputElement>(null);
-  const { draft, setDraft, busy, editable, edit: startEdit, save, close } = useTitleDraft({
+  const { draft, setDraft, busy, editable, edit: startEdit, save, close, onFieldKey } = useTitleDraft({
     title,
     untitled,
     onRename,
@@ -186,12 +198,8 @@ export function SessionTitle({ title, untitled, onRename, renaming, onReset, dis
             }
           }}
           onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Escape" && !busy) {
-              event.preventDefault();
-              close();
-            }
-          }}
+          // Enter submits the form.
+          onKeyDown={(event) => onFieldKey(event)}
         />
         <Button type="submit" disabled={busy || disabled || draft.trim() === ""}>
           {/* Both labels share one cell, so the button keeps its width and nothing beside it moves. */}

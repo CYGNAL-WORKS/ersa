@@ -99,14 +99,14 @@
     color var(--motion-quick) var(--motion-ease-out);
 }
 
-/* Beside a session that needs the user, More sits before the chevron, in a second square whose place is kept while
-   More is hidden, so the title never shifts. */
+/* Beside a session that needs the user, active or not, More sits before the chevron, which stays, in a second square
+   whose place is kept while More is hidden, so the title never shifts. */
 .session-more[data-before-chevron] {
   margin-inline-end: calc(var(--line-hairline) + var(--space-sm) + var(--size-control-sm));
 }
 
-.session[data-handle] .session-title,
-.session[data-handle] .session-title-field {
+.session[data-needs-you] .session-title,
+.session[data-needs-you] .session-title-field {
   margin-inline-end: var(--size-control-sm);
 }
 
@@ -117,10 +117,12 @@
   opacity: 1;
 }
 
-.session-item:hover > .session .session-mark,
-.session-item:focus-within > .session .session-mark,
-.session-item:has(> .session[data-force="hover"], > .session[data-force="focus"]) > .session .session-mark,
-.session-item:has(> .session-more[aria-expanded="true"]) > .session .session-mark {
+/* More takes the mark's square, so the mark gives way: not a chevron, which More sits beside, and not while the
+   title is edited, when More is not drawn. */
+.session-item:hover > .session:not([data-needs-you], [data-editing]) .session-mark,
+.session-item:focus-within > .session:not([data-needs-you], [data-editing]) .session-mark,
+.session-item:has(> .session[data-force="hover"], > .session[data-force="focus"]) > .session:not([data-needs-you], [data-editing]) .session-mark,
+.session-item:has(> .session-more[aria-expanded="true"]) > .session:not([data-needs-you], [data-editing]) .session-mark {
   opacity: 0;
 }
 
