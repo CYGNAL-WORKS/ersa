@@ -17,7 +17,7 @@ The shelf is the user's to open: a request arriving never opens it or moves focu
 
 The shelf is for sessions other than the active one. The active session's requests are answered on its transcript's cards, so its tile's chevron opens no shelf, and making a session active closes its shelf. The shelf and a transcript card never show the same request at once.
 
-The answers are the ones the request carries: what the backend accepts for it, as the agent offered them. For a permission request that is allowing, denying, and the request's own suggestions; for a question, its options, or the user's own words where the question takes them. Ersa invents no answer of its own.
+The answers are the ones the request carries: what the backend accepts for it, as the agent offered them. For a permission request that is allowing, denying, and the request's own suggestions; for a question, its options, the user's own words where the question takes them, or declining to answer. Ersa invents no answer of its own.
 
 What the shelf reads comes from the session's events (`PROTO-AGENT-EVENTS`, Permission and Question): Ersa follows the session's events while its shelf is open (`PROTO-CORE-API`, `session.subscribe`) and stops when it closes, and answers with `session.decide_permission` and `session.answer_question`. The tile's pending list says that a session waits and for how many requests; the events say what each request is.
 
@@ -53,6 +53,7 @@ A question
 - **FLOW-APPROVE-PERMISSION-R17**: When the active session has a pending question, the transcript's question card shall offer the same answers as the shelf would.
 - **FLOW-APPROVE-PERMISSION-R26**: The chevron on the active session's tile shall open no shelf, and when the user makes the session whose shelf is open the active one, Ersa shall close the shelf.
 - **FLOW-APPROVE-PERMISSION-R27**: The transcript's permission card shall offer the same answers as the shelf would for that request, with the same primary answer.
+- **FLOW-APPROVE-PERMISSION-R28**: For a question, the shelf and the transcript's question card shall also offer Decline, available at once; when the user chooses it, Ersa shall send `session.answer_question` with `declined` and no answers.
 
 Sending an answer
 
@@ -76,6 +77,7 @@ Assistive technology
 
 ## Changes
 
+- 2026-11-05: a question can be declined (R28 added), as Claude Code accepts (PROTO-CLAUDE-CODE-STREAM, Questions).
 - 2026-11-05: owner review: the active session has no shelf (R26 added; R27 gives the transcript's permission card the request's own answers; R01 narrowed to other sessions; R18 no longer joins the shelf and the transcript's card); the shelf shows no workspace (R11, R15); the answers are the ones the request carries (R12 reworded); a question shows its header and option descriptions and takes the user's own words where it allows them (R15, R16). Claude Code's questions are projected and answered (PROTO-CLAUDE-CODE-STREAM, Questions).
 - 2026-11-05: specified from the owner's decisions and the Rail mockup's shelf: opened only from the chevron, one at a time, over the transcript's edge, oldest request first with its place, focus in and back, what a permission request and a question show and send, one answer between the shelf and the transcript's card, and what assistive technology hears. Status ready; FLOW-APPROVE-PERMISSION-R01 to R25 added. Closing on the last answer puts focus on the tile rather than on the chevron the owner named, since the chevron goes once nothing is pending (R08). Closes the open questions on an "approve all" option (the request's own suggestions, never offered when it suppresses them) and on large details (they scroll, as the transcript's card's do).
 - 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.

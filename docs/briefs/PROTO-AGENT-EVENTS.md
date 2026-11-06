@@ -68,7 +68,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 ### Question
 
 - `question.asked`: `request_id`, `questions` (array of `{ id, text, header (optional short label), options (optional array of { id, label, description (optional) }), multi_select (boolean), takes_text (boolean: the user may answer in their own words beside the options) }`). Each question's `id` is unique within the request.
-- `question.answered`: `request_id`, `answers` (array of `{ id, value, own_words (boolean) }`, one per question, where `value` is the user's own words when `own_words` is true, and otherwise a single option id, or an array of option ids for multi-select; empty when the backend withdrew the question), `answered_by` one of `user`, `timeout`, `backend` (the backend withdrew the question, after an interrupt say).
+- `question.answered`: `request_id`, `answers` (array of `{ id, value, own_words (boolean) }`, one per question, where `value` is the user's own words when `own_words` is true, and otherwise a single option id, or an array of option ids for multi-select; empty when the user declined or the backend withdrew the question), `declined` (boolean: the user chose not to answer), `answered_by` one of `user`, `timeout`, `backend` (the backend withdrew the question, after an interrupt say).
 
 ### Usage
 
@@ -139,7 +139,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - **PROTO-AGENT-EVENTS-R16**: Core shall emit `session_open_elsewhere` notices at level `warning` and `session_open_check_failed` notices at level `info`.
 - **PROTO-AGENT-EVENTS-R17**: While a turn runs, each Claude Code live line that reports output usage (a partial `message_delta`, or an `assistant` line) shall project to a `usage.updated` whose `turn_output_tokens` is the sum of the output tokens of every API message in the turn so far, counting each message id once at the highest count reported for it, so the sum never decreases within the turn. A synthetic `assistant` message (model `<synthetic>`, made without an API call) adds nothing to the count.
 - **PROTO-AGENT-EVENTS-R18**: A Claude Code `can_use_tool` control request for its question tool shall project to one `question.asked`, and no `permission.requested`, carrying each question's text, header, options with their labels and descriptions, and multi-select, with `takes_text` true (PROTO-CLAUDE-CODE-STREAM, Questions).
-- **PROTO-AGENT-EVENTS-R19**: The host's answer to a Claude Code question shall project to one `question.answered` with `answered_by` `user`, and no `permission.decided`, matching each answer to its question by text and to options by label as PROTO-CLAUDE-CODE-STREAM (Questions) says; the CLI withdrawing a pending question, or the turn ending with it unanswered, shall project to `question.answered` with `answered_by` `backend` and no answers.
+- **PROTO-AGENT-EVENTS-R19**: The host's answer to a Claude Code question shall project to one `question.answered` with `answered_by` `user`, `declined` when it was a deny, and no `permission.decided`, matching each answer to its question by text and to options by label as PROTO-CLAUDE-CODE-STREAM (Questions) says; the CLI withdrawing a pending question, or the turn ending with it unanswered, shall project to `question.answered` with `answered_by` `backend` and no answers.
 
 ## Out of scope
 
@@ -155,6 +155,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 ## Changes
 
+- 2026-11-05: `question.answered` gains `declined`, recorded on Claude Code 2.1.316 (PROTO-CLAUDE-CODE-STREAM, Questions); R19 reworded to project a deny as declined.
 - 2026-11-05: for FLOW-APPROVE-PERMISSION: Claude Code's question tool projects to `question.asked` in the adapter, which answers the open question on where questions come from; `question.asked` gains optional `header`, option `description`, and `takes_text`; an answer gains `own_words`, the user's own words moving to `value` with it; `answered_by` gains `backend` for a withdrawn question. A shape change, so `v` is bumped. PROTO-AGENT-EVENTS-R18 and R19 added.
 - 2026-11-04: from #136 inbox: PROTO-AGENT-EVENTS-R17 takes each message's highest count, not its latest, since Claude Code can send an `assistant` line with a lower partial count after a `message_delta` for the same message; synthetic `assistant` messages add nothing to the count.
 - 2026-11-02: `usage.updated.turn_output_tokens` added for the working mark's token count beside the elapsed time; PROTO-AGENT-EVENTS-R17 added: the count belongs to one turn and takes each message's latest count. A shape change, so `v` is bumped. Elapsed time needs no field: it is the `turn.started` envelope's `ts` while the turn runs and `turn.completed.duration_ms` after.
