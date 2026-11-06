@@ -61,16 +61,18 @@ test("a bullet label repeated under one section name fails the check", () => {
   // What a union merge leaves: the old and new wording of one bullet, in a section whose heading also repeats,
   // a method whose parameters changed, and a nested bullet; a fence between them changes nothing.
   const { status, problems } = withSection(
-    "- **The foot** says one thing.\n\n## The rail\n\n```sh\n# a comment\n```\n\n- **The foot** says another.\n" +
-      "- `a.b { id }`: one.\n- `a.b { id, text }`: two.\n- **P**\n  - **Q** one.\n  - **Q** two.",
+    "- **The foot** says one thing.\n\n## The rail\n\n```sh\n# a comment\n~~~\n```\n\n- **The foot** says another.\n" +
+      "- `a.b { id }`: one.\n- `a.b { id, text }`: two.\n- **P**\n  - **Q** one.\n  - **Q** two.\n" +
+      "```js x```\n- **Z** one.\n- **Z** two.",
   );
   assert.equal(status, 1);
+  assert.match(problems, /LAY-SHELL: \*\*Z\*\* appears twice under "The rail"/);
   assert.match(problems, /LAY-SHELL: \*\*The foot\*\* appears twice under "The rail"/);
   assert.match(problems, /LAY-SHELL: `a\.b` appears twice under "The rail"/);
   assert.match(problems, /LAY-SHELL: \*\*Q\*\* appears twice under "The rail"/);
 });
 
 test("labels in fenced code, or nested under different bullets, are not repeats", () => {
-  const { status, problems } = withSection("## Spare\n\n```\n- **X**\n- **X**\n```\n\n- **P**\n  - **Q** one.\n- **R**\n  - **Q** two.");
+  const { status, problems } = withSection("## Spare\n\n```\n- **X**\n- **X**\n```\n\n- **P**\n  - **Q** one.\n- **R**\n  - **Q** two.\n- plain\n  - **Q** three.");
   assert.equal(status, 0, problems);
 });
