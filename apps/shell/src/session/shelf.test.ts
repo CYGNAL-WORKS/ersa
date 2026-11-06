@@ -275,6 +275,27 @@ describe("several requests", () => {
     ]);
   });
 
+  // verifies: FLOW-APPROVE-PERMISSION-R09
+  it("never counts past m: once every request it knew of is answered, it shows nothing while the tile catches up", () => {
+    const [r1, r2] = [permission("r1"), permission("r2")];
+    const both: [Kind, string][] = [
+      ["permission", "r1"],
+      ["permission", "r2"],
+    ];
+    expect(
+      across([
+        [[r1, r2], both],
+        [[r1, r2, decided("r1")], both],
+        [[r1, r2, decided("r1"), decided("r2")], both],
+      ]),
+    ).toEqual([
+      ["r1", { n: 1, m: 2 }],
+      ["r2", { n: 2, m: 2 }],
+      [undefined, undefined],
+    ]);
+    expect(shelfOf(viewOf([r1, r2, decided("r1"), decided("r2")]), pending(...both))).toEqual({ state: "loading" });
+  });
+
   it("keeps the shown requests while the same shelf is open, and starts afresh for another or after closing", () => {
     const first = shownAfter(undefined, "s1", "r1");
     expect(first?.requests).toEqual(new Set(["r1"]));

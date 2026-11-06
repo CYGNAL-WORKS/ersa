@@ -107,6 +107,9 @@ export function shelfOf(view: SessionView | undefined, pending: readonly Pending
   const answered = [...shown].filter((id) => !waiting.has(id)).length;
   const m = answered + stillPending.length;
   const place = m > 1 ? { n: answered + 1, m } : undefined;
+  // Every request it knew of is answered, though the tile still lists them: nothing is left to show, and the shelf
+  // closes once Core lists its sessions again.
+  if (stillPending.length === 0) return { state: "loading" };
   const oldest = showable[0];
   if (!oldest || (unshowable > 0 && missedEarlier(view))) return { state: "unknown", place };
   if (oldest.kind === "permission") return { state: "permission", request: oldest.request, place };

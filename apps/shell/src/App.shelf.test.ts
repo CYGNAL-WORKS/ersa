@@ -149,7 +149,10 @@ describe("several requests", () => {
     const shelf = screen.getByRole("dialog", { name: /^Request from / });
     expect(within(shelf).getByText("1 of 2")).toBeTruthy();
 
-    fireEvent.click(within(shelf).getByRole("button", { name: "Allow" }));
+    // Answered from the keyboard: focus is on Allow, which goes with the first request.
+    const allow = within(shelf).getByRole("button", { name: "Allow" });
+    act(() => allow.focus());
+    fireEvent.click(allow);
     // Core records the answer; the tile still lists both until Core lists its sessions again.
     await core.send(envelope({ type: "permission.decided", request_id: "r1", behavior: "allow", decided_by: "user" }, 2));
     expect(within(shelf).getByText("Write the second file")).toBeTruthy();

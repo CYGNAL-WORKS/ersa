@@ -384,15 +384,14 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const shelfOpen = (() => {
     if (!shelfSession || !shelfShows) return undefined;
     const tile = tileOf(shelfSession, backends);
-    const shows = shelfShows;
     return {
       id: shelfSession.id,
-      tone: shelfTone(shows),
+      tone: shelfTone(shelfShows),
       render: (domId: string) => (
         <Shelf
           id={domId}
           tile={tile}
-          shows={shows}
+          shows={shelfShows}
           onRetry={shelf.attached}
           answers={answers[shelfSession.id]}
           live={connected}
