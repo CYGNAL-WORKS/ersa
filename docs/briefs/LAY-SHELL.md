@@ -79,10 +79,11 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 
 ## Built so far
 
-The rail is a list of projects above one list of sessions grouped under a heading per workspace. Of the rail described above, the foot is built and the rest is still to build. Until the shelf is built, a tile's chevron is a mark, not a control, and a request is answered in the transcript.
+Of the rail described above, the tree is built grouped by project, sessions newest first, with the foot; the arrange button and menu, the other groupings, sections, pins and a tile's menu are still to build, and until the project chip is built a form beneath the tree adds a project. The shelf is built: a tile's chevron is the shelf's handle on every tile but the active one's.
 
 ## Changes
 
+- 2026-11-06: from #214 and #215 inbox: Built so far follows the rail tree and the shelf. No requirement IDs changed.
 - 2026-11-06: the union merges of #173, #174 and #171 left two or three versions of the rail's opening, Add project, "Loading, empty and failed" and "The foot", some under The shelf; one of each kept, as the owner's decisions of 2026-11-05 say. Meaning unchanged; no requirement IDs changed.
 - 2026-11-05: where the shelf sits (The shelf), from the owner's decisions; its behavior is FLOW-APPROVE-PERMISSION's. This closes the open question on overlay or push and queueing. No requirement IDs changed.
 - 2026-11-05: from #174 merge review: the sessions page's loading and failed states, what it hides while it shows, and its rows' mark and time; View all is named All sessions. No requirement IDs changed.

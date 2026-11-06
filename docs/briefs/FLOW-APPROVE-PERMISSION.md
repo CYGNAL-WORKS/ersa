@@ -19,7 +19,7 @@ The shelf is for sessions other than the active one. The active session's reques
 
 The answers are the ones the request carries: what the backend accepts for it, as the agent offered them. For a permission request that is allowing, denying, and the request's own suggestions; for a question, its options, the user's own words where the question takes them, or declining to answer. Ersa invents no answer of its own.
 
-What the shelf reads comes from the session's events (`PROTO-AGENT-EVENTS`, Permission and Question): Ersa follows the session's events while its shelf is open (`PROTO-CORE-API`, `session.subscribe`) and stops when it closes, and answers with `session.decide_permission` and `session.answer_question`. The tile's pending list says that a session waits and for how many requests; the events say what each request is.
+What the shelf reads comes from the session's events (`PROTO-AGENT-EVENTS`, Permission and Question): Ersa follows the session's events while its shelf is open (`PROTO-CORE-API`, `session.subscribe`) and stops when it closes, and answers with `session.decide_permission` and `session.answer_question`. The tile's pending list says that a session waits and for how many requests; the events say what each request is, and their order is the requests' order. A request with no place in that order, because its kind is unknown or its event is not held, is the oldest when Core has let go of the session's earliest events, where its event must have been, and otherwise the newest, since its event has not arrived yet.
 
 ## Requirements
 
@@ -62,6 +62,7 @@ Sending an answer
 - **FLOW-APPROVE-PERMISSION-R20**: While Ersa can't reach Core, the shelf's answers shall be unavailable and the shelf shall say that Ersa is reconnecting.
 - **FLOW-APPROVE-PERMISSION-R21**: While Ersa is reading the session's events for the shelf, the shelf shall say it is loading; when reading them fails, it shall say why and offer Retry.
 - **FLOW-APPROVE-PERMISSION-R25**: When the shown request is of a kind Ersa doesn't know, or its event is no longer among the session's events Core holds, the shelf shall say that the session is waiting on a request Ersa can't show here, and offer no answers for it.
+- **FLOW-APPROVE-PERMISSION-R29**: When ordering a session's pending requests, the shelf shall count a request it can't show (R25) as the oldest when the session's events it holds start after events Core let go of, and otherwise as newer than every request it can show.
 
 Assistive technology
 
@@ -73,10 +74,12 @@ Assistive technology
 
 - How much of each backend's native permission vocabulary is surfaced versus normalized: a reason with Deny (`message`) and editing the input before allowing (`updated_input`) are not offered yet.
 - Keyboard-only path: a shortcut that opens the oldest pending shelf across sessions, and moves to the next session's once one is done.
+- Whether a request the shelf can't show should hold the shelf when requests behind it can be shown. Today they are answered on the transcript's cards.
 - Whether Core should carry each pending request's details on the tile, so that opening a shelf does not read the session's whole event history first.
 
 ## Changes
 
+- 2026-11-06: from #215 inbox: where a request the shelf can't show falls in the order (R29 added).
 - 2026-11-05: a question can be declined (R28 added), as Claude Code accepts (PROTO-CLAUDE-CODE-STREAM, Questions).
 - 2026-11-05: owner review: the active session has no shelf (R26 added; R27 gives the transcript's permission card the request's own answers; R01 narrowed to other sessions; R18 no longer joins the shelf and the transcript's card); the shelf shows no workspace (R11, R15); the answers are the ones the request carries (R12 reworded); a question shows its header and option descriptions and takes the user's own words where it allows them (R15, R16). Claude Code's questions are projected and answered (PROTO-CLAUDE-CODE-STREAM, Questions).
 - 2026-11-05: specified from the owner's decisions and the Rail mockup's shelf: opened only from the chevron, one at a time, over the transcript's edge, oldest request first with its place, focus in and back, what a permission request and a question show and send, one answer between the shelf and the transcript's card, and what assistive technology hears. Status ready; FLOW-APPROVE-PERMISSION-R01 to R25 added. Closing on the last answer puts focus on the tile rather than on the chevron the owner named, since the chevron goes once nothing is pending (R08). Closes the open questions on an "approve all" option (the request's own suggestions, never offered when it suppresses them) and on large details (they scroll, as the transcript's card's do).
