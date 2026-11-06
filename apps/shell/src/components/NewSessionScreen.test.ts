@@ -135,11 +135,18 @@ describe("the new-session screen", () => {
   // verifies: FLOW-NEW-SESSION-R23
   it("says above the box while the host's backends are detected, and the box is unavailable until they are", () => {
     const detecting = render({ backends: {} });
-    expect(detecting).toContain("Detecting the backends on this host…");
+    expect(detecting).toMatch(/class="composer-status-line">Detecting the backends on this host…</);
     expect(detecting).toMatch(/<textarea[^>]*disabled/);
     const detected = render({});
     expect(detected).not.toContain("Detecting the backends on this host…");
     expect(detected).not.toMatch(/<textarea[^>]*disabled/);
+  });
+
+  it("opens the trust question in the status line's place, the box's focus shown by its edge alone", () => {
+    const html = render({ backends: {}, initialAsking: "D:/clones/stranger" });
+    expect(html).toContain("Trust stranger?");
+    expect(html).not.toContain("composer-status-line");
+    expect(html).toMatch(/class="composer-box"[^>]*data-quiet-focus/);
   });
 
   // verifies: FLOW-NEW-SESSION-R07

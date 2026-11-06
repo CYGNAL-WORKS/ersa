@@ -106,6 +106,7 @@
 
 /* Attach is the quiet icon button (Icon.css) at size-control-lg; send is the primary button made square. */
 .composer-attach {
+  box-sizing: border-box;
   width: var(--size-control-lg);
   height: var(--size-control-lg);
 }
