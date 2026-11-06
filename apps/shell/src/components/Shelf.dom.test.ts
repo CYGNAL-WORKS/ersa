@@ -4,9 +4,9 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { createElement } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PermissionRequested } from "../protocol/agent-events.gen";
 import type { ShelfShows } from "../session/shelf";
 import { Shelf } from "./Shelf";
@@ -25,7 +25,11 @@ const request = (request_id: string, description: string): PermissionRequested =
 
 const shelf = (shows: ShelfShows) => createElement(Shelf, { tile: { title: "Fix the build" }, shows, live: true, onDecide: () => {} });
 const contents = () => document.querySelector(".shelf-contents") as HTMLElement;
+const reduce = (on: boolean) => {
+  window.matchMedia = ((query: string) => ({ matches: on && query.includes("reduce"), media: query })) as unknown as typeof window.matchMedia;
+};
 
+beforeEach(() => reduce(false));
 afterEach(cleanup);
 
 describe("the shelf moving to the next request", () => {
@@ -42,6 +46,45 @@ describe("the shelf moving to the next request", () => {
     expect(screen.getByRole("status").textContent).toBe("Permission request, 2 of 3: Build the shell");
     rerender(shelf({ state: "question", requestId: "q3", questions: [{ id: "a", text: "Which branch?", multi_select: false }], place: { n: 3, m: 3 } }));
     expect(screen.getByRole("status").textContent).toBe("Question, 3 of 3: Which branch?");
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R24
+  it("says nothing when it comes back to a request after loading, as on a reconnect", () => {
+    const { rerender } = render(shelf({ state: "permission", request: request("r1", "Run the tests"), place: { n: 1, m: 3 } }));
+    rerender(shelf({ state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 3 } }));
+    const said = screen.getByRole("status").textContent;
+    rerender(shelf({ state: "loading" }));
+    rerender(shelf({ state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 3 } }));
+    expect(screen.getByRole("status").textContent).toBe(said);
+    expect(contents().hasAttribute("data-next")).toBe(false);
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R24
+  it("says the place when it moves on to a request it can't show", () => {
+    const { rerender } = render(shelf({ state: "permission", request: request("r1", "Run the tests"), place: { n: 1, m: 2 } }));
+    rerender(shelf({ state: "unknown", place: { n: 2, m: 2 } }));
+    expect(screen.getByRole("status").textContent).toBe("2 of 2: This session is waiting on a request Ersa can't show here.");
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R10
+  it("keeps focus on the shelf itself when the request whose answer held it is answered elsewhere", () => {
+    const { rerender } = render(shelf({ state: "permission", request: request("r1", "Run the tests"), place: { n: 1, m: 2 } }));
+    act(() => screen.getByRole("button", { name: "Deny" }).focus());
+    rerender(shelf({ state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 2 } }));
+    expect(document.activeElement).toBe(screen.getByRole("dialog"));
+  });
+
+  it("fades the last request's contents out over the next, out of reach, and not with reduced motion", () => {
+    const { rerender } = render(shelf({ state: "permission", request: request("r1", "Run the tests"), place: { n: 1, m: 3 } }));
+    rerender(shelf({ state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 3 } }));
+    const leaving = document.querySelector(".shelf-contents[data-leaving]") as HTMLElement;
+    expect(leaving.textContent).toContain("Run the tests");
+    expect(leaving.hasAttribute("inert")).toBe(true);
+    expect(leaving.getAttribute("aria-hidden")).toBe("true");
+
+    reduce(true);
+    rerender(shelf({ state: "permission", request: request("r3", "Ship it"), place: { n: 3, m: 3 } }));
+    expect(document.querySelector(".shelf-contents[data-leaving]")).toBeNull();
   });
 
   it("cross-fades its contents to the next request, but not as it first shows one", () => {
