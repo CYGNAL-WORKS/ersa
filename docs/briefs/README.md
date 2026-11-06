@@ -75,4 +75,4 @@ Before writing or rewriting a brief for an area, read the matching file under `d
 
 ## Manifest
 
-`node scripts/manifest.mjs` regenerates `docs/MANIFEST.md` and the table in `docs/adr/README.md`. It reports: every brief with status, requirement count, and verified count; unverified requirements in ready or built flow and protocol briefs; open inbox entries; duplicate IDs; reference cycles; dangling references; retired IDs still cited; and layout or component briefs carrying requirement IDs while still draft. Pass `--check` to exit non-zero on problems.
+`node scripts/manifest.mjs` regenerates `docs/MANIFEST.md` and the table in `docs/adr/README.md`. It reports: every brief with status, requirement count, and verified count; unverified requirements in ready or built flow and protocol briefs; open inbox entries; duplicate IDs; reference cycles; dangling references; retired IDs still cited; and layout or component briefs carrying requirement IDs while still draft. Pass `--check` to exit non-zero on problems. Open inbox entries count as a problem only with `--inbox` too, which CI passes on the merge queue and on main (ADR 0025).
