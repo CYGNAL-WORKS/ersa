@@ -124,6 +124,14 @@ Deny
 
 Allow
 
+### `rail.shelf.answerRefusedError`
+
+Your answer wasn't accepted.
+
+### `rail.shelf.reconnectingNote`
+
+Reconnecting to Core…
+
 ## `transcript`
 
 ## `composer`
