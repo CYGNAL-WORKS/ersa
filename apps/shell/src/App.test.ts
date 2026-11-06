@@ -81,8 +81,7 @@ async function openScreen() {
   await settle();
   await settle();
   // The newest session shows at launch; New session for gamma opens the screen.
-  const gamma = screen.getAllByRole("listitem").find((li) => li.querySelector(".project-name")?.textContent === "gamma");
-  fireEvent.click(within(gamma!).getByRole("button", { name: "New session" }));
+  fireEvent.click(screen.getByRole("button", { name: "New session in gamma" }));
   return core;
 }
 
@@ -102,5 +101,33 @@ describe("the projects App gives the new-session screen", () => {
     core.drop();
     await settle();
     expect(projectList()).toEqual(["beta", "alpha", "gamma"]);
+  });
+});
+
+// The rail's wiring (LAY-SHELL, The rail; FLOW-NEW-SESSION-R13): App hands the tree the sessions and the workspaces it
+// read, so each session sits under its own project. session/tree.test.ts covers the grouping itself.
+describe("the tree App draws in the rail", () => {
+  /** Each project heading's name with how many tiles sit beneath it, in the rail's order. */
+  function headings(): [string, number][] {
+    const tree = screen.getByRole("region", { name: "Projects and sessions" });
+    return [...tree.querySelectorAll(".rail-project")].map((group) => [
+      group.querySelector(".rail-heading-name")?.textContent ?? "",
+      group.querySelectorAll(".session").length,
+    ]);
+  }
+
+  // verifies: FLOW-NEW-SESSION-R13
+  it("puts each session Core lists under its own project, by the workspaces App read", async () => {
+    render(createElement(App, { client: fakeCore().client }));
+    await settle();
+    await settle();
+    expect(headings()).toEqual([
+      ["alpha", 1],
+      ["beta", 1],
+      ["gamma", 0],
+    ]);
+    // Every session is placed, so none sits at the end under no heading.
+    const tree = screen.getByRole("region", { name: "Projects and sessions" });
+    expect(tree.querySelectorAll(":scope > .rail-tiles")).toHaveLength(0);
   });
 });
