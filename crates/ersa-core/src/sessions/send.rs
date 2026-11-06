@@ -385,11 +385,18 @@ async fn report_progress(handle: Weak<Handle>, tiles: Arc<TileHub>, changed: Arc
                 last = Some((progress, Instant::now()));
             }
         }
-        // Looks again each gap; a phase change wakes it early, but it still
-        // waits out the gap after the last line it sent.
+        // Looks again each gap, for bytes copied; a phase change wakes it
+        // early, and the repeat is scheduled for its deadline rather than
+        // found at the next look, so it is never late. It still waits out
+        // the gap after the last line it sent.
+        let repeat = match &last {
+            Some((_, at)) => tokio::time::Instant::from_std(*at + PROGRESS_EVERY),
+            None => tokio::time::Instant::now(),
+        };
         tokio::select! {
             () = changed.notified() => {}
             () = tokio::time::sleep(PROGRESS_GAP) => {}
+            () = tokio::time::sleep_until(repeat) => {}
         }
         if let Some((_, at)) = last {
             tokio::time::sleep(PROGRESS_GAP.saturating_sub(at.elapsed())).await;
