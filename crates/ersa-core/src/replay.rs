@@ -33,10 +33,10 @@ use tokio::sync::watch;
 
 use crate::api::ApiError;
 use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
-use crate::platform;
 use crate::sessions::SessionError;
 use crate::state::Core;
 use crate::transport::MAX_PROCESS_LINE_BYTES;
+use crate::workspace;
 
 /// How fast a replay feeds its lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,9 +149,8 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
     };
     // Stored under the key `project.add` would give the folder, so
     // `project.find` answers for it as it does on a live Core.
-    let key = platform::canonicalize(&core.config.data_dir)
-        .map(|p| platform::folder_key(&p))
-        .unwrap_or_else(|_| platform::path_key(&path));
+    let key = workspace::location_key(&path);
+
     // The recording plays in the project's root workspace, its own folder.
     let workspace = core.store.insert_project(project.clone(), key).await?;
 
