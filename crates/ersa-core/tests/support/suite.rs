@@ -60,10 +60,10 @@ pub async fn hello_reports_versions_and_the_local_host(target: Target) {
     let hello = client
         .result(
             "core.hello",
-            json!({ "client": "test", "client_version": "0", "api_versions": [3, 7] }),
+            json!({ "client": "test", "client_version": "0", "api_versions": [4, 7] }),
         )
         .await;
-    assert_eq!(hello["api_version"], json!(3), "the highest shared version");
+    assert_eq!(hello["api_version"], json!(4), "the highest shared version");
     assert_eq!(hello["event_projection_version"], json!(PROJECTION_VERSION));
     assert_eq!(hello["host"]["id"], json!("local"));
     assert_eq!(hello["host"]["platform"], json!(std::env::consts::OS));
@@ -73,7 +73,7 @@ pub async fn hello_reports_versions_and_the_local_host(target: Target) {
     let error = client
         .error(
             "core.hello",
-            json!({ "client": "test", "client_version": "0", "api_versions": [3] }),
+            json!({ "client": "test", "client_version": "0", "api_versions": [4] }),
         )
         .await;
     assert_eq!(kind(&error), "invalid_state");
@@ -85,13 +85,13 @@ pub async fn hello_without_a_shared_version_names_the_supported_ones_and_closes(
     let error = client
         .error(
             "core.hello",
-            json!({ "client": "test", "client_version": "0", "api_versions": [1, 2] }),
+            json!({ "client": "test", "client_version": "0", "api_versions": [2, 3] }),
         )
         .await;
     assert_eq!(kind(&error), "invalid_state");
     let message = error["message"].as_str().unwrap();
-    assert!(message.contains("supports [3]"), "{message}");
-    assert!(message.contains("[1, 2]"), "{message}");
+    assert!(message.contains("supports [4]"), "{message}");
+    assert!(message.contains("[2, 3]"), "{message}");
 
     assert_eq!(client.read_line().await, None, "Core closed the connection");
 

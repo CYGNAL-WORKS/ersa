@@ -57,7 +57,7 @@ async fn exchange(endpoint: &str, request: Option<&str>) -> Value {
     let (read, mut write) = tokio::io::split(stream);
     let mut lines = BufReader::new(read).lines();
     let mut messages = vec![json!({ "jsonrpc": "2.0", "id": 1, "method": "core.hello",
-        "params": { "client": "ersa-cli-tests", "client_version": "0", "api_versions": [3] } })];
+        "params": { "client": "ersa-cli-tests", "client_version": "0", "api_versions": [4] } })];
     if let Some(method) = request {
         messages.push(json!({ "jsonrpc": "2.0", "id": 2, "method": method }));
     }

@@ -21,6 +21,12 @@ use crate::transport::{self, Output, RunError};
 /// whole tree, which takes a while for a large repository.
 const GIT_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// How long a quick question to git may take: listing branches, resolving a
+/// base. The Interface waits on these while the user picks, so a repository
+/// that hangs (a network drive, a stuck lock) is reported rather than waited
+/// on.
+pub const GIT_QUERY_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// How many times removal is tried, and the wait before the first retry
 /// (doubled each time). On Windows, a process that has just exited (an editor,
 /// an indexer, a session's backend) can hold files in the worktree for a
@@ -88,6 +94,131 @@ pub async fn git_worktree_add(
     args.extend(base);
     let output = git(transport, repo, &args).await?;
     check(output, "git worktree add failed")
+}
+
+/// A repository's local branches, and which one is its default.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LocalBranches {
+    /// Short names (`main`, `feature/rail`), sorted.
+    pub names: Vec<String>,
+    /// The default branch, one of `names`: the one `origin/HEAD` points
+    /// at, else `main`, else `master`, else the checked-out branch. None
+    /// on a detached checkout with none of those.
+    pub default: Option<String>,
+}
+
+/// The local branches of the repository at `repo`, and its default branch.
+/// One git call, given [`GIT_QUERY_TIMEOUT`].
+pub async fn git_local_branches(
+    transport: &dyn Transport,
+    repo: &str,
+) -> Result<LocalBranches, VcsError> {
+    // Each line is `<ref>:<* if checked out>:<target if a symbolic ref>`.
+    // A ref name can never contain `:`, so the split is unambiguous. The
+    // second pattern names `origin/HEAD` exactly, to read where it points.
+    let format = "--format=%(refname):%(HEAD):%(symref)";
+    let args = [
+        "for-each-ref",
+        format,
+        "refs/heads",
+        "refs/remotes/origin/HEAD",
+    ];
+    let output = query(transport, repo, &args).await?;
+    if !output.exit.success() {
+        return Err(VcsError::Failed {
+            message: "git could not list the branches".into(),
+            stderr: output.stderr_text(),
+        });
+    }
+    Ok(parse_branches(&output.stdout))
+}
+
+/// Parses `git_local_branches`' `for-each-ref` output and picks the default.
+fn parse_branches(lines: &[String]) -> LocalBranches {
+    let mut names = Vec::new();
+    let mut checked_out = None;
+    let mut origin_head = None;
+    for line in lines {
+        let mut fields = line.splitn(3, ':');
+        let (Some(refname), Some(head), Some(symref)) =
+            (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        if refname == "refs/remotes/origin/HEAD" {
+            origin_head = symref
+                .strip_prefix("refs/remotes/origin/")
+                .map(str::to_string);
+        } else if let Some(name) = refname.strip_prefix("refs/heads/") {
+            if head == "*" {
+                checked_out = Some(name.to_string());
+            }
+            names.push(name.to_string());
+        }
+    }
+    names.sort();
+    // `origin/HEAD` counts only when the branch it names exists locally:
+    // a base is a local branch.
+    let local = |name: &str| names.iter().any(|n| n == name);
+    let default = origin_head
+        .filter(|name| local(name))
+        .or_else(|| {
+            ["main", "master"]
+                .into_iter()
+                .find(|n| local(n))
+                .map(str::to_string)
+        })
+        .or(checked_out);
+    LocalBranches { names, default }
+}
+
+/// The commit `revision` names in the repository at `repo`, or `None`
+/// when git cannot resolve it to a commit. Given [`GIT_QUERY_TIMEOUT`].
+///
+/// The caller refuses a revision that starts with `-`, so git reads it as a
+/// revision, never as an option.
+pub async fn git_resolve_commit(
+    transport: &dyn Transport,
+    repo: &str,
+    revision: &str,
+) -> Result<Option<String>, VcsError> {
+    // `^{commit}` peels a tag to the commit it tags and refuses anything
+    // that is not a commit (a tree, a blob).
+    let peeled = format!("{revision}^{{commit}}");
+    let output = query(
+        transport,
+        repo,
+        &["rev-parse", "--verify", "--quiet", &peeled],
+    )
+    .await?;
+    match output.exit.code {
+        Some(0) => Ok(output.stdout.first().map(|line| line.trim().to_string())),
+        // `--verify --quiet` exits 1, silently, for what it cannot resolve;
+        // anything else is git failing.
+        Some(1) => Ok(None),
+        _ => Err(VcsError::Failed {
+            message: "git could not resolve the base".into(),
+            stderr: output.stderr_text(),
+        }),
+    }
+}
+
+/// Runs a quick git query under [`GIT_QUERY_TIMEOUT`]. Running out of time
+/// is git's failure, reported as such: a query changes nothing, so there is
+/// nothing half done to clean up.
+async fn query(transport: &dyn Transport, dir: &str, args: &[&str]) -> Result<Output, VcsError> {
+    match git_within(transport, dir, args, GIT_QUERY_TIMEOUT).await {
+        Err(VcsError::Incomplete(e)) if e.kind() == std::io::ErrorKind::TimedOut => {
+            Err(VcsError::Failed {
+                message: format!(
+                    "git did not answer within {} seconds",
+                    GIT_QUERY_TIMEOUT.as_secs()
+                ),
+                stderr: e.to_string(),
+            })
+        }
+        other => other,
+    }
 }
 
 /// The lock reason `git worktree add` writes while it works and removes
@@ -306,8 +437,19 @@ async fn exists(path: &str) -> bool {
         .unwrap_or(true)
 }
 
-/// Runs `git -C <dir> <args>` with a fixed environment.
+/// Runs `git -C <dir> <args>` with a fixed environment, under [`GIT_TIMEOUT`].
 async fn git(transport: &dyn Transport, dir: &str, args: &[&str]) -> Result<Output, VcsError> {
+    git_within(transport, dir, args, GIT_TIMEOUT).await
+}
+
+/// Runs `git -C <dir> <args>` with a fixed environment, killing it after
+/// `timeout`.
+async fn git_within(
+    transport: &dyn Transport,
+    dir: &str,
+    args: &[&str],
+    timeout: Duration,
+) -> Result<Output, VcsError> {
     let mut all = vec!["-C".to_string(), dir.to_string()];
     all.extend(args.iter().map(|a| a.to_string()));
     let env = [
@@ -327,7 +469,7 @@ async fn git(transport: &dyn Transport, dir: &str, args: &[&str]) -> Result<Outp
             .collect(),
         ..ProcessSpec::default()
     };
-    Ok(transport::run(transport, spec, GIT_TIMEOUT).await?)
+    Ok(transport::run(transport, spec, timeout).await?)
 }
 
 fn check(output: Output, message: &str) -> Result<(), VcsError> {
@@ -359,6 +501,36 @@ mod tests {
         assert_eq!(entries[1].lock_reason.as_deref(), Some("on a usb drive"));
         assert!(entries[2].locked && entries[2].lock_reason.is_none());
         assert!(entries[2].prunable);
+    }
+
+    fn lines(text: &str) -> Vec<String> {
+        text.lines().map(str::to_string).collect()
+    }
+
+    // verifies: PROTO-CORE-API-R18
+    #[test]
+    fn the_default_branch_is_picked_in_order() {
+        let origin = "refs/remotes/origin/HEAD: :refs/remotes/origin/dev";
+        // origin/HEAD's branch, when it exists locally.
+        let text = format!("refs/heads/dev: :\nrefs/heads/main: :\nrefs/heads/x:*:\n{origin}");
+        let parsed = parse_branches(&lines(&text));
+        assert_eq!(parsed.names, ["dev", "main", "x"]);
+        assert_eq!(parsed.default.as_deref(), Some("dev"));
+        // Else main, else master, else the checked-out branch.
+        let text = format!("refs/heads/main: :\nrefs/heads/master: :\nrefs/heads/x:*:\n{origin}");
+        assert_eq!(
+            parse_branches(&lines(&text)).default.as_deref(),
+            Some("main")
+        );
+        let text = "refs/heads/master: :\nrefs/heads/x:*:";
+        assert_eq!(
+            parse_branches(&lines(text)).default.as_deref(),
+            Some("master")
+        );
+        let text = "refs/heads/trunk: :\nrefs/heads/x:*:";
+        assert_eq!(parse_branches(&lines(text)).default.as_deref(), Some("x"));
+        // Detached, with none of them: no default.
+        assert_eq!(parse_branches(&lines("refs/heads/trunk: :")).default, None);
     }
 
     #[test]
