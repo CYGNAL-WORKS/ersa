@@ -31,10 +31,15 @@ test("Add project… opens the folder dialog, asks about trust, and cancels leav
   await expect(words).toHaveValue("Fix the build");
 
   // Sending with no project opens the dialog and keeps the message; the trust question canceled changes nothing.
+  // The question opens upward: the box and the session controls stay where they were (docs/design/COMPOSER.md).
+  const box = await words.boundingBox();
+  const controls = await screen.getByRole("group", { name: "Session controls" }).boundingBox();
   answered = ersa.answerDialog(stranger);
   await words.press("Enter");
   await answered;
   await expect(question).toHaveAccessibleName("Trust stranger?");
+  expect(await words.boundingBox()).toEqual(box);
+  expect(await screen.getByRole("group", { name: "Session controls" }).boundingBox()).toEqual(controls);
   await expect(question).toContainText(stranger);
   await ersa.shot("trust-question");
   await question.getByRole("button", { name: "Cancel" }).click();
