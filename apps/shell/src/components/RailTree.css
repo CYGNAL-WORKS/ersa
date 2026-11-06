@@ -164,7 +164,6 @@
   font-weight: var(--type-heading-weight);
 }
 
-/* Toward the trailing edge, at the regular weight: the shield in caution before "Not trusted". */
 /* Toward the trailing edge, at the regular weight: "Not trusted", then a collapsed heading's count. */
 .rail-heading-status {
   display: inline-flex;
@@ -186,13 +185,14 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The mark that leads the count: the tone of what the sessions in it want. */
-.rail-heading-count .glyph[data-tone="caution"] {
-  background: var(--color-caution);
-}
-
-.rail-heading-count .glyph[data-tone="accent"] {
-  background: var(--color-accent);
+/* Heard, not shown: the count's words beside the bare number. */
+.rail-heading-heard {
+  position: absolute;
+  width: var(--line-hairline);
+  height: var(--line-hairline);
+  overflow: hidden;
+  clip-path: circle(0);
+  white-space: nowrap;
 }
 
 /* The tiles under a heading slide closed or open, and fade, as it collapses and expands (RAIL.md, A project heading).

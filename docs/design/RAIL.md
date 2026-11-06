@@ -87,7 +87,7 @@ With reduced motion on, nothing here moves or fades: the arc, the foot's ring an
 
 ## The shelf
 
-The shelf is drawn in the Rail mockup's state "the shelf, pulled out of its tile". `FLOW-APPROVE-PERMISSION` says what it holds and when it opens and closes. Its tone is the shown request's: `accent` for a question, and `caution` for a permission request or one Ersa can't show. While the shelf is open, the tile's chevron and want take that tone too, so the shape has one.
+The gallery's Shelf entry shows the shelf in each of its states. `FLOW-APPROVE-PERMISSION` says what it holds and when it opens and closes. Its tone is the shown request's: `accent` for a question, and `caution` for a permission request or one Ersa can't show. While the shelf is open, the tile's chevron and want take that tone too, so the shape has one.
 
 - **One shape.** While its shelf is open, the tile takes `surface` and a `hairline` edge in the tone, open at its trailing side where the shelf joins it, and its trailing corners are square. The tile does not change under the pointer or when pressed while its shelf is open. The shelf starts at the tile's top edge and continues the shape: `surface`, the same edge, `radius-lg` corners except the one that meets the tile, which is square. When the shelf rises to fit the window, that corner is `radius-lg` too.
 - **The layer.** The shelf is `size-shelf` wide, stacks at `stack-shelf`, and casts `shadow-transient`, as a transient layer does. It carries no focal glow: its edge in the tone is its mark, and the screen's one glow stays where it was. With keyboard focus on the shelf itself, its edge and the open tile's turn `ink`. Its parts are padded and spaced `space-md`.
