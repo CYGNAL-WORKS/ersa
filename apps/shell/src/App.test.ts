@@ -175,6 +175,6 @@ describe("the rail's New session and collapsing", () => {
 
     fireEvent.click(toggle("beta"));
     expect(toggle("beta").getAttribute("aria-expanded")).toBe("true");
-    expect(toggle("beta").textContent).not.toContain("session");
+    expect(toggle("beta").closest(".rail-project")?.hasAttribute("data-collapsed")).toBe(false);
   });
 });
