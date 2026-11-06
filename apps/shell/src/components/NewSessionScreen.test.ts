@@ -42,7 +42,7 @@ const render = (props: Partial<Parameters<typeof NewSessionScreen>[0]>) =>
       projects: [ersa, notes],
       backends: { local: [claude()] },
       onStart: async () => false,
-      onAddProject: async () => false,
+      onAddProject: async () => undefined,
       ...props,
     }),
   );
@@ -97,9 +97,8 @@ describe("the new-session screen", () => {
     expect(second).toContain(">Folder<");
     expect(second).toContain("Not trusted");
     expect(second).toContain('aria-selected="true"');
-    // Adding a project from the chip comes with the folder dialog (FLOW-NEW-SESSION-R16); until then it is shown, unavailable.
+    // Without a folder dialog (none is given here) Add project is shown, unavailable, and without its shortcut.
     expect(add).toContain("Add project…");
-    // Its shortcut comes with it: nothing is offered that does nothing.
     expect(add).not.toContain("Ctrl+O");
     expect(add).toContain('aria-disabled="true"');
   });
@@ -144,14 +143,6 @@ describe("the new-session screen", () => {
 
   it("hides the backend chip when the host has one backend", () => {
     expect(chips(render({})).some((c) => c.startsWith("Backend"))).toBe(false);
-  });
-
-  // The typed folder path that FLOW-NEW-SESSION-R16 to R20 replace; it cites nothing until they are built.
-  it("offers to add a project when there is none, and nothing else", () => {
-    const html = render({ projects: [] });
-    expect(html).toContain('aria-label="Add a project"');
-    expect(html).not.toContain("<textarea");
-    expect(chips(html)).toEqual([]);
   });
 
   it("leaves out the chip for a choice the backend does not offer", () => {

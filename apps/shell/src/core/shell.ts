@@ -17,6 +17,8 @@ export interface ShellControl {
   hide(): Promise<void>;
   /** Shuts Core down and exits once it has stopped. Confirmation, if any, comes first. */
   quit(): Promise<void>;
+  /** Opens the system's folder dialog on this computer; the folder the user picked, or null when they canceled. */
+  pickFolder(): Promise<string | null>;
 }
 
 const BUSY = new Set<string>(["starting", "running", "waiting_user"]);
