@@ -33,8 +33,7 @@ The transcript header shows the active session's title. The title is renamed in 
 
 ## The rail
 
-From top to bottom: New session with the arrange button beside it, the groups of tiles, and the foot. The design documents say how each part and each state looks. How the user pins, renames and sections sessions, and groups, sorts and filters the rail, is FLOW-ORGANIZE-SESSIONS; archiving and deleting is FLOW-ARCHIVE-DELETE-SESSION; forking is FLOW-FORK-SESSION.
-From top to bottom: New session, the projects with their sessions, and the foot. The rail has no way to add a project: the new-session screen's project chip is the only one (FLOW-NEW-SESSION). The design documents say how each part and each state looks.
+From top to bottom: New session with the arrange button beside it, the groups of tiles, and the foot. The rail has no way to add a project: the new-session screen's project chip is the only one (FLOW-NEW-SESSION). The design documents say how each part and each state looks. How the user pins, renames and sections sessions, and groups, sorts and filters the rail, is FLOW-ORGANIZE-SESSIONS; archiving and deleting is FLOW-ARCHIVE-DELETE-SESSION; forking is FLOW-FORK-SESSION.
 
 - **New session** opens the new-session screen.
 - **The arrange button** is an icon button beside New session that opens the arrange menu: Group by ▸, Sort by ▸ and Show ▸, each naming its current choice and its submenu marking it, then New section, Reset to defaults and All sessions. The choices and their defaults are FLOW-ORGANIZE-SESSIONS's.
@@ -52,17 +51,13 @@ From top to bottom: New session, the projects with their sessions, and the foot.
 - **Needs you.** A session with a pending permission request or question shows the shelf's handle in place of its state mark, in the tone of what it wants, and names the want: a permission request, a question, or how many requests when more than one is pending. With both kinds pending, the tone is the permission request's, and a request of a kind Ersa doesn't know reads as needing the user in that tone too. The pending requests decide this, whatever state Core reports: a session reported as waiting on the user with nothing pending reads as idle.
 - **Unseen.** When Core reports a session that is not the active one as idle after working, the session is unseen, and its tile says so, until the user makes it active. Ersa keeps this while the window is open only.
 - **Context.** The context ring is near full from 85 percent of the context window, on a tile and in the session controls alike, and never shows more than full.
-- **Add project** sits at the end of the tree and opens the way to add one.
-- **Loading, empty and failed.** While the projects are being read the tree says so; with no projects it says how to add one. When the projects, a project's workspaces or the sessions can't be read, the tree says so with the reason, and shows what it could read.
-- **The foot** is empty while all is well, and while Ersa first connects, when the tree says it is loading. When Ersa can't reach Core, the foot says so in the user's terms, with the reason when Ersa has one, and the tree is empty. While Ersa is trying again the foot says that; once it has stopped trying, the foot offers Retry. Assistive technology is told when the problem appears and when Ersa reaches the sessions again. When Retry was pressed from the keyboard and the foot offers it again, keyboard focus returns to it unless the user has moved it. New session and Add project are unavailable until Ersa has connected. A debug build attached to a labeled endpoint names the label there (Development).
+- **Loading, empty and failed.** While the projects are being read the tree says so; with no projects it says to choose a folder in New session. Showing archived sessions with none, it says there are none. When the projects, a project's workspaces or the sessions can't be read, the tree says so with the reason, and shows what it could read.
+- **The foot** is empty while all is well, and while Ersa first connects, when the tree says it is loading. When Ersa can't reach Core, the foot says so in the user's terms, with the reason when Ersa has one, and the tree is empty. While Ersa is trying again the foot says that; once it has stopped trying, the foot offers Retry. Assistive technology is told when the problem appears and when Ersa reaches the sessions again. When Retry was pressed from the keyboard and the foot offers it again, keyboard focus returns to it unless the user has moved it. New session and the arrange button are unavailable until Ersa has connected. A debug build attached to a labeled endpoint names the label there (Development).
+
 ## The shelf
 
 The shelf pulls out of the tile it belongs to, at the tile's height, and lies over the edge of the transcript: it never pushes the transcript aside, narrows it, or scrolls it. It is the width the design documents give it, and when it would run past the foot of the window it rises to fit. `FLOW-APPROVE-PERMISSION` says when it opens and closes, what it holds, and how it answers.
 
-- **Loading, empty and failed.** While the projects are being read the tree says so; with no projects it says to start with New session, where a project is added. Showing archived sessions with none, it says there are none. When the projects, a project's workspaces or the sessions can't be read, the tree says so with the reason, and shows what it could read.
-- **The foot** is empty while all is well, and while Ersa first connects, when the tree says it is loading. When Ersa can't reach Core, the foot says so in the user's terms, with the reason when Ersa has one, and the tree is empty. While Ersa is trying again the foot says that; once it has stopped trying, the foot offers Retry. Assistive technology is told when the problem appears and when Ersa reaches the sessions again. When Retry was pressed from the keyboard and the foot offers it again, keyboard focus returns to it unless the user has moved it. New session and the arrange button are unavailable until Ersa has connected. A debug build attached to a labeled endpoint names the label there (Development).
-- **Loading, empty and failed.** While the projects are being read the tree says so; with no projects it says to choose a folder in New session. When the projects, a project's workspaces or the sessions can't be read, the tree says so with the reason, and shows what it could read.
-- **The foot** is empty while all is well, and while Ersa first connects, when the tree says it is loading. When Ersa can't reach Core, the foot says so in the user's terms, with the reason when Ersa has one, and the tree is empty. While Ersa is trying again the foot says that; once it has stopped trying, the foot offers Retry. Assistive technology is told when the problem appears and when Ersa reaches the sessions again. When Retry was pressed from the keyboard and the foot offers it again, keyboard focus returns to it unless the user has moved it. New session is unavailable until Ersa has connected. A debug build attached to a labeled endpoint names the label there (Development).
 ## Development
 
 A debug build attaches to a labeled Core endpoint, such as a replay, only when told to: `ERSA_ATTACH=<label>` makes it attach there and never launch a Core, and the rail's foot reads "Attached to <label>". A release build ignores the variable and always uses the user's own Core.
@@ -84,12 +79,13 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 
 ## Built so far
 
-The rail is a list of projects above one list of sessions grouped under a heading per workspace. Of the rail described above, the foot is built and the rest is still to build. Until the shelf is built, a tile's chevron is a mark, not a control, and a request is answered in the transcript.
+Of the rail described above, what is built is the tree grouped by project, with sessions newest first, each project heading with New session and trusting the project, the tiles, and the foot; the rest is still to build, and until the project chip is built a form beneath the tree adds a project. The shelf is built: a tile's chevron is the shelf's handle on every tile but the active one's.
 
 ## Changes
 
+- 2026-11-06: from #214 and #215 inbox: Built so far follows the rail tree and the shelf. No requirement IDs changed.
+- 2026-11-06: the union merges of #173, #174 and #171 left two or three versions of the rail's opening, Add project, "Loading, empty and failed" and "The foot", some under The shelf; one of each kept, as the owner's decisions of 2026-11-05 say. Meaning unchanged; no requirement IDs changed.
 - 2026-11-05: where the shelf sits (The shelf), from the owner's decisions; its behavior is FLOW-APPROVE-PERMISSION's. This closes the open question on overlay or push and queueing. No requirement IDs changed.
-
 - 2026-11-05: from #174 merge review: the sessions page's loading and failed states, what it hides while it shows, and its rows' mark and time; View all is named All sessions. No requirement IDs changed.
 - 2026-11-05: owner: View all in the arrange menu opens the sessions page. No requirement IDs changed.
 - 2026-11-05: owner: Delete… is unavailable while the session is starting, working or waiting on the user; the arrange menu's items name their current choice. No requirement IDs changed.
@@ -101,13 +97,11 @@ The rail is a list of projects above one list of sessions grouped under a headin
 - 2026-11-05: the rail specified from the owner-reviewed mockup (The rail): projects are headings with their sessions beneath and workspaces are not a level; a tile's contents and states; the shelf's handle on a session that needs the user; unseen sessions; what the tree says when a list can't be read; a foot that is silent while all is well. The context ring is near full from 85 percent, which closes that open question; FLOW-NEW-SESSION-R13 replaces R09 for where a new session's tile sits. No requirement IDs changed.
 - 2026-11-02: the context-ring open question no longer points at DESIGN.md's gauge vocabulary, which ADR 0019 removed. Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: from #55 inbox: Built so far added: sessions grouped by workspace, the tree still to build. No requirement IDs changed.
-
 - 2026-11-02: open question on reordering and sorting the rail, which DESIGN.md's motion rules anticipate. No requirement IDs changed.
 - 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: the title is renamed in place by double-click or keyboard, with no button (owner); open question on the context ring's tone near full.
 - 2026-11-02: from #53 inbox: the backend chip also shows a lone backend that is missing or failed.
 - 2026-11-02: the new-session screen and the session controls beneath the composer, from the owner's sketch (FLOW-NEW-SESSION).
 - 2026-11-01: from #14 inbox: a debug build attaches to a labeled endpoint when told to (Development).
-
 - 2026-10-31: tile contents and shelf behavior added from the owner's description; attention mark specified as edge or glyph.
 - 2026-10-31: created as draft.

@@ -336,6 +336,7 @@ const copilot = (status: BackendChoices["status"]): BackendChoices => ({
 
 const newSession = {
   hosts: [hello.host],
+  localHostId: hello.host.id,
   projects,
   backends: { local: [claudeCode, copilot("missing")] },
   onStart: async () => false,
@@ -352,6 +353,18 @@ const chipOptions = [
   { id: "root", label: "Root workspace" },
 ];
 const chip = { name: "Workspace", value: "isolated", options: chipOptions, onChoose: () => {} };
+const projectChip = {
+  name: "Project",
+  value: "p1",
+  wide: true,
+  options: [
+    { id: "p1", label: "ersa", detail: projects[0]!.path, status: "Git" },
+    { id: "p2", label: "engine", detail: `${projects[1]!.path}\\Plugins\\Experimental\\Deep`, status: "Folder", caution: "Not trusted" },
+  ],
+  action: { label: "Add project…", icon: Plus, shortcut: "Ctrl+O" },
+  onChoose: () => {},
+  initialOpen: true,
+};
 
 /** Throws while rendering, as a component given data it cannot read would. */
 function Unreadable(): never {
@@ -540,6 +553,8 @@ const entries: Entry[] = [
       ["No backend available", <NewSessionScreen {...newSession} backends={{ local: [{ ...claudeCode, status: "error" }] }} />],
       ["Detecting backends", <NewSessionScreen {...newSession} backends={{}} />],
       ["A chip open", room(<NewSessionScreen {...newSession} backends={oneBackend} open="permission_mode" />)],
+      // FLOW-NEW-SESSION-R14: most recently used first, with path, kind and trust, the chosen one marked.
+      ["The project chip open", room(<NewSessionScreen {...newSession} backends={oneBackend} projectId="p2" open="project" />)],
       [
         "Starting",
         <NewSessionScreen
@@ -575,6 +590,9 @@ const entries: Entry[] = [
       ["Open", room(<Chip {...chip} initialOpen />)],
       ["Open, an option hovered", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "hover" }} />)],
       ["Open, an option pressed", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "pressed" }} />)],
+      ["Open, two lines and an action", room(<Chip {...projectChip} forceOption={{ id: "p2", state: "hover" }} />)],
+      // The action as it will be once it can be taken, with its shortcut.
+      ["Open, the action available", room(<Chip {...projectChip} action={{ ...projectChip.action, onChoose: () => {} }} />)],
       [
         "Open, with statuses",
         room(
@@ -615,6 +633,7 @@ const entries: Entry[] = [
           <div className="stage-controls">
             <SessionControls
               hosts={[hello.host]}
+              localHostId={hello.host.id}
               projects={projects}
               backends={[claudeCode]}
               values={{ host_id: hello.host.id, project_id: "p1", workspace: "isolated", backend: "claude-code", model: "opus", effort: "high", permission_mode: "default" }}
