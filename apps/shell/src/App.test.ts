@@ -386,7 +386,7 @@ describe("the tree App draws in the rail", () => {
   });
 });
 
-// A new workspace's base branch (FLOW-NEW-SESSION-R21, R22): App reads the project's branches with `branch.list` and
+// A new workspace's base branch (FLOW-NEW-SESSION-R21, R28, R29): App reads the project's branches with `branch.list` and
 // creates the workspace from the one the workspace chip shows.
 describe("the base branch App gives a new workspace", () => {
   const branches = [
@@ -410,7 +410,7 @@ describe("the base branch App gives a new workspace", () => {
   };
 
   // verifies: FLOW-NEW-SESSION-R21
-  // verifies: FLOW-NEW-SESSION-R22
+  // verifies: FLOW-NEW-SESSION-R29
   it("starts at the default branch, narrows the branches by the search box, and creates the workspace from the one chosen", async () => {
     const core = await screenWith([project("alpha")], undefined, starting);
     expect(paramsOf(core, "branch.list")).toEqual({ project_id: "alpha" });
@@ -463,7 +463,7 @@ describe("the base branch App gives a new workspace", () => {
     expect(within(screen.getByRole("group", { name: "Base branch" })).getAllByRole("option")).toHaveLength(3);
   });
 
-  // verifies: FLOW-NEW-SESSION-R22
+  // verifies: FLOW-NEW-SESSION-R29
   it("names the project folder when it is chosen, and offers no base branch for it", async () => {
     const core = await screenWith([project("alpha")], undefined, starting);
     fireEvent.click(workspaceChip());
@@ -475,7 +475,7 @@ describe("the base branch App gives a new workspace", () => {
     expect(methods(core)).not.toContain("workspace.create");
   });
 
-  // R28 (on #230 until it merges): says while the branches are read or why they cannot be.
+  // verifies: FLOW-NEW-SESSION-R28
   it("says while the branches are read, with nothing to search, and leaves the base to Core's default", async () => {
     // Core has not answered branch.list yet.
     const core = await screenWith([project("alpha")], undefined, { ...starting, "branch.list": () => new Promise(() => {}) });
@@ -506,7 +506,7 @@ describe("the base branch App gives a new workspace", () => {
     expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from main");
   });
 
-  // R28 (on #230 until it merges): says while the branches are read or why they cannot be.
+  // verifies: FLOW-NEW-SESSION-R28
   it("says the branches could not be read, and leaves the base to Core's default", async () => {
     const core = await screenWith([project("alpha")], undefined, {
       ...starting,

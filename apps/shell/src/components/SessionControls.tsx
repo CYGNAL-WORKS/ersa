@@ -153,7 +153,7 @@ export function SessionControls({ hosts, localHostId, projects, backends, values
             <Chip
               name="Workspace"
               value={values.workspace}
-              // It names the workspace the session will start in: a new one with its base branch, or the project folder (R22).
+              // It names the workspace the session will start in: a new one with its base branch, or the project folder (R29).
               reads={
                 values.workspace === "isolated" && values.base !== undefined
                   ? t("sessionControls.workspace.newFromLabel", { branch: values.base })
