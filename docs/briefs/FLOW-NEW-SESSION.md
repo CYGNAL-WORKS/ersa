@@ -31,7 +31,7 @@ Adding a project is the step before: the user names a folder on a host and says 
 - **FLOW-NEW-SESSION-R10**: When Ersa has no project, the new-session screen shall offer to add one, and adding a project shall ask whether the user trusts it before the project exists.
 - **FLOW-NEW-SESSION-R11**: When the project's host cannot list its backends, the session controls shall say that detection failed, with the reason, rather than that no backend is available.
 - **FLOW-NEW-SESSION-R12**: When the session has started, Ersa shall make it the active session and show the session's values in the session controls.
-- **FLOW-NEW-SESSION-R13**: When the session has started, Ersa shall show its tile in the rail under its project.
+- **FLOW-NEW-SESSION-R13**: When the session has started, Ersa shall show its tile in the rail where the rail's arrangement puts it (FLOW-ORGANIZE-SESSIONS).
 
 ## Verification
 
@@ -50,6 +50,7 @@ A project is added by typing its folder path and answering the trust question. N
 
 ## Changes
 
+- 2026-11-05: R13 reworded for the rail's arrangement (FLOW-ORGANIZE-SESSIONS): a new tile sits where the arrangement puts it, under its project by default. Meaning unchanged for the default arrangement.
 - 2026-11-05: R09 retired; R12 and R13 added. R12 keeps the active session and the session controls, and the tests that cited R09 for them cite it. R13 puts a started session's tile under its project, since workspaces are not a level in the rail (LAY-SHELL); it has no test until the rail's tree is built, and the test of workspace headings cites nothing meanwhile. This closes the open question on where a root workspace's sessions sit.
 - 2026-11-02: from #55 inbox: R08 also removes the session, since a workspace with a session cannot be removed; R11 added for a host whose backend listing fails; Verification added (R03 to R09 run against a real Core, not the replay server); Built in M0 becomes Built so far, with the interim read-only controls and the root workspace's interim place in the rail.
 

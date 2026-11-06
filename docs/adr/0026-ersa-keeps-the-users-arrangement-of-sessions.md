@@ -2,6 +2,7 @@
 
 - Status: accepted
 - Date: 2026-11-05
+- Supersedes: 0017
 - Related briefs: FLOW-ORGANIZE-SESSIONS, FLOW-ARCHIVE-DELETE-SESSION, FLOW-FORK-SESSION, PROTO-CORE-API, ARCH-CORE, LAY-SHELL
 
 ## Context
@@ -16,7 +17,9 @@ ADR 0017 limits what Ersa stores per session to what finds it again: host, proje
 
 ## Decision
 
-Option 3. Per session, Core also stores whether it is pinned, its section, whether it is archived, and the time its latest turn ended. Core stores the user's sections. The rail's grouping, sort, filter and collapsed groups are user settings in Core. The title and the history stay the backend's.
+Option 3, and ADR 0017's decision otherwise stands, restated here so this record is whole: a session's history is the backend's own session record, read through the adapter, and details only the live stream carries are shown and not stored; Core's operational records go to an app log; Ersa sessions are ordinary backend sessions, launched the way the vendor's own IDE integration launches them (for Claude Code, the user's settings load, `CLAUDE_CODE_ENTRYPOINT` is `ersa`, and inherited Claude variables are cleared); Ersa lists and resumes any session in the backend's record for a project, and its own sessions can be resumed elsewhere by id; retention is the backend's, except that the user's Delete deletes the record.
+
+For the arrangement: per session, Core also stores whether it is pinned, its section, whether it is archived, and the time its latest turn ended. Core stores the user's sections. The rail's grouping, sort, filter and collapsed groups are user settings in Core. The title and the history stay the backend's.
 
 ## Consequences
 
