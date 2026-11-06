@@ -6,16 +6,13 @@ import "./TrustQuestion.css";
 interface TrustQuestionProps {
   /** The project's name, as the question names it. */
   name: string;
-  /** The folder the user picked, shown when the project is not added yet, so they see exactly what they trust. */
-  path?: string;
-  /**
-   * Adding a project: both answers add it, trusted or not, and the labels say so. Changing an added project's trust:
-   * trusting is the one answer, since not trusting it is leaving it as it is.
-   */
+  /** The folder's full path, so the user sees exactly what they trust (FLOW-NEW-SESSION-R24). */
+  path: string;
+  /** Where it opens: above the composer's box when a project is added, in the rail when one is trusted later. */
   purpose: "add" | "change";
-  /** The user's answer: whether the project's own configuration may run in its sessions. */
-  onAnswer: (trusted: boolean) => void;
-  /** Closes the question without an answer: Cancel, or Escape. */
+  /** Trust: the project is trusted (FLOW-NEW-SESSION-R25). */
+  onTrust: () => void;
+  /** Closes the question without trusting: Cancel, Enter while Cancel has focus, or Escape. */
   onDismiss: () => void;
   /** Whether the question takes focus as it opens; true when the user opened it, false for a question shown from the start. */
   takeFocus?: boolean;
@@ -24,13 +21,15 @@ interface TrustQuestionProps {
 }
 
 /**
- * Asks whether the user trusts a project, saying plainly what trust lets run, that it covers every workspace of the
- * project, and that it lasts until withdrawn (ADR 0018, FLOW-NEW-SESSION-R16, retired; ticket 226 builds its replacement).
+ * Asks whether the user trusts a folder, as the Claude Code CLI's folder-trust prompt does (ADR 0028): its path, the
+ * safety check, and what agents can do there (FLOW-NEW-SESSION-R24), answered by Cancel, first and focused, or Trust
+ * (R25). Trusting is never the default, so neither answer is primary.
  */
-export function TrustQuestion({ name, path, purpose, onAnswer, onDismiss, takeFocus = true, forceCancelFocus }: TrustQuestionProps) {
+export function TrustQuestion({ name, path, purpose, onTrust, onDismiss, takeFocus = true, forceCancelFocus }: TrustQuestionProps) {
   // The control that opened the question is disabled or elsewhere while it shows, so focus moves here rather than
-  // to the page: to Cancel, so a second Enter cancels and never trusts by accident.
+  // to the page: to Cancel, so Enter cancels until the user moves to Trust.
   const cancel = useRef<HTMLButtonElement>(null);
+  const trust = useRef<HTMLButtonElement>(null);
   // Only as it opens, so the first value of `takeFocus` is the one that counts.
   const focusOnOpen = useRef(takeFocus);
   useEffect(() => {
@@ -41,7 +40,7 @@ export function TrustQuestion({ name, path, purpose, onAnswer, onDismiss, takeFo
     <section
       className="trust-question"
       // Adding opens above the composer's box as a card that holds the screen's focal glow (docs/design/COMPOSER.md,
-      // The trust question); changing an added project's trust opens in the rail, under the project.
+      // The trust question); trusting an added project opens in the rail, under the project.
       data-place={purpose === "add" ? "composer" : "rail"}
       aria-label={title}
       onKeyDown={(event) => {
@@ -49,30 +48,27 @@ export function TrustQuestion({ name, path, purpose, onAnswer, onDismiss, takeFo
           // The question is the thing Escape closes, not whatever holds it.
           event.stopPropagation();
           onDismiss();
+        } else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+          // The arrows move between the two answers, as Tab does.
+          event.preventDefault();
+          (document.activeElement === cancel.current ? trust : cancel).current?.focus({ preventScroll: true });
         }
       }}
     >
       <p className="trust-question-title">{title}</p>
-      {path !== undefined && <p className="trust-question-path mono">{path}</p>}
+      <p className="trust-question-path mono">{path}</p>
       {/* The explanation scrolls when the question has less room than it needs; the title, the folder and the
           answers above and below it always show. */}
       <div className="trust-question-body">
-        <p className="trust-question-detail">{t("trust.question.runsDetail")}</p>
-        <p className="trust-question-detail">{t("trust.question.coversDetail")}</p>
-        <p className="trust-question-detail">{t("trust.question.untrustedDetail")}</p>
+        <p className="trust-question-detail">{t("trust.question.safetyDetail")}</p>
+        <p className="trust-question-detail">{t("trust.question.agentsDetail")}</p>
       </div>
       <div className="trust-question-actions">
-        {/* Neither answer is the primary one: Ersa does not lean towards trust. */}
-        {purpose === "add" ? (
-          <>
-            <Button onClick={() => onAnswer(true)}>{t("trust.question.addTrustedButton")}</Button>
-            <Button onClick={() => onAnswer(false)}>{t("trust.question.addUntrustedButton")}</Button>
-          </>
-        ) : (
-          <Button onClick={() => onAnswer(true)}>{t("trust.question.trustButton")}</Button>
-        )}
         <Button ref={cancel} onClick={onDismiss} force={forceCancelFocus ? "focus" : undefined}>
           {t("trust.question.cancelButton")}
+        </Button>
+        <Button ref={trust} onClick={onTrust}>
+          {t("trust.question.trustButton")}
         </Button>
       </div>
     </section>
