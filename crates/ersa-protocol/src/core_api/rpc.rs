@@ -143,6 +143,10 @@ pub struct ErrorData {
     pub kind: ErrorKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// With `attachment_refused`: the refused attachment's place in
+    /// `session.send`'s `attachments`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
 }
 
 impl ErrorObject {
@@ -151,7 +155,11 @@ impl ErrorObject {
         ErrorObject {
             code: code::APPLICATION_ERROR,
             message: message.into(),
-            data: Some(ErrorData { kind, detail: None }),
+            data: Some(ErrorData {
+                kind,
+                detail: None,
+                index: None,
+            }),
         }
     }
 
@@ -169,6 +177,15 @@ impl ErrorObject {
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         if let Some(data) = &mut self.data {
             data.detail = Some(detail.into());
+        }
+        self
+    }
+
+    /// The same error with `data.index` set. Does nothing to a
+    /// protocol-level error, which has no `data`.
+    pub fn with_index(mut self, index: u32) -> Self {
+        if let Some(data) = &mut self.data {
+            data.index = Some(index);
         }
         self
     }

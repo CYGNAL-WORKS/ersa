@@ -303,6 +303,12 @@ impl Drop for ProcessTree {
     }
 }
 
+/// Unix names no pipe or device by its name: its metadata tells one,
+/// without opening it.
+pub fn names_device(_path: &Path) -> bool {
+    false
+}
+
 /// The file to start for `program`: Unix needs no help finding it.
 pub fn resolve_program(program: &str, _path: Option<&str>) -> String {
     program.to_string()
