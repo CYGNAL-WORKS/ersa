@@ -348,7 +348,6 @@ const oneBackend = { local: [claudeCode] };
 
 /** Room beneath a specimen for a chip's open choices, which lie over what follows. */
 const room = (node: ReactNode) => <div className="gallery-room">{node}</div>;
-const roomAbove = (node: ReactNode) => <div className="gallery-room-above">{node}</div>;
 
 const chipOptions = [
   { id: "isolated", label: "New workspace" },
@@ -529,10 +528,10 @@ const entries: Entry[] = [
       ["No project", <NewSessionScreen {...newSession} projects={[]} backends={oneBackend} />],
       ["No project, the project chip open", room(<NewSessionScreen {...newSession} projects={[]} backends={oneBackend} open="project" />)],
       // FLOW-NEW-SESSION-R16: the trust question above the box, holding the focal glow.
-      ["Asking to trust a folder", roomAbove(<NewSessionScreen {...newSession} backends={oneBackend} initialAsking="D:\Clones\stranger" />)],
+      ["Asking to trust a folder", <NewSessionScreen {...newSession} backends={oneBackend} initialAsking="D:\Clones\stranger" />],
       [
         "Asking, from the keyboard",
-        roomAbove(<NewSessionScreen {...newSession} backends={oneBackend} initialAsking="D:\Clones\stranger" forceCancelFocus />),
+        <NewSessionScreen {...newSession} backends={oneBackend} initialAsking="D:\Clones\stranger" forceCancelFocus />,
       ],
       [
         "Adding a folder refused",
