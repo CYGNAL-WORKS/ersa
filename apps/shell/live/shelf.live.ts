@@ -13,9 +13,13 @@ test("the chevron opens the shelf with the oldest permission request, leaving th
   mkdirSync(folder);
   const rail = page.getByRole("navigation", { name: "Rail" });
 
-  await rail.getByRole("textbox", { name: "Project folder" }).fill(folder);
-  await rail.getByRole("button", { name: "Add", exact: true }).click();
+  // Added from the new-session screen's project chip, the folder dialog answered from the test.
+  await page.getByRole("button", { name: "Project: Choose a folder" }).click();
+  const answered = ersa.answerDialog(folder);
+  await page.getByRole("option", { name: /Add project…/ }).click();
+  await answered;
   await page.getByRole("button", { name: "Add, not trusted" }).click();
+  await expect(rail.getByRole("button", { name: /^New session in / })).toBeVisible();
 
   // The first session asks to write a file, which Claude Code's default permission mode asks about.
   await rail.getByRole("button", { name: /^New session in / }).click();
@@ -84,9 +88,13 @@ test("an answer from the shelf reaches the session, which goes on, and the shelf
   mkdirSync(folder);
   const rail = page.getByRole("navigation", { name: "Rail" });
 
-  await rail.getByRole("textbox", { name: "Project folder" }).fill(folder);
-  await rail.getByRole("button", { name: "Add", exact: true }).click();
+  // Added from the new-session screen's project chip, the folder dialog answered from the test.
+  await page.getByRole("button", { name: "Project: Choose a folder" }).click();
+  const answered = ersa.answerDialog(folder);
+  await page.getByRole("option", { name: /Add project…/ }).click();
+  await answered;
   await page.getByRole("button", { name: "Add, not trusted" }).click();
+  await expect(rail.getByRole("button", { name: /^New session in / })).toBeVisible();
 
   await rail.getByRole("button", { name: /^New session in / }).click();
   await page.getByRole("textbox", { name: "Message" }).fill("Use the Write tool to create answered.txt containing the word probe. Do nothing else.");

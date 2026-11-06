@@ -5,7 +5,6 @@
 
 import { ChevronDown, ChevronRight, Plus, ShieldAlert, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
-import { AddProject } from "../components/AddProject";
 import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
 import { ContextRing } from "../components/ContextRing";
@@ -378,7 +377,9 @@ const newSession = {
   projects,
   backends: { local: [claudeCode, copilot("missing")] },
   onStart: async () => false,
-  onAddProject: async () => false,
+  // The folder dialog is there, so Add project… can be taken; in the gallery it is always canceled.
+  onChooseFolder: async () => ({ kind: "canceled" }) as const,
+  onAddProject: async () => undefined,
   autoFocus: false,
 } as const;
 const oneBackend = { local: [claudeCode] };
@@ -536,29 +537,6 @@ const entries: Entry[] = [
     ],
   },
   {
-    name: "AddProject",
-    states: [
-      ["Empty", <AddProject onAdd={async () => false} />],
-      ["Typed", <AddProject onAdd={async () => false} initialPath="C:\Users\me\ersa" />],
-      ["Hover", <AddProject onAdd={async () => false} force="hover" />],
-      ["Focus", <AddProject onAdd={async () => false} initialPath="C:\Users\me\ersa" force="focus" />],
-      ["Asking to trust", <AddProject onAdd={async () => false} initialPath="D:\Clones\stranger" initialAsking />],
-      [
-        "Asking, from the keyboard",
-        <AddProject onAdd={async () => false} initialPath="D:\Clones\stranger" initialAsking forceCancelFocus />,
-      ],
-      ["Adding", <AddProject onAdd={async () => false} initialPath="C:\Users\me\ersa" adding={{ state: "sending" }} />],
-      [
-        "Refused",
-        <AddProject
-          onAdd={async () => false}
-          initialPath="D:\Projects\nowhere"
-          adding={{ state: "failed", message: "D:\\Projects\\nowhere does not exist" }}
-        />,
-      ],
-    ],
-  },
-  {
     name: "RailTree",
     rail: true,
     states: [
@@ -658,7 +636,19 @@ const entries: Entry[] = [
     name: "NewSessionScreen",
     wide: true,
     states: [
-      ["No project", <NewSessionScreen {...newSession} projects={[]} />],
+      // FLOW-NEW-SESSION-R19: with no project the chip offers to choose a folder, and its list holds Add project… alone.
+      ["No project", <NewSessionScreen {...newSession} projects={[]} backends={oneBackend} />],
+      ["No project, the project chip open", room(<NewSessionScreen {...newSession} projects={[]} backends={oneBackend} open="project" />)],
+      // FLOW-NEW-SESSION-R16: the trust question above the box, holding the focal glow.
+      ["Asking to trust a folder", <NewSessionScreen {...newSession} backends={oneBackend} initialAsking="D:\Clones\stranger" />],
+      [
+        "Asking, from the keyboard",
+        <NewSessionScreen {...newSession} backends={oneBackend} initialAsking="D:\Clones\stranger" forceCancelFocus />,
+      ],
+      [
+        "Adding a folder refused",
+        <NewSessionScreen {...newSession} backends={oneBackend} adding={{ state: "failed", message: "D:\\Projects\\nowhere does not exist" }} />,
+      ],
       ["Ready, at the defaults", <NewSessionScreen {...newSession} backends={oneBackend} forceFocus />],
       ["Project without version control", <NewSessionScreen {...newSession} backends={oneBackend} projectId="p3" />],
       ["Backend missing, beside one available", room(<NewSessionScreen {...newSession} open="backend" />)],
