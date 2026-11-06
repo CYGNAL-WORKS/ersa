@@ -71,6 +71,7 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 ### Sections
 
 - `section.list`, `section.create { name }`, `section.rename { id, name }`, `section.remove { id }`: `{ id, name, created_at }`, listed in the order they were made. Core trims a name and refuses with `invalid_params` one that is blank, longer than 80 characters, or that another section has, ignoring case. `section.remove` puts its sessions in no section.
+
 ### Turns and attachments
 
 An attachment is a file, an image or a folder that goes with a message (FLOW-SEND-MESSAGE). `session.send` takes them as `attachments`, in the order the user added them:
@@ -201,7 +202,6 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 - 2026-11-03: from #111 merge review: `session.tile` is coalesced (one tile per projected batch, the newest per session for a busy connection) and never closes a connection, as Core already did; what PROTO-CORE-API-R09 asks of tiles stated. No requirement IDs changed.
 - 2026-11-02: from #55 inbox: `session.send` to a starting backend waits for it, and to one that failed to start answers `invalid_state` with the adapter's reason; settings key `new_session.last_used.<project id>` named. No requirement IDs changed.
 - 2026-11-02: from #64 inbox: the replay capture format described under Conformance; the commit stamp is `ersa_commit`, since Core names the process, not a commit (PROTO-CORE-API-R17 added).
-
 - 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-02: from #43 inbox: `session.set_title`'s title bounds and its answers for a blank title, an unnamed session and a missing record. No requirement IDs changed.
 - 2026-11-02: R16 reworded before it shipped: the permission mode is always stated to the backend, so an unnamed one is the backend's default, stored and reported; model and effort stay absent when not named.
@@ -212,20 +212,13 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 - 2026-11-01: from #35 inbox: a session's title is its backend's: `session.set_title` renames through the backend (PROTO-CORE-API-R12 added) and `session.create` takes no title; `created_at` is the record's first entry, else the app log's first fact; `session.subscribe` returns `view`, and a client holding events from another view starts over from 0 (PROTO-CORE-API-R13 added); `session.reproject` removed, which bumps `api_version`; the bump ships with the method's removal in code.
 - 2026-11-01: project trust (ADR 0018): `trusted` on projects, `project.add` takes it, `project.set_trust` added; PROTO-CORE-API-R11 added.
 - 2026-11-01: aligned with ADR 0017: `session.raw_log` serves the in-memory raw log, `dir` no longer includes `core` (lifecycle facts go to the app log); `session.reproject` withdrawn. No requirement IDs changed.
-
 - 2026-11-01: from #14 inbox: notifications for created projects and sessions, and a pushed `core.status`, added as an open question.
 - 2026-11-01: from M0-T7 inbox: the replay server refuses every mutating request with `invalid_state`, keeps a replayed session idle after its last line until `core.shutdown`, and paces by recorded timing by default; from review of PR #27: it never serves the user's own endpoint (default label `replay`), applies Core's line limit, and refuses a recording it cannot read faithfully. No requirement IDs changed.
-
 - 2026-10-31: from #18 inbox and review: an explicit endpoint is a label beside the user's own endpoint, never a raw name or path, and nothing in the environment overrides it; on Windows a test stands two labeled endpoints in for "explicit beside default". No requirement IDs changed.
-
 - 2026-11-01: from M0-T6 inbox and review: unsolicited notifications defined; tile carries `state`; `mode` until M3; start, remove and reproject rules; `raw_log` paging; R08 says the line terminator is not part of a line (meaning unchanged: a line never included it). No requirement IDs added or retired.
-
 - 2026-11-01: `serve` and `replay` accept an explicit endpoint (from M0-T8).
-
 - 2026-11-01: the pipe name uses the user's SID; clients verify the server runs as the same user; line cap and handshake deadline; the security-descriptor open question closed.
-
 - 2026-11-01: from M0-T5 inbox: backend status values; `data` only on application errors; version mismatch is `invalid_state`; `settings.get` returns user-set values only, `workspaces.root` named; sequence numbers absent before the first event; `workspace.remove` and `project.remove` behavior stated. No requirement IDs changed.
-
 - 2026-11-01: `dir` includes `core` for Core's lifecycle records.
 - 2026-10-31: `session.raw_log` entries carry `dir`, since the raw log records host-written lines too.
 - 2026-10-31: elaborated to ready: transport, handshake, methods, notifications, errors, requirements.

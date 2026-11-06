@@ -100,7 +100,26 @@ for (const file of walk(BRIEFS_DIR)) {
   const active = new Set();
   const retired = new Set();
   const seen = new Map();
+  // A union merge keeps both sides of a rewritten bullet, so a bullet label
+  // (bold, or a code span without its `{ ... }` parameters) repeated under one
+  // section name and parent bullet is two versions of one rule. Fenced code is
+  // not prose.
+  let section = "";
+  let parent = "";
+  let fenced = false;
+  const labels = new Set();
   for (const line of text.split(/\r?\n/)) {
+    if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+    if (fenced) continue;
+    if (/^#{1,6}\s/.test(line)) section = line.replace(/^#+\s*/, "").trim();
+    const b = /^(\s*)[-*]\s+(\*\*.+?\*\*|`[^`]+`)/.exec(line);
+    if (b && !new RegExp(REQ_ID.source).test(b[2])) {
+      const label = b[2].replace(/^`(\S[^{]*?)\s*\{.*$/, "`$1`");
+      if (!b[1]) parent = label;
+      const key = [section, b[1] ? parent : "", label].join("\n");
+      if (labels.has(key)) problems.push(`${fm.id}: ${label} appears twice under "${section}"`);
+      labels.add(key);
+    }
     for (const m of line.matchAll(REQ_ID)) {
       const id = m[1];
       if (!id.startsWith(fm.id + "-R")) continue;
@@ -112,19 +131,6 @@ for (const file of walk(BRIEFS_DIR)) {
     }
   }
   for (const [id, n] of seen) if (n > 1) problems.push(`${fm.id}: requirement ${id} is defined ${n} times`);
-
-  // A union merge keeps both sides of a rewritten bullet, so a bullet label
-  // (bold or code) repeated under one section name is two versions of one rule.
-  let section = "";
-  const labels = new Set();
-  for (const line of text.split(/\r?\n/)) {
-    if (/^#{1,6}\s/.test(line)) section = line;
-    const m = /^-\s*(\*\*.+?\*\*|`[^`]+`)/.exec(line);
-    if (!m || new RegExp(REQ_ID.source).test(m[1])) continue;
-    const key = `${section}\n${m[1]}`;
-    if (labels.has(key)) problems.push(`${fm.id}: ${m[1]} appears twice under "${section.replace(/^#+\s*/, "")}"`);
-    labels.add(key);
-  }
 
   briefs.push({
     id: fm.id,
