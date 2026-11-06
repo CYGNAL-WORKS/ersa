@@ -34,6 +34,16 @@
   --shelf-edge: var(--color-accent);
 }
 
+/* With keyboard focus on the shelf itself, its edge turns ink, and the open tile's with it (SessionList.css). */
+.shelf:focus {
+  outline: none;
+}
+
+.shelf:focus-visible,
+.shelf[data-force="focus"] {
+  --shelf-edge: var(--color-ink);
+}
+
 /* Risen to fit: the corner that met the tile no longer does, so it rounds too. */
 .shelf[data-risen] {
   border-radius: var(--radius-lg);

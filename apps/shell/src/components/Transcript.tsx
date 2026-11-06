@@ -211,8 +211,11 @@ function PermissionCard({
   const { request, decision } = item;
   const name = request.display_name ?? request.tool_name;
   const open = isOpen(item);
+  // An answer makes the answers unavailable while it is on its way, so focus moves to the card itself rather than
+  // fall to the page with the button that held it.
+  const card = useRef<HTMLElement>(null);
   return (
-    <section className="transcript-card transcript-permission" data-open={open || undefined} aria-label={`Permission: ${name}`}>
+    <section ref={card} tabIndex={-1} className="transcript-card transcript-permission" data-open={open || undefined} aria-label={`Permission: ${name}`}>
       <div className="transcript-card-head">
         <span className="transcript-card-title">
           {open ? "Allow " : ""}
@@ -254,7 +257,10 @@ function PermissionCard({
           answer={answer}
           live={live}
           reconnectingNote={false}
-          onDecide={(decision) => onDecide(request.request_id, decision)}
+          onDecide={(decision) => {
+            onDecide(request.request_id, decision);
+            card.current?.focus();
+          }}
         />
       )}
     </section>
