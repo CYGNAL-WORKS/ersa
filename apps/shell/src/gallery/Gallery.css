@@ -90,7 +90,7 @@
 
 /* A menu or tooltip the gallery shows at once is laid out while its state is off screen, where it would flip above
    what it belongs to and stay there; in the gallery it always opens below. */
-.gallery-room .rail-menu,
+.gallery-room .menu,
 .gallery-states-rail .rail-heading-tip {
   position-try-fallbacks: none;
 }
@@ -129,4 +129,12 @@
   padding: var(--space-lg);
   background: var(--color-surface);
   border-right: var(--line-hairline) solid var(--color-line);
+}
+
+/* A stand-in for the button a menu opens below, at the specimen's trailing edge. */
+.gallery-menu-anchor {
+  display: block;
+  width: var(--size-control);
+  height: var(--size-control);
+  margin-inline-start: auto;
 }

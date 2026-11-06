@@ -8,5 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-06 FLOW-ORGANIZE-SESSIONS (Variations and errors), PROTO-CORE-API: a session with no backend session id offers Rename as unavailable, but `session.list` does not say whether a session has one, so the Interface cannot tell. #195 shows Rename unavailable while a session is starting, and otherwise lets `session.set_title` answer `invalid_state`, which keeps the field open with the reason; `session.list` could report whether the backend has named the session.
 
 ## Resolved recently (optional, trimmed in planning passes)

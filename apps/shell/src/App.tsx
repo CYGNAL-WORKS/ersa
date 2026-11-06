@@ -358,6 +358,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         }
       : undefined;
 
+  // A refusal goes; a rename still on its way stays, so its answer is shown.
+  const resetRename = (id: string) => setRenaming(({ [id]: was, ...rest }) => (was?.state === "sending" ? { ...rest, [id]: was } : rest));
+
   const addProject = async (path: string, trusted: boolean) => {
     if (view.phase !== "connected") return undefined;
     setAdding({ state: "sending" });
@@ -484,6 +487,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onNewSession={newSession}
               collapsed={collapsed}
               onToggle={toggleProject}
+              onRename={rename}
+              renaming={renaming}
+              onRenameReset={resetRename}
+              offline={view.phase !== "connected"}
               onSetTrust={setTrust}
               trusting={trusting}
               keepingTrust={keepingTrust}
@@ -521,9 +528,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onRename={(title) => rename(shown.id, title)}
               renaming={renaming[shown.id]}
               // A refusal goes; a rename still on its way stays, so its answer is shown.
-              onRenameReset={() =>
-                setRenaming(({ [shown.id]: was, ...rest }) => (was?.state === "sending" ? { ...rest, [shown.id]: was } : rest))
-              }
+              onRenameReset={() => resetRename(shown.id)}
               renameDisabled={view.phase !== "connected"}
             />
           </ErrorBoundary>

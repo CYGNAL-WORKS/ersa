@@ -1,0 +1,180 @@
+/* A floating menu (docs/design/RAIL.md, Menus): a layer in the top layer (a popover), above the rail and its
+   scrolling, on surface with a line edge, radius-lg and shadow-transient, padded space-xs, as wide as its widest item.
+   It fades in and out over motion-quick. */
+.menu {
+  /* The popover's own placement and look give way to the layer's. */
+  position: fixed;
+  inset: auto;
+  outline: none;
+  z-index: var(--stack-menu);
+  display: flex;
+  flex-direction: column;
+  min-width: max-content;
+  margin: 0;
+  padding: var(--space-xs);
+  list-style: none;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-transient);
+  overflow: visible;
+  animation: menu-in var(--motion-quick) var(--motion-ease-out);
+}
+
+/* Below what opened it, aligned to its trailing edge; with no room below, above it. */
+.menu[data-place="below"] {
+  position-area: block-end span-inline-start;
+  position-try-fallbacks: flip-block;
+  margin: var(--space-xs) 0;
+}
+
+/* A submenu opens beside its item, top edges aligned; with no room beside it, on the other side. */
+.menu[data-place="beside"] {
+  position-area: inline-end span-block-end;
+  position-try-fallbacks: flip-inline;
+  margin: 0 var(--space-xs);
+}
+
+/* Opened at the pointer: its corner at the press. */
+.menu[data-place="point"] {
+  position-area: none;
+}
+
+/* Closing, it fades out the same way, then goes. */
+.menu[data-closing] {
+  opacity: 0;
+  animation: menu-out var(--motion-quick) var(--motion-ease-out);
+}
+
+/* Each item stretches to the menu's width. */
+.menu > li {
+  display: grid;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes menu-out {
+  from {
+    opacity: 1;
+  }
+}
+
+/* An item: a row size-control high, padded space-sm, in ui, radius-md within the layer's radius-lg; a control
+   without an edge. Under the pointer or keyboard focus it takes material-hover; while its submenu is open,
+   material-pressed, which wins over hover. */
+.menu-item {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: var(--size-control);
+  padding: 0 var(--space-sm);
+  font: inherit;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+  text-align: left;
+  color: var(--color-ink);
+  background: transparent;
+  border: var(--line-hairline) solid transparent;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background var(--motion-quick) var(--motion-ease-out);
+}
+
+.menu-item:hover:not([aria-disabled]),
+.menu-item:focus-visible:not([aria-disabled]) {
+  background: var(--material-hover);
+}
+
+.menu-item:active:not([aria-disabled]),
+.menu-item[data-open] {
+  background: var(--material-pressed);
+}
+
+.menu-item:focus-visible {
+  outline: none;
+}
+
+/* The label, then what sits at its trailing edge, space-sm apart. */
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.menu-label {
+  flex: 1;
+}
+
+/* A submenu leaves a size-icon-sm column before its labels, where the chosen option shows a check in ink. */
+.menu-check {
+  display: inline-flex;
+  flex: none;
+  width: var(--size-icon-sm);
+}
+
+/* A key that does the same, and the arrange menu's current choice: ui-small in ink-muted. */
+.menu-key,
+.menu-current {
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.menu-current {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu-chevron {
+  display: inline-flex;
+  color: var(--color-ink-faint);
+}
+
+/* Delete: its label in danger. */
+.menu-item[data-danger] .menu-label {
+  color: var(--color-danger);
+}
+
+/* Unavailable: ink-faint throughout, its current choice, key and danger tone included, unchanged under the pointer. */
+.menu-item[aria-disabled] {
+  color: var(--color-ink-faint);
+  cursor: default;
+}
+
+.menu-item[aria-disabled] .menu-label,
+.menu-item[aria-disabled] .menu-key,
+.menu-item[aria-disabled] .menu-current {
+  color: var(--color-ink-faint);
+}
+
+/* Its reason sits beneath its label in ui-small, ink-muted, and the row grows to hold it. */
+.menu-reason {
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  white-space: normal;
+}
+
+/* Groups of items are parted by a hairline rule with space-xs above and below. */
+.menu-rule {
+  margin: var(--space-xs) 0;
+  border-top: var(--line-hairline) solid var(--color-line);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-item {
+    transition: none;
+  }
+
+  .menu,
+  .menu[data-closing] {
+    animation: none;
+  }
+}
