@@ -366,11 +366,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       () => ({ state: "failed" }),
     );
 
-  const addProject = async (path: string, trusted: boolean) => {
+  // Every project the Interface adds is trusted: Trust is the trust question's one answer that adds (FLOW-NEW-SESSION-R25).
+  const addProject = async (path: string) => {
     if (view.phase !== "connected") return undefined;
     setAdding({ state: "sending" });
     try {
-      const project = await client.call("project.add", { host_id: view.hello.host.id, path, trusted });
+      const project = await client.call("project.add", { host_id: view.hello.host.id, path, trusted: true });
       setAdding(undefined);
       connection.current?.reload("projects");
       return project;
