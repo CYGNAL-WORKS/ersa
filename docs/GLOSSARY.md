@@ -64,6 +64,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Transcript**: the main area rendering the active session's projection as a document with cards. *Not: chat history, chat log.*
 - **Composer**: the input area beneath the transcript where the user writes to the agent. *Not: chat box, input box, prompt box.*
 - **Session controls**: the row of chips beneath the composer naming where and how a session runs: host, project, workspace, backend, model, effort and permission mode, with the context ring. Set before the first message; shown during the session.
+- **Sessions page**: what the transcript area shows after View all: every session in one list, active or archived, with search. Choosing one opens it.
 - **New-session screen**: what the transcript area shows while no session is active: the composer and the session controls, ready for the first message, which starts the session.
 - **Workbench**: the right-hand area holding panes.
 - **Pane**: a purpose-built area in the workbench: Files, Diff, Terminal, Browser, Developer.
