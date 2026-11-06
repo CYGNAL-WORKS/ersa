@@ -1,5 +1,6 @@
 import { t } from "../catalog";
-import type { ShelfShows } from "../session/shelf";
+import { type ShelfShows, shelfTone } from "../session/shelf";
+import type { TileView } from "../session/tile";
 import { Button } from "./Button";
 import { ContextRing } from "./ContextRing";
 import { PermissionInput, Revealed } from "./Transcript";
@@ -7,12 +8,9 @@ import "./Shelf.css";
 
 interface ShelfProps {
   id?: string;
-  /** The session's title, which names the shelf (FLOW-APPROVE-PERMISSION-R23). */
-  title: string;
+  /** The session's tile: its title names the shelf (R23), and its readouts are the shelf's (R11). */
+  tile: Pick<TileView, "title" | "ring" | "cost">;
   shows: ShelfShows;
-  /** The session's readouts as its tile shows them: the context ring's share used, and the cost (R11). */
-  ring?: number;
-  cost?: string;
   /** Reads the session's events again after reading them failed (R21). */
   onRetry?: () => void;
 }
@@ -23,15 +21,15 @@ interface ShelfProps {
  * kind, what is asked, its details, the session's readouts, then the answers (R23). `shelfOf` decides what it
  * shows; this only lays it out. The answers are drawn here and wired by the answers ticket.
  */
-export function Shelf({ id, title, shows, ring, cost, onRetry }: ShelfProps) {
+export function Shelf({ id, tile, shows, onRetry }: ShelfProps) {
   return (
-    <div id={id} className="shelf" role="dialog" aria-label={t("rail.shelf.nameLabel", { title })} data-tone={shows.state === "question" ? "accent" : "caution"}>
-      <Contents shows={shows} ring={ring} cost={cost} onRetry={onRetry} />
+    <div id={id} className="shelf" role="dialog" aria-label={t("rail.shelf.nameLabel", { title: tile.title })} data-tone={shelfTone(shows)}>
+      <Contents shows={shows} ring={tile.ring} cost={tile.cost} onRetry={onRetry} />
     </div>
   );
 }
 
-function Contents({ shows, ring, cost, onRetry }: Omit<ShelfProps, "title" | "id">) {
+function Contents({ shows, ring, cost, onRetry }: Pick<ShelfProps, "shows" | "onRetry"> & { ring?: number; cost?: string }) {
   switch (shows.state) {
     case "loading":
       return (

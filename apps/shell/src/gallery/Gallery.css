@@ -101,7 +101,7 @@
   /* A containing block for the shelf, which is fixed in the window. */
   transform: translateZ(0);
   display: flex;
-  min-height: calc(var(--size-card-max) * 3);
+  min-height: calc(var(--size-shelf) + var(--size-shelf));
   overflow: hidden;
   background: var(--color-canvas);
 }

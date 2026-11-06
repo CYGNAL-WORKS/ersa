@@ -290,6 +290,12 @@
   border-right-color: transparent;
 }
 
+/* Keyboard focus on the open tile shows as on any tile: its edge turns ink. */
+.session-item[data-shelf] > .session:focus-visible {
+  border-color: var(--color-ink);
+  border-right-color: transparent;
+}
+
 /* With reduced motion on, the arc holds still at full tone, and fills change at once. */
 @media (prefers-reduced-motion: reduce) {
   .session,

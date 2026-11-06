@@ -45,8 +45,11 @@ export interface Follower {
   /** Sends the user's message. Resolves true once Core accepted it. */
   send(text: string): Promise<boolean>;
   decide(requestId: string, behavior: "allow" | "deny"): void;
-  /** Stops following; `update` is never called again. */
-  stop(): void;
+  /**
+   * Stops following; `update` is never called again. `keepSubscription` leaves Core's subscription in place, for
+   * when another follower of the same session has taken it over: Core holds one per session on a connection.
+   */
+  stop(keepSubscription?: boolean): void;
 }
 
 export function follow(client: CoreClient, id: string, update: (view: SessionView) => void): Follower {
@@ -211,9 +214,10 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
       );
     },
 
-    stop() {
+    stop(keepSubscription = false) {
       if (stopped) return;
       stopped = true;
+      if (keepSubscription) return;
       // Best effort: the connection may already be gone, which ends the
       // subscription anyway.
       client.call("session.unsubscribe", { id }).catch(() => {});
