@@ -613,3 +613,63 @@ async fn a_submodule_whose_history_went_with_git_s_record_counts() {
     // README.md, .gitmodules and the submodule's README.md.
     assert_eq!(counts(&found), [3, 0, 0, 0, 0], "{found}");
 }
+
+// cites PROTO-CORE-API-R46 once planning PR 245 adds it
+#[tokio::test(flavor = "multi_thread")]
+async fn without_git_s_record_the_token_follows_the_files_left_and_the_branch() {
+    let (core, mut client) = setup().await;
+    let repo = core.dir.path().join("repo");
+    git_repo(&repo);
+    let (workspace, folder) = workspace_of(&mut client, &repo).await;
+    let branch = workspace["vcs_ref"].as_str().unwrap().to_string();
+    write(&folder.join("a.txt"), "a\n");
+    let recorded = changes(&mut client, &workspace).await;
+    assert_eq!(recorded["unrecorded"], json!(false), "{recorded}");
+
+    let name = folder.file_name().unwrap();
+    std::fs::remove_dir_all(repo.join(".git").join("worktrees").join(name)).unwrap();
+    let first = changes(&mut client, &workspace).await;
+    assert_eq!(first["unrecorded"], json!(true), "{first}");
+    assert_eq!(counts(&first), [2, 0, 0, 0, 0], "{first}");
+
+    let mut seen = vec![first["token"].clone()];
+    let mut expect_new = |found: &Value| {
+        assert_eq!(found["unrecorded"], json!(true), "{found}");
+        assert!(
+            !seen.contains(&found["token"]),
+            "the token did not change: {found}"
+        );
+        seen.push(found["token"].clone());
+    };
+    // A file left edited.
+    write(&folder.join("a.txt"), "a, edited\n");
+    let edited = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&edited), [2, 0, 0, 0, 0]);
+    expect_new(&edited);
+    // A file added.
+    write(&folder.join("b.txt"), "b\n");
+    let added = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&added), [3, 0, 0, 0, 0]);
+    expect_new(&added);
+    // A commit on the workspace's branch, made from the repository, since
+    // the folder is no longer a checkout git knows.
+    let tree = git(&repo, &["rev-parse", &format!("{branch}^{{tree}}")]);
+    let commit = git(
+        &repo,
+        &[
+            "commit-tree",
+            "-p",
+            &branch,
+            "-m",
+            "on the branch",
+            tree.trim(),
+        ],
+    );
+    git(
+        &repo,
+        &["update-ref", &format!("refs/heads/{branch}"), commit.trim()],
+    );
+    let committed = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&committed), [3, 0, 1, 0, 0]);
+    expect_new(&committed);
+}
