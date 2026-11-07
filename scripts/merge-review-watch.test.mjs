@@ -10,7 +10,7 @@ import { PassThrough } from "node:stream";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { INTERVAL_MS, LOCK_STALE_MS, ENDED, RETRY_MS, RETRY_UNTIL_MS, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select, startReview } from "./merge-review-watch.mjs";
+import { INTERVAL_MS, LOCK_STALE_MS, ENDED, TRANSIENT, RETRY_MS, RETRY_UNTIL_MS, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select, startReview } from "./merge-review-watch.mjs";
 
 const HEAD = "b".repeat(40);
 const NOW = Date.parse("2026-11-04T12:00:00Z");
@@ -81,6 +81,23 @@ test("one retry runs at a time, counting a retry an earlier tick started", async
   await settle(() => started === 2);
   reviews[1].end(0);
   assert.equal((await run).code, 0);
+});
+
+test("TRANSIENT matches each cause that may clear on its own, and nothing else", () => {
+  for (const cause of [
+    "GraphQL: API rate limit already exceeded for user ID 1",
+    "Too Many Requests",
+    "HTTP 500",
+    "HTTP 502",
+    "HTTP 408",
+    "HTTP 429",
+    "read tcp 10.0.0.1:5000->140.82.112.6:443: connection reset by peer",
+    "dial tcp: i/o timeout",
+    "error connecting to api.github.com",
+    "network is unreachable",
+    "The run failed: adding it to the merge queue failed after the review was posted: refused",
+  ]) assert.match(cause, TRANSIENT);
+  for (const cause of ["The review ran past 70 minutes and was ended; the poller's log says what it was doing.", "The run failed: claude returned no result: error_max_turns", "HTTP 404: Not Found", "HTTP 4290", ""]) assert.doesNotMatch(cause, TRANSIENT);
 });
 
 test("a retry starts only when its error's description says the cause may clear", async () => {
