@@ -658,7 +658,7 @@ describe("stop under a session App draws", () => {
 describe("the attachments App gives the composer", () => {
   const inspected: Record<string, unknown> = {
     "D:/code/beta/notes.md": { path: "D:/code/beta/notes.md", name: "notes.md", kind: "file", size_bytes: 900, lines: 12, copied: false },
-    "C:/pics/shot.png": { path: "C:/pics/shot.png", name: "shot.png", kind: "image", size_bytes: 2048, media_type: "image/png" },
+    "C:/pics/shot.png": { path: "C:/pics/shot.png", name: "shot.png", kind: "image", size_bytes: 2048, media_type: "image/png", copied: false },
     // In beta's folder by its path, but a junction elsewhere: Core says sending copies it.
     "D:/code/beta/src": { path: "D:/code/beta/src", name: "src", kind: "folder", copied: true },
   };
@@ -666,8 +666,8 @@ describe("the attachments App gives the composer", () => {
     if (params.host_id !== "local") throw new Error("wrong host");
     const info = inspected[params.path] as Record<string, unknown> | undefined;
     if (!info) throw { kind: "rpc", error: { code: -32000, message: "attachment.inspect: missing", data: { kind: "not_found", detail: "This file no longer exists." } } };
-    // Core says whether sending copies it only when asked for a workspace.
-    if (params.workspace_id === undefined) return { ...info, copied: undefined };
+    // Without a workspace Core says every file and folder is copied.
+    if (params.workspace_id === undefined) return { ...info, copied: info.kind !== "image" };
     return info;
   };
   const choose = async (name: string) => {
@@ -761,7 +761,7 @@ describe("the attachments App gives the composer", () => {
 
 // A new session's first message with attachments (FLOW-SEND-MESSAGE-R10, R13 to R15).
 describe("the attachments of a new session's first message", () => {
-  const notes = { path: "D:/code/alpha/notes.md", name: "notes.md", kind: "file", size_bytes: 900, lines: 12 };
+  const notes = { path: "D:/code/alpha/notes.md", name: "notes.md", kind: "file", size_bytes: 900, lines: 12, copied: true };
   const start = (send: () => unknown) => {
     // Core lists the session once it is created, alive and idle.
     let created = false;
@@ -800,17 +800,25 @@ describe("the attachments of a new session's first message", () => {
   };
 
   // verifies: FLOW-SEND-MESSAGE-R14
-  it("says every attachment will be copied into a new workspace, and none from the project folder when it is chosen", async () => {
-    await screenWith([project("alpha")], shellWith(), start(() => ({ turn: 1 })));
-    await attachNotes();
+  it("asks Core about the project folder's workspace when it is chosen, and about none for a new workspace", async () => {
+    const core = await screenWith([project("alpha")], shellWith(), start(() => ({ turn: 1 })));
     const choose = (name: RegExp) => {
       fireEvent.click(screen.getByRole("button", { name: /^Workspace:/ }));
       fireEvent.click(screen.getByRole("option", { name }));
     };
+    choose(/Project folder/);
+    await attachNotes();
+    expect(shown()).toEqual(["notes.md12 lines"]);
+    // Choosing a new workspace after: judged for another, it is taken to be copied.
     choose(/New workspace/);
     expect(shown()).toEqual(["notes.md12 linesWill be copied into the workspace's .ersa folder"]);
-    choose(/Project folder/);
-    expect(shown()).toEqual(["notes.md12 lines"]);
+    fireEvent.click(screen.getByRole("button", { name: "Remove notes.md" }));
+    await attachNotes();
+    expect(shown()).toEqual(["notes.md12 linesWill be copied into the workspace's .ersa folder"]);
+    expect(core.calls.filter((c) => c.method === "attachment.inspect").map((c) => c.params)).toEqual([
+      { host_id: "local", path: "D:/code/alpha/notes.md", workspace_id: "w-alpha" },
+      { host_id: "local", path: "D:/code/alpha/notes.md" },
+    ]);
   });
 
   // verifies: FLOW-SEND-MESSAGE-R13

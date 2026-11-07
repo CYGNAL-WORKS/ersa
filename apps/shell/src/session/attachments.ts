@@ -12,8 +12,8 @@ export interface Attached {
   kind: AttachmentInspectResult["kind"];
   /** Its detail: a size, a line count, or that it is a folder (FLOW-SEND-MESSAGE-R09). */
   detail: string;
-  /** Whether sending copies it, as Core judged it for one workspace (FLOW-SEND-MESSAGE-R14). */
-  copied?: { workspace: string; copied: boolean };
+  /** Whether sending copies it, as Core judged it for one workspace, or for none yet (FLOW-SEND-MESSAGE-R14). */
+  copied?: { workspace: string | undefined; copied: boolean };
   /** Why Ersa can't send it, said beside it; the message waits until it is removed (FLOW-SEND-MESSAGE-R10). */
   problem?: string;
 }
@@ -54,22 +54,19 @@ export function same(a: string, b: string): boolean {
   return key(a) === key(b);
 }
 
-/** `info` as the composer holds it, with whether sending copies it when Core judged that for `workspace`. */
+/** `info` as the composer holds it, with whether sending copies it, as Core judged it for `workspace`. */
 export function attached(info: AttachmentInspectResult, workspace?: string): Attached {
-  const held: Attached = { path: info.path, name: info.name, kind: info.kind, detail: detail(info) };
-  if (workspace !== undefined && info.copied !== undefined) held.copied = { workspace, copied: info.copied };
-  return held;
+  return { path: info.path, name: info.name, kind: info.kind, detail: detail(info), copied: { workspace, copied: info.copied } };
 }
 
 /**
- * Whether sending `a` copies it into the workspace's `.ersa` folder (FLOW-SEND-MESSAGE-R14), as Core said when it
- * inspected it: Core alone resolves links and junctions, so the Interface never judges a path itself. An image goes
- * inline and is never copied. A workspace not made yet, as a new session's isolated one, holds nothing, so every
- * file and folder is copied; and one Core did not judge for this workspace is taken to be copied too.
+ * Whether sending `a` copies it into the workspace's `.ersa` folder (FLOW-SEND-MESSAGE-R14): Core's `copied`
+ * alone, since Core alone resolves links and junctions. One Core judged for another workspace than the composer's
+ * now, as after choosing another on the new-session screen, is taken to be copied, so the note never says a copy
+ * won't happen when it may.
  */
 export function willCopy(a: Attached, workspace: string | undefined): boolean {
-  if (a.kind === "image") return false;
-  if (workspace === undefined || a.copied?.workspace !== workspace) return true;
+  if (a.copied === undefined || a.copied.workspace !== workspace) return a.kind !== "image";
   return a.copied.copied;
 }
 
