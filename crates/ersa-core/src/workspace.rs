@@ -1232,6 +1232,17 @@ async fn git_within(
             .chain(extra_env)
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
+        // Which repository git reads is named by its arguments alone, never
+        // by what Core inherited (a git hook exports `GIT_DIR`, for one).
+        env_remove: [
+            "GIT_DIR",
+            "GIT_WORK_TREE",
+            "GIT_INDEX_FILE",
+            "GIT_COMMON_DIR",
+            "GIT_OBJECT_DIRECTORY",
+        ]
+        .map(String::from)
+        .to_vec(),
         ..ProcessSpec::default()
     };
     Ok(transport::run(transport, spec, timeout).await?)
@@ -1399,6 +1410,30 @@ mod tests {
         assert!(matches!(result, Err(VcsError::Busy)), "{result:?}");
         drop(held);
         assert!(blocking(deadline(), "reading", |_| Ok(())).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn git_never_reads_a_repository_named_by_inherited_variables() {
+        /// Keeps the spec of the one process it is asked to start.
+        struct Recording(std::sync::Mutex<Option<ProcessSpec>>);
+        #[ersa_adapter::async_trait]
+        impl Transport for Recording {
+            async fn spawn(
+                &self,
+                spec: ProcessSpec,
+            ) -> std::io::Result<Box<dyn ersa_adapter::Process>> {
+                *self.0.lock().unwrap() = Some(spec.clone());
+                ersa_adapter::fake::FakeTransport::new(Vec::<String>::new())
+                    .spawn(spec)
+                    .await
+            }
+        }
+        let transport = Recording(Default::default());
+        git(&transport, "repo", &["status"]).await.unwrap();
+        let spec = transport.0.lock().unwrap().take().unwrap();
+        for name in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"] {
+            assert!(spec.env_remove.iter().any(|n| n == name), "{name}");
+        }
     }
 
     #[test]
