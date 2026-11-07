@@ -34,6 +34,9 @@ import { mergeWorkspaces } from "./session/workspaces";
 const UNAVAILABLE = { state: "unavailable" } as const;
 const LOADING = { state: "loading" } as const;
 
+/** How many `attachment.inspect` reads Core runs at once; it refuses more (PROTO-CORE-API, Sending). */
+const INSPECTS_AT_ONCE = 8;
+
 /** The projects part of the view, whatever phase Core is in. */
 function projectsOf(view: CoreView): ProjectsView {
   switch (view.phase) {
@@ -393,11 +396,17 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           } catch {
             return [];
           }
-          // One at a time: Core reads only a few at once and refuses the rest, which would mark good paths unreadable.
-          const read: Attached[] = [];
-          for (const path of paths) {
-            read.push(await client.call("attachment.inspect", { host_id, path }).then(attached, (error) => unreadable(path, describeError(error))));
-          }
+          // At most INSPECTS_AT_ONCE in flight, the rest queued: Core reads that many at once and refuses more, which
+          // would mark good paths unreadable. Kept in the order picked.
+          const read: Attached[] = new Array(paths.length);
+          let next = 0;
+          const worker = async () => {
+            for (let at = next++; at < paths.length; at = next++) {
+              const path = paths[at] as string;
+              read[at] = await client.call("attachment.inspect", { host_id, path }).then(attached, (error) => unreadable(path, describeError(error)));
+            }
+          };
+          await Promise.all(Array.from({ length: Math.min(INSPECTS_AT_ONCE, paths.length) }, worker));
           return read;
         }
       : undefined;
