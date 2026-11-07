@@ -986,7 +986,7 @@ async fn a_sessions_title_and_start_come_from_its_record_and_its_mode_from_ersa(
     assert_eq!(row["mode"], "review");
 }
 
-// verifies: PROTO-CORE-API-R12
+// verifies: PROTO-CORE-API-R52
 #[tokio::test(flavor = "multi_thread")]
 async fn a_running_session_is_renamed_through_its_backend() {
     let records = Records::default();
@@ -1020,7 +1020,7 @@ async fn a_running_session_is_renamed_through_its_backend() {
     assert_eq!(session_row(&mut client, &id).await["title"], "Renamed");
 }
 
-// verifies: PROTO-CORE-API-R12
+// verifies: PROTO-CORE-API-R52
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stopped_session_is_renamed_in_its_record_which_a_later_core_reads() {
     let records = Records::default();
