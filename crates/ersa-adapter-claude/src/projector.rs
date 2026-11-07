@@ -1092,9 +1092,9 @@ fn tool_output(content: Option<MessageContent>) -> ToolResultContent {
     }
 }
 
-/// How a turn ended, from a `result` line. Only `success` has been recorded;
-/// the others follow the SDK's result subtypes until an interrupt or limit is
-/// recorded.
+/// How a turn ended, from a `result` line. `success` and an interrupt are
+/// recorded (an interrupt ends with `terminal_reason` `aborted_streaming`);
+/// the others follow the SDK's result subtypes until a limit is recorded.
 fn outcome(result: &Value) -> TurnOutcome {
     let subtype = result["subtype"].as_str().unwrap_or("");
     let reason = result["terminal_reason"].as_str().unwrap_or("");
