@@ -689,18 +689,26 @@ describe("a tile's menu, and renaming on the tile", () => {
     expect(reason?.textContent).toContain("no record of this session");
   });
 
-  it("offers Rename as unavailable, with the reason, while the session starts, and F2 does nothing", async () => {
+  it("offers Rename on a starting session, and shows Core's refusal in the field until the backend has named it", async () => {
     const starting = titled.map((s, i) => (i === 0 ? { ...s, state: "starting" as const, tile: { state: "starting" as const, pending: [] } } : s));
-    const core = await open({ "session.list": () => starting });
+    const core = await open({
+      "session.list": () => starting,
+      "session.set_title": () => {
+        // Core refuses a session its backend has not named yet with invalid_state (PROTO-CORE-API, Methods).
+        throw { kind: "rpc", error: { code: -32010, message: "session.set_title: the backend has not named this session yet" } };
+      },
+    });
     fireEvent.click(within(rail()).getByRole("button", { name: "More for Fix the build" }));
     const item = screen.getByRole("menuitem", { name: /^Rename/ });
-    expect(item.getAttribute("aria-disabled")).toBe("true");
-    expect(item.textContent).toContain("Available once the session has started");
+    expect(item.getAttribute("aria-disabled")).toBeNull();
     fireEvent.click(item);
-    expect(field()).toBeNull();
-    fireEvent.keyDown(tile("Fix the build"), { key: "F2" });
-    expect(field()).toBeNull();
-    expect(renames(core)).toEqual([]);
+    fireEvent.change(field() as HTMLInputElement, { target: { value: "Fix it" } });
+    fireEvent.keyDown(field() as HTMLInputElement, { key: "Enter" });
+    await settle();
+    expect(renames(core)).toEqual([{ id: "s1", title: "Fix it" }]);
+    expect(field()?.value).toBe("Fix it");
+    const reason = document.getElementById(field()?.getAttribute("aria-errormessage") ?? "");
+    expect(reason?.textContent).toContain("has not named this session yet");
   });
 });
 

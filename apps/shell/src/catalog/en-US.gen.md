@@ -122,10 +122,6 @@ Rename
 
 F2
 
-### `rail.tile.renameStartingReason`
-
-Available once the session has started
-
 ### `rail.tile.renameOfflineReason`
 
 Available once Ersa reaches your sessions
