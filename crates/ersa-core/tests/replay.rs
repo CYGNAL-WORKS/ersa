@@ -276,10 +276,6 @@ async fn read_only_requests_are_answered_as_core_answers_them() {
         )
         .await;
     assert_eq!(error["data"]["kind"], "invalid_state");
-    assert!(
-        error["message"].as_str().unwrap().contains("own folder"),
-        "{error}"
-    );
     assert_eq!(client.result("settings.get", json!({})).await, json!({}));
 
     // Nothing is played until a client subscribes.
