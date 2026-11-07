@@ -1,9 +1,10 @@
-import { type ReactNode, memo, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { t } from "../catalog";
 import type { PermissionRequested, ToolInput } from "../protocol/agent-events.gen";
 import type { Answer, Decision } from "../session/answers";
 import type { SessionView, Sending } from "../session/follow";
 import { pathName } from "../session/attachments";
+import { imageSize } from "../session/imageSize";
 import { stateText } from "../session/states";
 import { type Item, type MessageAttachment, isOpen } from "../session/transcript";
 import { Button } from "./Button";
@@ -131,42 +132,30 @@ function MessageAttachments({ attachments }: { attachments: readonly MessageAtta
 }
 
 /**
- * An image as itself, named "Attached image". One of a kind the window can't show, or that fails to load, is the
- * attachment with an image icon by that name.
+ * An image as itself, named "Attached image" (DESIGN.md, Layout). Its box takes its final size at once, from the width
+ * and height its own header states, capped at size-attachment-image with its proportions kept, and is filled with
+ * material-tile until the image draws, so nothing in the bubble moves. One of a kind the window can't show, or that
+ * fails to load, is the attachment with an image icon by that name.
  */
 function AttachedImage({ image }: { image: Extract<MessageAttachment, { kind: "image" }> }) {
   const [failed, setFailed] = useState(false);
+  const size = useMemo(() => imageSize(image.data), [image.data]);
   const label = t("transcript.attachment.imageLabel");
   if (failed || !image.media_type.toLowerCase().startsWith("image/")) return <AttachmentChip kind="image" name={label} />;
+  // The header's size reaches the CSS as custom properties; the cap and the proportions are the stylesheet's.
+  const box = size && ({ "--image-width": `${size.width}px`, "--image-ratio": `${size.width} / ${size.height}`, "--image-aspect": size.width / size.height } as CSSProperties);
   return (
     <li className="transcript-attachment-image">
-      <img src={`data:${image.media_type};base64,${image.data}`} alt={label} onError={() => setFailed(true)} />
+      <img src={`data:${image.media_type};base64,${image.data}`} alt={label} style={box} data-sized={size ? "" : undefined} onError={() => setFailed(true)} />
     </li>
   );
 }
 
-/**
- * A user's message (DESIGN.md, Layout): the bubble shows once its images are decoded, so nothing in it moves. Kept
- * hidden, at its place, until then; an image that fails to decode lets it show, falling back to its attachment.
- */
+/** A user's message (DESIGN.md, Layout): its attachments above its words. */
 function UserBubble({ item }: { item: Extract<Item, { kind: "user" }> }) {
-  const bubble = useRef<HTMLDivElement>(null);
-  const hasImages = item.attachments?.some((a) => a.kind === "image") ?? false;
-  const [decoded, setDecoded] = useState(!hasImages);
-  useLayoutEffect(() => {
-    if (decoded) return;
-    let live = true;
-    const images = Array.from(bubble.current?.querySelectorAll("img") ?? []);
-    Promise.all(images.map((img) => (typeof img.decode === "function" ? img.decode().catch(() => {}) : undefined))).then(() => {
-      if (live) setDecoded(true);
-    });
-    return () => {
-      live = false;
-    };
-  }, [decoded]);
   return (
     // A bubble with no label: its place says who wrote it, and assistive technology hears "You" (DESIGN.md, Layout).
-    <div ref={bubble} className="transcript-user" role="group" aria-label="You" data-decoding={!decoded || undefined}>
+    <div className="transcript-user" role="group" aria-label="You">
       {item.attachments && <MessageAttachments attachments={item.attachments} />}
       {item.text !== "" && <p className="transcript-text">{item.text}</p>}
     </div>
