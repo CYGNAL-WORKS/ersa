@@ -143,6 +143,7 @@ export function SessionControls({ hosts, localHostId, projects, backends, values
           options={projects.filter((p) => p.host_id === values.host_id).map(projectOption)}
           // With no project on the host, the chip offers to choose a folder (FLOW-NEW-SESSION-R19).
           placeholder={t("sessionControls.project.chooseFolderButton")}
+          invites
           wide
           // The only way to add a project (FLOW-NEW-SESSION-R27, R20); its shortcut shows while it can be taken.
           action={{

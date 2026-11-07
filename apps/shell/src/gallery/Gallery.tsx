@@ -721,7 +721,8 @@ const entries: Entry[] = [
       ["In a session", <Chip {...chip} readOnly />],
       ["Detecting backends", <Chip name="Backend" placeholder="Detecting backends…" pending options={[]} onChoose={() => {}} disabled />],
       // Where the window has no room beneath, the list opens above its chip.
-      ["Open above", <div className="gallery-room-before">{<Chip {...chip} initialOpen forceAbove />}</div>],
+      ["Open above", <div className="gallery-room-before gallery-list-above">{<Chip {...chip} initialOpen />}</div>],
+      ["Open, an option with keyboard focus beside one under the pointer", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "focus" }} />)],
       ["Open", room(<Chip {...chip} initialOpen />)],
       ["Open, an option hovered", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "hover" }} />)],
       ["Open, an option pressed", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "pressed" }} />)],

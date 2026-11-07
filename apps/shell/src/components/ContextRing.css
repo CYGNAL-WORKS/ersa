@@ -39,8 +39,24 @@
   transition: stroke-dasharray var(--motion-settle) var(--motion-ease-out);
 }
 
+/* Turning: the gauge spins once per motion-loop-ring at constant speed while the work lasts. */
+.context-ring[data-turning] .context-ring-gauge {
+  animation: context-ring-turn var(--motion-loop-ring) var(--motion-linear) infinite;
+}
+
+@keyframes context-ring-turn {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .context-ring-used {
     transition: none;
+  }
+
+  /* Held still, at full tone. */
+  .context-ring[data-turning] .context-ring-gauge {
+    animation: none;
   }
 }

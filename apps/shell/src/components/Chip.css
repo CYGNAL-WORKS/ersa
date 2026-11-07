@@ -52,8 +52,9 @@
   background: var(--material-pressed);
 }
 
-/* Open, it stands on the raised surface with a line edge, whatever the pointer does. */
-.chip[data-open] {
+/* Open, it stands on the raised surface with a line edge, whatever the pointer does, pressing included. */
+.chip[data-open],
+.chip[data-open]:active:not(:disabled) {
   color: var(--color-ink);
   background: var(--color-surface-raised);
   border-color: var(--color-line);
@@ -80,46 +81,32 @@
   color: var(--color-ink-muted);
 }
 
-/* Detecting backends: the context ring's track, a quarter arc turning once per motion-loop-ring. */
-.chip[data-pending]:disabled {
-  color: var(--color-ink-muted);
-}
-
-.chip-detecting {
-  animation: chip-detecting var(--motion-loop-ring) var(--motion-linear) infinite;
-}
-
-@keyframes chip-detecting {
-  to {
-    transform: rotate(1turn);
-  }
+/* An invitation to act, such as Choose a folder, reads ink. */
+.chip[data-invites] {
+  color: var(--color-ink);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .chip {
     transition: none;
   }
-
-  /* Held still, at full tone. */
-  .chip-detecting {
-    animation: none;
-  }
 }
 
 /* The choices: a transient layer beneath the chip, which it unfolds from. */
-/* Beneath its chip, which is size-control high, space-xs from it. */
+/* Anchored to its chip, space-xs from it: beneath where the window has room, else above, re-placed as it grows. */
 .chip-list {
-  position: absolute;
-  top: var(--size-control);
-  left: 0;
+  position: fixed;
+  inset: auto;
+  position-area: block-end span-inline-end;
+  position-try-fallbacks: flip-block;
   z-index: var(--stack-menu);
   display: flex;
   flex-direction: column;
   /* At least as wide as its chip, at most size-menu. */
-  min-width: stretch;
+  min-width: anchor-size(width);
   width: max-content;
   max-width: var(--size-menu);
-  margin: var(--space-xs) 0 0;
+  margin: var(--space-xs) 0;
   padding: var(--space-xs);
   list-style: none;
   font-size: var(--type-ui-size);
@@ -129,21 +116,6 @@
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-transient);
   animation: chip-list-in var(--motion-quick) var(--motion-ease-out);
-}
-
-/* Where the window has no room beneath, it opens above, sliding down toward its place. */
-.chip-list[data-above] {
-  top: auto;
-  bottom: var(--size-control);
-  margin: 0 0 var(--space-xs);
-  animation-name: chip-list-in-above;
-}
-
-@keyframes chip-list-in-above {
-  from {
-    opacity: 0;
-    transform: translateY(var(--space-xs));
-  }
 }
 
 @keyframes chip-list-in {
@@ -187,7 +159,8 @@
 }
 
 /* Keyboard focus is an ink edge, so the focused option stays distinct from the one under the pointer. */
-.chip-option:focus-visible {
+.chip-option:focus-visible,
+.chip-option[data-force="focus"] {
   outline: none;
   border-color: var(--color-ink);
 }
@@ -264,6 +237,8 @@
 }
 
 .chip-option-caution {
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
   grid-area: caution;
   display: inline-flex;
   align-items: center;
@@ -278,6 +253,8 @@
 
 /* Right to left, so the ellipsis falls at the path's start and the folder's own name stays in view. */
 .chip-option-detail {
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
   grid-area: detail;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -302,6 +279,8 @@
   margin-left: auto;
   padding-left: var(--space-md);
   font: inherit;
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
   color: var(--color-ink-faint);
 }
 
