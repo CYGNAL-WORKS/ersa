@@ -82,12 +82,14 @@
   margin-bottom: var(--space-sm);
 }
 
-.transcript-attachment-image img {
+/* An image's place: material-tile until the image is drawn, with a line edge and radius-md (DESIGN.md, Layout). */
+.attachment-image {
   display: block;
+  position: relative;
   box-sizing: border-box;
   max-width: var(--size-attachment-image);
   max-height: var(--size-attachment-image);
-  /* Filled until the image draws. */
+  overflow: hidden;
   background: var(--material-tile);
   border: var(--line-hairline) solid var(--color-line);
   border-radius: var(--radius-md);
@@ -95,14 +97,50 @@
 
 /* Sized from its header before it draws: as wide as it is, up to size-attachment-image, and no taller than that, its
    proportions kept. */
-.transcript-attachment-image img[data-sized] {
-  /* Set from the header by the image itself; these defaults leave the box at its cap, square. */
+.attachment-image[data-sized] {
+  /* Set from the header by the image itself; these defaults leave the place at its cap, square. */
   --image-width: var(--size-attachment-image);
   --image-ratio: auto;
   --image-aspect: 1;
   aspect-ratio: var(--image-ratio);
   width: min(var(--image-width), var(--size-attachment-image), calc(var(--size-attachment-image) * var(--image-aspect)));
-  height: auto;
+}
+
+/* The image fades in over motion-quick once it is drawn. */
+.attachment-image img {
+  display: block;
+  max-width: var(--size-attachment-image);
+  max-height: var(--size-attachment-image);
+  opacity: 0;
+  transition: opacity var(--motion-quick) var(--motion-ease-out);
+}
+
+.attachment-image[data-sized] img {
+  width: stretch;
+  height: stretch;
+}
+
+.attachment-image[data-state="drawn"] img {
+  opacity: 1;
+}
+
+/* Failed to draw after its place was set: the image icon and its name, in the place it keeps. */
+.attachment-image-failed {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  color: var(--color-ink-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .attachment-image img {
+    transition: none;
+  }
 }
 
 /* A new turn: the gap before every user message but the first grows to space-xxxl, so turns read as groups (DESIGN.md, Layout). */
