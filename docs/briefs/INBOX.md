@@ -8,6 +8,5 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-07 PROTO-CLAUDE-CODE-STREAM-R26, R27 (User message): the recorded message with attachments (fixture 2.1.316/07) settles what the brief left open. The CLI keeps the image and list blocks verbatim in the record, and writes beside them an `isMeta` user entry `[Image: source: <path of its cached copy>]`, which the adapter projects as a system `user.message` like any other text the CLI wrote; and for a prompt of attachments alone it leaves `last-prompt` at the prompt before. The brief can say both, and whether that `[Image: source: …]` entry should be shown at all.
 
 ## Resolved recently (optional, trimmed in planning passes)

@@ -1236,7 +1236,7 @@ fn meta(content: Value) -> Value {
     json!({"type": "user", "uuid": "m", "isMeta": true, "message": {"role": "user", "content": content}})
 }
 
-// R34 (on #241 until it merges): the CLI's note of where it cached an image passes through.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R34
 #[test]
 fn the_clis_note_of_a_cached_image_passes_through() {
     // Recorded beside the prompt with an image (fixture 2.1.316/07).
@@ -1266,7 +1266,7 @@ fn the_clis_note_of_a_cached_image_passes_through() {
     );
 }
 
-// R34 (on #241 until it merges): only a note that is nothing but image sources passes through.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R34
 #[test]
 fn a_cli_note_with_anything_else_in_it_is_still_shown() {
     let mixed =
@@ -1279,7 +1279,7 @@ fn a_cli_note_with_anything_else_in_it_is_still_shown() {
     );
 }
 
-// R34 (on #241 until it merges): the same words typed by the user are their message.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R34
 #[test]
 fn the_same_words_typed_by_the_user_are_their_message() {
     let typed = prompt_with(Some("[Image: source: x]"), &[]);
