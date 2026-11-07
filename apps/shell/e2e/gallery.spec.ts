@@ -9,6 +9,7 @@ const components = [
   "RailTree",
   "Shelf",
   "Transcript",
+  "AttachmentChip",
   "SessionTitle",
   "ErrorBoundary",
   "NewSessionScreen",

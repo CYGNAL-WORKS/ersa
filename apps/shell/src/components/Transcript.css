@@ -70,6 +70,8 @@
 .transcript-attachments {
   display: flex;
   flex-wrap: wrap;
+  /* Wrapping from the bubble's trailing edge, as the bubble sits at the column's. */
+  justify-content: flex-end;
   gap: var(--space-sm);
   margin: 0;
   padding: 0;
@@ -86,6 +88,11 @@
   max-height: var(--size-attachment-image);
   border: var(--line-hairline) solid var(--color-line);
   border-radius: var(--radius-md);
+}
+
+/* Kept at its place, unseen, until its images are decoded, so nothing in it moves (DESIGN.md, Layout). */
+.transcript-user[data-decoding] {
+  visibility: hidden;
 }
 
 /* A new turn: the gap before every user message but the first grows to space-xxxl, so turns read as groups (DESIGN.md, Layout). */
