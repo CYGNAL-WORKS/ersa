@@ -16,6 +16,24 @@ use crate::wire::{ContentBlock, ImageSource, InputBlock};
 const OPEN: &str = "<ersa-attachments>";
 const CLOSE: &str = "</ersa-attachments>";
 
+/// Why `message` cannot be sent as Claude Code takes it, if it cannot: a path
+/// with a line break would break the list it goes in.
+pub(crate) fn unsendable(message: &OutgoingMessage) -> Option<String> {
+    message
+        .attachments
+        .iter()
+        .find_map(|attachment| match attachment {
+            OutgoingAttachment::File { path } | OutgoingAttachment::Folder { path }
+                if path.contains(['\n', '\r']) =>
+            {
+                Some(format!(
+                    "the path {path:?} has a line break, which an attachments list cannot hold"
+                ))
+            }
+            _ => None,
+        })
+}
+
 /// The content blocks of a user message with `message`'s text and
 /// attachments, in the order the CLI takes them (PROTO-CLAUDE-CODE-STREAM-R25).
 pub(crate) fn blocks(message: &OutgoingMessage) -> Vec<InputBlock> {
@@ -107,6 +125,8 @@ pub(crate) fn split_blocks(blocks: &[ContentBlock]) -> (Option<String>, Vec<Mess
 /// The files and folders of a text block that is exactly an attachments list,
 /// else `None`: a list the user typed among other words stays their text.
 fn list(text: &str) -> Option<Vec<MessageAttachment>> {
+    // A list written with Windows line endings reads the same.
+    let text = text.replace("\r\n", "\n");
     let inner = text.strip_prefix(OPEN)?.strip_suffix(CLOSE)?;
     let inner = inner.strip_prefix('\n')?.strip_suffix('\n')?;
     inner
@@ -232,5 +252,37 @@ mod tests {
             assert_eq!(text.as_deref(), Some(typed));
             assert!(attachments.is_empty());
         }
+    }
+
+    // verifies: PROTO-CLAUDE-CODE-STREAM-R26
+    #[test]
+    fn a_list_with_windows_line_endings_reads_the_same() {
+        let (text, attachments) = split(&[json!({ "type": "text",
+            "text": "<ersa-attachments>\r\nfile: a.md\r\nfolder: src\r\n</ersa-attachments>" })]);
+        assert_eq!(text, None);
+        assert_eq!(
+            attachments,
+            vec![
+                MessageAttachment::File {
+                    path: "a.md".into()
+                },
+                MessageAttachment::Folder { path: "src".into() },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_path_with_a_line_break_cannot_be_sent() {
+        for path in ["a\nb", "a\rb"] {
+            let bad = message("", vec![OutgoingAttachment::File { path: path.into() }]);
+            assert!(unsendable(&bad).is_some(), "{path:?}");
+        }
+        assert!(
+            unsendable(&message(
+                "",
+                vec![OutgoingAttachment::Folder { path: "src".into() }]
+            ))
+            .is_none()
+        );
     }
 }
