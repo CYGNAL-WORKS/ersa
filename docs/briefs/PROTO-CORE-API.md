@@ -70,7 +70,7 @@ Names are `noun.verb`. Identifiers are strings Core issues. Listing methods retu
 
 ### Sections
 
-- `section.list`, `section.create { name }`, `section.rename { id, name }`, `section.remove { id }`: `{ id, name, created_at }`, listed in the order they were made. Core trims a name and refuses with `invalid_params` one that is blank, longer than 80 characters, or that another section has, ignoring case. `section.remove` puts its sessions in no section.
+- `section.list`, `section.create { name }`, `section.rename { id, name }`, `section.remove { id }`: `{ id, name, created_at }`, listed in the order they were made. Core trims a name and takes each run of spacing as one space, as `session.set_title` does, and refuses with `invalid_params` one that is then blank, longer than 80 characters, holding another control character, or that another section has, ignoring case. Two names differ only in case when their Unicode lowercase forms are equal, so "É" and "é" are one name; Core does not normalize the characters, so an accent typed as a separate combining character makes another name. `section.remove` puts its sessions in no section.
 
 ### Turns and attachments
 
@@ -118,7 +118,7 @@ Core takes the Interface's word that each path is one the user named (FLOW-SEND-
 
 - `session.event { session_id, event }`: one `PROTO-AGENT-EVENTS` envelope.
 - `session.send_progress { session_id, phase (checking | copying | starting | handing_over), copied_bytes (copying), total_bytes (copying) }`: where a send is, sent when its phase changes and at least every 5 seconds until it is answered, at most once a second. Coalesced like `session.tile`: a busy connection gets the newest per session, and it never closes a connection. The Interface waits for its send's answer for as long as these keep arriving.
-- `session.tile { session_id, tile }`: the tile object changed (so the rail updates without subscribing to every session's events). A tile is the session's whole state, so tiles are coalesced: Core may project several backend lines at once and publish one tile for them, and a connection that is busy gets only the newest tile per session when it is ready, never a backlog. A client therefore sees some of the tiles a session passes through, in order, always ending on the current one; for tiles, PROTO-CORE-API-R09's same notifications means that.
+- `session.tile { session_id, tile, last_activity_at (absent until a turn has ended) }`: the tile object or the session's last activity changed (so the rail updates and sorts without subscribing to every session's events). It carries `last_activity_at` as `session.list` would list it when sent, and Core sends one when a turn's end sets it, even if the tile is otherwise unchanged. A tile is the session's whole state, so tiles are coalesced: Core may project several backend lines at once and publish one tile for them, and a connection that is busy gets only the newest tile per session when it is ready, never a backlog. A client therefore sees some of the tiles a session passes through, in order, always ending on the current one; for tiles, PROTO-CORE-API-R09's same notifications means that.
 - `host.status { host_id, status }`.
 - `core.notice { level, message }`: for things the user should see that belong to no session.
 
@@ -191,6 +191,9 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 - **PROTO-CORE-API-R37**: Core shall set a session's `last_activity_at` when one of its turns ends, and at no other time.
 - ~~**PROTO-CORE-API-R38**~~: retired 2026-11-07 (it counted the checkout and reflog even when git has lost the workspace's record), replaced by R48 and R46.
 - **PROTO-CORE-API-R39**: `section.remove` shall leave every session it held in no section.
+- **PROTO-CORE-API-R58**: When a turn's end sets a session's `last_activity_at`, Core shall send a `session.tile` for the session carrying the new time, whether or not the tile changed, and every `session.tile` shall carry the session's `last_activity_at` as `session.list` would list it when sent.
+- **PROTO-CORE-API-R59**: `section.create` and `section.rename` shall take each run of spacing in a name as one space and refuse with `invalid_params` a name that then holds another control character.
+- **PROTO-CORE-API-R60**: `section.create` and `section.rename` shall refuse a name as another section's when the two names' Unicode lowercase forms are equal.
 - **PROTO-CORE-API-R40**: For a session in an isolated workspace, `session.delete` shall delete no file unless the session stopped and `workspace.changes`, computed after the stop, equals the token the call carries; a delete interrupted by a restart shall be marked failed and delete nothing more until called again.
 
 ## Out of scope
@@ -208,6 +211,7 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 
 ## Changes
 
+- 2026-11-07: from #255 inbox: `session.tile` carries `last_activity_at`, sent when a turn's end sets it, so the rail sorts by last activity without rereading `session.list`; a section's name takes runs of spacing as one space and refuses another control character, as a title does, and ignores case by Unicode lowercase without normalizing. PROTO-CORE-API-R58 to R60 added.
 - 2026-11-07: from #252 inbox: `session.delete` stops the session before asking the live-session registry, since Core can't tell its own process there; a stale token's `workspace.changes` goes in `detail` as JSON text; a call without `token` for an isolated workspace answers `invalid_params`; a workspace whose folder a delete took stays while a session marked deleting refers to it, and `workspace_deleted` says this delete took the folder; a session marked deleting no longer uses its workspace, as R35 always meant. `session.fork` counts the processes the registry shows against the one Core runs; a workspace is `error` from when a delete records that its files go, so a crash during step 5 leaves no `ready` workspace with its folder half gone; a session starts only in a `ready` workspace. PROTO-CORE-API-R52 to R57 added.
 - 2026-11-07: owner's decision: Rename works at once, a starting session included, through the backend's own naming; Ersa stores no title. PROTO-CORE-API-R51 added.
 - 2026-11-07: from #244 inbox: `workspace.changes` leaves out a missing file the commit keeps, counts every non-ignored file left when git's record of the workspace is gone, and answers `vcs_error` after 60 seconds without holding up the connection's other requests. R38 retired for R48, which applies while git has the workspace's record and changes the token when a tracked file goes missing; a submodule or nested repository with work of its own counts, and a failed step 3 of `session.delete` releases the claim, and `unrecorded` says when git's record is gone; PROTO-CORE-API-R45 to R50 added (R42 is allocated on another branch).
