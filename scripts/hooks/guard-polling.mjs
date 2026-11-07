@@ -8,7 +8,7 @@
 // It reads the Bash, PowerShell or Monitor command, and the shell scripts
 // that command runs. It also reads what a Write or Edit puts in a file
 // outside the repository or under .scratch/, where agents keep throwaway
-// scripts. A loop polls when it repeats without a fixed count (while, until,
+// scripts, when the file is a script. A loop polls when it repeats without a fixed count (while, until,
 // do, for (;;), setInterval), calls gh, and sleeps. A loop with a fixed count
 // (for x in, foreach) ends, and passes.
 //
@@ -16,43 +16,66 @@
 // This is a guardrail against habit, not a security boundary.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const LOOP = /\b(while|until)\b|\bdo\s*\{|\bfor\s*\(\s*;\s*;\s*\)|\bsetInterval\b/;
-const GH = /\bgh(?:\.exe)?["']?\s+(?:pr|run|api|issue|workflow|repo|release|search|label|status)\b/i;
-const SLEEP = /\b(?:sleep|Start-Sleep|setTimeout)\b|\btimeout(?:\.exe)?\s+\/t\b/i;
-const SCRIPT = /(?:^|[\s"'])((?:[A-Za-z]:)?[^\s"';&|]*\.(?:sh|bash|ps1))(?=["'\s;&|]|$)/g;
+// A loop keyword counts only where a command starts, so prose in a commit
+// message or a pull request body ("wait while the review runs") is not a loop.
+const AT = String.raw`(?:^|[;&|({"'\x60]|\b(?:then|do|else)\s)\s*`;
+const LOOP = new RegExp(String.raw`${AT}(?:while|until)\b|${AT}do\s*\{|${AT}for\s*\(\(?\s*;\s*;\s*\)|\bsetInterval\b`, "m");
+const GH = /\bgh(?:\.exe)?["']?(?:\s+--?[\w-]+(?:[ =][^\s-]\S*)?)*\s+(?:pr|run|api|issue|workflow|repo|release|search|label|status)\b/i;
+const SLEEP = /\b(?:sleep|Start-Sleep|setTimeout)\b|\btimeout(?:\.exe)?\s+\/t\b|\bread\s+-t\b/i;
+// A script the command runs: one that starts a command, or one a shell is
+// given. A script the command only names (rm, cat, pkill -f) is not read, so
+// cleaning up a watcher is never blocked.
+const SCRIPT = /(?:^|[;&|(\n]\s*|\b(?:bash|sh|zsh|pwsh|powershell)(?:\.exe)?["']?\s+(?:-\w+\s+)*|(?:^|\s)[&.]\s+)["']?((?:[A-Za-z]:)?[^\s"';&|]*\.(?:sh|bash|ps1))(?=["'\s;&|]|$)/gm;
+// The files an agent writes that can hold a loop; a note or a ticket in .scratch/ cannot.
+const RUNNABLE = /\.(?:sh|bash|ps1|psm1|cmd|bat|js|mjs|cjs|ts|py)$/i;
 
 // Whether text holds a loop that polls GitHub.
 export const polls = (text) => LOOP.test(text) && GH.test(text) && SLEEP.test(text);
 
-// The shell scripts a command names, resolved against dir.
+// The local shell scripts a command names, resolved against dir. A network
+// path is left out: opening one before the permission prompt would send the
+// owner's Windows credentials to that host.
 export function scriptsIn(command, dir) {
-  return [...command.matchAll(SCRIPT)].map((m) => resolve(dir, m[1].replace(/^\/([a-z])\//i, "$1:/")));
+  return [...command.matchAll(SCRIPT)]
+    .map((m) => resolve(dir, m[1].replace(/^\/([a-z])\//i, "$1:/")))
+    .filter((p) => !/^[\\/]{2}/.test(p));
+}
+
+// The repository holding dir: the nearest folder up with a .git entry.
+function repository(dir) {
+  for (let d = resolve(dir); ; d = dirname(d)) {
+    if (existsSync(join(d, ".git"))) return d;
+    if (dirname(d) === d) return resolve(dir);
+  }
 }
 
 // Whether a file is one an agent keeps for itself: outside the repository, or under .scratch/.
-export function throwaway(file, root) {
-  const rel = relative(root, resolve(root, file)).replace(/\\/g, "/");
+function throwaway(file, dir) {
+  const root = repository(dir);
+  const rel = relative(root, resolve(dir, file)).replace(/\\/g, "/");
   return rel.startsWith("../") || isAbsolute(rel) || rel.startsWith(".scratch/");
 }
 
+// A regular file's text; anything else (a pipe, a device, a large file) reads as empty.
 function read(file) {
   try {
-    return existsSync(file) && statSync(file).size < 256 * 1024 ? readFileSync(file, "utf8") : "";
+    const s = statSync(file);
+    return s.isFile() && s.size < 256 * 1024 ? readFileSync(file, "utf8") : "";
   } catch {
     return "";
   }
 }
 
 // The text the tool call would run or write, as far as it polls.
-export function inspected(payload) {
+function inspected(payload) {
   const input = payload?.tool_input ?? {};
   const dir = payload?.cwd ?? process.cwd();
   if (typeof input.command === "string") return [input.command, ...scriptsIn(input.command, dir).map(read)];
-  const file = input.file_path ?? input.notebook_path;
-  if (typeof file !== "string" || !throwaway(file, dir)) return [];
+  const file = input.file_path;
+  if (typeof file !== "string" || !RUNNABLE.test(file) || !throwaway(file, dir)) return [];
   return [input.content, input.new_string, ...(input.edits ?? []).map((e) => e?.new_string)].filter((t) => typeof t === "string");
 }
 
