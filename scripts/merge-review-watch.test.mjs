@@ -61,6 +61,7 @@ test("a merge review whose own run failed is retried after a backoff, behind fre
   const picked = select([failed(3, ago(2 * RETRY_MS)), failed(4, ago(2 * RETRY_MS)), pr({ number: 9, statusCheckRollup: [ci({ startedAt: ago(1000) })] })], NOW);
   assert.deepEqual(picked.review.map((p) => p.number), [9, 3]);
   assert.deepEqual(select([pr({ statusCheckRollup: [ci({ startedAt: ago(RETRY_UNTIL_MS + 1000) }), mark("ERROR", { startedAt: ago(RETRY_MS + 1000) })] })], NOW).review, [], "a head that keeps failing is left to the owner");
+  assert.deepEqual(select([pr({ statusCheckRollup: [{ context: "ext", state: "SUCCESS" }, mark("ERROR", { startedAt: ago(RETRY_MS + 1000) })] })], NOW).review, [], "with no CI time the cap holds");
   assert.deepEqual(picked.skip, [{ number: 4, why: "its merge review failed to run, and another failed head is retried this tick" }]);
 });
 
