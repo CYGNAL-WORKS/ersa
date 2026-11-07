@@ -5,7 +5,8 @@
 
 import { t } from "../catalog";
 import { type BridgeError, type CoreClient, describeError } from "../core/client";
-import type { Session, SessionCreateParams, Workspace } from "../protocol/core-api.gen";
+import type { Attachment, Session, SessionCreateParams, Workspace } from "../protocol/core-api.gen";
+import { type Sending, sendFailure } from "./follow";
 import type { BackendChoices, SessionValues, WorkspaceKind } from "./controls";
 
 /** What the new-session screen offers on a host: its backends, and the values each project last started with. */
@@ -29,7 +30,8 @@ export async function readChoices(client: Pick<CoreClient, "call">, hostId: stri
 
 /** Why the first message did not go through to a session that is still alive; the session stays and opens. */
 export interface FirstSendFailure {
-  message: string;
+  /** Refused with why, naming the attachment refused (R10), or a message Ersa can't tell arrived (FLOW-SEND-MESSAGE-R15). */
+  sending: Exclude<Sending, { state: "sending" }>;
   /** Whether to give the text back to write again: not when Core says the backend already has it. */
   giveBack: boolean;
 }
@@ -46,7 +48,8 @@ export type StartOutcome =
  */
 export class StartStop {
   stopped = false;
-  private session?: string;
+  /** The session the start created, once it exists: where its first message's progress comes from (FLOW-SEND-MESSAGE-R16). */
+  session?: string;
   constructor(private readonly client: Pick<CoreClient, "call">) {}
   /** The session the start created, so a stop can reach it. */
   created(id: string) {
@@ -78,6 +81,7 @@ export async function startSession(
   values: SessionValues,
   text: string,
   stop?: StartStop,
+  attachments: Attachment[] = [],
 ): Promise<StartOutcome> {
   const { backend } = values;
   if (!backend) return { ok: false, message: t("composer.noBackendError") };
@@ -105,7 +109,7 @@ export async function startSession(
     // Stopped before the session existed: nothing is sent.
     if (stop?.stopped) throw STOPPED;
     try {
-      await client.call("session.send", { id: created.id, text });
+      await client.call("session.send", attachments.length > 0 ? { id: created.id, text, attachments } : { id: created.id, text });
       return { ok: true, session: created, workspace };
     } catch (error) {
       // A stop canceled the message before it reached the agent, which Core answers as an invalid state: take back
@@ -121,8 +125,11 @@ export async function startSession(
         (all) => all.find((s) => s.id === created.id),
         () => undefined,
       );
-      if (internal || !listed || !NEVER_RAN.includes(listed.state)) {
-        return { ok: true, session: listed ?? created, workspace, firstSend: { message: describeError(error), giveBack: !internal } };
+      // A message Ersa can't tell arrived may be the backend's now, as one handed over just before the backend
+      // stopped: its session is kept whatever its state, and the message is said to be unknown, never failed (R15).
+      const failure = sendFailure(error);
+      if (internal || failure.state === "unknown" || !listed || !NEVER_RAN.includes(listed.state)) {
+        return { ok: true, session: listed ?? created, workspace, firstSend: { sending: failure, giveBack: !internal } };
       }
       throw error;
     }

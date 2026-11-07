@@ -9,6 +9,7 @@ import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
 import { ContextRing } from "../components/ContextRing";
 import { Composer } from "../components/Composer";
+import type { Attached } from "../session/attachments";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { Icon, IconButton } from "../components/Icon";
 import { NewSessionScreen } from "../components/NewSessionScreen";
@@ -411,6 +412,17 @@ const oneBackend = { local: [claudeCode] };
 const room = (node: ReactNode) => <div className="gallery-room">{node}</div>;
 /** Room above a composer for its status line, which grows upward over what is above it. */
 const statusRoom = (node: ReactNode) => <div className="gallery-status-room">{node}</div>;
+/** Room above a composer for its attach menu, which opens upward from attach. */
+const menuRoom = (node: ReactNode) => <div className="gallery-room-before gallery-list-above">{node}</div>;
+/** A message's attachments (FLOW-SEND-MESSAGE-R09, R14): in the workspace, from outside it, and a folder. */
+const galleryWorkspace = "D:\\code\\ersa";
+const galleryAttachments: [Attached, Attached, Attached] = [
+  { path: "D:\\code\\ersa\\docs\\briefs\\FLOW-SEND-MESSAGE.md", name: "FLOW-SEND-MESSAGE.md", kind: "file", detail: "212 lines" },
+  { path: "C:\\Pictures\\composer-mockup.png", name: "composer-mockup.png", kind: "image", detail: "84 KB" },
+  { path: "D:\\code\\ersa\\apps\\shell\\src", name: "src", kind: "folder", detail: "Folder" },
+];
+const attachProps = { autoFocus: false, onSend: async () => false, onAttach: async () => [], workspace: galleryWorkspace } as const;
+
 /** More room, for a list with a section beneath its options. */
 const tallRoom = (node: ReactNode) => <div className="gallery-room gallery-room-tall">{node}</div>;
 
@@ -861,6 +873,25 @@ const entries: Entry[] = [
       ["Detecting backends", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="detecting" />)],
       ["No backend", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="no-backend" />)],
       ["A backend not working", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable={{ failedBackend: "Claude Code" }} />)],
+      ["The attach menu open", menuRoom(<Composer {...attachProps} attachMenuOpen />)],
+      ["An attach choice under the pointer", menuRoom(<Composer {...attachProps} attachMenuOpen forceAttachChoice={{ what: "images", state: "hover" }} />)],
+      ["An attach choice pressed", menuRoom(<Composer {...attachProps} attachMenuOpen forceAttachChoice={{ what: "images", state: "pressed" }} />)],
+      ["An attach choice with keyboard focus", menuRoom(<Composer {...attachProps} attachMenuOpen forceAttachChoice={{ what: "files", state: "focus" }} />)],
+      ["Attachments, one from outside the workspace", <Composer {...attachProps} initialText="Match the mockup." initialAttachments={galleryAttachments} />],
+      [
+        "An attachment Ersa can't send",
+        <Composer
+          {...attachProps}
+          initialText="Match the mockup."
+          initialAttachments={[galleryAttachments[0], { ...galleryAttachments[1], problem: "This image is larger than Claude Code takes." }]}
+        />,
+      ],
+      [
+        "Copying attachments",
+        statusRoom(<Composer {...attachProps} initialAttachments={galleryAttachments} sending={{ state: "sending", progress: { phase: "copying", share: 0.4 } }} onStop={() => {}} />),
+      ],
+      ["Starting the backend", statusRoom(<Composer {...attachProps} initialText="Match the mockup." sending={{ state: "sending", progress: { phase: "starting" } }} onStop={() => {}} />)],
+      ["Can't tell whether it was sent", statusRoom(<Composer {...attachProps} initialText="Match the mockup." initialAttachments={galleryAttachments} sending={{ state: "unknown" }} />)],
     ],
   },
   {

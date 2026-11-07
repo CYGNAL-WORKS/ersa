@@ -384,3 +384,69 @@ describe("a second send after a turn has run", () => {
     expect(last().turnPending).toBe(true);
   });
 });
+
+describe("a message with attachments", () => {
+  // verifies: FLOW-SEND-MESSAGE-R13
+  it("sends them with its words, and leaves them out when there are none", async () => {
+    const { follower, calls } = following({ "session.send": () => Promise.resolve({}) });
+    await follower.send("Look", [{ kind: "file", path: "D:\w\a.md" }]);
+    await follower.send("Again", []);
+    const sends = calls.filter((c) => c.method === "session.send").map((c) => c.params);
+    expect(sends).toEqual([
+      { id: "s-replay", text: "Look", attachments: [{ kind: "file", path: "D:\w\a.md" }] },
+      { id: "s-replay", text: "Again" },
+    ]);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R10
+  it("names the attachment Core refused by its place", async () => {
+    const refusal: BridgeError = { kind: "rpc", error: { code: -32000, message: "session.send: refused", data: { kind: "attachment_refused", detail: "This image is too large.", index: 1 } } };
+    const { follower, last } = following({ "session.send": () => Promise.reject(refusal) });
+    expect(await follower.send("", [{ kind: "file", path: "a" }, { kind: "image", path: "b.png" }])).toBe(false);
+    expect(last().message).toEqual({ state: "failed", message: "This image is too large.", index: 1 });
+  });
+});
+
+describe("a message Ersa can't tell reached the agent", () => {
+  // verifies: FLOW-SEND-MESSAGE-R15
+  it("is neither sent nor failed when Core can't tell, the connection is lost, or no answer comes", async () => {
+    const outcomes: BridgeError[] = [
+      { kind: "rpc", error: { code: -32000, message: "session.send: handed over", data: { kind: "delivery_unknown" } } },
+      { kind: "unavailable", message: "The connection closed.", sent: true },
+      { kind: "unavailable", message: "Ersa got no answer in time.", sent: true },
+    ];
+    for (const outcome of outcomes) {
+      const { follower, last } = following({ "session.send": () => Promise.reject(outcome) });
+      expect(await follower.send("Fix it")).toBe(false);
+      expect(last().message).toEqual({ state: "unknown" });
+    }
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R15
+  it("is not sent when the send never reached Core, as one too large to write", async () => {
+    const unsent: BridgeError = { kind: "unavailable", message: "The request is too large to send." };
+    const { follower, last } = following({ "session.send": () => Promise.reject(unsent) });
+    expect(await follower.send("Fix it")).toBe(false);
+    expect(last().message).toEqual({ state: "failed", message: "The request is too large to send." });
+  });
+});
+
+describe("a message on its way", () => {
+  // verifies: FLOW-SEND-MESSAGE-R16
+  it("shows how far its attachments are copied, or that the backend is starting, and nothing once answered", async () => {
+    let answer: () => void = () => {};
+    const { follower, last } = following({ "session.send": () => new Promise<unknown>((r) => (answer = () => r({}))) });
+    const sending = follower.send("Look", [{ kind: "folder", path: "D:\w\src" }]);
+    follower.progress({ session_id: "s-replay", phase: "copying", copied_bytes: 250, total_bytes: 1000 });
+    expect(last().message).toEqual({ state: "sending", progress: { phase: "copying", share: 0.25 } });
+    // Another session's progress is not this one's.
+    follower.progress({ session_id: "s-other", phase: "starting" });
+    expect(last().message).toEqual({ state: "sending", progress: { phase: "copying", share: 0.25 } });
+    follower.progress({ session_id: "s-replay", phase: "starting" });
+    expect(last().message).toEqual({ state: "sending", progress: { phase: "starting" } });
+    answer();
+    await sending;
+    follower.progress({ session_id: "s-replay", phase: "copying", copied_bytes: 1, total_bytes: 2 });
+    expect(last().message).toBeUndefined();
+  });
+});

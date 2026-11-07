@@ -24,7 +24,8 @@ export interface Attachment {
 /** Why a request got no result, as the Shell reports it. */
 export type BridgeError =
   | { kind: "rpc"; error: RpcError }
-  | { kind: "unavailable"; message: string };
+  /** `sent`: the request was written to Core before it failed, so Core may have acted on it. */
+  | { kind: "unavailable"; message: string; sent?: true };
 
 export type Method = keyof CoreApiMethods;
 export type Params<M extends Method> = CoreApiMethods[M]["params"];
