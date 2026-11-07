@@ -34,10 +34,9 @@
   gap: var(--space-sm);
 }
 
-/* Here the composer stands on its own, not at the foot of a transcript, so it has no rule above it. */
+/* Here the column is the screen's own, already padded. */
 .new-session-start .composer {
   padding: 0;
-  border-top: none;
 }
 
 /* What opens above the box: the trust question, or why a folder could not be added. It takes no height, and what

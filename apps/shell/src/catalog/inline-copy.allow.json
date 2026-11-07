@@ -1,6 +1,5 @@
 {
   "App.tsx": [
-    "Core is not connected.",
     "Ersa did not quit:",
     "No session open. Start one from a project in the rail.",
     "Rail",
@@ -8,22 +7,12 @@
     "The new-session screen",
     "This session"
   ],
-  "components/Composer.tsx": [
-    "Composer",
-    "Enter to send, Shift+Enter for a new line",
-    "Message",
-    "Send",
-    "Sending…",
-    "Write to the agent"
-  ],
   "components/ErrorBoundary.tsx": [
     "could not be shown:"
   ],
   "components/NewSessionScreen.tsx": [
-    "Detecting the backends on this host…",
     "Ersa",
-    "New session",
-    "No backend is available on this host."
+    "New session"
   ],
   "components/QuitQuestion.tsx": [
     "Cancel",
@@ -89,7 +78,6 @@
     "Earlier events of this session are no longer held."
   ],
   "session/start.ts": [
-    "No backend is available on this host.",
     "This project has no root workspace in Core."
   ],
   "session/states.ts": [
