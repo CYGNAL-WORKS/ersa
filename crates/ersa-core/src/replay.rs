@@ -98,6 +98,7 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::SessionDecidePermission
         | Method::SessionAnswerQuestion
         | Method::SessionSetTitle
+        | Method::SessionSetArchived
         | Method::SessionSetMode => "the session is a replay of a recording and cannot change",
         Method::ProjectAdd
         | Method::ProjectSetTrust
@@ -171,6 +172,7 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
             &adapter.choices().permission_modes,
         ))
         .filter(|mode| !mode.is_empty()),
+        archived: false,
     };
     let transport = core
         .session_transport_for(LOCAL_HOST_ID)

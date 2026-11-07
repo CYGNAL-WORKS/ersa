@@ -303,6 +303,7 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         Method::SessionStop => to_json(sessions::stop(core, parse(params)?).await),
         Method::SessionResume => to_json(sessions::resume(core, parse(params)?).await),
         Method::SessionRemove => to_json(sessions::remove(core, parse(params)?).await),
+        Method::SessionSetArchived => to_json(sessions::set_archived(core, parse(params)?).await),
         Method::SessionSend => to_json(sessions::send(core, &conn.peer(), parse(params)?).await),
         Method::SessionInterrupt => to_json(sessions::interrupt(core, parse(params)?).await),
         Method::SessionDecidePermission => {
@@ -355,6 +356,8 @@ pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
                     | Method::SessionStop
                     | Method::SessionResume
                     | Method::SessionRemove
+                    // Stops the session first, which waits on its backend.
+                    | Method::SessionSetArchived
                     | Method::SessionSend
                     | Method::SessionInterrupt
                     | Method::SessionDecidePermission
@@ -424,6 +427,10 @@ pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Resp
         },
         Some(Method::SessionRemove) => match parse(params) {
             Ok(params) => to_json(sessions::remove(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionSetArchived) => match parse(params) {
+            Ok(params) => to_json(sessions::set_archived(core, params).await),
             Err((e, _)) => Err(e),
         },
         Some(Method::SessionSend) => match parse(params) {
