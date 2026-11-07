@@ -2322,7 +2322,7 @@ async fn run_pipeline(pipeline: Pipeline) {
         publish(&mut lock(&handle.hub), &handle.id, &events);
         // A tile carries the last activity, so a turn's end sends one even
         // when the tile itself ends as it began, as a turn that starts and
-        // ends in one batch does (PROTO-CORE-API-R58).
+        // ends in one batch does.
         if tile != last_tile || activity_changed {
             let last_activity_at = lock(&handle.row).last_activity_at.clone();
             send_tile(&tiles, &handle.id, &tile, last_activity_at);
