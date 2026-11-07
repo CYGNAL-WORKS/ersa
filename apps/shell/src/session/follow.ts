@@ -6,6 +6,7 @@
 // Core records it, never before.
 
 import type { Envelope } from "../protocol/agent-events.gen";
+import type { Attachment, SessionSendProgressNotification } from "../protocol/core-api.gen";
 import { hasSeq } from "../core/checks";
 import { type BridgeError, type CoreClient, describeError } from "../core/client";
 import { type Transcript, apply, emptyTranscript } from "./transcript";
@@ -13,8 +14,40 @@ import { type Transcript, apply, emptyTranscript } from "./transcript";
 /** The key that starts the notice saying Core no longer holds a session's earliest events. */
 export const EARLIER = "earlier:";
 
-/** The state of something the user sent: on its way, or refused with a reason. */
-export type Sending = { state: "sending" } | { state: "failed"; message: string };
+/** How far a message on its way has got (FLOW-SEND-MESSAGE-R16): its attachments' copy, as a share, or the backend starting. */
+export type SendProgress = { phase: "copying"; share: number } | { phase: "starting" };
+
+/**
+ * The state of something the user sent: on its way, refused with a reason, or a message Ersa can't tell reached the
+ * agent (FLOW-SEND-MESSAGE-R15). A message refused for one of its attachments names it by its place (R10).
+ */
+export type Sending =
+  | { state: "sending"; progress?: SendProgress }
+  | { state: "failed"; message: string; index?: number }
+  | { state: "unknown" };
+
+/** What `session.send_progress` says to show; nothing for checking or handing over, which are quick. */
+export function progressOf(notification: SessionSendProgressNotification): SendProgress | undefined {
+  if (notification.phase === "starting") return { phase: "starting" };
+  if (notification.phase !== "copying") return undefined;
+  const { copied_bytes: copied = 0, total_bytes: total = 0 } = notification;
+  return { phase: "copying", share: total > 0 ? Math.min(Math.max(copied / total, 0), 1) : 0 };
+}
+
+/**
+ * What a failed `session.send` means for the message: Core handed it over and can't tell (`delivery_unknown`), or
+ * the send reached Core and then lost its connection or got no answer, so Ersa can't tell either
+ * (FLOW-SEND-MESSAGE-R15); else not sent, with why, naming the attachment refused (R10). A send that never reached
+ * Core, as one too large to write, was not sent.
+ */
+export function sendFailure(error: unknown): Exclude<Sending, { state: "sending" }> {
+  const bridge = error as BridgeError | undefined;
+  if (bridge?.kind === "unavailable" && bridge.sent) return { state: "unknown" };
+  const data = bridge?.kind === "rpc" ? bridge.error.data : undefined;
+  if (data?.kind === "delivery_unknown") return { state: "unknown" };
+  const index = data?.kind === "attachment_refused" && Number.isInteger(data.index) ? data.index : undefined;
+  return index === undefined ? { state: "failed", message: describeError(error) } : { state: "failed", message: describeError(error), index };
+}
 
 export interface SessionView {
   id: string;
@@ -46,8 +79,10 @@ export interface Follower {
   attached(): void;
   /** The window lost its connection to Core. */
   detached(): void;
-  /** Sends the user's message. Resolves true once Core accepted it; false when it was refused or stopped. */
-  send(text: string): Promise<boolean>;
+  /** Sends the user's message. Resolves true once Core accepted it; false when it was refused, stopped, or may not have arrived. */
+  send(text: string, attachments?: Attachment[]): Promise<boolean>;
+  /** Where Core says this session's send is (FLOW-SEND-MESSAGE-R16). */
+  progress(notification: SessionSendProgressNotification): void;
   /**
    * Stop (FLOW-SEND-MESSAGE-R03): cancels a message not yet handed to the agent, which stays with the user and is not
    * refused, or else interrupts the turn the agent is working on.
@@ -190,23 +225,29 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
       set((v) => ({ ...v, stream: { state: "offline" } }));
     },
 
-    async send(text) {
+    async send(text, attachments) {
       stopping = false;
       turnSeen = false;
       set((v) => ({ ...v, message: { state: "sending" } }));
       try {
-        await client.call("session.send", { id, text });
+        await client.call("session.send", attachments?.length ? { id, text, attachments } : { id, text });
         const pending = !turnSeen;
         set((v) => ({ ...v, message: undefined, turnPending: pending || undefined }));
         return true;
       } catch (error) {
         // Only Core's cancel, answered as an invalid state, is the stop's doing; any other failure is still shown.
         const stopped = stopping && (error as BridgeError | undefined)?.kind === "rpc" && (error as Extract<BridgeError, { kind: "rpc" }>).error.data?.kind === "invalid_state";
-        set((v) => ({ ...v, message: stopped ? undefined : { state: "failed", message: describeError(error) } }));
+        set((v) => ({ ...v, message: stopped ? undefined : sendFailure(error) }));
         return false;
       } finally {
         stopping = false;
       }
+    },
+
+    progress(notification) {
+      if (notification.session_id !== id || view.message?.state !== "sending") return;
+      const progress = progressOf(notification);
+      set((v) => ({ ...v, message: { state: "sending", progress } }));
     },
 
     async interrupt() {

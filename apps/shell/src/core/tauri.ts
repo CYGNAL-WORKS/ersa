@@ -6,6 +6,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { t } from "../catalog";
 import type { Attachment, CoreClient, CoreEvent } from "./client";
 import type { ShellControl } from "./shell";
 
@@ -43,5 +44,14 @@ export const tauriShell: ShellControl = {
   pickFolder: async () => {
     const picked = await open({ directory: true, multiple: false });
     return typeof picked === "string" ? picked : null;
+  },
+  // Files, or images by the kinds the backend takes; none when the user cancels (FLOW-SEND-MESSAGE-R07).
+  pickFiles: async (images) => {
+    const picked = await open({
+      directory: false,
+      multiple: true,
+      filters: images ? [{ name: t("composer.attach.imagesFilterLabel"), extensions: ["png", "jpg", "jpeg", "gif", "webp"] }] : undefined,
+    });
+    return Array.isArray(picked) ? picked : typeof picked === "string" ? [picked] : [];
   },
 };
