@@ -50,7 +50,7 @@ pub fn timeout_for(method: &str) -> Duration {
 /// Why a request got no result. Sent to the Interface as
 /// `{ "kind": "rpc", "error": <JSON-RPC error object> }` or
 /// `{ "kind": "unavailable", "message": "...", "sent": true }`, `sent` present only when the
-/// request was written to Core before it failed, so Core may have acted on it.
+/// request was queued for Core before it failed, so Core may have acted on it (a line queued and then lost to a close still counts: unknown errs safe).
 #[derive(Debug, Clone, PartialEq, Serialize, thiserror::Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BridgeError {
@@ -61,7 +61,7 @@ pub enum BridgeError {
     #[error("{message}")]
     Unavailable {
         message: String,
-        /// The request was written to Core before it failed: Core may have acted on it, as a
+        /// The request was queued for Core before it failed: Core may have acted on it, as a
         /// message whose send got no answer may have reached the agent (FLOW-SEND-MESSAGE-R15).
         #[serde(skip_serializing_if = "std::ops::Not::not")]
         sent: bool,
@@ -76,7 +76,7 @@ impl BridgeError {
         }
     }
 
-    /// No answer to a request already written to Core.
+    /// No answer to a request already queued for Core.
     pub fn unanswered(message: impl Into<String>) -> Self {
         BridgeError::Unavailable {
             message: message.into(),
@@ -246,7 +246,7 @@ impl CoreLink {
             .unwrap_or_else(|| timeout_for(method));
         // The timeout covers queueing the line as well as the answer: a Core
         // that stops reading fills the queue, and the send would wait forever.
-        // Whether the line was queued, so a failure after it says Core may have it.
+        // Whether the line was queued, so a failure after it says Core may have it, even if a close then drops it.
         let written = std::sync::atomic::AtomicBool::new(false);
         let answer = tokio::time::timeout(timeout, async {
             if self.shared.outbound.send(line).await.is_err() {

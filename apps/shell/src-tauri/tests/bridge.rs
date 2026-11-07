@@ -213,7 +213,7 @@ fn values_round_trip_as_json() {
     let error = BridgeError::unavailable("gone");
     let value: Value = serde_json::to_value(&error).expect("serializes");
     assert_eq!(value, json!({ "kind": "unavailable", "message": "gone" }));
-    // A request written before it failed says so, as a send that may have reached the agent.
+    // A request queued for Core before it failed says so, as a send that may have reached the agent.
     let value = serde_json::to_value(BridgeError::unanswered("gone")).expect("serializes");
     assert_eq!(
         value,
