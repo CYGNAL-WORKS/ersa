@@ -560,7 +560,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               initialText={firstSendHere?.text}
               onSend={(text) => follower.current?.send(text) ?? Promise.resolve(false)}
               // Stop, from sending until the turn ends: cancels the message on its way, or interrupts the turn (FLOW-SEND-MESSAGE-R03).
-              working={shown.transcript.working}
+              working={shown.transcript.working || shown.turnPending}
               onStop={() => void follower.current?.interrupt()}
               controls={
                 sessionControls &&

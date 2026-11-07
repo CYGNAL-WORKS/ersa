@@ -190,6 +190,9 @@ describe("stop, while a message is on its way or the agent works", () => {
     rerender(draw({ onStop: () => stops++, working: false }));
     expect(button().getAttribute("aria-label")).toBe("Send");
     expect(document.activeElement).toBe(button());
+    // Not disabled, which in a browser would drop the focus: only marked as having nothing to send.
+    expect(button().disabled).toBe(false);
+    expect(button().getAttribute("aria-disabled")).toBe("true");
   });
 
   // verifies: FLOW-SEND-MESSAGE-R04
