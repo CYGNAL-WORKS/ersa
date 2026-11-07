@@ -667,7 +667,7 @@ const entries: Entry[] = [
     wide: true,
     states: [
       [
-        "A long path, wrapped in its tooltip",
+        "A long path, its name cut and its path wrapped",
         room(
           <ul className="transcript-attachments">
             <AttachmentChip kind="file" name="generated_protocol_bindings_for_the_session_stream_and_core_api.rs" path="target/debug/build/ersa-core-6f3c2a9e1b7d4c0f/out/generated_protocol_bindings_for_the_session_stream_and_core_api.rs" force="focus" />
