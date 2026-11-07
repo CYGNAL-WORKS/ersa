@@ -79,7 +79,10 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, work
   const refused = sending?.state === "failed" ? sending : undefined;
   // The attachment refused, while it is still here to be marked: its reason is said beside it, not in the status line.
   const refusedOne = refused?.index === undefined ? undefined : sent.current[refused.index];
-  const refusedHere = refusedOne !== undefined && attachments.some((a) => same(a.path, refusedOne.path));
+  // A first message's attachments come back already marked (session/stage.ts), with nothing sent from here yet.
+  const refusedHere =
+    refused?.index !== undefined &&
+    (refusedOne !== undefined ? attachments.some((a) => same(a.path, refusedOne.path)) : attachments.some((a) => a.problem === refused.message));
   useEffect(() => {
     const at = refused?.index;
     const which = at === undefined ? undefined : sent.current[at];

@@ -26,6 +26,7 @@ describe("an attachment's detail", () => {
     expect(size(1536)).toBe("1.5 KB");
     expect(size(1024)).toBe("1 KB");
     expect(size(5 * 1024 * 1024 * 1024)).toBe("5 GB");
+    expect(size(1024 * 1024 - 1)).toBe("1 MB");
   });
 });
 
@@ -39,6 +40,9 @@ describe("attachments from outside the workspace", () => {
     // A workspace not yet made, as a new session's, holds nothing yet.
     expect(outside(attached(info({})), undefined)).toBe(true);
     expect(inside("D:\\work\\repo", "D:\\work\\repo")).toBe(true);
+    // A link is judged by where it points.
+    expect(outside(attached(info({ target: "C:\\secrets\\a.md" })), "D:\\work\\repo")).toBe(true);
+    expect(outside(attached(info({ path: "C:\\links\\a.md", target: "D:\\work\\repo\\a.md" })), "D:\\work\\repo")).toBe(false);
   });
 });
 

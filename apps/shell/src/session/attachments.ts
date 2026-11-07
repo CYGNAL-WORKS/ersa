@@ -12,6 +12,8 @@ export interface Attached {
   kind: AttachmentInspectResult["kind"];
   /** Its detail: a size, a line count, or that it is a folder (FLOW-SEND-MESSAGE-R09). */
   detail: string;
+  /** Where a link points, which is what Core copies or not. */
+  target?: string;
   /** Why Ersa can't send it, said beside it; the message waits until it is removed (FLOW-SEND-MESSAGE-R10). */
   problem?: string;
 }
@@ -22,7 +24,9 @@ export function size(bytes: number): string {
   if (bytes < 1024) return t("composer.attachment.bytesDetail", { count: bytes });
   let value = bytes / 1024;
   let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
+  // Promoted on the value as shown, so a size just under a unit reads as one of it, not 1024 of the one below.
+  const shown = (v: number) => (v < 10 ? Math.round(v * 10) / 10 : Math.round(v));
+  while (shown(value) >= 1024 && unit < units.length - 1) {
     value /= 1024;
     unit += 1;
   }
@@ -59,15 +63,18 @@ export function inside(path: string, root: string): boolean {
 
 /** `info` as the composer holds it. */
 export function attached(info: AttachmentInspectResult): Attached {
-  return { path: info.path, name: info.name, kind: info.kind, detail: detail(info) };
+  const held: Attached = { path: info.path, name: info.name, kind: info.kind, detail: detail(info) };
+  if (info.target !== undefined) held.target = info.target;
+  return held;
 }
 
 /**
  * Whether `a` comes from outside the session's workspace, so Core copies it into the workspace's `.ersa` folder
- * (FLOW-SEND-MESSAGE-R14). A workspace not made yet, as a new session's isolated one, holds nothing.
+ * (FLOW-SEND-MESSAGE-R14). A workspace not made yet, as a new session's isolated one, holds nothing. A link is judged
+ * by where it points, as Core judges it.
  */
 export function outside(a: Attached, workspace: string | undefined): boolean {
-  return workspace === undefined || !inside(a.path, workspace);
+  return workspace === undefined || !inside(a.target ?? a.path, workspace);
 }
 
 /** A path Ersa couldn't read, as it no longer exists: named by its last part and marked with why (R10). */

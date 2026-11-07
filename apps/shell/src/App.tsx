@@ -393,11 +393,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           } catch {
             return [];
           }
-          return Promise.all(
-            paths.map((path) =>
-              client.call("attachment.inspect", { host_id, path }).then(attached, (error) => unreadable(path, describeError(error))),
-            ),
-          );
+          // One at a time: Core reads only a few at once and refuses the rest, which would mark good paths unreadable.
+          const read: Attached[] = [];
+          for (const path of paths) {
+            read.push(await client.call("attachment.inspect", { host_id, path }).then(attached, (error) => unreadable(path, describeError(error))));
+          }
+          return read;
         }
       : undefined;
 
