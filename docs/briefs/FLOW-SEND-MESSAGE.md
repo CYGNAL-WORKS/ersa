@@ -32,9 +32,10 @@ An attachment is a file, an image or a folder that goes with a message. The user
 - **FLOW-SEND-MESSAGE-R11**: The transcript shall show each message's attachments with it: an image as an image, a file or folder by its name.
 - **FLOW-SEND-MESSAGE-R12**: Adding the same file or folder twice to one message shall attach it once.
 - **FLOW-SEND-MESSAGE-R13**: Ersa shall attach only a path the user named: one picked in the system's dialog or dropped on the box.
-- **FLOW-SEND-MESSAGE-R14**: Before the message is sent, a file or folder whose target is outside the session's workspace shall say that it will be copied into the workspace, and where.
+- ~~**FLOW-SEND-MESSAGE-R14**~~: retired 2026-11-07 (a file or folder is judged by its target), replaced by R17.
 - **FLOW-SEND-MESSAGE-R15**: When Ersa can't tell whether a message reached the agent (the session was lost mid-send, or the send got no answer), the composer shall say so above its box and keep the message, and shall not say it failed.
 - **FLOW-SEND-MESSAGE-R16**: While a message is on its way to the agent, the composer shall show where it is: how far its attachments are copied, or that the backend is starting.
+- **FLOW-SEND-MESSAGE-R17**: Before the message is sent, a file or folder whose target is outside the session's workspace and does not hold it shall say that it will be copied into the workspace, and where.
 
 ## Verification
 
@@ -55,6 +56,6 @@ The composer sends words with Enter, keeps what was typed meanwhile (R01, R02), 
 
 ## Changes
 
-- 2026-11-07: R14 reworded to say what "from outside" always meant: a file or folder judged by its target, as Core reports it in `attachment.inspect`'s `copied` (PROTO-CORE-API-R44); a link inside the workspace whose target is outside it now gets the note, as it is copied. No requirement IDs changed.
+- 2026-11-07: R14 retired for R17: a file or folder is judged by its target, as Core reports it in `attachment.inspect`'s `copied` (PROTO-CORE-API-R44), so a link inside the workspace whose target is outside it gets the note.
 - 2026-11-05: from #173 merge review, before any of it shipped: stop is offered from the moment of sending and cancels a send that hasn't reached the agent (R03 reworded); a refused attachment is marked itself (R10); an outside attachment says where it will be copied (R14); a send whose outcome Ersa can't tell says so (R15); a copy shows its progress (R16); refusing likely secrets is an open question.
 - 2026-11-05: created ready from the owner's composer mockup and decisions: send and stop, a refused message kept with its reason, the composer unavailable while Ersa can't reach the sessions, and attachments (the attach menu, paste and drop, removable, images inline and files as paths, copied into the scratch folder from outside the workspace). FLOW-SEND-MESSAGE-R01 to R14 added; R01 and R02 describe what is built.
