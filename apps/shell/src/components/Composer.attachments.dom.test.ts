@@ -117,7 +117,7 @@ describe("attachments", () => {
     expect(shown()).toEqual([]);
   });
 
-  // verifies: FLOW-SEND-MESSAGE-R14
+  // verifies: FLOW-SEND-MESSAGE-R17
   it("say they will be copied into its .ersa folder when Core says sending copies them, and an image never", () => {
     render(draw({ initialAttachments: [notes, vendored, shot] }));
     expect(shown()).toEqual(["notes.md212 lines", "key.txt1 lineWill be copied into the workspace's .ersa folder", "shot.png84 KB"]);

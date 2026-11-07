@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "./harness";
 
-// The attach menu in the running window with real Claude Code (#191; FLOW-SEND-MESSAGE-R07, R09, R12 to R14): each
+// The attach menu in the running window with real Claude Code (#191; FLOW-SEND-MESSAGE-R07, R09, R12, R13, R17): each
 // choice opens the system's dialog, the paths picked are attached once with their detail, one from outside the
 // workspace says it will be copied, and the agent reads them.
 test.use({ backend: "claude" });
@@ -50,7 +50,7 @@ test("attaches files, an image and a folder from the attach menu, and the agent 
 
   const list = page.getByRole("list", { name: "Attachments" });
   await expect(list.getByRole("listitem")).toHaveCount(3);
-  // R09, R14: each by name and detail; the image from outside the workspace says it will be copied.
+  // R09, R17: each by name and detail; the image goes inline, so only what Core copies says so.
   await expect(list.getByRole("listitem").nth(0)).toHaveText(/notes\.md\s*2 lines/);
   await expect(list.getByRole("listitem").nth(1)).toHaveText(/dot\.png.*Will be copied into the workspace's \.ersa folder/);
   await expect(list.getByRole("listitem").nth(2)).toHaveText(/docs\s*Folder/);

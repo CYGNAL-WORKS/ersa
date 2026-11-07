@@ -109,6 +109,21 @@ fn file(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
     path
 }
 
+/// Whether `holds` comes to hold within ten seconds, checked every 50 ms:
+/// for what Core does just after an answer, such as removing a copy.
+async fn eventually(mut holds: impl FnMut() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if holds() {
+            return true;
+        }
+        if std::time::Instant::now() > deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 /// The numbered copies in a session's scratch folder, `.partial` aside.
 fn copies(scratch: &Path) -> Vec<String> {
     let mut names: Vec<String> = match std::fs::read_dir(scratch) {
@@ -396,9 +411,14 @@ async fn interrupt_cancels_a_send_still_waiting_for_its_backend() {
             .unwrap()
             .contains("stopped")
     );
-    // Nothing sent, no copy left, and the session can send again.
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    assert_eq!(copies(&s.scratch(&id)), Vec::<String>::new());
+    // Nothing sent, no copy left, and the session can send again. The copy is
+    // removed just after the answer: waited for, not timed.
+    let scratch = s.scratch(&id);
+    assert!(
+        eventually(|| copies(&scratch).is_empty()).await,
+        "{:?}",
+        copies(&scratch)
+    );
     assert!(s.messages().is_empty());
     let again = s.send(&id, "again", json!([])).await;
     assert!(again.get("result").is_some(), "{again:#}");
@@ -708,11 +728,15 @@ async fn interrupt_cancels_a_send_while_it_copies() {
         "{:?}",
         interrupted_at.elapsed()
     );
-    // The copy stops at its next chunk and removes itself.
-    tokio::time::sleep(Duration::from_millis(400)).await;
+    // The copy stops at its next chunk and removes itself: waited for, not
+    // timed, as a slow runner takes longer.
     let scratch = s.scratch(&id);
-    assert_eq!(aside(&scratch), Vec::<String>::new());
-    assert_eq!(copies(&scratch), Vec::<String>::new());
+    assert!(
+        eventually(|| aside(&scratch).is_empty() && copies(&scratch).is_empty()).await,
+        "{:?} {:?}",
+        aside(&scratch),
+        copies(&scratch)
+    );
     assert!(s.messages().is_empty());
 }
 
@@ -846,8 +870,8 @@ impl Setup {
     }
 }
 
-// verifies: FLOW-SEND-MESSAGE-R14
-// R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
+// verifies: FLOW-SEND-MESSAGE-R17
+// verifies: PROTO-CORE-API-R44
 #[tokio::test]
 async fn inspect_says_whether_sending_copies_the_path_through_dot_dot_and_not_for_images() {
     let mut s = setup(FakeAdapter::new(1)).await;
@@ -875,7 +899,7 @@ async fn inspect_says_whether_sending_copies_the_path_through_dot_dot_and_not_fo
     assert_eq!(bare["copied"], json!(true));
 }
 
-// R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
+// verifies: PROTO-CORE-API-R44
 #[tokio::test]
 async fn inspect_refuses_a_workspace_it_does_not_know() {
     let mut s = setup(FakeAdapter::new(1)).await;
@@ -898,8 +922,8 @@ async fn inspect_refuses_a_workspace_it_does_not_know() {
     assert_eq!(refused["data"]["kind"], "not_found", "{refused:#}");
 }
 
-// verifies: FLOW-SEND-MESSAGE-R14
-// R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
+// verifies: FLOW-SEND-MESSAGE-R17
+// verifies: PROTO-CORE-API-R44
 #[cfg(windows)]
 #[tokio::test]
 async fn a_file_through_a_junction_out_of_the_workspace_is_copied_and_inspect_says_so() {
@@ -924,8 +948,8 @@ async fn a_file_through_a_junction_out_of_the_workspace_is_copied_and_inspect_sa
     assert_eq!(copies(&s.scratch(&id)), vec!["1"]);
 }
 
-// verifies: FLOW-SEND-MESSAGE-R14
-// R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
+// verifies: FLOW-SEND-MESSAGE-R17
+// verifies: PROTO-CORE-API-R44
 #[cfg(unix)]
 #[tokio::test]
 async fn a_link_with_a_relative_target_is_judged_where_it_points() {
@@ -940,7 +964,7 @@ async fn a_link_with_a_relative_target_is_judged_where_it_points() {
     assert_eq!(s.copied(&far).await, json!(true));
 }
 
-// R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
+// verifies: PROTO-CORE-API-R44
 #[tokio::test]
 async fn inspect_takes_the_workspace_or_the_host_not_both_nor_neither() {
     let mut s = setup(FakeAdapter::new(1)).await;
@@ -954,7 +978,7 @@ async fn inspect_takes_the_workspace_or_the_host_not_both_nor_neither() {
     }
 }
 
-// R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
+// verifies: PROTO-CORE-API-R44
 #[tokio::test]
 async fn inspect_refuses_a_folder_that_holds_the_workspace() {
     let mut s = setup(FakeAdapter::new(1)).await;
@@ -980,4 +1004,29 @@ async fn inspect_refuses_a_folder_that_holds_the_workspace() {
     // A folder from outside is copied, whatever its size: inspect measures nothing.
     file(&s.outside, "small/a.txt", b"x\n");
     assert_eq!(s.copied(&s.outside.join("small")).await, json!(true));
+}
+
+// verifies: PROTO-CORE-API-R44
+#[tokio::test]
+async fn many_inspects_of_one_workspace_at_once_each_judge_where_the_path_lies() {
+    let s = setup(FakeAdapter::new(1)).await;
+    // As the Interface asks: up to 8 at once, each on its own connection here.
+    let mut asks = Vec::new();
+    for i in 0..8 {
+        let inside = file(&s.workspace, &format!("f{i}.md"), b"x\n");
+        let mut client = s.core.client().await;
+        let workspace_id = s.workspace_id.clone();
+        asks.push(tokio::spawn(async move {
+            client
+                .result(
+                    "attachment.inspect",
+                    json!({ "path": path(&inside), "workspace_id": workspace_id }),
+                )
+                .await["copied"]
+                .clone()
+        }));
+    }
+    for ask in asks {
+        assert_eq!(ask.await.unwrap(), json!(false));
+    }
 }

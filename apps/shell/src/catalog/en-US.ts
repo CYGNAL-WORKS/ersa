@@ -131,7 +131,7 @@ export const enUS = {
       pasteNote: "You can also paste attachments, or drop them on the box.",
       imagesFilterLabel: "Images",
     },
-    // An attachment above the words (docs/design/COMPOSER.md, Attachments; FLOW-SEND-MESSAGE-R09, R14).
+    // An attachment above the words (docs/design/COMPOSER.md, Attachments; FLOW-SEND-MESSAGE-R09, R17).
     attachment: {
       listLabel: "Attachments",
       bytesDetail: { one: "{count} byte", other: "{count} bytes" },

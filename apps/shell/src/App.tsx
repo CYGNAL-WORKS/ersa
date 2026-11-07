@@ -403,7 +403,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           const worker = async () => {
             for (let at = next++; at < paths.length; at = next++) {
               const path = paths[at] as string;
-              // With the workspace, read on its own host, Core says whether sending copies it (FLOW-SEND-MESSAGE-R14); a new
+              // With the workspace, read on its own host, Core says whether sending copies it (FLOW-SEND-MESSAGE-R17); a new
               // workspace not made yet names the host.
               const params = workspace === undefined ? { host_id, path } : { path, workspace_id: workspace };
               read[at] = await client.call("attachment.inspect", params).then(

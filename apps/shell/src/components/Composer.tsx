@@ -28,7 +28,7 @@ interface ComposerProps {
    * absent where nothing can be attached, and attach is then unavailable.
    */
   onAttach?: (what: AttachWhat) => Promise<Attached[]>;
-  /** The session's workspace, by id; absent while it is not made yet, so every file and folder will be copied (R14). */
+  /** The session's workspace, by id; absent while it is not made yet, so every file and folder will be copied (R17). */
   workspace?: string;
   /** Attachments already added: a message given back to send again, or the gallery's. */
   initialAttachments?: Attached[];
@@ -242,7 +242,7 @@ const KIND_ICON = { file: File, image: Image, folder: Folder } as const;
 
 /**
  * One attachment (docs/design/COMPOSER.md, Attachments): its icon, name and detail, that it will be copied into the
- * workspace when sending copies it (FLOW-SEND-MESSAGE-R14), and remove (R09). One Ersa can't send shows the
+ * workspace when sending copies it (FLOW-SEND-MESSAGE-R17), and remove (R09). One Ersa can't send shows the
  * danger glyph and why in place of its icon and detail (R10).
  */
 function Attachment({ attachment: a, copied, onRemove }: { attachment: Attached; copied: boolean; onRemove: () => void }) {
