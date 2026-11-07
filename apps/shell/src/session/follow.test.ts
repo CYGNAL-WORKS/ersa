@@ -366,3 +366,21 @@ describe("a turn Core has not shown yet", () => {
     expect(last().turnPending).toBeUndefined();
   });
 });
+
+describe("a second send after a turn has run", () => {
+  const event = (seq: number, e: unknown) =>
+    ({ v: EVENT_VERSION, session_id: "s-replay", seq, ts: "2026-01-01T00:00:00Z", source: { input: "backend" }, event: e }) as never;
+
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("marks its turn pending when Core answers before that turn shows, whatever the turn before did", async () => {
+    const { follower, last } = following({ "session.send": () => Promise.resolve({ turn: 1 }) });
+    // A first turn runs to completion.
+    expect(await follower.send("first")).toBe(true);
+    follower.receive(event(0, { type: "turn.started", turn: 1, trigger: "user" }));
+    follower.receive(event(1, { type: "turn.completed", turn: 1, outcome: "success", duration_ms: 1, is_error: false }));
+    expect(last().turnPending).toBeUndefined();
+    // The second is answered before its turn shows.
+    expect(await follower.send("second")).toBe(true);
+    expect(last().turnPending).toBe(true);
+  });
+});
