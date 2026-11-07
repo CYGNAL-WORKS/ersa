@@ -574,7 +574,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                   values={sessionControls.values}
                   workspaceLabel={sessionControls.workspaceLabel}
                   onChoose={() => {}}
-                  disabled
+                  readOnly
                   used={used}
                   />
                 )

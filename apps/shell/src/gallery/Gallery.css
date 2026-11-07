@@ -96,6 +96,7 @@
 /* A menu or tooltip the gallery shows at once is laid out while its state is off screen, where it would flip above
    what it belongs to and stay there; in the gallery it always opens below. */
 .gallery-room .rail-menu,
+.gallery-room .chip-list,
 .gallery-states-rail .rail-heading-tip {
   position-try-fallbacks: none;
 }
@@ -139,4 +140,15 @@
 /* Room above a composer for its status line, which grows upward. */
 .gallery-status-room {
   padding-top: var(--size-control);
+}
+
+/* Room above a specimen whose list opens above its chip. */
+.gallery-room-before {
+  padding-top: var(--size-card-max);
+}
+
+/* The list as the window places it with no room beneath its chip: above it. */
+.gallery-list-above .chip-list {
+  position-area: block-start span-inline-end;
+  position-try-fallbacks: none;
 }
