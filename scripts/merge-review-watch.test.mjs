@@ -52,17 +52,37 @@ test("a pending merge review older than an hour is a run that died, and the head
   assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: undefined })] })], NOW).review, [{ number: 7, head: HEAD }], "a pending status with no time is stale, not reviewed forever");
 });
 
-test("a merge review whose own run failed is retried after a backoff, behind fresh heads and one a tick", () => {
-  const failed = (n, at) => pr({ number: n, statusCheckRollup: [ci(), mark("ERROR", { startedAt: at })] });
+const QUEUE_FAILED = "The run failed: adding it to the merge queue failed: GraphQL: API rate limit already exceeded";
+const errored = (over) => mark("ERROR", { description: QUEUE_FAILED, startedAt: ago(RETRY_MS + 1000), ...over });
+
+test("a merge review that failed for a cause that may clear is retried after a backoff, behind fresh heads", () => {
+  assert.equal(RETRY_MS, 15 * 60 * 1000);
+  assert.equal(RETRY_UNTIL_MS, 6 * 60 * 60 * 1000);
+  const failed = (n, at) => pr({ number: n, statusCheckRollup: [ci(), errored({ startedAt: at })] });
   assert.deepEqual(select([failed(7, ago(RETRY_MS - 1000))], NOW).review, []);
-  assert.deepEqual(select([failed(7, ago(RETRY_MS + 1000))], NOW).review, [{ number: 7, head: HEAD }]);
-  assert.deepEqual(select([failed(7, undefined)], NOW).review, [{ number: 7, head: HEAD }], "an error with no time is retried, not left for good");
-  assert.deepEqual(select([pr({ autoMergeRequest: { enabledAt: ago(1000) }, statusCheckRollup: [ci(), mark("ERROR", { startedAt: ago(RETRY_MS + 1000) })] })], NOW).disarm, [7]);
+  assert.deepEqual(select([failed(7, ago(RETRY_MS + 1000))], NOW).review, [{ number: 7, head: HEAD, retry: true }]);
+  assert.deepEqual(select([failed(7, undefined)], NOW).review, [{ number: 7, head: HEAD, retry: true }], "an error with no time is retried, not left for good");
+  assert.deepEqual(select([pr({ autoMergeRequest: { enabledAt: ago(1000) }, statusCheckRollup: [ci(), errored()] })], NOW).disarm, [7]);
   const picked = select([failed(3, ago(2 * RETRY_MS)), failed(4, ago(2 * RETRY_MS)), pr({ number: 9, statusCheckRollup: [ci({ startedAt: ago(1000) })] })], NOW);
-  assert.deepEqual(picked.review.map((p) => p.number), [9, 3]);
-  assert.deepEqual(select([pr({ statusCheckRollup: [ci({ startedAt: ago(RETRY_UNTIL_MS + 1000) }), mark("ERROR", { startedAt: ago(RETRY_MS + 1000) })] })], NOW).review, [], "a head that keeps failing is left to the owner");
-  assert.deepEqual(select([pr({ statusCheckRollup: [{ context: "ext", state: "SUCCESS" }, mark("ERROR", { startedAt: ago(RETRY_MS + 1000) })] })], NOW).review, [], "with no CI time the cap holds");
-  assert.deepEqual(picked.skip, [{ number: 4, why: "its merge review failed to run, and another failed head is retried this tick" }]);
+  assert.deepEqual(picked.review.map((p) => p.number), [9, 3, 4]);
+  assert.deepEqual(select([pr({ statusCheckRollup: [ci({ startedAt: ago(RETRY_UNTIL_MS + 1000) }), errored()] })], NOW).review, [], "a head that keeps failing is left to the owner");
+  assert.deepEqual(select([pr({ statusCheckRollup: [{ context: "ext", state: "SUCCESS" }, errored()] })], NOW).review, [], "with no CI time the cap holds");
+  for (const description of ["The review ran past 70 minutes and was ended; the poller's log says what it was doing.", "The run failed: claude returned no result: error_max_turns", undefined])
+    assert.deepEqual(select([pr({ statusCheckRollup: [ci(), errored({ description })] })], NOW).review, [], `an error that repeats is the owner's: ${description}`);
+});
+
+test("one retry runs at a time, counting a retry an earlier tick started", async () => {
+  const prs = [3, 4].map((n) => pr({ number: n, headRefOid: String(n).repeat(40), statusCheckRollup: [ci(), errored()] }));
+  const reviews = [held(), held()];
+  let started = 0;
+  const run = drive(["--once"], { prs, start: () => reviews[started++].done });
+  await settle(() => started === 1);
+  await settle(() => false).catch(() => {});
+  assert.equal(started, 1, "the second failed head waits though a slot is free");
+  reviews[0].end(0);
+  await settle(() => started === 2);
+  reviews[1].end(0);
+  assert.equal((await run).code, 0);
 });
 
 test("every open pull request not reviewed this tick says why, and a tick with nothing to review logs it", async () => {
