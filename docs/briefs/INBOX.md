@@ -8,6 +8,5 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-07 PROTO-CORE-API: `workspace.changes` counts every session in the workspace, because the `deleting` mark it should leave out (Workspaces: `sessions`) arrives with #197; a `TODO(#197)` marks the count meanwhile. #197's Done when has no box for adding the filter and its test, so a planning pass should add one there, then delete this line.
 
 ## Resolved recently (optional, trimmed in planning passes)
