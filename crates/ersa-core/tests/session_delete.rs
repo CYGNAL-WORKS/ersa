@@ -611,6 +611,25 @@ async fn a_record_opened_elsewhere_part_way_fails_the_delete_until_tried_again()
     );
     assert!(!folder.exists(), "the files had gone");
     assert_eq!(backend_ids(&fake.records).len(), 1);
+    // Its files gone, the workspace takes no new session.
+    let workspaces = client
+        .result("workspace.list", json!({ "project_id": project["id"] }))
+        .await;
+    let listed_workspace = workspaces
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == workspace["id"])
+        .cloned()
+        .unwrap();
+    assert_eq!(listed_workspace["state"], "error");
+    let error = client
+        .error(
+            "session.create",
+            json!({ "workspace_id": workspace["id"], "backend": fake::BACKEND }),
+        )
+        .await;
+    assert_eq!(kind(&error), "invalid_state", "{error}");
 
     // What is left: nothing of the folder, nor the branch.
     *fake.delete_refusal.lock().unwrap() = None;

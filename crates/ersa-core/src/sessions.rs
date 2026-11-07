@@ -1173,7 +1173,8 @@ impl SessionManager {
 
     /// Refuses a delete while the session is starting, a turn is running
     /// in it (one waiting on the user included), or a message is being
-    /// sent to it, before anything is claimed (FLOW-ARCHIVE-DELETE-SESSION-R05).
+    /// sent to it (FLOW-ARCHIVE-DELETE-SESSION-R05). `session.delete` asks
+    /// once it holds the claim, so a send cannot start in between.
     pub fn check_deletable(&self, id: &str) -> Result<(), SessionError> {
         let handle = self.handle(id)?;
         let session = handle.describe();
