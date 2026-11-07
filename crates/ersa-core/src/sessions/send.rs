@@ -131,6 +131,14 @@ impl SessionManager {
         admitted: impl FnOnce(),
     ) -> Result<Option<u32>, SessionError> {
         let handle = self.handle(id)?;
+        // An archived session is read-only until it is unarchived or resumed
+        // (FLOW-ARCHIVE-DELETE-SESSION-R02). Said before anything else, so
+        // the refusal names the reason rather than that it is not running.
+        if lock(&handle.row).archived {
+            return Err(SessionError::InvalidState(
+                "the session is archived; unarchive or resume it to send it a message".into(),
+            ));
+        }
         let live = handle.live().ok_or_else(|| handle.not_running())?;
         let (cancel, mut canceled) = watch::channel(false);
         let changed = Arc::new(Notify::new());

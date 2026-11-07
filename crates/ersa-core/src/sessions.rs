@@ -598,6 +598,7 @@ impl Handle {
             created_at: presented.created_at,
             last_event_seq: hub.last_seq(),
             sending: lock(&self.sending).as_ref().map(send::Sending::phase),
+            archived: row.archived,
             tile,
         }
     }
@@ -1080,6 +1081,26 @@ impl SessionManager {
             }
         }
         lock(&handle.presented).title = Some(title.to_string());
+        Ok(handle.describe())
+    }
+
+    /// Archives the session, or unarchives it (ADR 0026,
+    /// FLOW-ARCHIVE-DELETE-SESSION). Archiving stops a live session first,
+    /// as `session.stop` does, and marks it only once it has stopped: a stop
+    /// that fails leaves the session as it was. Unarchiving leaves the
+    /// session stopped; nothing restarts it.
+    pub async fn set_archived(&self, id: &str, archived: bool) -> Result<Session, SessionError> {
+        let handle = self.handle(id)?;
+        if archived {
+            self.stop(id).await?;
+        }
+        // Stored first, then kept in memory: a store that fails leaves both
+        // as they were, so `session.list` never reports what a restart would
+        // lose.
+        self.store
+            .set_session_archived(id.to_string(), archived)
+            .await?;
+        lock(&handle.row).archived = archived;
         Ok(handle.describe())
     }
 
@@ -2443,6 +2464,7 @@ mod tests {
             model: None,
             effort: None,
             permission_mode: None,
+            archived: false,
         };
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&manager.sessions).insert(handle.id.clone(), handle);
