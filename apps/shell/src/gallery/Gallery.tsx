@@ -8,6 +8,7 @@ import { type CSSProperties, type ReactNode, useEffect, useId, useState } from "
 import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
 import { ContextRing } from "../components/ContextRing";
+import { AttachmentChip } from "../components/AttachmentChip";
 import { Composer } from "../components/Composer";
 import type { Attached } from "../session/attachments";
 import { ErrorBoundary } from "../components/ErrorBoundary";
@@ -290,6 +291,27 @@ const twoTurns: Event[] = [
   { type: "user.message", origin: "human", text: "Now delete probe.txt." },
   { type: "assistant.text", block_id: "m3/0", text: "Deleted. probe.txt no longer exists.", final: true },
 ];
+// FLOW-SEND-MESSAGE-R11: a message with an image, a file and a folder, then one of a file alone. The image is a
+// drawn mockup, wider than tall, so it shows at the largest size either way.
+const mockup = btoa(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><rect width="480" height="300" fill="lavender"/>' +
+    '<rect x="24" y="24" width="120" height="252" rx="8" fill="lightsteelblue"/><rect x="168" y="24" width="288" height="40" rx="8" fill="white"/>' +
+    '<rect x="168" y="236" width="288" height="40" rx="8" fill="royalblue"/></svg>',
+);
+const withAttachments: Event[] = [
+  {
+    type: "user.message",
+    origin: "human",
+    text: "Make the composer match this mockup.",
+    attachments: [
+      { kind: "image", media_type: "image/svg+xml", data: mockup },
+      { kind: "file", path: "docs/design/COMPOSER.md" },
+      { kind: "folder", path: "apps/shell/src/components" },
+    ],
+  },
+  { type: "assistant.text", block_id: "m1/0", text: "I'll start with the attachments above the words.", final: true },
+  { type: "user.message", origin: "human", text: "", attachments: [{ kind: "file", path: "docs/design/DESIGN.md" }] },
+];
 // A path with no break in it, which must wrap inside the bubble rather than widen it.
 const longPath: Event[] = [
   {
@@ -336,6 +358,7 @@ const transcriptStates: [string, SessionView, answers?: Record<string, Answer>][
   ["Answered", sessionView(answered)],
   ["Two turns", sessionView(twoTurns)],
   ["Long path", sessionView(longPath)],
+  ["Attachments", sessionView(withAttachments)],
   ["Failed", sessionView(failing)],
   ["Not receiving events", sessionView([], { stream: { state: "failed", message: "Core closed the connection" } })],
 ];
@@ -697,6 +720,28 @@ const entries: Entry[] = [
     name: "Shelf",
     wide: true,
     states: shelfStates.map(([label, shows, more]) => [label, <ShelfOpen shows={shows} more={more} />]),
+  },
+  {
+    // A file or folder in a message in the transcript (FLOW-SEND-MESSAGE-R11; DESIGN.md, Layout): its states, and its path as
+    // the tooltip with keyboard focus.
+    name: "AttachmentChip",
+    wide: true,
+    states: [
+      [
+        "A long path, its name cut and its path wrapped",
+        room(
+          <ul className="transcript-attachments">
+            <AttachmentChip kind="file" name="generated_protocol_bindings_for_the_session_stream_and_core_api.rs" path="target/debug/build/ersa-core-6f3c2a9e1b7d4c0f/out/generated_protocol_bindings_for_the_session_stream_and_core_api.rs" force="focus" />
+          </ul>,
+        ),
+      ],
+      ["At rest", <ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" /></ul>],
+      ["Under the pointer", <ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="hover" /></ul>],
+      ["Pressed", <ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="pressed" /></ul>],
+      ["Keyboard focus, its path shown", room(<ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="focus" /></ul>)],
+      ["A folder", <ul className="transcript-attachments"><AttachmentChip kind="folder" name="components" path="apps/shell/src/components" /></ul>],
+      ["An image the window can't show", <ul className="transcript-attachments"><AttachmentChip kind="image" name="Attached image" /></ul>],
+    ],
   },
   {
     name: "Transcript",

@@ -1,0 +1,110 @@
+/* An attachment (docs/design/COMPOSER.md, Attachments): size-control-lg high on material-tile, a line edge, radius-md,
+   padded space-sm, its parts space-sm apart, in ui-small: its icon in ink-muted, then its name in ink. */
+.attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  min-width: 0;
+  height: var(--size-control-lg);
+  padding: 0 var(--space-sm);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  background: var(--material-tile);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+}
+
+.attachment-icon {
+  display: inline-flex;
+  color: var(--color-ink-muted);
+}
+
+.attachment-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-ink);
+}
+
+/* A file or folder in the transcript (DESIGN.md, Layout): it takes keyboard focus, shown by an ink edge; under the
+   pointer it takes material-hover, pressed material-pressed, laid over the tile's material. */
+.attachment-item {
+  display: flex;
+  min-width: 0;
+}
+
+.attachment.attachment-path {
+  font-family: inherit;
+  cursor: default;
+  transition:
+    background var(--motion-quick) var(--motion-ease-out),
+    border-color var(--motion-quick) var(--motion-ease-out);
+}
+
+.attachment.attachment-path:hover,
+.attachment.attachment-path[data-force="hover"] {
+  background: linear-gradient(var(--material-hover), var(--material-hover)), var(--material-tile);
+}
+
+.attachment.attachment-path:active,
+.attachment.attachment-path[data-force="pressed"] {
+  background: linear-gradient(var(--material-pressed), var(--material-pressed)), var(--material-tile);
+}
+
+.attachment.attachment-path:focus-visible,
+.attachment.attachment-path[data-force="focus"] {
+  outline: none;
+  border-color: var(--color-ink);
+}
+
+/* The path as a tooltip: a transient layer anchored below the chip, above it where the window has no room, shown while
+   the pointer rests on the chip, while it has keyboard focus, and after a press on touch. Its trailing edge meets the
+   chip's, as the chip sits at the bubble's trailing edge, so a long path extends and wraps toward the start. */
+.attachment-tip {
+  position: fixed;
+  position-area: block-end span-inline-start;
+  position-try-fallbacks: flip-block;
+  z-index: var(--stack-menu);
+  margin: var(--space-xs) 0;
+  padding: var(--space-xs) var(--space-sm);
+  color: var(--color-ink);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  /* A long path wraps at the widest a transient layer grows, rather than run off the window. */
+  max-width: var(--size-menu);
+  overflow-wrap: anywhere;
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-transient);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--motion-quick) var(--motion-ease-out),
+    visibility var(--motion-quick);
+}
+
+.attachment-path:focus-visible + .attachment-tip,
+.attachment-path[data-tip] + .attachment-tip,
+.attachment-path[data-force="focus"] + .attachment-tip {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Resting under a pointer that can rest: a touch press leaves :hover behind, so touch goes by the press alone. */
+@media (hover: hover) {
+  .attachment-path:hover + .attachment-tip {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .attachment.attachment-path,
+  .attachment-tip {
+    transition: none;
+  }
+}
