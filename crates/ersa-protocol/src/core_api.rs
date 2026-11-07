@@ -672,8 +672,15 @@ pub struct SessionSendResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InspectParams {
-    pub host_id: String,
     pub path: String,
+    /// The workspace the attachment is for, whose host reads the path: the
+    /// result then says whether sending would copy it. Exactly one of this
+    /// and `host_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    /// The host that reads the path, for a workspace not made yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_id: Option<String>,
 }
 
 /// `attachment.inspect` result: what the composer shows for a path.
@@ -695,6 +702,11 @@ pub struct Inspected {
     /// Where a link points.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// Whether a send would copy it into the workspace's scratch folder: true
+    /// for a file or folder whose target, resolved as a send resolves it, is
+    /// outside `workspace_id`, or for any file or folder given a host; false
+    /// for an image, which goes inline, and for a path inside the workspace.
+    pub copied: bool,
 }
 
 /// `session.decide_permission` params.
