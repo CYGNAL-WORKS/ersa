@@ -1625,7 +1625,7 @@ async fn unarchiving_clears_the_mark_and_leaves_the_session_stopped() {
 /// A refused `session.resume` leaves an archived session archived: Core
 /// clears the mark only once it accepts a resume. Restarting the session is
 /// milestone M1, so every resume is refused for now.
-// Cites PROTO-CORE-API-R43 once planning PR #238 adds it.
+// verifies: PROTO-CORE-API-R43
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_resume_leaves_an_archived_session_archived() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;

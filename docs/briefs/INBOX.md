@@ -8,6 +8,5 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-06 PROTO-CORE-API: `session.resume` on an archived session "clears `archived` first", but resume itself is still milestone M1 and answers `invalid_state`; the brief does not say what a resume before M1 does to an archived session. Core clears the mark and then gives the M1 answer, so FLOW-ARCHIVE-DELETE-SESSION step 2's Resume unarchives the session and reports that resuming is not built yet; the next message is then refused as not running.
 
 ## Resolved recently (optional, trimmed in planning passes)
