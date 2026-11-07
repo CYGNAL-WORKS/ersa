@@ -762,11 +762,15 @@ fn within<'a>(resolved: &'a Path, workspace: &Path) -> Option<&'a Path> {
 
 /// Whether sending the file or folder at `path` into `workspace` copies it:
 /// whether its canonical path, through every link and junction on the way,
-/// lies outside the workspace's. `None` when either can't be resolved.
-pub fn copies(path: &str, workspace: &Path) -> Option<bool> {
-    let resolved = fs::canonicalize(named_path(path).ok()?).ok()?;
-    let workspace = fs::canonicalize(workspace).ok()?;
-    Some(within(&resolved, &workspace).is_none())
+/// lies outside the workspace's. Taken to be copied when either can't be
+/// resolved, so the composer never says a copy won't happen when it may.
+pub fn copies(path: &str, workspace: &Path) -> bool {
+    let resolved = named_path(path).ok().and_then(|p| fs::canonicalize(p).ok());
+    let workspace = fs::canonicalize(workspace).ok();
+    match (resolved, workspace) {
+        (Some(resolved), Some(workspace)) => within(&resolved, &workspace).is_none(),
+        _ => true,
+    }
 }
 
 /// Why `attachment.inspect` can't answer.
@@ -817,7 +821,7 @@ pub fn inspect(path: &str, media_types: &[&'static str]) -> Result<Inspected, In
         lines: None,
         media_type: None,
         target,
-        copied: None,
+        copied: false,
     };
     if meta.is_dir() {
         return Ok(inspected);

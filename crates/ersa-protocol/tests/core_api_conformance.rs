@@ -197,7 +197,7 @@ fn result_examples() -> Vec<(Method, Value)> {
                 lines: None,
                 media_type: Some("image/png".into()),
                 target: Some("D:/elsewhere/a.png".into()),
-                copied: None,
+                copied: false,
             }),
         ),
         (
@@ -210,7 +210,7 @@ fn result_examples() -> Vec<(Method, Value)> {
                 lines: Some(1),
                 media_type: None,
                 target: None,
-                copied: Some(true),
+                copied: true,
             }),
         ),
         (Method::SessionUnsubscribe, to_value(&Empty {})),

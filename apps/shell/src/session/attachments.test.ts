@@ -7,6 +7,7 @@ const info = (over: Partial<AttachmentInspectResult>): AttachmentInspectResult =
   name: "notes.md",
   kind: "file",
   size_bytes: 2048,
+  copied: true,
   ...over,
 });
 
@@ -36,13 +37,13 @@ describe("attachments that will be copied into the workspace", () => {
     // Core resolved it: a path inside the folder that leads outside it, through a link or junction, is copied.
     expect(willCopy(attached(info({ path: "D:\\work\\repo\\vendor\\key.txt", copied: true }), "w-1"), "w-1")).toBe(true);
     expect(willCopy(attached(info({ path: "C:\\elsewhere\\a.md", copied: false }), "w-1"), "w-1")).toBe(false);
-    // Judged for another workspace, or not judged at all: taken to be copied.
+    // Judged for another workspace than the composer's now: taken to be copied, an image aside.
     expect(willCopy(attached(info({ copied: false }), "w-1"), "w-2")).toBe(true);
-    expect(willCopy(attached(info({})), "w-1")).toBe(true);
-    // A workspace not yet made, as a new session's isolated one, holds nothing yet.
     expect(willCopy(attached(info({ copied: false }), "w-1"), undefined)).toBe(true);
-    // An image goes inline, never copied.
-    expect(willCopy(attached(info({ kind: "image", media_type: "image/png" })), undefined)).toBe(false);
+    expect(willCopy(attached(info({ kind: "image", copied: false }), "w-1"), "w-2")).toBe(false);
+    // For a workspace not yet made, as a new session's isolated one, Core says copied; an image never is.
+    expect(willCopy(attached(info({ copied: true })), undefined)).toBe(true);
+    expect(willCopy(attached(info({ kind: "image", media_type: "image/png", copied: false })), undefined)).toBe(false);
   });
 });
 

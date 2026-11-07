@@ -846,8 +846,8 @@ impl Setup {
     }
 }
 
-// verifies: PROTO-CORE-API-R24
 // verifies: FLOW-SEND-MESSAGE-R14
+// R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
 #[tokio::test]
 async fn inspect_says_whether_sending_copies_the_path_through_dot_dot_and_not_for_images() {
     let mut s = setup(FakeAdapter::new(1)).await;
@@ -861,22 +861,37 @@ async fn inspect_says_whether_sending_copies_the_path_through_dot_dot_and_not_fo
     assert_eq!(s.copied(&back_in).await, json!(false));
     let out_again = s.workspace.join("..").join("outside").join("a.txt");
     assert_eq!(s.copied(&out_again).await, json!(true));
-    // An image goes inline: nothing is copied, so nothing is said.
+    // An image goes inline: never copied, from outside or not.
     let image = file(&s.outside, "a.png", PNG);
-    assert_eq!(s.copied(&image).await, Value::Null);
-    // Without a workspace, nothing is said either.
+    assert_eq!(s.copied(&image).await, json!(false));
+    // Without a workspace, as a new one not made yet, a file is copied, even one in the project folder.
     let bare = s
         .client
         .result(
             "attachment.inspect",
-            json!({ "host_id": "local", "path": path(&outside) }),
+            json!({ "host_id": "local", "path": path(&inside) }),
         )
         .await;
-    assert_eq!(bare.get("copied"), None);
+    assert_eq!(bare["copied"], json!(true));
 }
 
-// verifies: PROTO-CORE-API-R24
+// R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
+#[tokio::test]
+async fn inspect_refuses_a_workspace_it_does_not_know() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    let inside = file(&s.workspace, "notes.md", b"x\n");
+    let refused = s
+        .client
+        .error(
+            "attachment.inspect",
+            json!({ "host_id": "local", "path": path(&inside), "workspace_id": "w-none" }),
+        )
+        .await;
+    assert_eq!(refused["data"]["kind"], "not_found", "{refused:#}");
+}
+
 // verifies: FLOW-SEND-MESSAGE-R14
+// R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
 #[cfg(windows)]
 #[tokio::test]
 async fn a_file_through_a_junction_out_of_the_workspace_is_copied_and_inspect_says_so() {
@@ -901,8 +916,8 @@ async fn a_file_through_a_junction_out_of_the_workspace_is_copied_and_inspect_sa
     assert_eq!(copies(&s.scratch(&id)), vec!["1"]);
 }
 
-// verifies: PROTO-CORE-API-R24
 // verifies: FLOW-SEND-MESSAGE-R14
+// R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
 #[cfg(unix)]
 #[tokio::test]
 async fn a_link_with_a_relative_target_is_judged_where_it_points() {
