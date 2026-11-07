@@ -298,3 +298,16 @@ describe("a repeated question", () => {
     expect(shown.items).toEqual([{ kind: "question", key: "question:q", requestId: "q", questions: [{ id: "a", text: "Which?", multi_select: false }], answered: true }]);
   });
 });
+
+describe("a turn the agent is working on", () => {
+  // verifies: FLOW-SEND-MESSAGE-R04
+  it("is working from turn.started until the turn completes, however it ends, or the session ends", () => {
+    let t = apply(emptyTranscript, envelope(0, { type: "turn.started", turn: 1, trigger: "user" }));
+    expect(t.working).toBe(true);
+    t = apply(t, envelope(1, { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 1, is_error: true }));
+    expect(t.working).toBe(false);
+    t = apply(t, envelope(2, { type: "turn.started", turn: 2, trigger: "user" }));
+    t = apply(t, envelope(3, { type: "session.ended", reason: "user_stopped" }));
+    expect(t.working).toBe(false);
+  });
+});
