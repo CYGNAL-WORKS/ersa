@@ -145,6 +145,10 @@ impl SessionManager {
         let changed = Arc::new(Notify::new());
         {
             let mut sending = lock(&handle.sending);
+            // Again under the lock a delete's working check reads `sending`
+            // through, so a delete that claimed the workspace since the check
+            // above is seen here, or sees this send.
+            self.refuse_if_deleting(&handle)?;
             if sending.is_some() {
                 return Err(SessionError::InvalidState(
                     "a message is already being sent to this session; wait for its answer".into(),
