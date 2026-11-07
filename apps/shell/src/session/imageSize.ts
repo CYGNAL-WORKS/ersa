@@ -24,6 +24,7 @@ export function imageSize(data: string): ImageSize | undefined {
 }
 
 const u16le = (b: Uint8Array, at: number) => (b[at] ?? 0) | ((b[at + 1] ?? 0) << 8);
+const u32le = (b: Uint8Array, at: number) => ((u16le(b, at + 2) << 16) >>> 0) + u16le(b, at);
 const u16be = (b: Uint8Array, at: number) => ((b[at] ?? 0) << 8) | (b[at + 1] ?? 0);
 const u24le = (b: Uint8Array, at: number) => u16le(b, at) | ((b[at + 2] ?? 0) << 16);
 const u32be = (b: Uint8Array, at: number) => ((u16be(b, at) << 16) >>> 0) + u16be(b, at + 2);
@@ -53,10 +54,11 @@ function webp(b: Uint8Array): ImageSize | undefined {
   return undefined;
 }
 
-/** JPEG: the first start-of-frame segment, past whatever segments come before it. */
+/** JPEG: the first start-of-frame segment, past whatever segments come before it, turned by its EXIF orientation. */
 function jpeg(b: Uint8Array): ImageSize | undefined {
   if (b[0] !== 0xff || b[1] !== 0xd8) return undefined;
   let at = 2;
+  let quarterTurn = false;
   while (at + 9 < b.length) {
     if (b[at] !== 0xff) {
       at += 1;
@@ -65,8 +67,12 @@ function jpeg(b: Uint8Array): ImageSize | undefined {
     const marker = b[at + 1] ?? 0;
     // Start-of-frame markers, leaving out DHT (C4), JPG (C8) and DAC (CC), which share the range.
     if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-      return { width: u16be(b, at + 7), height: u16be(b, at + 5) };
+      const width = u16be(b, at + 7);
+      const height = u16be(b, at + 5);
+      // A phone photo is often stored sideways, with an orientation that turns it upright a quarter.
+      return quarterTurn ? { width: height, height: width } : { width, height };
     }
+    if (marker === 0xe1) quarterTurn = exifQuarterTurn(b, at + 4, u16be(b, at + 2) - 2) || quarterTurn;
     // Markers that stand alone, with no length.
     if (marker === 0xff || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) {
       at += marker === 0xff ? 1 : 2;
@@ -75,4 +81,29 @@ function jpeg(b: Uint8Array): ImageSize | undefined {
     at += 2 + u16be(b, at + 2);
   }
   return undefined;
+}
+
+/**
+ * Whether the EXIF data in an APP1 segment (`length` bytes from `start`) orients the image a quarter turn: an
+ * Orientation tag (0x0112) of 5 to 8 in the first image directory.
+ */
+function exifQuarterTurn(b: Uint8Array, start: number, length: number): boolean {
+  if (!ascii(b, start, "Exif") || b[start + 4] !== 0 || b[start + 5] !== 0) return false;
+  const tiff = start + 6;
+  const end = start + length;
+  const little = ascii(b, tiff, "II");
+  if (!little && !ascii(b, tiff, "MM")) return false;
+  const u16 = (at: number) => (little ? u16le(b, at) : u16be(b, at));
+  const u32 = (at: number) => (little ? u32le(b, at) : u32be(b, at));
+  const directory = tiff + u32(tiff + 4);
+  const entries = u16(directory);
+  for (let i = 0; i < entries; i += 1) {
+    const entry = directory + 2 + i * 12;
+    if (entry + 12 > end) return false;
+    if (u16(entry) === 0x0112) {
+      const orientation = u16(entry + 8);
+      return orientation >= 5 && orientation <= 8;
+    }
+  }
+  return false;
 }
