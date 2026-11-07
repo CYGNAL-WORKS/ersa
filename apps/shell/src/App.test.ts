@@ -699,7 +699,7 @@ describe("the attachments App gives the composer", () => {
       { path: "C:/pics/shot.png", workspace_id: "w-beta" },
       { path: "D:/code/beta/src", workspace_id: "w-beta" },
     ]);
-    // R14: the note follows what Core says for the session's workspace; an image goes inline.
+    // R17: the note follows what Core says for the session's workspace; an image goes inline.
     expect(shown()).toEqual(["notes.md12 lines", "shot.png2 KB", "srcFolderWill be copied into the workspace's .ersa folder"]);
     fireEvent.change(words(), { target: { value: "Look" } });
     await act(async () => {
@@ -736,7 +736,7 @@ describe("the attachments App gives the composer", () => {
   });
 
   // verifies: FLOW-SEND-MESSAGE-R10
-  // R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
+  // verifies: PROTO-CORE-API-R44
   it("shows a folder Core refuses, as one holding the workspace, as that attachment's refusal and nothing else", async () => {
     const shell = fakeShell("D:/code");
     const holds = { kind: "rpc", error: { code: -32000, message: "attachment.inspect: D:/code holds the session's workspace", data: { kind: "attachment_refused" } } };
@@ -817,7 +817,7 @@ describe("the attachments of a new session's first message", () => {
     return shell;
   };
 
-  // verifies: FLOW-SEND-MESSAGE-R14
+  // verifies: FLOW-SEND-MESSAGE-R17
   it("asks Core about the project folder's workspace when it is chosen, and about none for a new workspace", async () => {
     const core = await screenWith([project("alpha")], shellWith(), start(() => ({ turn: 1 })));
     const choose = (name: RegExp) => {

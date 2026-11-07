@@ -32,7 +32,7 @@ describe("an attachment's detail", () => {
 });
 
 describe("attachments that will be copied into the workspace", () => {
-  // verifies: FLOW-SEND-MESSAGE-R14
+  // verifies: FLOW-SEND-MESSAGE-R17
   it("will be copied as Core said for the workspace, never judged from the path's text", () => {
     // Core resolved it: a path inside the folder that leads outside it, through a link or junction, is copied.
     expect(willCopy(attached(info({ path: "D:\\work\\repo\\vendor\\key.txt", copied: true }), "w-1"), "w-1")).toBe(true);
