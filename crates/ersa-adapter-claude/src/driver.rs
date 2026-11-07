@@ -962,6 +962,10 @@ impl AdapterSession for ClaudeSession {
     /// recorded before it is written, so a write that fails reads as delivery
     /// unknown.
     async fn send_message(&self, message: &OutgoingMessage) -> Result<(), AdapterError> {
+        // Refused before anything is recorded or written, so it reads as not sent.
+        if let Some(reason) = crate::attachments::unsendable(message) {
+            return Err(AdapterError::Protocol(reason));
+        }
         self.shared
             .write(&HostMessage::user(crate::attachments::blocks(message)))
             .await

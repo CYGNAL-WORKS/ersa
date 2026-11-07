@@ -84,10 +84,10 @@ async fn a_tiny_prompt_with_a_permission_round_trip_against_the_real_cli() {
 
     // Writing a file needs approval in the default mode, so this prompts.
     session
-        .send_user(
+        .send_message(&text(
             "Use the Write tool to create a file named smoke.txt containing the word ok. \
              Then reply with the single word: done",
-        )
+        ))
         .await
         .expect("send");
     let ask = sink
@@ -224,7 +224,7 @@ async fn workspace_configuration_loaded(
         )
         .await
         .expect("start: is the CLI installed?");
-    session.send_user("hello").await.expect("send");
+    session.send_message(&text("hello")).await.expect("send");
     let init = sink
         .wait_for_line(TURN, |l| is_kind(l, "system/init"))
         .await;
@@ -479,4 +479,12 @@ async fn a_trusted_projects_worktrees_are_trusted_through_the_clis_own_record() 
 
     let (_, stderr) = start_and_stop(&config_dir, &worktree, true, &repo).await;
     assert!(!ignored_allow_rules(&stderr), "{stderr:?}");
+}
+
+/// A message of words alone, as Core sends one (PROTO-CORE-API, Turns and attachments).
+fn text(words: &str) -> ersa_adapter::OutgoingMessage {
+    ersa_adapter::OutgoingMessage {
+        text: words.into(),
+        attachments: Vec::new(),
+    }
 }

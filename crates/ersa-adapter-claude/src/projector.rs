@@ -1065,20 +1065,10 @@ pub(crate) fn plain_text(blocks: &[ContentBlock]) -> Option<String> {
     (!texts.is_empty()).then(|| texts.join("\n"))
 }
 
-/// The text of a host user message's `content`: a string, or text blocks.
+/// The text of a host user message's `content` given as a plain string;
+/// content blocks go through [`crate::attachments::split`].
 fn input_text(content: &Value) -> Option<String> {
-    match content {
-        Value::String(text) => Some(text.clone()),
-        Value::Array(blocks) => {
-            let texts: Vec<&str> = blocks
-                .iter()
-                .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
-                .filter_map(|block| block.get("text").and_then(Value::as_str))
-                .collect();
-            (!texts.is_empty()).then(|| texts.join("\n"))
-        }
-        _ => None,
-    }
+    content.as_str().map(String::from)
 }
 
 /// A tool's output: plain text when it is only text, else the blocks as they

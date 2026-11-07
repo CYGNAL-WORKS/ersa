@@ -1190,6 +1190,25 @@ fn a_prompts_images_and_list_are_its_attachments_not_its_text() {
     );
 }
 
+// verifies: PROTO-CLAUDE-CODE-STREAM-R26
+#[test]
+fn a_prompt_of_images_the_adapter_cannot_read_still_shows_as_a_turn() {
+    // An image from somewhere other than base64, which has no data to show.
+    let unreadable =
+        json!({"type": "image", "source": {"type": "url", "url": "https://example.com/a.png"}});
+    let events = events_of(&[prompt_with(None, &[unreadable])]);
+    let prompts: Vec<&UserMessage> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::UserMessage(m) => Some(m),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(prompts.len(), 1);
+    assert_eq!(prompts[0].text, "");
+    assert!(prompts[0].attachments.is_empty());
+}
+
 // verifies: PROTO-CLAUDE-CODE-STREAM-R27
 #[test]
 fn a_title_leaves_out_attachments_and_passes_over_a_prompt_of_attachments_alone() {
