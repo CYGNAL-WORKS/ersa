@@ -99,19 +99,16 @@ describe("a message's attachments in the transcript", () => {
   });
 
   // verifies: FLOW-SEND-MESSAGE-R11
-  it("keeps the bubble unseen at its place until its images are decoded", async () => {
-    let decode: () => void = () => {};
-    const decoding = new Promise<void>((r) => (decode = r));
-    const original = HTMLImageElement.prototype.decode;
-    HTMLImageElement.prototype.decode = () => decoding;
-    try {
-      draw(message([{ kind: "image", media_type: "image/png", data: "iVBOR" }]));
-      const bubble = screen.getByRole("group", { name: "You" });
-      expect(bubble.hasAttribute("data-decoding")).toBe(true);
-      await act(async () => decode());
-      expect(bubble.hasAttribute("data-decoding")).toBe(false);
-    } finally {
-      HTMLImageElement.prototype.decode = original;
-    }
+  it("shows the bubble at once, its image's box already at the size its header states, before the image draws", () => {
+    // A PNG header stating 640 by 480, and no image data after it: the image never draws.
+    const header = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 2, 128, 0, 0, 1, 224, 8, 6, 0, 0, 0];
+    draw(message([{ kind: "image", media_type: "image/png", data: btoa(String.fromCharCode(...header)) }]));
+    const bubble = screen.getByRole("group", { name: "You" });
+    expect(bubble.hasAttribute("data-decoding")).toBe(false);
+    const image = screen.getByRole("img", { name: "Attached image" });
+    expect(image.hasAttribute("data-sized")).toBe(true);
+    expect(image.style.getPropertyValue("--image-width")).toBe("640px");
+    expect(image.style.getPropertyValue("--image-ratio")).toBe("640 / 480");
+    expect(Number(image.style.getPropertyValue("--image-aspect"))).toBeCloseTo(640 / 480);
   });
 });
