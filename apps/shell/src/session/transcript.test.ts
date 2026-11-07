@@ -304,6 +304,9 @@ describe("a turn the agent is working on", () => {
   it("is working from turn.started until the turn completes, however it ends, or the session ends", () => {
     let t = apply(emptyTranscript, envelope(0, { type: "turn.started", turn: 1, trigger: "user" }));
     expect(t.working).toBe(true);
+    // A turn that finishes ends the work, as one interrupted does.
+    const done = apply(t, envelope(1, { type: "turn.completed", turn: 1, outcome: "success", duration_ms: 1, is_error: false }));
+    expect(done.working).toBe(false);
     t = apply(t, envelope(1, { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 1, is_error: true }));
     expect(t.working).toBe(false);
     t = apply(t, envelope(2, { type: "turn.started", turn: 2, trigger: "user" }));
