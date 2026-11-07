@@ -2,6 +2,7 @@
 // has chosen New session or has no session (LAY-SHELL, FLOW-NEW-SESSION). Kept free of React so the tests drive each
 // transition; the window holds it with `useReducer`.
 
+import type { Attached } from "./attachments";
 import type { Sending } from "./follow";
 import type { FirstSendFailure } from "./start";
 
@@ -20,8 +21,11 @@ export interface StageState {
   opening?: string;
   /** The session the window follows, as it last said. */
   following?: string;
-  /** A session kept alive whose first message did not go through: its composer shows why, and the text if it is to be sent again. */
-  firstSend?: { id: string; text?: string; message: string };
+  /**
+   * A session kept alive whose first message did not go through: its composer shows why, and the text and attachments
+   * if they are to be sent again, the one Core refused marked (FLOW-SEND-MESSAGE-R10).
+   */
+  firstSend?: { id: string; text?: string; attachments?: Attached[]; sending: Exclude<Sending, { state: "sending" }> };
   /** The last `composing.key` given. */
   keys: number;
 }
@@ -35,7 +39,7 @@ export type StageAction =
   | { type: "failed"; message: string }
   /** Stop ended the start before the message reached the agent: the screen stays, its message with it, and says nothing. */
   | { type: "stopped" }
-  | { type: "started"; id: string; text: string; firstSend?: FirstSendFailure }
+  | { type: "started"; id: string; text: string; attachments?: readonly Attached[]; firstSend?: FirstSendFailure }
   /** The window now follows session `id`, so its transcript can show. */
   | { type: "followed"; id: string };
 
@@ -76,10 +80,15 @@ export function stage(state: StageState, action: StageAction): StageState {
       // The screen stays as it is, so its composer keeps the message (FLOW-NEW-SESSION-R08).
       return { ...state, starting: { state: "failed", message: action.message } };
     case "started": {
-      const firstSend = action.firstSend && {
+      const failed = action.firstSend;
+      const refused = failed?.sending.state === "failed" ? failed.sending : undefined;
+      const firstSend = failed && {
         id: action.id,
-        message: action.firstSend.message,
-        ...(action.firstSend.giveBack ? { text: action.text } : {}),
+        sending: failed.sending,
+        // The attachment Core refused is marked with why, which shows beside it rather than in the status line.
+        ...(failed.giveBack
+          ? { text: action.text, attachments: action.attachments?.map((a, i) => (refused && i === refused.index ? { ...a, problem: refused.message } : a)) }
+          : {}),
       };
       // The session becomes the active one (FLOW-NEW-SESSION-R12); the screen stays until the window follows it,
       // and goes now when the window already does.
