@@ -10,6 +10,7 @@
 //! its messages, which change between versions and languages. Messages are
 //! only passed on to the user.
 
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use ersa_adapter::{ProcessSpec, Transport};
@@ -211,34 +212,511 @@ pub async fn git_resolve_commit(
     Err(failed())
 }
 
-/// When a git query started now must have answered.
-fn deadline() -> tokio::time::Instant {
-    tokio::time::Instant::now() + GIT_QUERY_TIMEOUT
+/// When the git queries for one answer must all have finished, and the
+/// limit that was set from, to name in the error. `Copy`, so each query
+/// takes it by value.
+#[derive(Debug, Clone, Copy)]
+struct Deadline {
+    at: tokio::time::Instant,
+    limit: Duration,
 }
 
-/// Runs a quick git query that must answer by `deadline`, which several
-/// queries for one answer share, so together they stay within
-/// [`GIT_QUERY_TIMEOUT`]. Running out of time is git's failure, reported as
-/// such: a query changes nothing, so there is nothing half done to clean up.
+impl Deadline {
+    /// A deadline `limit` from now.
+    fn after(limit: Duration) -> Deadline {
+        Deadline {
+            at: tokio::time::Instant::now() + limit,
+            limit,
+        }
+    }
+
+    /// The error for running out of time.
+    fn expired(&self, detail: String) -> VcsError {
+        VcsError::Failed {
+            message: format!("git did not answer within {} seconds", self.limit.as_secs()),
+            stderr: detail,
+        }
+    }
+}
+
+/// The deadline for a quick query, [`GIT_QUERY_TIMEOUT`] from now.
+fn deadline() -> Deadline {
+    Deadline::after(GIT_QUERY_TIMEOUT)
+}
+
+/// Runs a git query that must answer by `deadline`, which several queries
+/// for one answer share, so together they stay within its limit. Running
+/// out of time is git's failure, reported as such: a query changes nothing,
+/// so there is nothing half done to clean up.
 async fn query(
     transport: &dyn Transport,
     dir: &str,
     args: &[&str],
-    deadline: tokio::time::Instant,
+    deadline: Deadline,
 ) -> Result<Output, VcsError> {
-    let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+    let left = deadline
+        .at
+        .saturating_duration_since(tokio::time::Instant::now());
     match git_within(transport, dir, args, left).await {
         Err(VcsError::Incomplete(e)) if e.kind() == std::io::ErrorKind::TimedOut => {
-            Err(VcsError::Failed {
-                message: format!(
-                    "git did not answer within {} seconds",
-                    GIT_QUERY_TIMEOUT.as_secs()
-                ),
-                stderr: e.to_string(),
-            })
+            Err(deadline.expired(e.to_string()))
         }
         other => other,
     }
+}
+
+// -- What deleting a workspace would lose ---------------------------------
+
+/// How long counting a workspace's changes may take, all its git calls and
+/// file reads together. Longer than a quick query: it lists every untracked
+/// and ignored file and reads every uncommitted one.
+const CHANGES_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How many commit ids one `git rev-list` is given on its command line.
+/// Windows caps a command line at 32,767 characters; 200 ids of 40
+/// characters stay well inside it.
+const REVISIONS_PER_CALL: usize = 200;
+
+/// What deleting an isolated workspace would lose: its folder's files, and
+/// commits nothing but the workspace holds (PROTO-CORE-API-R38).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorktreeChanges {
+    /// Files with changes not committed, untracked files included.
+    pub uncommitted: u64,
+    /// Ignored entries, a wholly ignored folder as one.
+    pub ignored: u64,
+    /// Commits reachable from the checkout, the branch or the checkout's
+    /// reflog that no other local or remote-tracking branch holds.
+    pub unshared: u64,
+    /// Those of them the branch does not hold.
+    pub stranded: u64,
+    /// One line per thing that went into the counts, and the content of
+    /// each uncommitted file: what the token is a digest of, so the token
+    /// changes when any of them does.
+    pub evidence: Vec<String>,
+}
+
+/// What deleting the git worktree at `path`, on branch `branch`, of the
+/// repository at `repo` would lose. All of it is given [`CHANGES_TIMEOUT`].
+///
+/// git's own records of a worktree (its checkout, index and reflog, kept
+/// in the repository) outlive its folder, so this answers for a worktree
+/// whose removal has begun: with the folder partly gone, the files left are
+/// counted; with it wholly gone, only commits. A folder git does not list
+/// as a worktree is refused with [`VcsError::NotListed`], as removal
+/// refuses it: git cannot say what in it is uncommitted.
+pub async fn git_worktree_changes(
+    transport: &dyn Transport,
+    repo: &str,
+    path: &str,
+    branch: &str,
+) -> Result<WorktreeChanges, VcsError> {
+    let deadline = Deadline::after(CHANGES_TIMEOUT);
+    let mut changes = WorktreeChanges::default();
+    let admin = admin_dir(transport, repo, path, deadline).await?;
+    if exists(path).await {
+        let Some(admin) = &admin else {
+            return Err(VcsError::NotListed {
+                path: path.to_string(),
+            });
+        };
+        count_files(transport, repo, admin, path, deadline, &mut changes).await?;
+    }
+    count_commits(
+        transport,
+        repo,
+        admin.as_deref(),
+        branch,
+        deadline,
+        &mut changes,
+    )
+    .await?;
+    Ok(changes)
+}
+
+/// The folder in which git keeps its records of the worktree at `path`
+/// (`.git/worktrees/<name>` in the repository), or `None` when git has no
+/// record of it.
+///
+/// Found by reading each record's `gitdir` file, which names the worktree's
+/// folder and outlives it. Like [`find`], this reads the local file system:
+/// worktrees are on the local host until remote hosts (M4).
+async fn admin_dir(
+    transport: &dyn Transport,
+    repo: &str,
+    path: &str,
+    deadline: Deadline,
+) -> Result<Option<String>, VcsError> {
+    let output = query(
+        transport,
+        repo,
+        &["rev-parse", "--git-common-dir"],
+        deadline,
+    )
+    .await?;
+    let common = match output.stdout.first() {
+        Some(line) if output.exit.success() => line.trim().to_string(),
+        _ => {
+            return Err(VcsError::Failed {
+                message: "git could not find the repository's folder".into(),
+                stderr: output.stderr_text(),
+            });
+        }
+    };
+    // git prints the folder relative to `repo` when it is inside it (`.git`);
+    // joining an absolute path replaces `repo`.
+    let records = std::path::Path::new(repo).join(common).join("worktrees");
+    let path = path.to_string();
+    let found = tokio::task::spawn_blocking(move || {
+        let key = location_key(&path);
+        // No `worktrees` folder: git has no record of any worktree.
+        let entries = std::fs::read_dir(&records).ok()?;
+        entries
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|admin| {
+                // `gitdir` holds `<worktree folder>/.git`.
+                let Ok(gitdir) = std::fs::read_to_string(admin.join("gitdir")) else {
+                    return false;
+                };
+                std::path::Path::new(gitdir.trim())
+                    .parent()
+                    .is_some_and(|folder| location_key(&folder.display().to_string()) == key)
+            })
+            .map(|admin| admin.display().to_string())
+    });
+    tokio::time::timeout_at(deadline.at, found)
+        .await
+        .map_err(|_| deadline.expired("finding git's records of the worktree".into()))?
+        .map_err(|e| VcsError::Failed {
+            message: "finding git's records of the worktree failed".into(),
+            stderr: e.to_string(),
+        })
+}
+
+/// Counts the uncommitted files and the ignored entries in the worktree's
+/// folder, and records them, and each uncommitted file's content, as
+/// evidence.
+async fn count_files(
+    transport: &dyn Transport,
+    repo: &str,
+    admin: &str,
+    path: &str,
+    deadline: Deadline,
+    changes: &mut WorktreeChanges,
+) -> Result<(), VcsError> {
+    // Naming git's records and the folder outright, rather than running in
+    // the folder, works when the folder's `.git` file is gone, and never
+    // finds some other repository above a half-deleted folder.
+    let git_dir = format!("--git-dir={admin}");
+    let work_tree = format!("--work-tree={path}");
+    // `--no-optional-locks`: otherwise `status` may refresh the index,
+    // writing to the workspace while a session works in it. `-z` ends each
+    // entry with NUL and never quotes a path.
+    let status = |untracked: &'static str, ignored: bool| {
+        let mut args = vec![
+            "--no-optional-locks",
+            git_dir.as_str(),
+            work_tree.as_str(),
+            "status",
+            "--porcelain=v2",
+            "-z",
+            untracked,
+        ];
+        if ignored {
+            args.push("--ignored");
+        }
+        args
+    };
+
+    // Every untracked file, each its own entry.
+    let output = query(
+        transport,
+        repo,
+        &status("--untracked-files=all", false),
+        deadline,
+    )
+    .await?;
+    let mut to_read = Vec::new();
+    for entry in parse_status(&checked(output, "git status failed")?.stdout) {
+        changes.evidence.push(format!("status {}", entry.raw));
+        if entry.gone_from_folder() {
+            // Nothing of it is left in the folder to lose: its last content
+            // is committed or in the index.
+            continue;
+        }
+        changes.uncommitted += 1;
+        if entry.folder_differs() {
+            to_read.push(entry.path);
+        }
+    }
+
+    // The ignored entries, with a wholly ignored folder as one: `--ignored`
+    // collapses one only while untracked folders are collapsed too, hence a
+    // second call.
+    let output = query(
+        transport,
+        repo,
+        &status("--untracked-files=normal", true),
+        deadline,
+    )
+    .await?;
+    for entry in parse_status(&checked(output, "git status failed")?.stdout) {
+        if entry.kind == '!' {
+            changes.ignored += 1;
+            changes.evidence.push(format!("ignored {}", entry.path));
+        }
+    }
+
+    // The content of each uncommitted file, so editing one changes the
+    // token. Read here, not by git: git cannot hash a link to a folder, and
+    // fails outright on a file deleted since it listed it.
+    let folder = std::path::PathBuf::from(path);
+    let read = tokio::task::spawn_blocking(move || {
+        to_read
+            .into_iter()
+            .map(|relative| {
+                let digest = content_digest(&folder.join(&relative));
+                format!("content {digest} {relative}")
+            })
+            .collect::<Vec<_>>()
+    });
+    let contents = tokio::time::timeout_at(deadline.at, read)
+        .await
+        .map_err(|_| deadline.expired("reading the uncommitted files".into()))?
+        .map_err(|e| VcsError::Failed {
+            message: "reading the uncommitted files failed".into(),
+            stderr: e.to_string(),
+        })?;
+    changes.evidence.extend(contents);
+    Ok(())
+}
+
+/// One entry of `git status --porcelain=v2 -z`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StatusEntry {
+    /// `1` changed, `2` renamed or copied, `u` unmerged, `?` untracked,
+    /// `!` ignored.
+    kind: char,
+    /// The index's and the folder's state against the commit, such as `.M`
+    /// or `A.`; `..` for untracked and ignored entries.
+    xy: String,
+    /// Relative to the worktree's root, with `/` separators.
+    path: String,
+    /// The whole entry, a renamed file's original path included.
+    raw: String,
+}
+
+impl StatusEntry {
+    /// Whether the file is no longer in the folder: deleted there, or
+    /// deleted from the index with the folder matching.
+    fn gone_from_folder(&self) -> bool {
+        matches!(self.kind, '1' | '2') && self.xy.contains('D')
+    }
+
+    /// Whether the folder's copy may differ from the index's, which git's
+    /// entry does not identify by content.
+    fn folder_differs(&self) -> bool {
+        match self.kind {
+            '1' | '2' => !self.xy.ends_with('.'),
+            _ => true,
+        }
+    }
+}
+
+/// Parses `git status --porcelain=v2 -z`. Each entry ends in NUL, and a
+/// renamed entry is followed by its original path; fields are separated by
+/// spaces, with the path last, so a path may hold spaces.
+fn parse_status(lines: &[String]) -> Vec<StatusEntry> {
+    // The transport splits output into lines; with `-z` the only newlines
+    // are inside paths, so joining the lines restores the output.
+    let text = lines.join("\n");
+    let mut fields = text.split('\0');
+    let mut entries = Vec::new();
+    while let Some(field) = fields.next() {
+        let Some(kind) = field.chars().next() else {
+            continue;
+        };
+        // The number of fields before the path.
+        let before_path = match kind {
+            '1' => 8,
+            '2' => 9,
+            'u' => 10,
+            '?' | '!' => 1,
+            _ => continue,
+        };
+        let Some(path) = field.splitn(before_path + 1, ' ').nth(before_path) else {
+            continue;
+        };
+        let mut raw = field.to_string();
+        if kind == '2' {
+            raw.push('\0');
+            raw.push_str(fields.next().unwrap_or_default());
+        }
+        let xy = match kind {
+            '1' | '2' | 'u' => field.get(2..4).unwrap_or_default().to_string(),
+            _ => "..".to_string(),
+        };
+        entries.push(StatusEntry {
+            kind,
+            xy,
+            path: path.to_string(),
+            raw,
+        });
+    }
+    entries
+}
+
+/// The SHA-256 of a file's content or a link's target, or a word for what
+/// is there instead. Blocking.
+fn content_digest(file: &std::path::Path) -> String {
+    use sha2::Digest as _;
+    let metadata = match std::fs::symlink_metadata(file) {
+        Ok(metadata) => metadata,
+        Err(e) => return format!("unreadable:{:?}", e.kind()),
+    };
+    if metadata.file_type().is_symlink() {
+        return match std::fs::read_link(file) {
+            Ok(target) => format!(
+                "link:{}",
+                hex(&sha2::Sha256::digest(target.display().to_string()))
+            ),
+            Err(e) => format!("unreadable:{:?}", e.kind()),
+        };
+    }
+    if metadata.is_dir() {
+        // A nested repository: git lists it, not the files in it.
+        return "folder".to_string();
+    }
+    let mut hasher = sha2::Sha256::new();
+    let read = std::fs::File::open(file).and_then(|mut f| std::io::copy(&mut f, &mut hasher));
+    match read {
+        Ok(_) => hex(&hasher.finalize()),
+        Err(e) => format!("unreadable:{:?}", e.kind()),
+    }
+}
+
+/// Counts the commits only the workspace holds, and records them as
+/// evidence. `admin` is git's record of the worktree, when it has one,
+/// for its checkout and reflog.
+async fn count_commits(
+    transport: &dyn Transport,
+    repo: &str,
+    admin: Option<&str>,
+    branch: &str,
+    deadline: Deadline,
+    changes: &mut WorktreeChanges,
+) -> Result<(), VcsError> {
+    // The checkout and every commit its reflog names: a detached checkout's
+    // commits, and those a reset left behind, are held by nothing else.
+    let mut tips = BTreeSet::new();
+    if let Some(admin) = admin {
+        let git_dir = format!("--git-dir={admin}");
+        let head = [git_dir.as_str(), "rev-parse", "--verify", "--quiet", "HEAD"];
+        let output = query(transport, repo, &head, deadline).await?;
+        // No HEAD to read is a checkout with no commit yet, and no reflog.
+        if output.exit.success() {
+            tips.extend(commit_ids(&output.stdout));
+            let reflog = [git_dir.as_str(), "reflog", "show", "--format=%H", "HEAD"];
+            let output = query(transport, repo, &reflog, deadline).await?;
+            let output = checked(output, "git could not read the reflog")?;
+            tips.extend(commit_ids(&output.stdout));
+        }
+    }
+
+    // What the branch holds that no other branch does; a branch already
+    // deleted holds nothing.
+    let on_branch = if branch.is_empty() {
+        BTreeSet::new()
+    } else {
+        let tip = [format!("refs/heads/{branch}")];
+        unshared_from(transport, repo, &tip, branch, deadline).await?
+    };
+    let tips: Vec<String> = tips.into_iter().collect();
+    let mut stranded = BTreeSet::new();
+    for batch in tips.chunks(REVISIONS_PER_CALL) {
+        stranded.extend(unshared_from(transport, repo, batch, branch, deadline).await?);
+    }
+    stranded.retain(|commit| !on_branch.contains(commit));
+
+    changes.unshared = (on_branch.len() + stranded.len()) as u64;
+    changes.stranded = stranded.len() as u64;
+    let on_branch = on_branch.iter().map(|c| format!("unshared {c}"));
+    let off_branch = stranded.iter().map(|c| format!("stranded {c}"));
+    changes.evidence.extend(on_branch.chain(off_branch));
+    Ok(())
+}
+
+/// The commits reachable from `tips` that no local branch but `branch`,
+/// and no remote-tracking branch, holds.
+async fn unshared_from(
+    transport: &dyn Transport,
+    repo: &str,
+    tips: &[String],
+    branch: &str,
+    deadline: Deadline,
+) -> Result<BTreeSet<String>, VcsError> {
+    // `--ignore-missing` skips a tip that no longer exists: a branch
+    // deleted, or a reflog entry whose commit git has since collected.
+    let mut args = vec!["rev-list", "--ignore-missing"];
+    args.extend(tips.iter().map(String::as_str));
+    // Everything after `--not` is subtracted. `--exclude` leaves the
+    // workspace's own branch out of the `--branches` that follows it; a
+    // branch name can hold no glob character, so it matches only itself.
+    args.push("--not");
+    let exclude = format!("--exclude={branch}");
+    if !branch.is_empty() {
+        args.push(&exclude);
+    }
+    args.extend(["--branches", "--remotes"]);
+    let output = query(transport, repo, &args, deadline).await?;
+    let output = checked(output, "git could not list the workspace's commits")?;
+    Ok(commit_ids(&output.stdout).collect())
+}
+
+/// The commit ids in git's output, one per line.
+fn commit_ids(lines: &[String]) -> impl Iterator<Item = String> + '_ {
+    lines
+        .iter()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+}
+
+/// `output` when git succeeded, else its failure with `message`.
+fn checked(output: Output, message: &str) -> Result<Output, VcsError> {
+    if output.exit.success() {
+        Ok(output)
+    } else {
+        Err(VcsError::Failed {
+            message: message.into(),
+            stderr: output.stderr_text(),
+        })
+    }
+}
+
+/// A SHA-256 digest of a sequence of strings, for an opaque token. Each is
+/// added with its length first, so no two sequences give the same input.
+#[derive(Default)]
+pub struct Digest(sha2::Sha256);
+
+impl Digest {
+    pub fn add(&mut self, item: &str) {
+        use sha2::Digest as _;
+        self.0.update((item.len() as u64).to_le_bytes());
+        self.0.update(item.as_bytes());
+    }
+
+    /// The digest, in lowercase hexadecimal.
+    pub fn finish(self) -> String {
+        use sha2::Digest as _;
+        hex(&self.0.finalize())
+    }
+}
+
+/// `bytes` in lowercase hexadecimal.
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// The lock reason `git worktree add` writes while it works and removes
@@ -495,14 +973,7 @@ async fn git_within(
 }
 
 fn check(output: Output, message: &str) -> Result<(), VcsError> {
-    if output.exit.success() {
-        Ok(())
-    } else {
-        Err(VcsError::Failed {
-            message: message.into(),
-            stderr: output.stderr_text(),
-        })
-    }
+    checked(output, message).map(drop)
 }
 
 #[cfg(test)]
@@ -599,6 +1070,33 @@ mod tests {
         let started = tokio::time::Instant::now();
         let result = git_resolve_commit(&transport, "repo", "main@{50}").await;
         timed_out_at_ten_seconds(result, started);
+    }
+
+    // verifies: PROTO-CORE-API-R38
+    #[test]
+    fn status_entries_keep_spaces_and_a_renamed_file_s_original_path() {
+        // As the transport hands it over: `-z` output, split into lines at
+        // the newline inside one path.
+        let text = concat!(
+            "1 .M N... 100644 100644 100644 aa bb with space.txt\0",
+            "2 R. N... 100644 100644 100644 aa aa R100 new name\0old name\0",
+            "? line\nbreak\0",
+            "! build/\0",
+        );
+        let lines: Vec<String> = text.split('\n').map(str::to_string).collect();
+        let entries = parse_status(&lines);
+        let paths: Vec<_> = entries.iter().map(|e| (e.kind, e.path.as_str())).collect();
+        assert_eq!(
+            paths,
+            [
+                ('1', "with space.txt"),
+                ('2', "new name"),
+                ('?', "line\nbreak"),
+                ('!', "build/")
+            ]
+        );
+        assert!(entries[1].raw.ends_with("\0old name"));
+        assert!(entries[0].folder_differs() && !entries[1].folder_differs());
     }
 
     #[test]

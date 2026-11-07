@@ -178,6 +178,17 @@ fn result_examples() -> Vec<(Method, Value)> {
                 },
             ]),
         ),
+        (
+            Method::WorkspaceChanges,
+            to_value(&WorkspaceChanges {
+                uncommitted: 2,
+                ignored: 1,
+                unshared: 3,
+                stranded: 1,
+                sessions: 1,
+                token: "9f2c".into(),
+            }),
+        ),
         (Method::SessionList, to_value(&vec![session()])),
         (Method::SessionCreate, to_value(&session())),
         (Method::SessionSetArchived, to_value(&session())),
@@ -326,6 +337,10 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&BranchListParams {
                 project_id: "p-1".into(),
             }),
+        ),
+        (
+            Method::WorkspaceChanges,
+            to_value(&IdParams { id: "w-1".into() }),
         ),
         (
             Method::ProjectFind,
