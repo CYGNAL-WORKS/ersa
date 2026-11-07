@@ -84,15 +84,25 @@
 
 .transcript-attachment-image img {
   display: block;
+  box-sizing: border-box;
   max-width: var(--size-attachment-image);
   max-height: var(--size-attachment-image);
+  /* Filled until the image draws. */
+  background: var(--material-tile);
   border: var(--line-hairline) solid var(--color-line);
   border-radius: var(--radius-md);
 }
 
-/* Kept at its place, unseen, until its images are decoded, so nothing in it moves (DESIGN.md, Layout). */
-.transcript-user[data-decoding] {
-  visibility: hidden;
+/* Sized from its header before it draws: as wide as it is, up to size-attachment-image, and no taller than that, its
+   proportions kept. */
+.transcript-attachment-image img[data-sized] {
+  /* Set from the header by the image itself; these defaults leave the box at its cap, square. */
+  --image-width: var(--size-attachment-image);
+  --image-ratio: auto;
+  --image-aspect: 1;
+  aspect-ratio: var(--image-ratio);
+  width: min(var(--image-width), var(--size-attachment-image), calc(var(--size-attachment-image) * var(--image-aspect)));
+  height: auto;
 }
 
 /* A new turn: the gap before every user message but the first grows to space-xxxl, so turns read as groups (DESIGN.md, Layout). */
