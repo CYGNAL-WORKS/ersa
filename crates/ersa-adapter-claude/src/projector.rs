@@ -33,7 +33,7 @@ use crate::{BACKEND, MAX_TESTED_VERSION};
 
 /// The version of this projection. Bump it whenever the events produced for
 /// some raw log would change, so Core re-projects cached sessions.
-pub const PROJECTOR_VERSION: u32 = 4;
+pub const PROJECTOR_VERSION: u32 = 5;
 
 /// The `model` the CLI gives the messages it writes itself rather than
 /// receiving from the API.
@@ -731,9 +731,17 @@ impl ClaudeProjector {
     /// A user message the host sent. It starts a turn: the CLI's `system/init`
     /// for the turn only arrives after it.
     fn host_user(&mut self, line: &RawLine, value: Value) -> Vec<Projected> {
-        let Some(text) = value.pointer("/message/content").and_then(input_text) else {
-            return vec![passthrough(line, value)];
+        // A message with attachments carries its images and its list of files
+        // and folders as blocks of their own, never as its text (R26).
+        let (text, attachments) = match value.pointer("/message/content") {
+            Some(Value::Array(blocks)) => crate::attachments::split(blocks),
+            Some(content) => (input_text(content), Vec::new()),
+            None => (None, Vec::new()),
         };
+        if text.is_none() && attachments.is_empty() {
+            return vec![passthrough(line, value)];
+        }
+        let text = text.unwrap_or_default();
         // A message sent while a turn runs joins that turn rather than
         // starting one the CLI has not started.
         let mut out = if self.turn_open {
@@ -747,6 +755,7 @@ impl ClaudeProjector {
                 text,
                 origin: MessageOrigin::Human,
                 peer: None,
+                attachments,
             }),
         ));
         out
@@ -875,7 +884,9 @@ pub(crate) fn reply_events(
             },
             // A tool result never comes from the assistant; any other block
             // kind is new, and the caller's passthrough keeps it.
-            ContentBlock::ToolResult { .. } | ContentBlock::Other(_) => {}
+            ContentBlock::ToolResult { .. }
+            | ContentBlock::Image { .. }
+            | ContentBlock::Other(_) => {}
         }
     }
     events

@@ -111,6 +111,7 @@ pub fn recorded_user(id: &str, text: &str) -> RecordEvent {
             text: text.into(),
             origin: MessageOrigin::Human,
             peer: None,
+            attachments: Vec::new(),
         }),
     }
 }
@@ -539,6 +540,7 @@ impl Projector for FakeProjector {
                         text: text("text"),
                         origin: MessageOrigin::Human,
                         peer: None,
+                        attachments: Vec::new(),
                     }),
                 ]
             }

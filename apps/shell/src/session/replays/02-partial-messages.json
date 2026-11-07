@@ -1,5 +1,5 @@
 {
-  "ersa_commit": "5b3d878c9b634e49c8dcd940f8472e98adefd6f4",
+  "ersa_commit": "0741684af3c27c7ec5dcf841c6e69d5c0d6ab83d-dirty",
   "notifications": [
     {
       "kind": "notification",
@@ -18,7 +18,7 @@
             "input": "core"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -57,7 +57,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -80,7 +80,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -102,7 +102,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -132,7 +132,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -194,7 +194,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -232,7 +232,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -256,7 +256,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -281,7 +281,7 @@
             "message_id": "aa1cdaf1-d2be-4b92-ab04-e7089321b5f1"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -303,7 +303,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -337,7 +337,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -359,7 +359,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -392,7 +392,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -418,7 +418,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -451,7 +451,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -477,7 +477,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -502,7 +502,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
@@ -524,7 +524,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 3
+          "v": 4
         },
         "session_id": "s-replay"
       }
