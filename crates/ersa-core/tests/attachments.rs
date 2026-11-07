@@ -109,6 +109,21 @@ fn file(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
     path
 }
 
+/// Whether `holds` comes to hold within ten seconds, checked every 50 ms:
+/// for what Core does just after an answer, such as removing a copy.
+async fn eventually(mut holds: impl FnMut() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if holds() {
+            return true;
+        }
+        if std::time::Instant::now() > deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
 /// The numbered copies in a session's scratch folder, `.partial` aside.
 fn copies(scratch: &Path) -> Vec<String> {
     let mut names: Vec<String> = match std::fs::read_dir(scratch) {
@@ -396,9 +411,14 @@ async fn interrupt_cancels_a_send_still_waiting_for_its_backend() {
             .unwrap()
             .contains("stopped")
     );
-    // Nothing sent, no copy left, and the session can send again.
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    assert_eq!(copies(&s.scratch(&id)), Vec::<String>::new());
+    // Nothing sent, no copy left, and the session can send again. The copy is
+    // removed just after the answer: waited for, not timed.
+    let scratch = s.scratch(&id);
+    assert!(
+        eventually(|| copies(&scratch).is_empty()).await,
+        "{:?}",
+        copies(&scratch)
+    );
     assert!(s.messages().is_empty());
     let again = s.send(&id, "again", json!([])).await;
     assert!(again.get("result").is_some(), "{again:#}");
@@ -708,11 +728,15 @@ async fn interrupt_cancels_a_send_while_it_copies() {
         "{:?}",
         interrupted_at.elapsed()
     );
-    // The copy stops at its next chunk and removes itself.
-    tokio::time::sleep(Duration::from_millis(400)).await;
+    // The copy stops at its next chunk and removes itself: waited for, not
+    // timed, as a slow runner takes longer.
     let scratch = s.scratch(&id);
-    assert_eq!(aside(&scratch), Vec::<String>::new());
-    assert_eq!(copies(&scratch), Vec::<String>::new());
+    assert!(
+        eventually(|| aside(&scratch).is_empty() && copies(&scratch).is_empty()).await,
+        "{:?} {:?}",
+        aside(&scratch),
+        copies(&scratch)
+    );
     assert!(s.messages().is_empty());
 }
 
@@ -830,4 +854,179 @@ async fn progress_reaches_the_client_while_a_phase_lasts() {
     }
     let response = s.client.response(send).await;
     assert!(response.get("result").is_some(), "{response:#}");
+}
+
+impl Setup {
+    /// Whether `attachment.inspect` says sending `p` into the workspace copies it.
+    async fn copied(&mut self, p: &Path) -> Value {
+        let inspected = self
+            .client
+            .result(
+                "attachment.inspect",
+                json!({ "path": path(p), "workspace_id": self.workspace_id }),
+            )
+            .await;
+        inspected["copied"].clone()
+    }
+}
+
+// verifies: FLOW-SEND-MESSAGE-R17
+// verifies: PROTO-CORE-API-R44
+#[tokio::test]
+async fn inspect_says_whether_sending_copies_the_path_through_dot_dot_and_not_for_images() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    let inside = file(&s.workspace, "notes.md", b"x\n");
+    let outside = file(&s.outside, "a.txt", b"x\n");
+    assert_eq!(s.copied(&inside).await, json!(false));
+    assert_eq!(s.copied(&outside).await, json!(true));
+    // `..` is resolved: out of the workspace and back into it is inside, and the reverse outside.
+    let workspace_name = s.workspace.file_name().unwrap().to_owned();
+    let back_in = s.outside.join("..").join(&workspace_name).join("notes.md");
+    assert_eq!(s.copied(&back_in).await, json!(false));
+    let out_again = s.workspace.join("..").join("outside").join("a.txt");
+    assert_eq!(s.copied(&out_again).await, json!(true));
+    // An image goes inline: never copied, from outside or not.
+    let image = file(&s.outside, "a.png", PNG);
+    assert_eq!(s.copied(&image).await, json!(false));
+    // Without a workspace, as a new one not made yet, a file is copied, even one in the project folder.
+    let bare = s
+        .client
+        .result(
+            "attachment.inspect",
+            json!({ "host_id": "local", "path": path(&inside) }),
+        )
+        .await;
+    assert_eq!(bare["copied"], json!(true));
+}
+
+// verifies: PROTO-CORE-API-R44
+#[tokio::test]
+async fn inspect_refuses_a_workspace_it_does_not_know() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    let inside = file(&s.workspace, "notes.md", b"x\n");
+    let refused = s
+        .client
+        .error(
+            "attachment.inspect",
+            json!({ "path": path(&inside), "workspace_id": "w-none" }),
+        )
+        .await;
+    assert_eq!(refused["data"]["kind"], "not_found", "{refused:#}");
+    let refused = s
+        .client
+        .error(
+            "attachment.inspect",
+            json!({ "path": path(&inside), "host_id": "h-none" }),
+        )
+        .await;
+    assert_eq!(refused["data"]["kind"], "not_found", "{refused:#}");
+}
+
+// verifies: FLOW-SEND-MESSAGE-R17
+// verifies: PROTO-CORE-API-R44
+#[cfg(windows)]
+#[tokio::test]
+async fn a_file_through_a_junction_out_of_the_workspace_is_copied_and_inspect_says_so() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    file(&s.outside, "key.txt", b"x\n");
+    let junction = s.workspace.join("vendor");
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&junction)
+        .arg(&s.outside)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let through = junction.join("key.txt");
+    assert_eq!(s.copied(&through).await, json!(true));
+    // And session.send does copy it: the two judge alike.
+    let id = s.session().await;
+    let sent = s
+        .send(&id, "", json!([{ "kind": "file", "path": path(&through) }]))
+        .await;
+    assert!(sent.get("result").is_some(), "{sent:#}");
+    assert_eq!(copies(&s.scratch(&id)), vec!["1"]);
+}
+
+// verifies: FLOW-SEND-MESSAGE-R17
+// verifies: PROTO-CORE-API-R44
+#[cfg(unix)]
+#[tokio::test]
+async fn a_link_with_a_relative_target_is_judged_where_it_points() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    file(&s.workspace, "a.md", b"x\n");
+    let near = s.workspace.join("near.md");
+    std::os::unix::fs::symlink("a.md", &near).unwrap();
+    assert_eq!(s.copied(&near).await, json!(false));
+    file(&s.outside, "far.md", b"x\n");
+    let far = s.workspace.join("far.md");
+    std::os::unix::fs::symlink("../outside/far.md", &far).unwrap();
+    assert_eq!(s.copied(&far).await, json!(true));
+}
+
+// verifies: PROTO-CORE-API-R44
+#[tokio::test]
+async fn inspect_takes_the_workspace_or_the_host_not_both_nor_neither() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    let inside = file(&s.workspace, "notes.md", b"x\n");
+    for params in [
+        json!({ "path": path(&inside), "workspace_id": s.workspace_id, "host_id": "local" }),
+        json!({ "path": path(&inside) }),
+    ] {
+        let refused = s.client.error("attachment.inspect", params).await;
+        assert_eq!(refused["code"], -32602, "{refused:#}");
+    }
+}
+
+// verifies: PROTO-CORE-API-R44
+#[tokio::test]
+async fn inspect_refuses_a_folder_that_holds_the_workspace() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    let holding = s.workspace.parent().unwrap().to_path_buf();
+    let refused = s
+        .client
+        .error(
+            "attachment.inspect",
+            json!({ "path": path(&holding), "workspace_id": s.workspace_id }),
+        )
+        .await;
+    assert_eq!(refused["data"]["kind"], "attachment_refused", "{refused:#}");
+    assert!(
+        refused["message"]
+            .as_str()
+            .unwrap()
+            .contains("holds the session's workspace"),
+        "{refused:#}"
+    );
+    // A folder inside the workspace is not a copy.
+    file(&s.workspace, "docs/a.md", b"x\n");
+    assert_eq!(s.copied(&s.workspace.join("docs")).await, json!(false));
+    // A folder from outside is copied, whatever its size: inspect measures nothing.
+    file(&s.outside, "small/a.txt", b"x\n");
+    assert_eq!(s.copied(&s.outside.join("small")).await, json!(true));
+}
+
+// verifies: PROTO-CORE-API-R44
+#[tokio::test]
+async fn many_inspects_of_one_workspace_at_once_each_judge_where_the_path_lies() {
+    let s = setup(FakeAdapter::new(1)).await;
+    // As the Interface asks: up to 8 at once, each on its own connection here.
+    let mut asks = Vec::new();
+    for i in 0..8 {
+        let inside = file(&s.workspace, &format!("f{i}.md"), b"x\n");
+        let mut client = s.core.client().await;
+        let workspace_id = s.workspace_id.clone();
+        asks.push(tokio::spawn(async move {
+            client
+                .result(
+                    "attachment.inspect",
+                    json!({ "path": path(&inside), "workspace_id": workspace_id }),
+                )
+                .await["copied"]
+                .clone()
+        }));
+    }
+    for ask in asks {
+        assert_eq!(ask.await.unwrap(), json!(false));
+    }
 }
