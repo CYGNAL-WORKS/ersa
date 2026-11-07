@@ -755,3 +755,115 @@ describe("the attachments App gives the composer", () => {
     expect(document.querySelector(".composer-status-line")?.textContent).toBe("Starting the backend…");
   });
 });
+
+// A new session's first message with attachments (FLOW-SEND-MESSAGE-R10, R13 to R15).
+describe("the attachments of a new session's first message", () => {
+  const notes = { path: "D:/code/alpha/notes.md", name: "notes.md", kind: "file", size_bytes: 900, lines: 12 };
+  const start = (send: () => unknown) => {
+    // Core lists the session once it is created, alive and idle.
+    let created = false;
+    const made = { ...session("s-new", "alpha", "2026-11-03T09:00:00Z"), workspace_id: "w-new", state: "idle" as const };
+    return {
+      "attachment.inspect": () => notes,
+      "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", path: "D:/ws/alpha-1", vcs_ref: "ersa/new" }),
+      "session.create": () => ((created = true), made),
+      "session.subscribe": () => ({ last_seq: -1 }),
+      "settings.set": () => ({}),
+      "session.send": send,
+      "session.list": () => (created ? [made] : []),
+    };
+  };
+  const attachNotes = async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Attach", exact: true } as never));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add files…" }));
+    await settle();
+  };
+  const shown = () => Array.from(document.querySelectorAll(".composer-attachment")).map((li) => li.textContent);
+  const sendIt = async () => {
+    // Started in a new workspace, which the first message makes.
+    fireEvent.click(screen.getByRole("button", { name: /^Workspace:/ }));
+    fireEvent.click(screen.getByRole("option", { name: /New workspace/ }));
+    fireEvent.change(words(), { target: { value: "Look" } });
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    await settle();
+    await settle();
+  };
+  const shellWith = () => {
+    const shell = fakeShell();
+    shell.pickFiles.mockResolvedValue(["D:/code/alpha/notes.md"]);
+    return shell;
+  };
+
+  // verifies: FLOW-SEND-MESSAGE-R14
+  it("says every attachment will be copied into a new workspace, and none from the project folder when it is chosen", async () => {
+    await screenWith([project("alpha")], shellWith(), start(() => ({ turn: 1 })));
+    await attachNotes();
+    const choose = (name: RegExp) => {
+      fireEvent.click(screen.getByRole("button", { name: /^Workspace:/ }));
+      fireEvent.click(screen.getByRole("option", { name }));
+    };
+    choose(/New workspace/);
+    expect(shown()).toEqual(["notes.md12 linesWill be copied into the workspace's .ersa folder"]);
+    choose(/Project folder/);
+    expect(shown()).toEqual(["notes.md12 lines"]);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R13
+  it("sends them with the first message", async () => {
+    const core = await screenWith([project("alpha")], shellWith(), start(() => ({ turn: 1 })));
+    await attachNotes();
+    await sendIt();
+    expect(paramsOf(core, "session.send")).toEqual({ id: "s-new", text: "Look", attachments: [{ kind: "file", path: "D:/code/alpha/notes.md" }] });
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R10
+  it("opens the session with the message given back, the refused attachment marked and its reason said once", async () => {
+    const refused = { kind: "rpc", error: { code: -32000, message: "session.send: refused", data: { kind: "attachment_refused", detail: "This file is too large.", index: 0 } } };
+    await screenWith([project("alpha")], shellWith(), start(() => Promise.reject(refused)));
+    await attachNotes();
+    await sendIt();
+    expect(screen.queryByRole("region", { name: "New session" })).toBeNull();
+    expect(words().value).toBe("Look");
+    expect(shown()).toEqual(["notes.mdThis file is too large."]);
+    expect(screen.getAllByRole("alert").map((a) => a.textContent)).toEqual(["This file is too large."]);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R15
+  it("opens the session saying Ersa can't tell whether the first message arrived, the message kept", async () => {
+    const lost = { kind: "unavailable", message: "Ersa got no answer in time.", sent: true };
+    await screenWith([project("alpha")], shellWith(), start(() => Promise.reject(lost)));
+    await attachNotes();
+    await sendIt();
+    expect(screen.queryByRole("region", { name: "New session" })).toBeNull();
+    expect(document.querySelector(".composer-status-line")?.textContent).toBe("Ersa can't tell whether your message reached the agent. If it did, the transcript shows it.");
+    expect(words().value).toBe("Look");
+    expect(shown()).toEqual(["notes.md12 linesWill be copied into the workspace's .ersa folder"]);
+  });
+});
+
+describe("reading the paths picked", () => {
+  // verifies: FLOW-SEND-MESSAGE-R13
+  it("asks Core about one at a time, since Core refuses more than a few at once", async () => {
+    const shell = fakeShell();
+    shell.pickFiles.mockResolvedValue(["D:/code/beta/a.md", "D:/code/beta/b.md"]);
+    const answers: ((v: unknown) => void)[] = [];
+    const core = fakeCore({
+      "session.subscribe": () => ({ last_seq: -1 }),
+      "attachment.inspect": (params: { path: string }) => new Promise((r) => answers.push(() => r({ path: params.path, name: params.path.slice(-4), kind: "file", size_bytes: 1 }))),
+    });
+    render(createElement(App, { client: core.client, shell }));
+    await settle();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Attach", exact: true } as never));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add files…" }));
+    await settle();
+    expect(core.calls.filter((c) => c.method === "attachment.inspect")).toHaveLength(1);
+    answers[0]?.(undefined);
+    await settle();
+    expect(core.calls.filter((c) => c.method === "attachment.inspect")).toHaveLength(2);
+    answers[1]?.(undefined);
+    await settle();
+    expect(document.querySelectorAll(".composer-attachment")).toHaveLength(2);
+  });
+});
