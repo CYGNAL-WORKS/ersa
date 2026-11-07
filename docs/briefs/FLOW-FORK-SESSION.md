@@ -48,7 +48,7 @@ The user chooses **Fork** in a tile's menu (`LAY-SHELL`, The rail).
 
 ## Open questions
 
-- What a fork is named. The owner expects it to be named as Claude Code names one, likely the original's name marked as a fork; the CLI's fork is not yet recorded, so this is decided when forking is built.
+- What a fork is named, and whether it can be renamed before its first message. The owner expects it named as Claude Code names one, likely the original's name marked as a fork. The CLI reports a fork's new id only in `system/init`, so a rename before the first message needs that id some other way, such as `--session-id` with `--fork-session`, which is not yet tried. Both are decided when forking is built.
 
 ## Changes
 
