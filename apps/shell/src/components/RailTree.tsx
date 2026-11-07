@@ -71,14 +71,14 @@ interface RailTreeProps {
 export function RailTree(props: RailTreeProps) {
   const { projects, sessions, workspaces, placing, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
   const { onRename, renaming, onRenameReset, offline, initialTileMenu, initialTileDraft } = props;
-  // Rename on a tile: unavailable while Ersa can't reach Core, and while the session starts, before its backend has
-  // named it; a session the backend has not named for another reason is refused by Core, and the field says why.
+  // Rename on a tile: unavailable only while Ersa can't reach Core. A session its backend has not named yet, such as one
+  // still starting, is refused by Core, and the field says why.
   const renameOf = (s: Session): TileRename | undefined =>
     onRename && {
       onSave: (title) => onRename(s.id, title),
       renaming: renaming?.[s.id],
       onReset: () => onRenameReset?.(s.id),
-      unavailable: offline ? t("rail.tile.renameOfflineReason") : s.tile.state === "starting" ? t("rail.tile.renameStartingReason") : undefined,
+      unavailable: offline ? t("rail.tile.renameOfflineReason") : undefined,
     };
   const listed = projects.state === "ready" ? projects.projects : [];
   const tree = treeOf(listed, workspaces, sessions.state === "ready" ? sessions.sessions : []);
