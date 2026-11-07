@@ -60,10 +60,11 @@
 }
 
 /* The path as a tooltip: a transient layer anchored below the chip, above it where the window has no room, shown while
-   the pointer rests on the chip, while it has keyboard focus, and after a press on touch. */
+   the pointer rests on the chip, while it has keyboard focus, and after a press on touch. Its trailing edge meets the
+   chip's, as the chip sits at the bubble's trailing edge, so a long path extends and wraps toward the start. */
 .attachment-tip {
   position: fixed;
-  position-area: block-end;
+  position-area: block-end span-inline-start;
   position-try-fallbacks: flip-block;
   z-index: var(--stack-menu);
   margin: var(--space-xs) 0;
