@@ -345,6 +345,10 @@ async fn requests_that_would_change_anything_answer_invalid_state_naming_the_rep
             json!({ "id": id, "request_id": "r", "answers": {} }),
         ),
         ("session.set_title", json!({ "id": id, "title": "t" })),
+        (
+            "session.set_archived",
+            json!({ "id": id, "archived": true }),
+        ),
         ("session.set_mode", json!({ "id": id, "mode": "m" })),
         (
             "project.add",
@@ -371,6 +375,7 @@ async fn requests_that_would_change_anything_answer_invalid_state_naming_the_rep
     let after = the_session(&mut client).await;
     assert_eq!(after["title"], session["title"]);
     assert_eq!(after["state"], session["state"]);
+    assert_eq!(after["archived"], false);
 }
 
 // The shared request/response suite Core passes (`core_api.rs`,

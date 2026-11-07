@@ -1441,3 +1441,222 @@ async fn a_session_in_the_root_workspace_keeps_its_project() {
         "the project's own folder is left as it was"
     );
 }
+
+/// Restarts `core` on the same data directory, as a user closing and
+/// opening Ersa would: the new Core knows only what its store kept.
+async fn restarted(core: TestCore) -> (TestCore, Client) {
+    let mut client = core.client().await;
+    client.result("core.shutdown", json!({})).await;
+    let TestCore { dir, task, .. } = core;
+    task.await.unwrap().unwrap();
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
+    let core = start_with_adapters(dir, |_| {}, adapters).await;
+    let client = core.client().await;
+    (core, client)
+}
+
+/// Whether `workspace.list` still lists the workspace `workspace_id`, in
+/// any project.
+async fn workspace_listed(client: &mut Client, workspace_id: &Value) -> bool {
+    let projects = client.result("project.list", json!({})).await;
+    for project in projects.as_array().unwrap() {
+        let workspaces = client
+            .result("workspace.list", json!({ "project_id": project["id"] }))
+            .await;
+        if workspaces
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| &w["id"] == workspace_id)
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Archiving a running session stops it, as `session.stop` does, and marks
+/// it archived; the session and its workspace stay.
+// verifies: FLOW-ARCHIVE-DELETE-SESSION-R01
+#[tokio::test(flavor = "multi_thread")]
+async fn archiving_a_running_session_stops_it_and_keeps_it_and_its_workspace() {
+    let (core, stats) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    let workspace_id = session_row(&mut client, &id).await["workspace_id"].clone();
+    assert_eq!(session_row(&mut client, &id).await["archived"], false);
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    // Ready, so the stop reaches the backend rather than cancelling its start.
+    client.events_until("session.started").await;
+
+    let response = client
+        .call("session.set_archived", json!({ "id": id, "archived": true }))
+        .await;
+    support::assert_valid("session.set_archived", &response);
+    let archived = &response["result"];
+    assert_eq!(archived["id"], id.as_str());
+    assert_eq!(archived["archived"], true);
+    assert_eq!(archived["state"], "ended");
+    assert_eq!(stats.stops.load(Ordering::SeqCst), 1);
+    let events = client.events_until("session.ended").await;
+    assert_eq!(
+        events.last().unwrap()["event"]["reason"],
+        "user_stopped",
+        "stopped as session.stop stops it"
+    );
+
+    // Still listed, archived, with its workspace.
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(row["archived"], true);
+    assert_eq!(row["state"], "ended");
+    assert_eq!(row["workspace_id"], workspace_id);
+    assert!(workspace_listed(&mut client, &workspace_id).await);
+}
+
+/// What `session.set_archived` sets outlives Core, and `session.list`
+/// reports it. This covers `session.set_archived`'s half of R34; what
+/// `session.arrange` sets is not built yet, and its own test will cite R34.
+// verifies: PROTO-CORE-API-R34
+#[tokio::test(flavor = "multi_thread")]
+async fn an_archived_session_is_still_archived_after_core_restarts() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let archived = new_session(&core, &mut client).await;
+    let workspace_id = session_row(&mut client, &archived).await["workspace_id"].clone();
+    let kept = client
+        .result(
+            "session.create",
+            json!({ "workspace_id": workspace_id, "backend": fake::BACKEND }),
+        )
+        .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    client
+        .result(
+            "session.set_archived",
+            json!({ "id": archived, "archived": true }),
+        )
+        .await;
+    client.result("session.stop", json!({ "id": kept })).await;
+    drop(client);
+
+    let (_core, mut client) = restarted(core).await;
+    assert_eq!(session_row(&mut client, &archived).await["archived"], true);
+    assert_eq!(session_row(&mut client, &kept).await["archived"], false);
+}
+
+/// Core refuses to send an archived session a message: it is read-only
+/// until it is unarchived or resumed.
+// verifies: FLOW-ARCHIVE-DELETE-SESSION-R02
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_to_an_archived_session_is_refused() {
+    let (core, stats) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.started").await;
+    client
+        .result("session.set_archived", json!({ "id": id, "archived": true }))
+        .await;
+
+    let response = client
+        .call("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    support::assert_valid("session.send", &response);
+    let error = &response["error"];
+    assert_eq!(kind(error), "invalid_state");
+    // Refused because it is archived, not only because it has stopped.
+    assert!(
+        error["message"].as_str().unwrap().contains("archived"),
+        "{error:#}"
+    );
+    assert!(stats.messages.lock().unwrap().is_empty());
+
+    // Still refused after a restart, which kept the mark.
+    drop(client);
+    let (_core, mut client) = restarted(core).await;
+    let error = client
+        .error("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    assert_eq!(kind(&error), "invalid_state");
+    assert!(
+        error["message"].as_str().unwrap().contains("archived"),
+        "{error:#}"
+    );
+}
+
+/// Unarchiving clears the mark, for good, and leaves the session stopped;
+/// a message is no longer refused for being archived.
+// verifies: FLOW-ARCHIVE-DELETE-SESSION-R03
+#[tokio::test(flavor = "multi_thread")]
+async fn unarchiving_clears_the_mark_and_leaves_the_session_stopped() {
+    let (core, stats) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.set_archived", json!({ "id": id, "archived": true }))
+        .await;
+    let starts = stats.starts.load(Ordering::SeqCst);
+
+    let unarchived = client
+        .result(
+            "session.set_archived",
+            json!({ "id": id, "archived": false }),
+        )
+        .await;
+    assert_eq!(unarchived["archived"], false);
+    assert_eq!(unarchived["state"], "ended");
+    assert_eq!(stats.starts.load(Ordering::SeqCst), starts, "not restarted");
+    let error = client
+        .error("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    assert!(
+        !error["message"].as_str().unwrap().contains("archived"),
+        "{error:#}"
+    );
+
+    drop(client);
+    let (_core, mut client) = restarted(core).await;
+    assert_eq!(session_row(&mut client, &id).await["archived"], false);
+}
+
+/// `session.resume` on an archived session clears the mark first, for
+/// good. Restarting the session is milestone M1, so the resume itself is
+/// still answered as not built yet.
+// verifies: FLOW-ARCHIVE-DELETE-SESSION-R03
+#[tokio::test(flavor = "multi_thread")]
+async fn resuming_an_archived_session_clears_the_mark_first() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.set_archived", json!({ "id": id, "archived": true }))
+        .await;
+
+    let error = client.error("session.resume", json!({ "id": id })).await;
+    assert_eq!(kind(&error), "invalid_state");
+    assert!(error["message"].as_str().unwrap().contains("M1"));
+    assert_eq!(session_row(&mut client, &id).await["archived"], false);
+
+    drop(client);
+    let (_core, mut client) = restarted(core).await;
+    assert_eq!(session_row(&mut client, &id).await["archived"], false);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn archiving_an_unknown_session_is_not_found() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let error = client
+        .error(
+            "session.set_archived",
+            json!({ "id": "s-missing", "archived": true }),
+        )
+        .await;
+    assert_eq!(kind(&error), "not_found");
+}

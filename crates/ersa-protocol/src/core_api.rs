@@ -85,6 +85,7 @@ methods! {
     SessionStop => "session.stop",
     SessionResume => "session.resume",
     SessionRemove => "session.remove",
+    SessionSetArchived => "session.set_archived",
     SessionSend => "session.send",
     SessionInterrupt => "session.interrupt",
     AttachmentInspect => "attachment.inspect",
@@ -515,6 +516,9 @@ pub struct Session {
     /// Absent unless a send is under way: its phase.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sending: Option<SendPhase>,
+    /// Whether the user archived the session: put away, stopped, and refused
+    /// messages until it is unarchived or resumed. Core stores it (ADR 0026).
+    pub archived: bool,
     pub tile: Tile,
 }
 
@@ -701,6 +705,15 @@ pub struct AnswerQuestionParams {
 pub struct SetTitleParams {
     pub id: String,
     pub title: String,
+}
+
+/// `session.set_archived` params. Archiving stops a live session first, as
+/// `session.stop` does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetArchivedParams {
+    pub id: String,
+    pub archived: bool,
 }
 
 /// `session.set_mode` params.

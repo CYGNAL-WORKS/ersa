@@ -584,6 +584,30 @@
               "$ref": "#/$defs/request_id"
             },
             "method": {
+              "const": "session.set_archived"
+            },
+            "params": {
+              "$ref": "#/$defs/session.set_archived.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
               "const": "session.send"
             },
             "params": {
@@ -1587,6 +1611,7 @@
         "permission_mode",
         "state",
         "created_at",
+        "archived",
         "tile"
       ],
       "properties": {
@@ -1638,6 +1663,10 @@
         "sending": {
           "$ref": "#/$defs/send_phase",
           "description": "Absent unless a send is under way: its phase."
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "Whether the user archived the session. session.send to an archived session answers invalid_state; session.resume clears it first."
         }
       }
     },
@@ -2238,6 +2267,26 @@
       }
     },
     "session.remove.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.set_archived.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "archived"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "Archiving stops a live session first, as session.stop does."
+        }
+      }
+    },
+    "session.set_archived.result": {
       "$ref": "#/$defs/session"
     },
     "session.send.params": {
