@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { t } from "./catalog";
 import "./App.css";
 import { Button } from "./components/Button";
+import type { AttachWhat } from "./components/AttachMenu";
 import { Composer } from "./components/Composer";
 import { RailFoot } from "./components/RailFoot";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -22,7 +23,8 @@ import { contextUsed, tileOf } from "./session/tile";
 import { type Answers, type Decision, answering } from "./session/answers";
 import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./session/shelf";
 import { sharedSubscriptions } from "./session/subscriptions";
-import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
+import { type Attached, attached, sendable, unreadable } from "./session/attachments";
+import { type Follower, type SendProgress, type SessionView, type Sending, follow, progressOf } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { StartStop, readChoices, rememberPatch, remembered, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
@@ -107,6 +109,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   useEffect(() => {
     const running = connect(client, setView, undefined, (notification) => {
+      // Where a send is (FLOW-SEND-MESSAGE-R16): the active session's, or the first message of a session starting.
+      if (notification.method === "session.send_progress") {
+        follower.current?.progress(notification.params);
+        if (notification.params.session_id === startStop.current?.session) setStartProgress(progressOf(notification.params));
+        return;
+      }
       if (notification.method !== "session.event") return;
       // Each follower takes only its own session's events.
       follower.current?.receive(notification.params.event);
@@ -303,11 +311,13 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // (FLOW-NEW-SESSION-R08). Once started, it is the active session (R12).
   // Stop on the new-session screen reaches the start under way (FLOW-SEND-MESSAGE-R03).
   const startStop = useRef<StartStop>(undefined);
-  const start = async (text: string, values: SessionValues) => {
+  const [startProgress, setStartProgress] = useState<SendProgress>();
+  const start = async (text: string, values: SessionValues, attachments: readonly Attached[]) => {
     dispatch({ type: "sending" });
+    setStartProgress(undefined);
     const stop = new StartStop(client);
     startStop.current = stop;
-    const outcome = await startSession(client, values, text, stop).finally(() => {
+    const outcome = await startSession(client, values, text, stop, sendable(attachments)).finally(() => {
       if (startStop.current === stop) startStop.current = undefined;
     });
     if (!outcome.ok && "stopped" in outcome) {
@@ -327,7 +337,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     // Known at once, so the rail puts the new session's tile under its project as it appears (FLOW-NEW-SESSION-R13).
     setWorkspaces((known) => ({ ...known, [outcome.workspace.id]: outcome.workspace }));
     connection.current?.reload("sessions");
-    dispatch({ type: "started", id: outcome.session.id, text, firstSend: outcome.firstSend });
+    dispatch({ type: "started", id: outcome.session.id, text, attachments, firstSend: outcome.firstSend });
     return true;
   };
 
@@ -366,6 +376,28 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             setAdding({ state: "failed", message: describeError(error) });
             return { kind: "failed" };
           }
+        }
+      : undefined;
+
+  // Attaching (FLOW-SEND-MESSAGE-R07, R13): the Shell's dialog on this computer, then `attachment.inspect` for each path
+  // picked, and only those. A path Core can't read is attached marked with why, so the message waits until it is
+  // removed (R10). Without the Shell, as in tests that give none, attach is unavailable.
+  const pickFiles = shell?.pickFiles;
+  const attach =
+    pickFiles && pickFolder && view.phase === "connected"
+      ? async (what: AttachWhat): Promise<Attached[]> => {
+          const host_id = view.hello.host.id;
+          let paths: string[];
+          try {
+            paths = what === "folder" ? [await pickFolder()].filter((p): p is string => p !== null) : await pickFiles(what === "images");
+          } catch {
+            return [];
+          }
+          return Promise.all(
+            paths.map((path) =>
+              client.call("attachment.inspect", { host_id, path }).then(attached, (error) => unreadable(path, describeError(error))),
+            ),
+          );
         }
       : undefined;
 
@@ -556,9 +588,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               // An open permission request holds the focal glow; the box shows focus by its edge alone.
               quietFocus={listed?.tile.pending.some((p) => p.kind === "permission")}
               // A kept session's first message that did not go through: why, and the text when it is to go again.
-              sending={shown.message ?? (firstSendHere && { state: "failed", message: firstSendHere.message })}
+              sending={shown.message ?? firstSendHere?.sending}
               initialText={firstSendHere?.text}
-              onSend={(text) => follower.current?.send(text) ?? Promise.resolve(false)}
+              initialAttachments={firstSendHere?.attachments}
+              onAttach={attach}
+              workspace={listedWorkspace?.path}
+              onSend={(text, attachments) => follower.current?.send(text, sendable(attachments)) ?? Promise.resolve(false)}
               // Stop, from sending until the turn ends: cancels the message on its way, or interrupts the turn (FLOW-SEND-MESSAGE-R03).
               working={shown.transcript.working || shown.turnPending}
               onStop={() => void follower.current?.interrupt()}
@@ -595,7 +630,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               lastUsed={lastUsed}
               projectId={composing?.projectId}
               onStart={start}
-              starting={starting}
+              onAttach={attach}
+              starting={starting?.state === "sending" ? { state: "sending", progress: startProgress } : starting}
               onChooseFolder={chooseFolder}
               onListBranches={listBranches}
               onAddProject={addProject}

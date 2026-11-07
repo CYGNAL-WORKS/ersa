@@ -11,7 +11,9 @@ import {
   startingProject,
   valuesFor,
 } from "../session/controls";
+import type { Attached } from "../session/attachments";
 import type { Sending } from "../session/follow";
+import type { AttachWhat } from "./AttachMenu";
 import { Composer, type Unavailable } from "./Composer";
 import { type ControlKey, type Host, SessionControls } from "./SessionControls";
 import { TrustQuestion, folderName } from "./TrustQuestion";
@@ -36,7 +38,9 @@ interface NewSessionScreenProps {
   /** The project the user chose New session for; else the local host's most recently used (FLOW-NEW-SESSION-R15). */
   projectId?: string;
   /** Starts the session with the first message; resolves true once it has started. */
-  onStart: (text: string, values: SessionValues) => Promise<boolean>;
+  onStart: (text: string, values: SessionValues, attachments: readonly Attached[]) => Promise<boolean>;
+  /** Opens the system's dialog for files, images or a folder and reads each path picked (FLOW-SEND-MESSAGE-R07). */
+  onAttach?: (what: AttachWhat) => Promise<Attached[]>;
   starting?: Sending;
   /**
    * Opens the system's folder dialog on the local host and finds whether the folder picked is already a project
@@ -313,14 +317,17 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           sending={starting}
           onStop={props.onStop}
           onWrite={hold}
-          onSend={(text) => {
+          onAttach={props.onAttach}
+          // A new isolated workspace is not made yet, so it holds nothing; the root workspace is the project's folder.
+          workspace={project && values.workspace === "root" ? project.path : undefined}
+          onSend={(text, attachments) => {
             hold();
             // With no project, sending opens the folder dialog and the message stays for the user to send (R19).
             if (!project) {
               void addProject();
               return Promise.resolve(false);
             }
-            return onStart(text, values);
+            return onStart(text, values, attachments);
           }}
         />
         <SessionControls
