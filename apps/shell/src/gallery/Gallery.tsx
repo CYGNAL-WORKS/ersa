@@ -414,12 +414,13 @@ const room = (node: ReactNode) => <div className="gallery-room">{node}</div>;
 const statusRoom = (node: ReactNode) => <div className="gallery-status-room">{node}</div>;
 /** Room above a composer for its attach menu, which opens upward from attach. */
 const menuRoom = (node: ReactNode) => <div className="gallery-room-before gallery-list-above">{node}</div>;
-/** A message's attachments (FLOW-SEND-MESSAGE-R09, R14): in the workspace, from outside it, and a folder. */
-const galleryWorkspace = "D:\\code\\ersa";
+/** A message's attachments (FLOW-SEND-MESSAGE-R09, R14): a file in the workspace, an image, and a folder Core copies. */
+const galleryWorkspace = "w-gallery";
+const inWorkspace = { workspace: galleryWorkspace, copied: false };
 const galleryAttachments: [Attached, Attached, Attached] = [
-  { path: "D:\\code\\ersa\\docs\\briefs\\FLOW-SEND-MESSAGE.md", name: "FLOW-SEND-MESSAGE.md", kind: "file", detail: "212 lines" },
-  { path: "C:\\Pictures\\composer-mockup.png", name: "composer-mockup.png", kind: "image", detail: "84 KB" },
-  { path: "D:\\code\\ersa\\apps\\shell\\src", name: "src", kind: "folder", detail: "Folder" },
+  { path: "D:/code/ersa/docs/briefs/FLOW-SEND-MESSAGE.md", name: "FLOW-SEND-MESSAGE.md", kind: "file", detail: "212 lines", copied: inWorkspace },
+  { path: "C:/Pictures/composer-mockup.png", name: "composer-mockup.png", kind: "image", detail: "84 KB" },
+  { path: "C:/design/icons", name: "icons", kind: "folder", detail: "Folder", copied: { workspace: galleryWorkspace, copied: true } },
 ];
 const attachProps = { autoFocus: false, onSend: async () => false, onAttach: async () => [], workspace: galleryWorkspace } as const;
 
@@ -877,7 +878,7 @@ const entries: Entry[] = [
       ["An attach choice under the pointer", menuRoom(<Composer {...attachProps} attachMenuOpen forceAttachChoice={{ what: "images", state: "hover" }} />)],
       ["An attach choice pressed", menuRoom(<Composer {...attachProps} attachMenuOpen forceAttachChoice={{ what: "images", state: "pressed" }} />)],
       ["An attach choice with keyboard focus", menuRoom(<Composer {...attachProps} attachMenuOpen forceAttachChoice={{ what: "files", state: "focus" }} />)],
-      ["Attachments, one from outside the workspace", <Composer {...attachProps} initialText="Match the mockup." initialAttachments={galleryAttachments} />],
+      ["Attachments, one that will be copied", <Composer {...attachProps} initialText="Match the mockup." initialAttachments={galleryAttachments} />],
       [
         "An attachment Ersa can't send",
         <Composer

@@ -1,7 +1,7 @@
 import { ArrowUp, File, Folder, Image, Square, X } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { t } from "../catalog";
-import { type Attached, addAll, outside, same } from "../session/attachments";
+import { type Attached, addAll, same, willCopy } from "../session/attachments";
 import type { Sending } from "../session/follow";
 import { type AttachWhat, AttachMenu } from "./AttachMenu";
 import { ContextRing } from "./ContextRing";
@@ -28,7 +28,7 @@ interface ComposerProps {
    * absent where nothing can be attached, and attach is then unavailable.
    */
   onAttach?: (what: AttachWhat) => Promise<Attached[]>;
-  /** The folder of the session's workspace; absent while it is not made yet, so every attachment is from outside it (R14). */
+  /** The session's workspace, by id; absent while it is not made yet, so every file and folder will be copied (R14). */
   workspace?: string;
   /** Attachments already added: a message given back to send again, or the gallery's. */
   initialAttachments?: Attached[];
@@ -181,7 +181,7 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, work
         {attachments.length > 0 && (
           <ul ref={list} className="composer-attachments" aria-label={t("composer.attachment.listLabel")}>
             {attachments.map((a, i) => (
-              <Attachment key={a.path} attachment={a} outside={outside(a, workspace)} onRemove={() => remove(i)} />
+              <Attachment key={a.path} attachment={a} copied={willCopy(a, workspace)} onRemove={() => remove(i)} />
             ))}
           </ul>
         )}
@@ -242,10 +242,10 @@ const KIND_ICON = { file: File, image: Image, folder: Folder } as const;
 
 /**
  * One attachment (docs/design/COMPOSER.md, Attachments): its icon, name and detail, that it will be copied into the
- * workspace when it comes from outside it (FLOW-SEND-MESSAGE-R14), and remove (R09). One Ersa can't send shows the
+ * workspace when sending copies it (FLOW-SEND-MESSAGE-R14), and remove (R09). One Ersa can't send shows the
  * danger glyph and why in place of its icon and detail (R10).
  */
-function Attachment({ attachment: a, outside, onRemove }: { attachment: Attached; outside: boolean; onRemove: () => void }) {
+function Attachment({ attachment: a, copied, onRemove }: { attachment: Attached; copied: boolean; onRemove: () => void }) {
   return (
     <li className="composer-attachment" data-problem={a.problem !== undefined || undefined}>
       {a.problem !== undefined ? (
@@ -263,7 +263,7 @@ function Attachment({ attachment: a, outside, onRemove }: { attachment: Attached
       ) : (
         <>
           <span className="composer-attachment-detail">{a.detail}</span>
-          {outside && <span className="composer-attachment-detail">{t("composer.attachment.copiedNote")}</span>}
+          {copied && <span className="composer-attachment-detail">{t("composer.attachment.copiedNote")}</span>}
         </>
       )}
       <IconButton icon={X} size="icon-xs" label={t("composer.attachment.removeLabel", { name: a.name })} className="composer-attachment-remove" onClick={onRemove} />

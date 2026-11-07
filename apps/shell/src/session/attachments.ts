@@ -1,5 +1,5 @@
 // A message's attachments in the composer (FLOW-SEND-MESSAGE, COMPOSER.md Attachments): what each shows, which are
-// the same, which come from outside the workspace, and what `session.send` gets. Kept free of React so the tests
+// the same, which will be copied into the workspace, and what `session.send` gets. Kept free of React so the tests
 // drive it with plain data.
 
 import { t } from "../catalog";
@@ -12,8 +12,8 @@ export interface Attached {
   kind: AttachmentInspectResult["kind"];
   /** Its detail: a size, a line count, or that it is a folder (FLOW-SEND-MESSAGE-R09). */
   detail: string;
-  /** Where a link points, which is what Core copies or not. */
-  target?: string;
+  /** Whether sending copies it, as Core judged it for one workspace (FLOW-SEND-MESSAGE-R14). */
+  copied?: { workspace: string; copied: boolean };
   /** Why Ersa can't send it, said beside it; the message waits until it is removed (FLOW-SEND-MESSAGE-R10). */
   problem?: string;
 }
@@ -54,27 +54,23 @@ export function same(a: string, b: string): boolean {
   return key(a) === key(b);
 }
 
-/** Whether `path` lies inside the folder `root`, the folder itself included. */
-export function inside(path: string, root: string): boolean {
-  const p = key(path);
-  const r = key(root);
-  return p === r || p.startsWith(`${r}/`);
-}
-
-/** `info` as the composer holds it. */
-export function attached(info: AttachmentInspectResult): Attached {
+/** `info` as the composer holds it, with whether sending copies it when Core judged that for `workspace`. */
+export function attached(info: AttachmentInspectResult, workspace?: string): Attached {
   const held: Attached = { path: info.path, name: info.name, kind: info.kind, detail: detail(info) };
-  if (info.target !== undefined) held.target = info.target;
+  if (workspace !== undefined && info.copied !== undefined) held.copied = { workspace, copied: info.copied };
   return held;
 }
 
 /**
- * Whether `a` comes from outside the session's workspace, so Core copies it into the workspace's `.ersa` folder
- * (FLOW-SEND-MESSAGE-R14). A workspace not made yet, as a new session's isolated one, holds nothing. A link is judged
- * by where it points, as Core judges it.
+ * Whether sending `a` copies it into the workspace's `.ersa` folder (FLOW-SEND-MESSAGE-R14), as Core said when it
+ * inspected it: Core alone resolves links and junctions, so the Interface never judges a path itself. An image goes
+ * inline and is never copied. A workspace not made yet, as a new session's isolated one, holds nothing, so every
+ * file and folder is copied; and one Core did not judge for this workspace is taken to be copied too.
  */
-export function outside(a: Attached, workspace: string | undefined): boolean {
-  return workspace === undefined || !inside(a.target ?? a.path, workspace);
+export function willCopy(a: Attached, workspace: string | undefined): boolean {
+  if (a.kind === "image") return false;
+  if (workspace === undefined || a.copied?.workspace !== workspace) return true;
+  return a.copied.copied;
 }
 
 /** A path Ersa couldn't read, as it no longer exists: named by its last part and marked with why (R10). */

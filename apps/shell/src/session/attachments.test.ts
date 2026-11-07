@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AttachmentInspectResult } from "../protocol/core-api.gen";
-import { addAll, attached, detail, inside, outside, sendable, size } from "./attachments";
+import { addAll, attached, detail, sendable, size, willCopy } from "./attachments";
 
 const info = (over: Partial<AttachmentInspectResult>): AttachmentInspectResult => ({
   path: "D:\\work\\repo\\notes.md",
@@ -30,19 +30,19 @@ describe("an attachment's detail", () => {
   });
 });
 
-describe("attachments from outside the workspace", () => {
+describe("attachments that will be copied into the workspace", () => {
   // verifies: FLOW-SEND-MESSAGE-R14
-  it("are those the session's workspace does not hold, compared as Windows compares paths", () => {
-    expect(outside(attached(info({})), "D:\\work\\repo")).toBe(false);
-    expect(outside(attached(info({ path: "d:/WORK/repo/src" })), "D:\\work\\repo\\")).toBe(false);
-    expect(outside(attached(info({ path: "D:\\work\\repository\\a.md" })), "D:\\work\\repo")).toBe(true);
-    expect(outside(attached(info({ path: "C:\\Users\\me\\a.md" })), "D:\\work\\repo")).toBe(true);
-    // A workspace not yet made, as a new session's, holds nothing yet.
-    expect(outside(attached(info({})), undefined)).toBe(true);
-    expect(inside("D:\\work\\repo", "D:\\work\\repo")).toBe(true);
-    // A link is judged by where it points.
-    expect(outside(attached(info({ target: "C:\\secrets\\a.md" })), "D:\\work\\repo")).toBe(true);
-    expect(outside(attached(info({ path: "C:\\links\\a.md", target: "D:\\work\\repo\\a.md" })), "D:\\work\\repo")).toBe(false);
+  it("will be copied as Core said for the workspace, never judged from the path's text", () => {
+    // Core resolved it: a path inside the folder that leads outside it, through a link or junction, is copied.
+    expect(willCopy(attached(info({ path: "D:\\work\\repo\\vendor\\key.txt", copied: true }), "w-1"), "w-1")).toBe(true);
+    expect(willCopy(attached(info({ path: "C:\\elsewhere\\a.md", copied: false }), "w-1"), "w-1")).toBe(false);
+    // Judged for another workspace, or not judged at all: taken to be copied.
+    expect(willCopy(attached(info({ copied: false }), "w-1"), "w-2")).toBe(true);
+    expect(willCopy(attached(info({})), "w-1")).toBe(true);
+    // A workspace not yet made, as a new session's isolated one, holds nothing yet.
+    expect(willCopy(attached(info({ copied: false }), "w-1"), undefined)).toBe(true);
+    // An image goes inline, never copied.
+    expect(willCopy(attached(info({ kind: "image", media_type: "image/png" })), undefined)).toBe(false);
   });
 });
 

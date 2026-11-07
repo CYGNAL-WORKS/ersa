@@ -657,14 +657,17 @@ describe("stop under a session App draws", () => {
 // Attachments under a session and on the new-session screen (FLOW-SEND-MESSAGE-R07, R10, R13, R16).
 describe("the attachments App gives the composer", () => {
   const inspected: Record<string, unknown> = {
-    "D:/code/beta/notes.md": { path: "D:/code/beta/notes.md", name: "notes.md", kind: "file", size_bytes: 900, lines: 12 },
+    "D:/code/beta/notes.md": { path: "D:/code/beta/notes.md", name: "notes.md", kind: "file", size_bytes: 900, lines: 12, copied: false },
     "C:/pics/shot.png": { path: "C:/pics/shot.png", name: "shot.png", kind: "image", size_bytes: 2048, media_type: "image/png" },
-    "D:/code/beta/src": { path: "D:/code/beta/src", name: "src", kind: "folder" },
+    // In beta's folder by its path, but a junction elsewhere: Core says sending copies it.
+    "D:/code/beta/src": { path: "D:/code/beta/src", name: "src", kind: "folder", copied: true },
   };
-  const inspect = (params: { host_id: string; path: string }) => {
+  const inspect = (params: { host_id: string; path: string; workspace_id?: string }) => {
     if (params.host_id !== "local") throw new Error("wrong host");
-    const info = inspected[params.path];
+    const info = inspected[params.path] as Record<string, unknown> | undefined;
     if (!info) throw { kind: "rpc", error: { code: -32000, message: "attachment.inspect: missing", data: { kind: "not_found", detail: "This file no longer exists." } } };
+    // Core says whether sending copies it only when asked for a workspace.
+    if (params.workspace_id === undefined) return { ...info, copied: undefined };
     return info;
   };
   const choose = async (name: string) => {
@@ -689,12 +692,12 @@ describe("the attachments App gives the composer", () => {
     expect(shell.pickFiles.mock.calls).toEqual([[false], [true]]);
     expect(shell.pickFolder).toHaveBeenCalledTimes(1);
     expect(core.calls.filter((c) => c.method === "attachment.inspect").map((c) => c.params)).toEqual([
-      { host_id: "local", path: "D:/code/beta/notes.md" },
-      { host_id: "local", path: "C:/pics/shot.png" },
-      { host_id: "local", path: "D:/code/beta/src" },
+      { host_id: "local", path: "D:/code/beta/notes.md", workspace_id: "w-beta" },
+      { host_id: "local", path: "C:/pics/shot.png", workspace_id: "w-beta" },
+      { host_id: "local", path: "D:/code/beta/src", workspace_id: "w-beta" },
     ]);
-    // The session's workspace is beta's folder: only the image is from outside it (R14).
-    expect(shown()).toEqual(["notes.md12 lines", "shot.png2 KBWill be copied into the workspace's .ersa folder", "srcFolder"]);
+    // R14: the note follows what Core says for the session's workspace; an image goes inline.
+    expect(shown()).toEqual(["notes.md12 lines", "shot.png2 KB", "srcFolderWill be copied into the workspace's .ersa folder"]);
     fireEvent.change(words(), { target: { value: "Look" } });
     await act(async () => {
       fireEvent.keyDown(words(), { key: "Enter" });
@@ -764,7 +767,8 @@ describe("the attachments of a new session's first message", () => {
     let created = false;
     const made = { ...session("s-new", "alpha", "2026-11-03T09:00:00Z"), workspace_id: "w-new", state: "idle" as const };
     return {
-      "attachment.inspect": () => notes,
+      // Judged against the project's root workspace: inside it.
+      "attachment.inspect": (params: { workspace_id?: string }) => (params.workspace_id === "w-alpha" ? { ...notes, copied: false } : notes),
       "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", path: "D:/ws/alpha-1", vcs_ref: "ersa/new" }),
       "session.create": () => ((created = true), made),
       "session.subscribe": () => ({ last_seq: -1 }),

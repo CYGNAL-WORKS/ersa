@@ -646,6 +646,10 @@ pub struct SessionSendResult {
 pub struct InspectParams {
     pub host_id: String,
     pub path: String,
+    /// The workspace the attachment is for: with it, the result says whether
+    /// sending would copy the path into the session's scratch folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
 }
 
 /// `attachment.inspect` result: what the composer shows for a path.
@@ -667,6 +671,10 @@ pub struct Inspected {
     /// Where a link points.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// With `workspace_id`: whether sending would copy it into the session's
+    /// scratch folder, judged as `session.send` judges it. Never for an image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copied: Option<bool>,
 }
 
 /// `session.decide_permission` params.

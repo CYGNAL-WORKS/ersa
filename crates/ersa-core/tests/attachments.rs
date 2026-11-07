@@ -831,3 +831,88 @@ async fn progress_reaches_the_client_while_a_phase_lasts() {
     let response = s.client.response(send).await;
     assert!(response.get("result").is_some(), "{response:#}");
 }
+
+impl Setup {
+    /// Whether `attachment.inspect` says sending `p` into the workspace copies it.
+    async fn copied(&mut self, p: &Path) -> Value {
+        let inspected = self
+            .client
+            .result(
+                "attachment.inspect",
+                json!({ "host_id": "local", "path": path(p), "workspace_id": self.workspace_id }),
+            )
+            .await;
+        inspected["copied"].clone()
+    }
+}
+
+// verifies: PROTO-CORE-API-R24
+// verifies: FLOW-SEND-MESSAGE-R14
+#[tokio::test]
+async fn inspect_says_whether_sending_copies_the_path_through_dot_dot_and_not_for_images() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    let inside = file(&s.workspace, "notes.md", b"x\n");
+    let outside = file(&s.outside, "a.txt", b"x\n");
+    assert_eq!(s.copied(&inside).await, json!(false));
+    assert_eq!(s.copied(&outside).await, json!(true));
+    // `..` is resolved: out of the workspace and back into it is inside, and the reverse outside.
+    let workspace_name = s.workspace.file_name().unwrap().to_owned();
+    let back_in = s.outside.join("..").join(&workspace_name).join("notes.md");
+    assert_eq!(s.copied(&back_in).await, json!(false));
+    let out_again = s.workspace.join("..").join("outside").join("a.txt");
+    assert_eq!(s.copied(&out_again).await, json!(true));
+    // An image goes inline: nothing is copied, so nothing is said.
+    let image = file(&s.outside, "a.png", PNG);
+    assert_eq!(s.copied(&image).await, Value::Null);
+    // Without a workspace, nothing is said either.
+    let bare = s
+        .client
+        .result(
+            "attachment.inspect",
+            json!({ "host_id": "local", "path": path(&outside) }),
+        )
+        .await;
+    assert_eq!(bare.get("copied"), None);
+}
+
+// verifies: PROTO-CORE-API-R24
+// verifies: FLOW-SEND-MESSAGE-R14
+#[cfg(windows)]
+#[tokio::test]
+async fn a_file_through_a_junction_out_of_the_workspace_is_copied_and_inspect_says_so() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    file(&s.outside, "key.txt", b"x\n");
+    let junction = s.workspace.join("vendor");
+    let made = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&junction)
+        .arg(&s.outside)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    let through = junction.join("key.txt");
+    assert_eq!(s.copied(&through).await, json!(true));
+    // And session.send does copy it: the two judge alike.
+    let id = s.session().await;
+    let sent = s
+        .send(&id, "", json!([{ "kind": "file", "path": path(&through) }]))
+        .await;
+    assert!(sent.get("result").is_some(), "{sent:#}");
+    assert_eq!(copies(&s.scratch(&id)), vec!["1"]);
+}
+
+// verifies: PROTO-CORE-API-R24
+// verifies: FLOW-SEND-MESSAGE-R14
+#[cfg(unix)]
+#[tokio::test]
+async fn a_link_with_a_relative_target_is_judged_where_it_points() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    file(&s.workspace, "a.md", b"x\n");
+    let near = s.workspace.join("near.md");
+    std::os::unix::fs::symlink("a.md", &near).unwrap();
+    assert_eq!(s.copied(&near).await, json!(false));
+    file(&s.outside, "far.md", b"x\n");
+    let far = s.workspace.join("far.md");
+    std::os::unix::fs::symlink("../outside/far.md", &far).unwrap();
+    assert_eq!(s.copied(&far).await, json!(true));
+}

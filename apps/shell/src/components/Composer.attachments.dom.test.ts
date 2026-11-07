@@ -13,9 +13,11 @@ import { Composer } from "./Composer";
 
 afterEach(cleanup);
 
-const notes: Attached = { path: "D:\\work\\repo\\notes.md", name: "notes.md", kind: "file", detail: "212 lines" };
+const notes: Attached = { path: "D:\\work\\repo\\notes.md", name: "notes.md", kind: "file", detail: "212 lines", copied: { workspace: "w-1", copied: false } };
 const shot: Attached = { path: "C:\\pics\\shot.png", name: "shot.png", kind: "image", detail: "84 KB" };
-const src: Attached = { path: "D:\\work\\repo\\src", name: "src", kind: "folder", detail: "Folder" };
+const src: Attached = { path: "D:\\work\\repo\\src", name: "src", kind: "folder", detail: "Folder", copied: { workspace: "w-1", copied: false } };
+// Inside the folder by its path, but Core resolved it elsewhere, as through a junction.
+const vendored: Attached = { path: "D:\\work\\repo\\vendor\\key.txt", name: "key.txt", kind: "file", detail: "1 line", copied: { workspace: "w-1", copied: true } };
 
 type Props = {
   sending?: Sending;
@@ -26,7 +28,7 @@ type Props = {
   onSend?: (text: string, attachments: readonly Attached[]) => Promise<boolean>;
 };
 const draw = (props: Props = {}) =>
-  createElement(Composer, { autoFocus: false, onSend: async () => true, workspace: "D:\\work\\repo", ...props });
+  createElement(Composer, { autoFocus: false, onSend: async () => true, workspace: "w-1", ...props });
 const words = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
 const attachButton = () => screen.getByRole("button", { name: "Attach" });
 const send = () => screen.getByRole("button", { name: "Send" });
@@ -116,13 +118,13 @@ describe("attachments", () => {
   });
 
   // verifies: FLOW-SEND-MESSAGE-R14
-  it("from outside the workspace say they will be copied into its .ersa folder", () => {
-    render(draw({ initialAttachments: [notes, shot] }));
-    expect(shown()).toEqual(["notes.md212 lines", "shot.png84 KBWill be copied into the workspace's .ersa folder"]);
+  it("say they will be copied into its .ersa folder when Core says sending copies them, and an image never", () => {
+    render(draw({ initialAttachments: [notes, vendored, shot] }));
+    expect(shown()).toEqual(["notes.md212 lines", "key.txt1 lineWill be copied into the workspace's .ersa folder", "shot.png84 KB"]);
     cleanup();
-    // A workspace not made yet holds nothing: every attachment is copied.
-    render(draw({ initialAttachments: [notes], workspace: undefined }));
-    expect(shown()).toEqual(["notes.md212 linesWill be copied into the workspace's .ersa folder"]);
+    // A workspace not made yet holds nothing: every file and folder is copied.
+    render(draw({ initialAttachments: [notes, shot], workspace: undefined }));
+    expect(shown()).toEqual(["notes.md212 linesWill be copied into the workspace's .ersa folder", "shot.png84 KB"]);
   });
 });
 
