@@ -359,6 +359,10 @@ async fn requests_that_would_change_anything_answer_invalid_state_naming_the_rep
             json!({ "id": id, "archived": true }),
         ),
         ("session.set_mode", json!({ "id": id, "mode": "m" })),
+        ("session.arrange", json!({ "id": id, "pinned": true })),
+        ("section.create", json!({ "name": "Work" })),
+        ("section.rename", json!({ "id": "sec-1", "name": "Work" })),
+        ("section.remove", json!({ "id": "sec-1" })),
         (
             "project.add",
             json!({ "host_id": "local", "path": ".", "trusted": false }),
@@ -385,6 +389,9 @@ async fn requests_that_would_change_anything_answer_invalid_state_naming_the_rep
     assert_eq!(after["title"], session["title"]);
     assert_eq!(after["state"], session["state"]);
     assert_eq!(after["archived"], false);
+    assert_eq!(after["pinned"], false);
+    // Reading the sections changes nothing, so the replay answers it.
+    assert_eq!(client.result("section.list", json!({})).await, json!([]));
 }
 
 // The shared request/response suite Core passes (`core_api.rs`,

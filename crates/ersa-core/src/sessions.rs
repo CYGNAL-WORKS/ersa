@@ -50,7 +50,9 @@ use ersa_adapter::{
     SessionConfig, Transport,
 };
 use ersa_protocol::core_api::rpc::Notification;
-use ersa_protocol::core_api::{Deleting, Session, SessionEventParams, SessionTileParams, Tile};
+use ersa_protocol::core_api::{
+    Deleting, Section, Session, SessionEventParams, SessionTileParams, Tile,
+};
 use ersa_protocol::events::{
     Envelope, ErrorCode, ErrorEvent, Event, LifecycleState, NoticeCode, NoticeLevel, SessionNotice,
 };
@@ -155,6 +157,9 @@ pub enum SessionError {
     /// ([`SessionManager::claim_workspace`]).
     #[error("{0}")]
     Busy(String),
+    /// A `session.arrange` named a section that does not exist.
+    #[error("no section {0}")]
+    NoSection(String),
 }
 
 /// Every session Core knows, and the adapters it can start them with.
@@ -177,6 +182,10 @@ pub struct SessionManager {
     /// the session it deletes. In memory only, so a restart drops every
     /// claim (PROTO-CORE-API, `session.delete`).
     claims: Claims,
+    /// Held while a session's arrangement is written to the store and to
+    /// memory, so a `section.remove` and a `session.arrange` into that
+    /// section land in the same order in both.
+    arrangement: tokio::sync::Mutex<()>,
 }
 
 /// Claimed workspaces, by id, with the session each delete is for.
@@ -631,6 +640,9 @@ impl Handle {
             last_event_seq: hub.last_seq(),
             sending: lock(&self.sending).as_ref().map(send::Sending::phase),
             archived: row.archived,
+            pinned: row.pinned,
+            section_id: row.section_id,
+            last_activity_at: row.last_activity_at,
             deleting: row.deleting,
             tile,
         }
@@ -651,6 +663,7 @@ impl SessionManager {
             copy_pause: Duration::ZERO,
             closing: AtomicBool::new(false),
             claims: Arc::default(),
+            arrangement: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -1162,6 +1175,64 @@ impl SessionManager {
             .await?;
         lock(&handle.row).archived = archived;
         Ok(handle.describe())
+    }
+
+    /// Pins or unpins the session and moves it between sections, changing
+    /// only what is given (ADR 0026, FLOW-ORGANIZE-SESSIONS). A section that
+    /// does not exist is `not_found`, and changes nothing.
+    pub async fn arrange(
+        &self,
+        id: &str,
+        pinned: Option<bool>,
+        section_id: Option<Option<String>>,
+    ) -> Result<Session, SessionError> {
+        let handle = self.handle(id)?;
+        self.refuse_if_deleting(&handle)?;
+        // As `set_archived`: a `session.remove` is either finished, and seen
+        // here, or waits for the change.
+        let _op = handle.op.lock().await;
+        if handle.removed.load(Ordering::SeqCst) {
+            return Err(SessionError::NotFound(id.to_string()));
+        }
+        let _arrangement = self.arrangement.lock().await;
+        // Stored first, then kept in memory, so `session.list` never reports
+        // what a restart would lose.
+        let stored = self
+            .store
+            .arrange_session(id.to_string(), pinned, section_id.clone())
+            .await?;
+        if !stored {
+            let missing = section_id.flatten().unwrap_or_default();
+            return Err(SessionError::NoSection(missing));
+        }
+        {
+            let mut row = lock(&handle.row);
+            if let Some(pinned) = pinned {
+                row.pinned = pinned;
+            }
+            if let Some(section_id) = section_id {
+                row.section_id = section_id;
+            }
+        }
+        Ok(handle.describe())
+    }
+
+    /// Removes section `id`, putting its sessions in no section
+    /// (PROTO-CORE-API-R39). Returns the section as it was; `None` when
+    /// there is no such section.
+    pub async fn remove_section(&self, id: &str) -> Result<Option<Section>, SessionError> {
+        let _arrangement = self.arrangement.lock().await;
+        let removed = self.store.delete_section(id.to_string()).await?;
+        if removed.is_some() {
+            let handles: Vec<Arc<Handle>> = lock(&self.sessions).values().cloned().collect();
+            for handle in handles {
+                let mut row = lock(&handle.row);
+                if row.section_id.as_deref() == Some(id) {
+                    row.section_id = None;
+                }
+            }
+        }
+        Ok(removed)
     }
 
     // -- Deleting (PROTO-CORE-API, `session.delete`) --------------------------
@@ -2215,6 +2286,28 @@ async fn run_pipeline(pipeline: Pipeline) {
                 }
             }
         }
+        // When a turn ends, its time is the session's last activity, and
+        // only then (PROTO-CORE-API-R37). Stored before the turn's end is
+        // published, as the backend's id is, so a client that saw it end
+        // finds the time in `session.list`.
+        let ended = events
+            .iter()
+            .rev()
+            .find_map(|envelope| match envelope.event {
+                Event::TurnCompleted(_) => Some(envelope.ts.clone()),
+                _ => None,
+            });
+        if let Some(at) = ended {
+            match store
+                .set_session_last_activity(handle.id.clone(), at.clone())
+                .await
+            {
+                Ok(()) => lock(&handle.row).last_activity_at = Some(at),
+                Err(e) => {
+                    tracing::error!(session = %handle.id, error = %e, "could not record when a turn ended");
+                }
+            }
+        }
         publish(&mut lock(&handle.hub), &handle.id, &events);
         if tile != last_tile {
             send_tile(&tiles, &handle.id, &tile);
@@ -2700,6 +2793,9 @@ mod tests {
             permission_mode: None,
             archived: false,
             deleting: None,
+            pinned: false,
+            section_id: None,
+            last_activity_at: None,
         };
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&manager.sessions).insert(handle.id.clone(), handle);
