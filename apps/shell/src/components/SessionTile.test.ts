@@ -15,6 +15,7 @@ const at = (id: string, created_at: string): Session => ({
   permission_mode: "default",
   state: "idle",
   created_at,
+  archived: false,
   tile: { state: "idle", pending: [] },
 });
 
