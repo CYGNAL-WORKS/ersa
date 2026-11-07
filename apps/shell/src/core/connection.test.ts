@@ -23,6 +23,7 @@ const session: Session = {
   permission_mode: "default",
   state: "running",
   created_at: "2026-11-01T00:00:00Z",
+  archived: false,
   tile: { state: "running", pending: [] },
 };
 
