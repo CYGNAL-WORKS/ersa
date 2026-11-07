@@ -4,7 +4,7 @@ type: layout
 title: Application shell
 status: draft
 references: []
-adrs: [0008, 0026]
+adrs: [0008, 0029]
 ---
 
 # Application shell

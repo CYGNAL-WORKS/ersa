@@ -23,7 +23,7 @@ A session's history is the backend's own session record, read through the adapte
 
 Per session, Core stores what finds it again (host, project, workspace, backend, the backend's session id), its mode, and the user's arrangement of it: whether it is pinned, its section, whether it is archived, and the time its latest turn ended. Core stores the user's sections, and the rail's grouping, sort, filter and collapsed groups are user settings in Core.
 
-A session's title is the backend's, with one exception: a name the user gives a session its backend has not recorded yet. Core stores that name at once, reports it as the session's title, and writes it to the backend as the user's name once the backend reports the session's id, then drops its copy.
+A session's title is the backend's, with one exception: a name the user gives a session its backend has not recorded yet. Core stores that name at once, across restarts, reports it as the session's title, and writes the latest one to the backend as the user's name once the backend reports the session's id, keeping its copy until the backend lists the name and trying again when a write fails.
 
 ## Consequences
 
