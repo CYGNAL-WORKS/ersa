@@ -2343,20 +2343,32 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "host_id",
         "path"
       ],
-      "properties": {
-        "host_id": {
-          "$ref": "#/$defs/id"
+      "oneOf": [
+        {
+          "required": [
+            "workspace_id"
+          ]
         },
+        {
+          "required": [
+            "host_id"
+          ]
+        }
+      ],
+      "properties": {
         "path": {
           "type": "string",
           "minLength": 1
         },
         "workspace_id": {
           "$ref": "#/$defs/id",
-          "description": "The workspace the attachment is for: with it, the result says whether sending would copy the path."
+          "description": "The workspace the attachment is for, whose host reads the path; the result then says whether sending would copy it. Exactly one of this and host_id."
+        },
+        "host_id": {
+          "$ref": "#/$defs/id",
+          "description": "The host that reads the path, for a workspace not made yet."
         }
       }
     },
@@ -2403,7 +2415,7 @@
         },
         "copied": {
           "type": "boolean",
-          "description": "Whether session.send would copy it into the session's scratch folder in workspace_id, judged as send judges it: false for an image, which goes inline; true without a workspace_id, as for a new workspace not made yet."
+          "description": "Whether session.send would copy it into the session's scratch folder in workspace_id, by send's own decision: false for an image, which goes inline, and for one send would refuse; true without a workspace_id, as for a new workspace not made yet."
         }
       }
     },

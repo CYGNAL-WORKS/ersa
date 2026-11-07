@@ -760,17 +760,28 @@ fn within<'a>(resolved: &'a Path, workspace: &Path) -> Option<&'a Path> {
     resolved.strip_prefix(workspace).ok()
 }
 
-/// Whether sending the file or folder at `path` into `workspace` copies it:
-/// whether its canonical path, through every link and junction on the way,
-/// lies outside the workspace's. Taken to be copied when either can't be
-/// resolved, so the composer never says a copy won't happen when it may.
-pub fn copies(path: &str, workspace: &Path) -> bool {
-    let resolved = named_path(path).ok().and_then(|p| fs::canonicalize(p).ok());
-    let workspace = fs::canonicalize(workspace).ok();
-    match (resolved, workspace) {
-        (Some(resolved), Some(workspace)) => within(&resolved, &workspace).is_none(),
-        _ => true,
-    }
+/// Whether sending the file or folder at `path` into `workspace` copies it,
+/// by send's own decision (PROTO-CORE-API-R44): the check `prepare` runs, so
+/// a path through a link or junction is judged where it leads, and one send
+/// would refuse, as a folder holding the workspace or one past the copy
+/// limits, is not copied. `workspace` is canonical, as `prepare` makes it;
+/// `work` stops the check when the caller stops waiting.
+pub fn copies(path: &str, kind: AttachmentKind, workspace: &Path, work: &Work) -> bool {
+    let attachment = Attachment {
+        kind,
+        path: Some(path.to_string()),
+        media_type: None,
+        data: None,
+    };
+    // A file or folder: the image limits are never read.
+    let images = ImageLimits {
+        media_types: &[],
+        max_bytes: 0,
+    };
+    matches!(
+        check(&attachment, workspace, images, &mut 0, work),
+        Ok(Checked::Copy { .. })
+    )
 }
 
 /// Why `attachment.inspect` can't answer.

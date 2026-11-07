@@ -839,7 +839,7 @@ impl Setup {
             .client
             .result(
                 "attachment.inspect",
-                json!({ "host_id": "local", "path": path(p), "workspace_id": self.workspace_id }),
+                json!({ "path": path(p), "workspace_id": self.workspace_id }),
             )
             .await;
         inspected["copied"].clone()
@@ -884,7 +884,7 @@ async fn inspect_refuses_a_workspace_it_does_not_know() {
         .client
         .error(
             "attachment.inspect",
-            json!({ "host_id": "local", "path": path(&inside), "workspace_id": "w-none" }),
+            json!({ "path": path(&inside), "workspace_id": "w-none" }),
         )
         .await;
     assert_eq!(refused["data"]["kind"], "not_found", "{refused:#}");
@@ -930,4 +930,42 @@ async fn a_link_with_a_relative_target_is_judged_where_it_points() {
     let far = s.workspace.join("far.md");
     std::os::unix::fs::symlink("../outside/far.md", &far).unwrap();
     assert_eq!(s.copied(&far).await, json!(true));
+}
+
+// R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
+#[tokio::test]
+async fn inspect_takes_the_workspace_or_the_host_not_both_nor_neither() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    let inside = file(&s.workspace, "notes.md", b"x\n");
+    for params in [
+        json!({ "path": path(&inside), "workspace_id": s.workspace_id, "host_id": "local" }),
+        json!({ "path": path(&inside) }),
+    ] {
+        let refused = s.client.error("attachment.inspect", params).await;
+        assert_eq!(refused["code"], -32602, "{refused:#}");
+    }
+}
+
+// verifies: FLOW-SEND-MESSAGE-R14
+// R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
+#[tokio::test]
+async fn inspect_says_not_copied_for_what_send_refuses() {
+    let mut s = setup(FakeAdapter::new(1)).await;
+    // A folder holding the workspace: send refuses it, so nothing is copied.
+    let holding = s.workspace.parent().unwrap().to_path_buf();
+    assert_eq!(s.copied(&holding).await, json!(false));
+    // A folder past the copy limits: send refuses it too.
+    let big = s.outside.join("big");
+    std::fs::create_dir_all(&big).unwrap();
+    let large = std::fs::File::create(big.join("large.bin")).unwrap();
+    large
+        .set_len(ersa_core::attachments::COPY_BYTES + 1)
+        .unwrap();
+    assert_eq!(s.copied(&big).await, json!(false));
+    // A folder from outside within the limits is copied.
+    file(&s.outside, "small/a.txt", b"x\n");
+    assert_eq!(s.copied(&s.outside.join("small")).await, json!(true));
+    // A workspace folder that is gone: send refuses the message, so nothing is copied.
+    std::fs::remove_dir_all(&s.workspace).unwrap();
+    assert_eq!(s.copied(&s.outside.join("small")).await, json!(false));
 }

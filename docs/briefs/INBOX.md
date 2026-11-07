@@ -8,6 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-07 PROTO-CORE-API (attachment.inspect), FLOW-SEND-MESSAGE-R14: the composer can't tell from a path's text whether sending copies it, since Core judges the canonical path through links, junctions and `..`. #242 builds the field planning PR #243 defines as PROTO-CORE-API-R44: `attachment.inspect` takes an optional `workspace_id` and always answers `copied`, judged by send's own rule; the composer shows the note from it alone. Its tests carry `TODO verifies: PROTO-CORE-API-R44` until #243 merges; then the citations go in and this line goes.
+- [ ] 2026-11-07 PROTO-CORE-API (attachment.inspect), FLOW-SEND-MESSAGE-R14: the composer can't tell from a path's text whether sending copies it, since Core judges the canonical path through links, junctions and `..`. #242 builds the field planning PR #243 defines as PROTO-CORE-API-R44: `attachment.inspect` takes the path with exactly one of `workspace_id` (read on that workspace's host) and `host_id`, and always answers `copied` by send's own decision, refusals included; the composer shows the note from it alone. Its tests carry `TODO verifies: PROTO-CORE-API-R44` until #243 merges; then the citations go in and this line goes.
 
 ## Resolved recently (optional, trimmed in planning passes)

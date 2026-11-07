@@ -391,9 +391,17 @@ fn params_examples() -> Vec<(Method, Value)> {
         (
             Method::AttachmentInspect,
             to_value(&InspectParams {
-                host_id: "local".into(),
                 path: "D:/shots/a.png".into(),
                 workspace_id: Some("w-1".into()),
+                host_id: None,
+            }),
+        ),
+        (
+            Method::AttachmentInspect,
+            to_value(&InspectParams {
+                path: "D:/shots/a.png".into(),
+                workspace_id: None,
+                host_id: Some("local".into()),
             }),
         ),
         (

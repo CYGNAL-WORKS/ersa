@@ -2,6 +2,7 @@
 //! parsed params and returns the typed result or an [`ApiError`]; the work
 //! is the session manager's.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use ersa_adapter::{BackendChoices, Direction, PermissionDecision, SessionConfig};
@@ -251,16 +252,37 @@ const INSPECT_LIMIT: Duration = Duration::from_secs(30);
 /// of Core's.
 static INSPECTING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
 
-/// `attachment.inspect` (PROTO-CORE-API-R24), on the local host: the only
-/// one Core reaches yet.
-pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspected, ApiError> {
-    if params.host_id != LOCAL_HOST_ID {
-        return Err(ApiError::not_found(format!("no host {}", params.host_id)));
+/// The most workspace folders being resolved at once for `attachment.inspect`.
+/// Resolving one happens before an inspect takes its place, so a workspace on
+/// a drive that stops answering holds these threads, never the inspects'.
+static RESOLVING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
+/// How long `attachment.inspect` waits for a workspace folder to resolve,
+/// past which every file and folder is taken to be copied.
+const RESOLVE_LIMIT: Duration = Duration::from_secs(5);
+
+/// The workspace folder as send resolves it (an error when it can't be read,
+/// which send refuses), or `None` when it does not answer in time or too many
+/// are being resolved already.
+async fn resolve_workspace(path: String) -> Option<std::io::Result<std::path::PathBuf>> {
+    let place = RESOLVING.try_acquire().ok()?;
+    let job = tokio::task::spawn_blocking(move || {
+        let _place = place;
+        std::fs::canonicalize(path)
+    });
+    match tokio::time::timeout(RESOLVE_LIMIT, job).await {
+        Ok(Ok(resolved)) => Some(resolved),
+        _ => None,
     }
-    let images = core.sessions.image_types();
-    let path = params.path;
-    let workspace = match params.workspace_id {
-        Some(id) => {
+}
+
+/// `attachment.inspect` (PROTO-CORE-API-R24, R44), on the local host: the
+/// only one Core reaches yet. With a workspace, it also answers whether
+/// sending would copy the path, by send's own decision.
+pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspected, ApiError> {
+    // A workspace reads the path on its own host.
+    let (host, workspace) = match (params.workspace_id, params.host_id) {
+        (Some(id), None) => {
             let workspace = core
                 .store
                 .workspace(id.clone())
@@ -273,11 +295,26 @@ pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspec
                 .ok_or_else(|| {
                     ApiError::not_found(format!("no project {}", workspace.project_id))
                 })?;
-            same_host(&params.host_id, &project.host_id, &id)?;
-            Some(workspace.path)
+            (project.host_id, Some(workspace.path))
         }
+        (None, Some(host)) => (host, None),
+        _ => {
+            return Err(ApiError::invalid_params(
+                "name either the workspace or the host, not both",
+            ));
+        }
+    };
+    if host != LOCAL_HOST_ID {
+        return Err(ApiError::not_found(format!("no host {host}")));
+    }
+    // Resolved before a place is taken. `Some(None)`: a workspace that did
+    // not resolve in time, whose files and folders are taken to be copied.
+    let workspace = match workspace {
+        Some(path) => Some(resolve_workspace(path).await),
         None => None,
     };
+    let images = core.sessions.image_types();
+    let path = params.path;
     let place = INSPECTING.try_acquire().map_err(|_| {
         ApiError::invalid_params(
             "too many paths asked about are not answering; try again once they do",
@@ -285,26 +322,37 @@ pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspec
     })?;
     // A blocking thread: a network drive that no longer answers holds that
     // thread, never the request, which is answered at the limit. The path is
-    // read first and answered on its own, then whether sending copies it is
-    // judged, so a workspace folder that stops answering never fails a path
-    // that was read (PROTO-CORE-API-R44); the thread keeps its place for both.
+    // read and answered first, then whether sending copies it is judged, so a
+    // judgment that runs long never fails a path that was read; one deadline
+    // covers both.
+    let deadline = tokio::time::Instant::now() + INSPECT_LIMIT;
     let (read_tx, read_rx) = tokio::sync::oneshot::channel();
     let (judged_tx, judged_rx) = tokio::sync::oneshot::channel();
-    let judging = workspace.clone();
+    let judging = match &workspace {
+        Some(Some(Ok(resolved))) => Some(resolved.clone()),
+        _ => None,
+    };
     let judged_path = path.clone();
+    let work = Arc::new(attachments::Work::default());
+    let judge_work = Arc::clone(&work);
     tokio::task::spawn_blocking(move || {
         let _place = place;
         let read = attachments::inspect(&path, &images);
-        let judge = matches!(&read, Ok(i) if i.kind != AttachmentKind::Image);
+        let kind = match &read {
+            Ok(i) if i.kind != AttachmentKind::Image => Some(i.kind),
+            _ => None,
+        };
         let _ = read_tx.send(read);
-        if let (true, Some(workspace)) = (judge, judging) {
+        if let (Some(kind), Some(workspace)) = (kind, judging) {
             let _ = judged_tx.send(attachments::copies(
                 &judged_path,
-                std::path::Path::new(&workspace),
+                kind,
+                &workspace,
+                &judge_work,
             ));
         }
     });
-    let mut inspected = match tokio::time::timeout(INSPECT_LIMIT, read_rx).await {
+    let mut inspected = match tokio::time::timeout_at(deadline, read_rx).await {
         Ok(Ok(Ok(inspected))) => inspected,
         Ok(Ok(Err(InspectError::NotFound(message)))) => return Err(ApiError::not_found(message)),
         Ok(Ok(Err(InspectError::Invalid(message)))) => {
@@ -318,33 +366,24 @@ pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspec
         }
     };
     // An image goes inline, never copied; without a workspace, as a new one
-    // not made yet, every file and folder is. A judgment that does not answer
-    // in time is taken to be a copy, so the note never says one won't happen.
+    // not made yet, every file and folder is. A workspace that can't be read is
+    // one send refuses: nothing is copied. A judgment that is not done by the
+    // deadline, or a workspace that did not resolve in time, is taken to be a
+    // copy, so the note never says one won't happen when it may.
     inspected.copied = match (&inspected.kind, &workspace) {
         (AttachmentKind::Image, _) => false,
-        (_, None) => true,
-        (_, Some(_)) => tokio::time::timeout(JUDGE_LIMIT, judged_rx)
-            .await
-            .ok()
-            .and_then(Result::ok)
-            .unwrap_or(true),
+        (_, None) | (_, Some(None)) => true,
+        (_, Some(Some(Err(_)))) => false,
+        (_, Some(Some(Ok(_)))) => match tokio::time::timeout_at(deadline, judged_rx).await {
+            Ok(Ok(copied)) => copied,
+            _ => {
+                // The check stops at its next step.
+                work.stop();
+                true
+            }
+        },
     };
     Ok(inspected)
-}
-
-/// How long `attachment.inspect` waits to judge whether sending copies a
-/// path it has read, past which it is taken to be copied.
-const JUDGE_LIMIT: Duration = Duration::from_secs(5);
-
-/// A path is read on `host`, so it is judged only against a workspace there.
-fn same_host(host: &str, workspace_host: &str, workspace_id: &str) -> Result<(), ApiError> {
-    if host == workspace_host {
-        Ok(())
-    } else {
-        Err(ApiError::invalid_params(format!(
-            "workspace {workspace_id} is on host {workspace_host}, not {host}"
-        )))
-    }
 }
 
 pub(super) async fn interrupt(core: &Core, params: IdParams) -> Result<Session, ApiError> {
@@ -502,17 +541,4 @@ pub(super) async fn raw_log(
             line: line.line,
         })
         .collect())
-}
-
-#[cfg(test)]
-mod inspect_tests {
-    use super::same_host;
-
-    // R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
-    #[test]
-    fn a_workspace_on_another_host_is_invalid_params() {
-        assert!(same_host("local", "local", "w-1").is_ok());
-        let refused = same_host("local", "devbox", "w-1").unwrap_err();
-        assert_eq!(refused.0.code, -32602, "{refused:?}");
-    }
 }
