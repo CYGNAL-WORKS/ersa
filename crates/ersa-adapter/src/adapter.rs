@@ -397,11 +397,12 @@ pub trait Projector: Send {
 
     /// The latest title the backend announced on the live stream for the
     /// session, from the lines projected so far: a name the user gave it,
-    /// which its record may not hold yet. Core shows it as the session's
-    /// title, in memory only, as it does any detail only the live stream
-    /// carries. `None`, the default, before any announcement, and for a
-    /// backend that makes none.
-    fn announced_title(&self) -> Option<&str> {
+    /// which its record may not hold yet, with how many announcements there
+    /// have been, so that one repeating the last title still counts as one.
+    /// Core shows it as the session's title, in memory only, as it does any
+    /// detail only the live stream carries. `None`, the default, before any
+    /// announcement, and for a backend that makes none.
+    fn announced_title(&self) -> Option<(u64, &str)> {
         None
     }
 }
