@@ -1,10 +1,13 @@
+import { File, Folder } from "lucide-react";
 import { type ReactNode, memo, useLayoutEffect, useRef } from "react";
+import { t } from "../catalog";
 import type { PermissionRequested, ToolInput } from "../protocol/agent-events.gen";
 import type { Answer, Decision } from "../session/answers";
 import type { SessionView, Sending } from "../session/follow";
 import { stateText } from "../session/states";
-import { type Item, isOpen } from "../session/transcript";
+import { type Item, type MessageAttachment, isOpen } from "../session/transcript";
 import { Button } from "./Button";
+import { Icon } from "./Icon";
 import { PermissionAnswers } from "./PermissionAnswers";
 import { SessionTitle } from "./SessionTitle";
 import "./Transcript.css";
@@ -109,6 +112,40 @@ interface BlockProps {
   onDecide: Decide;
 }
 
+const KIND_ICON = { file: File, folder: Folder } as const;
+
+/** A path's last part, as the composer named it: `notes/todo.md` is `todo.md`. */
+function lastPart(path: string): string {
+  return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+}
+
+/**
+ * What came with a user's message, above its words (FLOW-SEND-MESSAGE-R11): an image as the image, a file or folder
+ * by its name, with its path as the agent was given it on hover. Only an image's own kinds show as images.
+ */
+function MessageAttachments({ attachments }: { attachments: readonly MessageAttachment[] }) {
+  return (
+    <ul className="transcript-attachments" aria-label={t("transcript.attachment.listLabel")}>
+      {attachments.map((a, i) =>
+        a.kind === "image" ? (
+          a.media_type.startsWith("image/") && (
+            <li key={i} className="transcript-attachment-image">
+              <img src={`data:${a.media_type};base64,${a.data}`} alt={t("transcript.attachment.imageLabel")} />
+            </li>
+          )
+        ) : (
+          <li key={i} className="transcript-attachment" title={a.path}>
+            <span className="transcript-attachment-icon">
+              <Icon icon={KIND_ICON[a.kind]} size="icon-sm" />
+            </span>
+            <span className="transcript-attachment-name">{lastPart(a.path)}</span>
+          </li>
+        ),
+      )}
+    </ul>
+  );
+}
+
 /**
  * One block. Memoised: items keep their identity until their own event
  * changes them, so a streamed delta re-renders one block, not the page.
@@ -119,7 +156,8 @@ const Block = memo(function Block({ item, answer, waiting, live, onDecide }: Blo
       return (
         // A bubble with no label: its place says who wrote it, and assistive technology hears "You" (DESIGN.md, Layout).
         <div className="transcript-user" role="group" aria-label="You">
-          <p className="transcript-text">{item.text}</p>
+          {item.attachments && <MessageAttachments attachments={item.attachments} />}
+          {item.text !== "" && <p className="transcript-text">{item.text}</p>}
         </div>
       );
     case "assistant":

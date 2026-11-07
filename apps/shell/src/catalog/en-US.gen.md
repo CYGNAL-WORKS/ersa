@@ -220,6 +220,14 @@ Reconnecting to Core…
 
 ## `transcript`
 
+### `transcript.attachment.listLabel`
+
+Attachments
+
+### `transcript.attachment.imageLabel`
+
+Attached image
+
 ## `composer`
 
 ### `composer.name`

@@ -62,16 +62,24 @@ impl Drop for ReplayServer {
     }
 }
 
+/// A Claude Code fixture: `name` in 2.1.302, or `<version>/<name>` in
+/// another version's folder.
 fn fixture(name: &str) -> PathBuf {
-    repo_root()
-        .join("docs/briefs/protocol/fixtures/claude-code/2.1.302")
-        .join(format!("{name}.jsonl"))
+    let fixtures = repo_root().join("docs/briefs/protocol/fixtures/claude-code");
+    let named = if name.contains('/') {
+        name.to_string()
+    } else {
+        format!("2.1.302/{name}")
+    };
+    fixtures.join(format!("{named}.jsonl"))
 }
 
+/// Where the capture of fixture `name` is kept: by the fixture's own name.
 fn capture_path(name: &str) -> PathBuf {
+    let own = name.rsplit('/').next().unwrap_or(name);
     repo_root()
         .join("apps/shell/src/session/replays")
-        .join(format!("{name}.json"))
+        .join(format!("{own}.json"))
 }
 
 /// Serves `name` and returns what the Interface sees of it: the session
@@ -335,6 +343,13 @@ async fn streamed_text_capture_is_current() {
 #[tokio::test]
 async fn permission_capture_is_current() {
     check("11-stream-permission-prompt-tool-stdio").await;
+}
+
+// verifies: ARCH-CORE-R11
+// verifies: FLOW-SEND-MESSAGE-R11
+#[tokio::test]
+async fn attachments_capture_is_current() {
+    check("2.1.316/07-attachments").await;
 }
 
 #[test]
