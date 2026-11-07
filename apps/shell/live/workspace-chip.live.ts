@@ -31,7 +31,7 @@ test("a new workspace starts at the default branch, and is made from the base br
   const answered = ersa.answerDialog(repo);
   await screen.getByRole("option", { name: /Add project…/ }).click();
   await answered;
-  await page.getByRole("button", { name: "Add, not trusted" }).click();
+  await page.getByRole("button", { name: "Trust", exact: true }).click();
   await expect(screen.getByRole("button", { name: "Project: repo" })).toBeVisible();
 
   // R21, R29: the chip names a new workspace from the default branch, not the one the folder has checked out.
@@ -60,6 +60,31 @@ test("a new workspace starts at the default branch, and is made from the base br
     .filter((entry) => entry.trim() !== "");
   expect(worktrees).toHaveLength(2);
   expect(/^HEAD (\w+)$/m.exec(worktrees[1]!)?.[1]).toBe(releaseTip);
+
+  // Under the session, in a wide window, the session controls sit in the composer's column at the measure,
+  // space-xs beneath the box, with room at the window's foot (docs/design/COMPOSER.md, The composer).
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const composer = page.locator(".composer");
+  await expect(composer.locator(".session-controls")).toBeVisible();
+  const layout = await composer.evaluate((column) => {
+    const tokens = getComputedStyle(column);
+    const px = (name: string) => {
+      const probe = column.appendChild(document.createElement("div"));
+      probe.style.width = `var(${name})`;
+      const width = probe.getBoundingClientRect().width;
+      probe.remove();
+      return width;
+    };
+    const box = column.querySelector(".composer-box")!.getBoundingClientRect();
+    const controls = column.querySelector(".session-controls")!.getBoundingClientRect();
+    return { box, controls, xs: px("--space-xs"), lg: px("--space-lg"), measure: px("--size-measure"), padding: tokens.paddingBottom, window: innerHeight };
+  });
+  expect(layout.box.width).toBeLessThanOrEqual(layout.measure);
+  expect(layout.controls.left).toBeGreaterThanOrEqual(layout.box.left - 0.5);
+  expect(layout.controls.right).toBeLessThanOrEqual(layout.box.right + 0.5);
+  expect(layout.controls.top - layout.box.bottom).toBeCloseTo(layout.xs, 0);
+  expect(layout.window - layout.controls.bottom).toBeGreaterThanOrEqual(layout.lg - 0.5);
+  await ersa.shot("session-wide");
 
   // A new session starts at the default branch again: the base chosen for the last one is not remembered.
   await page.getByRole("navigation", { name: "Rail" }).getByRole("button", { name: "New session in repo" }).click();

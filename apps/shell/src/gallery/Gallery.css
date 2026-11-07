@@ -135,3 +135,8 @@
   background: var(--color-surface);
   border-right: var(--line-hairline) solid var(--color-line);
 }
+
+/* Room above a composer for its status line, which grows upward. */
+.gallery-status-room {
+  padding-top: var(--size-control);
+}

@@ -80,6 +80,7 @@ describe("follow", () => {
     expect(last().transcript.items).toEqual([]);
   });
 
+  // verifies: FLOW-SEND-MESSAGE-R01
   it("shows nothing for a sent message until Core records it", async () => {
     const { follower, calls, last } = following({ "session.send": () => Promise.resolve({ turn: 1 }) });
     expect(await follower.send("hello")).toBe(true);
@@ -88,6 +89,7 @@ describe("follow", () => {
     expect(last().message).toBeUndefined();
   });
 
+  // verifies: FLOW-SEND-MESSAGE-R05
   it("keeps a refused message's reason", async () => {
     const { follower, last } = following({ "session.send": () => Promise.reject(replayRefusal("session.send")) });
     expect(await follower.send("hello")).toBe(false);
