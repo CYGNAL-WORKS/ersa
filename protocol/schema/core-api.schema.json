@@ -429,6 +429,30 @@
           "required": [
             "jsonrpc",
             "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "workspace.changes"
+            },
+            "params": {
+              "$ref": "#/$defs/workspace.changes.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
             "method"
           ],
           "properties": {
@@ -1600,6 +1624,56 @@
         }
       }
     },
+    "workspace_changes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uncommitted",
+        "ignored",
+        "unshared",
+        "stranded",
+        "sessions",
+        "unrecorded",
+        "token"
+      ],
+      "properties": {
+        "uncommitted": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Files with changes not committed, untracked files included."
+        },
+        "ignored": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Ignored entries the version control reports, a wholly ignored folder as one."
+        },
+        "unshared": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Commits reachable from the workspace's checkout, its branch or its own reflog that no other local branch or remote-tracking branch holds."
+        },
+        "stranded": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Those unshared commits the workspace's branch does not hold, which deleting the folder loses."
+        },
+        "sessions": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Sessions using the workspace, leaving out any marked deleting."
+        },
+        "unrecorded": {
+          "type": "boolean",
+          "description": "Whether git has lost its record of the workspace: its checkout and reflog went with it, so commits made on a detached checkout can't be counted."
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Opaque; changes whenever the uncommitted files or their content, the unshared commits, the set of ignored entries or the counted sessions change. session.delete carries it."
+        }
+      },
+      "description": "What deleting an isolated workspace would lose."
+    },
     "session": {
       "type": "object",
       "additionalProperties": false,
@@ -2162,6 +2236,21 @@
         "$ref": "#/$defs/branch"
       },
       "description": "The project's local branches, sorted by name."
+    },
+    "workspace.changes.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "workspace.changes.result": {
+      "$ref": "#/$defs/workspace_changes"
     },
     "session.list.params": {
       "type": "object",

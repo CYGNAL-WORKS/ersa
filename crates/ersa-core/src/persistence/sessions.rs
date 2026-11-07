@@ -93,15 +93,15 @@ impl Store {
         self.call(move |conn| read_session(conn, &id)).await
     }
 
-    /// How many sessions a workspace has, running or not.
-    pub async fn sessions_in_workspace(&self, workspace_id: String) -> Result<u64> {
+    /// The ids of a workspace's sessions, running or not, sorted.
+    pub async fn sessions_in_workspace(&self, workspace_id: String) -> Result<Vec<String>> {
         self.call(move |conn| {
-            let count: i64 = conn.query_row(
-                "SELECT COUNT(*) FROM sessions WHERE workspace_id = ?1",
-                [workspace_id],
-                |row| row.get(0),
-            )?;
-            Ok(count as u64)
+            let mut statement =
+                conn.prepare("SELECT id FROM sessions WHERE workspace_id = ?1 ORDER BY id")?;
+            let ids = statement
+                .query_map([workspace_id], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()?;
+            Ok(ids)
         })
         .await
     }

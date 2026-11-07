@@ -267,6 +267,15 @@ async fn read_only_requests_are_answered_as_core_answers_them() {
         .error("branch.list", json!({ "project_id": projects[0]["id"] }))
         .await;
     assert_eq!(error["data"]["kind"], "invalid_state");
+    // Its one workspace is the project's own folder, which Core refuses to
+    // count, since nothing of it is ever deleted.
+    let error = client
+        .error(
+            "workspace.changes",
+            json!({ "id": session["workspace_id"] }),
+        )
+        .await;
+    assert_eq!(error["data"]["kind"], "invalid_state");
     assert_eq!(client.result("settings.get", json!({})).await, json!({}));
 
     // Nothing is played until a client subscribes.
