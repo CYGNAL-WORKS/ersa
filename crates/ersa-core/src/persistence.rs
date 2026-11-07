@@ -37,6 +37,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("persistence/0003_session_record.sql"),
     include_str!("persistence/0004_project_trust.sql"),
     include_str!("persistence/0005_root_workspace.sql"),
+    include_str!("persistence/0006_session_archived.sql"),
 ];
 
 /// The id of the local host's row, which always exists.
@@ -733,7 +734,9 @@ mod tests {
                 // Migration 5's.
                 "model",
                 "effort",
-                "permission_mode"
+                "permission_mode",
+                // Migration 6's.
+                "archived",
             ]
         );
     }
