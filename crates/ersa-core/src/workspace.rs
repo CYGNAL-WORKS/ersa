@@ -1104,6 +1104,107 @@ pub async fn git_worktree_remove(
     }
 }
 
+/// Deletes an isolated workspace's files for the user's Delete
+/// (PROTO-CORE-API-R35): the git worktree at `path` of the repository at
+/// `repo`, forced, since the user was shown what it held, and then its
+/// branch `branch` unless another worktree has it checked out or it holds
+/// commits no other local or remote-tracking branch holds. Returns whether
+/// the branch was kept.
+///
+/// A folder git no longer lists (on Windows a failed removal can delete
+/// git's record and leave files behind) is deleted as a folder; a locked
+/// worktree is refused, as `workspace.remove` refuses it. Safe to run
+/// again after it failed part way: a folder already gone is pruned, and a
+/// branch already gone is not kept.
+pub async fn git_worktree_delete(
+    transport: &dyn Transport,
+    repo: &str,
+    path: &str,
+    branch: &str,
+) -> Result<bool, VcsError> {
+    match git_worktree_remove(transport, repo, path, true, false).await {
+        Ok(()) => {}
+        Err(VcsError::NotListed { .. }) => {
+            remove_folder(path).await?;
+            let pruned = git(transport, repo, &["worktree", "prune"]).await?;
+            check(pruned, "git worktree prune failed")?;
+        }
+        Err(e) => return Err(e),
+    }
+    if branch.is_empty() {
+        return Ok(false);
+    }
+    let deadline = deadline();
+    let reference = format!("refs/heads/{branch}");
+    let exists = ["rev-parse", "--verify", "--quiet", reference.as_str()];
+    let output = query(transport, repo, &exists, deadline).await?;
+    match output.exit.code {
+        Some(0) => {}
+        // Gone already: deleted by an earlier try, or by the user.
+        Some(1) => return Ok(false),
+        _ => {
+            return Err(VcsError::Failed {
+                message: "git could not look up the workspace's branch".into(),
+                stderr: output.stderr_text(),
+            });
+        }
+    }
+    // Checked out in another worktree: git would refuse to delete it, and
+    // the other worktree is using it.
+    let listed = git_worktree_list(transport, repo).await?;
+    if listed
+        .iter()
+        .any(|entry| entry.branch.as_deref() == Some(reference.as_str()))
+    {
+        return Ok(true);
+    }
+    // Commits only the branch holds are kept with it.
+    let unshared = unshared_from(
+        transport,
+        repo,
+        std::slice::from_ref(&reference),
+        branch,
+        deadline,
+    )
+    .await?;
+    if !unshared.is_empty() {
+        return Ok(true);
+    }
+    // `-D`: every commit on it is held elsewhere, which `-d` would check
+    // only against the checked-out branch.
+    let deleted = git(transport, repo, &["branch", "-D", branch]).await?;
+    check(deleted, "git could not delete the workspace's branch")?;
+    Ok(false)
+}
+
+/// Deletes the folder at `path` and everything in it, retried while files
+/// are busy, as worktree removal is. A link inside is removed, never
+/// followed. A folder already gone is not an error.
+async fn remove_folder(path: &str) -> Result<(), VcsError> {
+    let mut backoff = REMOVE_FIRST_BACKOFF;
+    let mut attempt = 1;
+    loop {
+        let folder = path.to_string();
+        let removed = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&folder))
+            .await
+            .map_err(|e| VcsError::Incomplete(std::io::Error::other(e.to_string())))?;
+        match removed {
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(e) if attempt == REMOVE_ATTEMPTS => {
+                return Err(VcsError::Failed {
+                    message: format!("the workspace's folder {path} could not be deleted"),
+                    stderr: e.to_string(),
+                });
+            }
+            Err(e) => tracing::debug!(attempt, error = %e, "deleting a folder failed; retrying"),
+        }
+        tokio::time::sleep(backoff).await;
+        backoff *= 2;
+        attempt += 1;
+    }
+}
+
 /// Whether the worktree at `path` has anything `git worktree remove` would
 /// refuse over: modified or untracked files. Ignored files do not count.
 async fn is_dirty(transport: &dyn Transport, path: &str) -> Result<bool, VcsError> {
@@ -1120,6 +1221,9 @@ pub struct WorktreeEntry {
     pub lock_reason: Option<String>,
     /// The folder is gone and only git's record of it remains.
     pub prunable: bool,
+    /// The branch checked out there (`refs/heads/<name>`); `None` when the
+    /// checkout is detached.
+    pub branch: Option<String>,
 }
 
 /// The repository's worktrees, the main one included.
@@ -1160,6 +1264,11 @@ fn parse_worktree_list(lines: &[String]) -> Vec<WorktreeEntry> {
             "prunable" => {
                 if let Some(entry) = current.as_mut() {
                     entry.prunable = true;
+                }
+            }
+            "branch" => {
+                if let Some(entry) = current.as_mut() {
+                    entry.branch = value.map(str::to_string);
                 }
             }
             _ => {}
@@ -1277,6 +1386,8 @@ mod tests {
         assert_eq!(entries[1].lock_reason.as_deref(), Some("on a usb drive"));
         assert!(entries[2].locked && entries[2].lock_reason.is_none());
         assert!(entries[2].prunable);
+        assert_eq!(entries[1].branch.as_deref(), Some("refs/heads/a"));
+        assert_eq!(entries[2].branch, None);
     }
 
     // verifies: PROTO-CORE-API-R18

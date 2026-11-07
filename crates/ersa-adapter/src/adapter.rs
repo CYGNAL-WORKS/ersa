@@ -152,6 +152,36 @@ pub trait Adapter: Send + Sync {
     ) -> OpenElsewhere {
         OpenElsewhere::No
     }
+
+    /// Deletes session `backend_session_id`'s record from the backend, for
+    /// the user's Delete, so neither Ersa nor the backend's own tools list it
+    /// again (ADR 0026). Refused, with nothing deleted, when the backend's
+    /// registry shows another process has the session open or cannot say,
+    /// since that process would go on writing the record. A record already
+    /// gone counts as deleted. The default: the backend cannot delete a
+    /// session.
+    async fn delete_record(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        _backend_session_id: &str,
+    ) -> Result<RecordDeletion, AdapterError> {
+        Err(AdapterError::Protocol(format!(
+            "the {} backend cannot delete a session",
+            self.backend()
+        )))
+    }
+}
+
+/// What [`Adapter::delete_record`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordDeletion {
+    /// The record is gone, or was already.
+    Deleted,
+    /// Nothing was deleted: another process has the session open
+    /// ([`OpenElsewhere::Yes`]) or the registry could not say
+    /// ([`OpenElsewhere::Unknown`]).
+    Refused(OpenElsewhere),
 }
 
 /// Whether another process has a session open, as the backend's own

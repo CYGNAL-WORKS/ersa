@@ -632,6 +632,30 @@
               "$ref": "#/$defs/request_id"
             },
             "method": {
+              "const": "session.delete"
+            },
+            "params": {
+              "$ref": "#/$defs/session.delete.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
               "const": "session.send"
             },
             "params": {
@@ -1741,6 +1765,13 @@
         "archived": {
           "type": "boolean",
           "description": "Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume."
+        },
+        "deleting": {
+          "enum": [
+            "running",
+            "failed"
+          ],
+          "description": "Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set."
         }
       }
     },
@@ -2377,6 +2408,45 @@
     },
     "session.set_archived.result": {
       "$ref": "#/$defs/session"
+    },
+    "session.delete.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "token": {
+          "type": "string",
+          "description": "The token of the workspace.changes the user was shown. Needed for a session in an isolated workspace: when what would be lost now differs, the delete is refused with invalid_state and the new workspace.changes, as JSON text, in detail. Ignored for a root workspace."
+        }
+      },
+      "description": "The user's Delete: stops the session, deletes its isolated workspace's folder and branch when no other session uses the workspace and the branch holds no commit only it holds, deletes its record from its backend, and removes it. While it runs, requests that would change the session or its workspace answer invalid_state with detail busy."
+    },
+    "session.delete.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "workspace_deleted",
+        "branch_kept"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "workspace_deleted": {
+          "type": "boolean",
+          "description": "Whether the session's workspace went too: its folder, its branch unless kept, and its row."
+        },
+        "branch_kept": {
+          "type": "boolean",
+          "description": "Whether the workspace's branch was kept because it holds commits no other branch or remote holds, or another worktree has it checked out. False when the workspace stayed."
+        }
+      }
     },
     "session.send.params": {
       "type": "object",

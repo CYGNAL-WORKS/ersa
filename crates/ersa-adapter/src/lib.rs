@@ -43,8 +43,8 @@ pub mod fake;
 // rather than reaching into private module paths.
 pub use adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ImageLimits, OpenElsewhere,
-    OutgoingAttachment, OutgoingMessage, PermissionDecision, Projected, Projector, RecordEvent,
-    RecordSummary, SessionConfig,
+    OutgoingAttachment, OutgoingMessage, PermissionDecision, Projected, Projector, RecordDeletion,
+    RecordEvent, RecordSummary, SessionConfig,
 };
 pub use local::LocalTransport;
 pub use raw::{Direction, RawLine};
