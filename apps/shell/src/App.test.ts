@@ -6,7 +6,7 @@ import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { Attachment, CoreClient, CoreEvent, Method } from "./core/client";
-import type { ShellControl } from "./core/shell";
+import type { DragDrop, ShellControl } from "./core/shell";
 import type { BackendInfo, CoreHelloResult, Project, Session, Workspace } from "./protocol/core-api.gen";
 
 const hello: CoreHelloResult = {
@@ -140,6 +140,7 @@ function fakeShell(...picks: (string | null)[]) {
     quit: async () => {},
     pickFolder: vi.fn(async () => picks.shift() ?? null),
     pickFiles: vi.fn(async (_images: boolean) => [] as string[]),
+    onDragDrop: vi.fn((_handler: (event: DragDrop) => void) => () => {}),
   } satisfies ShellControl;
 }
 
@@ -748,6 +749,29 @@ describe("the attachments App gives the composer", () => {
     expect(shown()).toEqual(["codeD:/code holds the session's workspace"]);
     expect(screen.getAllByRole("alert").map((a) => a.textContent)).toEqual(["D:/code holds the session's workspace"]);
     expect(document.querySelector(".composer-status-line")).toBeNull();
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R08
+  // verifies: FLOW-SEND-MESSAGE-R13
+  it("reads the files dropped on the box as the dialog's, for the session's workspace, and attaches them", async () => {
+    const shell = fakeShell();
+    let emit: (event: DragDrop) => void = () => {};
+    shell.onDragDrop.mockImplementation((handler) => ((emit = handler), () => {}));
+    vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue({ left: 0, top: 100, right: 400, bottom: 200 } as DOMRect);
+    const core = fakeCore({ "session.subscribe": () => ({ last_seq: -1 }), "attachment.inspect": inspect });
+    render(createElement(App, { client: core.client, shell }));
+    await settle();
+    await settle();
+    act(() => emit({ type: "over", x: 10, y: 150 }));
+    expect(screen.getByRole("form", { name: "Composer" }).hasAttribute("data-drag-over")).toBe(true);
+    act(() => emit({ type: "drop", x: 10, y: 150, paths: ["D:/code/beta/notes.md", "D:/code/beta/src"] }));
+    await settle();
+    expect(core.calls.filter((c) => c.method === "attachment.inspect").map((c) => c.params)).toEqual([
+      { path: "D:/code/beta/notes.md", workspace_id: "w-beta" },
+      { path: "D:/code/beta/src", workspace_id: "w-beta" },
+    ]);
+    expect(shown()).toEqual(["notes.md12 lines", "srcFolderWill be copied into the workspace's .ersa folder"]);
+    vi.restoreAllMocks();
   });
 
   // verifies: FLOW-SEND-MESSAGE-R16
