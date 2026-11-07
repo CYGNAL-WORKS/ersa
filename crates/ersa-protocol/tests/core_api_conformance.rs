@@ -99,6 +99,7 @@ fn session() -> Session {
         last_event_seq: Some(41),
         sending: Some(SendPhase::Copying),
         archived: true,
+        deleting: Some(Deleting::Failed),
         tile: tile(),
     }
 }
@@ -193,6 +194,14 @@ fn result_examples() -> Vec<(Method, Value)> {
         (Method::SessionList, to_value(&vec![session()])),
         (Method::SessionCreate, to_value(&session())),
         (Method::SessionSetArchived, to_value(&session())),
+        (
+            Method::SessionDelete,
+            to_value(&SessionDeleteResult {
+                id: "s-1".into(),
+                workspace_deleted: true,
+                branch_kept: false,
+            }),
+        ),
         (
             Method::SessionSend,
             to_value(&SessionSendResult { turn: Some(2) }),
@@ -465,6 +474,13 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&SetArchivedParams {
                 id: "s-1".into(),
                 archived: true,
+            }),
+        ),
+        (
+            Method::SessionDelete,
+            to_value(&SessionDeleteParams {
+                id: "s-1".into(),
+                token: Some("9f2c".into()),
             }),
         ),
         (
