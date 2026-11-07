@@ -554,3 +554,44 @@ async fn a_tile_carries_the_last_activity_and_a_turns_end_sends_one() {
     assert_eq!(tile["tile"]["state"], "idle");
     assert_eq!(tile["last_activity_at"], row["last_activity_at"]);
 }
+
+/// The tile Core sends when a subscribe opens a stored session, after a
+/// restart, carries the `last_activity_at` that `session.list` reports.
+// verifies: PROTO-CORE-API-R59
+#[tokio::test(flavor = "multi_thread")]
+async fn the_tile_sent_on_opening_a_stored_session_carries_its_last_activity() {
+    let records = fake::Records::default();
+    let adapters: Vec<Arc<dyn Adapter>> =
+        vec![Arc::new(FakeAdapter::with_records(Arc::clone(&records)))];
+    let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
+    let mut client = core.client().await;
+    let workspace_id = json!(workspace(&mut client, core.dir.path()).await);
+    let id = new_session(&mut client, &workspace_id).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.started").await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client
+        .result("session.send", json!({ "id": id, "text": "finish" }))
+        .await;
+    tile_with_activity(&mut client, &id).await;
+    client.result("session.stop", json!({ "id": id })).await;
+    client.result("core.shutdown", json!({})).await;
+    drop(client);
+    let TestCore { dir, task, .. } = core;
+    task.await.unwrap().unwrap();
+
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(records))];
+    let core = start_with_adapters(dir, |_| {}, adapters).await;
+    let mut client = core.client().await;
+    let listed = session_row(&mut client, &id).await["last_activity_at"].clone();
+    assert!(listed.is_string(), "kept across the restart");
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    let (tile, _) = tile_with_activity(&mut client, &id).await;
+    assert_eq!(tile["last_activity_at"], listed);
+}
