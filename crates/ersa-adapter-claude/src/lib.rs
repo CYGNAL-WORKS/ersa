@@ -17,6 +17,7 @@
 //!   and the registry of sessions open in running CLI processes.
 //! - [`wire`] holds the typed models of every line in both directions.
 
+mod attachments;
 mod driver;
 mod platform;
 mod projector;

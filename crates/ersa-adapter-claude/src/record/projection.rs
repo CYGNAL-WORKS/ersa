@@ -25,7 +25,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::BACKEND;
-use crate::projector::{kind_of, plain_text, reply_events, tool_result_events};
+use crate::projector::{kind_of, reply_events, tool_result_events};
 use crate::wire::{LocalCommandOutput, MessageContent, RecordEntry, RecordUser};
 
 /// The longest record line read as an entry. A tool result can run to
@@ -488,27 +488,61 @@ impl RecordProjector {
 /// on the stream (Ersa sends them, and does not ask for them back), so the
 /// record is where they come from.
 fn user_events(user: RecordUser) -> Vec<Event> {
+    // The CLI's note of where it cached an attached image is not a message:
+    // no events, so the entry passes through (fixture 2.1.316/07).
+    if user.is_meta == Some(true) && names_cached_images(&user.message.content) {
+        return Vec::new();
+    }
     let from_cli = user.is_from_cli();
     let content = user.message.content;
     let results = tool_result_events(content.clone());
     if !results.is_empty() {
         return results;
     }
-    let text = match content {
-        MessageContent::Text(text) => Some(text),
-        MessageContent::Blocks(blocks) => plain_text(&blocks),
+    // Its images and its list of files and folders are its attachments, never
+    // its text (PROTO-CLAUDE-CODE-STREAM-R26).
+    let has_image = matches!(&content, MessageContent::Blocks(blocks)
+        if blocks.iter().any(|b| matches!(b, crate::wire::ContentBlock::Image { .. })));
+    let (text, attachments) = match content {
+        MessageContent::Text(text) => (Some(text), Vec::new()),
+        MessageContent::Blocks(blocks) => crate::attachments::split_blocks(&blocks),
     };
-    match text {
-        Some(text) => vec![Event::UserMessage(UserMessage {
-            text,
+    match (text, attachments.is_empty()) {
+        // Images the adapter cannot read leave a prompt with nothing to show,
+        // but it was still a turn: it stays in the transcript, empty.
+        (None, true) if !has_image => Vec::new(),
+        (text, _) => vec![Event::UserMessage(UserMessage {
+            text: text.unwrap_or_default(),
             origin: if from_cli {
                 MessageOrigin::System
             } else {
                 MessageOrigin::Human
             },
             peer: None,
+            attachments,
         })],
-        None => Vec::new(),
+    }
+}
+
+/// Whether `content` is only the CLI's note of where it cached attached
+/// images: text alone, every line of it `[Image: source: <path>]`. A note
+/// with anything else in it is still shown.
+fn names_cached_images(content: &MessageContent) -> bool {
+    let cached = |text: &str| {
+        !text.is_empty()
+            && text
+                .lines()
+                .all(|line| line.starts_with("[Image: source: ") && line.ends_with(']'))
+    };
+    match content {
+        MessageContent::Text(text) => cached(text),
+        MessageContent::Blocks(blocks) => {
+            !blocks.is_empty()
+                && blocks.iter().all(|block| match block {
+                    crate::wire::ContentBlock::Text { text, .. } => cached(text),
+                    _ => false,
+                })
+        }
     }
 }
 

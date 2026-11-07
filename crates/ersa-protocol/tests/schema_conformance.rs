@@ -65,6 +65,7 @@ fn examples() -> Vec<Event> {
                 session_id: "s-2".into(),
                 name: "planner".into(),
             }),
+            attachments: Vec::new(),
         }),
         Event::AssistantText(AssistantText {
             block_id: "b-1".into(),
