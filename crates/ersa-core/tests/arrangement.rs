@@ -457,7 +457,10 @@ async fn section_names_are_one_line_without_control_characters() {
         assert_valid("section.create", &response);
         assert_eq!(response["error"]["code"], -32602, "{name:?}: {response:#}");
         let response = client
-            .call("section.rename", json!({ "id": spaced["id"], "name": name }))
+            .call(
+                "section.rename",
+                json!({ "id": spaced["id"], "name": name }),
+            )
             .await;
         assert_valid("section.rename", &response);
         assert_eq!(response["error"]["code"], -32602, "{name:?}: {response:#}");
