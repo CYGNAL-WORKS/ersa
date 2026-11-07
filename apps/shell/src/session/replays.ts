@@ -16,7 +16,7 @@ export interface Capture {
   notifications: { kind: "notification"; method: "session.event"; params: { session_id: string; event: Envelope } }[];
 }
 
-export type Replay = "02-partial-messages" | "11-stream-permission-prompt-tool-stdio";
+export type Replay = "02-partial-messages" | "2.1.316-07-attachments" | "11-stream-permission-prompt-tool-stdio";
 
 export function capture(name: Replay): Capture {
   return JSON.parse(readFileSync(join(import.meta.dirname, "replays", `${name}.json`), "utf8")) as Capture;

@@ -1,10 +1,16 @@
-import { type ReactNode, memo, useLayoutEffect, useRef } from "react";
+import { Image } from "lucide-react";
+import { type CSSProperties, type ReactNode, memo, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { t } from "../catalog";
 import type { PermissionRequested, ToolInput } from "../protocol/agent-events.gen";
 import type { Answer, Decision } from "../session/answers";
 import type { SessionView, Sending } from "../session/follow";
+import { pathName } from "../session/attachments";
+import { imageSize } from "../session/imageSize";
 import { stateText } from "../session/states";
-import { type Item, isOpen } from "../session/transcript";
+import { type Item, type MessageAttachment, isOpen } from "../session/transcript";
 import { Button } from "./Button";
+import { AttachmentChip } from "./AttachmentChip";
+import { Icon } from "./Icon";
 import { PermissionAnswers } from "./PermissionAnswers";
 import { SessionTitle } from "./SessionTitle";
 import "./Transcript.css";
@@ -110,18 +116,72 @@ interface BlockProps {
 }
 
 /**
+ * What came with a user's message, above its words (FLOW-SEND-MESSAGE-R11; DESIGN.md, Layout): an image as the image;
+ * a file or folder by its name, focusable, its path the agent was given as its name and tooltip.
+ */
+function MessageAttachments({ attachments }: { attachments: readonly MessageAttachment[] }) {
+  return (
+    <ul className="transcript-attachments" aria-label={t("transcript.attachment.listLabel")}>
+      {attachments.map((a, i) =>
+        a.kind === "image" ? (
+          <AttachedImage key={i} image={a} />
+        ) : (
+          <AttachmentChip key={i} kind={a.kind} name={pathName(a.path)} path={a.path} />
+        ),
+      )}
+    </ul>
+  );
+}
+
+/**
+ * An image as itself, named "Attached image" (DESIGN.md, Layout). Its place takes its final size at once, from the
+ * width and height its own header states (turned upright), capped at size-attachment-image with its proportions kept,
+ * and is material-tile until the image is drawn, which then fades in, so nothing in the bubble moves. An image that
+ * fails to draw after its place is set keeps that place and shows the image icon and "Attached image" in it. One of a
+ * kind the window can't show, or that fails to load with no place set, is the attachment with an image icon.
+ */
+function AttachedImage({ image }: { image: Extract<MessageAttachment, { kind: "image" }> }) {
+  const [state, setState] = useState<"drawing" | "drawn" | "failed">("drawing");
+  const size = useMemo(() => imageSize(image.data), [image.data]);
+  const label = t("transcript.attachment.imageLabel");
+  if (!image.media_type.toLowerCase().startsWith("image/") || (state === "failed" && !size)) return <AttachmentChip kind="image" name={label} />;
+  // The header's size reaches the CSS as custom properties; the cap and the proportions are the stylesheet's.
+  const place = size && ({ "--image-width": `${size.width}px`, "--image-ratio": `${size.width} / ${size.height}`, "--image-aspect": size.width / size.height } as CSSProperties);
+  return (
+    <li className="transcript-attachment-image">
+      <span className="attachment-image" style={place} data-sized={size ? "" : undefined} data-state={state}>
+        {state === "failed" ? (
+          <span className="attachment-image-failed">
+            <Icon icon={Image} size="icon-sm" />
+            {label}
+          </span>
+        ) : (
+          <img src={`data:${image.media_type};base64,${image.data}`} alt={label} onLoad={() => setState("drawn")} onError={() => setState("failed")} />
+        )}
+      </span>
+    </li>
+  );
+}
+
+/** A user's message (DESIGN.md, Layout): its attachments above its words. */
+function UserBubble({ item }: { item: Extract<Item, { kind: "user" }> }) {
+  return (
+    // A bubble with no label: its place says who wrote it, and assistive technology hears "You" (DESIGN.md, Layout).
+    <div className="transcript-user" role="group" aria-label="You">
+      {item.attachments && <MessageAttachments attachments={item.attachments} />}
+      {item.text !== "" && <p className="transcript-text">{item.text}</p>}
+    </div>
+  );
+}
+
+/**
  * One block. Memoised: items keep their identity until their own event
  * changes them, so a streamed delta re-renders one block, not the page.
  */
 const Block = memo(function Block({ item, answer, waiting, live, onDecide }: BlockProps) {
   switch (item.kind) {
     case "user":
-      return (
-        // A bubble with no label: its place says who wrote it, and assistive technology hears "You" (DESIGN.md, Layout).
-        <div className="transcript-user" role="group" aria-label="You">
-          <p className="transcript-text">{item.text}</p>
-        </div>
-      );
+      return <UserBubble item={item} />;
     case "assistant":
       return <p className="transcript-text">{item.text}</p>;
     case "thinking":

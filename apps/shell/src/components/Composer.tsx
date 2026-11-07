@@ -1,10 +1,11 @@
-import { ArrowUp, File, Folder, Image, Square, X } from "lucide-react";
+import { ArrowUp, Square, X } from "lucide-react";
 import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { t } from "../catalog";
 import type { ShellControl } from "../core/shell";
 import { type Attached, addAll, pastedImage, same, willCopy } from "../session/attachments";
 import type { Sending } from "../session/follow";
 import { type AttachWhat, AttachMenu } from "./AttachMenu";
+import { AttachmentChip } from "./AttachmentChip";
 import { ContextRing } from "./ContextRing";
 import { Icon, IconButton } from "./Icon";
 import "./Composer.css";
@@ -288,8 +289,6 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, onRe
   );
 }
 
-const KIND_ICON = { file: File, image: Image, folder: Folder } as const;
-
 /**
  * One attachment (docs/design/COMPOSER.md, Attachments): its icon, name and detail, that it will be copied into the
  * workspace when sending copies it (FLOW-SEND-MESSAGE-R17), and remove (R09). One Ersa can't send shows the
@@ -297,15 +296,7 @@ const KIND_ICON = { file: File, image: Image, folder: Folder } as const;
  */
 function Attachment({ attachment: a, copied, onRemove }: { attachment: Attached; copied: boolean; onRemove: () => void }) {
   return (
-    <li className="composer-attachment" data-problem={a.problem !== undefined || undefined}>
-      {a.problem !== undefined ? (
-        <span className="glyph" data-tone="danger" aria-hidden="true" />
-      ) : (
-        <span className="composer-attachment-icon">
-          <Icon icon={KIND_ICON[a.kind]} size="icon-sm" />
-        </span>
-      )}
-      <span className="composer-attachment-name">{a.name}</span>
+    <AttachmentChip kind={a.kind} name={a.name} problem={a.problem !== undefined} className="composer-attachment">
       {a.problem !== undefined ? (
         <span className="composer-attachment-problem" role="alert">
           {a.problem}
@@ -317,7 +308,7 @@ function Attachment({ attachment: a, copied, onRemove }: { attachment: Attached;
         </>
       )}
       <IconButton icon={X} size="icon-xs" label={t("composer.attachment.removeLabel", { name: a.name })} className="composer-attachment-remove" onClick={onRemove} />
-    </li>
+    </AttachmentChip>
   );
 }
 

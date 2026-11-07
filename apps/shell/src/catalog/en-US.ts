@@ -111,7 +111,12 @@ export const enUS = {
       reconnectingNote: "Reconnecting to Core…",
     },
   },
-  transcript: {},
+  transcript: {
+    attachment: {
+      listLabel: "Attachments",
+      imageLabel: "Attached image",
+    },
+  },
   // The composer (docs/design/COMPOSER.md): the box's parts, and the status line's note while backends are detected
   // (FLOW-NEW-SESSION-R23). That Ersa can't reach the sessions is said in the rail foot's words.
   composer: {
