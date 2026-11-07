@@ -788,7 +788,9 @@ pub struct SessionDeleteParams {
 #[serde(deny_unknown_fields)]
 pub struct SessionDeleteResult {
     pub id: String,
-    /// Whether the session's workspace, its folder and its row, went too.
+    /// Whether this delete took the session's workspace's folder, and its
+    /// branch unless kept. The workspace's row goes once no other session
+    /// refers to it.
     pub workspace_deleted: bool,
     /// Whether the workspace's branch was kept, because it holds commits
     /// no other branch or remote holds or another worktree has it checked

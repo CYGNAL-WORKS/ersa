@@ -1255,15 +1255,7 @@ impl SessionManager {
         let adapter = self.adapter(&row.backend).ok_or_else(|| {
             SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
         })?;
-        let check =
-            tokio::spawn(async move { adapter.open_elsewhere(transport, &backend_id).await });
-        Ok(
-            match tokio::time::timeout(OPEN_ELSEWHERE_CHECK, check).await {
-                Ok(Ok(answer)) => answer,
-                // A check that panicked or hung could not tell.
-                Ok(Err(_)) | Err(_) => OpenElsewhere::Unknown,
-            },
-        )
+        Ok(ask_open_elsewhere(adapter, transport, &backend_id).await)
     }
 
     /// Marks the session deleting, `running`, and records whether its
@@ -1711,6 +1703,22 @@ fn is_rfc3339(text: &str) -> bool {
 ///
 /// Notices are not part of the record, so one reaches the clients reading
 /// the session now; with none reading, there is nobody to tell.
+/// Asks `adapter` whether another process has session `backend_id` open,
+/// for at most [`OPEN_ELSEWHERE_CHECK`]: a check that panics or hangs could
+/// not tell, so its answer is unknown.
+async fn ask_open_elsewhere(
+    adapter: Arc<dyn Adapter>,
+    transport: Arc<dyn Transport>,
+    backend_id: &str,
+) -> OpenElsewhere {
+    let id = backend_id.to_string();
+    let check = tokio::spawn(async move { adapter.open_elsewhere(transport, &id).await });
+    match tokio::time::timeout(OPEN_ELSEWHERE_CHECK, check).await {
+        Ok(Ok(answer)) => answer,
+        Ok(Err(_)) | Err(_) => OpenElsewhere::Unknown,
+    }
+}
+
 async fn notice_if_open_elsewhere(
     handle: &Handle,
     adapter: Arc<dyn Adapter>,
@@ -1718,14 +1726,7 @@ async fn notice_if_open_elsewhere(
     backend_id: &str,
     consequence: &str,
 ) {
-    let id = backend_id.to_string();
-    let check = tokio::spawn(async move { adapter.open_elsewhere(transport, &id).await });
-    let answer = match tokio::time::timeout(OPEN_ELSEWHERE_CHECK, check).await {
-        Ok(Ok(answer)) => answer,
-        // A check that panicked or hung could not tell.
-        Ok(Err(_)) | Err(_) => OpenElsewhere::Unknown,
-    };
-    let notice = match answer {
+    let notice = match ask_open_elsewhere(adapter, transport, backend_id).await {
         OpenElsewhere::No => return,
         OpenElsewhere::Yes { pid } => SessionNotice {
             level: NoticeLevel::Warning,

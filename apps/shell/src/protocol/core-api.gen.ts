@@ -1286,7 +1286,7 @@ export interface Session6 {
 export interface SessionDeleteResult {
   id: Id;
   /**
-   * Whether the session's workspace went too: its folder, its branch unless kept, and its row.
+   * Whether this delete took the session's workspace's folder, and its branch unless kept. Its row goes with it once no other session refers to it; a session whose delete kept the files, when the last to leave a workspace whose folder is gone, takes the row.
    */
   workspace_deleted: boolean;
   /**
