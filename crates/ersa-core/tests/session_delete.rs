@@ -798,3 +798,34 @@ async fn the_last_session_out_of_a_workspace_whose_files_went_takes_its_row() {
     assert!(!workspace_listed(&mut client, &project, &workspace).await);
     assert!(backend_ids(&fake.records).is_empty());
 }
+
+/// A folder missing for some other reason (a drive unplugged, a folder
+/// deleted by hand) while git still lists the worktree keeps the row: Ersa
+/// did not delete those files, and their worktree and branch stay findable.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_missing_while_git_still_lists_it_keeps_the_row() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let (project, _repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, folder) = isolated(&mut client, &project).await;
+    let first = idle_session(&mut client, &workspace).await;
+    let second = idle_session(&mut client, &workspace).await;
+
+    // Shared: the first delete keeps the files, and fails at the record.
+    *fake.delete_refusal.lock().unwrap() = Some(OpenElsewhere::Unknown);
+    let shown = token(&mut client, &workspace).await;
+    client
+        .error("session.delete", json!({ "id": first, "token": shown }))
+        .await;
+    *fake.delete_refusal.lock().unwrap() = None;
+    client.result("session.stop", json!({ "id": second })).await;
+    client.result("session.remove", json!({ "id": second })).await;
+    std::fs::remove_dir_all(&folder).unwrap();
+
+    let shown = token(&mut client, &workspace).await;
+    let result = client
+        .result("session.delete", json!({ "id": first, "token": shown }))
+        .await;
+    assert_eq!(result["workspace_deleted"], false);
+    assert!(workspace_listed(&mut client, &project, &workspace).await);
+}

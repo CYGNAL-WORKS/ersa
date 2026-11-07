@@ -1177,6 +1177,18 @@ pub async fn git_worktree_delete(
     Ok(false)
 }
 
+/// Whether git lists a worktree at `path` of the repository at `repo`,
+/// prunable ones included: git keeps a worktree's record until it is
+/// removed or pruned, even with its folder gone.
+pub async fn git_worktree_listed(
+    transport: &dyn Transport,
+    repo: &str,
+    path: &str,
+) -> Result<bool, VcsError> {
+    let listed = git_worktree_list(transport, repo).await?;
+    Ok(find(&listed, path).await.is_some())
+}
+
 /// Deletes the folder at `path` and everything in it, retried while files
 /// are busy, as worktree removal is. A link inside is removed, never
 /// followed. A folder already gone is not an error. Each try is given
