@@ -1,5 +1,5 @@
 import { ArrowUp, Plus } from "lucide-react";
-import { type KeyboardEvent, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { type KeyboardEvent, type ReactNode, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { t } from "../catalog";
 import type { Sending } from "../session/follow";
 import { Icon, IconButton } from "./Icon";
@@ -26,6 +26,10 @@ interface ComposerProps {
   tall?: boolean;
   /** What a screen opens above the box in the status line's place, such as the trust question: the line says nothing meanwhile. */
   statusTaken?: boolean;
+  /** The session controls, beneath the box in the same column, space-xs below it (docs/design/COMPOSER.md). */
+  controls?: ReactNode;
+  /** For the gallery: send shown under the pointer or pressed. */
+  forceSend?: "hover" | "pressed";
   /** A permission request is open and holds the focal glow, so focus shows on the box's edge alone. */
   quietFocus?: boolean;
   /** For the gallery: text already typed, and a pointer or keyboard state shown without one. */
@@ -41,7 +45,7 @@ interface ComposerProps {
  * Where the user writes to the agent (docs/design/COMPOSER.md): the status line above the box, and the box holding
  * attach, the words and send. Enter sends; Shift+Enter starts a new line (FLOW-SEND-MESSAGE-R01).
  */
-export function Composer({ unavailable, sending, onSend, onWrite, tall, statusTaken, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
+export function Composer({ unavailable, sending, onSend, onWrite, tall, statusTaken, controls, forceSend, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const words = useRef<HTMLTextAreaElement>(null);
   useImperativeHandle(inputRef, () => words.current as HTMLTextAreaElement);
@@ -115,10 +119,11 @@ export function Composer({ unavailable, sending, onSend, onWrite, tall, statusTa
           }}
           onKeyDown={onKeyDown}
         />
-        <button type="submit" className="composer-send" aria-label={t("composer.sendButton")} disabled={!canSend}>
+        <button type="submit" className="composer-send" data-force={forceSend} aria-label={t("composer.sendButton")} disabled={!canSend}>
           <Icon icon={ArrowUp} size="icon" />
         </button>
       </form>
+      {controls}
     </div>
   );
 }

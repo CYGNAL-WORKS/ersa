@@ -548,10 +548,11 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               sending={shown.message ?? (firstSendHere && { state: "failed", message: firstSendHere.message })}
               initialText={firstSendHere?.text}
               onSend={(text) => follower.current?.send(text) ?? Promise.resolve(false)}
-            />
-            {sessionControls && listedProject && hello && (
-              <div className="stage-controls">
-                <SessionControls
+              controls={
+                sessionControls &&
+                listedProject &&
+                hello && (
+                  <SessionControls
                   hosts={[hello.host]}
                   localHostId={hello.host.id}
                   projects={[listedProject]}
@@ -561,9 +562,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                   onChoose={() => {}}
                   disabled
                   used={used}
-                />
-              </div>
-            )}
+                  />
+                )
+              }
+            />
           </ErrorBoundary>
         </main>
       ) : hello && screenProjects && showsScreen({ composing, starting, activeId }, view.phase === "connected") ? (

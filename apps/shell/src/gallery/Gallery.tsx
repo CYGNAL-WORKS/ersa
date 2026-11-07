@@ -791,9 +791,10 @@ const entries: Entry[] = [
       ["Empty", <Composer autoFocus={false} onSend={async () => false} />],
       [
         "Under a session, with its values",
-        <>
-          <Composer autoFocus={false} onSend={async () => false} />
-          <div className="stage-controls">
+        <Composer
+          autoFocus={false}
+          onSend={async () => false}
+          controls={
             <SessionControls
               hosts={[hello.host]}
               localHostId={hello.host.id}
@@ -805,10 +806,12 @@ const entries: Entry[] = [
               disabled
               used={0.42}
             />
-          </div>
-        </>,
+          }
+        />,
       ],
       ["Hover", <Composer autoFocus={false} onSend={async () => false} force="hover" />],
+      ["Send under the pointer", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." forceSend="hover" />],
+      ["Send pressed", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." forceSend="pressed" />],
       ["Focus", <Composer autoFocus={false} onSend={async () => false} force="focus" />],
       // A permission request holds the screen's focal glow, so the box shows focus by its edge alone.
       ["Focus, a permission request open", <Composer autoFocus={false} onSend={async () => false} force="focus" quietFocus />],
