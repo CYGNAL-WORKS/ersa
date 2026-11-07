@@ -112,6 +112,12 @@ export type Request =
   | {
       jsonrpc: "2.0";
       id: RequestId;
+      method: "workspace.changes";
+      params: WorkspaceChangesParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
       method: "session.list";
       params?: SessionListParams;
     }
@@ -459,6 +465,9 @@ export interface WorkspaceRemoveParams {
 export interface BranchListParams {
   project_id: Id;
 }
+export interface WorkspaceChangesParams {
+  id: Id;
+}
 /**
  * No fields.
  */
@@ -787,6 +796,35 @@ export interface Branch {
    */
   default: boolean;
 }
+/**
+ * What deleting an isolated workspace would lose.
+ */
+export interface WorkspaceChanges {
+  /**
+   * Files with changes not committed, untracked files included.
+   */
+  uncommitted: number;
+  /**
+   * Ignored entries the version control reports, a wholly ignored folder as one.
+   */
+  ignored: number;
+  /**
+   * Commits reachable from the workspace's checkout, its branch or its own reflog that no other local branch or remote-tracking branch holds.
+   */
+  unshared: number;
+  /**
+   * Those unshared commits the workspace's branch does not hold, which deleting the folder loses.
+   */
+  stranded: number;
+  /**
+   * Sessions using the workspace, leaving out any marked deleting.
+   */
+  sessions: number;
+  /**
+   * Opaque; changes whenever the uncommitted files or their content, the unshared commits, the set of ignored entries or the counted sessions change. session.delete carries it.
+   */
+  token: string;
+}
 export interface Session {
   id: Id;
   workspace_id: Id;
@@ -958,6 +996,35 @@ export interface Workspace2 {
    */
   vcs_ref: string;
   state: "ready" | "creating" | "removing" | "error";
+}
+/**
+ * What deleting an isolated workspace would lose.
+ */
+export interface WorkspaceChangesResult {
+  /**
+   * Files with changes not committed, untracked files included.
+   */
+  uncommitted: number;
+  /**
+   * Ignored entries the version control reports, a wholly ignored folder as one.
+   */
+  ignored: number;
+  /**
+   * Commits reachable from the workspace's checkout, its branch or its own reflog that no other local branch or remote-tracking branch holds.
+   */
+  unshared: number;
+  /**
+   * Those unshared commits the workspace's branch does not hold, which deleting the folder loses.
+   */
+  stranded: number;
+  /**
+   * Sessions using the workspace, leaving out any marked deleting.
+   */
+  sessions: number;
+  /**
+   * Opaque; changes whenever the uncommitted files or their content, the unshared commits, the set of ignored entries or the counted sessions change. session.delete carries it.
+   */
+  token: string;
 }
 export interface Session1 {
   id: Id;
@@ -1444,6 +1511,7 @@ export interface CoreApiMethods {
   "workspace.create": { params: WorkspaceCreateParams; result: WorkspaceCreateResult };
   "workspace.remove": { params: WorkspaceRemoveParams; result: WorkspaceRemoveResult };
   "branch.list": { params: BranchListParams; result: BranchListResult };
+  "workspace.changes": { params: WorkspaceChangesParams; result: WorkspaceChangesResult };
   "session.list": { params: SessionListParams; result: SessionListResult };
   "session.create": { params: SessionCreateParams; result: SessionCreateResult };
   "session.start": { params: SessionStartParams; result: SessionStartResult };

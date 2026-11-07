@@ -294,6 +294,9 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         Method::WorkspaceCreate => to_json(handlers::workspace_create(core, parse(params)?).await),
         Method::WorkspaceRemove => to_json(handlers::workspace_remove(core, parse(params)?).await),
         Method::BranchList => to_json(handlers::branch_list(core, parse(params)?).await),
+        Method::WorkspaceChanges => {
+            to_json(handlers::workspace_changes(core, parse(params)?).await)
+        }
         Method::SettingsGet => to_json(handlers::settings_get(core, parse(params)?).await),
         Method::SettingsSet => to_json(handlers::settings_set(core, parse(params)?).await),
 
@@ -346,6 +349,8 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
 /// connection's other requests. Only after the handshake. Every request
 /// that names a session is one, so requests about one session keep their
 /// order whatever they are; `session.list` and `session.create` name none.
+/// A few slow requests that name no session run detached too, so they
+/// never hold up the connection's other requests.
 pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
     conn.api_version.is_some()
         && matches!(
@@ -369,6 +374,9 @@ pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
                     | Method::SessionRawLog
                     // Reads a path that may be slow to answer.
                     | Method::AttachmentInspect
+                    // Runs several git calls and reads every uncommitted
+                    // file, which may take a while in a large workspace.
+                    | Method::WorkspaceChanges
             )
         )
 }
@@ -481,7 +489,11 @@ pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Resp
             Ok(params) => to_json(sessions::inspect(core, params).await),
             Err((e, _)) => Err(e),
         },
-        _ => unreachable!("runs_detached chose a session method"),
+        Some(Method::WorkspaceChanges) => match parse(params) {
+            Ok(params) => to_json(handlers::workspace_changes(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        _ => unreachable!("runs_detached chose one of the methods above"),
     };
     match result {
         Ok(value) => Response::success(id, value),
