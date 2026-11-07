@@ -41,6 +41,8 @@ test("finds loops that repeat without a fixed count, call gh and sleep", () => {
     "while (1) { gh pr view 5; timeout /t 30 }",
     "while true; do gh project item-list; sleep 1; done",
     "watch -n 30 gh pr view 1",
+    "Do { gh pr view 1; Start-Sleep 30 } Until ($done)",
+    "For (;;) { gh pr view 1; Start-Sleep 30 }",
     'setInterval(() => execSync("gh pr view 5"), 30000)',
   ]) {
     assert.ok(polls(t), t);
@@ -59,6 +61,9 @@ test("passes a loop with a fixed count, a wait gh ends itself, and a loop withou
     'gh pr create --body "poll until done with gh pr view, then sleep"',
     'gh pr comment 5 --body "Fixed: the poller would sleep while CI ran"',
     'git commit -m "Poller: sleep while gh api returns 403"',
+    'gh pr create --body "The timer uses setInterval now"',
+    'git commit -m "Polling guard: fixes\n\nLoop keywords ignore case;\nwatch -n and setInterval count as repeating; any gh subcommand counts. Runs in a child."',
+    'gh pr create --body "Summary\nWhile the review runs, the orchestrator does not sleep."',
   ]) {
     assert.ok(!polls(t), t);
   }
@@ -146,7 +151,7 @@ test("runs on every tool that can start or write a loop", () => {
 });
 
 test("passes input it cannot read, and fields of an unexpected type", () => {
-  assert.equal(spawnSync(process.execPath, [HOOK], { input: "not json" }).status, 0);
+  assert.equal(spawnSync(process.execPath, [HOOK], { input: "not json", timeout: 10_000 }).status, 0);
   assert.equal(exitCode({ cwd: 5, tool_input: { command: "bash a.sh" } }), 0);
   assert.equal(exitCode({ tool_input: { file_path: join(tmpdir(), "w.sh"), edits: {} } }), 0);
 });

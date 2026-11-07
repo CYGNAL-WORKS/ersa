@@ -21,12 +21,15 @@ import { fileURLToPath } from "node:url";
 
 // A loop keyword counts only where a command starts, so prose in a commit
 // message or a pull request body ("wait while the review runs") is not a loop.
-// PowerShell keywords ignore case, so the match does too. Every repeated part
-// can match a stretch of text one way only, so no input makes these backtrack.
+// PowerShell keywords ignore case, so its forms (a keyword then a parenthesis
+// or brace) match in any case; a capitalized word that starts a sentence does
+// not. Every repeated part can match a stretch of text one way only, so no
+// input makes these backtrack.
 const AT = String.raw`(?:^|[;&|({"'\x60]|\b(?:then|do|else)\s|-Command\s)[ \t]*`;
-const LOOP = new RegExp(String.raw`${AT}(?:while|until)\b|${AT}do\s*\{|${AT}for\s*\(\(?\s*;\s*;\s*\)`, "mi");
-// A command that repeats on its own clock needs no sleep.
-const REPEAT = /\bsetInterval\b|\bwatch\s+(?:-n|--interval)\b/;
+const LOOP = new RegExp(String.raw`${AT}(?:while|until)\b|${AT}[Ww][Hh][Ii][Ll][Ee]\s*\(|${AT}[Dd][Oo]\s*\{|${AT}[Ff][Oo][Rr]\s*\(\(?\s*;\s*;\s*\)`, "m");
+// A command that repeats on its own clock needs no sleep. It counts only as
+// code: a call, or watch given an interval and then gh.
+const REPEAT = /\bsetInterval\s*\(|\bwatch\s+(?:-n|--interval)(?:=|\s+)\d+\s+["']?gh\b/;
 const GH = /\bgh(?:\.exe)?["']?(?:\s+-{1,2}(?!-)[\w-]+(?:[ =][^\s-]\S*)?)*\s+[a-z]/i;
 const SLEEP = /\b(?:sleep|Start-Sleep|setTimeout)\b|\btimeout(?:\.exe)?\s+\/t\b|\bread\s+-t\b/i;
 // A script the command runs: one that starts a command, or one a shell is
