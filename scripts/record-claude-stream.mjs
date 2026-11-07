@@ -16,6 +16,10 @@
 // placeholders. An --mcp-config file among the extra flags names the
 // repository by that placeholder; the CLI gets an expanded copy.
 //
+// ERSA_STREAM_INTERRUPT_MS=<n> sends an interrupt control request <n> ms after
+// each user message, as Ersa's driver does when the user chooses stop, so a
+// turn ending as interrupted is recorded.
+//
 // Set ERSA_CLAUDE to the claude executable if it is not on PATH.
 
 import { spawn, spawnSync } from "node:child_process";
@@ -147,6 +151,10 @@ for (const text of messages) {
   turn += 1;
   const p = waitForResult(180_000);
   send(userMessage(text));
+  const interruptAfter = Number(process.env.ERSA_STREAM_INTERRUPT_MS);
+  if (interruptAfter > 0) {
+    setTimeout(() => send({ type: "control_request", request_id: `ersa-interrupt-${turn}`, request: { subtype: "interrupt" } }), interruptAfter);
+  }
   const res = await p;
   turns.push({ turn, text, got_result: !!res, subtype: res?.subtype ?? null, is_error: res?.is_error ?? null });
   if (!res) break;

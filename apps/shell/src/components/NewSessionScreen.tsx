@@ -45,6 +45,8 @@ interface NewSessionScreenProps {
   onChooseFolder?: () => Promise<FolderChoice>;
   /** Adds the folder as a trusted project on the local host (FLOW-NEW-SESSION-R25); resolves to the project once Core added it. */
   onAddProject: (path: string) => Promise<Project | undefined>;
+  /** Stop while the first message is on its way, as while the new session's backend starts (FLOW-SEND-MESSAGE-R03). */
+  onStop?: () => void;
   /** Ersa can't reach the sessions: trying again, or no longer trying (FLOW-SEND-MESSAGE-R06). */
   away?: Extract<Unavailable, "reconnecting" | "unreachable">;
   /**
@@ -309,6 +311,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           initialText={props.initialText}
           unavailable={unavailable}
           sending={starting}
+          onStop={props.onStop}
           onWrite={hold}
           onSend={(text) => {
             hold();
