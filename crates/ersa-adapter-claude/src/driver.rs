@@ -24,8 +24,8 @@ use std::time::Duration;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, ImageLimits,
     LineReader, LineWriter, OpenElsewhere, OutgoingMessage, PermissionDecision, Process,
-    ProcessExit, ProcessSpec, Projector, RecordEvent, RecordSummary, SessionConfig, Transport,
-    async_trait,
+    ProcessExit, ProcessSpec, Projector, RecordDeletion, RecordEvent, RecordSummary, SessionConfig,
+    Transport, async_trait,
 };
 use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::PermissionBehavior;
@@ -570,6 +570,43 @@ impl Adapter for ClaudeAdapter {
             Ok(LiveCheck::Open(live)) => OpenElsewhere::Yes { pid: live.pid },
             Ok(LiveCheck::Unknown { .. }) | Err(_) => OpenElsewhere::Unknown,
         }
+    }
+
+    /// Deletes the session's record file and the folder of the same name
+    /// beside it, on this machine (PROTO-CLAUDE-CODE-STREAM, Deleting), only
+    /// when the live-session registry shows no process has it open
+    /// (PROTO-CLAUDE-CODE-STREAM-R37). Core stops its own process for the
+    /// session first, and a CLI removes its registry file as it exits, so any
+    /// process still listed is another one. The registry is read and the
+    /// files deleted on one thread, one straight after the other.
+    async fn delete_record(
+        &self,
+        _transport: Arc<dyn Transport>,
+        cwd: &str,
+        backend_session_id: &str,
+    ) -> Result<RecordDeletion, AdapterError> {
+        let home = self.claude_home()?;
+        let (cwd, id) = (cwd.to_string(), backend_session_id.to_string());
+        let deletion = blocking(move || {
+            match record::live_session(&home, &id) {
+                LiveCheck::NotOpen => {}
+                LiveCheck::Open(live) => {
+                    return Ok(RecordDeletion::Refused(OpenElsewhere::Yes {
+                        pid: live.pid,
+                    }));
+                }
+                LiveCheck::Unknown { .. } => {
+                    return Ok(RecordDeletion::Refused(OpenElsewhere::Unknown));
+                }
+            }
+            record::delete_record(&home, &cwd, &id)?;
+            Ok(RecordDeletion::Deleted)
+        })
+        .await?;
+        if deletion == RecordDeletion::Deleted {
+            self.records.forget(backend_session_id);
+        }
+        Ok(deletion)
     }
 }
 

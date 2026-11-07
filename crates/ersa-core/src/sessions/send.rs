@@ -131,6 +131,7 @@ impl SessionManager {
         admitted: impl FnOnce(),
     ) -> Result<Option<u32>, SessionError> {
         let handle = self.handle(id)?;
+        self.refuse_if_deleting(&handle)?;
         // An archived session is read-only until it is unarchived, or a resume is accepted
         // (FLOW-ARCHIVE-DELETE-SESSION-R02). Said before anything else, so
         // the refusal names the reason rather than that it is not running.
@@ -144,6 +145,10 @@ impl SessionManager {
         let changed = Arc::new(Notify::new());
         {
             let mut sending = lock(&handle.sending);
+            // Again under the lock a delete's working check reads `sending`
+            // through, so a delete that claimed the workspace since the check
+            // above is seen here, or sees this send.
+            self.refuse_if_deleting(&handle)?;
             if sending.is_some() {
                 return Err(SessionError::InvalidState(
                     "a message is already being sent to this session; wait for its answer".into(),

@@ -127,7 +127,7 @@ pub(super) async fn backend_list(
         .collect())
 }
 
-fn unreachable_host(host_id: &str) -> ApiError {
+pub(super) fn unreachable_host(host_id: &str) -> ApiError {
     ApiError::new(
         ersa_protocol::core_api::ErrorKind::TransportError,
         format!("host {host_id} cannot be reached"),
@@ -325,7 +325,7 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
     Ok(project)
 }
 
-async fn find_project(core: &Core, id: &str) -> Result<Project, ApiError> {
+pub(super) async fn find_project(core: &Core, id: &str) -> Result<Project, ApiError> {
     core.store
         .project(id.to_string())
         .await?
@@ -376,6 +376,17 @@ pub(super) async fn workspace_changes(
         .workspace(params.id.clone())
         .await?
         .ok_or_else(|| ApiError::not_found(format!("no workspace {}", params.id)))?;
+    Ok(changes_of(core, &workspace).await?.0)
+}
+
+/// `workspace.changes` for `workspace`, and the ids of the sessions it
+/// counted: every one using the workspace but those marked deleting, which
+/// are on their way out. `session.delete` computes it the same way, so the
+/// token it compares is made as the user's was.
+pub(super) async fn changes_of(
+    core: &Core,
+    workspace: &Workspace,
+) -> Result<(WorkspaceChanges, Vec<String>), ApiError> {
     if workspace.kind == WorkspaceKind::Root {
         return Err(ApiError::invalid_state(format!(
             "workspace {} is the project's own folder, whose files are never deleted",
@@ -388,12 +399,9 @@ pub(super) async fn workspace_changes(
         .transport_for(&project.host_id)
         .ok_or_else(|| unreachable_host(&project.host_id))?;
 
-    // Every session in the workspace counts: Core cannot mark one deleting
-    // yet, so there are none to leave out.
-    // TODO(#197): leave out sessions marked deleting once the mark exists
     let sessions = core
         .store
-        .sessions_in_workspace(workspace.id.clone())
+        .sessions_counted_in_workspace(workspace.id.clone())
         .await?;
     let found = workspace::git_worktree_changes(
         transport.as_ref(),
@@ -413,7 +421,7 @@ pub(super) async fn workspace_changes(
     for id in &sessions {
         digest.add(&format!("session {id}"));
     }
-    Ok(WorkspaceChanges {
+    let changes = WorkspaceChanges {
         uncommitted: found.uncommitted,
         ignored: found.ignored,
         unshared: found.unshared,
@@ -421,7 +429,8 @@ pub(super) async fn workspace_changes(
         sessions: sessions.len() as u64,
         unrecorded: found.unrecorded,
         token: digest.finish(),
-    })
+    };
+    Ok((changes, sessions))
 }
 
 /// Refuses a project whose version control has no workspace adapter. Git is
