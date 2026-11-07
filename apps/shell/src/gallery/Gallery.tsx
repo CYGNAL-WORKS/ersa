@@ -664,12 +664,8 @@ const entries: Entry[] = [
     // A file or folder in a message in the transcript (FLOW-SEND-MESSAGE-R11; DESIGN.md, Layout): its states, and its path as
     // the tooltip with keyboard focus.
     name: "AttachmentChip",
+    wide: true,
     states: [
-      ["At rest", <ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" /></ul>],
-      ["Under the pointer", <ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="hover" /></ul>],
-      ["Pressed", <ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="pressed" /></ul>],
-      ["Keyboard focus, its path shown", room(<ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="focus" /></ul>)],
-      ["A folder", <ul className="transcript-attachments"><AttachmentChip kind="folder" name="components" path="apps/shell/src/components" /></ul>],
       [
         "A long path, its name cut and its path wrapped",
         room(
@@ -678,6 +674,11 @@ const entries: Entry[] = [
           </ul>,
         ),
       ],
+      ["At rest", <ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" /></ul>],
+      ["Under the pointer", <ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="hover" /></ul>],
+      ["Pressed", <ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="pressed" /></ul>],
+      ["Keyboard focus, its path shown", room(<ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="focus" /></ul>)],
+      ["A folder", <ul className="transcript-attachments"><AttachmentChip kind="folder" name="components" path="apps/shell/src/components" /></ul>],
       ["An image the window can't show", <ul className="transcript-attachments"><AttachmentChip kind="image" name="Attached image" /></ul>],
     ],
   },
