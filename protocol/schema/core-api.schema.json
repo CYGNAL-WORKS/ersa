@@ -1666,7 +1666,7 @@
         },
         "archived": {
           "type": "boolean",
-          "description": "Whether the user archived the session. session.send to an archived session answers invalid_state; session.resume clears it first."
+          "description": "Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume."
         }
       }
     },

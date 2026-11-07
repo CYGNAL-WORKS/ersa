@@ -1540,7 +1540,7 @@ async fn an_archived_session_is_still_archived_after_core_restarts() {
 }
 
 /// Core refuses to send an archived session a message: it is read-only
-/// until it is unarchived or resumed.
+/// until it is unarchived, or a resume is accepted.
 // verifies: FLOW-ARCHIVE-DELETE-SESSION-R02
 #[tokio::test(flavor = "multi_thread")]
 async fn a_message_to_an_archived_session_is_refused() {
@@ -1622,12 +1622,12 @@ async fn unarchiving_clears_the_mark_and_leaves_the_session_stopped() {
     assert_eq!(session_row(&mut client, &id).await["archived"], false);
 }
 
-/// `session.resume` on an archived session clears the mark first, for
-/// good. Restarting the session is milestone M1, so the resume itself is
-/// still answered as not built yet.
-// verifies: FLOW-ARCHIVE-DELETE-SESSION-R03
+/// A refused `session.resume` leaves an archived session archived: Core
+/// clears the mark only once it accepts a resume. Restarting the session is
+/// milestone M1, so every resume is refused for now.
+// Cites PROTO-CORE-API-R43 once planning PR #238 adds it.
 #[tokio::test(flavor = "multi_thread")]
-async fn resuming_an_archived_session_clears_the_mark_first() {
+async fn a_refused_resume_leaves_an_archived_session_archived() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
@@ -1641,11 +1641,11 @@ async fn resuming_an_archived_session_clears_the_mark_first() {
     let error = client.error("session.resume", json!({ "id": id })).await;
     assert_eq!(kind(&error), "invalid_state");
     assert!(error["message"].as_str().unwrap().contains("M1"));
-    assert_eq!(session_row(&mut client, &id).await["archived"], false);
+    assert_eq!(session_row(&mut client, &id).await["archived"], true);
 
     drop(client);
     let (_core, mut client) = restarted(core).await;
-    assert_eq!(session_row(&mut client, &id).await["archived"], false);
+    assert_eq!(session_row(&mut client, &id).await["archived"], true);
 }
 
 #[tokio::test(flavor = "multi_thread")]

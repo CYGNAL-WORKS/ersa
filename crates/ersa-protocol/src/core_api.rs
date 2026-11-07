@@ -517,7 +517,8 @@ pub struct Session {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sending: Option<SendPhase>,
     /// Whether the user archived the session: put away, stopped, and refused
-    /// messages until it is unarchived or resumed. Core stores it (ADR 0026).
+    /// messages until it is unarchived, or until Core accepts a resume of it.
+    /// Core stores it (ADR 0026).
     pub archived: bool,
     pub tile: Tile,
 }
