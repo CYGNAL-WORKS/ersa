@@ -124,12 +124,7 @@ pub async fn git_local_branches(
         "refs/remotes/origin/HEAD",
     ];
     let output = query(transport, repo, &args, deadline()).await?;
-    if !output.exit.success() {
-        return Err(VcsError::Failed {
-            message: "git could not list the branches".into(),
-            stderr: output.stderr_text(),
-        });
-    }
+    let output = checked(output, "git could not list the branches")?;
     Ok(parse_branches(&output.stdout))
 }
 
@@ -254,10 +249,21 @@ async fn query(
     args: &[&str],
     deadline: Deadline,
 ) -> Result<Output, VcsError> {
+    query_env(transport, dir, args, &[], deadline).await
+}
+
+/// [`query`], with `env` added to git's environment.
+async fn query_env(
+    transport: &dyn Transport,
+    dir: &str,
+    args: &[&str],
+    env: &[(&str, &str)],
+    deadline: Deadline,
+) -> Result<Output, VcsError> {
     let left = deadline
         .at
         .saturating_duration_since(tokio::time::Instant::now());
-    match git_within(transport, dir, args, left).await {
+    match git_within(transport, dir, args, env, left).await {
         Err(VcsError::Incomplete(e)) if e.kind() == std::io::ErrorKind::TimedOut => {
             Err(deadline.expired(e.to_string()))
         }
@@ -302,9 +308,9 @@ pub struct WorktreeChanges {
 /// git's own records of a worktree (its checkout, index and reflog, kept
 /// in the repository) outlive its folder, so this answers for a worktree
 /// whose removal has begun: with the folder partly gone, the files left are
-/// counted; with it wholly gone, only commits. A folder git does not list
-/// as a worktree is refused with [`VcsError::NotListed`], as removal
-/// refuses it: git cannot say what in it is uncommitted.
+/// counted; with it wholly gone, only commits. A removal that failed on
+/// Windows can leave files git could not delete after git deleted its
+/// record: those are counted as described at [`count_files`].
 pub async fn git_worktree_changes(
     transport: &dyn Transport,
     repo: &str,
@@ -313,19 +319,21 @@ pub async fn git_worktree_changes(
 ) -> Result<WorktreeChanges, VcsError> {
     let deadline = Deadline::after(CHANGES_TIMEOUT);
     let mut changes = WorktreeChanges::default();
-    let admin = admin_dir(transport, repo, path, deadline).await?;
-    if exists(path).await {
-        let Some(admin) = &admin else {
-            return Err(VcsError::NotListed {
-                path: path.to_string(),
-            });
-        };
-        count_files(transport, repo, admin, path, deadline, &mut changes).await?;
+    let records = git_records(transport, repo, path, deadline).await?;
+    let folder = path.to_string();
+    let folder_exists = tokio::task::spawn_blocking(move || std::path::Path::new(&folder).exists());
+    let folder_exists = tokio::time::timeout_at(deadline.at, folder_exists)
+        .await
+        .map_err(|_| deadline.expired("looking for the workspace's folder".into()))?
+        // A check that panicked says nothing; counting the folder is safe.
+        .unwrap_or(true);
+    if folder_exists {
+        count_files(transport, repo, &records, path, deadline, &mut changes).await?;
     }
     count_commits(
         transport,
         repo,
-        admin.as_deref(),
+        records.worktree.as_deref(),
         branch,
         deadline,
         &mut changes,
@@ -334,19 +342,28 @@ pub async fn git_worktree_changes(
     Ok(changes)
 }
 
-/// The folder in which git keeps its records of the worktree at `path`
-/// (`.git/worktrees/<name>` in the repository), or `None` when git has no
-/// record of it.
+/// Where git keeps a repository's records.
+struct GitRecords {
+    /// The repository's own git folder, shared by all its worktrees.
+    common: String,
+    /// The folder of git's records of one worktree
+    /// (`<common>/worktrees/<name>`), or `None` when git has none.
+    worktree: Option<String>,
+}
+
+/// The repository's git folder, and git's records of the worktree at
+/// `path`.
 ///
-/// Found by reading each record's `gitdir` file, which names the worktree's
-/// folder and outlives it. Like [`find`], this reads the local file system:
-/// worktrees are on the local host until remote hosts (M4).
-async fn admin_dir(
+/// The worktree's records are found by reading each record's `gitdir` file,
+/// which names the worktree's folder and outlives it. Like [`find`], this
+/// reads the local file system: worktrees are on the local host until
+/// remote hosts (M4).
+async fn git_records(
     transport: &dyn Transport,
     repo: &str,
     path: &str,
     deadline: Deadline,
-) -> Result<Option<String>, VcsError> {
+) -> Result<GitRecords, VcsError> {
     let output = query(
         transport,
         repo,
@@ -365,7 +382,8 @@ async fn admin_dir(
     };
     // git prints the folder relative to `repo` when it is inside it (`.git`);
     // joining an absolute path replaces `repo`.
-    let records = std::path::Path::new(repo).join(common).join("worktrees");
+    let common = std::path::Path::new(repo).join(common);
+    let records = common.join("worktrees");
     let path = path.to_string();
     let found = tokio::task::spawn_blocking(move || {
         let key = location_key(&path);
@@ -375,32 +393,62 @@ async fn admin_dir(
             .flatten()
             .map(|entry| entry.path())
             .find(|admin| {
-                // `gitdir` holds `<worktree folder>/.git`.
+                // `gitdir` holds `<worktree folder>/.git`, relative to the
+                // record's own folder when git writes relative paths
+                // (`worktree.useRelativePaths`); joining an absolute one
+                // replaces the record's folder.
                 let Ok(gitdir) = std::fs::read_to_string(admin.join("gitdir")) else {
                     return false;
                 };
-                std::path::Path::new(gitdir.trim())
+                let gitdir = without_dots(&admin.join(gitdir.trim()));
+                gitdir
                     .parent()
                     .is_some_and(|folder| location_key(&folder.display().to_string()) == key)
             })
             .map(|admin| admin.display().to_string())
     });
-    tokio::time::timeout_at(deadline.at, found)
+    let worktree = tokio::time::timeout_at(deadline.at, found)
         .await
         .map_err(|_| deadline.expired("finding git's records of the worktree".into()))?
         .map_err(|e| VcsError::Failed {
             message: "finding git's records of the worktree failed".into(),
             stderr: e.to_string(),
-        })
+        })?;
+    Ok(GitRecords {
+        common: common.display().to_string(),
+        worktree,
+    })
+}
+
+/// `path` with its `.` and `..` resolved by their text alone, so it compares
+/// equal to the folder it names when that folder no longer exists to be
+/// canonicalised.
+fn without_dots(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// Counts the uncommitted files and the ignored entries in the worktree's
 /// folder, and records them, and each uncommitted file's content, as
 /// evidence.
+///
+/// Without git's records of the worktree, git cannot say which files left
+/// in the folder were committed: each is judged against an empty index, so
+/// every file left counts as uncommitted, and the ignore rules still apply.
 async fn count_files(
     transport: &dyn Transport,
     repo: &str,
-    admin: &str,
+    records: &GitRecords,
     path: &str,
     deadline: Deadline,
     changes: &mut WorktreeChanges,
@@ -408,8 +456,22 @@ async fn count_files(
     // Naming git's records and the folder outright, rather than running in
     // the folder, works when the folder's `.git` file is gone, and never
     // finds some other repository above a half-deleted folder.
-    let git_dir = format!("--git-dir={admin}");
+    let git_dir = format!(
+        "--git-dir={}",
+        records.worktree.as_deref().unwrap_or(&records.common)
+    );
     let work_tree = format!("--work-tree={path}");
+    // An index file that does not exist reads as an empty index. A path
+    // nobody else uses, never created: `--no-optional-locks` keeps git from
+    // writing an index. Local, like the records' lookup, until M4.
+    let empty_index = std::env::temp_dir()
+        .join(format!("ersa-empty-index-{}", uuid::Uuid::new_v4()))
+        .display()
+        .to_string();
+    let env: &[(&str, &str)] = match records.worktree {
+        Some(_) => &[],
+        None => &[("GIT_INDEX_FILE", empty_index.as_str())],
+    };
     // `--no-optional-locks`: otherwise `status` may refresh the index,
     // writing to the workspace while a session works in it. `-z` ends each
     // entry with NUL and never quotes a path.
@@ -430,19 +492,12 @@ async fn count_files(
     };
 
     // Every untracked file, each its own entry.
-    let output = query(
-        transport,
-        repo,
-        &status("--untracked-files=all", false),
-        deadline,
-    )
-    .await?;
+    let args = status("--untracked-files=all", false);
+    let output = query_env(transport, repo, &args, env, deadline).await?;
     let mut to_read = Vec::new();
     for entry in parse_status(&checked(output, "git status failed")?.stdout) {
         changes.evidence.push(format!("status {}", entry.raw));
         if entry.gone_from_folder() {
-            // Nothing of it is left in the folder to lose: its last content
-            // is committed or in the index.
             continue;
         }
         changes.uncommitted += 1;
@@ -454,13 +509,8 @@ async fn count_files(
     // The ignored entries, with a wholly ignored folder as one: `--ignored`
     // collapses one only while untracked folders are collapsed too, hence a
     // second call.
-    let output = query(
-        transport,
-        repo,
-        &status("--untracked-files=normal", true),
-        deadline,
-    )
-    .await?;
+    let args = status("--untracked-files=normal", true);
+    let output = query_env(transport, repo, &args, env, deadline).await?;
     for entry in parse_status(&checked(output, "git status failed")?.stdout) {
         if entry.kind == '!' {
             changes.ignored += 1;
@@ -470,24 +520,27 @@ async fn count_files(
 
     // The content of each uncommitted file, so editing one changes the
     // token. Read here, not by git: git cannot hash a link to a folder, and
-    // fails outright on a file deleted since it listed it.
+    // fails outright on a file deleted since it listed it. The reading
+    // stops itself at the deadline, so a huge file is not read on after
+    // the answer has gone; only a read the file system never returns from
+    // keeps its thread.
     let folder = std::path::PathBuf::from(path);
+    let stop = deadline.at.into_std();
     let read = tokio::task::spawn_blocking(move || {
         to_read
             .into_iter()
             .map(|relative| {
-                let digest = content_digest(&folder.join(&relative));
-                format!("content {digest} {relative}")
+                let digest = content_digest(&folder.join(&relative), stop)?;
+                Some(format!("content {digest} {relative}"))
             })
-            .collect::<Vec<_>>()
+            .collect::<Option<Vec<_>>>()
     });
     let contents = tokio::time::timeout_at(deadline.at, read)
         .await
-        .map_err(|_| deadline.expired("reading the uncommitted files".into()))?
-        .map_err(|e| VcsError::Failed {
-            message: "reading the uncommitted files failed".into(),
-            stderr: e.to_string(),
-        })?;
+        .ok()
+        .and_then(Result::ok)
+        .flatten()
+        .ok_or_else(|| deadline.expired("reading the uncommitted files".into()))?;
     changes.evidence.extend(contents);
     Ok(())
 }
@@ -508,10 +561,13 @@ struct StatusEntry {
 }
 
 impl StatusEntry {
-    /// Whether the file is no longer in the folder: deleted there, or
-    /// deleted from the index with the folder matching.
+    /// Whether deleting the folder loses nothing of the file: it is gone
+    /// from the folder, and the index holds nothing the commit does not
+    /// (deleted from the folder alone, or the deletion staged). A file
+    /// staged and then deleted from the folder still counts: the index is
+    /// deleted with the workspace.
     fn gone_from_folder(&self) -> bool {
-        matches!(self.kind, '1' | '2') && self.xy.contains('D')
+        matches!(self.kind, '1' | '2') && matches!(self.xy.as_str(), ".D" | "D.")
     }
 
     /// Whether the folder's copy may differ from the index's, which git's
@@ -567,32 +623,56 @@ fn parse_status(lines: &[String]) -> Vec<StatusEntry> {
     entries
 }
 
-/// The SHA-256 of a file's content or a link's target, or a word for what
-/// is there instead. Blocking.
-fn content_digest(file: &std::path::Path) -> String {
+/// The SHA-256 of a file's content or a link's target, or what is known of
+/// what is there instead; `None` once `stop` passes. Blocking.
+fn content_digest(file: &std::path::Path, stop: std::time::Instant) -> Option<String> {
+    use std::io::Read as _;
+
     use sha2::Digest as _;
     let metadata = match std::fs::symlink_metadata(file) {
         Ok(metadata) => metadata,
-        Err(e) => return format!("unreadable:{:?}", e.kind()),
+        Err(e) => return Some(format!("unreadable:{:?}", e.kind())),
+    };
+    // What a file that cannot be read is known by: its size and the time it
+    // was last written, which change when its content does.
+    let unreadable = |e: std::io::Error| {
+        let written = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        format!("unreadable:{:?}:{}:{written}", e.kind(), metadata.len())
     };
     if metadata.file_type().is_symlink() {
-        return match std::fs::read_link(file) {
+        return Some(match std::fs::read_link(file) {
             Ok(target) => format!(
                 "link:{}",
                 hex(&sha2::Sha256::digest(target.display().to_string()))
             ),
-            Err(e) => format!("unreadable:{:?}", e.kind()),
-        };
+            Err(e) => unreadable(e),
+        });
     }
     if metadata.is_dir() {
         // A nested repository: git lists it, not the files in it.
-        return "folder".to_string();
+        return Some("folder".to_string());
     }
+    let mut file = match std::fs::File::open(file) {
+        Ok(file) => file,
+        Err(e) => return Some(unreadable(e)),
+    };
     let mut hasher = sha2::Sha256::new();
-    let read = std::fs::File::open(file).and_then(|mut f| std::io::copy(&mut f, &mut hasher));
-    match read {
-        Ok(_) => hex(&hasher.finalize()),
-        Err(e) => format!("unreadable:{:?}", e.kind()),
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        if std::time::Instant::now() >= stop {
+            return None;
+        }
+        match file.read(&mut buffer) {
+            Ok(0) => return Some(hex(&hasher.finalize())),
+            Ok(n) => hasher.update(&buffer[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Some(unreadable(e)),
+        }
     }
 }
 
@@ -614,8 +694,10 @@ async fn count_commits(
         let git_dir = format!("--git-dir={admin}");
         let head = [git_dir.as_str(), "rev-parse", "--verify", "--quiet", "HEAD"];
         let output = query(transport, repo, &head, deadline).await?;
-        // No HEAD to read is a checkout with no commit yet, and no reflog.
-        if output.exit.success() {
+        // `--verify --quiet` exits 1 for a HEAD with no commit yet, which
+        // has no reflog either; any other failure is git's.
+        if output.exit.code != Some(1) {
+            let output = checked(output, "git could not read the workspace's checkout")?;
             tips.extend(commit_ids(&output.stdout));
             let reflog = [git_dir.as_str(), "reflog", "show", "--format=%H", "HEAD"];
             let output = query(transport, repo, &reflog, deadline).await?;
@@ -828,12 +910,7 @@ pub async fn git_worktree_remove(
 /// refuse over: modified or untracked files. Ignored files do not count.
 async fn is_dirty(transport: &dyn Transport, path: &str) -> Result<bool, VcsError> {
     let output = git(transport, path, &["status", "--porcelain"]).await?;
-    if !output.exit.success() {
-        return Err(VcsError::Failed {
-            message: "git status failed".into(),
-            stderr: output.stderr_text(),
-        });
-    }
+    let output = checked(output, "git status failed")?;
     Ok(output.stdout.iter().any(|line| !line.is_empty()))
 }
 
@@ -853,12 +930,7 @@ pub async fn git_worktree_list(
     repo: &str,
 ) -> Result<Vec<WorktreeEntry>, VcsError> {
     let output = git(transport, repo, &["worktree", "list", "--porcelain"]).await?;
-    if !output.exit.success() {
-        return Err(VcsError::Failed {
-            message: "git worktree list failed".into(),
-            stderr: output.stderr_text(),
-        });
-    }
+    let output = checked(output, "git worktree list failed")?;
     Ok(parse_worktree_list(&output.stdout))
 }
 
@@ -939,7 +1011,7 @@ async fn exists(path: &str) -> bool {
 
 /// Runs `git -C <dir> <args>` with a fixed environment, under [`GIT_TIMEOUT`].
 async fn git(transport: &dyn Transport, dir: &str, args: &[&str]) -> Result<Output, VcsError> {
-    git_within(transport, dir, args, GIT_TIMEOUT).await
+    git_within(transport, dir, args, &[], GIT_TIMEOUT).await
 }
 
 /// Runs `git -C <dir> <args>` with a fixed environment, killing it after
@@ -948,6 +1020,7 @@ async fn git_within(
     transport: &dyn Transport,
     dir: &str,
     args: &[&str],
+    extra_env: &[(&str, &str)],
     timeout: Duration,
 ) -> Result<Output, VcsError> {
     let mut all = vec!["-C".to_string(), dir.to_string()];
@@ -965,6 +1038,7 @@ async fn git_within(
         args: all,
         env: env
             .iter()
+            .chain(extra_env)
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect(),
         ..ProcessSpec::default()
