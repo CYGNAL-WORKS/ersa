@@ -321,12 +321,19 @@ pub async fn git_worktree_changes(
     let mut changes = WorktreeChanges::default();
     let records = git_records(transport, repo, path, deadline).await?;
     let folder = path.to_string();
-    let folder_exists = tokio::task::spawn_blocking(move || std::path::Path::new(&folder).exists());
+    // `try_exists`, not `exists`: a folder Core may not look into is an
+    // error, never a folder that is gone, whose files would go uncounted.
+    let folder_exists =
+        tokio::task::spawn_blocking(move || std::path::Path::new(&folder).try_exists());
     let folder_exists = tokio::time::timeout_at(deadline.at, folder_exists)
         .await
         .map_err(|_| deadline.expired("looking for the workspace's folder".into()))?
-        // A check that panicked says nothing; counting the folder is safe.
-        .unwrap_or(true);
+        .map_err(|e| e.to_string())
+        .and_then(|exists| exists.map_err(|e| e.to_string()))
+        .map_err(|detail| VcsError::Failed {
+            message: "looking for the workspace's folder failed".into(),
+            stderr: detail,
+        })?;
     if folder_exists {
         count_files(transport, repo, &records, path, deadline, &mut changes).await?;
     }
@@ -385,35 +392,44 @@ async fn git_records(
     let common = std::path::Path::new(repo).join(common);
     let records = common.join("worktrees");
     let path = path.to_string();
-    let found = tokio::task::spawn_blocking(move || {
+    let found = tokio::task::spawn_blocking(move || -> std::io::Result<Option<String>> {
         let key = location_key(&path);
-        // No `worktrees` folder: git has no record of any worktree.
-        let entries = std::fs::read_dir(&records).ok()?;
-        entries
-            .flatten()
-            .map(|entry| entry.path())
-            .find(|admin| {
-                // `gitdir` holds `<worktree folder>/.git`, relative to the
-                // record's own folder when git writes relative paths
-                // (`worktree.useRelativePaths`); joining an absolute one
-                // replaces the record's folder.
-                let Ok(gitdir) = std::fs::read_to_string(admin.join("gitdir")) else {
-                    return false;
-                };
-                let gitdir = without_dots(&admin.join(gitdir.trim()));
-                gitdir
-                    .parent()
-                    .is_some_and(|folder| location_key(&folder.display().to_string()) == key)
-            })
-            .map(|admin| admin.display().to_string())
+        // Anything but a missing file is an error, never "no record": a
+        // record missed would leave its checkout's commits uncounted.
+        let entries = match std::fs::read_dir(&records) {
+            // No `worktrees` folder: git has no record of any worktree.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            other => other?,
+        };
+        for entry in entries {
+            let admin = entry?.path();
+            // `gitdir` holds `<worktree folder>/.git`, relative to the
+            // record's own folder when git writes relative paths
+            // (`worktree.useRelativePaths`); joining an absolute one
+            // replaces the record's folder.
+            let gitdir = match std::fs::read_to_string(admin.join("gitdir")) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                other => other?,
+            };
+            let gitdir = without_dots(&admin.join(gitdir.trim()));
+            let matches = gitdir
+                .parent()
+                .is_some_and(|folder| location_key(&folder.display().to_string()) == key);
+            if matches {
+                return Ok(Some(admin.display().to_string()));
+            }
+        }
+        Ok(None)
     });
+    let failed = |detail: String| VcsError::Failed {
+        message: "finding git's records of the worktree failed".into(),
+        stderr: detail,
+    };
     let worktree = tokio::time::timeout_at(deadline.at, found)
         .await
         .map_err(|_| deadline.expired("finding git's records of the worktree".into()))?
-        .map_err(|e| VcsError::Failed {
-            message: "finding git's records of the worktree failed".into(),
-            stderr: e.to_string(),
-        })?;
+        .map_err(|e| failed(e.to_string()))?
+        .map_err(|e| failed(e.to_string()))?;
     Ok(GitRecords {
         common: common.display().to_string(),
         worktree,
@@ -535,12 +551,15 @@ async fn count_files(
             })
             .collect::<Option<Vec<_>>>()
     });
+    let expired = || deadline.expired("reading the uncommitted files".into());
     let contents = tokio::time::timeout_at(deadline.at, read)
         .await
-        .ok()
-        .and_then(Result::ok)
-        .flatten()
-        .ok_or_else(|| deadline.expired("reading the uncommitted files".into()))?;
+        .map_err(|_| expired())?
+        .map_err(|e| VcsError::Failed {
+            message: "reading the uncommitted files failed".into(),
+            stderr: e.to_string(),
+        })?
+        .ok_or_else(expired)?;
     changes.evidence.extend(contents);
     Ok(())
 }
