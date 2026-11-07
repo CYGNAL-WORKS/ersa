@@ -14,6 +14,8 @@ export interface Attached {
   detail: string;
   /** Whether sending copies it, as Core judged it for one workspace, or for none yet (FLOW-SEND-MESSAGE-R17). */
   copied?: { workspace: string | undefined; copied: boolean };
+  /** A pasted image's bytes, sent inline rather than by path (FLOW-SEND-MESSAGE-R08). */
+  inline?: { media_type: string; data: string };
   /** Why Ersa can't send it, said beside it; the message waits until it is removed (FLOW-SEND-MESSAGE-R10). */
   problem?: string;
 }
@@ -88,7 +90,32 @@ export function addAll(list: readonly Attached[], more: readonly Attached[]): At
   return out;
 }
 
-/** What `session.send` gets: each attachment by its kind and the path the user picked (FLOW-SEND-MESSAGE-R13). */
+/**
+ * What `session.send` gets: each attachment by its kind and the path the user picked or dropped
+ * (FLOW-SEND-MESSAGE-R13), and a pasted image by its bytes (R08).
+ */
 export function sendable(list: readonly Attached[]): Attachment[] {
-  return list.map(({ kind, path }) => ({ kind, path }));
+  return list.map(({ kind, path, inline }) => (inline ? { kind: "image" as const, ...inline } : { kind, path }));
+}
+
+// Each pasted image gets its own key in place of a path, so two pastes are two attachments.
+let pastes = 0;
+
+/**
+ * An image pasted into the composer, attached inline (FLOW-SEND-MESSAGE-R08): named as pasted, its detail its size.
+ * Whether the backend takes its kind and size is Core's to say when the message is sent (R10).
+ */
+export async function pastedImage(file: Blob): Promise<Attached> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  // btoa takes a string of bytes; built in chunks, so a large image does not overflow the call stack.
+  let binary = "";
+  for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  pastes += 1;
+  return {
+    path: `pasted:${pastes}`,
+    name: t("composer.attachment.pastedName"),
+    kind: "image",
+    detail: size(bytes.length),
+    inline: { media_type: file.type, data: btoa(binary) },
+  };
 }

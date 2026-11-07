@@ -388,11 +388,17 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const pickFiles = shell?.pickFiles;
   const attach =
     pickFiles && pickFolder && view.phase === "connected"
-      ? async (what: AttachWhat, workspace: string | undefined): Promise<Attached[]> => {
+      ? async (what: AttachWhat | readonly string[], workspace: string | undefined): Promise<Attached[]> => {
           const host_id = view.hello.host.id;
-          let paths: string[];
+          // Paths dropped on the box (FLOW-SEND-MESSAGE-R08) are read as the dialog's are.
+          let paths: readonly string[];
           try {
-            paths = what === "folder" ? [await pickFolder()].filter((p): p is string => p !== null) : await pickFiles(what === "images");
+            paths =
+              typeof what !== "string"
+                ? what
+                : what === "folder"
+                  ? [await pickFolder()].filter((p): p is string => p !== null)
+                  : await pickFiles(what === "images");
           } catch {
             return [];
           }
@@ -612,6 +618,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               initialText={firstSendHere?.text}
               initialAttachments={firstSendHere?.attachments}
               onAttach={attach && ((what) => attach(what, listed?.workspace_id))}
+              dragDrop={shell?.onDragDrop}
               workspace={listed?.workspace_id}
               onSend={(text, attachments) => follower.current?.send(text, sendable(attachments)) ?? Promise.resolve(false)}
               // Stop, from sending until the turn ends: cancels the message on its way, or interrupts the turn (FLOW-SEND-MESSAGE-R03).
@@ -651,6 +658,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               projectId={composing?.projectId}
               onStart={start}
               onAttach={attach}
+              dragDrop={shell?.onDragDrop}
               rootWorkspaces={rootWorkspaces}
               starting={starting?.state === "sending" ? { state: "sending", progress: startProgress } : starting}
               onChooseFolder={chooseFolder}

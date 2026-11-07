@@ -78,6 +78,15 @@
   box-shadow: none;
 }
 
+/* Files dragged over the box (FLOW-SEND-MESSAGE-R08): its edge is the accent, with no glow, until the drop or the
+   drag leaves. */
+.composer-box[data-drag-over],
+.composer-box[data-drag-over]:focus-within,
+.composer-box[data-drag-over][data-force="focus"] {
+  border-color: var(--color-accent);
+  box-shadow: none;
+}
+
 /* With attachments the box wraps: they take its full width above the words (docs/design/COMPOSER.md, Attachments). */
 .composer-box:has(.composer-attachments) {
   flex-wrap: wrap;
