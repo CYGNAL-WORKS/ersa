@@ -7,6 +7,12 @@ interface ContextRingProps {
   used?: number;
   /** `ring-sm` is a tile's ring, drawn without its readout; `ring` is the session controls', with it. */
   size?: "ring" | "ring-sm";
+  /**
+   * Waiting on work of unknown length, as while backends are detected: the track with a quarter arc in ink-muted,
+   * turning once per motion-loop-ring (docs/design/COMPOSER.md, The session controls). A mark beside words that say
+   * what is waited on, so it carries no name of its own.
+   */
+  turning?: boolean;
 }
 
 // The ring is drawn in a box as many units wide as the size token is pixels (`size-ring` 16, `size-ring-sm` 12),
@@ -15,13 +21,23 @@ interface ContextRingProps {
 const BOX = { ring: 16, "ring-sm": 12 } as const;
 
 /** The context ring (GLOSSARY): a gauge of context consumed, with its readout beside it once there is one. */
-export function ContextRing({ used, size = "ring" }: ContextRingProps) {
+export function ContextRing({ used, size = "ring", turning }: ContextRingProps) {
   // A value Core could not measure reads as none, not as NaN.
   const share = used === undefined || !Number.isFinite(used) ? undefined : Math.min(Math.max(used, 0), 1);
   const percent = share === undefined ? undefined : Math.round(share * 100);
   const box = BOX[size];
   const centre = box / 2;
   const radius = centre - 1;
+  if (turning) {
+    return (
+      <span className="context-ring" data-size={size} data-turning="" aria-hidden="true">
+        <svg className="context-ring-gauge" viewBox={`0 0 ${box} ${box}`}>
+          <circle className="context-ring-track" cx={centre} cy={centre} r={radius} />
+          <circle className="context-ring-used" cx={centre} cy={centre} r={radius} pathLength={4} strokeDasharray="1 3" />
+        </svg>
+      </span>
+    );
+  }
   return (
     <span
       className="context-ring"
