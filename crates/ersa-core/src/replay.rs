@@ -82,6 +82,7 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::ProjectFind
         | Method::WorkspaceList
         | Method::BranchList
+        | Method::WorkspaceChanges
         | Method::SettingsGet
         | Method::SessionList
         | Method::SessionSubscribe
