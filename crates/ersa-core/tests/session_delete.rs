@@ -351,6 +351,17 @@ async fn a_session_in_an_isolated_workspace_needs_a_token() {
     assert_eq!(error["code"], -32602, "{error}");
     assert_eq!(fake.stats.stops.load(Ordering::SeqCst), 0);
     assert!(folder.is_dir());
+
+    // Before any other refusal: a session with a turn running, which would
+    // otherwise be refused `invalid_state`, answers `invalid_params` first.
+    let busy = idle_session(&mut client, &workspace).await;
+    client
+        .result("session.send", json!({ "id": busy, "text": "work" }))
+        .await;
+    let error = client.error("session.delete", json!({ "id": busy })).await;
+    assert_eq!(error["code"], -32602, "{error}");
+    assert_eq!(fake.stats.stops.load(Ordering::SeqCst), 0);
+    assert!(folder.is_dir());
 }
 
 // verifies: FLOW-ARCHIVE-DELETE-SESSION-R05
