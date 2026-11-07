@@ -226,7 +226,7 @@ const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 // review ends with `exit` (or with what `start` resolves to, for a test that
 // holds a review open); `reviews` lists each review started. A wait between
 // ticks lets the test run and no more, unless `sleep` says otherwise.
-async function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list = () => null, statuses = () => said(QUEUE_FAILED), start, lockPath, alive, sleep = () => new Promise((r) => setImmediate(r)), now = () => NOW } = {}) {
+async function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list = () => null, statuses = () => said(QUEUE_FAILED), start, lockPath, alive, sleep = () => new Promise((r) => setImmediate(r)), now = () => NOW, slots } = {}) {
   const calls = [];
   const logs = [];
   const reviews = [];
@@ -245,7 +245,7 @@ async function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }),
     return start ? start(n, head, dir, log) : Promise.resolve(exit);
   };
   const path = lockPath ?? join(tmp(), `lock-${Math.random().toString(36).slice(2)}`);
-  const got = await main(argv, { run, start: begin, now, log: (l) => logs.push(l), lockPath: path, alive, sleep });
+  const got = await main(argv, { run, start: begin, now, log: (l) => logs.push(l), lockPath: path, alive, sleep, ...(slots ? { slots } : {}) });
   return { ...got, calls, logs, reviews, lockPath: path, gh: calls.filter((c) => c.cmd === "gh").map((c) => c.args.join(" ")) };
 }
 
@@ -304,29 +304,32 @@ test("heads are due in the order their CI passed, not the order gh lists them", 
   assert.deepEqual(select([pr({ number: 9, statusCheckRollup: passed(120) }), pr({ number: 3, statusCheckRollup: [...passed(180), mark("PENDING", { startedAt: ago(90 * 60 * 1000) })] })], NOW).review.map((p) => p.number), [3, 9]);
 });
 
-test("two heads are reviewed side by side, each in its own slot's checkout, and the rest wait for a free slot", async () => {
+test("three heads are reviewed side by side (ADR 0029), each in its own slot's checkout, and the rest wait for a free slot", async () => {
+  assert.equal(SLOTS, 3);
   const dir = join(tmp(), "existing");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, ".git"), "gitdir: elsewhere");
-  const prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) })];
-  const reviews = [held(), held(), held()];
+  const prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) }), pr({ number: 10, headRefOid: "e".repeat(40) })];
+  const reviews = [held(), held(), held(), held()];
   let started = 0;
   const run = drive(["--once", "--checkout", dir], { prs, start: () => reviews[started++].done });
   await settle();
-  assert.equal(started, SLOTS, "the second review starts without waiting for the first");
-  // #8's review ends while #7's runs: the task's run fills the freed slot with #9 on its next tick.
+  assert.equal(started, 3, "three reviews start without waiting for one another; the fourth waits");
+  // #8's review ends while #7's and #9's run: the task's run fills the freed slot with #10 on its next tick.
   reviews[1].end(1);
-  await settle(() => started === 3);
+  await settle(() => started === 4);
+  reviews[3].end(0);
   reviews[2].end(0);
   reviews[0].end(0);
   const got = await run;
   assert.equal(got.code, 0, got.stderr);
-  assert.deepEqual(got.reviews.map((r) => [r.n, r.dir]), [["7", dir], ["8", `${dir}-2`], ["9", `${dir}-2`]]);
-  // The first slot's checkout is reused; the second slot's is made.
-  assert.deepEqual(got.calls.filter((c) => c.cmd === "git" && c.args[0] === "worktree").map((c) => c.args.join(" ")).slice(0, 2), ["worktree prune", `worktree add --detach ${dir}-2 origin/main`]);
+  assert.deepEqual(got.reviews.map((r) => [r.n, r.dir]), [["7", dir], ["8", `${dir}-2`], ["9", `${dir}-3`], ["10", `${dir}-2`]]);
+  // The first slot's checkout is reused; the others are made.
+  const added = got.calls.filter((c) => c.cmd === "git" && c.args[0] === "worktree" && c.args[1] === "add").map((c) => c.args.join(" "));
+  assert.deepEqual(added.slice(0, 2), [`worktree add --detach ${dir}-2 origin/main`, `worktree add --detach ${dir}-3 origin/main`]);
   assert.ok(!got.calls.some((c) => c.cmd === "git" && c.args.includes(`${dir}`) && c.args[1] === "add"), "the existing checkout is not added again");
-  assert.deepEqual(got.logs.slice(0, 3), ["#7 at bbbbbbb: reviewing; #8, #9 next", "#8 at ccccccc: reviewing; #9 next", "#9 wait for a free slot"]);
-  assert.ok(got.logs.indexOf("#8 at ccccccc: the review exited 1") < got.logs.indexOf("#9 at ddddddd: reviewing"));
+  assert.deepEqual(got.logs.slice(0, 4), ["#7 at bbbbbbb: reviewing; #8, #9, #10 next", "#8 at ccccccc: reviewing; #9, #10 next", "#9 at ddddddd: reviewing; #10 next", "#10 wait for a free slot"]);
+  assert.ok(got.logs.indexOf("#8 at ccccccc: the review exited 1") < got.logs.indexOf("#10 at eeeeeee: reviewing"));
 });
 
 test("the task's run starts no review after its window, and then waits for those it started", async () => {
@@ -374,6 +377,7 @@ test("in a terminal a tick fills a slot whose review ended, and never starts a s
   let prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) })];
   let naps = 0;
   const got = await drive(["--checkout", dir], {
+    slots: 2,
     list: () => ({ ok: true, status: 0, out: JSON.stringify(prs), err: "" }),
     start: (n) => runs[n].shift(),
     sleep: async () => {
@@ -398,6 +402,7 @@ test("a head whose checkout cannot be prepared gives its slot to the next head",
   const prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) }), pr({ number: 10, headRefOid: "e".repeat(40) })];
   const got = await drive(["--once", "--checkout", join(tmp(), "r2")], {
     prs,
+    slots: 2,
     git: (args) => (args[0] === "fetch" && args.includes("pull/7/head") ? { ok: false, err: "network down" } : {}),
     exit: 2,
   });
@@ -413,6 +418,7 @@ test("a head whose slot's checkout cannot be prepared is reviewed in the other s
   const dir = join(tmp(), "r12");
   const got = await drive(["--once", "--checkout", dir], {
     prs: [pr(), pr({ number: 8, headRefOid: "c".repeat(40) })],
+    slots: 2,
     git: (args, cwd) => (args[0] === "reset" && cwd === dir ? { ok: false, err: "index.lock exists" } : {}),
   });
   assert.equal(got.code, 0, got.stderr);
@@ -426,6 +432,7 @@ test("heads that cannot start use up the task's window, and in a terminal an hou
   const prs = [pr(), pr({ number: 8, headRefOid: "c".repeat(40) }), pr({ number: 9, headRefOid: "d".repeat(40) }), pr({ number: 10, headRefOid: "e".repeat(40) })];
   const got = await drive(["--once", "--checkout", join(tmp(), "r7")], {
     prs,
+    slots: 2,
     git: (args) => (args[0] === "fetch" ? ((t += 25 * 60 * 1000), { ok: false, err: "timed out" }) : {}),
     now: () => t,
   });
@@ -437,6 +444,7 @@ test("heads that cannot start use up the task's window, and in a terminal an hou
   t = NOW;
   const loop = await drive(["--checkout", join(tmp(), "r7b")], {
     prs,
+    slots: 2,
     git: (args) => (args[0] === "fetch" ? ((t += 25 * 60 * 1000), { ok: false, err: "timed out" }) : {}),
     now: () => t,
     sleep: async () => {
