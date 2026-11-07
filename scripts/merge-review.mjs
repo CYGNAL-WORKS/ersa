@@ -285,7 +285,7 @@ function review(argv, run, sleep) {
     const superseded = current.ok && current.out && current.out !== head ? current.out : "";
     if (superseded) {
       queue = false;
-      outcome = `${outcome}\n\nSuperseded: the pull request's head moved to ${superseded.slice(0, 7)} while this review ran, so this is not a round. The next review reads the new head; fix what this one names there.`;
+      outcome = `Superseded: the pull request's head moved to ${superseded.slice(0, 7)} while this review ran, so this is not a round and the gate was not asked. The next review reads the new head; fix what this one names there.`;
     }
     const url = fresh ? post(run, sleep, me, n, head, reviewBody({ head, findings, dismissed, outcome, superseded })) : "";
     if (!block.length && !labels.includes("hold") && owner.length && !labels.includes("needs-owner")) must("gh", ["pr", "edit", n, "--add-label", "needs-owner"]);

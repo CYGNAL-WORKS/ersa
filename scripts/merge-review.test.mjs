@@ -175,11 +175,13 @@ test("a head the pull request left while the review ran gets its verdict marked 
   assert.equal(blocked.posted.length, 1);
   const body = blocked.bodies[0];
   assert.equal(parseState(body).superseded, moved);
-  assert.match(body, /Superseded: the pull request's head moved to ddddddd while this review ran, so this is not a round\./);
+  assert.match(body, /Superseded: the pull request's head moved to ddddddd while this review ran, so this is not a round and the gate was not asked\./);
   const clean = drive(["7", "--head", HEAD], { movedTo: moved });
   assert.equal(clean.code, 0, clean.stderr);
   assert.equal(clean.posted.length, 1);
   assert.deepEqual(clean.queued, [], "the queue would refuse the old head; the next review enqueues the new one");
+  assert.doesNotMatch(clean.bodies[0], /adding it to the merge queue/);
+  assert.doesNotMatch(clean.statuses.join(" "), /queue/);
   const same = drive(["7", "--head", HEAD]);
   assert.equal(parseState(same.bodies[0]).superseded, undefined);
 });
