@@ -69,7 +69,7 @@ function fakeCore(more: Answers = {}, { reattach = false } = {}) {
       return new Promise((resolve) => resolve(answer(params as never))) as never;
     },
   };
-  return { client, calls, drop: () => act(() => onEvent({ kind: "lost", reason: "gone" })) };
+  return { client, calls, drop: () => act(() => onEvent({ kind: "lost", reason: "gone" })), emit: (event: CoreEvent) => act(() => onEvent(event)) };
 }
 
 /** Lets every answer the fake gave settle, and the renders they cause. */
@@ -138,6 +138,7 @@ function fakeShell(...picks: (string | null)[]) {
     hide: async () => {},
     quit: async () => {},
     pickFolder: vi.fn(async () => picks.shift() ?? null),
+    pickFiles: vi.fn(async (_images: boolean) => [] as string[]),
   } satisfies ShellControl;
 }
 
@@ -650,5 +651,107 @@ describe("stop under a session App draws", () => {
     await settle();
     expect(core.calls.filter((c) => c.method === "session.send")).toHaveLength(1);
     expect(message().value).toBe("And the tests");
+  });
+});
+
+// Attachments under a session and on the new-session screen (FLOW-SEND-MESSAGE-R07, R10, R13, R16).
+describe("the attachments App gives the composer", () => {
+  const inspected: Record<string, unknown> = {
+    "D:/code/beta/notes.md": { path: "D:/code/beta/notes.md", name: "notes.md", kind: "file", size_bytes: 900, lines: 12 },
+    "C:/pics/shot.png": { path: "C:/pics/shot.png", name: "shot.png", kind: "image", size_bytes: 2048, media_type: "image/png" },
+    "D:/code/beta/src": { path: "D:/code/beta/src", name: "src", kind: "folder" },
+  };
+  const inspect = (params: { host_id: string; path: string }) => {
+    if (params.host_id !== "local") throw new Error("wrong host");
+    const info = inspected[params.path];
+    if (!info) throw { kind: "rpc", error: { code: -32000, message: "attachment.inspect: missing", data: { kind: "not_found", detail: "This file no longer exists." } } };
+    return info;
+  };
+  const choose = async (name: string) => {
+    fireEvent.click(screen.getByRole("button", { name: "Attach" }));
+    fireEvent.click(screen.getByRole("menuitem", { name }));
+    await settle();
+  };
+  const shown = () => Array.from(document.querySelectorAll(".composer-attachment")).map((li) => li.textContent);
+
+  // verifies: FLOW-SEND-MESSAGE-R07
+  // verifies: FLOW-SEND-MESSAGE-R13
+  it("opens the system's dialog for each choice, reads only the paths picked, and sends them with the message", async () => {
+    const shell = fakeShell("D:/code/beta/src");
+    shell.pickFiles.mockImplementation(async (images: boolean) => (images ? ["C:/pics/shot.png"] : ["D:/code/beta/notes.md"]));
+    const core = fakeCore({ "session.subscribe": () => ({ last_seq: -1 }), "session.send": () => ({ turn: 1 }), "attachment.inspect": inspect });
+    render(createElement(App, { client: core.client, shell }));
+    await settle();
+    await settle();
+    await choose("Add files…");
+    await choose("Add images…");
+    await choose("Add a folder…");
+    expect(shell.pickFiles.mock.calls).toEqual([[false], [true]]);
+    expect(shell.pickFolder).toHaveBeenCalledTimes(1);
+    expect(core.calls.filter((c) => c.method === "attachment.inspect").map((c) => c.params)).toEqual([
+      { host_id: "local", path: "D:/code/beta/notes.md" },
+      { host_id: "local", path: "C:/pics/shot.png" },
+      { host_id: "local", path: "D:/code/beta/src" },
+    ]);
+    // The session's workspace is beta's folder: only the image is from outside it (R14).
+    expect(shown()).toEqual(["notes.md12 lines", "shot.png2 KBWill be copied into the workspace's .ersa folder", "srcFolder"]);
+    fireEvent.change(words(), { target: { value: "Look" } });
+    await act(async () => {
+      fireEvent.keyDown(words(), { key: "Enter" });
+    });
+    await settle();
+    expect(paramsOf(core, "session.send")).toEqual({
+      id: "s2",
+      text: "Look",
+      attachments: [
+        { kind: "file", path: "D:/code/beta/notes.md" },
+        { kind: "image", path: "C:/pics/shot.png" },
+        { kind: "folder", path: "D:/code/beta/src" },
+      ],
+    });
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R10
+  it("attaches a path Core can't read marked with why, holding the message, and a canceled dialog attaches nothing", async () => {
+    const shell = fakeShell();
+    shell.pickFiles.mockResolvedValueOnce([]).mockResolvedValueOnce(["D:/code/beta/gone.md"]);
+    const core = fakeCore({ "session.subscribe": () => ({ last_seq: -1 }), "attachment.inspect": inspect });
+    render(createElement(App, { client: core.client, shell }));
+    await settle();
+    await settle();
+    await choose("Add files…");
+    expect(shown()).toEqual([]);
+    await choose("Add files…");
+    expect(shown()).toEqual(["gone.mdThis file no longer exists."]);
+    fireEvent.change(words(), { target: { value: "Look" } });
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    expect(methods(core)).not.toContain("session.send");
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R16
+  it("shows where a session's message is, and where a new session's first message is", async () => {
+    const core = fakeCore({ "session.subscribe": () => ({ last_seq: -1 }), "session.send": () => new Promise(() => {}) });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    fireEvent.change(words(), { target: { value: "Look" } });
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    core.emit({ kind: "notification", method: "session.send_progress", params: { session_id: "s2", phase: "copying", copied_bytes: 1, total_bytes: 2 } });
+    expect(document.querySelector(".composer-status-line")?.textContent).toBe("Copying attachments, 50 percent done…");
+    cleanup();
+
+    const started = await screenWith([project("alpha")], undefined, {
+      "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", vcs_ref: "ersa/new" }),
+      "session.create": () => session("s-new", "alpha", "2026-11-03T09:00:00Z"),
+      "session.send": () => new Promise(() => {}),
+    });
+    fireEvent.change(words(), { target: { value: "Fix it" } });
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    await settle();
+    started.emit({ kind: "notification", method: "session.send_progress", params: { session_id: "s-new", phase: "starting" } });
+    expect(document.querySelector(".composer-status-line")?.textContent).toBe("Starting the backend…");
   });
 });

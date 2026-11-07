@@ -42,14 +42,15 @@ pub fn timeout_for(method: &str) -> Duration {
     match method {
         "workspace.create" | "workspace.remove" | "session.create" | "session.start"
         | "session.resume" | "session.stop" | "session.remove" | "session.send" | "host.probe"
-        | "core.shutdown" => LONG_REQUEST_TIMEOUT,
+        | "core.shutdown" | "attachment.inspect" => LONG_REQUEST_TIMEOUT,
         _ => REQUEST_TIMEOUT,
     }
 }
 
 /// Why a request got no result. Sent to the Interface as
 /// `{ "kind": "rpc", "error": <JSON-RPC error object> }` or
-/// `{ "kind": "unavailable", "message": "..." }`.
+/// `{ "kind": "unavailable", "message": "...", "sent": true }`, `sent` present only when the
+/// request was written to Core before it failed, so Core may have acted on it.
 #[derive(Debug, Clone, PartialEq, Serialize, thiserror::Error)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BridgeError {
@@ -58,13 +59,28 @@ pub enum BridgeError {
     Rpc { error: ErrorObject },
     /// No answer: not attached, the connection closed, or Core timed out.
     #[error("{message}")]
-    Unavailable { message: String },
+    Unavailable {
+        message: String,
+        /// The request was written to Core before it failed: Core may have acted on it, as a
+        /// message whose send got no answer may have reached the agent (FLOW-SEND-MESSAGE-R15).
+        #[serde(skip_serializing_if = "std::ops::Not::not")]
+        sent: bool,
+    },
 }
 
 impl BridgeError {
     pub fn unavailable(message: impl Into<String>) -> Self {
         BridgeError::Unavailable {
             message: message.into(),
+            sent: false,
+        }
+    }
+
+    /// No answer to a request already written to Core.
+    pub fn unanswered(message: impl Into<String>) -> Self {
+        BridgeError::Unavailable {
+            message: message.into(),
+            sent: true,
         }
     }
 }
@@ -230,20 +246,30 @@ impl CoreLink {
             .unwrap_or_else(|| timeout_for(method));
         // The timeout covers queueing the line as well as the answer: a Core
         // that stops reading fills the queue, and the send would wait forever.
+        // Whether the line was queued, so a failure after it says Core may have it.
+        let written = std::sync::atomic::AtomicBool::new(false);
         let answer = tokio::time::timeout(timeout, async {
             if self.shared.outbound.send(line).await.is_err() {
                 return None;
             }
+            written.store(true, Ordering::SeqCst);
             rx.await.ok()
         })
         .await;
+        let failed = |message: &str| {
+            if written.load(Ordering::SeqCst) {
+                BridgeError::unanswered(message)
+            } else {
+                BridgeError::unavailable(message)
+            }
+        };
         match answer {
             Ok(Some(Ok(result))) => Ok(result),
             Ok(Some(Err(error))) => Err(BridgeError::Rpc { error }),
             // The writer stopped, or the waiter was dropped: the connection closed.
             Ok(None) => {
                 self.forget(id);
-                Err(BridgeError::unavailable("The connection closed."))
+                Err(failed("The connection closed."))
             }
             Err(_) => {
                 // Only this request fails, unless the probe finds Core wedged.
@@ -256,7 +282,7 @@ impl CoreLink {
                 {
                     close(&self.shared, Some(NO_ANSWER_ANYWHERE.to_owned()));
                 }
-                Err(BridgeError::unavailable(NO_ANSWER))
+                Err(failed(NO_ANSWER))
             }
         }
     }
@@ -506,6 +532,8 @@ mod link_tests {
         assert_eq!(timeout_for("session.create"), LONG_REQUEST_TIMEOUT);
         assert_eq!(timeout_for("session.send"), LONG_REQUEST_TIMEOUT);
         assert_eq!(timeout_for("host.probe"), LONG_REQUEST_TIMEOUT);
+        // Longer than Core's own limit on an inspect, so Core's reason reaches the window.
+        assert_eq!(timeout_for("attachment.inspect"), LONG_REQUEST_TIMEOUT);
         assert_eq!(timeout_for("project.list"), REQUEST_TIMEOUT);
     }
 
@@ -516,7 +544,7 @@ mod link_tests {
         // The whole reason: it names no method and no duration.
         assert_eq!(
             slow,
-            Err(BridgeError::unavailable("Ersa got no answer in time."))
+            Err(BridgeError::unanswered("Ersa got no answer in time."))
         );
         assert!(!link.is_closed(), "one slow request must not drop the link");
 
@@ -544,7 +572,7 @@ mod link_tests {
         let result = link.request("core.status", None).await;
         assert_eq!(
             result,
-            Err(BridgeError::unavailable("Ersa got no answer in time."))
+            Err(BridgeError::unanswered("Ersa got no answer in time."))
         );
         assert!(link.is_closed(), "the next attach must connect anew");
         assert_eq!(
@@ -586,7 +614,7 @@ mod link_tests {
             .request("settings.set", Some(json!({ "patch": { "k": huge } })))
             .await;
         assert!(
-            matches!(result, Err(BridgeError::Unavailable { .. })),
+            matches!(result, Err(BridgeError::Unavailable { sent: false, .. })),
             "{result:?}"
         );
         assert!(!link.is_closed());

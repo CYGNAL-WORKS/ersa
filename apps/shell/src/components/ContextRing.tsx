@@ -13,6 +13,8 @@ interface ContextRingProps {
    * what is waited on, so it carries no name of its own.
    */
   turning?: boolean;
+  /** A gauge beside words that give its share, as a send's copy (FLOW-SEND-MESSAGE-R16): no readout, and no name of its own. */
+  mark?: boolean;
 }
 
 // The ring is drawn in a box as many units wide as the size token is pixels (`size-ring` 16, `size-ring-sm` 12),
@@ -21,7 +23,7 @@ interface ContextRingProps {
 const BOX = { ring: 16, "ring-sm": 12 } as const;
 
 /** The context ring (GLOSSARY): a gauge of context consumed, with its readout beside it once there is one. */
-export function ContextRing({ used, size = "ring", turning }: ContextRingProps) {
+export function ContextRing({ used, size = "ring", turning, mark }: ContextRingProps) {
   // A value Core could not measure reads as none, not as NaN.
   const share = used === undefined || !Number.isFinite(used) ? undefined : Math.min(Math.max(used, 0), 1);
   const percent = share === undefined ? undefined : Math.round(share * 100);
@@ -43,8 +45,9 @@ export function ContextRing({ used, size = "ring", turning }: ContextRingProps) 
       className="context-ring"
       data-size={size}
       data-near-full={nearFull(share) || undefined}
-      role="img"
-      aria-label={percent === undefined ? t("sessionControls.contextRing.noneLabel") : t("sessionControls.contextRing.usedLabel", { percent })}
+      role={mark ? undefined : "img"}
+      aria-hidden={mark || undefined}
+      aria-label={mark ? undefined : percent === undefined ? t("sessionControls.contextRing.noneLabel") : t("sessionControls.contextRing.usedLabel", { percent })}
     >
       <svg className="context-ring-gauge" viewBox={`0 0 ${box} ${box}`} aria-hidden="true">
         <circle className="context-ring-track" cx={centre} cy={centre} r={radius} />
@@ -61,7 +64,7 @@ export function ContextRing({ used, size = "ring", turning }: ContextRingProps) 
           />
         )}
       </svg>
-      {percent !== undefined && size === "ring" && <span className="readout context-ring-readout">{`${percent}%`}</span>}
+      {percent !== undefined && size === "ring" && !mark && <span className="readout context-ring-readout">{`${percent}%`}</span>}
     </span>
   );
 }
