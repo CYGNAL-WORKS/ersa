@@ -10,7 +10,7 @@ import { PassThrough } from "node:stream";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { INTERVAL_MS, LOCK_STALE_MS, ENDED, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select, startReview } from "./merge-review-watch.mjs";
+import { INTERVAL_MS, LOCK_STALE_MS, ENDED, TRANSIENT, RETRY_MS, latestCause, RETRY_UNTIL_MS, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select, startReview } from "./merge-review-watch.mjs";
 
 const HEAD = "b".repeat(40);
 const NOW = Date.parse("2026-11-04T12:00:00Z");
@@ -50,6 +50,79 @@ test("a pending merge review older than an hour is a run that died, and the head
   assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: ago(STALE_MS + 1000) })] })], NOW).review, [{ number: 7, head: HEAD }]);
   assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: ago(STALE_MS - 1000) })] })], NOW).review, []);
   assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: undefined })] })], NOW).review, [{ number: 7, head: HEAD }], "a pending status with no time is stale, not reviewed forever");
+});
+
+const QUEUE_FAILED = "The run failed: adding it to the merge queue failed: GraphQL: API rate limit already exceeded";
+// The REST list of a head's statuses, newest first as GitHub gives it, with an older merge review and another context around it.
+const said = (description) => ({ ok: true, out: JSON.stringify([{ context: "ext", description: "rate limit", created_at: ago(1000) }, { context: "Merge review", description, created_at: ago(2000) }, { context: "Merge review", description: "Reviewing…", created_at: ago(3000) }]) });
+const errored = (over) => mark("ERROR", { startedAt: ago(RETRY_MS + 1000), ...over });
+
+test("a merge review that failed for a cause that may clear is retried after a backoff, behind fresh heads", () => {
+  assert.equal(RETRY_MS, 15 * 60 * 1000);
+  assert.equal(RETRY_UNTIL_MS, 6 * 60 * 60 * 1000);
+  const failed = (n, at) => pr({ number: n, statusCheckRollup: [ci(), errored({ startedAt: at })] });
+  assert.deepEqual(select([failed(7, ago(RETRY_MS - 1000))], NOW).review, []);
+  assert.deepEqual(select([failed(7, ago(RETRY_MS + 1000))], NOW).review, [{ number: 7, head: HEAD, retry: true }]);
+  assert.deepEqual(select([failed(7, undefined)], NOW).review, [{ number: 7, head: HEAD, retry: true }], "an error with no time is retried, not left for good");
+  assert.deepEqual(select([pr({ autoMergeRequest: { enabledAt: ago(1000) }, statusCheckRollup: [ci(), errored()] })], NOW).disarm, [7]);
+  const picked = select([failed(3, ago(2 * RETRY_MS)), failed(4, ago(2 * RETRY_MS)), pr({ number: 9, statusCheckRollup: [ci({ startedAt: ago(1000) })] })], NOW);
+  assert.deepEqual(picked.review.map((p) => p.number), [9, 3, 4]);
+  assert.deepEqual(select([pr({ statusCheckRollup: [ci({ startedAt: ago(RETRY_UNTIL_MS + 1000) }), errored()] })], NOW).review, [], "a head that keeps failing is left to the owner");
+  assert.deepEqual(select([pr({ statusCheckRollup: [{ context: "ext", state: "SUCCESS" }, errored()] })], NOW).review, [], "with no CI time the cap holds");
+});
+
+test("one retry runs at a time, counting a retry an earlier tick started", async () => {
+  const prs = [3, 4].map((n) => pr({ number: n, headRefOid: String(n).repeat(40), statusCheckRollup: [ci(), errored()] }));
+  const reviews = [held(), held()];
+  let started = 0;
+  const run = drive(["--once"], { prs, start: () => reviews[started++].done });
+  await settle(() => started === 1);
+  await settle(() => false).catch(() => {});
+  assert.equal(started, 1, "the second failed head waits though a slot is free");
+  reviews[0].end(0);
+  await settle(() => started === 2);
+  reviews[1].end(0);
+  assert.equal((await run).code, 0);
+});
+
+test("TRANSIENT matches each cause that may clear on its own, and nothing else", () => {
+  for (const cause of [
+    "GraphQL: API rate limit already exceeded for user ID 1",
+    "Too Many Requests",
+    "HTTP 500",
+    "HTTP 502",
+    "HTTP 408",
+    "HTTP 429",
+    "read tcp 10.0.0.1:5000->140.82.112.6:443: connection reset by peer",
+    "dial tcp: i/o timeout",
+    "error connecting to api.github.com",
+    "network is unreachable",
+    "The run failed: adding it to the merge queue failed after the review was posted: refused",
+  ]) assert.match(cause, TRANSIENT);
+  for (const cause of ["The review ran past 70 minutes and was ended; the poller's log says what it was doing.", "The run failed: claude returned no result: error_max_turns", "HTTP 404: Not Found", "HTTP 4290", "claude returned no result after 500 turns", ""]) assert.doesNotMatch(cause, TRANSIENT);
+});
+
+test("the cause read is the newest merge review status's, whatever order GitHub lists them in", () => {
+  const status = (description, at) => ({ context: "Merge review", description, created_at: ago(at) });
+  assert.equal(latestCause(JSON.stringify([status("old: claude returned no result", 9000), status(QUEUE_FAILED, 1000)])), QUEUE_FAILED);
+  assert.equal(latestCause(JSON.stringify([status(QUEUE_FAILED, 9000), status("new: claude returned no result", 1000)])), "new: claude returned no result");
+  assert.equal(latestCause(JSON.stringify([{ context: "ext", description: "rate limit", created_at: ago(1) }])), "");
+  assert.equal(latestCause("not json"), null);
+  assert.equal(latestCause("{}"), null);
+});
+
+test("a retry starts only when its error's description says the cause may clear", async () => {
+  const prs = [pr({ statusCheckRollup: [ci(), errored()] })];
+  for (const description of [QUEUE_FAILED, "The run failed: gh api --paginate repos/o/r/pulls/7/reviews failed: HTTP 502: Bad Gateway", "posting the review failed 3 times: read tcp: connection reset by peer"])
+    assert.equal((await drive(["--once"], { prs, statuses: () => said(description) })).reviews.length, 1, description);
+  for (const description of ["The review ran past 70 minutes and was ended; the poller's log says what it was doing.", "The run failed: claude returned no result: error_max_turns", ""]) {
+    const got = await drive(["--once"], { prs, statuses: () => said(description) });
+    assert.equal(got.reviews.length, 0, description);
+    assert.match(got.logs.join("\n"), /does not clear on its own/);
+  }
+  const down = await drive(["--once"], { prs, statuses: () => ({ ok: false, out: "", err: "HTTP 403: API rate limit exceeded" }) });
+  assert.equal(down.reviews.length, 0, "an unreadable cause is not retried this tick");
+  assert.match(down.logs.join("\n"), /could not read why its merge review failed: HTTP 403/);
 });
 
 test("every open pull request not reviewed this tick says why, and a tick with nothing to review logs it", async () => {
@@ -153,7 +226,7 @@ const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 // review ends with `exit` (or with what `start` resolves to, for a test that
 // holds a review open); `reviews` lists each review started. A wait between
 // ticks lets the test run and no more, unless `sleep` says otherwise.
-async function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list = () => null, start, lockPath, alive, sleep = () => new Promise((r) => setImmediate(r)), now = () => NOW } = {}) {
+async function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list = () => null, statuses = () => said(QUEUE_FAILED), start, lockPath, alive, sleep = () => new Promise((r) => setImmediate(r)), now = () => NOW } = {}) {
   const calls = [];
   const logs = [];
   const reviews = [];
@@ -162,6 +235,7 @@ async function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }),
   const run = (cmd, args, cwd) => {
     calls.push({ cmd, args, cwd });
     if (cmd === "gh" && args[1] === "list") return list() ?? ok(JSON.stringify(prs.map(marked)));
+    if (cmd === "gh" && /\/commits\/.*\/statuses$/.test(args[1] ?? "")) return { status: 0, err: "", ...statuses() };
     if (cmd === "gh") return ok();
     if (cmd === "git") return { ok: true, status: 0, out: "", err: "", ...git(args, cwd) };
     throw new Error(`unexpected ${cmd}`);
