@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // The merge review poller (ADR 0023): on the owner's machine, with the owner's
 // gh and Claude Code logins, it finds every open pull request from this
-// repository whose CI passed on a head that carries no merge review yet, and
-// runs scripts/merge-review.mjs on up to two of them at once, the head whose
-// CI passed first leading.
+// repository whose CI passed on a head that carries no merge review yet (or
+// one whose review failed for a cause that may clear), and runs
+// scripts/merge-review.mjs on up to two of them at once, the head whose CI
+// passed first leading and retries behind them all.
 //
 //   node scripts/merge-review-watch.mjs [--once] [--checkout <dir>]
 //
@@ -15,7 +16,9 @@
 // as it starts on a head. A head with the status is reviewed, being reviewed,
 // or clean and waiting for the gate; a pending status older than an hour is
 // one of the last two gone stale (a run that died with the machine, a gate
-// that may pass now), and the head is taken up again. Heads are due in the
+// that may pass now), and the head is taken up again. An error status whose
+// cause may clear on its own (TRANSIENT) is retried after RETRY_MS, one retry
+// running at a time, for RETRY_UNTIL_MS after CI passed. Heads are due in the
 // order their CI passed, so a pull request pushed again and again never keeps
 // an older one waiting. Each tick starts a review in every free slot (SLOTS of
 // them, each with its own checkout) and leaves it running: in a terminal the
@@ -86,6 +89,18 @@ export const SLOTS = 2;
 // never be taken over.
 export const STALE_MS = 60 * 60 * 1000;
 export const LOCK_STALE_MS = 3 * STALE_MS;
+// A review whose own run failed for a cause that may clear on its own (its
+// error status's description, which gh's rollup leaves out and the tick reads
+// over REST, matches TRANSIENT: a rate limit, the network, a GitHub server
+// error, or the queue after the review was posted, which a retry redoes without
+// reviewing again) is retried this long after the status was set. Retries go behind every head due
+// for its first review, and only one runs at a time, so failed heads never take
+// every slot. Retries end once the head's CI passed RETRY_UNTIL_MS ago (a CI
+// rerun moves that); the error is then the owner's. Any other error, a review
+// ended at its time limit included, is the owner's at once.
+export const TRANSIENT = /rate limit|too many requests|merge queue|HTTP (5\d\d|408|429)\b|connection reset|timeout|error connecting|network/i;
+export const RETRY_MS = 15 * 60 * 1000;
+export const RETRY_UNTIL_MS = 6 * 60 * 60 * 1000;
 // How long a run of the scheduled task starts reviews for, counted from its
 // start, heads that cannot be prepared included: a review takes about an hour,
 // so the last one it starts ends within the two hours the task allows it.
@@ -103,7 +118,8 @@ const FIELDS = "number,isDraft,isCrossRepository,headRefOid,labels,autoMergeRequ
 const VERDICT = { SUCCESS: "passed", FAILURE: "blocks the merge", ERROR: "failed to run", PENDING: "is running or waits for the gate" };
 
 // Which pull requests a tick acts on: `review` the heads to review, the one
-// whose CI passed first leading, `disarm` the numbers whose auto-merge must go, and `skip` every other
+// whose CI passed first leading and errored heads due a retry (marked `retry`,
+// for the tick to read why they failed) last, `disarm` the numbers whose auto-merge must go, and `skip` every other
 // open pull request with why it is not reviewed, so a tick with nothing to
 // review says what it is waiting for. Pure, so a test can drive every case
 // with gh's JSON alone.
@@ -119,16 +135,31 @@ export function select(prs, now = Date.now()) {
     const mark = normalizeChecks(pr.statusCheckRollup).find((c) => c.name === MERGE_REVIEW);
     // A pending time gh did not give reads as stale: the lock keeps a running review safe from the retake.
     const stale = mark?.status === "PENDING" && !(now - Date.parse(mark.startedAt ?? "") <= STALE_MS);
-    const reviewed = Boolean(mark) && !stale;
+    const retry = mark?.status === "COMPLETED" && mark.conclusion === "ERROR" && !(now - Date.parse(mark.startedAt ?? "") < RETRY_MS) && now - passedAt(pr.statusCheckRollup, -Infinity) < RETRY_UNTIL_MS;
+    const reviewed = Boolean(mark) && !stale && !retry;
     const held = (pr.labels ?? []).some((l) => l.name === "hold");
     if (pr.autoMergeRequest && (!reviewed || held)) disarm.push(pr.number);
     const ci = ciRefusals(pr.statusCheckRollup);
     if (reviewed) skip.push({ number: pr.number, why: `its merge review ${VERDICT[mark.status === "COMPLETED" ? mark.conclusion : "PENDING"] ?? "has a status this poller cannot read"}${held ? ", and it is on hold" : ""}` });
     else if (ci.length) skip.push({ number: pr.number, why: ci.join(", and ") });
-    else review.push({ number: pr.number, head: pr.headRefOid, since: passedAt(pr.statusCheckRollup, now) });
+    else review.push({ number: pr.number, head: pr.headRefOid, retry, since: passedAt(pr.statusCheckRollup, now) });
   }
-  review.sort((a, b) => a.since - b.since || a.number - b.number);
-  return { review: review.map(({ number, head }) => ({ number, head })), disarm, skip };
+  review.sort((a, b) => a.retry - b.retry || a.since - b.since || a.number - b.number);
+  return { review: review.map(({ number, head, retry }) => ({ number, head, ...(retry && { retry }) })), disarm, skip };
+}
+
+// The description of a head's newest merge review status, from the REST list
+// of its statuses; null when the list is not JSON.
+export function latestCause(json) {
+  let list;
+  try {
+    list = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(list)) return null;
+  const newest = list.filter((s) => s?.context === MERGE_REVIEW).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
+  return newest?.description ?? "";
 }
 
 // When a head's CI passed: the end of its last check to finish, among those gh
@@ -316,7 +347,17 @@ function tick(run, start, dirs, log, now, running, until) {
   const due = review.filter((p) => !running.has(p.number));
   if (!due.length && !running.size) return log(`nothing to review${skip.length ? `: ${skip.map((p) => `#${p.number} (${p.why})`).join("; ")}` : ""}`.replace(/\s+/g, " "));
   const free = dirs.filter((d) => ![...running.values()].some((x) => x.dir === d));
-  for (const [i, { number: n, head }] of due.entries()) {
+  for (const [i, { number: n, head, retry }] of due.entries()) {
+    // One retry runs at a time, counting those started by earlier ticks.
+    if (retry && [...running.values()].some((x) => x.retry)) continue;
+    if (retry) {
+      const why = run("gh", ["api", `repos/{owner}/{repo}/commits/${head}/statuses`]);
+      const cause = why.ok ? latestCause(why.out) : null;
+      if (cause === null || !TRANSIENT.test(cause)) {
+        log(`#${n} at ${head.slice(0, 7)}: ${cause !== null ? "its merge review failed for a cause that does not clear on its own; the owner's to look at" : `could not read why its merge review failed: ${why.ok ? "the statuses are not JSON" : why.err}`}`.replace(/\s+/g, " "));
+        continue;
+      }
+    }
     const later = due.slice(i + 1).map((p) => `#${p.number}`);
     if (!free.length) return log(`${[`#${n}`, ...later].join(", ")} wait for a free slot`);
     if (now() > until) return log(`out of time; ${[`#${n}`, ...later].join(", ")} wait for the next run`);
@@ -341,13 +382,13 @@ function tick(run, start, dirs, log, now, running, until) {
         running.delete(n);
         log(`#${n} at ${head.slice(0, 7)}: the review exited ${status}`);
         // An ended review never set its verdict, and its pending status would
-        // go stale and send the head round again; an error is the owner's.
+        // go stale and send the head round again; an error is retried for a while.
         if (status !== ENDED) return;
         const description = `The review ran past ${REVIEW_LIMIT_MS / 60000} minutes and was ended; the poller's log says what it was doing.`;
         const r = run("gh", ["api", `repos/{owner}/{repo}/statuses/${head}`, "-f", "state=error", "-f", `context=${MERGE_REVIEW}`, "-f", `description=${description}`]);
         if (!r.ok) log(`#${n} at ${head.slice(0, 7)}: could not mark the head's merge review as failed: ${r.err}`);
       });
-    running.set(n, { dir, done });
+    running.set(n, { dir, done, retry });
   }
 }
 
