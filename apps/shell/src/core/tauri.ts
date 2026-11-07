@@ -1,7 +1,7 @@
 // The CoreClient the window uses: the Shell's two bridge commands
 // (documented on the Shell's Rust side, in src-tauri/src/lib.rs). Beside it,
-// the Shell's own controls for closing and quitting, and the system's folder
-// dialog.
+// the Shell's own controls for closing and quitting, the system's dialogs, and
+// drags from the file manager.
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -22,43 +22,39 @@ export const tauriClient: CoreClient = {
   call: (method, params) => invoke("core_request", { method, params: params ?? null }),
 };
 
-export const tauriShell: ShellControl = {
-  onQuitRequested: (handler) => {
-    // `listen` registers asynchronously; stopping before it has means
-    // unlistening as soon as it does.
-    let stopped = false;
-    let unlisten: (() => void) | undefined;
-    listen("quit-requested", () => handler()).then((stop) => {
+/**
+ * A listener Tauri registers asynchronously, as a function that stops it: stopping before it has registered
+ * unlistens as soon as it does. One that fails to register hears nothing, which is all a caller can do about it.
+ */
+function listening(registered: Promise<() => void>): () => void {
+  let stopped = false;
+  let unlisten: (() => void) | undefined;
+  registered.then(
+    (stop) => {
       if (stopped) stop();
       else unlisten = stop;
-    });
-    return () => {
-      stopped = true;
-      unlisten?.();
-    };
-  },
-  onDragDrop: (handler) => {
-    // As onQuitRequested: registering is asynchronous, so a stop before it has unlistens once it does.
-    let stopped = false;
-    let unlisten: (() => void) | undefined;
-    getCurrentWebview()
-      .onDragDropEvent(({ payload }) => {
+    },
+    () => {},
+  );
+  return () => {
+    stopped = true;
+    unlisten?.();
+  };
+}
+
+export const tauriShell: ShellControl = {
+  onQuitRequested: (handler) => listening(listen("quit-requested", () => handler())),
+  onDragDrop: (handler) =>
+    listening(
+      getCurrentWebview().onDragDropEvent(({ payload }) => {
         if (payload.type === "leave") return handler({ type: "leave" });
         // Tauri gives physical pixels; the page lays out in CSS pixels.
         const x = payload.position.x / window.devicePixelRatio;
         const y = payload.position.y / window.devicePixelRatio;
         if (payload.type === "drop") handler({ type: "drop", x, y, paths: payload.paths });
         else handler({ type: "over", x, y });
-      })
-      .then((stop) => {
-        if (stopped) stop();
-        else unlisten = stop;
-      });
-    return () => {
-      stopped = true;
-      unlisten?.();
-    };
-  },
+      }),
+    ),
   quitHeard: () => invoke("shell_quit_heard"),
   show: () => invoke<boolean>("shell_show"),
   hide: () => invoke("shell_hide"),

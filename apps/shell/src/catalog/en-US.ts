@@ -143,6 +143,8 @@ export const enUS = {
       gigabytesDetail: "{size} GB",
       removeLabel: "Remove {name}",
       pastedName: "Pasted image",
+      pastedTooLargeError: "This image is larger than 10 MB, the most Ersa sends in one message.",
+      pastedUnreadableError: "Ersa couldn't read this image.",
     },
   },
   newSession: {},
