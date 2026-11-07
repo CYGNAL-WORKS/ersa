@@ -767,6 +767,10 @@ export interface SessionSendProgressNotification {
 export interface SessionTileNotification {
   session_id: Id;
   tile: Tile;
+  /**
+   * The session's last_activity_at as session.list has it: when its latest turn ended; absent until one has. Every tile carries it, and a turn's end sends a tile even when the tile itself is unchanged.
+   */
+  last_activity_at?: string;
 }
 /**
  * What the rail renders for a session; Core keeps it current from events. Usage fields are absent until known.
