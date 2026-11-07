@@ -30,6 +30,7 @@ const session = (id: string, created_at: string, tile: Session["tile"]): Session
   permission_mode: "default",
   state: tile.state,
   created_at,
+  archived: false,
   tile,
 });
 
