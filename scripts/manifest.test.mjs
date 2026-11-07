@@ -74,6 +74,15 @@ test("a bullet label repeated under one section name fails the check", () => {
   assert.match(problems, /LAY-SHELL: \*\*Q\*\* appears twice under "The rail"/);
 });
 
+test("a Built so far section of two lines fails the check; one line passes, fenced code aside", () => {
+  // What a union merge of two planning commits that each rewrote the one line leaves: both, adjacent.
+  const two = withSection("## Built so far\n\nThe rail lists sessions.\nThe rail lists sessions under their project.");
+  assert.equal(two.status, 1);
+  assert.match(two.problems, /LAY-SHELL: Built so far holds 2 lines/);
+  const one = withSection("## Built so far\n\nThe rail lists sessions under their project; the tree is still to build.\n\n```\ntwo\n\nblocks\n```");
+  assert.doesNotMatch(one.problems, /Built so far holds/);
+});
+
 test("labels in fenced code, or nested under different bullets, are not repeats", () => {
   const { status, problems } = withSection("## Spare\n\n```\n- **X**\n- **X**\n```\n\n- **P**\n  - **Q** one.\n- **R**\n  - **Q** two.\n- plain\n  - **Q** three.");
   assert.equal(status, 0, problems);

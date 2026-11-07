@@ -100,9 +100,10 @@ const REVIEW_URL = "https://github.com/o/r/pull/7#pullrequestreview-1";
 // review and from `gate` for the gate (which asks for `mergeable`), the reviews
 // list from `reviews`, claude from `claude`, `git diff` from `files` (against
 // main) and `since` (against the previous head).
-function drive(argv, { pr = {}, reviews = [], claude, gate = {}, reviewedMissing = false, ancestors = [], files = "scripts/x.mjs\0scripts/x.test.mjs\0", since = "", mainHas = [], me = { ok: true, out: ME, err: "" }, statusOk = true, revList = "", show = "", posts = [], landed = false } = {}) {
+function drive(argv, { pr = {}, reviews = [], claude, gate = {}, reviewedMissing = false, ancestors = [], files = "scripts/x.mjs\0scripts/x.test.mjs\0", since = "", mainHas = [], me = { ok: true, out: ME, err: "" }, statusOk = true, revList = "", show = "", posts = [], landed = false, movedTo = "" } = {}) {
   const calls = [];
   const slept = [];
+  const bodies = [];
   const postResults = [...posts];
   const ok = (out = "") => ({ ok: true, out, err: "" });
   const no = (err = "no") => ({ ok: false, out: "", err });
@@ -114,6 +115,8 @@ function drive(argv, { pr = {}, reviews = [], claude, gate = {}, reviewedMissing
       const review = own ? [{ context: "Merge review", state: own.find((a) => a.startsWith("state=")).slice(6).toUpperCase() }] : [];
       return gate.view ?? ok(JSON.stringify({ state: "OPEN", isDraft: false, mergeable: "MERGEABLE", headRefOid: HEAD, statusCheckRollup: [{ name: "CI", status: "COMPLETED", conclusion: "SUCCESS" }, ...review], ...gate.pr }));
     }
+    // The head as the review ends: `movedTo` when the pull request was pushed meanwhile.
+    if (cmd === "gh" && args[1] === "view" && args.includes(".headRefOid")) return ok(movedTo || pr.headRefOid || HEAD);
     if (cmd === "gh" && args[1] === "view") return ok(JSON.stringify({ state: "OPEN", isDraft: false, headRefOid: HEAD, headRefName: "claude/x", isCrossRepository: false, labels: [], title: "T", body: "Fixes #5", author: { login: ME, is_bot: false }, ...pr }));
     // The check for a post that failed but landed: the body it sent, when `landed`.
     if (cmd === "gh" && args[0] === "api" && args[1] === "--paginate" && args.at(-1).includes("select(.commit_id")) {
@@ -123,7 +126,11 @@ function drive(argv, { pr = {}, reviews = [], claude, gate = {}, reviewedMissing
     if (cmd === "gh" && args[0] === "api" && args[1] === "--paginate") return ok(reviews.map((r) => JSON.stringify(r)).join("\n"));
     if (cmd === "gh" && args[1] === "user") return me;
     if (cmd === "gh" && args[0] === "api" && /\/statuses\//.test(args[1])) return statusOk ? ok(JSON.stringify({ id: 1 })) : no("HTTP 403");
-    if (cmd === "gh" && args[0] === "api" && /\/reviews$/.test(args[1])) return postResults.shift() ?? ok(REVIEW_URL);
+    if (cmd === "gh" && args[0] === "api" && /\/reviews$/.test(args[1])) {
+      // The body as sent, read now: the run removes its file when it ends.
+      bodies.push(readFileSync(args.find((a) => a.startsWith("body=@")).slice(6), "utf8"));
+      return postResults.shift() ?? ok(REVIEW_URL);
+    }
     if (cmd === "gh" && args[0] === "pr" && args[1] === "merge") return gate.merge ?? ok();
     if (cmd === "git" && args[0] === "rev-parse") return ok(HEAD);
     if (cmd === "git" && args[0] === "merge-base") return (args[2] === HEAD && !reviewedMissing) || ancestors.includes(args[2]) ? ok() : no("");
@@ -140,6 +147,7 @@ function drive(argv, { pr = {}, reviews = [], claude, gate = {}, reviewedMissing
     ...got,
     calls,
     slept,
+    bodies,
     reviewed: of("claude", 0, "claude").length,
     posted: calls.filter((c) => c[0] === "gh" && c[1] === "api" && /\/reviews$/.test(c[2]) && c.includes("event=COMMENT")),
     queued: of("gh", 2, "merge"),
@@ -158,6 +166,24 @@ test("a head that moved, a closed, draft or fork pull request gets no review and
     assert.equal(got.posted.length, 0);
     assert.deepEqual(got.statuses, []);
   }
+});
+
+test("a head the pull request left while the review ran gets its verdict marked superseded, counts as no round, and is not enqueued", () => {
+  const moved = "d".repeat(40);
+  const blocked = drive(["7", "--head", HEAD], { movedTo: moved, claude: { structured_output: { findings: [finding()], dismissed: [] }, num_turns: 1, total_cost_usd: 0.5 } });
+  assert.equal(blocked.code, 1);
+  assert.equal(blocked.posted.length, 1);
+  const body = blocked.bodies[0];
+  assert.equal(parseState(body).superseded, moved);
+  assert.match(body, /Superseded: the pull request's head moved to ddddddd while this review ran, so this is not a round and the gate was not asked\./);
+  const clean = drive(["7", "--head", HEAD], { movedTo: moved });
+  assert.equal(clean.code, 0, clean.stderr);
+  assert.equal(clean.posted.length, 1);
+  assert.deepEqual(clean.queued, [], "the queue would refuse the old head; the next review enqueues the new one");
+  assert.doesNotMatch(clean.bodies[0], /adding it to the merge queue/);
+  assert.doesNotMatch(clean.statuses.join(" "), /queue/);
+  const same = drive(["7", "--head", HEAD]);
+  assert.equal(parseState(same.bodies[0]).superseded, undefined);
 });
 
 test("a clean review is posted on the head, the status points at it, and the head enters the merge queue through the gate", () => {
