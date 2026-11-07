@@ -65,8 +65,7 @@ export const enUS = {
       renameButton: "Rename",
       // The key that does the same as Rename, at the item's trailing edge.
       renameKey: "F2",
-      // Why Rename is unavailable: the backend names a session as it starts, and a title needs that name.
-      renameStartingReason: "Available once the session has started",
+      // Why Rename is unavailable: renaming goes through Core.
       renameOfflineReason: "Available once Ersa reaches your sessions",
       // The field the title becomes while it is renamed on the tile.
       titleLabel: "Session title",

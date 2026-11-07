@@ -680,14 +680,8 @@ const entries: Entry[] = [
       // s1 is the active session and waits on a permission request: its chevron stays a mark, and More sits before it.
       ["Active, needs you, pointer over it", <RailTree {...ersaOnly} activeId="s1" force={{ id: "s1", state: "hover" }} />],
       ["Tile menu, open", room(<RailTree {...pairOnly} initialTileMenu="p2" />)],
-      ["Tile menu, Rename unavailable", room(
-          <RailTree
-            {...tree}
-            projects={{ state: "ready", projects: [treeProjects[1]!] }}
-            sessions={{ state: "ready", sessions: treeSessions.filter((s) => s.workspace_id === "w-dev") }}
-            initialTileMenu="s4"
-          />,
-        )],
+      // Renaming goes through Core, so while Ersa can't reach it Rename is unavailable, with the reason.
+      ["Tile menu, Rename unavailable", room(<RailTree {...pairOnly} initialTileMenu="p2" offline />)],
       ["Renaming on the tile", <RailTree {...pairOnly} initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }} />],
       [
         "A title the backend refused",
