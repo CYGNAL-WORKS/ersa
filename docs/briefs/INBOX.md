@@ -8,6 +8,5 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-06 FLOW-NEW-SESSION-R07 (COMPOSER.md, The status line): the status line's table has no row for a host with no backend to run, which the new-session screen already treated as unavailable; it keeps the box unavailable and says "No backend is available on this host." on the status line with no leading mark, after detecting backends.
 
 ## Resolved recently (optional, trimmed in planning passes)
