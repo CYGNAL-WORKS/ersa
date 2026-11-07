@@ -70,8 +70,9 @@ pub struct ClaudeProjector {
     output_tokens: HashMap<String, u64>,
     /// The title of the latest `system/session_title_changed`: the name the
     /// user gave the session, which the CLI announces after each change to
-    /// it, never for a title it generated (PROTO-CLAUDE-CODE-STREAM-R36).
-    announced_title: Option<String>,
+    /// it, never for a title it generated (PROTO-CLAUDE-CODE-STREAM-R36),
+    /// after how many such lines.
+    announced_title: Option<(u64, String)>,
 }
 
 /// A `can_use_tool` request the CLI is waiting on.
@@ -121,8 +122,10 @@ impl Projector for ClaudeProjector {
         }
     }
 
-    fn announced_title(&self) -> Option<&str> {
-        self.announced_title.as_deref()
+    fn announced_title(&self) -> Option<(u64, &str)> {
+        self.announced_title
+            .as_ref()
+            .map(|(count, title)| (*count, title.as_str()))
     }
 }
 
@@ -151,7 +154,8 @@ impl ClaudeProjector {
             // holds it; the line itself stays a passthrough, as it is below.
             (Some("system"), Some("session_title_changed"), _) => {
                 if let Some(title) = field("/title") {
-                    self.announced_title = Some(title.to_string());
+                    let count = self.announced_title.as_ref().map_or(0, |(n, _)| *n);
+                    self.announced_title = Some((count + 1, title.to_string()));
                 }
             }
             _ => {}

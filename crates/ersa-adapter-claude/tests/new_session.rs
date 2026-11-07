@@ -266,16 +266,19 @@ fn the_latest_announced_title_is_reported_until_another() {
     projector.project(&line(0, &stdout[0]));
     assert_eq!(projector.announced_title(), None);
     let events = projector.project(&line(1, &stdout[1]));
-    assert_eq!(projector.announced_title(), Some(TITLE));
+    assert_eq!(projector.announced_title(), Some((1, TITLE)));
     // The line itself is still kept, as a passthrough.
     assert_eq!(events.len(), 1);
     // Every later line leaves it, until the next announcement.
     for (n, l) in stdout[2..].iter().enumerate() {
         projector.project(&line(n as u64 + 2, l));
     }
-    assert_eq!(projector.announced_title(), Some(TITLE));
+    assert_eq!(projector.announced_title(), Some((1, TITLE)));
+    // The same name again is an announcement of its own.
+    projector.project(&line(98, &stdout[1]));
+    assert_eq!(projector.announced_title(), Some((2, TITLE)));
     let mut next = parse(&stdout[1]);
     next["title"] = json!("Renamed again");
     projector.project(&line(99, &next.to_string()));
-    assert_eq!(projector.announced_title(), Some("Renamed again"));
+    assert_eq!(projector.announced_title(), Some((3, "Renamed again")));
 }
