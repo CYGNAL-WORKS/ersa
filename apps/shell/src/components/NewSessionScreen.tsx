@@ -11,6 +11,7 @@ import {
   startingProject,
   valuesFor,
 } from "../session/controls";
+import type { ShellControl } from "../core/shell";
 import { type Attached, pathName } from "../session/attachments";
 import type { Sending } from "../session/follow";
 import type { AttachWhat } from "./AttachMenu";
@@ -39,8 +40,12 @@ interface NewSessionScreenProps {
   projectId?: string;
   /** Starts the session with the first message; resolves true once it has started. */
   onStart: (text: string, values: SessionValues, attachments: readonly Attached[]) => Promise<boolean>;
-  /** Opens the system's dialog for files, images or a folder and reads each path picked (FLOW-SEND-MESSAGE-R07). */
+  /** Opens the system's dialog for files, images or a folder and reads each path picked (FLOW-SEND-MESSAGE-R07); paths dropped on the box go to `onRead`. */
   onAttach?: (what: AttachWhat, workspace: string | undefined) => Promise<Attached[]>;
+  /** Reads each path dropped on the composer's box (FLOW-SEND-MESSAGE-R08). */
+  onRead?: (paths: readonly string[], workspace: string | undefined) => Promise<Attached[]>;
+  /** Hears drags from the file manager over the window, for the composer's box (FLOW-SEND-MESSAGE-R08). */
+  dragDrop?: ShellControl["onDragDrop"];
   /** Each project's root workspace, by project id: the workspace a session in the project folder runs in. */
   rootWorkspaces?: Readonly<Record<string, string>>;
   starting?: Sending;
@@ -323,6 +328,8 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           onStop={props.onStop}
           onWrite={hold}
           onAttach={props.onAttach && ((what) => props.onAttach?.(what, attachTo) ?? Promise.resolve([]))}
+          onRead={props.onRead && ((paths) => props.onRead?.(paths, attachTo) ?? Promise.resolve([]))}
+          dragDrop={props.dragDrop}
           workspace={attachTo}
           onSend={(text, attachments) => {
             hold();
