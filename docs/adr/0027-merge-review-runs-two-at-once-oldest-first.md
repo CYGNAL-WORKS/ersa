@@ -1,6 +1,6 @@
 # 0027: The merge review runs two reviews at once, the longest-waiting head first
 
-- Status: accepted
+- Status: superseded by 0029
 - Date: 2026-11-06
 - Related briefs: none
 

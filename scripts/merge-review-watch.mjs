@@ -2,7 +2,7 @@
 // The merge review poller (ADR 0023): on the owner's machine, with the owner's
 // gh and Claude Code logins, it finds every open pull request from this
 // repository whose CI passed on a head that carries no merge review yet, and
-// runs scripts/merge-review.mjs on up to two of them at once, the head whose
+// runs scripts/merge-review.mjs on up to SLOTS of them at once, the head whose
 // CI passed first leading.
 //
 //   node scripts/merge-review-watch.mjs [--once] [--checkout <dir>]
@@ -73,9 +73,9 @@ const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const LOCK = join(ROOT, ".scratch", "merge-review-watch.lock");
 const CHECKOUT = join(ROOT, "..", `${basename(ROOT)}-review`);
 export const INTERVAL_MS = 5 * 60 * 1000;
-// Reviews that run at once. Each builds and tests a pull request on this
-// machine, so more would slow every one of them down.
-export const SLOTS = 2;
+// Reviews that run at once (ADR 0029). Each builds and tests a pull request on
+// this machine, so more would slow every one of them down.
+export const SLOTS = 3;
 // A pending status older than this belongs to a run that is over: longer than
 // the review's claude runs (38 and 4 minutes) and its tool calls at their
 // usual pace. A lock gets three times that, past the two hours the task
@@ -354,9 +354,10 @@ function tick(run, start, dirs, log, now, running, until) {
 const USAGE = "usage: node scripts/merge-review-watch.mjs [--once] [--checkout <dir>]";
 
 // Runs the poller for argv. `run` runs one command, `start` starts a review,
-// `sleep` waits between ticks, `now` tells the time and `log` takes each line,
-// so a test can stand in for every tool and the clock.
-export async function main(argv, { run: r = run, start = startReview, sleep = pause, now = Date.now, log = (l) => process.stdout.write(`${stamp()} ${l}\n`), lockPath = LOCK, alive } = {}) {
+// `sleep` waits between ticks, `now` tells the time, `log` takes each line and
+// `slots` is how many reviews run at once, so a test can stand in for every
+// tool and the clock.
+export async function main(argv, { run: r = run, start = startReview, sleep = pause, now = Date.now, log = (l) => process.stdout.write(`${stamp()} ${l}\n`), lockPath = LOCK, alive, slots = SLOTS } = {}) {
   let once = false;
   let dir = CHECKOUT;
   try {
@@ -367,7 +368,7 @@ export async function main(argv, { run: r = run, start = startReview, sleep = pa
     }
     const release = lock(lockPath, { now, ...(alive ? { alive } : {}) });
     if (!release) return { code: 0, stdout: `another tick holds ${lockPath}; nothing to do\n` };
-    const dirs = Array.from({ length: SLOTS }, (_, i) => (i ? `${dir}-${i + 1}` : dir));
+    const dirs = Array.from({ length: slots }, (_, i) => (i ? `${dir}-${i + 1}` : dir));
     const running = new Map();
     const began = now();
     try {
