@@ -40,12 +40,12 @@ describe("a chip as a pill (docs/design/COMPOSER.md, The session controls)", () 
 
   it("while detecting, leads with the context ring's track and a turning arc, and has no chevron", () => {
     const shown = html({ value: undefined, placeholder: "Detecting backends…", pending: true, options: [], disabled: true });
-    expect(shown).toContain("chip-detecting");
+    expect(shown).toContain("data-turning");
     expect(shown).not.toContain("chip-chevron");
   });
 
-  it("opens its list above it when asked, as where the window has no room beneath", () => {
-    expect(html({ initialOpen: true, forceAbove: true })).toMatch(/class="chip-list"[^>]*data-above/);
-    expect(html({ initialOpen: true })).not.toMatch(/data-above/);
+  it("reads a placeholder that invites the user, such as Choose a folder, in ink", () => {
+    expect(html({ value: undefined, placeholder: "Choose a folder", invites: true })).toContain("data-invites");
+    expect(html({ value: undefined, placeholder: "No backend" })).not.toContain("data-invites");
   });
 });

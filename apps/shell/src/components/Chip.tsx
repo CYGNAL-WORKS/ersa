@@ -1,5 +1,6 @@
 import { ChevronDown, type LucideIcon, Search, ShieldAlert } from "lucide-react";
-import { type KeyboardEvent, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
+import { ContextRing } from "./ContextRing";
 import { Icon } from "./Icon";
 import "./Chip.css";
 
@@ -69,6 +70,8 @@ interface ChipProps {
   problem?: boolean;
   /** The value is still being found out: the context ring's track with a turning arc before it, as backends are detected. */
   pending?: boolean;
+  /** The placeholder is an invitation to act, such as Choose a folder, so it reads ink rather than ink-muted. */
+  invites?: boolean;
   /** Shows a value that cannot change, as under a running session: the same pill, without its chevron, that does not open. */
   readOnly?: boolean;
   options: ChipOption[];
@@ -83,10 +86,8 @@ interface ChipProps {
   /** For the gallery: the choices shown open, and a pointer or keyboard state shown without one. */
   initialOpen?: boolean;
   force?: "hover" | "focus" | "pressed";
-  /** For the gallery: one option of an open list shown hovered or pressed. */
-  forceOption?: { id: string; state: "hover" | "pressed" };
-  /** For the gallery: an open list shown above its chip, as where the window has no room beneath. */
-  forceAbove?: boolean;
+  /** For the gallery: one option of an open list shown hovered, pressed or with keyboard focus. */
+  forceOption?: { id: string; state: "hover" | "pressed" | "focus" };
   /** For the gallery: what an open list's search box holds. */
   initialQuery?: string;
 }
@@ -96,26 +97,14 @@ interface ChipProps {
  * with Enter, Space or the arrows, moves with the arrows, chooses with Enter or Space, and Escape closes it with
  * focus back on the chip.
  */
-export function Chip({ name, icon, prefix, value, reads, placeholder, problem, pending, readOnly, options, onChoose, action, section, wide, disabled, initialOpen = false, force, forceOption, forceAbove, initialQuery = "" }: ChipProps) {
+export function Chip({ name, icon, prefix, value, reads, placeholder, problem, pending, readOnly, options, onChoose, action, section, wide, disabled, initialOpen = false, force, forceOption, invites, initialQuery = "" }: ChipProps) {
   const [open, setOpen] = useState(initialOpen);
-  // The list opens beneath the chip where the window has room, else above it (docs/design/COMPOSER.md, A chip's list).
-  const [above, setAbove] = useState(false);
   const chip = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
   const root = useRef<HTMLDivElement>(null);
   const listId = useId();
-  // Measured only for a list the user opens: a gallery's list, open from the start, says where it is with `forceAbove`.
-  const measure = useRef(false);
-  useLayoutEffect(() => {
-    if (!open) return setAbove(false);
-    if (!measure.current) return;
-    measure.current = false;
-    const placed = list.current?.getBoundingClientRect();
-    const from = chip.current?.getBoundingClientRect();
-    if (!placed || !from) return;
-    // Measured where it opens, beneath; it moves above only when that has the room beneath lacks.
-    if (placed.bottom > window.innerHeight && from.top - (placed.bottom - from.bottom) >= 0) setAbove(true);
-  }, [open]);
+  // The list is anchored to its chip by this name: beneath it where the window has room, else above (Chip.css).
+  const anchor = `--chip-${listId.replace(/[^a-zA-Z0-9]/g, "")}`;
   const chosen = options.find((o) => o.id === value);
   const shown = reads ?? chosen?.label ?? placeholder ?? "";
   const [query, setQuery] = useState(initialQuery);
@@ -158,7 +147,6 @@ export function Chip({ name, icon, prefix, value, reads, placeholder, problem, p
   const [openedWaiting, setOpenedWaiting] = useState(initialOpen && section?.unavailable === true);
   const show = () => {
     focusOnOpen.current = true;
-    measure.current = true;
     setOpenedWaiting(section?.unavailable === true);
     setOpen(true);
   };
@@ -262,17 +250,14 @@ export function Chip({ name, icon, prefix, value, reads, placeholder, problem, p
         data-open={open || undefined}
         data-pending={pending || undefined}
         data-read-only={readOnly || undefined}
+        data-invites={(invites && chosen === undefined) || undefined}
+        style={{ anchorName: anchor } as CSSProperties}
         disabled={disabled || readOnly}
         onClick={() => (open ? setOpen(false) : show())}
         onKeyDown={onChipKey}
       >
         {problem && <span className="glyph" data-tone="danger" aria-hidden="true" />}
-        {pending && (
-          <svg className="context-ring-gauge chip-detecting" viewBox="0 0 16 16" aria-hidden="true">
-            <circle className="context-ring-track" cx="8" cy="8" r="7" />
-            <circle className="context-ring-used" cx="8" cy="8" r="7" pathLength={4} strokeDasharray="1 3" />
-          </svg>
-        )}
+        {pending && <ContextRing turning />}
         {icon && (
           <span className="chip-icon">
             <Icon icon={icon} size="icon-xs" />
@@ -288,7 +273,7 @@ export function Chip({ name, icon, prefix, value, reads, placeholder, problem, p
         )}
       </button>
       {open && (
-        <ul ref={list} id={listId} className="chip-list" data-wide={wide || undefined} data-above={above || forceAbove || undefined} role="listbox" aria-label={name} onKeyDown={onListKey}>
+        <ul ref={list} id={listId} className="chip-list" data-wide={wide || undefined} style={{ positionAnchor: anchor } as CSSProperties} role="listbox" aria-label={name} onKeyDown={onListKey}>
           {options.map((option) => (
             <li
               key={option.id}
