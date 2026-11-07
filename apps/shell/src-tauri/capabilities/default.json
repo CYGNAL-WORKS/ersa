@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the main window's Interface, loaded from the app itself, may call: the two Core bridge commands, showing the window and quitting (FLOW-CLOSE-AND-QUIT), listening for the Shell's quit-requested event, and the dialog plugin's open, which picks a folder to add a project (FLOW-NEW-SESSION-R27). Nothing else, and no remote origin.",
+  "description": "What the main window's Interface, loaded from the app itself, may call: the two Core bridge commands, showing the window and quitting (FLOW-CLOSE-AND-QUIT), listening for the Shell's quit-requested event and the webview's drag-and-drop events, which carry the paths dropped on the composer (FLOW-SEND-MESSAGE-R08), and the dialog plugin's open, which picks a folder to add a project (FLOW-NEW-SESSION-R27). Nothing else, and no remote origin.",
   "windows": ["main"],
   "local": true,
   "permissions": [
