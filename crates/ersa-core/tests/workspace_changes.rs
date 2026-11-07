@@ -537,3 +537,79 @@ async fn a_submodule_counts_when_it_holds_commits_its_remote_does_not() {
     assert_eq!(counts(&held), [1, 0, 0, 0, 0], "{held}");
     assert_ne!(held["token"], clean["token"]);
 }
+
+// verifies: PROTO-CORE-API-R38
+#[tokio::test(flavor = "multi_thread")]
+async fn the_token_follows_tracked_files_content_and_the_index() {
+    let (core, mut client) = setup().await;
+    let repo = core.dir.path().join("repo");
+    git_repo(&repo);
+    let (workspace, folder) = workspace_of(&mut client, &repo).await;
+
+    // A tracked file edited, then edited again: the count stays, the
+    // token follows the content.
+    write(&folder.join("README.md"), "one\n");
+    let first = changes(&mut client, &workspace).await;
+    write(&folder.join("README.md"), "two\n");
+    let second = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&first), [1, 0, 0, 0, 0], "{first}");
+    assert_eq!(counts(&second), [1, 0, 0, 0, 0], "{second}");
+    assert_ne!(second["token"], first["token"]);
+
+    // Staged, then deleted from the folder: only the index holds it, and
+    // staging other content changes nothing but the index.
+    write(&folder.join("gone.txt"), "staged first\n");
+    git(&folder, &["add", "gone.txt"]);
+    std::fs::remove_file(folder.join("gone.txt")).unwrap();
+    let staged = changes(&mut client, &workspace).await;
+    write(&folder.join("gone.txt"), "staged second\n");
+    git(&folder, &["add", "gone.txt"]);
+    std::fs::remove_file(folder.join("gone.txt")).unwrap();
+    let restaged = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&staged), [2, 0, 0, 0, 0], "{staged}");
+    assert_eq!(counts(&restaged), [2, 0, 0, 0, 0], "{restaged}");
+    assert_ne!(restaged["token"], staged["token"]);
+}
+
+// cites PROTO-CORE-API-R46 once planning PR 245 adds it
+// cites PROTO-CORE-API-R49 once planning PR 245 adds it
+#[tokio::test(flavor = "multi_thread")]
+async fn a_submodule_whose_history_went_with_git_s_record_counts() {
+    let (core, mut client) = setup().await;
+    let repo = core.dir.path().join("repo");
+    git_repo(&repo);
+    let source = pushed_clone(core.dir.path(), "source");
+    let allow_files = ["-c", "protocol.file.allow=always"];
+    let source_path = source.display().to_string();
+    git(
+        &repo,
+        &[
+            &allow_files[..],
+            &["submodule", "add", "--quiet", &source_path, "sub"],
+        ]
+        .concat(),
+    );
+    commit(&repo, "submodule");
+    let (workspace, folder) = workspace_of(&mut client, &repo).await;
+    git(
+        &folder,
+        &[
+            &allow_files[..],
+            &["submodule", "update", "--init", "--quiet"],
+        ]
+        .concat(),
+    );
+    assert_eq!(
+        counts(&changes(&mut client, &workspace).await),
+        [0, 0, 0, 0, 0]
+    );
+
+    // A submodule of a worktree keeps its repository inside git's record
+    // of the worktree: deleting the record leaves its files with no
+    // history, which git lists as files like any other.
+    let name = folder.file_name().unwrap();
+    std::fs::remove_dir_all(repo.join(".git").join("worktrees").join(name)).unwrap();
+    let found = changes(&mut client, &workspace).await;
+    // README.md, .gitmodules and the submodule's README.md.
+    assert_eq!(counts(&found), [3, 0, 0, 0, 0], "{found}");
+}

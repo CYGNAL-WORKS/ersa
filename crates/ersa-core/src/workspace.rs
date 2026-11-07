@@ -59,6 +59,9 @@ pub enum VcsError {
     /// of the repository's worktrees, so removing it is not git's to do.
     #[error("{path} exists but git does not list it as a worktree; remove the folder by hand")]
     NotListed { path: String },
+    /// Too many earlier requests' file system reads have not answered yet.
+    #[error("too many workspace folders asked about are not answering; try again once they do")]
+    Busy,
 }
 
 impl VcsError {
@@ -323,17 +326,10 @@ pub async fn git_worktree_changes(
     let folder = path.to_string();
     // `try_exists`, not `exists`: a folder Core may not look into is an
     // error, never a folder that is gone, whose files would go uncounted.
-    let folder_exists =
-        tokio::task::spawn_blocking(move || std::path::Path::new(&folder).try_exists());
-    let folder_exists = tokio::time::timeout_at(deadline.at, folder_exists)
-        .await
-        .map_err(|_| deadline.expired("looking for the workspace's folder".into()))?
-        .map_err(|e| e.to_string())
-        .and_then(|exists| exists.map_err(|e| e.to_string()))
-        .map_err(|detail| VcsError::Failed {
-            message: "looking for the workspace's folder failed".into(),
-            stderr: detail,
-        })?;
+    let folder_exists = blocking(deadline, "looking for the workspace's folder", move |_| {
+        Ok(std::path::Path::new(&folder).try_exists()?)
+    })
+    .await?;
     if folder_exists {
         count_files(transport, repo, &records, path, deadline, &mut changes).await?;
     }
@@ -392,58 +388,95 @@ async fn git_records(
     let common = std::path::Path::new(repo).join(common);
     let records = common.join("worktrees");
     let path = path.to_string();
-    let stop = deadline.at.into_std();
-    let found = tokio::task::spawn_blocking(move || -> std::io::Result<Option<String>> {
-        let key = location_key(&path);
-        // Anything but a missing file is an error, never "no record": a
-        // record missed would leave its checkout's commits uncounted.
-        let entries = match std::fs::read_dir(&records) {
-            // No `worktrees` folder: git has no record of any worktree.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            other => other?,
-        };
-        for entry in entries {
-            // The walk stops itself at the deadline, as the file reads do.
-            if std::time::Instant::now() >= stop {
-                return Err(std::io::ErrorKind::TimedOut.into());
-            }
-            let admin = entry?.path();
-            // `gitdir` holds `<worktree folder>/.git`, relative to the
-            // record's own folder when git writes relative paths
-            // (`worktree.useRelativePaths`); joining an absolute one
-            // replaces the record's folder.
-            let gitdir = match std::fs::read_to_string(admin.join("gitdir")) {
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+    let worktree = blocking(
+        deadline,
+        "finding git's records of the worktree",
+        move |stop| {
+            let key = location_key(&path);
+            // Anything but a missing file is an error, never "no record": a
+            // record missed would leave its checkout's commits uncounted.
+            let entries = match std::fs::read_dir(&records) {
+                // No `worktrees` folder: git has no record of any worktree.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
                 other => other?,
             };
-            let gitdir = without_dots(&admin.join(gitdir.trim()));
-            let matches = gitdir
-                .parent()
-                .is_some_and(|folder| location_key(&folder.display().to_string()) == key);
-            if matches {
-                return Ok(Some(admin.display().to_string()));
+            for entry in entries {
+                // The walk stops itself at the deadline, as the file reads do.
+                if std::time::Instant::now() >= stop {
+                    return Err(Halt::Expired);
+                }
+                let admin = entry?.path();
+                // `gitdir` holds `<worktree folder>/.git`, relative to the
+                // record's own folder when git writes relative paths
+                // (`worktree.useRelativePaths`); joining an absolute one
+                // replaces the record's folder.
+                let gitdir = match std::fs::read_to_string(admin.join("gitdir")) {
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                    other => other?,
+                };
+                let gitdir = without_dots(&admin.join(gitdir.trim()));
+                let matches = gitdir
+                    .parent()
+                    .is_some_and(|folder| location_key(&folder.display().to_string()) == key);
+                if matches {
+                    return Ok(Some(admin.display().to_string()));
+                }
             }
-        }
-        Ok(None)
-    });
-    let failed = |detail: String| VcsError::Failed {
-        message: "finding git's records of the worktree failed".into(),
-        stderr: detail,
-    };
-    let worktree = tokio::time::timeout_at(deadline.at, found)
-        .await
-        .map_err(|_| deadline.expired("finding git's records of the worktree".into()))?
-        .map_err(|e| failed(e.to_string()))?
-        .map_err(|e| match e.kind() {
-            std::io::ErrorKind::TimedOut => {
-                deadline.expired("finding git's records of the worktree".into())
-            }
-            _ => failed(e.to_string()),
-        })?;
+            Ok(None)
+        },
+    )
+    .await?;
     Ok(GitRecords {
         common: common.display().to_string(),
         worktree,
     })
+}
+
+/// Why blocking work for `workspace.changes` stopped early.
+enum Halt {
+    /// Its deadline passed; it stopped itself.
+    Expired,
+    /// The file system refused.
+    Io(std::io::Error),
+}
+
+impl From<std::io::Error> for Halt {
+    fn from(e: std::io::Error) -> Self {
+        Halt::Io(e)
+    }
+}
+
+/// The most blocking file system jobs `workspace.changes` may have running
+/// at once, Core-wide, as `attachment.inspect` caps its reads. A job
+/// answered at its deadline keeps its place until its thread returns, so a
+/// folder that hangs, asked about again and again, takes this many threads,
+/// never all of Core's.
+static FILE_SYSTEM: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
+
+/// Runs `work` on a blocking thread, answering by `deadline`; `what` names
+/// it in errors. `work` gets the deadline as a clock time, to stop itself
+/// between reads.
+async fn blocking<T: Send + 'static>(
+    deadline: Deadline,
+    what: &'static str,
+    work: impl FnOnce(std::time::Instant) -> Result<T, Halt> + Send + 'static,
+) -> Result<T, VcsError> {
+    let place = FILE_SYSTEM.try_acquire().map_err(|_| VcsError::Busy)?;
+    let stop = deadline.at.into_std();
+    let job = tokio::task::spawn_blocking(move || {
+        let _place = place;
+        work(stop)
+    });
+    let failed = |detail: String| VcsError::Failed {
+        message: format!("{what} failed"),
+        stderr: detail,
+    };
+    match tokio::time::timeout_at(deadline.at, job).await {
+        Err(_) | Ok(Ok(Err(Halt::Expired))) => Err(deadline.expired(what.into())),
+        Ok(Ok(Err(Halt::Io(e)))) => Err(failed(e.to_string())),
+        Ok(Err(panicked)) => Err(failed(panicked.to_string())),
+        Ok(Ok(Ok(value))) => Ok(value),
+    }
 }
 
 /// `path` with its `.` and `..` resolved by their text alone, so it compares
@@ -607,25 +640,15 @@ async fn count_files(
     // the answer has gone; only a read the file system never returns from
     // keeps its thread.
     let folder = std::path::PathBuf::from(path);
-    let stop = deadline.at.into_std();
-    let read = tokio::task::spawn_blocking(move || {
-        to_read
-            .into_iter()
-            .map(|relative| {
-                let digest = content_digest(&folder.join(&relative), stop)?;
-                Some(format!("content {digest} {relative}"))
-            })
-            .collect::<Option<Vec<_>>>()
-    });
-    let expired = || deadline.expired("reading the uncommitted files".into());
-    let contents = tokio::time::timeout_at(deadline.at, read)
-        .await
-        .map_err(|_| expired())?
-        .map_err(|e| VcsError::Failed {
-            message: "reading the uncommitted files failed".into(),
-            stderr: e.to_string(),
-        })?
-        .ok_or_else(expired)?;
+    let contents = blocking(deadline, "reading the uncommitted files", move |stop| {
+        let mut contents = Vec::with_capacity(to_read.len());
+        for relative in to_read {
+            let digest = content_digest(&folder.join(&relative), stop).ok_or(Halt::Expired)?;
+            contents.push(format!("content {digest} {relative}"));
+        }
+        Ok(contents)
+    })
+    .await?;
     changes.evidence.extend(contents);
     Ok(())
 }
@@ -659,16 +682,10 @@ async fn inspect_repository(
     deadline: Deadline,
 ) -> Result<Option<Repository>, VcsError> {
     let marker = dir.join(".git");
-    let found = tokio::task::spawn_blocking(move || marker.try_exists());
-    let found = tokio::time::timeout_at(deadline.at, found)
-        .await
-        .map_err(|_| deadline.expired("looking into a nested repository".into()))?
-        .map_err(|e| e.to_string())
-        .and_then(|found| found.map_err(|e| e.to_string()))
-        .map_err(|detail| VcsError::Failed {
-            message: "looking into a nested repository failed".into(),
-            stderr: detail,
-        })?;
+    let found = blocking(deadline, "looking into a nested repository", move |_| {
+        Ok(marker.try_exists()?)
+    })
+    .await?;
     if !found {
         return Ok(None);
     }
@@ -1371,6 +1388,17 @@ mod tests {
         assert!(content_digest(&file, later).is_some());
         // A deadline already passed stops the read before its first chunk.
         assert_eq!(content_digest(&file, std::time::Instant::now()), None);
+    }
+
+    // cites PROTO-CORE-API-R47 once planning PR 245 adds it
+    #[tokio::test]
+    async fn blocking_reads_past_the_cap_are_refused_not_queued() {
+        // Eight reads that have not answered hold every place.
+        let held = FILE_SYSTEM.try_acquire_many(8).unwrap();
+        let result = blocking(deadline(), "reading", |_| Ok(())).await;
+        assert!(matches!(result, Err(VcsError::Busy)), "{result:?}");
+        drop(held);
+        assert!(blocking(deadline(), "reading", |_| Ok(())).await.is_ok());
     }
 
     #[test]

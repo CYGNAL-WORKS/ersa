@@ -388,9 +388,9 @@ pub(super) async fn workspace_changes(
         .transport_for(&project.host_id)
         .ok_or_else(|| unreachable_host(&project.host_id))?;
 
-    // Every session in the workspace counts. Sessions marked deleting are to
-    // be left out, once Core can mark one (the `deleting` field of
-    // `session.list`); until then there are none to leave out.
+    // Every session in the workspace counts: Core cannot mark one deleting
+    // yet, so there are none to leave out.
+    // TODO(#197): leave out sessions marked deleting once the mark exists
     let sessions = core
         .store
         .sessions_in_workspace(workspace.id.clone())
