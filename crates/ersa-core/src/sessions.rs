@@ -1187,13 +1187,14 @@ impl SessionManager {
         section_id: Option<Option<String>>,
     ) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
-        self.refuse_if_deleting(&handle)?;
         // As `set_archived`: a `session.remove` is either finished, and seen
-        // here, or waits for the change.
+        // here, or waits for the change. A delete marks the session under
+        // the same lock, so the refusal below sees a mark made meanwhile.
         let _op = handle.op.lock().await;
         if handle.removed.load(Ordering::SeqCst) {
             return Err(SessionError::NotFound(id.to_string()));
         }
+        self.refuse_if_deleting(&handle)?;
         let _arrangement = self.arrangement.lock().await;
         // Stored first, then kept in memory, so `session.list` never reports
         // what a restart would lose.
