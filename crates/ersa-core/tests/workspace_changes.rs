@@ -5,6 +5,7 @@ mod support;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use ersa_core::Adapter;
 use serde_json::{Value, json};
@@ -701,4 +702,32 @@ async fn without_git_s_record_the_token_follows_ignored_entries_and_nested_repos
     let committed = changes(&mut client, &workspace).await;
     assert_eq!(counts(&committed), [4, 1, 0, 0, 0], "{committed}");
     assert_ne!(committed["token"], ignored["token"]);
+}
+
+// cites PROTO-CORE-API-R47 once planning PR 245 adds it
+#[tokio::test(flavor = "multi_thread")]
+async fn other_requests_on_the_connection_never_wait_for_it() {
+    let (core, mut client) = setup().await;
+    let repo = core.dir.path().join("repo");
+    git_repo(&repo);
+    let (workspace, _folder) = workspace_of(&mut client, &repo).await;
+    // A slow `git status`: git asks the file system monitor the repository
+    // names, run through the shell, before it answers. The worktree shares
+    // the repository's configuration.
+    git(&repo, &["config", "core.fsmonitor", "sleep 4 #"]);
+
+    let started = std::time::Instant::now();
+    let slow = client
+        .request("workspace.changes", json!({ "id": workspace["id"] }))
+        .await;
+    let quick = client.request("session.list", json!({})).await;
+    let listed = client.response(quick).await;
+    assert!(listed.get("result").is_some(), "{listed:#}");
+    let quick_took = started.elapsed();
+    let counted = client.response(slow).await;
+    assert!(counted.get("result").is_some(), "{counted:#}");
+    let slow_took = started.elapsed();
+    // The slow one really was slow, and the other did not wait for it.
+    assert!(slow_took >= Duration::from_secs(4), "{slow_took:?}");
+    assert!(quick_took < Duration::from_secs(2), "{quick_took:?}");
 }
