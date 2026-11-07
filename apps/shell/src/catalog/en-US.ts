@@ -142,6 +142,7 @@ export const enUS = {
       megabytesDetail: "{size} MB",
       gigabytesDetail: "{size} GB",
       removeLabel: "Remove {name}",
+      pastedName: "Pasted image",
     },
   },
   newSession: {},

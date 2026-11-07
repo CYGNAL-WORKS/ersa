@@ -5,6 +5,7 @@
 
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { t } from "../catalog";
 import type { Attachment, CoreClient, CoreEvent } from "./client";
@@ -31,6 +32,28 @@ export const tauriShell: ShellControl = {
       if (stopped) stop();
       else unlisten = stop;
     });
+    return () => {
+      stopped = true;
+      unlisten?.();
+    };
+  },
+  onDragDrop: (handler) => {
+    // As onQuitRequested: registering is asynchronous, so a stop before it has unlistens once it does.
+    let stopped = false;
+    let unlisten: (() => void) | undefined;
+    getCurrentWebview()
+      .onDragDropEvent(({ payload }) => {
+        if (payload.type === "leave") return handler({ type: "leave" });
+        // Tauri gives physical pixels; the page lays out in CSS pixels.
+        const x = payload.position.x / window.devicePixelRatio;
+        const y = payload.position.y / window.devicePixelRatio;
+        if (payload.type === "drop") handler({ type: "drop", x, y, paths: payload.paths });
+        else handler({ type: "over", x, y });
+      })
+      .then((stop) => {
+        if (stopped) stop();
+        else unlisten = stop;
+      });
     return () => {
       stopped = true;
       unlisten?.();

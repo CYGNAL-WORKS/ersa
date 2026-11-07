@@ -342,6 +342,10 @@ Will be copied into the workspace's .ersa folder
 
 Remove {name}
 
+### `composer.attachment.pastedName`
+
+Pasted image
+
 ## `newSession`
 
 ## `sessionControls`
