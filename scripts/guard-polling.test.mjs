@@ -84,7 +84,8 @@ test("blocks a command that runs a polling script, in either path form", () => {
 
 test("names each local shell script a command runs, never a network path", () => {
   assert.deepEqual(scriptsIn("bash ./a.sh 1 && pwsh -File b.ps1", "/r").map((p) => p.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "")), ["/r/a.sh", "/r/b.ps1"]);
-  assert.deepEqual(scriptsIn("bash \\\\host.example\\s\\x.sh; bash //host.example/s/y.sh", "/r"), []);
+  // Only Windows opens a network path from such a name; elsewhere both are local paths.
+  if (process.platform === "win32") assert.deepEqual(scriptsIn("bash \\\\host.example\\s\\x.sh; bash //host.example/s/y.sh", "/r"), []);
   for (const c of ["nohup ./w.sh &", "setsid ./w.sh", "timeout 5 ./w.sh", "source w.sh", "pwsh -ExecutionPolicy Bypass -File w.ps1", "Start-Process -FilePath C:\\t\\w.ps1"]) {
     assert.equal(scriptsIn(c, "/r").length, 1, c);
   }
