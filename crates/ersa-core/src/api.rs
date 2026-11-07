@@ -7,6 +7,7 @@
 //!   handshake and the reserved methods.
 //! - `handlers`: one function per implemented method.
 
+mod delete;
 mod handlers;
 mod lines;
 pub mod server;
@@ -122,6 +123,7 @@ impl From<SessionError> for ApiError {
             SessionError::DeliveryUnknown(message) => {
                 ApiError::new(ErrorKind::DeliveryUnknown, message)
             }
+            SessionError::Busy(message) => ApiError::invalid_state(message).with_detail("busy"),
         }
     }
 }
@@ -308,6 +310,7 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         Method::SessionResume => to_json(sessions::resume(core, parse(params)?).await),
         Method::SessionRemove => to_json(sessions::remove(core, parse(params)?).await),
         Method::SessionSetArchived => to_json(sessions::set_archived(core, parse(params)?).await),
+        Method::SessionDelete => to_json(delete::delete(core, parse(params)?).await),
         Method::SessionSend => to_json(sessions::send(core, &conn.peer(), parse(params)?).await),
         Method::SessionInterrupt => to_json(sessions::interrupt(core, parse(params)?).await),
         Method::SessionDecidePermission => {
@@ -364,6 +367,8 @@ pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
                     | Method::SessionRemove
                     // Stops the session first, which waits on its backend.
                     | Method::SessionSetArchived
+                    // Stops the session, runs git and deletes files.
+                    | Method::SessionDelete
                     | Method::SessionSend
                     | Method::SessionInterrupt
                     | Method::SessionDecidePermission
@@ -440,6 +445,10 @@ pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Resp
         },
         Some(Method::SessionSetArchived) => match parse(params) {
             Ok(params) => to_json(sessions::set_archived(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionDelete) => match parse(params) {
+            Ok(params) => to_json(delete::delete(core, params).await),
             Err((e, _)) => Err(e),
         },
         Some(Method::SessionSend) => match parse(params) {

@@ -13,8 +13,9 @@
 //! - [`list_sessions`] lists a directory's sessions, reading only the head and
 //!   tail of each record.
 //! - [`live_session`] says whether a running CLI has a session open.
-//! - [`append_title`] renames a session no CLI of Ersa's has open, the only
-//!   write Ersa makes to a record.
+//! - [`append_title`] renames a session no CLI of Ersa's has open, and
+//!   [`delete_record`] deletes one for the user's Delete: the only writes
+//!   Ersa makes to the CLI's files.
 //!
 //! These read local files. A remote host's record needs reading through its
 //! transport, which has no file access yet.
@@ -196,6 +197,40 @@ pub fn record_version(
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
     Ok(Some(format!("{}:{}", metadata.len(), since.as_nanos())))
+}
+
+/// Deletes session `session_id`'s record, for the user's Delete
+/// (PROTO-CLAUDE-CODE-STREAM, Deleting): its record file and the folder of
+/// the same name beside it, which holds the session's subagent transcripts
+/// and stored tool results, and nothing else of the CLI's. A record already
+/// gone counts as deleted, and its folder, if left under `cwd`'s directory,
+/// goes too.
+///
+/// The folder goes first and the file last, so a deletion that fails part
+/// way leaves the file, and a second try finds the folder beside it again,
+/// wherever the record was filed. Only a real folder is deleted: a link of
+/// that name is not the CLI's to follow. Checking that no other process has
+/// the session open is the caller's.
+pub fn delete_record(claude_home: &Path, cwd: &str, session_id: &str) -> io::Result<()> {
+    let file = find_record(claude_home, cwd, session_id)?;
+    // `find_record` checked the id, so it is a plain name, never a path.
+    let folder = match &file {
+        Some(file) => file.with_file_name(session_id),
+        None => project_dir(claude_home, cwd).join(session_id),
+    };
+    if fs::symlink_metadata(&folder).is_ok_and(|m| m.file_type().is_dir()) {
+        match fs::remove_dir_all(&folder) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    if let Some(file) = file {
+        match fs::remove_file(&file) {
+            Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// Renames session `session_id` by appending one `custom-title` entry to its

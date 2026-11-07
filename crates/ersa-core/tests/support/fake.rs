@@ -10,8 +10,10 @@
 //! - `ask`: a permission request, answered with `session.decide_permission`.
 //! - `question`: a question for the user.
 //! - `burst <n>`: `n` replies at once, to flood subscribers.
-//! - `work`: a turn that keeps working until it is interrupted, then ends
-//!   with outcome `interrupted`.
+//! - `work`: a turn that keeps working, the backend saying it is running,
+//!   until it is interrupted, then ends with outcome `interrupted`.
+//! - `idle`: the backend says it is idle, as Claude Code does once a turn
+//!   ends; the fake otherwise reports itself running from its start.
 //! - `broken pipe`: the write fails halfway, so Core can't tell whether the
 //!   backend has the message.
 //! - `stopped mid-write`: the line is recorded, then the session is found
@@ -34,7 +36,7 @@ use std::sync::{Arc, Mutex};
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, ImageLimits,
     OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit, Projected, Projector, RawLine,
-    RecordEvent, RecordSummary, SessionConfig, Transport, async_trait,
+    RecordDeletion, RecordEvent, RecordSummary, SessionConfig, Transport, async_trait,
 };
 use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::{
@@ -66,6 +68,8 @@ pub struct Stats {
     pub open_checks: Mutex<Vec<(String, usize)>>,
     /// Every message the fake was given, in order.
     pub messages: Mutex<Vec<OutgoingMessage>>,
+    /// Records deleted.
+    pub record_deletes: AtomicUsize,
 }
 
 /// The kind of the record entry a rename adds.
@@ -142,6 +146,13 @@ pub struct FakeAdapter {
     pub records: Records,
     /// What the fake's registry of open sessions answers.
     pub open_elsewhere: Arc<Mutex<OpenElsewhere>>,
+    /// Held by a test to hold every registry check until it lets go.
+    pub open_check_gate: Arc<tokio::sync::Mutex<()>>,
+    /// When set, what deleting a record answers instead of deleting it: the
+    /// registry saying so at the moment of deletion.
+    pub delete_refusal: Arc<Mutex<Option<OpenElsewhere>>>,
+    /// A backend that takes a stop and never exits.
+    stop_hangs: bool,
 }
 
 impl FakeAdapter {
@@ -154,6 +165,17 @@ impl FakeAdapter {
             stats: Arc::default(),
             records: Arc::default(),
             open_elsewhere: Arc::new(Mutex::new(OpenElsewhere::No)),
+            open_check_gate: Arc::default(),
+            delete_refusal: Arc::default(),
+            stop_hangs: false,
+        }
+    }
+
+    /// An adapter whose backend never exits when stopped.
+    pub fn unstoppable() -> Self {
+        FakeAdapter {
+            stop_hangs: true,
+            ..FakeAdapter::new(1)
         }
     }
 
@@ -249,6 +271,7 @@ impl Adapter for FakeAdapter {
             stats: Arc::clone(&self.stats),
             records: Arc::clone(&self.records),
             session_id,
+            stop_hangs: self.stop_hangs,
             inner: Mutex::default(),
         }))
     }
@@ -315,6 +338,7 @@ impl Adapter for FakeAdapter {
         _transport: Arc<dyn Transport>,
         backend_session_id: &str,
     ) -> OpenElsewhere {
+        drop(self.open_check_gate.lock().await);
         let renames = self.stats.record_renames.load(Ordering::SeqCst);
         self.stats
             .open_checks
@@ -322,6 +346,22 @@ impl Adapter for FakeAdapter {
             .unwrap()
             .push((backend_session_id.to_string(), renames));
         *self.open_elsewhere.lock().unwrap()
+    }
+
+    /// Deletes the record, as Claude Code's adapter deletes its file; one
+    /// already gone counts as deleted.
+    async fn delete_record(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        backend_session_id: &str,
+    ) -> Result<RecordDeletion, AdapterError> {
+        if let Some(refused) = *self.delete_refusal.lock().unwrap() {
+            return Ok(RecordDeletion::Refused(refused));
+        }
+        self.records.lock().unwrap().remove(backend_session_id);
+        self.stats.record_deletes.fetch_add(1, Ordering::SeqCst);
+        Ok(RecordDeletion::Deleted)
     }
 
     /// Titled by its latest rename, else its last prompt, as Claude Code
@@ -354,6 +394,8 @@ struct FakeSession {
     stats: Arc<Stats>,
     records: Records,
     session_id: String,
+    /// Takes a stop and never exits.
+    stop_hangs: bool,
     inner: Mutex<Inner>,
 }
 
@@ -447,6 +489,9 @@ impl AdapterSession for FakeSession {
         } else if text == "work" {
             // The turn starts and keeps working: nothing more until an interrupt.
             self.inner.lock().unwrap().working = true;
+            self.backend(json!({ "t": "working" }));
+        } else if text == "idle" {
+            self.backend(json!({ "t": "idle" }));
         } else if text == "question" {
             self.backend(json!({ "t": "question", "id": "q-1" }));
         } else if text == "ask" {
@@ -520,7 +565,9 @@ impl AdapterSession for FakeSession {
 
     async fn stop(&self) -> Result<(), AdapterError> {
         self.stats.stops.fetch_add(1, Ordering::SeqCst);
-        self.exit(Some(0));
+        if !self.stop_hangs {
+            self.exit(Some(0));
+        }
         Ok(())
     }
 }
@@ -570,6 +617,14 @@ impl Projector for FakeProjector {
                     reason: None,
                 }),
             ],
+            (Direction::Backend, Some("idle")) => vec![Event::SessionState(SessionState {
+                state: LifecycleState::Idle,
+                reason: None,
+            })],
+            (Direction::Backend, Some("working")) => vec![Event::SessionState(SessionState {
+                state: LifecycleState::Running,
+                reason: None,
+            })],
             (Direction::Backend, Some("interrupted")) => {
                 vec![Event::TurnCompleted(TurnCompleted {
                     turn: self.turn,

@@ -6,6 +6,7 @@
 //! neither is the session's state: Core knows that from the backend
 //! processes it runs.
 
+use ersa_protocol::core_api::Deleting;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use super::{Error, Result, Store, conflict};
@@ -35,10 +36,14 @@ pub struct SessionRow {
     /// Whether the user archived the session (ADR 0026). A new session is
     /// not archived, so `insert_session` leaves it to the column's default.
     pub archived: bool,
+    /// Where the user's delete of the session is, when it is marked
+    /// deleting (FLOW-ARCHIVE-DELETE-SESSION). A new session is not, so
+    /// `insert_session` leaves it to the column's default.
+    pub deleting: Option<Deleting>,
 }
 
 const SESSION_COLUMNS: &str = "s.id, s.workspace_id, s.host_id, s.backend, s.backend_session_id, \
-     s.mode, w.path, s.model, s.effort, s.permission_mode, s.archived";
+     s.mode, w.path, s.model, s.effort, s.permission_mode, s.archived, s.deleting";
 
 impl Store {
     /// Records a new session, but only while its workspace is `ready`, in
@@ -145,6 +150,105 @@ impl Store {
         .await
     }
 
+    /// The ids of a workspace's sessions that are not marked deleting,
+    /// sorted: those `workspace.changes` counts.
+    pub async fn sessions_counted_in_workspace(&self, workspace_id: String) -> Result<Vec<String>> {
+        self.call(move |conn| {
+            let mut statement = conn.prepare(
+                "SELECT id FROM sessions WHERE workspace_id = ?1 AND deleting IS NULL ORDER BY id",
+            )?;
+            let ids = statement
+                .query_map([workspace_id], |row| row.get(0))?
+                .collect::<rusqlite::Result<Vec<String>>>()?;
+            Ok(ids)
+        })
+        .await
+    }
+
+    /// Marks the session deleting, `running`, and records whether the delete
+    /// takes the workspace's files: `files` the first time, and after that
+    /// only ever narrowed, so files once to stay still stay. When the record
+    /// says they go, the workspace's state becomes `error` in the same
+    /// transaction, so no session can start in it. Returns what is recorded.
+    pub async fn mark_session_deleting(&self, id: String, files: bool) -> Result<bool> {
+        self.call(move |conn| {
+            let tx = conn.transaction()?;
+            tx.execute(
+                "UPDATE sessions SET deleting = 'running',
+                     delete_files = CASE WHEN delete_files IS NULL THEN ?2
+                                         ELSE delete_files AND ?2 END
+                 WHERE id = ?1",
+                params![id, files],
+            )?;
+            let recorded: bool = tx.query_row(
+                "SELECT delete_files FROM sessions WHERE id = ?1",
+                [&id],
+                |row| row.get(0),
+            )?;
+            if recorded {
+                tx.execute(
+                    "UPDATE workspaces SET state = 'error'
+                     WHERE id = (SELECT workspace_id FROM sessions WHERE id = ?1)",
+                    [&id],
+                )?;
+            }
+            tx.commit()?;
+            Ok(recorded)
+        })
+        .await
+    }
+
+    /// Marks the session's delete failed.
+    pub async fn set_session_delete_failed(&self, id: String) -> Result<()> {
+        self.call(move |conn| {
+            conn.execute(
+                "UPDATE sessions SET deleting = 'failed' WHERE id = ?1 AND deleting IS NOT NULL",
+                [id],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Marks every delete a previous Core left `running` as `failed`, and
+    /// returns how many there were. Run at startup, before any request, when
+    /// no delete can still be in flight: nothing more is deleted until the
+    /// user tries again.
+    pub async fn fail_running_deletes(&self) -> Result<usize> {
+        self.call(|conn| {
+            Ok(conn.execute(
+                "UPDATE sessions SET deleting = 'failed' WHERE deleting = 'running'",
+                [],
+            )?)
+        })
+        .await
+    }
+
+    /// Removes a deleted session, and its workspace with it when
+    /// `workspace_id` names one and no other session refers to it (one
+    /// marked deleting, whose own delete keeps the files, may), in one
+    /// transaction.
+    pub async fn finish_session_delete(
+        &self,
+        id: String,
+        workspace_id: Option<String>,
+    ) -> Result<()> {
+        self.call(move |conn| {
+            let tx = conn.transaction()?;
+            tx.execute("DELETE FROM sessions WHERE id = ?1", [&id])?;
+            if let Some(workspace_id) = workspace_id {
+                tx.execute(
+                    "DELETE FROM workspaces WHERE id = ?1
+                     AND NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ?1)",
+                    [workspace_id],
+                )?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await
+    }
+
     /// Forgets a session. Its record is the backend's, and stays.
     pub async fn delete_session(&self, id: String) -> Result<()> {
         self.call(move |conn| {
@@ -183,5 +287,11 @@ fn session_row(row: &Row) -> rusqlite::Result<SessionRow> {
         // SQLite has no boolean type: the column holds 0 or 1, which
         // rusqlite reads as a `bool`.
         archived: row.get(10)?,
+        deleting: match row.get::<_, Option<String>>(11)?.as_deref() {
+            None => None,
+            Some("running") => Some(Deleting::Running),
+            // The column's check allows only the two.
+            Some(_) => Some(Deleting::Failed),
+        },
     })
 }

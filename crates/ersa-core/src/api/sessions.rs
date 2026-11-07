@@ -119,6 +119,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         effort: params.effort.clone(),
         permission_mode: (!permission_mode.is_empty()).then(|| permission_mode.clone()),
         archived: false,
+        deleting: None,
     };
     let config = SessionConfig {
         cwd: workspace.path,
