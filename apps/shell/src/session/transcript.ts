@@ -13,7 +13,7 @@ import type {
 } from "../protocol/agent-events.gen";
 
 /** The event schema version this Interface renders (PROTO-AGENT-EVENTS, Versioning). */
-export const EVENT_VERSION: Envelope["v"] = 3;
+export const EVENT_VERSION: Envelope["v"] = 4;
 
 /** One block of the transcript. `key` is stable while the block changes, so it updates in place. */
 export type Item =
@@ -44,6 +44,8 @@ export interface Transcript {
   items: Item[];
   /** The session's lifecycle state, as its latest `session.state` said. */
   state?: SessionState["state"];
+  /** The agent is working on a turn: from `turn.started` until the turn completes or the session ends (FLOW-SEND-MESSAGE-R03, R04). */
+  working?: boolean;
   /** Set when an event came with a schema version this Interface does not know; nothing after it is applied. */
   refused?: string;
 }
@@ -80,7 +82,7 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
     case "session.ended": {
       // Nobody can answer a request once the session has ended.
       const items = next.items.map((i) => (i.kind === "permission" && isOpen(i) ? { ...i, unanswered: true as const } : i));
-      return add({ ...next, items }, { kind: "ended", key: `ended:${envelope.seq}`, reason: endedReason[event.reason] ?? "Ended." });
+      return add({ ...next, items, working: false }, { kind: "ended", key: `ended:${envelope.seq}`, reason: endedReason[event.reason] ?? "Ended." });
     }
     case "session.notice":
       return add(next, { kind: "notice", key: `notice:${envelope.seq}`, message: event.message });
@@ -132,10 +134,11 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
       // A turn that ended other than by finishing says so; one that
       // succeeded needs no mark, its last words are on the page.
       return event.outcome === "success"
-        ? next
-        : add(next, { kind: "notice", key: `turn:${envelope.seq}`, message: turnOutcome[event.outcome] ?? "The turn ended early." });
-    case "session.started":
+        ? { ...next, working: false }
+        : add({ ...next, working: false }, { kind: "notice", key: `turn:${envelope.seq}`, message: turnOutcome[event.outcome] ?? "The turn ended early." });
     case "turn.started":
+      return { ...next, working: true };
+    case "session.started":
     case "usage.updated":
     case "backend.passthrough":
       return next;
