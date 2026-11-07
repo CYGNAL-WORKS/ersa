@@ -241,6 +241,25 @@ describe("stop while a new session starts", () => {
   });
 
   // verifies: FLOW-SEND-MESSAGE-R03
+  it("keeps a session whose backend already has the message, even after a stop", async () => {
+    let refuse: (error: BridgeError) => void = () => {};
+    const { client, methods } = fakeClient({
+      ...working,
+      "session.send": () => new Promise((_, reject) => (refuse = reject)),
+      "session.interrupt": () => ({}),
+      "session.list": () => [{ ...session, state: "running" }],
+    });
+    const stop = new StartStop(client);
+    const started = startSession(client, values("isolated"), "Fix the build", stop);
+    await new Promise((r) => setTimeout(r, 0));
+    stop.stop();
+    refuse(refusal("the backend took the message and stopped", "internal"));
+    expect(await started).toMatchObject({ ok: true, session: { id: "s1" } });
+    expect(methods()).not.toContain("session.remove");
+    expect(methods()).not.toContain("workspace.remove");
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R03
   it("sends nothing when stopped before the session exists", async () => {
     const { client, methods } = fakeClient({ ...working, "session.stop": () => ({}), "session.remove": () => ({}), "workspace.remove": () => ({}) });
     const stop = new StartStop(client);

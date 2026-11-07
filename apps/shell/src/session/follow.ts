@@ -7,7 +7,7 @@
 
 import type { Envelope } from "../protocol/agent-events.gen";
 import { hasSeq } from "../core/checks";
-import { type CoreClient, describeError } from "../core/client";
+import { type BridgeError, type CoreClient, describeError } from "../core/client";
 import { type Transcript, apply, emptyTranscript } from "./transcript";
 
 /** The key that starts the notice saying Core no longer holds a session's earliest events. */
@@ -187,7 +187,8 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         set((v) => ({ ...v, message: undefined }));
         return true;
       } catch (error) {
-        const stopped = stopping;
+        // Only Core's cancel, answered as an invalid state, is the stop's doing; any other failure is still shown.
+        const stopped = stopping && (error as BridgeError | undefined)?.kind === "rpc" && (error as Extract<BridgeError, { kind: "rpc" }>).error.data?.kind === "invalid_state";
         set((v) => ({ ...v, message: stopped ? undefined : { state: "failed", message: describeError(error) } }));
         return false;
       } finally {
@@ -197,8 +198,11 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
 
     async interrupt() {
       if (view.message?.state === "sending") stopping = true;
-      // Best effort: a turn that ended meanwhile, or a lost connection, leaves nothing to stop.
-      await client.call("session.interrupt", { id }).catch(() => {});
+      // Best effort: a turn that ended meanwhile, or a lost connection, leaves nothing to stop. A stop that never
+      // reached Core stopped nothing, so a failure of the send after it is still a refusal to show.
+      await client.call("session.interrupt", { id }).catch(() => {
+        stopping = false;
+      });
     },
 
     stop() {

@@ -822,6 +822,9 @@ const entries: Entry[] = [
       ["The agent working", <Composer autoFocus={false} onSend={async () => false} initialText="Then update the changelog." working onStop={() => {}} />],
       ["Stop under the pointer", <Composer autoFocus={false} onSend={async () => false} working onStop={() => {}} forceSend="hover" />],
       ["Stop pressed", <Composer autoFocus={false} onSend={async () => false} working onStop={() => {}} forceSend="pressed" />],
+      ["Stop with keyboard focus", <Composer autoFocus={false} onSend={async () => false} working onStop={() => {}} forceSend="focus" />],
+      // Stop turns back into send with focus kept, often with nothing left to send.
+      ["Send with keyboard focus, nothing to send", <Composer autoFocus={false} onSend={async () => false} forceSend="focus" />],
       [
         "Refused",
         statusRoom(
