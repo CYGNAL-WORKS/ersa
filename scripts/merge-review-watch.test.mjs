@@ -10,7 +10,7 @@ import { PassThrough } from "node:stream";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { INTERVAL_MS, LOCK_STALE_MS, ENDED, RETRY_MS, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select, startReview } from "./merge-review-watch.mjs";
+import { INTERVAL_MS, LOCK_STALE_MS, ENDED, RETRY_MS, RETRY_UNTIL_MS, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select, startReview } from "./merge-review-watch.mjs";
 
 const HEAD = "b".repeat(40);
 const NOW = Date.parse("2026-11-04T12:00:00Z");
@@ -60,6 +60,7 @@ test("a merge review whose own run failed is retried after a backoff, behind fre
   assert.deepEqual(select([pr({ autoMergeRequest: { enabledAt: ago(1000) }, statusCheckRollup: [ci(), mark("ERROR", { startedAt: ago(RETRY_MS + 1000) })] })], NOW).disarm, [7]);
   const picked = select([failed(3, ago(2 * RETRY_MS)), failed(4, ago(2 * RETRY_MS)), pr({ number: 9, statusCheckRollup: [ci({ startedAt: ago(1000) })] })], NOW);
   assert.deepEqual(picked.review.map((p) => p.number), [9, 3]);
+  assert.deepEqual(select([pr({ statusCheckRollup: [ci({ startedAt: ago(RETRY_UNTIL_MS + 1000) }), mark("ERROR", { startedAt: ago(RETRY_MS + 1000) })] })], NOW).review, [], "a head that keeps failing is left to the owner");
   assert.deepEqual(picked.skip, [{ number: 4, why: "its merge review failed to run, and another failed head is retried this tick" }]);
 });
 
