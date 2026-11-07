@@ -30,7 +30,7 @@ use ersa_protocol::core_api::{
 use super::{ApiError, handlers};
 use crate::sessions::SessionError;
 use crate::state::Core;
-use crate::workspace;
+use crate::workspace::{self, VcsError};
 
 pub(super) async fn delete(
     core: &Core,
@@ -130,28 +130,27 @@ async fn finish(
             &workspace.vcs_ref,
         )
         .await;
-        branch_kept = match deleted {
-            Ok(kept) => kept,
-            Err(e) => {
-                // A refusal (a locked worktree) left the files as they were.
-                // Anything else may have left them half gone, or still going
-                // on a thread that outlived its limit: the workspace is no
-                // longer `ready`, so no new session starts in it while the
-                // claim is gone (`workspace.remove` takes it from `error`).
-                if !e.is_refusal() {
-                    let marked = core
-                        .store
-                        .set_workspace_state(workspace.id.clone(), WorkspaceState::Error)
-                        .await;
-                    // The git failure is the cause to report; a store that
-                    // also failed is logged.
-                    if let Err(store) = marked {
-                        tracing::error!(workspace = %workspace.id, error = %store, "could not mark a workspace error");
-                    }
+        // A refusal (a locked worktree) left the files as they were.
+        // Anything else took them, or may have left them half gone, or still
+        // going on a thread that outlived its limit: the workspace is no
+        // longer `ready`, so no new session starts in it once the claim is
+        // gone, should a later step fail (`workspace.remove` takes it from
+        // `error`, and a retry of this delete removes its row).
+        if !deleted.as_ref().is_err_and(VcsError::is_refusal) {
+            let marked = core
+                .store
+                .set_workspace_state(workspace.id.clone(), WorkspaceState::Error)
+                .await;
+            if let Err(store) = marked {
+                // A git failure is the cause to report; a store that also
+                // failed is logged.
+                tracing::error!(workspace = %workspace.id, error = %store, "could not mark a workspace error");
+                if deleted.is_ok() {
+                    return Err(store.into());
                 }
-                return Err(e.into());
             }
-        };
+        }
+        branch_kept = deleted?;
     }
     match core.sessions.delete_record(id, session_transport).await {
         Ok(RecordDeletion::Deleted) => {}
