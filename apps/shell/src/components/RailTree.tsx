@@ -1,4 +1,4 @@
-import { type CSSProperties, type FocusEvent, type KeyboardEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useCallback, useId, useRef, useState } from "react";
 import { ChevronDown, Ellipsis, Plus, ShieldAlert } from "lucide-react";
 import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
@@ -7,7 +7,8 @@ import type { Sending } from "../session/follow";
 import { type Collapsed, collapsedOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Icon, IconButton } from "./Icon";
-import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem } from "./SessionTile";
+import { Menu, type MenuClose } from "./Menu";
+import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileRename } from "./SessionTile";
 import { TrustQuestion } from "./TrustQuestion";
 import "./RailTree.css";
 
@@ -48,16 +49,37 @@ interface RailTreeProps {
   collapsed?: ReadonlySet<string>;
   /** The user collapsed or expanded a project's heading. */
   onToggle?: (projectId: string) => void;
+  /** Renames a session through its backend from its tile; resolves true once Core has (FLOW-ORGANIZE-SESSIONS-R02). */
+  onRename?: (id: string, title: string) => Promise<boolean>;
+  /** Renames on their way, and why the last was refused, by session id. */
+  renaming?: Readonly<Record<string, Sending>>;
+  /** Editing a tile's title starts or ends: its earlier refusal goes. */
+  onRenameReset?: (id: string) => void;
+  /** Ersa can't reach Core, so nothing can be renamed now. */
+  offline?: boolean;
   /** For the gallery: a pointer or keyboard state on one tile or one heading, the menu open, the trust question asked. */
   force?: ForcedTile;
   forceHeading?: { id: string; state: "hover" | "focus" | "pressed" };
   initialMenu?: string;
   initialAsking?: string;
+  /** For the gallery: the session whose tile menu is open, and a tile's title being edited. */
+  initialTileMenu?: string;
+  initialTileDraft?: { id: string; draft: string };
 }
 
 /** The rail's tree (LAY-SHELL, The rail): each project's heading with its sessions beneath it, and their notes. */
 export function RailTree(props: RailTreeProps) {
   const { projects, sessions, workspaces, placing, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
+  const { onRename, renaming, onRenameReset, offline, initialTileMenu, initialTileDraft } = props;
+  // Rename on a tile: unavailable only while Ersa can't reach Core. A session its backend has not named yet, such as one
+  // still starting, is refused by Core, and the field says why.
+  const renameOf = (s: Session): TileRename | undefined =>
+    onRename && {
+      onSave: (title) => onRename(s.id, title),
+      renaming: renaming?.[s.id],
+      onReset: () => onRenameReset?.(s.id),
+      unavailable: offline ? t("rail.tile.renameOfflineReason") : undefined,
+    };
   const listed = projects.state === "ready" ? projects.projects : [];
   const tree = treeOf(listed, workspaces, sessions.state === "ready" ? sessions.sessions : []);
   // A session waits to be placed while the projects or their workspaces are still being read, so it does not
@@ -79,6 +101,9 @@ export function RailTree(props: RailTreeProps) {
               onSelect={onSelect}
               shelf={open && { tone: open.tone, domId: shelfDomId }}
               onChevron={onChevron}
+              rename={renameOf(s)}
+              initialMenu={initialTileMenu === s.id}
+              initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
             />
           </ErrorBoundary>
         )}
@@ -158,87 +183,29 @@ function ProjectGroup({
   const tilesId = useId();
   // The "Not trusted" tooltip is placed by the shield, which names it as its anchor.
   const shieldAnchor = `--rail-shield-${tilesId.replace(/[^a-zA-Z0-9]/g, "")}`;
-  const [menu, setMenu] = useState(initialMenu === project.id);
+  // The More menu, while open: where focus went as it opened (RAIL.md, Menus). The gallery's open menu takes none.
+  const [menu, setMenu] = useState<"item" | "menu" | "none" | undefined>(initialMenu === project.id ? "none" : undefined);
   const [asking, setAsking] = useState(initialAsking === project.id);
   const more = useRef<HTMLButtonElement>(null);
-  // The menu floats above the rail in the top layer, anchored to More by this name (RailTree.css, .rail-menu).
+  // The menu floats above the rail in the top layer, anchored to More by this name.
   const anchor = `--rail-more-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   const trust = trusting[project.id];
   const saving = trust?.state === "sending";
   const host = localHost !== undefined && project.host_id !== localHost ? (hostNames?.[project.host_id] ?? project.host_id) : undefined;
   const forced = forceHeading?.id === project.id ? forceHeading.state : undefined;
 
-  // A press anywhere but on More or the menu closes it, leaving focus where the press put it: New session and the
-  // heading's name too. More's own press toggles it.
-  const list = useRef<HTMLUListElement>(null);
-  useEffect(() => {
-    if (!menu) return;
-    const outside = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (!more.current?.contains(target) && !list.current?.contains(target)) setMenu(false);
-    };
-    document.addEventListener("pointerdown", outside);
-    return () => document.removeEventListener("pointerdown", outside);
-  }, [menu]);
-
-  // The menu stays drawn while it fades out, then goes (RAIL.md, Menus): `shown` outlasts `menu` until its
-  // animations finish, at once when there are none, as with reduced motion.
-  const [shown, setShown] = useState(menu);
-  if (menu && !shown) setShown(true);
-  useLayoutEffect(() => {
-    const el = list.current;
-    if (!el) return;
-    // A popover that is not open is not drawn; showing it puts it in the top layer, above the rail's scrolling.
-    if (!el.matches(":popover-open")) el.showPopover();
-    if (menu) return;
-    let live = true;
-    Promise.all(el.getAnimations().map((a) => a.finished)).then(
-      () => live && setShown(false),
-      () => live && setShown(false),
-    );
-    return () => {
-      live = false;
-    };
-  }, [menu, shown]);
-
-  // The gallery's open menu does not take focus; one the user opens does.
-  // Opened from the keyboard, focus goes to the item; from the pointer, to the menu (RAIL.md, Menus).
-  const focusOnOpen = useRef<"item" | "menu">(undefined);
-  useEffect(() => {
-    const target = focusOnOpen.current;
-    if (!menu || !target) return;
-    focusOnOpen.current = undefined;
-    const into = target === "item" ? list.current?.querySelector<HTMLElement>('[role="menuitem"]') : list.current;
-    into?.focus({ preventScroll: true });
-  }, [menu]);
-
   // Once the menu or the trust question closes, focus goes back to More, which opened it.
   const back = () => more.current?.focus({ preventScroll: true });
-  const closeMenu = () => {
-    setMenu(false);
-    back();
-  };
-  // Escape closes the menu wherever focus is in the heading, and focus leaving the heading closes it too.
-  const onHeadingKey = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!menu || event.key !== "Escape") return;
-    event.preventDefault();
-    // The menu is the heading's; Escape here is not also a request to leave the screen.
-    event.stopPropagation();
-    closeMenu();
-  };
-  const onHeadingBlur = (event: FocusEvent<HTMLDivElement>) => {
-    if (menu && !event.currentTarget.contains(event.relatedTarget as Node | null)) setMenu(false);
-  };
+  const closeMenu = useCallback((how: MenuClose) => {
+    setMenu(undefined);
+    if (how !== "away") back();
+  }, []);
+  const insideMenu = useCallback(() => [more.current], []);
   const choose = () => {
-    if (saving || !onSetTrust) return;
-    if (project.trusted) {
-      closeMenu();
-      onSetTrust(project, false);
-    } else {
-      // The question takes focus as it opens.
-      setMenu(false);
-      setAsking(true);
-    }
+    if (!onSetTrust) return;
+    if (project.trusted) onSetTrust(project, false);
+    // The question takes focus as it opens.
+    else setAsking(true);
   };
   const closeQuestion = () => {
     setAsking(false);
@@ -248,7 +215,7 @@ function ProjectGroup({
   const nameLabel = { project: project.name };
   return (
     <li className="rail-project" data-collapsed={folded || undefined}>
-      <div className="rail-heading" data-force={forced} data-open={menu || undefined} onKeyDown={onHeadingKey} onBlur={onHeadingBlur}>
+      <div className="rail-heading" data-force={forced} data-open={menu ? true : undefined}>
         <h3 className="rail-heading-title">
           {/* The heading's name collapses and expands its tiles, and says which it is (LAY-SHELL, Collapsing). */}
           <button type="button" className="rail-heading-toggle" aria-expanded={!folded} aria-controls={children ? tilesId : undefined} onClick={toggle}>
@@ -296,43 +263,30 @@ function ProjectGroup({
               size="icon-sm"
               label={t("rail.heading.moreLabel", nameLabel)}
               aria-haspopup="menu"
-              aria-expanded={menu}
+              aria-expanded={!!menu}
               style={{ anchorName: anchor } as CSSProperties}
-              onClick={(event) => {
-                // A click the keyboard made (Enter or Space) has no pointer presses to count.
-                focusOnOpen.current = menu ? undefined : event.detail === 0 ? "item" : "menu";
-                setMenu(!menu);
-              }}
+              // A click the keyboard made (Enter or Space) has no pointer presses to count.
+              onClick={(event) => setMenu(menu ? undefined : event.detail === 0 ? "item" : "menu")}
             />
           )}
         </span>
-        {shown && onSetTrust && (
-          <ul
-            ref={list}
-            className="rail-menu"
-            role="menu"
-            popover="manual"
-            tabIndex={-1}
-            data-closing={!menu || undefined}
-            // While it fades out it takes no input.
-            inert={!menu}
-            style={{ positionAnchor: anchor } as CSSProperties}
-            // The arrow keys move to the item from the menu itself, which a pointer-opened menu holds.
-            onKeyDown={(event) => {
-              if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-              event.preventDefault();
-              list.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
-            }}
-            aria-label={t("rail.heading.moreLabel", nameLabel)}
-          >
-            <li role="none">
-              <button type="button" role="menuitem" className="rail-menu-item" aria-disabled={saving || undefined} onClick={choose}>
-                {project.trusted ? t("rail.heading.distrustButton") : t("rail.heading.trustButton")}
-                {/* An unavailable item says why beneath its label (RAIL.md, Menus). */}
-                {saving && <span className="rail-menu-reason">{t("rail.heading.savingProgress")}</span>}
-              </button>
-            </li>
-          </ul>
+        {onSetTrust && (
+          <Menu
+            label={t("rail.heading.moreLabel", nameLabel)}
+            open={menu !== undefined}
+            place={{ anchor }}
+            focus={menu}
+            inside={insideMenu}
+            onClose={closeMenu}
+            entries={[
+              {
+                kind: "item",
+                label: project.trusted ? t("rail.heading.distrustButton") : t("rail.heading.trustButton"),
+                unavailable: saving ? t("rail.heading.savingProgress") : undefined,
+                onChoose: choose,
+              },
+            ]}
+          />
         )}
       </div>
       {asking && onSetTrust && (

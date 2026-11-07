@@ -78,6 +78,95 @@
   justify-content: center;
   width: var(--size-control-sm);
   height: var(--size-control-sm);
+  transition: opacity var(--motion-quick) var(--motion-ease-out);
+}
+
+/* More (docs/design/RAIL.md, A tile): it fades in over the state mark under the pointer or keyboard focus, in the
+   same square, and the mark returns as it goes. While its menu is open it stays, reading ink on material-pressed. */
+.session-more.icon-button {
+  grid-area: 1 / 1;
+  justify-self: end;
+  align-self: start;
+  box-sizing: border-box;
+  margin: calc(var(--line-hairline) + var(--space-sm));
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  transition:
+    opacity var(--motion-quick) var(--motion-ease-out),
+    background var(--motion-quick) var(--motion-ease-out),
+    color var(--motion-quick) var(--motion-ease-out);
+}
+
+/* Beside a session that needs the user, active or not, More sits before the chevron, which stays, in a second square
+   whose place is kept while More is hidden, so the title never shifts. */
+.session-more[data-before-chevron] {
+  margin-inline-end: calc(var(--line-hairline) + var(--space-sm) + var(--size-control-sm));
+}
+
+.session[data-needs-you] .session-title,
+.session[data-needs-you] .session-title-field {
+  margin-inline-end: var(--size-control-sm);
+}
+
+.session-item:hover > .session-more,
+.session-item:focus-within > .session-more,
+.session-item:has(> .session[data-force="hover"], > .session[data-force="focus"]) > .session-more,
+.session-more[aria-expanded="true"] {
+  opacity: 1;
+}
+
+/* More takes the mark's square, so the mark gives way: not a chevron, which More sits beside, and not while the
+   title is edited, when More is not drawn. */
+.session-item:hover > .session:not([data-needs-you], [data-editing]) .session-mark,
+.session-item:focus-within > .session:not([data-needs-you], [data-editing]) .session-mark,
+.session-item:has(> .session[data-force="hover"], > .session[data-force="focus"]) > .session:not([data-needs-you], [data-editing]) .session-mark,
+.session-item:has(> .session-more[aria-expanded="true"]) > .session:not([data-needs-you], [data-editing]) .session-mark {
+  opacity: 0;
+}
+
+.session-more.icon-button[aria-expanded="true"],
+.session-more.icon-button[aria-expanded="true"]:hover {
+  color: var(--color-ink);
+  background: var(--material-pressed);
+}
+
+/* Renaming on the tile: the title becomes a field in its place, ui on surface with a line edge that is accent while
+   focused, radius-md, the tile's height unchanged. */
+.session[data-editing] {
+  cursor: default;
+}
+
+.session-title-field {
+  grid-column: 2;
+  grid-row: 1;
+  box-sizing: border-box;
+  min-width: 0;
+  height: var(--size-control-sm);
+  padding: 0 var(--space-xs);
+  font: inherit;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.session-title-field:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+/* While the title is on its way to the backend, the field takes no typing, and reads so. */
+.session-title-field:read-only {
+  color: var(--color-ink-muted);
+}
+
+/* Why a title was refused, beneath the tile, starting where its icon does. */
+.session-rename-problem {
+  padding-inline: calc(var(--line-hairline) + var(--space-sm));
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
 }
 
 .session-ring {
@@ -226,6 +315,8 @@
 /* With reduced motion on, the arc holds still at full tone, and fills change at once. */
 @media (prefers-reduced-motion: reduce) {
   .session,
+  .session-mark,
+  .session-more.icon-button,
   .session-chevron-button,
   .session-chevron-button > * {
     transition: none;

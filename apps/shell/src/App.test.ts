@@ -591,6 +591,128 @@ describe("the rail's New session and collapsing", () => {
   });
 });
 
+// FLOW-ORGANIZE-SESSIONS (step 2; Variations and errors); docs/design/RAIL.md (A tile: More; Menus).
+describe("a tile's menu, and renaming on the tile", () => {
+  const titled = sessions.map((s, i) => ({ ...s, title: i === 0 ? "Fix the build" : "Write the notes" }));
+  const rail = () => screen.getByRole("navigation", { name: "Rail" });
+  // A tile is named by its backend first, then its title; More is named for it too, so the tile is found by its class.
+  const tile = (title: string) => [...rail().querySelectorAll<HTMLElement>(".session")].find((el) => el.textContent?.includes(title)) as HTMLElement;
+  const field = () => screen.queryByRole("textbox", { name: "Session title" }) as HTMLInputElement | null;
+  const renames = (core: ReturnType<typeof fakeCore>) => core.calls.filter((c) => c.method === "session.set_title").map((c) => c.params);
+  async function open(more: Parameters<typeof fakeCore>[0] = {}) {
+    const core = fakeCore({ "session.list": () => titled, ...more });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    return core;
+  }
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R02
+  it("renames the session through session.set_title when Rename is chosen and Enter pressed", async () => {
+    const core = await open({ "session.set_title": (params: { title: string }) => ({ title: params.title }) });
+    fireEvent.click(within(rail()).getByRole("button", { name: "More for Fix the build" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Rename/ }));
+    expect(field()?.value).toBe("Fix the build");
+    expect(document.activeElement).toBe(field());
+    fireEvent.change(field() as HTMLInputElement, { target: { value: "Fix the flaky build" } });
+    fireEvent.keyDown(field() as HTMLInputElement, { key: "Enter" });
+    await settle();
+    expect(renames(core)).toEqual([{ id: "s1", title: "Fix the flaky build" }]);
+    expect(field()).toBeNull();
+  });
+
+  it("turns the title into a field with F2, and Escape restores it, sending nothing", async () => {
+    const core = await open();
+    fireEvent.keyDown(tile("Write the notes"), { key: "F2" });
+    fireEvent.change(field() as HTMLInputElement, { target: { value: "Something else" } });
+    fireEvent.keyDown(field() as HTMLInputElement, { key: "Escape" });
+    expect(field()).toBeNull();
+    expect(tile("Write the notes")).toBeTruthy();
+    expect(renames(core)).toEqual([]);
+  });
+
+  it("keeps the field open with the reason when the backend refuses the title", async () => {
+    await open({
+      "session.set_title": () => {
+        // Core refuses a session whose record is gone with invalid_state (PROTO-CORE-API, Methods).
+        throw { kind: "rpc", error: { code: -32010, message: "session.set_title: Claude Code has no record of this session any more." } };
+      },
+    });
+    fireEvent.keyDown(tile("Fix the build"), { key: "F2" });
+    fireEvent.change(field() as HTMLInputElement, { target: { value: "Fix it" } });
+    fireEvent.keyDown(field() as HTMLInputElement, { key: "Enter" });
+    await settle();
+    expect(field()?.value).toBe("Fix it");
+    // Said beneath the tile, which the field points to.
+    const reason = document.getElementById(field()?.getAttribute("aria-errormessage") ?? "");
+    expect(reason?.getAttribute("role")).toBe("alert");
+    expect(reason?.textContent).toContain("no record of this session");
+  });
+
+  it("opens the same menu by right-click, the context-menu key and Shift+F10, and gives focus back to the tile", async () => {
+    await open();
+    const menu = () => screen.queryByRole("menu", { name: "More for Fix the build" });
+    fireEvent.contextMenu(tile("Fix the build"), { clientX: 40, clientY: 80 });
+    expect(menu()).toBeTruthy();
+    // From the pointer, focus goes to the menu.
+    expect(document.activeElement).toBe(menu());
+    fireEvent.keyDown(menu() as HTMLElement, { key: "Escape" });
+    expect(document.activeElement).toBe(tile("Fix the build"));
+    // It fades out where it was, not under More.
+    expect(menu()?.getAttribute("data-place")).toBe("point");
+    await settle();
+
+    for (const press of [{ key: "ContextMenu" }, { key: "F10", shiftKey: true }]) {
+      fireEvent.keyDown(tile("Fix the build"), press);
+      // The key may send its own contextmenu event after the keydown: the menu stays at the tile, on its first item.
+      fireEvent.contextMenu(tile("Fix the build"), { clientX: 0, clientY: 0 });
+      expect(menu()?.getAttribute("data-place")).toBe("below");
+      // From the keyboard, focus goes to the first item.
+      expect(document.activeElement?.textContent).toMatch(/^Rename/);
+      fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
+      expect(document.activeElement).toBe(tile("Fix the build"));
+    }
+  });
+
+  it("keeps the field while a rename is on its way, even on Escape, so a refusal still shows its reason", async () => {
+    let refuse: (error: unknown) => void = () => {};
+    const core = await open({ "session.set_title": () => new Promise((_, reject) => (refuse = reject)) });
+    fireEvent.keyDown(tile("Fix the build"), { key: "F2" });
+    fireEvent.change(field() as HTMLInputElement, { target: { value: "Fix it" } });
+    fireEvent.keyDown(field() as HTMLInputElement, { key: "Enter" });
+    await settle();
+    expect(renames(core)).toEqual([{ id: "s1", title: "Fix it" }]);
+    fireEvent.keyDown(field() as HTMLInputElement, { key: "Escape" });
+    expect(field()?.value).toBe("Fix it");
+    await act(async () => refuse({ kind: "rpc", error: { code: -32010, message: "session.set_title: Claude Code has no record of this session any more." } }));
+    await settle();
+    const reason = document.getElementById(field()?.getAttribute("aria-errormessage") ?? "");
+    expect(reason?.textContent).toContain("no record of this session");
+  });
+
+  it("offers Rename on a starting session, and shows Core's refusal in the field until the backend has named it", async () => {
+    const starting = titled.map((s, i) => (i === 0 ? { ...s, state: "starting" as const, tile: { state: "starting" as const, pending: [] } } : s));
+    const core = await open({
+      "session.list": () => starting,
+      "session.set_title": () => {
+        // Core refuses a session its backend has not named yet with invalid_state (PROTO-CORE-API, Methods).
+        throw { kind: "rpc", error: { code: -32010, message: "session.set_title: the backend has not named this session yet" } };
+      },
+    });
+    fireEvent.click(within(rail()).getByRole("button", { name: "More for Fix the build" }));
+    const item = screen.getByRole("menuitem", { name: /^Rename/ });
+    expect(item.getAttribute("aria-disabled")).toBeNull();
+    fireEvent.click(item);
+    fireEvent.change(field() as HTMLInputElement, { target: { value: "Fix it" } });
+    fireEvent.keyDown(field() as HTMLInputElement, { key: "Enter" });
+    await settle();
+    expect(renames(core)).toEqual([{ id: "s1", title: "Fix it" }]);
+    expect(field()?.value).toBe("Fix it");
+    const reason = document.getElementById(field()?.getAttribute("aria-errormessage") ?? "");
+    expect(reason?.textContent).toContain("has not named this session yet");
+  });
+});
+
 // The composer while Ersa can't reach the sessions (FLOW-SEND-MESSAGE-R06): App tells it so whichever view holds it.
 describe("the composer App draws when Core is lost", () => {
   // verifies: FLOW-SEND-MESSAGE-R06

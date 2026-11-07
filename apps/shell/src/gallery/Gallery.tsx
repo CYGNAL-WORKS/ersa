@@ -4,7 +4,7 @@
 // A component built for the window gets an entry here in the same change.
 
 import { ChevronDown, ChevronRight, Plus, ShieldAlert, X } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useId, useState } from "react";
 import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
 import { ContextRing } from "../components/ContextRing";
@@ -15,6 +15,7 @@ import { Icon, IconButton } from "../components/Icon";
 import { NewSessionScreen } from "../components/NewSessionScreen";
 import { QuitQuestion } from "../components/QuitQuestion";
 import { RailFoot } from "../components/RailFoot";
+import { Menu, type MenuEntry } from "../components/Menu";
 import { RailTop } from "../components/RailTop";
 import { RailTree } from "../components/RailTree";
 import { SessionControls } from "../components/SessionControls";
@@ -190,6 +191,11 @@ const tree: Parameters<typeof RailTree>[0] = {
   // The last call a heading made, kept on the page where the gallery test reads it; nothing shows it.
   onNewSession: (project) => (document.body.dataset.railCall = `newSession ${project.id}`),
   onSetTrust: (project, trusted) => (document.body.dataset.railCall = `setTrust ${project.id} ${trusted}`),
+  // The last title a tile saved, kept on the page as above.
+  onRename: async (id, title) => {
+    document.body.dataset.railCall = `rename ${id} ${title}`;
+    return true;
+  },
   localHost: "local",
   hostNames: { local: "WORKSTATION", devbox: "devbox" },
 };
@@ -466,6 +472,38 @@ interface ShelfMore {
   live?: boolean;
 }
 
+/** Every part a menu has (docs/design/RAIL.md, Menus), as the arrange and tile menus will use them. */
+const menuParts: MenuEntry[] = [
+  {
+    kind: "submenu",
+    label: "Group by",
+    current: "Project",
+    entries: [
+      { kind: "item", label: "Project", checked: true },
+      { kind: "item", label: "Section" },
+      { kind: "item", label: "Date" },
+      { kind: "item", label: "None" },
+    ],
+  },
+  { kind: "submenu", label: "Sort by", current: "Date created", entries: [{ kind: "item", label: "Date created", checked: true }] },
+  { kind: "rule" },
+  { kind: "item", label: "Rename", keyHint: "F2" },
+  { kind: "item", label: "Fork", unavailable: "Available once the session has finished its reply" },
+  { kind: "rule" },
+  { kind: "item", label: "Delete…", danger: true },
+];
+
+/** A menu shown open below a stand-in for the button that opens it. */
+function MenuOpen({ entries, submenu }: { entries: MenuEntry[]; submenu?: number }) {
+  const anchor = `--gallery-menu-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
+  return (
+    <div className="gallery-room">
+      <span className="gallery-menu-anchor" style={{ anchorName: anchor } as CSSProperties} />
+      <Menu label="Menu" entries={entries} open place={{ anchor }} focus="none" onClose={() => {}} initialSubmenu={submenu} />
+    </div>
+  );
+}
+
 function ShelfOpen({ shows, more = {} }: { shows: ShelfShows; more?: ShelfMore }) {
   const { short, answer, live = true, focus } = more;
   // The open tile waits on what its shelf shows: a question's tile says it has one.
@@ -543,6 +581,13 @@ interface Entry {
 }
 
 const entries: Entry[] = [
+  {
+    name: "Menu",
+    states: [
+      ["Its parts", <MenuOpen entries={menuParts} />],
+      ["A submenu open", <MenuOpen entries={menuParts} submenu={0} />],
+    ],
+  },
   {
     name: "RailTop",
     rail: true,
@@ -630,6 +675,22 @@ const entries: Entry[] = [
       ["Active tile, pointer over it", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "hover" }} />],
       ["Active tile, pressed", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "pressed" }} />],
       ["Active tile, keyboard focus", <RailTree {...pairOnly} activeId="p2" force={{ id: "p2", state: "focus" }} />],
+      // s1 waits on a permission request and is not the active session: More sits before its chevron.
+      ["Needs you, pointer over it", <RailTree {...ersaOnly} force={{ id: "s1", state: "hover" }} />],
+      // s1 is the active session and waits on a permission request: its chevron stays a mark, and More sits before it.
+      ["Active, needs you, pointer over it", <RailTree {...ersaOnly} activeId="s1" force={{ id: "s1", state: "hover" }} />],
+      ["Tile menu, open", room(<RailTree {...pairOnly} initialTileMenu="p2" />)],
+      // Renaming goes through Core, so while Ersa can't reach it Rename is unavailable, with the reason.
+      ["Tile menu, Rename unavailable", room(<RailTree {...pairOnly} initialTileMenu="p2" offline />)],
+      ["Renaming on the tile", <RailTree {...pairOnly} initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }} />],
+      [
+        "A title the backend refused",
+        <RailTree
+          {...pairOnly}
+          initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }}
+          renaming={{ p2: { state: "failed", message: "Claude Code has no record of this session any more." } }}
+        />,
+      ],
     ],
   },
   {
