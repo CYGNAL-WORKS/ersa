@@ -171,18 +171,11 @@ pub(super) async fn start(core: &Core, params: IdParams) -> Result<Session, ApiE
     ))
 }
 
-/// Clears an archived session's mark first, as the brief says resuming
-/// does (FLOW-ARCHIVE-DELETE-SESSION-R03); restarting the session itself is
-/// milestone M1, and until then it is answered like a reserved method. An
-/// unknown id gets that answer too.
-pub(super) async fn resume(core: &Core, params: IdParams) -> Result<Session, ApiError> {
-    if core
-        .sessions
-        .get(&params.id)
-        .is_ok_and(|session| session.archived)
-    {
-        core.sessions.set_archived(&params.id, false).await?;
-    }
+/// Restarting a session is milestone M1, and until then it is answered like
+/// a reserved method, for an unknown id too. Core clears an archived
+/// session's mark only once it accepts a resume, so a refused resume leaves
+/// the session archived, as it was.
+pub(super) async fn resume(_core: &Core, _params: IdParams) -> Result<Session, ApiError> {
     Err(ApiError::invalid_state(
         "session.resume is milestone M1 and not implemented yet",
     ))
