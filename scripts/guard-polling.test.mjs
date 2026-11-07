@@ -35,6 +35,7 @@ test("finds loops that repeat without a fixed count, call gh and sleep", () => {
     "while true; do gh --repo o/r pr view 5; read -t 30; done",
     'powershell -Command "while ($true) { gh pr view 5; Start-Sleep 60 }"',
     "if ok; then while true; do gh pr view 5; sleep 9; done; fi",
+    "powershell -Command while ($true) { gh pr view 5; Start-Sleep 60 }",
   ]) {
     assert.ok(polls(t), t);
   }
@@ -84,6 +85,9 @@ test("blocks a command that runs a polling script, in either path form", () => {
 test("names each local shell script a command runs, never a network path", () => {
   assert.deepEqual(scriptsIn("bash ./a.sh 1 && pwsh -File b.ps1", "/r").map((p) => p.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "")), ["/r/a.sh", "/r/b.ps1"]);
   assert.deepEqual(scriptsIn("bash \\\\host.example\\s\\x.sh; bash //host.example/s/y.sh", "/r"), []);
+  for (const c of ["nohup ./w.sh &", "setsid ./w.sh", "timeout 5 ./w.sh", "source w.sh", "pwsh -ExecutionPolicy Bypass -File w.ps1", "Start-Process -FilePath C:\\t\\w.ps1"]) {
+    assert.equal(scriptsIn(c, "/r").length, 1, c);
+  }
 });
 
 test("treats .scratch/ as throwaway from a subfolder of the repository", () => {
@@ -92,8 +96,15 @@ test("treats .scratch/ as throwaway from a subfolder of the repository", () => {
   assert.equal(exitCode({ cwd, tool_input: { file_path: join(ROOT, "apps", "poller.mjs"), content: WATCHER } }), 0);
 });
 
+test("answers at once on a long run of gh flags", () => {
+  const start = Date.now();
+  assert.ok(!polls(`while x; do gh${" --a".repeat(40)}; sleep 1; done`));
+  assert.ok(Date.now() - start < 1000);
+});
+
 test("blocks writing a polling script outside the repository or under .scratch/", () => {
   assert.equal(exitCode({ tool_input: { file_path: join(tmpdir(), "watch.sh"), content: WATCHER } }), 2);
+  assert.equal(exitCode({ tool_input: { file_path: join(tmpdir(), "watch"), content: WATCHER } }), 2);
   assert.equal(exitCode({ tool_input: { file_path: join(ROOT, ".scratch", "watch.sh"), content: WATCHER } }), 2);
   assert.equal(exitCode({ tool_input: { file_path: join(tmpdir(), "watch.sh"), old_string: "x", new_string: WATCHER } }), 2);
 });

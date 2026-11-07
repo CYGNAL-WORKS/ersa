@@ -21,16 +21,16 @@ import { fileURLToPath } from "node:url";
 
 // A loop keyword counts only where a command starts, so prose in a commit
 // message or a pull request body ("wait while the review runs") is not a loop.
-const AT = String.raw`(?:^|[;&|({"'\x60]|\b(?:then|do|else)\s)\s*`;
+const AT = String.raw`(?:^|[;&|({"'\x60]|\b(?:then|do|else)\s|-Command\s)\s*`;
 const LOOP = new RegExp(String.raw`${AT}(?:while|until)\b|${AT}do\s*\{|${AT}for\s*\(\(?\s*;\s*;\s*\)|\bsetInterval\b`, "m");
-const GH = /\bgh(?:\.exe)?["']?(?:\s+--?[\w-]+(?:[ =][^\s-]\S*)?)*\s+(?:pr|run|api|issue|workflow|repo|release|search|label|status)\b/i;
+const GH = /\bgh(?:\.exe)?["']?(?:\s+-{1,2}(?!-)[\w-]+(?:[ =][^\s-]\S*)?)*\s+(?:pr|run|api|issue|workflow|repo|release|search|label|status)\b/i;
 const SLEEP = /\b(?:sleep|Start-Sleep|setTimeout)\b|\btimeout(?:\.exe)?\s+\/t\b|\bread\s+-t\b/i;
 // A script the command runs: one that starts a command, or one a shell is
 // given. A script the command only names (rm, cat, pkill -f) is not read, so
 // cleaning up a watcher is never blocked.
-const SCRIPT = /(?:^|[;&|(\n]\s*|\b(?:bash|sh|zsh|pwsh|powershell)(?:\.exe)?["']?\s+(?:-\w+\s+)*|(?:^|\s)[&.]\s+)["']?((?:[A-Za-z]:)?[^\s"';&|]*\.(?:sh|bash|ps1))(?=["'\s;&|]|$)/gm;
+const SCRIPT = /(?:^|[;&|(\n]\s*|\b(?:bash|sh|zsh|pwsh|powershell)(?:\.exe)?["']?\s+(?:-[\w-]+\s+(?:[\w.-]+\s+(?=-))?)*|\b(?:nohup|setsid|exec|source|start|timeout\s+\S+|Start-Process(?:\s+-FilePath)?)\s+|(?:^|\s)[&.]\s+)["']?((?:[A-Za-z]:)?[^\s"';&|]*\.(?:sh|bash|ps1))(?=["'\s;&|]|$)/gm;
 // The files an agent writes that can hold a loop; a note or a ticket in .scratch/ cannot.
-const RUNNABLE = /\.(?:sh|bash|ps1|psm1|cmd|bat|js|mjs|cjs|ts|py)$/i;
+const RUNNABLE = /\.(?:sh|bash|ps1|psm1|cmd|bat|js|mjs|cjs|ts|py)$|(?:^|[\\/])[^.\\/]+$/i;
 
 // Whether text holds a loop that polls GitHub.
 export const polls = (text) => LOOP.test(text) && GH.test(text) && SLEEP.test(text);
