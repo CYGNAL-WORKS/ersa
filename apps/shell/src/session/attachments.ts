@@ -14,6 +14,8 @@ export interface Attached {
   detail: string;
   /** Whether sending copies it, as Core judged it for one workspace, or for none yet (FLOW-SEND-MESSAGE-R17). */
   copied?: { workspace: string | undefined; copied: boolean };
+  /** A pasted image's bytes, sent inline rather than by path (FLOW-SEND-MESSAGE-R08). */
+  inline?: { media_type: string; data: string };
   /** Why Ersa can't send it, said beside it; the message waits until it is removed (FLOW-SEND-MESSAGE-R10). */
   problem?: string;
 }
@@ -88,7 +90,37 @@ export function addAll(list: readonly Attached[], more: readonly Attached[]): At
   return out;
 }
 
-/** What `session.send` gets: each attachment by its kind and the path the user picked (FLOW-SEND-MESSAGE-R13). */
+/**
+ * What `session.send` gets: each attachment by its kind and the path the user picked or dropped
+ * (FLOW-SEND-MESSAGE-R13), and a pasted image by its bytes (R08).
+ */
 export function sendable(list: readonly Attached[]): Attachment[] {
-  return list.map(({ kind, path }) => ({ kind, path }));
+  return list.map(({ kind, path, inline }) => (inline ? { kind: "image" as const, ...inline } : { kind, path }));
+}
+
+// Each pasted image gets its own key in place of a path, so two pastes are two attachments.
+let pastes = 0;
+
+/** The most inline image bytes Core takes in one message (PROTO-CORE-API, Turns and attachments: 10 MiB). */
+export const INLINE_MAX = 10 * 1024 * 1024;
+
+/**
+ * An image pasted into the composer, attached inline (FLOW-SEND-MESSAGE-R08): named as pasted, its detail its size.
+ * One larger than Core takes inline, or one that can't be read, is attached marked with why, so the message waits
+ * until it is removed (R10), rather than fail to send or vanish; it is not read when too large. Whether the backend
+ * takes its kind is Core's to say when the message is sent.
+ */
+export async function pastedImage(file: Blob): Promise<Attached> {
+  pastes += 1;
+  const pasted = { path: `pasted:${pastes}`, name: t("composer.attachment.pastedName"), kind: "image" as const, detail: size(file.size) };
+  if (file.size > INLINE_MAX) return { ...pasted, problem: t("composer.attachment.pastedTooLargeError") };
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // btoa takes a string of bytes; built in chunks, so a large image does not overflow the call stack.
+    let binary = "";
+    for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+    return { ...pasted, inline: { media_type: file.type, data: btoa(binary) } };
+  } catch {
+    return { ...pasted, problem: t("composer.attachment.pastedUnreadableError") };
+  }
 }

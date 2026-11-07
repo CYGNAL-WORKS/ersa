@@ -32,6 +32,7 @@ function fakes(listed: Session[] | Error | "never", wasHidden = true) {
     quit: vi.fn(async () => {}),
     pickFolder: vi.fn(async () => null),
     pickFiles: vi.fn(async () => []),
+    onDragDrop: vi.fn(() => () => {}),
   };
   return { client, shell };
 }
