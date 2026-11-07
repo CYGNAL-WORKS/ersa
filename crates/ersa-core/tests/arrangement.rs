@@ -434,3 +434,116 @@ async fn last_activity_changes_only_when_a_turn_ends() {
         Some(second)
     );
 }
+
+/// A section's name is taken as a session's title is: each run of spacing
+/// is one space, and a name holding any other control character is refused
+/// with `invalid_params`, renaming included. Case is compared by Unicode
+/// lowercase and nothing else, so two spellings of one accented letter are
+/// two names.
+#[tokio::test(flavor = "multi_thread")]
+async fn section_names_are_one_line_without_control_characters() {
+    let (_core, mut client) = start().await;
+
+    let spaced = create_section(&mut client, " Two \n\t  words  ").await;
+    assert_eq!(spaced["name"], "Two words");
+    // Taken once collapsed, ignoring case.
+    let response = client
+        .call("section.create", json!({ "name": "two   WORDS" }))
+        .await;
+    assert_eq!(response["error"]["code"], -32602, "{response:#}");
+
+    for name in ["Bell\u{7}", "Null\u{0}here", "Esc\u{1b}[1m", "Del\u{7f}"] {
+        let response = client.call("section.create", json!({ "name": name })).await;
+        assert_valid("section.create", &response);
+        assert_eq!(response["error"]["code"], -32602, "{name:?}: {response:#}");
+        let response = client
+            .call("section.rename", json!({ "id": spaced["id"], "name": name }))
+            .await;
+        assert_valid("section.rename", &response);
+        assert_eq!(response["error"]["code"], -32602, "{name:?}: {response:#}");
+    }
+
+    let renamed = client
+        .result(
+            "section.rename",
+            json!({ "id": spaced["id"], "name": "Three\r\n  words" }),
+        )
+        .await;
+    assert_eq!(renamed["name"], "Three words");
+
+    // "é" as one code point and as "e" with a combining accent: no
+    // normalization, so both are made.
+    create_section(&mut client, "Caf\u{e9}").await;
+    create_section(&mut client, "Cafe\u{301}").await;
+    assert_eq!(
+        section_names(&mut client).await,
+        vec![
+            "Three words".to_string(),
+            "Caf\u{e9}".to_string(),
+            "Cafe\u{301}".to_string()
+        ]
+    );
+}
+
+/// Reads notifications until a `session.tile` for `id` that carries a
+/// `last_activity_at`, failing after 10 seconds; returns its params and the
+/// `ts` of the last `turn.completed` read on the way, if any.
+async fn tile_with_activity(client: &mut Client, id: &str) -> (Value, Option<Value>) {
+    let mut ended = None;
+    let found = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let notification = client.notification().await.expect("connection open");
+            let params = &notification["params"];
+            match notification["method"].as_str() {
+                Some("session.event") if params["event"]["event"]["type"] == "turn.completed" => {
+                    ended = Some(params["event"]["ts"].clone());
+                }
+                Some("session.tile")
+                    if params["session_id"] == id && params.get("last_activity_at").is_some() =>
+                {
+                    return params.clone();
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("a tile carrying the last activity within 10 s");
+    (found, ended)
+}
+
+/// Every `session.tile` carries the session's `last_activity_at` as
+/// `session.list` has it, and a turn's end sends a tile even when the tile
+/// itself is unchanged, as the fake's `finish` turn leaves it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tile_carries_the_last_activity_and_a_turns_end_sends_one() {
+    let (core, mut client) = start().await;
+    let workspace_id = json!(workspace(&mut client, core.dir.path()).await);
+    let id = new_session(&mut client, &workspace_id).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.started").await;
+    let before = session_row(&mut client, &id).await["tile"].clone();
+
+    // A turn that replies and ends, changing nothing on the tile.
+    client
+        .result("session.send", json!({ "id": id, "text": "finish" }))
+        .await;
+    let (tile, ended) = tile_with_activity(&mut client, &id).await;
+    let row = session_row(&mut client, &id).await;
+    assert_eq!(row["tile"], before, "the tile itself is unchanged");
+    assert_eq!(tile["tile"], before);
+    assert_eq!(tile["last_activity_at"], row["last_activity_at"]);
+    if let Some(ended) = ended {
+        assert_eq!(tile["last_activity_at"], ended);
+    }
+
+    // A tile sent for anything else carries the same value.
+    client
+        .result("session.send", json!({ "id": id, "text": "idle" }))
+        .await;
+    let (tile, _) = tile_with_activity(&mut client, &id).await;
+    assert_eq!(tile["tile"]["state"], "idle");
+    assert_eq!(tile["last_activity_at"], row["last_activity_at"]);
+}

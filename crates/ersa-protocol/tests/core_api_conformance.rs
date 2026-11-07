@@ -588,6 +588,7 @@ fn notification_examples() -> Vec<Notification> {
             &SessionTileParams {
                 session_id: "s-1".into(),
                 tile: Tile::starting(),
+                last_activity_at: Some("2026-10-31T12:05:00.250Z".into()),
             },
         )
         .expect("serialize"),

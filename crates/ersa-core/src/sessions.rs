@@ -1518,7 +1518,13 @@ impl SessionManager {
             opened = Some(self.open_view(&handle, &transport_for).await?);
         };
         if installed {
-            send_tile(&self.tiles, &handle.id, &handle.describe().tile);
+            let session = handle.describe();
+            send_tile(
+                &self.tiles,
+                &handle.id,
+                &session.tile,
+                session.last_activity_at,
+            );
         }
         let first_seq = subscribed.first_seq.unwrap_or(0).max(from_seq);
         let (go_tx, go_rx) = oneshot::channel();
@@ -2298,20 +2304,28 @@ async fn run_pipeline(pipeline: Pipeline) {
                 Event::TurnCompleted(_) => Some(envelope.ts.clone()),
                 _ => None,
             });
+        let mut activity_changed = false;
         if let Some(at) = ended {
             match store
                 .set_session_last_activity(handle.id.clone(), at.clone())
                 .await
             {
-                Ok(()) => lock(&handle.row).last_activity_at = Some(at),
+                Ok(()) => {
+                    lock(&handle.row).last_activity_at = Some(at);
+                    activity_changed = true;
+                }
                 Err(e) => {
                     tracing::error!(session = %handle.id, error = %e, "could not record when a turn ended");
                 }
             }
         }
         publish(&mut lock(&handle.hub), &handle.id, &events);
-        if tile != last_tile {
-            send_tile(&tiles, &handle.id, &tile);
+        // A tile carries the last activity, so a turn's end sends one even
+        // when the tile itself ends as it began, as a turn that starts and
+        // ends in one batch does (PROTO-CORE-API-R58).
+        if tile != last_tile || activity_changed {
+            let last_activity_at = lock(&handle.row).last_activity_at.clone();
+            send_tile(&tiles, &handle.id, &tile, last_activity_at);
             last_tile = tile;
         }
         progress.send_replace(Progress {
@@ -2363,10 +2377,13 @@ fn published(session_id: &str, event: &Envelope) -> Published {
     }
 }
 
-fn send_tile(tiles: &TileHub, session_id: &str, tile: &Tile) {
+/// Sends a session's tile with its last activity, which every tile carries
+/// as `session.list` has it.
+fn send_tile(tiles: &TileHub, session_id: &str, tile: &Tile, last_activity_at: Option<String>) {
     let params = SessionTileParams {
         session_id: session_id.to_string(),
         tile: tile.clone(),
+        last_activity_at,
     };
     tiles.publish(
         session_id,

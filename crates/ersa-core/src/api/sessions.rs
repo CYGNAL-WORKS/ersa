@@ -450,6 +450,17 @@ pub(super) async fn answer_question(
     )))
 }
 
+/// `text` as one line: each run of spacing (a line break and a tab
+/// included) as one space, none at the ends. `None` when it holds any other
+/// control character. A session's title and a section's name both take
+/// this form.
+pub(super) fn one_line(text: &str) -> Option<String> {
+    if text.chars().any(|c| c.is_control() && !c.is_whitespace()) {
+        return None;
+    }
+    Some(text.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
 /// Renames the session in its backend, which keeps the title where its own
 /// tools show it too (ADR 0017, PROTO-CORE-API-R12).
 pub(super) async fn set_title(core: &Core, params: SetTitleParams) -> Result<Session, ApiError> {
@@ -459,20 +470,11 @@ pub(super) async fn set_title(core: &Core, params: SetTitleParams) -> Result<Ses
     // in that form, so Ersa shows what the backend's list will: a longer
     // title, or one holding a control character, would read differently
     // there. A line break or a tab is spacing, and collapses like any other.
-    if params
-        .title
-        .chars()
-        .any(|c| c.is_control() && !c.is_whitespace())
-    {
+    let Some(title) = one_line(&params.title) else {
         return Err(ApiError::invalid_params(
             "a session's title is one line, without control characters",
         ));
-    }
-    let title = params
-        .title
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    };
     if title.is_empty() {
         return Err(ApiError::invalid_params(
             "a session's title cannot be empty",
