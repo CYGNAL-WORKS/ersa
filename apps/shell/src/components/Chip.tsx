@@ -250,7 +250,8 @@ export function Chip({ name, icon, prefix, value, reads, placeholder, problem, p
         data-open={open || undefined}
         data-pending={pending || undefined}
         data-read-only={readOnly || undefined}
-        data-invites={(invites && chosen === undefined) || undefined}
+        // Unavailable, it reads ink-faint like any chip.
+        data-invites={(invites && chosen === undefined && !disabled) || undefined}
         style={{ anchorName: anchor } as CSSProperties}
         disabled={disabled || readOnly}
         onClick={() => (open ? setOpen(false) : show())}
