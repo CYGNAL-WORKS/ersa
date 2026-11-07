@@ -671,10 +671,10 @@ pub struct Inspected {
     /// Where a link points.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
-    /// With `workspace_id`: whether sending would copy it into the session's
-    /// scratch folder, judged as `session.send` judges it. Never for an image.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub copied: Option<bool>,
+    /// Whether `session.send` would copy it into the session's scratch
+    /// folder in `workspace_id`, judged as send judges it: false for an image,
+    /// which goes inline; true without a workspace, as a new one not made yet.
+    pub copied: bool,
 }
 
 /// `session.decide_permission` params.

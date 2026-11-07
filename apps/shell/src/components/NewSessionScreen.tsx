@@ -251,10 +251,9 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   // A new workspace starts from the base branch the chip shows: the one chosen, else the default (R21, R29).
   const base = chosen.workspace === "isolated" && branches?.state === "read" ? baseFor(branches.branches, wanted.base) : undefined;
   const values: SessionValues = base === undefined ? chosen : { ...chosen, base };
-  // Attachments are judged against the project's root workspace, whichever is chosen, so choosing the project folder
-  // after attaching still knows what is copied. A new isolated workspace is not made yet: it holds nothing (R14).
-  const rootWorkspace = project ? props.rootWorkspaces?.[project.id] : undefined;
-  const attachTo = values.workspace === "root" ? rootWorkspace : undefined;
+  // Attachments are judged against the project folder's root workspace when it is chosen, and against none for a new
+  // workspace, which is not made yet and holds nothing (FLOW-SEND-MESSAGE-R14).
+  const attachTo = project && values.workspace === "root" ? props.rootWorkspaces?.[project.id] : undefined;
 
   const onChoose = (key: ControlKey, id: string) => {
     if (key === "host") {
@@ -323,7 +322,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           sending={starting}
           onStop={props.onStop}
           onWrite={hold}
-          onAttach={props.onAttach && ((what) => props.onAttach?.(what, rootWorkspace) ?? Promise.resolve([]))}
+          onAttach={props.onAttach && ((what) => props.onAttach?.(what, attachTo) ?? Promise.resolve([]))}
           workspace={attachTo}
           onSend={(text, attachments) => {
             hold();

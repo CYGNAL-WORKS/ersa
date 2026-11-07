@@ -1142,9 +1142,9 @@ export interface AttachmentInspectResult {
    */
   target?: string;
   /**
-   * With workspace_id: whether session.send would copy it into the session's scratch folder, judged as session.send judges it. Absent for an image, which goes inline.
+   * Whether session.send would copy it into the session's scratch folder in workspace_id, judged as send judges it: false for an image, which goes inline; true without a workspace_id, as for a new workspace not made yet.
    */
-  copied?: boolean;
+  copied: boolean;
 }
 export interface Session7 {
   id: Id;

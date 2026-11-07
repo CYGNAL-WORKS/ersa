@@ -244,13 +244,22 @@ pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspec
     let images = core.sessions.image_types();
     let path = params.path;
     let workspace = match params.workspace_id {
-        Some(id) => Some(
-            core.store
+        Some(id) => {
+            let workspace = core
+                .store
                 .workspace(id.clone())
                 .await?
-                .ok_or_else(|| ApiError::not_found(format!("no workspace {id}")))?
-                .path,
-        ),
+                .ok_or_else(|| ApiError::not_found(format!("no workspace {id}")))?;
+            let project = core
+                .store
+                .project(workspace.project_id.clone())
+                .await?
+                .ok_or_else(|| {
+                    ApiError::not_found(format!("no project {}", workspace.project_id))
+                })?;
+            same_host(&params.host_id, &project.host_id, &id)?;
+            Some(workspace.path)
+        }
         None => None,
     };
     let place = INSPECTING.try_acquire().map_err(|_| {
@@ -259,26 +268,66 @@ pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspec
         )
     })?;
     // A blocking thread: a network drive that no longer answers holds that
-    // thread, never the request, which is answered at the limit.
-    let job = tokio::task::spawn_blocking(move || {
+    // thread, never the request, which is answered at the limit. The path is
+    // read first and answered on its own, then whether sending copies it is
+    // judged, so a workspace folder that stops answering never fails a path
+    // that was read (PROTO-CORE-API-R44); the thread keeps its place for both.
+    let (read_tx, read_rx) = tokio::sync::oneshot::channel();
+    let (judged_tx, judged_rx) = tokio::sync::oneshot::channel();
+    let judging = workspace.clone();
+    let judged_path = path.clone();
+    tokio::task::spawn_blocking(move || {
         let _place = place;
-        let mut inspected = attachments::inspect(&path, &images)?;
-        // An image goes inline, never copied.
-        if let Some(workspace) = workspace
-            && inspected.kind != AttachmentKind::Image
-        {
-            inspected.copied = attachments::copies(&path, std::path::Path::new(&workspace));
+        let read = attachments::inspect(&path, &images);
+        let judge = matches!(&read, Ok(i) if i.kind != AttachmentKind::Image);
+        let _ = read_tx.send(read);
+        if let (true, Some(workspace)) = (judge, judging) {
+            let _ = judged_tx.send(attachments::copies(
+                &judged_path,
+                std::path::Path::new(&workspace),
+            ));
         }
-        Ok(inspected)
     });
-    match tokio::time::timeout(INSPECT_LIMIT, job).await {
-        Ok(Ok(Ok(inspected))) => Ok(inspected),
-        Ok(Ok(Err(InspectError::NotFound(message)))) => Err(ApiError::not_found(message)),
-        Ok(Ok(Err(InspectError::Invalid(message)))) => Err(ApiError::invalid_params(message)),
-        Ok(Err(e)) => Err(ApiError::internal(format!("inspecting failed: {e}"))),
-        Err(_) => Err(ApiError::invalid_params(format!(
-            "the path did not answer within {INSPECT_LIMIT:?}"
-        ))),
+    let mut inspected = match tokio::time::timeout(INSPECT_LIMIT, read_rx).await {
+        Ok(Ok(Ok(inspected))) => inspected,
+        Ok(Ok(Err(InspectError::NotFound(message)))) => return Err(ApiError::not_found(message)),
+        Ok(Ok(Err(InspectError::Invalid(message)))) => {
+            return Err(ApiError::invalid_params(message));
+        }
+        Ok(Err(e)) => return Err(ApiError::internal(format!("inspecting failed: {e}"))),
+        Err(_) => {
+            return Err(ApiError::invalid_params(format!(
+                "the path did not answer within {INSPECT_LIMIT:?}"
+            )));
+        }
+    };
+    // An image goes inline, never copied; without a workspace, as a new one
+    // not made yet, every file and folder is. A judgment that does not answer
+    // in time is taken to be a copy, so the note never says one won't happen.
+    inspected.copied = match (&inspected.kind, &workspace) {
+        (AttachmentKind::Image, _) => false,
+        (_, None) => true,
+        (_, Some(_)) => tokio::time::timeout(JUDGE_LIMIT, judged_rx)
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or(true),
+    };
+    Ok(inspected)
+}
+
+/// How long `attachment.inspect` waits to judge whether sending copies a
+/// path it has read, past which it is taken to be copied.
+const JUDGE_LIMIT: Duration = Duration::from_secs(5);
+
+/// A path is read on `host`, so it is judged only against a workspace there.
+fn same_host(host: &str, workspace_host: &str, workspace_id: &str) -> Result<(), ApiError> {
+    if host == workspace_host {
+        Ok(())
+    } else {
+        Err(ApiError::invalid_params(format!(
+            "workspace {workspace_id} is on host {workspace_host}, not {host}"
+        )))
     }
 }
 
@@ -437,4 +486,17 @@ pub(super) async fn raw_log(
             line: line.line,
         })
         .collect())
+}
+
+#[cfg(test)]
+mod inspect_tests {
+    use super::same_host;
+
+    // R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
+    #[test]
+    fn a_workspace_on_another_host_is_invalid_params() {
+        assert!(same_host("local", "local", "w-1").is_ok());
+        let refused = same_host("local", "devbox", "w-1").unwrap_err();
+        assert_eq!(refused.0.code, -32602, "{refused:?}");
+    }
 }
