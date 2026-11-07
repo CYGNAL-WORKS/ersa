@@ -1,4 +1,4 @@
-import { type ReactNode, memo, useLayoutEffect, useRef } from "react";
+import { type ReactNode, memo, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../catalog";
 import type { PermissionRequested, ToolInput } from "../protocol/agent-events.gen";
 import type { Answer, Decision } from "../session/answers";
@@ -113,28 +113,63 @@ interface BlockProps {
 }
 
 /**
- * What came with a user's message, above its words (FLOW-SEND-MESSAGE-R11): an image as the image, numbered among the
- * message's images; a file or folder by its name, with its path as the agent was given it on hover. An image of a kind
- * the window does not show as one is still there, by name.
+ * What came with a user's message, above its words (FLOW-SEND-MESSAGE-R11; DESIGN.md, Layout): an image as the image;
+ * a file or folder by its name, focusable, its path the agent was given as its name and tooltip.
  */
 function MessageAttachments({ attachments }: { attachments: readonly MessageAttachment[] }) {
-  const images = attachments.filter((a) => a.kind === "image").length;
-  let image = 0;
   return (
     <ul className="transcript-attachments" aria-label={t("transcript.attachment.listLabel")}>
-      {attachments.map((a, i) => {
-        if (a.kind !== "image") return <AttachmentChip key={i} kind={a.kind} name={pathName(a.path)} title={a.path} />;
-        image += 1;
-        const label = t("transcript.attachment.imageLabel", { n: image, count: images });
-        return a.media_type.toLowerCase().startsWith("image/") ? (
-          <li key={i} className="transcript-attachment-image">
-            <img src={`data:${a.media_type};base64,${a.data}`} alt={label} />
-          </li>
+      {attachments.map((a, i) =>
+        a.kind === "image" ? (
+          <AttachedImage key={i} image={a} />
         ) : (
-          <AttachmentChip key={i} kind="image" name={label} />
-        );
-      })}
+          <AttachmentChip key={i} kind={a.kind} name={pathName(a.path)} path={a.path} />
+        ),
+      )}
     </ul>
+  );
+}
+
+/**
+ * An image as itself, named "Attached image". One of a kind the window can't show, or that fails to load, is the
+ * attachment with an image icon by that name.
+ */
+function AttachedImage({ image }: { image: Extract<MessageAttachment, { kind: "image" }> }) {
+  const [failed, setFailed] = useState(false);
+  const label = t("transcript.attachment.imageLabel");
+  if (failed || !image.media_type.toLowerCase().startsWith("image/")) return <AttachmentChip kind="image" name={label} />;
+  return (
+    <li className="transcript-attachment-image">
+      <img src={`data:${image.media_type};base64,${image.data}`} alt={label} onError={() => setFailed(true)} />
+    </li>
+  );
+}
+
+/**
+ * A user's message (DESIGN.md, Layout): the bubble shows once its images are decoded, so nothing in it moves. Kept
+ * hidden, at its place, until then; an image that fails to decode lets it show, falling back to its attachment.
+ */
+function UserBubble({ item }: { item: Extract<Item, { kind: "user" }> }) {
+  const bubble = useRef<HTMLDivElement>(null);
+  const hasImages = item.attachments?.some((a) => a.kind === "image") ?? false;
+  const [decoded, setDecoded] = useState(!hasImages);
+  useLayoutEffect(() => {
+    if (decoded) return;
+    let live = true;
+    const images = Array.from(bubble.current?.querySelectorAll("img") ?? []);
+    Promise.all(images.map((img) => (typeof img.decode === "function" ? img.decode().catch(() => {}) : undefined))).then(() => {
+      if (live) setDecoded(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, [decoded]);
+  return (
+    // A bubble with no label: its place says who wrote it, and assistive technology hears "You" (DESIGN.md, Layout).
+    <div ref={bubble} className="transcript-user" role="group" aria-label="You" data-decoding={!decoded || undefined}>
+      {item.attachments && <MessageAttachments attachments={item.attachments} />}
+      {item.text !== "" && <p className="transcript-text">{item.text}</p>}
+    </div>
   );
 }
 
@@ -145,13 +180,7 @@ function MessageAttachments({ attachments }: { attachments: readonly MessageAtta
 const Block = memo(function Block({ item, answer, waiting, live, onDecide }: BlockProps) {
   switch (item.kind) {
     case "user":
-      return (
-        // A bubble with no label: its place says who wrote it, and assistive technology hears "You" (DESIGN.md, Layout).
-        <div className="transcript-user" role="group" aria-label="You">
-          {item.attachments && <MessageAttachments attachments={item.attachments} />}
-          {item.text !== "" && <p className="transcript-text">{item.text}</p>}
-        </div>
-      );
+      return <UserBubble item={item} />;
     case "assistant":
       return <p className="transcript-text">{item.text}</p>;
     case "thinking":
