@@ -97,10 +97,14 @@ test("treats .scratch/ as throwaway from a subfolder of the repository", () => {
   assert.equal(exitCode({ cwd, tool_input: { file_path: join(ROOT, "apps", "poller.mjs"), content: WATCHER } }), 0);
 });
 
+// A regex that backtracks blocks the event loop, so the check runs in a child
+// with a deadline: a regression fails in seconds rather than hanging the run.
 test("answers at once on a long run of gh flags", () => {
-  const start = Date.now();
-  assert.ok(!polls(`while x; do gh${" --a".repeat(40)}; sleep 1; done`));
-  assert.ok(Date.now() - start < 1000);
+  const text = `while x; do gh${" --a".repeat(40)}; sleep 1; done`;
+  const code = `import { polls } from ${JSON.stringify(new URL("./hooks/guard-polling.mjs", import.meta.url).href)}; process.stdout.write(String(polls(${JSON.stringify(text)})));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], { encoding: "utf8", timeout: 2000 });
+  assert.equal(r.error?.code, undefined, "polls() did not answer within 2 seconds");
+  assert.equal(r.stdout, "false");
 });
 
 test("blocks writing a polling script outside the repository or under .scratch/", () => {
