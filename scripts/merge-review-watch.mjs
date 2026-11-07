@@ -148,6 +148,20 @@ export function select(prs, now = Date.now()) {
   return { review: review.map(({ number, head, retry }) => ({ number, head, ...(retry && { retry }) })), disarm, skip };
 }
 
+// The description of a head's newest merge review status, from the REST list
+// of its statuses; null when the list is not JSON.
+export function latestCause(json) {
+  let list;
+  try {
+    list = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(list)) return null;
+  const newest = list.filter((s) => s?.context === MERGE_REVIEW).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
+  return newest?.description ?? "";
+}
+
 // When a head's CI passed: the end of its last check to finish, among those gh
 // gave a time for. A head with no time at all counts as passing now, so a
 // missing time neither jumps the line nor keeps a head at its back for good.
@@ -337,9 +351,10 @@ function tick(run, start, dirs, log, now, running, until) {
     // One retry runs at a time, counting those started by earlier ticks.
     if (retry && [...running.values()].some((x) => x.retry)) continue;
     if (retry) {
-      const why = run("gh", ["api", `repos/{owner}/{repo}/commits/${head}/statuses`, "--jq", `[.[] | select(.context == "${MERGE_REVIEW}")][0].description`]);
-      if (!why.ok || !TRANSIENT.test(why.out)) {
-        log(`#${n} at ${head.slice(0, 7)}: ${why.ok ? "its merge review failed for a cause that does not clear on its own; the owner's to look at" : `could not read why its merge review failed: ${why.err}`}`.replace(/\s+/g, " "));
+      const why = run("gh", ["api", `repos/{owner}/{repo}/commits/${head}/statuses`]);
+      const cause = why.ok ? latestCause(why.out) : null;
+      if (cause === null || !TRANSIENT.test(cause)) {
+        log(`#${n} at ${head.slice(0, 7)}: ${cause !== null ? "its merge review failed for a cause that does not clear on its own; the owner's to look at" : `could not read why its merge review failed: ${why.ok ? "the statuses are not JSON" : why.err}`}`.replace(/\s+/g, " "));
         continue;
       }
     }

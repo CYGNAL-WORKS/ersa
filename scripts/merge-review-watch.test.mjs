@@ -10,7 +10,7 @@ import { PassThrough } from "node:stream";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { INTERVAL_MS, LOCK_STALE_MS, ENDED, TRANSIENT, RETRY_MS, RETRY_UNTIL_MS, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select, startReview } from "./merge-review-watch.mjs";
+import { INTERVAL_MS, LOCK_STALE_MS, ENDED, TRANSIENT, RETRY_MS, latestCause, RETRY_UNTIL_MS, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select, startReview } from "./merge-review-watch.mjs";
 
 const HEAD = "b".repeat(40);
 const NOW = Date.parse("2026-11-04T12:00:00Z");
@@ -53,6 +53,8 @@ test("a pending merge review older than an hour is a run that died, and the head
 });
 
 const QUEUE_FAILED = "The run failed: adding it to the merge queue failed: GraphQL: API rate limit already exceeded";
+// The REST list of a head's statuses, newest first as GitHub gives it, with an older merge review and another context around it.
+const said = (description) => ({ ok: true, out: JSON.stringify([{ context: "ext", description: "rate limit", created_at: ago(1000) }, { context: "Merge review", description, created_at: ago(2000) }, { context: "Merge review", description: "Reviewing…", created_at: ago(3000) }]) });
 const errored = (over) => mark("ERROR", { startedAt: ago(RETRY_MS + 1000), ...over });
 
 test("a merge review that failed for a cause that may clear is retried after a backoff, behind fresh heads", () => {
@@ -97,15 +99,24 @@ test("TRANSIENT matches each cause that may clear on its own, and nothing else",
     "network is unreachable",
     "The run failed: adding it to the merge queue failed after the review was posted: refused",
   ]) assert.match(cause, TRANSIENT);
-  for (const cause of ["The review ran past 70 minutes and was ended; the poller's log says what it was doing.", "The run failed: claude returned no result: error_max_turns", "HTTP 404: Not Found", "HTTP 4290", ""]) assert.doesNotMatch(cause, TRANSIENT);
+  for (const cause of ["The review ran past 70 minutes and was ended; the poller's log says what it was doing.", "The run failed: claude returned no result: error_max_turns", "HTTP 404: Not Found", "HTTP 4290", "claude returned no result after 500 turns", ""]) assert.doesNotMatch(cause, TRANSIENT);
+});
+
+test("the cause read is the newest merge review status's, whatever order GitHub lists them in", () => {
+  const status = (description, at) => ({ context: "Merge review", description, created_at: ago(at) });
+  assert.equal(latestCause(JSON.stringify([status("old: claude returned no result", 9000), status(QUEUE_FAILED, 1000)])), QUEUE_FAILED);
+  assert.equal(latestCause(JSON.stringify([status(QUEUE_FAILED, 9000), status("new: claude returned no result", 1000)])), "new: claude returned no result");
+  assert.equal(latestCause(JSON.stringify([{ context: "ext", description: "rate limit", created_at: ago(1) }])), "");
+  assert.equal(latestCause("not json"), null);
+  assert.equal(latestCause("{}"), null);
 });
 
 test("a retry starts only when its error's description says the cause may clear", async () => {
   const prs = [pr({ statusCheckRollup: [ci(), errored()] })];
   for (const description of [QUEUE_FAILED, "The run failed: gh api --paginate repos/o/r/pulls/7/reviews failed: HTTP 502: Bad Gateway", "posting the review failed 3 times: read tcp: connection reset by peer"])
-    assert.equal((await drive(["--once"], { prs, statuses: () => ({ ok: true, out: description }) })).reviews.length, 1, description);
+    assert.equal((await drive(["--once"], { prs, statuses: () => said(description) })).reviews.length, 1, description);
   for (const description of ["The review ran past 70 minutes and was ended; the poller's log says what it was doing.", "The run failed: claude returned no result: error_max_turns", ""]) {
-    const got = await drive(["--once"], { prs, statuses: () => ({ ok: true, out: description }) });
+    const got = await drive(["--once"], { prs, statuses: () => said(description) });
     assert.equal(got.reviews.length, 0, description);
     assert.match(got.logs.join("\n"), /does not clear on its own/);
   }
@@ -215,7 +226,7 @@ const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 // review ends with `exit` (or with what `start` resolves to, for a test that
 // holds a review open); `reviews` lists each review started. A wait between
 // ticks lets the test run and no more, unless `sleep` says otherwise.
-async function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list = () => null, statuses = () => ({ ok: true, out: QUEUE_FAILED }), start, lockPath, alive, sleep = () => new Promise((r) => setImmediate(r)), now = () => NOW } = {}) {
+async function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list = () => null, statuses = () => said(QUEUE_FAILED), start, lockPath, alive, sleep = () => new Promise((r) => setImmediate(r)), now = () => NOW } = {}) {
   const calls = [];
   const logs = [];
   const reviews = [];
