@@ -226,7 +226,7 @@ Attachments
 
 ### `transcript.attachment.imageLabel`
 
-Attached image {n} of {count}
+Attached image
 
 ## `composer`
 

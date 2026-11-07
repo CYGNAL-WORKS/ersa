@@ -27,3 +27,74 @@
   text-overflow: ellipsis;
   color: var(--color-ink);
 }
+
+/* A file or folder in the transcript (DESIGN.md, Layout): it takes keyboard focus, shown by an ink edge; under the
+   pointer it takes material-hover, pressed material-pressed, laid over the tile's material. */
+.attachment-item {
+  display: flex;
+  min-width: 0;
+}
+
+.attachment.attachment-path {
+  font-family: inherit;
+  cursor: default;
+  transition:
+    background var(--motion-quick) var(--motion-ease-out),
+    border-color var(--motion-quick) var(--motion-ease-out);
+}
+
+.attachment.attachment-path:hover,
+.attachment.attachment-path[data-force="hover"] {
+  background: linear-gradient(var(--material-hover), var(--material-hover)), var(--material-tile);
+}
+
+.attachment.attachment-path:active,
+.attachment.attachment-path[data-force="pressed"] {
+  background: linear-gradient(var(--material-pressed), var(--material-pressed)), var(--material-tile);
+}
+
+.attachment.attachment-path:focus-visible,
+.attachment.attachment-path[data-force="focus"] {
+  outline: none;
+  border-color: var(--color-ink);
+}
+
+/* The path as a tooltip: a transient layer anchored below the chip, above it where the window has no room, shown while
+   the pointer rests on the chip, while it has keyboard focus, and after a press on touch. */
+.attachment-tip {
+  position: fixed;
+  position-area: block-end;
+  position-try-fallbacks: flip-block;
+  z-index: var(--stack-menu);
+  margin: var(--space-xs) 0;
+  padding: var(--space-xs) var(--space-sm);
+  color: var(--color-ink);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  white-space: nowrap;
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-transient);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--motion-quick) var(--motion-ease-out),
+    visibility var(--motion-quick);
+}
+
+.attachment-path:hover + .attachment-tip,
+.attachment-path:focus-visible + .attachment-tip,
+.attachment-path[data-tip] + .attachment-tip,
+.attachment-path[data-force="focus"] + .attachment-tip {
+  opacity: 1;
+  visibility: visible;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .attachment.attachment-path,
+  .attachment-tip {
+    transition: none;
+  }
+}

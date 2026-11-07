@@ -8,6 +8,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
 import { ContextRing } from "../components/ContextRing";
+import { AttachmentChip } from "../components/AttachmentChip";
 import { Composer } from "../components/Composer";
 import type { Attached } from "../session/attachments";
 import { ErrorBoundary } from "../components/ErrorBoundary";
@@ -658,6 +659,18 @@ const entries: Entry[] = [
     name: "Shelf",
     wide: true,
     states: shelfStates.map(([label, shows, more]) => [label, <ShelfOpen shows={shows} more={more} />]),
+  },
+  {
+    // A file or folder in a message in the transcript (FLOW-SEND-MESSAGE-R11; DESIGN.md, Layout): its states, and its path as
+    // the tooltip with keyboard focus.
+    name: "AttachmentChip",
+    states: [
+      ["At rest", <ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" /></ul>],
+      ["Under the pointer", <ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="hover" /></ul>],
+      ["Pressed", <ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="pressed" /></ul>],
+      ["Keyboard focus, its path shown", room(<ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="focus" /></ul>)],
+      ["An image the window can't show", <ul className="transcript-attachments"><AttachmentChip kind="image" name="Attached image" /></ul>],
+    ],
   },
   {
     name: "Transcript",
