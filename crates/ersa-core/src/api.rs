@@ -86,11 +86,10 @@ impl From<VcsError> for ApiError {
             VcsError::Failed { message, stderr } => {
                 ApiError::new(ErrorKind::VcsError, message).with_detail(stderr)
             }
-            // Answered as `attachment.inspect` answers over its cap.
-            VcsError::Busy => ApiError::invalid_params(e.to_string()),
-            VcsError::Locked { .. } | VcsError::Dirty | VcsError::NotListed { .. } => {
-                ApiError::new(ErrorKind::VcsError, e.to_string())
-            }
+            VcsError::Busy
+            | VcsError::Locked { .. }
+            | VcsError::Dirty
+            | VcsError::NotListed { .. } => ApiError::new(ErrorKind::VcsError, e.to_string()),
         }
     }
 }

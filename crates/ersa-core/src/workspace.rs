@@ -1408,15 +1408,52 @@ mod tests {
         assert_eq!(content_digest(&file, std::time::Instant::now()), None);
     }
 
-    // verifies: PROTO-CORE-API-R47
+    /// The cap's tests take its places, so they run one at a time.
+    static CAP_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    // No requirement names the cap: it keeps a folder that hangs from
+    // taking all of Core's blocking threads, as `attachment.inspect`'s does.
     #[tokio::test]
     async fn blocking_reads_past_the_cap_are_refused_not_queued() {
+        let _one_at_a_time = CAP_TESTS.lock().await;
         // Eight reads that have not answered hold every place.
         let held = FILE_SYSTEM.try_acquire_many(8).unwrap();
         let result = blocking(deadline(), "reading", |_| Ok(())).await;
         assert!(matches!(result, Err(VcsError::Busy)), "{result:?}");
+        // workspace.changes fails only with `vcs_error`.
+        let answered = crate::api::ApiError::from(VcsError::Busy);
+        assert_eq!(
+            answered.0.data.as_ref().map(|d| d.kind),
+            Some(ersa_protocol::core_api::ErrorKind::VcsError),
+            "{answered:?}"
+        );
         drop(held);
         assert!(blocking(deadline(), "reading", |_| Ok(())).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_job_keeps_its_place_until_its_thread_returns() {
+        let _one_at_a_time = CAP_TESTS.lock().await;
+        let free = || FILE_SYSTEM.available_permits();
+        assert_eq!(free(), 8);
+        // A read the file system does not answer until told to.
+        let (answer, hung) = std::sync::mpsc::channel::<()>();
+        let short = Deadline::after(Duration::from_millis(50));
+        let result = blocking(short, "reading", move |_| {
+            let _ = hung.recv();
+            Ok(())
+        })
+        .await;
+        assert!(matches!(result, Err(VcsError::Failed { .. })), "{result:?}");
+        // Answered at its deadline, the job still holds its place.
+        assert_eq!(free(), 7);
+        answer.send(()).unwrap();
+        // Its thread returns, and only then gives the place back.
+        let waited = std::time::Instant::now();
+        while free() < 8 && waited.elapsed() < Duration::from_secs(10) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(free(), 8);
     }
 
     #[tokio::test]
