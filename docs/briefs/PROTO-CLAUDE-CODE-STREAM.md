@@ -110,7 +110,7 @@ A session's title is the backend's, so renaming a session from Ersa renames it i
 
 ### Deleting
 
-When the user deletes a session (FLOW-ARCHIVE-DELETE-SESSION), the adapter deletes its record file, `<session id>.jsonl`, and the folder of the same name beside it, which holds the session's subagent transcripts and stored tool results; it deletes nothing else of the CLI's. It deletes only when the live-session registry shows no process other than Core's own has the session open, never when the registry cannot say, and a record already gone counts as deleted. PROTO-CLAUDE-CODE-STREAM-R31 to R33 are its requirements. This and appending a `custom-title` entry (R22) are the only changes the adapter makes to the CLI's files.
+When the user deletes a session (FLOW-ARCHIVE-DELETE-SESSION), the adapter deletes its record file, `<session id>.jsonl`, and the folder of the same name beside it, which holds the session's subagent transcripts and stored tool results; it deletes nothing else of the CLI's. It deletes only when the live-session registry shows no process other than Core's own has the session open, never when the registry cannot say, and a record already gone counts as deleted. Core has stopped its own process by then, so any process the registry shows is another's (PROTO-CORE-API, `session.delete`). PROTO-CLAUDE-CODE-STREAM-R31 to R33 are its requirements. This and appending a `custom-title` entry (R22) are the only changes the adapter makes to the CLI's files.
 
 ### Live-session registry
 
