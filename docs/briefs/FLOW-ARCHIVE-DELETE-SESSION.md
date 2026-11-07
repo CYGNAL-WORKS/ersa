@@ -52,6 +52,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 - **FLOW-ARCHIVE-DELETE-SESSION-R07**: When deleting the workspace or branch fails, Ersa shall keep the session, stopped, say what failed, and offer to try again.
 - **FLOW-ARCHIVE-DELETE-SESSION-R08**: When what a deletion would lose has changed in any way since the user was asked, Ersa shall ask again before deleting.
 - **FLOW-ARCHIVE-DELETE-SESSION-R09**: When the user confirms a delete, Ersa shall delete the session's record from its backend, so that neither the rail, after a restart or when Ersa lists the backend's sessions, nor the backend's own tools list it again.
+- **FLOW-ARCHIVE-DELETE-SESSION-R10**: When `workspace.changes` reports `unrecorded`, the delete question shall say that commits made on a detached checkout can't be counted and may be lost with the folder, in place of a count of them.
 
 ## Out of scope
 
@@ -64,6 +65,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 
 ## Changes
 
+- 2026-11-07: from #244 inbox: when git has lost a workspace's record, the delete question says commits made on a detached checkout can't be counted (R10).
 - 2026-11-06: from #236 inbox: a refused Resume leaves the session archived (PROTO-CORE-API-R43); R03 reworded to say a resume clears the mark once Core accepts it, its meaning kept.
 - 2026-11-05: from #174 merge review: R01 names the pin and the section it keeps, since Arrangement now covers more. Meaning unchanged.
 - 2026-11-05: owner, before this shipped: Delete deletes the session's conversation and record from the backend, keeps a branch with commits that exist nowhere else, and is unavailable while the session is starting, working or waiting on the user. R04, R05 and R09 reworded; no test cites them.
