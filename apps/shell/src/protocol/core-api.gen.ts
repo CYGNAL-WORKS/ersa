@@ -815,7 +815,7 @@ export interface Session {
   tile: Tile;
   sending?: SendPhase1;
   /**
-   * Whether the user archived the session. session.send to an archived session answers invalid_state; session.resume clears it first.
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
 }
@@ -987,7 +987,7 @@ export interface Session1 {
   tile: Tile;
   sending?: SendPhase1;
   /**
-   * Whether the user archived the session. session.send to an archived session answers invalid_state; session.resume clears it first.
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
 }
@@ -1019,7 +1019,7 @@ export interface Session2 {
   tile: Tile;
   sending?: SendPhase1;
   /**
-   * Whether the user archived the session. session.send to an archived session answers invalid_state; session.resume clears it first.
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
 }
@@ -1051,7 +1051,7 @@ export interface Session3 {
   tile: Tile;
   sending?: SendPhase1;
   /**
-   * Whether the user archived the session. session.send to an archived session answers invalid_state; session.resume clears it first.
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
 }
@@ -1083,7 +1083,7 @@ export interface Session4 {
   tile: Tile;
   sending?: SendPhase1;
   /**
-   * Whether the user archived the session. session.send to an archived session answers invalid_state; session.resume clears it first.
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
 }
@@ -1115,7 +1115,7 @@ export interface Session5 {
   tile: Tile;
   sending?: SendPhase1;
   /**
-   * Whether the user archived the session. session.send to an archived session answers invalid_state; session.resume clears it first.
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
 }
@@ -1147,7 +1147,7 @@ export interface Session6 {
   tile: Tile;
   sending?: SendPhase1;
   /**
-   * Whether the user archived the session. session.send to an archived session answers invalid_state; session.resume clears it first.
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
 }
@@ -1185,7 +1185,7 @@ export interface Session7 {
   tile: Tile;
   sending?: SendPhase1;
   /**
-   * Whether the user archived the session. session.send to an archived session answers invalid_state; session.resume clears it first.
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
 }
@@ -1238,7 +1238,7 @@ export interface Session8 {
   tile: Tile;
   sending?: SendPhase1;
   /**
-   * Whether the user archived the session. session.send to an archived session answers invalid_state; session.resume clears it first.
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
 }
@@ -1270,7 +1270,7 @@ export interface Session9 {
   tile: Tile;
   sending?: SendPhase1;
   /**
-   * Whether the user archived the session. session.send to an archived session answers invalid_state; session.resume clears it first.
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
 }
@@ -1302,7 +1302,7 @@ export interface Session10 {
   tile: Tile;
   sending?: SendPhase1;
   /**
-   * Whether the user archived the session. session.send to an archived session answers invalid_state; session.resume clears it first.
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
 }
@@ -1334,7 +1334,7 @@ export interface Session11 {
   tile: Tile;
   sending?: SendPhase1;
   /**
-   * Whether the user archived the session. session.send to an archived session answers invalid_state; session.resume clears it first.
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
 }

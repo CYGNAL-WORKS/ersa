@@ -131,7 +131,7 @@ impl SessionManager {
         admitted: impl FnOnce(),
     ) -> Result<Option<u32>, SessionError> {
         let handle = self.handle(id)?;
-        // An archived session is read-only until it is unarchived or resumed
+        // An archived session is read-only until it is unarchived, or a resume is accepted
         // (FLOW-ARCHIVE-DELETE-SESSION-R02). Said before anything else, so
         // the refusal names the reason rather than that it is not running.
         if lock(&handle.row).archived {
