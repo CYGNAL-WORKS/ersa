@@ -844,26 +844,34 @@ describe("the attachments of a new session's first message", () => {
 
 describe("reading the paths picked", () => {
   // verifies: FLOW-SEND-MESSAGE-R13
-  it("asks Core about one at a time, since Core refuses more than a few at once", async () => {
+  it("asks Core about at most 8 at once, queuing the rest, and attaches them all in the order picked", async () => {
     const shell = fakeShell();
-    shell.pickFiles.mockResolvedValue(["D:/code/beta/a.md", "D:/code/beta/b.md"]);
-    const answers: ((v: unknown) => void)[] = [];
+    const picked = Array.from({ length: 10 }, (_, i) => `D:/code/beta/f${i}.md`);
+    shell.pickFiles.mockResolvedValue(picked);
+    const answers: (() => void)[] = [];
     const core = fakeCore({
       "session.subscribe": () => ({ last_seq: -1 }),
-      "attachment.inspect": (params: { path: string }) => new Promise((r) => answers.push(() => r({ path: params.path, name: params.path.slice(-4), kind: "file", size_bytes: 1 }))),
+      "attachment.inspect": (params: { path: string }) =>
+        new Promise((r) => answers.push(() => r({ path: params.path, name: params.path.slice(-6), kind: "file", size_bytes: 1 }))),
     });
+    const inspects = () => core.calls.filter((c) => c.method === "attachment.inspect").length;
     render(createElement(App, { client: core.client, shell }));
     await settle();
     await settle();
     fireEvent.click(screen.getByRole("button", { name: "Attach", exact: true } as never));
     fireEvent.click(screen.getByRole("menuitem", { name: "Add files…" }));
     await settle();
-    expect(core.calls.filter((c) => c.method === "attachment.inspect")).toHaveLength(1);
-    answers[0]?.(undefined);
+    expect(inspects()).toBe(8);
+    // One answered, the next queued one goes.
+    answers[0]?.();
     await settle();
-    expect(core.calls.filter((c) => c.method === "attachment.inspect")).toHaveLength(2);
-    answers[1]?.(undefined);
+    expect(inspects()).toBe(9);
+    // Answered out of order, they still attach in the order picked.
+    for (const answer of answers.slice(1).reverse()) answer();
     await settle();
-    expect(document.querySelectorAll(".composer-attachment")).toHaveLength(2);
+    answers[9]?.();
+    await settle();
+    expect(inspects()).toBe(10);
+    expect(Array.from(document.querySelectorAll(".composer-attachment-name")).map((n) => n.textContent)).toEqual(picked.map((p) => p.slice(-6)));
   });
 });
