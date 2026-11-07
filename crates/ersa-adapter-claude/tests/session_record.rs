@@ -495,6 +495,7 @@ fn prompts_are_user_messages_and_what_the_cli_wrote_is_system() {
                 text: "Hello".into(),
                 origin: MessageOrigin::Human,
                 peer: None,
+                attachments: Vec::new(),
             }),
         }
     );
@@ -1126,4 +1127,191 @@ fn a_drifted_local_command_entry_is_reported_and_kept() {
             "{content}: {events:?}"
         );
     }
+}
+
+/// A prompt as a message with attachments is kept: `blocks` after an optional text block.
+fn prompt_with(text: Option<&str>, attachments: &[Value]) -> Value {
+    let mut content: Vec<Value> = text
+        .map(|t| json!({"type": "text", "text": t}))
+        .into_iter()
+        .collect();
+    content.extend(attachments.iter().cloned());
+    json!({"type": "user", "uuid": "u", "message": {"role": "user", "content": content}})
+}
+
+fn image() -> Value {
+    json!({"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"}})
+}
+
+fn listed(lines: &str) -> Value {
+    json!({"type": "text", "text": format!("<ersa-attachments>\n{lines}\n</ersa-attachments>")})
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R26
+#[test]
+fn a_prompts_images_and_list_are_its_attachments_not_its_text() {
+    // Recorded: a prompt with an image and a list, then one of a list alone (fixture 2.1.316/07).
+    let fixture = record_fixtures()
+        .into_iter()
+        .find(|f| f.name.ends_with("07-attachments"))
+        .expect("the attachments fixture");
+    let prompts: Vec<UserMessage> = project_record(&fixture.text)
+        .into_iter()
+        .filter_map(|e| match e.event {
+            Event::UserMessage(m) if m.origin == MessageOrigin::Human => Some(m),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(prompts.len(), 2);
+    assert!(
+        prompts[0]
+            .text
+            .starts_with("What colour is the attached image?")
+    );
+    assert!(!prompts[0].text.contains("ersa-attachments"));
+    assert!(
+        matches!(&prompts[0].attachments[0], MessageAttachment::Image { media_type, .. } if media_type == "image/png")
+    );
+    assert_eq!(
+        prompts[0].attachments[1..],
+        [
+            MessageAttachment::File {
+                path: "notes/todo.md".into()
+            },
+            MessageAttachment::Folder { path: "src".into() },
+        ]
+    );
+    assert_eq!(prompts[1].text, "");
+    assert_eq!(
+        prompts[1].attachments,
+        [MessageAttachment::File {
+            path: "README.md".into()
+        }]
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R26
+#[test]
+fn a_prompt_of_images_the_adapter_cannot_read_still_shows_as_a_turn() {
+    // An image from somewhere other than base64, which has no data to show.
+    let unreadable =
+        json!({"type": "image", "source": {"type": "url", "url": "https://example.com/a.png"}});
+    let events = events_of(&[prompt_with(None, &[unreadable])]);
+    let prompts: Vec<&UserMessage> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::UserMessage(m) => Some(m),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(prompts.len(), 1);
+    assert_eq!(prompts[0].text, "");
+    assert!(prompts[0].attachments.is_empty());
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R27
+#[test]
+fn a_title_leaves_out_attachments_and_passes_over_a_prompt_of_attachments_alone() {
+    let with_text = prompt_with(
+        Some("Fix the build"),
+        &[image(), listed("file: notes/todo.md")],
+    )
+    .to_string();
+    let alone = prompt_with(None, &[image(), listed("folder: src")]).to_string();
+    // The prompt's own words title it, without the list.
+    assert_eq!(
+        title_of(vec![with_text.clone()]).as_deref(),
+        Some("Fix the build")
+    );
+    // A later prompt of attachments alone titles nothing: the rule moves on to the one before.
+    assert_eq!(
+        title_of(vec![with_text, alone.clone()]).as_deref(),
+        Some("Fix the build")
+    );
+    assert_eq!(title_of(vec![alone]), None);
+}
+
+/// A user entry the CLI wrote itself, with `content` as given.
+fn meta(content: Value) -> Value {
+    json!({"type": "user", "uuid": "m", "isMeta": true, "message": {"role": "user", "content": content}})
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R34
+#[test]
+fn the_clis_note_of_a_cached_image_passes_through() {
+    // Recorded beside the prompt with an image (fixture 2.1.316/07).
+    let fixture = record_fixtures()
+        .into_iter()
+        .find(|f| f.name.ends_with("07-attachments"))
+        .expect("the attachments fixture");
+    let events: Vec<Event> = project_record(&fixture.text)
+        .into_iter()
+        .map(|e| e.event)
+        .collect();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, Event::UserMessage(m) if m.text.starts_with("[Image: source: ")))
+    );
+    assert!(events.iter().any(|e| matches!(e, Event::BackendPassthrough(p) if p.payload.to_string().contains("[Image: source: "))));
+
+    // Several images, one line each, still pass through.
+    let two = meta(
+        json!([{"type": "text", "text": "[Image: source: C:/a/1.png]\n[Image: source: C:/a/2.png]"}]),
+    );
+    assert!(
+        !events_of(&[two])
+            .iter()
+            .any(|e| matches!(e, Event::UserMessage(_)))
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R34
+#[test]
+fn a_cli_note_with_anything_else_in_it_is_still_shown() {
+    let mixed =
+        meta(json!([{"type": "text", "text": "[Image: source: C:/a/1.png]\nAnd something else"}]));
+    let events = events_of(&[mixed]);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::UserMessage(m) if m.origin == MessageOrigin::System))
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R34
+#[test]
+fn the_same_words_typed_by_the_user_are_their_message() {
+    let typed = prompt_with(Some("[Image: source: x]"), &[]);
+    let events = events_of(&[typed]);
+    assert!(events.iter().any(|e| matches!(e, Event::UserMessage(m)
+        if m.origin == MessageOrigin::Human && m.text == "[Image: source: x]")));
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R27
+#[test]
+fn a_recorded_prompt_of_a_file_list_alone_leaves_the_title_at_the_prompt_before() {
+    // Fixture 2.1.316/07 without the CLI's own last-prompt entries, so the title
+    // comes from the adapter reading the prompts: the second, a list alone,
+    // titles nothing, and the first does.
+    let fixture = record_fixtures()
+        .into_iter()
+        .find(|f| f.name.ends_with("07-attachments"))
+        .expect("the attachments fixture");
+    let lines: Vec<String> = fixture
+        .text
+        .lines()
+        .filter(|line| !line.contains("\"type\":\"last-prompt\""))
+        .map(String::from)
+        .collect();
+    assert!(
+        lines.len() < fixture.text.lines().count(),
+        "the fixture's last-prompt entries are gone"
+    );
+    assert_eq!(
+        title_of(lines).as_deref(),
+        Some(
+            "What colour is the attached image? Then say which attachment paths you were given. Do not open or read them, and do not use any tools."
+        )
+    );
 }
