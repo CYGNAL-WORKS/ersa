@@ -1660,3 +1660,39 @@ async fn archiving_an_unknown_session_is_not_found() {
         .await;
     assert_eq!(kind(&error), "not_found");
 }
+
+// verifies: PROTO-CORE-API-R25
+#[tokio::test(flavor = "multi_thread")]
+async fn interrupt_ends_a_running_turn_as_interrupted_and_otherwise_does_nothing() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+
+    // With no turn running, the interrupt succeeds and changes nothing.
+    let idle = client
+        .result("session.interrupt", json!({ "id": id }))
+        .await;
+    assert_eq!(idle["id"], id.as_str());
+
+    // A turn that keeps working ends with outcome interrupted.
+    client
+        .result("session.send", json!({ "id": id, "text": "work" }))
+        .await;
+    client.events_until("turn.started").await;
+    client
+        .result("session.interrupt", json!({ "id": id }))
+        .await;
+    let events = client.events_until("turn.completed").await;
+    let completed = &events.last().unwrap()["event"];
+    assert_eq!(completed["outcome"], "interrupted");
+    assert_eq!(completed["turn"], 1);
+    // Only the one turn ended: the first interrupt ended nothing.
+    let ended = events
+        .iter()
+        .filter(|e| e["event"]["type"] == "turn.completed")
+        .count();
+    assert_eq!(ended, 1);
+}

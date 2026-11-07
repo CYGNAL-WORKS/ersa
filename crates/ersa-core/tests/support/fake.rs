@@ -10,6 +10,8 @@
 //! - `ask`: a permission request, answered with `session.decide_permission`.
 //! - `question`: a question for the user.
 //! - `burst <n>`: `n` replies at once, to flood subscribers.
+//! - `work`: a turn that keeps working until it is interrupted, then ends
+//!   with outcome `interrupted`.
 //! - `broken pipe`: the write fails halfway, so Core can't tell whether the
 //!   backend has the message.
 //! - `stopped mid-write`: the line is recorded, then the session is found
@@ -38,8 +40,8 @@ use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::{
     AssistantText, BackendPassthrough, DecidedBy, Event, LifecycleState, MessageOrigin,
     PermissionBehavior, PermissionDecided, PermissionFlags, PermissionRequested, Question,
-    QuestionAsked, SessionStarted, SessionState, TurnStarted, TurnTrigger, UsageUpdated,
-    UserMessage,
+    QuestionAsked, SessionStarted, SessionState, TurnCompleted, TurnOutcome, TurnStarted,
+    TurnTrigger, UsageUpdated, UserMessage,
 };
 use serde_json::{Map, Value, json};
 
@@ -360,6 +362,8 @@ struct Inner {
     next_message: u32,
     next_request: u32,
     pending: HashSet<String>,
+    /// A `work` turn is running, and an interrupt ends it.
+    working: bool,
     exited: bool,
 }
 
@@ -440,6 +444,9 @@ impl AdapterSession for FakeSession {
                 let id = self.next_id("r");
                 self.backend(json!({ "t": "reply", "id": id, "text": format!("{i}") }));
             }
+        } else if text == "work" {
+            // The turn starts and keeps working: nothing more until an interrupt.
+            self.inner.lock().unwrap().working = true;
         } else if text == "question" {
             self.backend(json!({ "t": "question", "id": "q-1" }));
         } else if text == "ask" {
@@ -487,6 +494,11 @@ impl AdapterSession for FakeSession {
         self.running()?;
         self.sink
             .record(Direction::Host, json!({ "t": "interrupt" }).to_string());
+        // A working turn ends as interrupted; with none, the interrupt has no effect.
+        let working = std::mem::take(&mut self.inner.lock().unwrap().working);
+        if working {
+            self.backend(json!({ "t": "interrupted" }));
+        }
         Ok(())
     }
 
@@ -558,6 +570,15 @@ impl Projector for FakeProjector {
                     reason: None,
                 }),
             ],
+            (Direction::Backend, Some("interrupted")) => {
+                vec![Event::TurnCompleted(TurnCompleted {
+                    turn: self.turn,
+                    outcome: TurnOutcome::Interrupted,
+                    duration_ms: 0,
+                    is_error: true,
+                    final_text: None,
+                })]
+            }
             (Direction::Backend, Some("usage")) => {
                 let tokens = value["tokens"].as_u64().unwrap_or(0);
                 vec![Event::UsageUpdated(UsageUpdated {

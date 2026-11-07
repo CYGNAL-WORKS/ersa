@@ -14,6 +14,15 @@ describe("the stage", () => {
   });
 
   // verifies: FLOW-NEW-SESSION-R08
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("keeps the screen as it was when stop ends a start, saying nothing", () => {
+    const sending = run([{ type: "newSession", projectId: "p1" }, { type: "sending" }]);
+    const stopped = stage(sending, { type: "stopped" });
+    expect(stopped.composing).toEqual(sending.composing);
+    expect(stopped.starting).toBeUndefined();
+    expect(stopped.activeId).toBeUndefined();
+  });
+
   it("keeps the screen as it was when a start fails, with the failure shown", () => {
     const sending = run([{ type: "newSession", projectId: "p1" }, { type: "sending" }]);
     const failed = stage(sending, { type: "failed", message: "the backend could not be started: not logged in" });
