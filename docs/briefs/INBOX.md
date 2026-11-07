@@ -8,8 +8,5 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-06 PROTO-CORE-API: `workspace.changes` leaves out of `uncommitted` a tracked file that is gone from the folder while the index holds nothing the commit does not (deleted from the folder alone, or the deletion staged), since nothing of it is left to lose and a half-removed folder's missing files would otherwise count; a file staged and then deleted still counts, and either change still changes `token`. The brief says only "files with changes not committed"; Core counts as described meanwhile.
-- [ ] 2026-11-06 PROTO-CORE-API: `workspace.changes` names no time limit; Core gives all its git calls and file reads 60 seconds together, answers `vcs_error` past it, and runs the request detached from the connection's other requests, since it reads every uncommitted file.
-- [ ] 2026-11-06 PROTO-CORE-API: `workspace.changes` for a folder git no longer has a record of (on Windows a failed removal deletes git's record and leaves files it could not delete) is not covered; Core counts every file left that the ignore rules do not ignore as uncommitted, since git cannot say which were committed, and counts the branch's commits only.
 
 ## Resolved recently (optional, trimmed in planning passes)
