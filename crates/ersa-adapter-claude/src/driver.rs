@@ -23,8 +23,9 @@ use std::time::Duration;
 
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, ImageLimits,
-    LineReader, LineWriter, OpenElsewhere, PermissionDecision, Process, ProcessExit, ProcessSpec,
-    Projector, RecordEvent, RecordSummary, SessionConfig, Transport, async_trait,
+    LineReader, LineWriter, OpenElsewhere, OutgoingMessage, PermissionDecision, Process,
+    ProcessExit, ProcessSpec, Projector, RecordEvent, RecordSummary, SessionConfig, Transport,
+    async_trait,
 };
 use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::PermissionBehavior;
@@ -954,6 +955,20 @@ impl Drop for ClaudeSession {
 impl AdapterSession for ClaudeSession {
     async fn send_user(&self, text: &str) -> Result<(), AdapterError> {
         self.shared.write(&HostMessage::user_text(text)).await
+    }
+
+    /// A message with attachments: its text, then its images, then the list
+    /// of its files and folders (PROTO-CLAUDE-CODE-STREAM-R25). The line is
+    /// recorded before it is written, so a write that fails reads as delivery
+    /// unknown.
+    async fn send_message(&self, message: &OutgoingMessage) -> Result<(), AdapterError> {
+        // Refused before anything is recorded or written, so it reads as not sent.
+        if let Some(reason) = crate::attachments::unsendable(message) {
+            return Err(AdapterError::Protocol(reason));
+        }
+        self.shared
+            .write(&HostMessage::user(crate::attachments::blocks(message)))
+            .await
     }
 
     async fn decide_permission(
