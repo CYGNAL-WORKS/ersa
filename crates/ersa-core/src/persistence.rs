@@ -734,7 +734,9 @@ mod tests {
                 // Migration 5's.
                 "model",
                 "effort",
-                "permission_mode"
+                "permission_mode",
+                // Migration 6's.
+                "archived",
             ]
         );
     }
