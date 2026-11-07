@@ -271,3 +271,116 @@ describe("follow", () => {
     expect(seen.length).toBe(before);
   });
 });
+
+describe("stop", () => {
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("cancels a message still on its way: the send answers false, with no refusal shown", async () => {
+    let refuse: (error: BridgeError) => void = () => {};
+    const { follower, calls, last } = following({
+      "session.send": () => new Promise((_, reject) => (refuse = reject)),
+      "session.interrupt": () => Promise.resolve({}),
+    });
+    const sent = follower.send("hello");
+    await settle();
+    expect(last().message).toEqual({ state: "sending" });
+    await follower.interrupt();
+    expect(calls.at(-1)).toEqual({ method: "session.interrupt", params: { id: "s-replay" } });
+    // Core answers the canceled send with an error.
+    refuse({ kind: "rpc", error: { code: -32000, message: "the message was stopped before it was sent", data: { kind: "invalid_state" } } } as never);
+    expect(await sent).toBe(false);
+    expect(last().message).toBeUndefined();
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("interrupts the turn when no message is on its way, and a later refusal still shows", async () => {
+    const { follower, calls, last } = following({
+      "session.interrupt": () => Promise.resolve({}),
+      "session.send": () => Promise.reject(replayRefusal("session.send")),
+    });
+    await follower.interrupt();
+    expect(calls.at(-1)).toEqual({ method: "session.interrupt", params: { id: "s-replay" } });
+    expect(await follower.send("hello")).toBe(false);
+    expect(last().message).toEqual({ state: "failed", message: "the session is a replay of a recording and cannot change" });
+  });
+});
+
+describe("a stop that did not cancel the message", () => {
+  // verifies: FLOW-SEND-MESSAGE-R05
+  it("still shows the send's refusal when the interrupt never reached Core, or the send failed for another reason", async () => {
+    for (const interrupt of [() => Promise.reject({ kind: "unavailable", message: "gone" }), () => Promise.resolve({})]) {
+      let refuse: (error: BridgeError) => void = () => {};
+      const { follower, last } = following({
+        "session.send": () => new Promise((_, reject) => (refuse = reject)),
+        "session.interrupt": interrupt,
+      });
+      const sent = follower.send("hello");
+      await settle();
+      await follower.interrupt();
+      refuse({ kind: "rpc", error: { code: -32000, message: "the backend could not be reached", data: { kind: "internal" } } } as never);
+      expect(await sent).toBe(false);
+      expect(last().message).toEqual({ state: "failed", message: "the backend could not be reached" });
+    }
+  });
+});
+
+describe("a stop that never reached Core", () => {
+  // verifies: FLOW-SEND-MESSAGE-R05
+  it("leaves the send's refusal to show, even one Core gives as an invalid state", async () => {
+    let refuse: (error: BridgeError) => void = () => {};
+    const { follower, last } = following({
+      "session.send": () => new Promise((_, reject) => (refuse = reject)),
+      "session.interrupt": () => Promise.reject({ kind: "unavailable", message: "gone" }),
+    });
+    const sent = follower.send("hello");
+    await settle();
+    await follower.interrupt();
+    refuse(replayRefusal("session.send"));
+    expect(await sent).toBe(false);
+    expect(last().message).toEqual({ state: "failed", message: "the session is a replay of a recording and cannot change" });
+  });
+});
+
+describe("a turn Core has not shown yet", () => {
+  const turnStarted = (seq: number) =>
+    ({ v: EVENT_VERSION, session_id: "s-replay", seq, ts: "2026-01-01T00:00:00Z", source: { input: "backend" }, event: { type: "turn.started", turn: 1, trigger: "user" } }) as never;
+
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("keeps stop offered after Core accepts the message until the turn shows", async () => {
+    const { follower, last } = following({ "session.send": () => Promise.resolve({ turn: 1 }) });
+    expect(await follower.send("hello")).toBe(true);
+    expect(last().turnPending).toBe(true);
+    follower.receive(turnStarted(0));
+    expect(last().turnPending).toBeUndefined();
+    expect(last().transcript.working).toBe(true);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("leaves nothing pending when the turn showed before Core answered", async () => {
+    let accept: (answer: unknown) => void = () => {};
+    const { follower, last } = following({ "session.send": () => new Promise((r) => (accept = r)) });
+    const sent = follower.send("hello");
+    await settle();
+    follower.receive(turnStarted(0));
+    accept({ turn: 1 });
+    expect(await sent).toBe(true);
+    expect(last().turnPending).toBeUndefined();
+  });
+});
+
+describe("a second send after a turn has run", () => {
+  const event = (seq: number, e: unknown) =>
+    ({ v: EVENT_VERSION, session_id: "s-replay", seq, ts: "2026-01-01T00:00:00Z", source: { input: "backend" }, event: e }) as never;
+
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("marks its turn pending when Core answers before that turn shows, whatever the turn before did", async () => {
+    const { follower, last } = following({ "session.send": () => Promise.resolve({ turn: 1 }) });
+    // A first turn runs to completion.
+    expect(await follower.send("first")).toBe(true);
+    follower.receive(event(0, { type: "turn.started", turn: 1, trigger: "user" }));
+    follower.receive(event(1, { type: "turn.completed", turn: 1, outcome: "success", duration_ms: 1, is_error: false }));
+    expect(last().turnPending).toBeUndefined();
+    // The second is answered before its turn shows.
+    expect(await follower.send("second")).toBe(true);
+    expect(last().turnPending).toBe(true);
+  });
+});
