@@ -3,47 +3,40 @@
 // harness): for each pull request merged since the last pass, what the merge
 // review found against what the author's own review listed.
 //
-//   node scripts/harness-lessons.mjs [--since <commit>] [--json]
+//   node scripts/harness-lessons.mjs [--since <commit>]
 //
 // The last pass is the newest commit on origin/main whose subject starts
 // "Harness: lessons from"; --since names another start. The pull
 // requests are the first-parent merges since it ("Merge pull request #n"),
-// the pass's own left out. For each, the merge reviews this repository posted
+// the pass's own left out. For each, the merge reviews this account posted
 // (bodies starting <!-- merge-review -->, each carrying its head, verdict and
-// findings as JSON) are read, and every blocking finding (high or medium) with
-// origin "new" is set against the body's **Review** section: the finding's
-// file is looked for there, so "not named" is a lead, not a verdict. A pull
-// request with no merge review or no Review section is listed as not
-// compared. Findings marked superseded are left out: that head was never a
-// round.
+// findings as JSON; another account's are ignored, since anyone can post one)
+// are read, and every blocking finding (high or medium) with origin "new" is
+// set against the body's **Review** section: the finding's file is looked for
+// there, so "not named" is a lead, not a verdict. A pull request with no merge
+// review or no Review section is listed as not compared. A review marked
+// superseded is not a round, but its findings count: the review after it
+// carries them as listed.
 //
 // GitHub is read once per pull request and the answer kept under
 // .scratch/harness-lessons/<n>.json, so a second run, or one after the API
-// quota is spent, costs nothing. --json prints the comparison as one object
-// for another tool to read.
+// quota is spent, costs nothing; a merged pull request's reviews do not change.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// The review's own reading of the state its bodies carry.
+import { parseState } from "./merge-review.mjs";
+
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
-export const PASS_SUBJECT = /^Harness: lessons from/;
-const MARK = "<!-- merge-review -->";
+const PASS_SUBJECT = /^Harness: lessons from/;
 
+// A stalled git or gh call ends after two minutes, as in the review and the gate.
 function run(cmd, args) {
-  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim() };
-}
-
-// The JSON a merge review's body carries, or null for any other review.
-export function parseState(body) {
-  const m = /^<!-- merge-review -->\s*<!-- merge-review (.*?) -->/s.exec(body ?? "");
-  try {
-    return m ? JSON.parse(m[1]) : null;
-  } catch {
-    return null;
-  }
+  const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 2 * 60 * 1000 });
+  return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: [(r.stderr ?? "").trim(), r.error?.message].filter(Boolean).join("; ") };
 }
 
 // The body's "## Review" section: from that heading to the next "## ".
@@ -53,11 +46,12 @@ export function reviewSection(body) {
 }
 
 // The pull request numbers merged by first-parent merge commits in `log`
-// (one "<sha> <subject>" per line), the pass's own left out.
+// (one "<sha> <subject>" per line). The pass's own merge is among them, since
+// a merge commit's subject names only its pull request; main() leaves it out
+// by the pull request's title.
 export function mergedPullRequests(log) {
   return log
     .split("\n")
-    .filter((l) => l.trim() && !PASS_SUBJECT.test(l.replace(/^\S+\s+/, "")))
     .map((l) => /Merge pull request #(\d+)/.exec(l)?.[1])
     .filter(Boolean)
     .map(Number);
@@ -66,18 +60,26 @@ export function mergedPullRequests(log) {
 const fileOf = (location) => (location ?? "").split(":")[0].split("/").pop().split(" ")[0];
 
 // One pull request's comparison: the blocking findings the merge review posted,
-// each with whether the author's Review section names its file.
-export function compare(pr) {
-  const states = (pr.reviews ?? []).map((r) => parseState(r.body)).filter(Boolean);
+// each with whether the author's Review section names its file. Only reviews
+// by `author` (the account the merge review posts as) count: anyone can post a
+// review with the marker on a public repository. A superseded review's
+// findings count (the next review carries them as listed), the review itself
+// is not a round.
+export function compare(pr, author) {
+  // Only a state of the shape the review writes: a body this account posted by
+  // hand, or a truncated one, is not a review.
+  const states = (pr.reviews ?? [])
+    .filter((r) => r.author?.login === author)
+    .map((r) => parseState(r.body))
+    .filter((s) => typeof s?.head === "string" && Array.isArray(s.findings));
   const review = reviewSection(pr.body);
   if (!states.length) return { number: pr.number, title: pr.title, compared: false, why: "no merge review" };
   if (!review) return { number: pr.number, title: pr.title, compared: false, why: "no Review section in the body" };
   const seen = new Set();
   const findings = [];
   for (const s of states) {
-    if (s.superseded) continue;
-    for (const f of s.findings ?? []) {
-      if (f.severity === "low" || f.origin !== "new") continue;
+    for (const f of s.findings) {
+      if (!f || f.severity === "low" || f.origin !== "new") continue;
       const key = `${f.location}|${f.defect}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -85,7 +87,8 @@ export function compare(pr) {
       findings.push({ head: s.head.slice(0, 7), severity: f.severity, location: f.location, defect: f.defect, named: Boolean(file) && review.includes(file) });
     }
   }
-  return { number: pr.number, title: pr.title, compared: true, rounds: states.filter((s) => !s.superseded).length, blocked: states.filter((s) => s.verdict === "blocked" && !s.superseded).length, findings };
+  const rounds = states.filter((s) => !s.superseded);
+  return { number: pr.number, title: pr.title, compared: true, rounds: rounds.length, blocked: rounds.filter((s) => s.verdict === "blocked").length, findings };
 }
 
 export function report(results) {
@@ -105,19 +108,39 @@ export function report(results) {
   return lines.join("\n");
 }
 
-// Reads what one pull request needs, from the cache or GitHub.
+// Reads what one pull request needs, from the cache or GitHub. A cached file
+// that does not parse (a write cut short) is read again from GitHub; the
+// write goes through a rename, so a cut leaves no half file behind.
 function fetchPullRequest(n, { run: r, cacheDir }) {
   const file = join(cacheDir, `${n}.json`);
-  if (existsSync(file)) return JSON.parse(readFileSync(file, "utf8"));
+  if (existsSync(file)) {
+    try {
+      return JSON.parse(readFileSync(file, "utf8"));
+    } catch {}
+  }
   const x = r("gh", ["pr", "view", String(n), "--json", "number,title,body,reviews"]);
   if (!x.ok) throw new Error(`gh pr view ${n} failed: ${x.err.split("\n")[0]}`);
-  const pr = JSON.parse(x.out);
+  let pr;
+  try {
+    pr = JSON.parse(x.out);
+  } catch {
+    throw new Error(`gh pr view ${n} answered no JSON`);
+  }
   mkdirSync(cacheDir, { recursive: true });
-  writeFileSync(file, JSON.stringify(pr));
+  writeFileSync(`${file}.tmp`, JSON.stringify(pr));
+  renameSync(`${file}.tmp`, file);
   return pr;
 }
 
 export function main(argv, { run: r = run, cacheDir = join(ROOT, ".scratch", "harness-lessons") } = {}) {
+  try {
+    return lessons(argv, r, cacheDir);
+  } catch (e) {
+    return { code: 2, stderr: `${e.message}\n` };
+  }
+}
+
+function lessons(argv, r, cacheDir) {
   const at = argv.indexOf("--since");
   let since = at >= 0 ? argv[at + 1] : "";
   if (!since) {
@@ -130,8 +153,13 @@ export function main(argv, { run: r = run, cacheDir = join(ROOT, ".scratch", "ha
   }
   const log = r("git", ["log", "--first-parent", "--merges", "--format=%h %s", `${since}..origin/main`]);
   if (!log.ok) return { code: 2, stderr: `git log failed: ${log.err}\n` };
-  const results = mergedPullRequests(log.out).map((n) => compare(fetchPullRequest(n, { run: r, cacheDir })));
-  return { code: 0, stdout: `${argv.includes("--json") ? JSON.stringify(results, null, 2) : report(results)}\n` };
+  const me = r("gh", ["api", "user", "--jq", ".login"]);
+  if (!me.ok || !me.out) return { code: 2, stderr: `gh api user failed: ${me.err || "no login"}\n` };
+  const results = mergedPullRequests(log.out)
+    .map((n) => fetchPullRequest(n, { run: r, cacheDir }))
+    .filter((pr) => !PASS_SUBJECT.test(pr.title ?? ""))
+    .map((pr) => compare(pr, me.out));
+  return { code: 0, stdout: `${report(results)}\n` };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
