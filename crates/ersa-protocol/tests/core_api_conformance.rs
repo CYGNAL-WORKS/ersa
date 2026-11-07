@@ -99,8 +99,19 @@ fn session() -> Session {
         last_event_seq: Some(41),
         sending: Some(SendPhase::Copying),
         archived: true,
+        pinned: true,
+        section_id: Some("sec-1".into()),
+        last_activity_at: Some("2026-10-31T12:05:00.250Z".into()),
         deleting: Some(Deleting::Failed),
         tile: tile(),
+    }
+}
+
+fn section() -> Section {
+    Section {
+        id: "sec-1".into(),
+        name: "Work".into(),
+        created_at: "2026-10-31T12:00:00Z".into(),
     }
 }
 
@@ -194,6 +205,11 @@ fn result_examples() -> Vec<(Method, Value)> {
         (Method::SessionList, to_value(&vec![session()])),
         (Method::SessionCreate, to_value(&session())),
         (Method::SessionSetArchived, to_value(&session())),
+        (Method::SessionArrange, to_value(&session())),
+        (Method::SectionList, to_value(&vec![section()])),
+        (Method::SectionCreate, to_value(&section())),
+        (Method::SectionRename, to_value(&section())),
+        (Method::SectionRemove, to_value(&section())),
         (
             Method::SessionDelete,
             to_value(&SessionDeleteResult {
@@ -477,6 +493,40 @@ fn params_examples() -> Vec<(Method, Value)> {
             }),
         ),
         (
+            Method::SessionArrange,
+            to_value(&ArrangeParams {
+                id: "s-1".into(),
+                pinned: Some(true),
+                section_id: Some(Some("sec-1".into())),
+            }),
+        ),
+        (
+            Method::SessionArrange,
+            to_value(&ArrangeParams {
+                id: "s-1".into(),
+                pinned: None,
+                section_id: Some(None),
+            }),
+        ),
+        (Method::SectionList, to_value(&Empty {})),
+        (
+            Method::SectionCreate,
+            to_value(&SectionCreateParams {
+                name: "Work".into(),
+            }),
+        ),
+        (
+            Method::SectionRename,
+            to_value(&SectionRenameParams {
+                id: "sec-1".into(),
+                name: "Later".into(),
+            }),
+        ),
+        (
+            Method::SectionRemove,
+            to_value(&IdParams { id: "sec-1".into() }),
+        ),
+        (
             Method::SessionDelete,
             to_value(&SessionDeleteParams {
                 id: "s-1".into(),
@@ -751,4 +801,26 @@ fn typed_values_round_trip() {
         serde_json::from_str::<Host>(&json).expect("deserialize"),
         host()
     );
+}
+
+/// `session.arrange`'s `section_id` has three meanings: left out leaves the
+/// section, `null` is no section, and an id is that section.
+#[test]
+fn arrange_params_tell_a_missing_section_from_a_null_one() {
+    let parse = |value: Value| serde_json::from_value::<ArrangeParams>(value).expect("parses");
+    assert_eq!(parse(json!({ "id": "s-1" })).section_id, None);
+    assert_eq!(
+        parse(json!({ "id": "s-1", "section_id": null })).section_id,
+        Some(None)
+    );
+    assert_eq!(
+        parse(json!({ "id": "s-1", "section_id": "sec-1" })).section_id,
+        Some(Some("sec-1".to_string()))
+    );
+    let null = to_value(&ArrangeParams {
+        id: "s-1".into(),
+        pinned: None,
+        section_id: Some(None),
+    });
+    assert_eq!(null, json!({ "id": "s-1", "section_id": null }));
 }

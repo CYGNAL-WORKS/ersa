@@ -490,6 +490,11 @@ impl AdapterSession for FakeSession {
             // The turn starts and keeps working: nothing more until an interrupt.
             self.inner.lock().unwrap().working = true;
             self.backend(json!({ "t": "working" }));
+        } else if text == "finish" {
+            // A turn that replies and ends, successfully.
+            let id = self.next_id("r");
+            self.backend(json!({ "t": "reply", "id": id, "text": "done" }));
+            self.backend(json!({ "t": "completed" }));
         } else if text == "idle" {
             self.backend(json!({ "t": "idle" }));
         } else if text == "question" {
@@ -631,6 +636,15 @@ impl Projector for FakeProjector {
                     outcome: TurnOutcome::Interrupted,
                     duration_ms: 0,
                     is_error: true,
+                    final_text: None,
+                })]
+            }
+            (Direction::Backend, Some("completed")) => {
+                vec![Event::TurnCompleted(TurnCompleted {
+                    turn: self.turn,
+                    outcome: TurnOutcome::Success,
+                    duration_ms: 0,
+                    is_error: false,
                     final_text: None,
                 })]
             }

@@ -1507,8 +1507,8 @@ async fn archiving_a_running_session_stops_it_and_keeps_it_and_its_workspace() {
 }
 
 /// What `session.set_archived` sets outlives Core, and `session.list`
-/// reports it. This covers `session.set_archived`'s half of R34; what
-/// `session.arrange` sets is not built yet, and its own test will cite R34.
+/// reports it: `session.set_archived`'s half of R34 (`arrangement.rs` has
+/// `session.arrange`'s).
 // verifies: PROTO-CORE-API-R34
 #[tokio::test(flavor = "multi_thread")]
 async fn an_archived_session_is_still_archived_after_core_restarts() {

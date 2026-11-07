@@ -211,7 +211,7 @@ fn normalise(mut value: Value, session_id: &str) -> Value {
             Value::Object(map) => {
                 for (key, field) in map.iter_mut() {
                     match (key.as_str(), &*field) {
-                        ("ts" | "created_at", Value::String(_)) => {
+                        ("ts" | "created_at" | "last_activity_at", Value::String(_)) => {
                             *field = json!("2026-01-01T00:00:00Z")
                         }
                         ("workspace_id", Value::String(_)) => *field = json!("w-replay"),

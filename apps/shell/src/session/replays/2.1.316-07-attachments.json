@@ -1,5 +1,5 @@
 {
-  "ersa_commit": "3bf8dfde372e5e6365a6d7df65b24b23407ed379",
+  "ersa_commit": "58b18487d222af3793feb89bdd05dc39b3d971e9-dirty",
   "notifications": [
     {
       "kind": "notification",
@@ -3569,6 +3569,7 @@
       "id": "s-replay",
       "last_event_seq": 0,
       "permission_mode": "default",
+      "pinned": false,
       "state": "starting",
       "tile": {
         "pending": [],
@@ -3585,8 +3586,10 @@
       "created_at": "2026-01-01T00:00:00Z",
       "host_id": "local",
       "id": "s-replay",
+      "last_activity_at": "2026-01-01T00:00:00Z",
       "last_event_seq": 83,
       "permission_mode": "default",
+      "pinned": false,
       "state": "idle",
       "tile": {
         "context_tokens": 47115,

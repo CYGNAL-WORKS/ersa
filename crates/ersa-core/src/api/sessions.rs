@@ -6,10 +6,11 @@ use std::time::Duration;
 
 use ersa_adapter::{BackendChoices, Direction, PermissionDecision, SessionConfig};
 use ersa_protocol::core_api::{
-    AnswerQuestionParams, Attachment, AttachmentKind, Choice, DecidePermissionParams, Empty,
-    IdParams, InspectParams, Inspected, RawDirection, RawLogEntry, RawLogParams, Session,
-    SessionCreateParams, SessionSendParams, SessionSendResult, SetArchivedParams, SetModeParams,
-    SetTitleParams, SubscribeParams, SubscribeResult, WorkspaceState,
+    AnswerQuestionParams, ArrangeParams, Attachment, AttachmentKind, Choice,
+    DecidePermissionParams, Empty, IdParams, InspectParams, Inspected, RawDirection, RawLogEntry,
+    RawLogParams, Session, SessionCreateParams, SessionSendParams, SessionSendResult,
+    SetArchivedParams, SetModeParams, SetTitleParams, SubscribeParams, SubscribeResult,
+    WorkspaceState,
 };
 use serde_json::Value;
 
@@ -120,6 +121,9 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         permission_mode: (!permission_mode.is_empty()).then(|| permission_mode.clone()),
         archived: false,
         deleting: None,
+        pinned: false,
+        section_id: None,
+        last_activity_at: None,
     };
     let config = SessionConfig {
         cwd: workspace.path,
@@ -191,6 +195,15 @@ pub(super) async fn set_archived(
     Ok(core
         .sessions
         .set_archived(&params.id, params.archived)
+        .await?)
+}
+
+/// `session.arrange`: changes the arrangement fields given and leaves the
+/// others (FLOW-ORGANIZE-SESSIONS).
+pub(super) async fn arrange(core: &Core, params: ArrangeParams) -> Result<Session, ApiError> {
+    Ok(core
+        .sessions
+        .arrange(&params.id, params.pinned, params.section_id)
         .await?)
 }
 

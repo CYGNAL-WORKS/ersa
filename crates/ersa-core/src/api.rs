@@ -10,6 +10,7 @@
 mod delete;
 mod handlers;
 mod lines;
+mod sections;
 pub mod server;
 mod sessions;
 
@@ -124,6 +125,7 @@ impl From<SessionError> for ApiError {
                 ApiError::new(ErrorKind::DeliveryUnknown, message)
             }
             SessionError::Busy(message) => ApiError::invalid_state(message).with_detail("busy"),
+            SessionError::NoSection(id) => ApiError::not_found(format!("no section {id}")),
         }
     }
 }
@@ -310,6 +312,7 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         Method::SessionResume => to_json(sessions::resume(core, parse(params)?).await),
         Method::SessionRemove => to_json(sessions::remove(core, parse(params)?).await),
         Method::SessionSetArchived => to_json(sessions::set_archived(core, parse(params)?).await),
+        Method::SessionArrange => to_json(sessions::arrange(core, parse(params)?).await),
         Method::SessionDelete => to_json(delete::delete(core, parse(params)?).await),
         Method::SessionSend => to_json(sessions::send(core, &conn.peer(), parse(params)?).await),
         Method::SessionInterrupt => to_json(sessions::interrupt(core, parse(params)?).await),
@@ -327,6 +330,10 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         Method::SessionUnsubscribe => to_json(sessions::unsubscribe(&conn.peer(), parse(params)?)),
         Method::SessionRawLog => to_json(sessions::raw_log(core, parse(params)?).await),
         Method::AttachmentInspect => to_json(sessions::inspect(core, parse(params)?).await),
+        Method::SectionList => to_json(sections::list(core, parse(params)?).await),
+        Method::SectionCreate => to_json(sections::create(core, parse(params)?).await),
+        Method::SectionRename => to_json(sections::rename(core, parse(params)?).await),
+        Method::SectionRemove => to_json(sections::remove(core, parse(params)?).await),
 
         // Handled above by `reserved_for`; listed so that adding a method
         // without deciding how to answer it is a compile error.
@@ -367,6 +374,7 @@ pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
                     | Method::SessionRemove
                     // Stops the session first, which waits on its backend.
                     | Method::SessionSetArchived
+                    | Method::SessionArrange
                     // Stops the session, runs git and deletes files.
                     | Method::SessionDelete
                     | Method::SessionSend
@@ -445,6 +453,10 @@ pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Resp
         },
         Some(Method::SessionSetArchived) => match parse(params) {
             Ok(params) => to_json(sessions::set_archived(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionArrange) => match parse(params) {
+            Ok(params) => to_json(sessions::arrange(core, params).await),
             Err((e, _)) => Err(e),
         },
         Some(Method::SessionDelete) => match parse(params) {

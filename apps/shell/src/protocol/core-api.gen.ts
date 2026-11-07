@@ -160,6 +160,12 @@ export type Request =
   | {
       jsonrpc: "2.0";
       id: RequestId;
+      method: "session.arrange";
+      params: SessionArrangeParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
       method: "session.delete";
       params: SessionDeleteParams;
     }
@@ -222,6 +228,30 @@ export type Request =
       id: RequestId;
       method: "session.raw_log";
       params: SessionRawLogParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
+      method: "section.list";
+      params: SectionListParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
+      method: "section.create";
+      params: SectionCreateParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
+      method: "section.rename";
+      params: SectionRenameParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
+      method: "section.remove";
+      params: SectionRemoveParams;
     }
   | {
       jsonrpc: "2.0";
@@ -382,6 +412,10 @@ export type HostStatus = "connected" | "disconnected" | "unknown";
  * Where a send is: checking its attachments, copying them into the session's scratch folder, waiting for a starting backend, or handing the message to the backend.
  */
 export type SendPhase1 = "checking" | "copying" | "starting" | "handing_over";
+/**
+ * An identifier Core issues.
+ */
+export type Id3 = string;
 export type HostListResult = Host[];
 export type ProjectListResult = Project[];
 /**
@@ -395,6 +429,10 @@ export type WorkspaceListResult = Workspace[];
 export type BranchListResult = Branch[];
 export type SessionListResult = Session[];
 export type SessionRawLogResult = RawLogEntry[];
+/**
+ * In the order they were made.
+ */
+export type SectionListResult = Section[];
 export type BackendListResult = BackendInfo[];
 export type ModeListResult = {
   name: string;
@@ -527,6 +565,20 @@ export interface SessionSetArchivedParams {
   archived: boolean;
 }
 /**
+ * Changes the fields given and leaves the others. A session marked deleting answers invalid_state.
+ */
+export interface SessionArrangeParams {
+  id: Id;
+  /**
+   * Pins or unpins the session; left as it was when absent.
+   */
+  pinned?: boolean;
+  /**
+   * Puts the session in this section, or in none when null; left as it was when absent. A section that does not exist answers not_found.
+   */
+  section_id?: Id | null;
+}
+/**
  * The user's Delete: stops the session, deletes its isolated workspace's folder and branch when no other session uses the workspace and the branch holds no commit only it holds, deletes its record from its backend, and removes it. While it runs, requests that would change the session or its workspace answer invalid_state with detail busy.
  */
 export interface SessionDeleteParams {
@@ -596,6 +648,29 @@ export interface SessionRawLogParams {
    * Last raw-log index, inclusive; the end of the log when absent.
    */
   to?: number;
+}
+/**
+ * No fields.
+ */
+export interface SectionListParams {}
+export interface SectionCreateParams {
+  /**
+   * Core trims it and refuses with invalid_params one that is then blank, longer than 80 characters, or another section's, ignoring case.
+   */
+  name: string;
+}
+export interface SectionRenameParams {
+  id: Id;
+  /**
+   * Core trims it and refuses with invalid_params one that is then blank, longer than 80 characters, or another section's, ignoring case.
+   */
+  name: string;
+}
+/**
+ * Removes the section and puts its sessions in no section.
+ */
+export interface SectionRemoveParams {
+  id: Id;
 }
 export interface BackendListParams {
   host_id: Id;
@@ -890,9 +965,26 @@ export interface Session {
    */
   archived: boolean;
   /**
-   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
    */
   deleting?: "running" | "failed";
+}
+/**
+ * A section the user made to group sessions in the rail.
+ */
+export interface Section {
+  id: Id;
+  name: string;
+  created_at: string;
 }
 export interface RawLogEntry {
   index: number;
@@ -1099,7 +1191,16 @@ export interface Session1 {
    */
   archived: boolean;
   /**
-   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
    */
   deleting?: "running" | "failed";
 }
@@ -1135,7 +1236,16 @@ export interface Session2 {
    */
   archived: boolean;
   /**
-   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
    */
   deleting?: "running" | "failed";
 }
@@ -1171,7 +1281,16 @@ export interface Session3 {
    */
   archived: boolean;
   /**
-   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
    */
   deleting?: "running" | "failed";
 }
@@ -1207,7 +1326,16 @@ export interface Session4 {
    */
   archived: boolean;
   /**
-   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
    */
   deleting?: "running" | "failed";
 }
@@ -1243,7 +1371,16 @@ export interface Session5 {
    */
   archived: boolean;
   /**
-   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
    */
   deleting?: "running" | "failed";
 }
@@ -1279,26 +1416,18 @@ export interface Session6 {
    */
   archived: boolean;
   /**
-   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
    */
   deleting?: "running" | "failed";
-}
-export interface SessionDeleteResult {
-  id: Id;
-  /**
-   * Whether this delete took the session's workspace's folder, and its branch unless kept. Its row goes with it once no other session refers to it; a session whose delete kept the files, when the last to leave a workspace whose folder is gone, takes the row.
-   */
-  workspace_deleted: boolean;
-  /**
-   * Whether the workspace's branch was kept because it holds commits no other branch or remote holds, or another worktree has it checked out. False when the workspace stayed.
-   */
-  branch_kept: boolean;
-}
-export interface SessionSendResult {
-  /**
-   * The turn the message starts or joins; absent when Core has not projected the message yet.
-   */
-  turn?: number;
 }
 export interface Session7 {
   id: Id;
@@ -1332,34 +1461,35 @@ export interface Session7 {
    */
   archived: boolean;
   /**
-   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
    */
   deleting?: "running" | "failed";
 }
-export interface AttachmentInspectResult {
-  path: string;
-  name: string;
-  kind: "file" | "image" | "folder";
+export interface SessionDeleteResult {
+  id: Id;
   /**
-   * For a file or image.
+   * Whether this delete took the session's workspace's folder, and its branch unless kept. Its row goes with it once no other session refers to it; a session whose delete kept the files, when the last to leave a workspace whose folder is gone, takes the row.
    */
-  size_bytes?: number;
+  workspace_deleted: boolean;
   /**
-   * A text file's line count, for one of at most 10 MB.
+   * Whether the workspace's branch was kept because it holds commits no other branch or remote holds, or another worktree has it checked out. False when the workspace stayed.
    */
-  lines?: number;
+  branch_kept: boolean;
+}
+export interface SessionSendResult {
   /**
-   * For an image, told by its first bytes.
+   * The turn the message starts or joins; absent when Core has not projected the message yet.
    */
-  media_type?: string;
-  /**
-   * Where a link points.
-   */
-  target?: string;
-  /**
-   * Whether a send would copy it into the workspace's scratch folder: true for a file or folder whose target, resolved as a send resolves it, is outside workspace_id, or for any file or folder given a host_id; false for an image, which goes inline, and for a path inside the workspace.
-   */
-  copied: boolean;
+  turn?: number;
 }
 export interface Session8 {
   id: Id;
@@ -1393,9 +1523,43 @@ export interface Session8 {
    */
   archived: boolean;
   /**
-   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
    */
   deleting?: "running" | "failed";
+}
+export interface AttachmentInspectResult {
+  path: string;
+  name: string;
+  kind: "file" | "image" | "folder";
+  /**
+   * For a file or image.
+   */
+  size_bytes?: number;
+  /**
+   * A text file's line count, for one of at most 10 MB.
+   */
+  lines?: number;
+  /**
+   * For an image, told by its first bytes.
+   */
+  media_type?: string;
+  /**
+   * Where a link points.
+   */
+  target?: string;
+  /**
+   * Whether a send would copy it into the workspace's scratch folder: true for a file or folder whose target, resolved as a send resolves it, is outside workspace_id, or for any file or folder given a host_id; false for an image, which goes inline, and for a path inside the workspace.
+   */
+  copied: boolean;
 }
 export interface Session9 {
   id: Id;
@@ -1429,7 +1593,16 @@ export interface Session9 {
    */
   archived: boolean;
   /**
-   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
    */
   deleting?: "running" | "failed";
 }
@@ -1465,7 +1638,16 @@ export interface Session10 {
    */
   archived: boolean;
   /**
-   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
    */
   deleting?: "running" | "failed";
 }
@@ -1501,7 +1683,61 @@ export interface Session11 {
    */
   archived: boolean;
   /**
-   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
+}
+export interface Session12 {
+  id: Id;
+  workspace_id: Id;
+  host_id: Id;
+  backend: string;
+  /**
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   */
+  model?: string;
+  /**
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   */
+  effort?: string;
+  /**
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
+   */
+  permission_mode: string;
+  mode?: string;
+  title?: string;
+  state: AgentEvents.SessionState["state"];
+  created_at: string;
+  /**
+   * Absent when the session has no events yet.
+   */
+  last_event_seq?: number;
+  tile: Tile;
+  sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
+  /**
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
    */
   deleting?: "running" | "failed";
 }
@@ -1523,6 +1759,30 @@ export interface SessionSubscribeResult {
  * No fields.
  */
 export interface SessionUnsubscribeResult {}
+/**
+ * A section the user made to group sessions in the rail.
+ */
+export interface Section1 {
+  id: Id;
+  name: string;
+  created_at: string;
+}
+/**
+ * A section the user made to group sessions in the rail.
+ */
+export interface Section2 {
+  id: Id;
+  name: string;
+  created_at: string;
+}
+/**
+ * A section the user made to group sessions in the rail.
+ */
+export interface Section3 {
+  id: Id;
+  name: string;
+  created_at: string;
+}
 /**
  * User settings, an open JSON object. Known keys: workspaces.root (string), the directory new worktrees go under.
  */
@@ -1587,11 +1847,15 @@ export type SessionStopResult = Session;
 export type SessionResumeResult = Session;
 export type SessionRemoveResult = Session;
 export type SessionSetArchivedResult = Session;
+export type SessionArrangeResult = Session;
 export type SessionInterruptResult = Session;
 export type SessionDecidePermissionResult = Session;
 export type SessionAnswerQuestionResult = Session;
 export type SessionSetTitleResult = Session;
 export type SessionSetModeResult = Session;
+export type SectionCreateResult = Section;
+export type SectionRenameResult = Section;
+export type SectionRemoveResult = Section;
 
 /** Every Core API method with its params and result types. */
 export interface CoreApiMethods {
@@ -1619,6 +1883,7 @@ export interface CoreApiMethods {
   "session.resume": { params: SessionResumeParams; result: SessionResumeResult };
   "session.remove": { params: SessionRemoveParams; result: SessionRemoveResult };
   "session.set_archived": { params: SessionSetArchivedParams; result: SessionSetArchivedResult };
+  "session.arrange": { params: SessionArrangeParams; result: SessionArrangeResult };
   "session.delete": { params: SessionDeleteParams; result: SessionDeleteResult };
   "session.send": { params: SessionSendParams; result: SessionSendResult };
   "session.interrupt": { params: SessionInterruptParams; result: SessionInterruptResult };
@@ -1630,6 +1895,10 @@ export interface CoreApiMethods {
   "session.subscribe": { params: SessionSubscribeParams; result: SessionSubscribeResult };
   "session.unsubscribe": { params: SessionUnsubscribeParams; result: SessionUnsubscribeResult };
   "session.raw_log": { params: SessionRawLogParams; result: SessionRawLogResult };
+  "section.list": { params: SectionListParams; result: SectionListResult };
+  "section.create": { params: SectionCreateParams; result: SectionCreateResult };
+  "section.rename": { params: SectionRenameParams; result: SectionRenameResult };
+  "section.remove": { params: SectionRemoveParams; result: SectionRemoveResult };
   "backend.list": { params: BackendListParams; result: BackendListResult };
   "mode.list": { params: ModeListParams; result: ModeListResult };
   "settings.get": { params: SettingsGetParams; result: SettingsGetResult };

@@ -87,6 +87,7 @@ methods! {
     SessionResume => "session.resume",
     SessionRemove => "session.remove",
     SessionSetArchived => "session.set_archived",
+    SessionArrange => "session.arrange",
     SessionDelete => "session.delete",
     SessionSend => "session.send",
     SessionInterrupt => "session.interrupt",
@@ -98,6 +99,10 @@ methods! {
     SessionSubscribe => "session.subscribe",
     SessionUnsubscribe => "session.unsubscribe",
     SessionRawLog => "session.raw_log",
+    SectionList => "section.list",
+    SectionCreate => "section.create",
+    SectionRename => "section.rename",
+    SectionRemove => "section.remove",
     BackendList => "backend.list",
     ModeList => "mode.list",
     SettingsGet => "settings.get",
@@ -548,6 +553,16 @@ pub struct Session {
     /// messages until it is unarchived, or until Core accepts a resume of it.
     /// Core stores it (ADR 0026).
     pub archived: bool,
+    /// Whether the user pinned the session (ADR 0026).
+    pub pinned: bool,
+    /// The section the user put the session in; absent when in none
+    /// (ADR 0026).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section_id: Option<String>,
+    /// RFC 3339: when the session's latest turn ended, which Core records as
+    /// a turn ends and at no other time; absent until a turn has ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity_at: Option<String>,
     /// Absent unless the session is marked deleting: `running` while Core
     /// works on its delete, `failed` after a step failed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -771,6 +786,36 @@ pub struct SetArchivedParams {
     pub archived: bool,
 }
 
+/// `session.arrange` params: each field given is changed, and each left out
+/// is left as it was.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArrangeParams {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned: Option<bool>,
+    /// Three ways: left out (`None`) leaves the section as it was, `null`
+    /// (`Some(None)`) puts the session in no section, and an id
+    /// (`Some(Some(id))`) puts it in that section. Plain serde reads both a
+    /// missing field and `null` as `None`, so [`present`] tells them apart.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub section_id: Option<Option<String>>,
+}
+
+/// Reads a field that is present, `null` included, as `Some`. Used with
+/// `#[serde(default)]`, which gives `None` when the field is missing.
+fn present<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
 /// `session.delete` params: the user's Delete.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -863,6 +908,34 @@ pub struct RawLogEntry {
 pub enum RawDirection {
     Backend,
     Host,
+}
+
+// ---------------------------------------------------------------------------
+// Sections
+
+/// A section the user made, to group sessions in the rail (ADR 0026).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Section {
+    pub id: String,
+    pub name: String,
+    /// RFC 3339; `section.list` lists sections in this order.
+    pub created_at: String,
+}
+
+/// `section.create` params.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SectionCreateParams {
+    pub name: String,
+}
+
+/// `section.rename` params.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SectionRenameParams {
+    pub id: String,
+    pub name: String,
 }
 
 // ---------------------------------------------------------------------------

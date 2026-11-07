@@ -571,6 +571,7 @@ async fn a_failed_step_reads_failed_and_a_fresh_token_finishes_it() {
             "session.set_archived",
             json!({ "id": id, "archived": true }),
         ),
+        ("session.arrange", json!({ "id": id, "pinned": true })),
         ("session.remove", json!({ "id": id })),
     ] {
         let error = client.error(method, params).await;
