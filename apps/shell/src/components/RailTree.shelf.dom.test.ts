@@ -32,6 +32,7 @@ const session = (id: string, title: string, created_at: string, pending: Session
   permission_mode: "default",
   state: pending.length > 0 ? "waiting_user" : "idle",
   created_at,
+  archived: false,
   tile: { state: pending.length > 0 ? "waiting_user" : "idle", pending },
 });
 

@@ -18,6 +18,7 @@ const session = (tile: Partial<Tile> = {}, rest: Partial<Session> = {}): Session
   title: "Fix the build",
   state: tile.state ?? "running",
   created_at: "2026-11-01T09:00:00Z",
+  archived: false,
   tile: { state: "running", pending: [], ...tile },
   ...rest,
 });
