@@ -673,3 +673,32 @@ async fn without_git_s_record_the_token_follows_the_files_left_and_the_branch() 
     assert_eq!(counts(&committed), [3, 0, 1, 0, 0]);
     expect_new(&committed);
 }
+
+// cites PROTO-CORE-API-R46 once planning PR 245 adds it
+#[tokio::test(flavor = "multi_thread")]
+async fn without_git_s_record_the_token_follows_ignored_entries_and_nested_repositories() {
+    let (core, mut client) = setup().await;
+    let repo = repo_with_ignores(core.dir.path());
+    let (workspace, folder) = workspace_of(&mut client, &repo).await;
+    let nested = folder.join("nested");
+    git_repo(&nested);
+    let name = folder.file_name().unwrap();
+    std::fs::remove_dir_all(repo.join(".git").join("worktrees").join(name)).unwrap();
+    let first = changes(&mut client, &workspace).await;
+    assert_eq!(first["unrecorded"], json!(true), "{first}");
+    // README.md, .gitignore, old.txt, and the nested repository, whose
+    // commit is on no remote.
+    assert_eq!(counts(&first), [4, 0, 0, 0, 0], "{first}");
+
+    // An ignored file added.
+    write(&folder.join("x.log"), "x\n");
+    let ignored = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&ignored), [4, 1, 0, 0, 0], "{ignored}");
+    assert_ne!(ignored["token"], first["token"]);
+
+    // A new commit inside the nested repository: no count changes.
+    commit(&nested, "more");
+    let committed = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&committed), [4, 1, 0, 0, 0], "{committed}");
+    assert_ne!(committed["token"], ignored["token"]);
+}
