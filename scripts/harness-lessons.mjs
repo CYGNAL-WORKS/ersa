@@ -115,7 +115,8 @@ function fetchPullRequest(n, { run: r, cacheDir }) {
   const file = join(cacheDir, `${n}.json`);
   if (existsSync(file)) {
     try {
-      return JSON.parse(readFileSync(file, "utf8"));
+      const cached = JSON.parse(readFileSync(file, "utf8"));
+      if (cached && typeof cached === "object" && !Array.isArray(cached)) return cached;
     } catch {}
   }
   const x = r("gh", ["pr", "view", String(n), "--json", "number,title,body,reviews"]);
