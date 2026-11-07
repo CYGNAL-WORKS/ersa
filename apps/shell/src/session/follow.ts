@@ -41,8 +41,13 @@ export interface Follower {
   attached(): void;
   /** The window lost its connection to Core. */
   detached(): void;
-  /** Sends the user's message. Resolves true once Core accepted it. */
+  /** Sends the user's message. Resolves true once Core accepted it; false when it was refused or stopped. */
   send(text: string): Promise<boolean>;
+  /**
+   * Stop (FLOW-SEND-MESSAGE-R03): cancels a message not yet handed to the agent, which stays with the user and is not
+   * refused, or else interrupts the turn the agent is working on.
+   */
+  interrupt(): Promise<void>;
   /** Stops following; `update` is never called again. */
   stop(): void;
 }
@@ -55,6 +60,8 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
   // The last event before a gap this follower already resubscribed for, so
   // one gap costs one resubscribe, not one per event behind it.
   let resumedAt: number | undefined;
+  // Stop was chosen while a message was on its way: its failure is the stop's doing, not a refusal.
+  let stopping = false;
 
   const set = (change: (view: SessionView) => SessionView) => {
     if (stopped) return;
@@ -173,15 +180,25 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
     },
 
     async send(text) {
+      stopping = false;
       set((v) => ({ ...v, message: { state: "sending" } }));
       try {
         await client.call("session.send", { id, text });
         set((v) => ({ ...v, message: undefined }));
         return true;
       } catch (error) {
-        set((v) => ({ ...v, message: { state: "failed", message: describeError(error) } }));
+        const stopped = stopping;
+        set((v) => ({ ...v, message: stopped ? undefined : { state: "failed", message: describeError(error) } }));
         return false;
+      } finally {
+        stopping = false;
       }
+    },
+
+    async interrupt() {
+      if (view.message?.state === "sending") stopping = true;
+      // Best effort: a turn that ended meanwhile, or a lost connection, leaves nothing to stop.
+      await client.call("session.interrupt", { id }).catch(() => {});
     },
 
     stop() {

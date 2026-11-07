@@ -33,6 +33,8 @@ export type StageAction =
   | { type: "showNewest"; id: string }
   | { type: "sending" }
   | { type: "failed"; message: string }
+  /** Stop ended the start before the message reached the agent: the screen stays, its message with it, and says nothing. */
+  | { type: "stopped" }
   | { type: "started"; id: string; text: string; firstSend?: FirstSendFailure }
   /** The window now follows session `id`, so its transcript can show. */
   | { type: "followed"; id: string };
@@ -68,6 +70,8 @@ export function stage(state: StageState, action: StageAction): StageState {
       return state.activeId === undefined && state.starting === undefined ? { ...state, activeId: action.id } : state;
     case "sending":
       return { ...state, starting: { state: "sending" } };
+    case "stopped":
+      return { ...state, starting: undefined };
     case "failed":
       // The screen stays as it is, so its composer keeps the message (FLOW-NEW-SESSION-R08).
       return { ...state, starting: { state: "failed", message: action.message } };

@@ -271,3 +271,35 @@ describe("follow", () => {
     expect(seen.length).toBe(before);
   });
 });
+
+describe("stop", () => {
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("cancels a message still on its way: the send answers false, with no refusal shown", async () => {
+    let refuse: (error: BridgeError) => void = () => {};
+    const { follower, calls, last } = following({
+      "session.send": () => new Promise((_, reject) => (refuse = reject)),
+      "session.interrupt": () => Promise.resolve({}),
+    });
+    const sent = follower.send("hello");
+    await settle();
+    expect(last().message).toEqual({ state: "sending" });
+    await follower.interrupt();
+    expect(calls.at(-1)).toEqual({ method: "session.interrupt", params: { id: "s-replay" } });
+    // Core answers the canceled send with an error.
+    refuse({ kind: "rpc", error: { code: -32000, message: "the message was stopped before it was sent", data: { kind: "invalid_state" } } } as never);
+    expect(await sent).toBe(false);
+    expect(last().message).toBeUndefined();
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("interrupts the turn when no message is on its way, and a later refusal still shows", async () => {
+    const { follower, calls, last } = following({
+      "session.interrupt": () => Promise.resolve({}),
+      "session.send": () => Promise.reject(replayRefusal("session.send")),
+    });
+    await follower.interrupt();
+    expect(calls.at(-1)).toEqual({ method: "session.interrupt", params: { id: "s-replay" } });
+    expect(await follower.send("hello")).toBe(false);
+    expect(last().message).toEqual({ state: "failed", message: "the session is a replay of a recording and cannot change" });
+  });
+});
