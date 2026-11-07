@@ -141,7 +141,7 @@ async fn a_record_already_gone_counts_as_deleted_and_its_folder_left_behind_goes
     assert!(dir.join(format!("{OTHER}.jsonl")).exists());
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R32
+// verifies: PROTO-CLAUDE-CODE-STREAM-R37
 #[tokio::test]
 async fn a_session_another_process_has_open_is_refused_with_its_pid_and_nothing_deleted() {
     let home = home();
@@ -157,7 +157,7 @@ async fn a_session_another_process_has_open_is_refused_with_its_pid_and_nothing_
     assert_eq!(files(home.path()), before);
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R32
+// verifies: PROTO-CLAUDE-CODE-STREAM-R37
 #[tokio::test]
 async fn a_registry_that_cannot_say_refuses_and_deletes_nothing() {
     let home = home();
