@@ -488,6 +488,11 @@ impl RecordProjector {
 /// on the stream (Ersa sends them, and does not ask for them back), so the
 /// record is where they come from.
 fn user_events(user: RecordUser) -> Vec<Event> {
+    // The CLI's note of where it cached an attached image is not a message:
+    // no events, so the entry passes through (fixture 2.1.316/07).
+    if user.is_meta == Some(true) && names_cached_images(&user.message.content) {
+        return Vec::new();
+    }
     let from_cli = user.is_from_cli();
     let content = user.message.content;
     let results = tool_result_events(content.clone());
@@ -516,6 +521,28 @@ fn user_events(user: RecordUser) -> Vec<Event> {
             peer: None,
             attachments,
         })],
+    }
+}
+
+/// Whether `content` is only the CLI's note of where it cached attached
+/// images: text alone, every line of it `[Image: source: <path>]`. A note
+/// with anything else in it is still shown.
+fn names_cached_images(content: &MessageContent) -> bool {
+    let cached = |text: &str| {
+        !text.is_empty()
+            && text
+                .lines()
+                .all(|line| line.starts_with("[Image: source: ") && line.ends_with(']'))
+    };
+    match content {
+        MessageContent::Text(text) => cached(text),
+        MessageContent::Blocks(blocks) => {
+            !blocks.is_empty()
+                && blocks.iter().all(|block| match block {
+                    crate::wire::ContentBlock::Text { text, .. } => cached(text),
+                    _ => false,
+                })
+        }
     }
 }
 
