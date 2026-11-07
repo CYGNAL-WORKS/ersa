@@ -243,6 +243,16 @@ pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspec
     }
     let images = core.sessions.image_types();
     let path = params.path;
+    let workspace = match params.workspace_id {
+        Some(id) => Some(
+            core.store
+                .workspace(id.clone())
+                .await?
+                .ok_or_else(|| ApiError::not_found(format!("no workspace {id}")))?
+                .path,
+        ),
+        None => None,
+    };
     let place = INSPECTING.try_acquire().map_err(|_| {
         ApiError::invalid_params(
             "too many paths asked about are not answering; try again once they do",
@@ -252,7 +262,14 @@ pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspec
     // thread, never the request, which is answered at the limit.
     let job = tokio::task::spawn_blocking(move || {
         let _place = place;
-        attachments::inspect(&path, &images)
+        let mut inspected = attachments::inspect(&path, &images)?;
+        // An image goes inline, never copied.
+        if let Some(workspace) = workspace
+            && inspected.kind != AttachmentKind::Image
+        {
+            inspected.copied = attachments::copies(&path, std::path::Path::new(&workspace));
+        }
+        Ok(inspected)
     });
     match tokio::time::timeout(INSPECT_LIMIT, job).await {
         Ok(Ok(Ok(inspected))) => Ok(inspected),

@@ -8,5 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-07 PROTO-CORE-API (attachment.inspect), FLOW-SEND-MESSAGE-R14: the composer can't tell from a path's text whether sending copies it. Core judges the canonical path, through links, junctions and `..`, and a link's raw `target` can be relative. So `attachment.inspect` now takes an optional `workspace_id` and, with it, answers `copied` (boolean, absent for an image, which goes inline), judged by the same rule `session.send` uses. The composer shows the "will be copied" note from that field alone, and `target` still means where a link points. The brief can add both fields to attachment.inspect.
 
 ## Resolved recently (optional, trimmed in planning passes)

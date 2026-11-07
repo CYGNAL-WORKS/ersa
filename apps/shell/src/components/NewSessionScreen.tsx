@@ -40,7 +40,9 @@ interface NewSessionScreenProps {
   /** Starts the session with the first message; resolves true once it has started. */
   onStart: (text: string, values: SessionValues, attachments: readonly Attached[]) => Promise<boolean>;
   /** Opens the system's dialog for files, images or a folder and reads each path picked (FLOW-SEND-MESSAGE-R07). */
-  onAttach?: (what: AttachWhat) => Promise<Attached[]>;
+  onAttach?: (what: AttachWhat, workspace: string | undefined) => Promise<Attached[]>;
+  /** Each project's root workspace, by project id: the workspace a session in the project folder runs in. */
+  rootWorkspaces?: Readonly<Record<string, string>>;
   starting?: Sending;
   /**
    * Opens the system's folder dialog on the local host and finds whether the folder picked is already a project
@@ -249,6 +251,10 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   // A new workspace starts from the base branch the chip shows: the one chosen, else the default (R21, R29).
   const base = chosen.workspace === "isolated" && branches?.state === "read" ? baseFor(branches.branches, wanted.base) : undefined;
   const values: SessionValues = base === undefined ? chosen : { ...chosen, base };
+  // Attachments are judged against the project's root workspace, whichever is chosen, so choosing the project folder
+  // after attaching still knows what is copied. A new isolated workspace is not made yet: it holds nothing (R14).
+  const rootWorkspace = project ? props.rootWorkspaces?.[project.id] : undefined;
+  const attachTo = values.workspace === "root" ? rootWorkspace : undefined;
 
   const onChoose = (key: ControlKey, id: string) => {
     if (key === "host") {
@@ -317,9 +323,8 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           sending={starting}
           onStop={props.onStop}
           onWrite={hold}
-          onAttach={props.onAttach}
-          // A new isolated workspace is not made yet, so it holds nothing; the root workspace is the project's folder.
-          workspace={project && values.workspace === "root" ? project.path : undefined}
+          onAttach={props.onAttach && ((what) => props.onAttach?.(what, rootWorkspace) ?? Promise.resolve([]))}
+          workspace={attachTo}
           onSend={(text, attachments) => {
             hold();
             // With no project, sending opens the folder dialog and the message stays for the user to send (R19).

@@ -293,6 +293,10 @@ export type Attachment =
       data: string;
     };
 /**
+ * An identifier Core issues.
+ */
+export type Id1 = string;
+/**
  * Core's answer to one request. Validate `result` against the `<method>.result` definition of the request's method.
  */
 export type Response =
@@ -500,6 +504,7 @@ export interface SessionInterruptParams {
 export interface AttachmentInspectParams {
   host_id: Id;
   path: string;
+  workspace_id?: Id1;
 }
 export interface SessionDecidePermissionParams {
   id: Id;
@@ -1136,6 +1141,10 @@ export interface AttachmentInspectResult {
    * Where a link points.
    */
   target?: string;
+  /**
+   * With workspace_id: whether session.send would copy it into the session's scratch folder, judged as session.send judges it. Absent for an image, which goes inline.
+   */
+  copied?: boolean;
 }
 export interface Session7 {
   id: Id;

@@ -2304,6 +2304,10 @@
         "path": {
           "type": "string",
           "minLength": 1
+        },
+        "workspace_id": {
+          "$ref": "#/$defs/id",
+          "description": "The workspace the attachment is for: with it, the result says whether sending would copy the path."
         }
       }
     },
@@ -2346,6 +2350,10 @@
         "target": {
           "type": "string",
           "description": "Where a link points."
+        },
+        "copied": {
+          "type": "boolean",
+          "description": "With workspace_id: whether session.send would copy it into the session's scratch folder, judged as session.send judges it. Absent for an image, which goes inline."
         }
       }
     },

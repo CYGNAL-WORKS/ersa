@@ -326,7 +326,7 @@ fn check(
             if folder && workspace.starts_with(&resolved) {
                 return Err(reason(format!("{path} holds the session's workspace")));
             }
-            if let Ok(inside) = resolved.strip_prefix(workspace) {
+            if let Some(inside) = within(&resolved, workspace) {
                 let path = relative(inside);
                 return Ok(Checked::Ready(if folder {
                     OutgoingAttachment::Folder { path }
@@ -753,6 +753,22 @@ pub fn sniff_image(bytes: &[u8], media_types: &[&'static str]) -> Option<&'stati
     media_types.iter().copied().find(|&t| t == kind)
 }
 
+/// Where `resolved` lies in `workspace`, both canonical, or `None` when it
+/// lies outside it and sending copies it (PROTO-CORE-API, Turns and
+/// attachments): the one rule `session.send` and `attachment.inspect` share.
+fn within<'a>(resolved: &'a Path, workspace: &Path) -> Option<&'a Path> {
+    resolved.strip_prefix(workspace).ok()
+}
+
+/// Whether sending the file or folder at `path` into `workspace` copies it:
+/// whether its canonical path, through every link and junction on the way,
+/// lies outside the workspace's. `None` when either can't be resolved.
+pub fn copies(path: &str, workspace: &Path) -> Option<bool> {
+    let resolved = fs::canonicalize(named_path(path).ok()?).ok()?;
+    let workspace = fs::canonicalize(workspace).ok()?;
+    Some(within(&resolved, &workspace).is_none())
+}
+
 /// Why `attachment.inspect` can't answer.
 #[derive(Debug, PartialEq, Eq)]
 pub enum InspectError {
@@ -801,6 +817,7 @@ pub fn inspect(path: &str, media_types: &[&'static str]) -> Result<Inspected, In
         lines: None,
         media_type: None,
         target,
+        copied: None,
     };
     if meta.is_dir() {
         return Ok(inspected);
