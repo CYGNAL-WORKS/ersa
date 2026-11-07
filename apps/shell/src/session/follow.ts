@@ -32,6 +32,11 @@ export interface SessionView {
     | { state: "failed"; message: string; gap?: true };
   /** The composer's message, while it is on its way or after it was refused. */
   message?: Sending;
+  /**
+   * Core accepted the message, and its turn has not shown on the subscription yet: Core can answer the send before
+   * the turn's events reach the window, and stop stays offered meanwhile (FLOW-SEND-MESSAGE-R03, R04).
+   */
+  turnPending?: boolean;
 }
 
 export interface Follower {
@@ -62,6 +67,8 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
   let resumedAt: number | undefined;
   // Stop was chosen while a message was on its way: its failure is the stop's doing, not a refusal.
   let stopping = false;
+  // A turn showed on the subscription since the latest send began, so its answer needs no pending turn.
+  let turnSeen = false;
 
   const set = (change: (view: SessionView) => SessionView) => {
     if (stopped) return;
@@ -168,7 +175,11 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         if (transcript === v.transcript) return v;
         // The missing event arrived after all: the stream is live again.
         const stream = v.stream.state === "failed" && v.stream.gap ? { state: "live" as const } : v.stream;
-        return { ...v, transcript, stream };
+        // The turn the send started has shown: the transcript says whether it still works.
+        const type = envelope.event?.type;
+        const turned = type === "turn.started" || type === "turn.completed" || type === "session.ended";
+        if (turned) turnSeen = true;
+        return { ...v, transcript, stream, turnPending: turned ? undefined : v.turnPending };
       });
     },
 
@@ -181,10 +192,12 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
 
     async send(text) {
       stopping = false;
+      turnSeen = false;
       set((v) => ({ ...v, message: { state: "sending" } }));
       try {
         await client.call("session.send", { id, text });
-        set((v) => ({ ...v, message: undefined }));
+        const pending = !turnSeen;
+        set((v) => ({ ...v, message: undefined, turnPending: pending || undefined }));
         return true;
       } catch (error) {
         // Only Core's cancel, answered as an invalid state, is the stop's doing; any other failure is still shown.

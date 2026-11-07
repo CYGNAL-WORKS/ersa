@@ -339,3 +339,30 @@ describe("a stop that never reached Core", () => {
     expect(last().message).toEqual({ state: "failed", message: "the session is a replay of a recording and cannot change" });
   });
 });
+
+describe("a turn Core has not shown yet", () => {
+  const turnStarted = (seq: number) =>
+    ({ v: EVENT_VERSION, session_id: "s-replay", seq, ts: "2026-01-01T00:00:00Z", source: { input: "backend" }, event: { type: "turn.started", turn: 1, trigger: "user" } }) as never;
+
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("keeps stop offered after Core accepts the message until the turn shows", async () => {
+    const { follower, last } = following({ "session.send": () => Promise.resolve({ turn: 1 }) });
+    expect(await follower.send("hello")).toBe(true);
+    expect(last().turnPending).toBe(true);
+    follower.receive(turnStarted(0));
+    expect(last().turnPending).toBeUndefined();
+    expect(last().transcript.working).toBe(true);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("leaves nothing pending when the turn showed before Core answered", async () => {
+    let accept: (answer: unknown) => void = () => {};
+    const { follower, last } = following({ "session.send": () => new Promise((r) => (accept = r)) });
+    const sent = follower.send("hello");
+    await settle();
+    follower.receive(turnStarted(0));
+    accept({ turn: 1 });
+    expect(await sent).toBe(true);
+    expect(last().turnPending).toBeUndefined();
+  });
+});
