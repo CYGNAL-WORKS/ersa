@@ -35,7 +35,7 @@ An attachment is a file, an image or a folder that goes with a message. The user
 - ~~**FLOW-SEND-MESSAGE-R14**~~: retired 2026-11-07 (a file or folder is judged by its target), replaced by R17.
 - **FLOW-SEND-MESSAGE-R15**: When Ersa can't tell whether a message reached the agent (the session was lost mid-send, or the send got no answer), the composer shall say so above its box and keep the message, and shall not say it failed.
 - **FLOW-SEND-MESSAGE-R16**: While a message is on its way to the agent, the composer shall show where it is: how far its attachments are copied, or that the backend is starting.
-- **FLOW-SEND-MESSAGE-R17**: Before the message is sent, a file or folder whose target is outside the session's workspace and does not hold it shall say that it will be copied into the workspace, and where.
+- **FLOW-SEND-MESSAGE-R17**: Before the message is sent, a file or folder whose target is outside the session's workspace shall say that it will be copied into the workspace, and where.
 
 ## Verification
 
