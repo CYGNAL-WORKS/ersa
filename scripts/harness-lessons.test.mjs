@@ -110,6 +110,7 @@ test("main finds the last pass, reads each pull request once and keeps the answe
 test("a cached file that does not parse is read again from GitHub; a gh answer that is not JSON, or a gh failure, ends the run with its reason", () => {
   const cacheDir = scratch();
   writeFileSync(join(cacheDir, "9.json"), '{"number": 9, "title": "Ni');
+  writeFileSync(join(cacheDir, "9.json.tmp"), "[]");
   let answer = { ok: true, out: JSON.stringify({ number: 9, title: "Nine", body: body("x"), reviews: [] }), err: "" };
   const run = (cmd, args) => {
     if (cmd === "git" && args[0] === "log") return { ok: true, out: "abc Merge pull request #9 from o/x", err: "" };
@@ -121,7 +122,9 @@ test("a cached file that does not parse is read again from GitHub; a gh answer t
   assert.equal(got.code, 0, got.stderr);
   assert.match(got.stdout, /#9 Nine: not compared \(no merge review\)/);
   assert.deepEqual(JSON.parse(readFileSync(join(cacheDir, "9.json"), "utf8")).title, "Nine", "the torn file is replaced");
-  assert.deepEqual(readdirSync(cacheDir), ["9.json"], "no half-written file is left");
+  assert.deepEqual(readdirSync(cacheDir), ["9.json"], "no half-written file is left; a stale .tmp is replaced");
+  writeFileSync(join(cacheDir, "9.json"), "null");
+  assert.equal(main(["--since", "abc"], { run, cacheDir }).code, 0, "a cached value that is not an object is read again");
   rmSync(join(cacheDir, "9.json"));
   answer = { ok: true, out: "", err: "" };
   assert.match(main(["--since", "abc"], { run, cacheDir }).stderr, /gh pr view 9 answered no JSON/);
