@@ -24,7 +24,7 @@
 
 use ersa_adapter::{OpenElsewhere, RecordDeletion};
 use ersa_protocol::core_api::{
-    ErrorKind, SessionDeleteParams, SessionDeleteResult, Workspace, WorkspaceKind,
+    SessionDeleteParams, SessionDeleteResult, Workspace, WorkspaceKind,
 };
 
 use super::{ApiError, handlers};
@@ -38,8 +38,6 @@ pub(super) async fn delete(
 ) -> Result<SessionDeleteResult, ApiError> {
     let id = params.id;
     let row = core.sessions.row(&id)?;
-    // Refused before anything is claimed while it starts or works.
-    core.sessions.check_deletable(&id)?;
     let workspace = core
         .store
         .workspace(row.workspace_id.clone())
@@ -57,15 +55,17 @@ pub(super) async fn delete(
         }
         (false, _) => String::new(),
     };
-    let session_transport = core.session_transport_for(&row.host_id).ok_or_else(|| {
-        ApiError::new(
-            ErrorKind::TransportError,
-            format!("host {} cannot be reached", row.host_id),
-        )
-    })?;
+    let session_transport = core
+        .session_transport_for(&row.host_id)
+        .ok_or_else(|| handlers::unreachable_host(&row.host_id))?;
 
     // (1) Held to the end of this function: every way out releases it.
     let _claim = core.sessions.claim_workspace(&workspace.id, &id)?;
+    // Refused while it starts or works. Checked once the claim is held, so
+    // a send that arrives after it is refused `busy` and one that arrived
+    // before is seen here; the refusal releases the claim, having changed
+    // nothing.
+    core.sessions.check_deletable(&id)?;
 
     // (2) A stop that fails or times out ends the delete with its error.
     core.sessions.stop(&id).await?;
@@ -142,14 +142,36 @@ async fn finish(
         }
         Err(e) => return Err(e.into()),
     }
+    // The workspace's row goes when its files went, or when an earlier
+    // delete of another session in it took them (this one's record kept
+    // them, since it shared the workspace then); in either case only once
+    // no session refers to it.
+    let folder_gone = !files && !folder_exists(&workspace.path).await;
+    let isolated = workspace.kind == WorkspaceKind::Isolated;
     core.sessions
-        .finish_delete(id, files.then(|| workspace.id.clone()))
+        .finish_delete(
+            id,
+            (isolated && (files || folder_gone)).then(|| workspace.id.clone()),
+        )
         .await?;
     Ok(SessionDeleteResult {
         id: id.to_string(),
         workspace_deleted: files,
         branch_kept,
     })
+}
+
+/// Whether anything is at `path`; a folder Core may not look into, or that
+/// does not answer within five seconds, counts as there, so its row is kept.
+async fn folder_exists(path: &str) -> bool {
+    let path = path.to_string();
+    let look = tokio::task::spawn_blocking(move || {
+        std::path::Path::new(&path).try_exists().unwrap_or(true)
+    });
+    !matches!(
+        tokio::time::timeout(std::time::Duration::from_secs(5), look).await,
+        Ok(Ok(false))
+    )
 }
 
 /// The refusal for a session another process has open, or may have.
