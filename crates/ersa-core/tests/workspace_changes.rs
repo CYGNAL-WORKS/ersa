@@ -723,11 +723,12 @@ async fn other_requests_on_the_connection_never_wait_for_it() {
     let quick = client.request("session.list", json!({})).await;
     let listed = client.response(quick).await;
     assert!(listed.get("result").is_some(), "{listed:#}");
-    let quick_took = started.elapsed();
+    // Nothing arrived ahead of session.list's answer: workspace.changes'
+    // answer, had it come first, would be waiting here.
+    assert_eq!(client.responses_waiting(), 0);
     let counted = client.response(slow).await;
     assert!(counted.get("result").is_some(), "{counted:#}");
+    // The slow one really was slow.
     let slow_took = started.elapsed();
-    // The slow one really was slow, and the other did not wait for it.
     assert!(slow_took >= Duration::from_secs(4), "{slow_took:?}");
-    assert!(quick_took < Duration::from_secs(2), "{quick_took:?}");
 }
