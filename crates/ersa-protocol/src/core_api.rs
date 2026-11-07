@@ -979,6 +979,10 @@ pub struct SendProgressParams {
 pub struct SessionTileParams {
     pub session_id: String,
     pub tile: Tile,
+    /// The session's `last_activity_at` as `session.list` has it, so the
+    /// rail learns when a turn ends without reading the list again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity_at: Option<String>,
 }
 
 /// `host.status` params.

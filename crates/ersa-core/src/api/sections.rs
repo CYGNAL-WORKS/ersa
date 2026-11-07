@@ -40,12 +40,17 @@ pub(super) async fn remove(core: &Core, params: IdParams) -> Result<Section, Api
         .ok_or_else(|| ApiError::not_found(format!("no section {}", params.id)))
 }
 
-/// The name trimmed, and its key: the name as sections are compared,
-/// ignoring case. Refuses a name that is then blank or longer than 80
-/// characters (FLOW-ORGANIZE-SESSIONS-R06). Characters, not bytes: a name
-/// in an accented or non-Latin script is as long as it reads.
+/// The name as one line, as a session's title is taken, and its key: the
+/// name as sections are compared, ignoring case. Refuses a name holding a
+/// control character other than spacing, and one that is then blank or
+/// longer than 80 characters (FLOW-ORGANIZE-SESSIONS-R06). Characters, not
+/// bytes: a name in an accented or non-Latin script is as long as it reads.
 fn checked_name(name: &str) -> Result<(String, String), ApiError> {
-    let name = name.trim();
+    let Some(name) = super::sessions::one_line(name) else {
+        return Err(ApiError::invalid_params(
+            "a section's name is one line, without control characters",
+        ));
+    };
     if name.is_empty() {
         return Err(ApiError::invalid_params("a section's name cannot be blank"));
     }
@@ -55,7 +60,8 @@ fn checked_name(name: &str) -> Result<(String, String), ApiError> {
         )));
     }
     // `to_lowercase` folds case beyond ASCII ("É" and "é" are one name).
-    Ok((name.to_string(), name.to_lowercase()))
+    let key = name.to_lowercase();
+    Ok((name, key))
 }
 
 /// The store refuses a name another section has, ignoring case, as a
