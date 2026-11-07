@@ -8,8 +8,8 @@ use ersa_adapter::{BackendChoices, Direction, PermissionDecision, SessionConfig}
 use ersa_protocol::core_api::{
     AnswerQuestionParams, Attachment, AttachmentKind, Choice, DecidePermissionParams, Empty,
     IdParams, InspectParams, Inspected, RawDirection, RawLogEntry, RawLogParams, Session,
-    SessionCreateParams, SessionSendParams, SessionSendResult, SetModeParams, SetTitleParams,
-    SubscribeParams, SubscribeResult, WorkspaceState,
+    SessionCreateParams, SessionSendParams, SessionSendResult, SetArchivedParams, SetModeParams,
+    SetTitleParams, SubscribeParams, SubscribeResult, WorkspaceState,
 };
 use serde_json::Value;
 
@@ -118,6 +118,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         model: params.model.clone(),
         effort: params.effort.clone(),
         permission_mode: (!permission_mode.is_empty()).then(|| permission_mode.clone()),
+        archived: false,
     };
     let config = SessionConfig {
         cwd: workspace.path,
@@ -170,11 +171,26 @@ pub(super) async fn start(core: &Core, params: IdParams) -> Result<Session, ApiE
     ))
 }
 
-/// Answered like a reserved method until its milestone, whatever the id.
-pub(super) async fn resume(_: &Core, _: IdParams) -> Result<Session, ApiError> {
+/// Restarting a session is milestone M1, and until then it is answered like
+/// a reserved method, for an unknown id too. Core clears an archived
+/// session's mark only once it accepts a resume, so a refused resume leaves
+/// the session archived, as it was.
+pub(super) async fn resume(_core: &Core, _params: IdParams) -> Result<Session, ApiError> {
     Err(ApiError::invalid_state(
         "session.resume is milestone M1 and not implemented yet",
     ))
+}
+
+/// `session.set_archived`: archiving stops a live session first, as
+/// `session.stop` does.
+pub(super) async fn set_archived(
+    core: &Core,
+    params: SetArchivedParams,
+) -> Result<Session, ApiError> {
+    Ok(core
+        .sessions
+        .set_archived(&params.id, params.archived)
+        .await?)
 }
 
 pub(super) async fn stop(core: &Core, params: IdParams) -> Result<Session, ApiError> {

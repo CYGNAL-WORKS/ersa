@@ -175,6 +175,7 @@ impl Tally {
                 ContentBlock::Text { .. } => "text",
                 ContentBlock::ToolUse { .. } => "tool_use",
                 ContentBlock::Thinking { .. } => "thinking",
+                ContentBlock::Image { .. } => "image",
                 ContentBlock::ToolResult { content, .. } => {
                     if let Some(MessageContent::Blocks(inner)) = content {
                         self.blocks(at, inner);
@@ -389,11 +390,26 @@ fn host_messages_serialise_to_the_recorded_stdin_lines() {
         // Build the message through the typed API, taking only the variable
         // parts (ids, text, tool input) from the recording.
         let built = match (line["type"].as_str(), line.pointer("/request/subtype")) {
-            (Some("user"), _) => HostMessage::user_text(
-                line.pointer("/message/content/0/text")
+            // Text blocks, and images as a message with attachments carries
+            // them (fixture 2.1.316/07).
+            (Some("user"), _) => HostMessage::user(
+                line.pointer("/message/content")
+                    .and_then(Value::as_array)
                     .unwrap()
-                    .as_str()
-                    .unwrap(),
+                    .iter()
+                    .map(|block| match block["type"].as_str() {
+                        Some("image") => InputBlock::Image {
+                            source: ImageSource {
+                                kind: block["source"]["type"].as_str().unwrap().into(),
+                                media_type: block["source"]["media_type"].as_str().unwrap().into(),
+                                data: block["source"]["data"].as_str().unwrap().into(),
+                            },
+                        },
+                        _ => InputBlock::Text {
+                            text: block["text"].as_str().unwrap().into(),
+                        },
+                    })
+                    .collect(),
             ),
             (Some("control_request"), Some(subtype)) if subtype == "initialize" => {
                 // A trusted project's session attests trust in a folder
@@ -410,6 +426,15 @@ fn host_messages_serialise_to_the_recorded_stdin_lines() {
                         workspace_trust,
                         ..InitializeRequest::default()
                     })),
+                )
+            }
+            // Stop: the driver's interrupt, recorded ending a turn (fixture 2.1.316/07).
+            (Some("control_request"), Some(subtype)) if subtype == "interrupt" => {
+                HostMessage::control_request(
+                    line["request_id"].as_str().unwrap(),
+                    HostRequest::Interrupt {
+                        cancel_queued: None,
+                    },
                 )
             }
             (Some("control_request"), Some(subtype)) if subtype == "rename_session" => {
