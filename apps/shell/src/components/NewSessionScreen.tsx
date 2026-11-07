@@ -1,8 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Project } from "../protocol/core-api.gen";
-import { type BackendChoices, type SessionValues, available, howFor, seedScreen, startingProject, valuesFor } from "../session/controls";
+import {
+  type BackendChoices,
+  type Branches,
+  type SessionValues,
+  available,
+  baseFor,
+  howFor,
+  seedScreen,
+  startingProject,
+  valuesFor,
+} from "../session/controls";
 import type { Sending } from "../session/follow";
-import { Composer } from "./Composer";
+import { Composer, type Unavailable } from "./Composer";
 import { type ControlKey, type Host, SessionControls } from "./SessionControls";
 import { TrustQuestion, folderName } from "./TrustQuestion";
 import "./NewSessionScreen.css";
@@ -33,8 +43,15 @@ interface NewSessionScreenProps {
    * there; absent while there is no dialog to open, and Add project is then unavailable.
    */
   onChooseFolder?: () => Promise<FolderChoice>;
-  /** Adds the folder as a project on the local host, trusted or not; resolves to the project once Core added it. */
-  onAddProject: (path: string, trusted: boolean) => Promise<Project | undefined>;
+  /** Adds the folder as a trusted project on the local host (FLOW-NEW-SESSION-R25); resolves to the project once Core added it. */
+  onAddProject: (path: string) => Promise<Project | undefined>;
+  /** Ersa can't reach the sessions: trying again, or no longer trying (FLOW-SEND-MESSAGE-R06). */
+  away?: Extract<Unavailable, "reconnecting" | "unreachable">;
+  /**
+   * Reads a git project's local branches, for the base branch a new workspace starts from (FLOW-NEW-SESSION-R21);
+   * resolves to why they could not be read rather than failing. Absent, the workspace chip offers no base branch.
+   */
+  onListBranches?: (projectId: string) => Promise<Branches>;
   /** Choosing or adding a folder: on its way, or why it failed. */
   adding?: Sending;
   /** For the gallery: focus not taken, the composer shown focused, a chip shown open or in a state. */
@@ -149,7 +166,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     choosing.current = true;
     try {
       const choice = await onChooseFolder();
-      // A folder already a project is chosen without the question (R18); a new one is asked about first (R16).
+      // A folder already a project is chosen without the question (R18); a new one is asked about first (R27).
       if (choice.kind === "found") {
         // Listed at once, as an added one is, in case the list Core last gave does not have it yet.
         setAdded(choice.project);
@@ -161,15 +178,15 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
       choosing.current = false;
     }
   };
-  // Answered, the project is added with the answer and chosen; canceled, nothing changes (FLOW-NEW-SESSION-R17).
-  const answer = async (trusted: boolean | undefined) => {
+  // Trusted, the project is added and chosen (FLOW-NEW-SESSION-R27); canceled, nothing changes (R17).
+  const answer = async (trust: boolean) => {
     const path = asking;
     setAsking(undefined);
     backToWords();
-    if (path === undefined || trusted === undefined || choosing.current) return;
+    if (path === undefined || !trust || choosing.current) return;
     choosing.current = true;
     try {
-      const project = await onAddProject(path, trusted);
+      const project = await onAddProject(path);
       if (project) {
         setAdded(project);
         chooseProject(project.id);
@@ -195,11 +212,37 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
+  // A git project's branches, read afresh each time the screen shows it, so a new session's base branch starts at the
+  // repository's default branch (FLOW-NEW-SESSION-R21). The latest reader is used, so a new function each render
+  // reads nothing again.
+  const gitProject = project?.vcs === "git" ? project.id : undefined;
+  const [read, setRead] = useState<{ projectId: string; branches: Branches }>();
+  const lister = useRef(props.onListBranches);
+  lister.current = props.onListBranches;
+  const listing = props.onListBranches !== undefined;
+  useEffect(() => {
+    // A list read for this project before is not shown while it is read again: its branches may have changed.
+    setRead(undefined);
+    if (gitProject === undefined || !lister.current) return;
+    let current = true;
+    void lister.current(gitProject).then((branches) => {
+      if (current) setRead({ projectId: gitProject, branches });
+    });
+    return () => {
+      current = false;
+    };
+  }, [gitProject, listing]);
+  const branches: Branches | undefined =
+    gitProject === undefined || !listing ? undefined : read?.projectId === gitProject ? read.branches : { state: "reading" };
+
   const hostBackends = backends[hostId];
   // With no project yet, the where values are the local host's alone; the how values still show (R19).
-  const values: SessionValues = project
+  const chosen: SessionValues = project
     ? valuesFor(project, hostBackends ?? [], wanted)
     : { host_id: localHostId, project_id: "", workspace: "root", ...howFor(hostBackends ?? [], wanted) };
+  // A new workspace starts from the base branch the chip shows: the one chosen, else the default (R21, R29).
+  const base = chosen.workspace === "isolated" && branches?.state === "read" ? baseFor(branches.branches, wanted.base) : undefined;
+  const values: SessionValues = base === undefined ? chosen : { ...chosen, base };
 
   const onChoose = (key: ControlKey, id: string) => {
     if (key === "host") {
@@ -216,12 +259,19 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     }
   };
 
-  const unavailable =
-    hostBackends === undefined
-      ? "Detecting the backends on this host…"
-      : available(hostBackends).length === 0
-        ? "No backend is available on this host."
-        : undefined;
+  // The box is unavailable while Ersa can't reach the sessions, while the host's backends are being detected
+  // (FLOW-NEW-SESSION-R23), and while the host has no backend to run.
+  // With none to run, the line names a backend that failed detection, else says none is installed (R07).
+  const failed = hostBackends?.find((b) => b.status === "error");
+  const unavailable: Unavailable | undefined =
+    props.away ??
+    (hostBackends === undefined
+      ? "detecting"
+      : available(hostBackends).length > 0
+        ? undefined
+        : failed
+          ? { failedBackend: failed.label }
+          : "no-backend");
 
   return (
     <section ref={screen} className="new-session" aria-label="New session">
@@ -235,8 +285,8 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
               name={folderName(asking)}
               path={asking}
               purpose="add"
-              onAnswer={(trusted) => void answer(trusted)}
-              onDismiss={() => void answer(undefined)}
+              onTrust={() => void answer(true)}
+              onDismiss={() => void answer(false)}
               takeFocus={props.initialAsking === undefined}
               forceCancelFocus={props.forceCancelFocus}
             />
@@ -249,6 +299,11 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
         </div>
         <Composer
           inputRef={words}
+          tall
+          // The trust question, or why a folder could not be added, opens in the status line's place, and the
+          // question holds the focal glow while it is open (docs/design/COMPOSER.md, The trust question).
+          statusTaken={asking !== undefined || adding?.state === "failed"}
+          quietFocus={asking !== undefined}
           autoFocus={props.autoFocus ?? true}
           force={props.forceFocus ? "focus" : undefined}
           initialText={props.initialText}
@@ -271,6 +326,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           projects={projects}
           backends={hostBackends}
           values={values}
+          branches={branches}
           onChoose={onChoose}
           onAddProject={canAdd ? () => void addProject() : undefined}
           disabled={busy || adding?.state === "sending"}

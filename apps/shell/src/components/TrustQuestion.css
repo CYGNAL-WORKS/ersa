@@ -72,6 +72,9 @@
    tile material that holds the screen's one focal glow while it is open, and opens upward from the box over
    motion-settle, as the status line does. */
 .trust-question[data-place="composer"] {
+  /* The cap the new-session screen sets is the room above the box, so it bounds the whole card, padding and edge
+     included, as the least it must show is measured. */
+  box-sizing: border-box;
   gap: var(--space-sm);
   padding: var(--space-lg);
   background: var(--material-tile);

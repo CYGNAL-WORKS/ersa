@@ -75,7 +75,7 @@ describe("the new-session screen", () => {
         p1: { host_id: "local", project_id: "p1", workspace: "root", backend: "claude-code", model: "sonnet", effort: "medium", permission_mode: "acceptEdits" },
       },
     });
-    expect(chips(html)).toContain("Workspace: Root workspace");
+    expect(chips(html)).toContain("Workspace: Project folder");
     expect(chips(html)).toContain("Model: Sonnet");
     expect(chips(html)).toContain("Permission mode: Accept edits");
   });
@@ -119,7 +119,7 @@ describe("the new-session screen", () => {
   // verifies: FLOW-NEW-SESSION-R06
   it("offers the root workspace only for a project without a workspace adapter", () => {
     const html = render({ projectId: "p2", open: "workspace" });
-    expect(chips(html)).toContain("Workspace: Root workspace");
+    expect(chips(html)).toContain("Workspace: Project folder");
     expect(html).not.toContain("New workspace");
   });
 
@@ -132,12 +132,39 @@ describe("the new-session screen", () => {
     expect(failed).toContain("Detection failed");
   });
 
+  // verifies: FLOW-NEW-SESSION-R23
+  it("says above the box while the host's backends are detected, and the box is unavailable until they are", () => {
+    const detecting = render({ backends: {} });
+    expect(detecting).toMatch(/class="composer-status-line">Detecting the backends on this host…</);
+    expect(detecting).toMatch(/<textarea[^>]*disabled/);
+    const detected = render({});
+    expect(detected).not.toContain("Detecting the backends on this host…");
+    expect(detected).not.toMatch(/<textarea[^>]*disabled/);
+  });
+
+  it("opens the trust question in the status line's place, the box's focus shown by its edge alone", () => {
+    const html = render({ backends: {}, initialAsking: "D:/clones/stranger" });
+    expect(html).toContain("Trust stranger?");
+    expect(html).not.toContain("composer-status-line");
+    expect(html).toMatch(/class="composer-box"[^>]*data-quiet-focus/);
+  });
+
   // verifies: FLOW-NEW-SESSION-R07
   it("shows a host's lone backend that is missing, and does not let a message start", () => {
     const html = render({ backends: { local: [claude("missing")] }, open: "backend" });
     expect(chips(html)).toContain("Backend: No backend");
     expect(html).toContain("Not installed");
-    expect(html).toContain("No backend is available on this host.");
+    expect(html).toContain("No backend is available on this host. Install Claude Code or GitHub Copilot on it to start a session.");
+    expect(html).toMatch(/<textarea[^>]*disabled/);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R07
+  it("names a backend that failed detection, by its label, when none can run", () => {
+    const copilot: BackendChoices = { ...claude("missing"), name: "copilot", label: "GitHub Copilot" };
+    const html = render({ backends: { local: [copilot, { ...claude("error"), label: "Claude Code" }] } });
+    // The markup escapes the apostrophes.
+    expect(html.replaceAll("&#x27;", "'")).toContain("Claude Code isn't working on this host. Check that it's installed and signed in, then open New session again.");
+    expect(html).not.toContain("Install Claude Code or GitHub Copilot");
     expect(html).toMatch(/<textarea[^>]*disabled/);
   });
 

@@ -17,14 +17,14 @@ import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { Project, Session, Workspace } from "./protocol/core-api.gen";
-import { type BackendChoices, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
+import { type BackendChoices, type Branches, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
 import { contextUsed, tileOf } from "./session/tile";
 import { type Answers, type Decision, answering } from "./session/answers";
 import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./session/shelf";
 import { sharedSubscriptions } from "./session/subscriptions";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
-import { readChoices, rememberPatch, startSession } from "./session/start";
+import { readChoices, rememberPatch, remembered, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
 
 // The same objects every render, so effects and error-boundary keys that
@@ -310,7 +310,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       connection.current?.reload("sessions");
       return false;
     }
-    setLastUsed((l) => ({ ...l, [values.project_id]: values }));
+    setLastUsed((l) => ({ ...l, [values.project_id]: remembered(values) }));
     // Best effort: a failure only means the screen starts at these values in this window alone.
     client.call("settings.set", { patch: rememberPatch(values) }).catch(() => {});
     // Known at once, so the rail puts the new session's tile under its project as it appears (FLOW-NEW-SESSION-R13).
@@ -358,11 +358,20 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         }
       : undefined;
 
-  const addProject = async (path: string, trusted: boolean) => {
+  // A git project's local branches, for the base branch a new workspace starts from (FLOW-NEW-SESSION-R21). Branches
+  // that cannot be listed leave the base to Core, which starts the workspace at the default branch.
+  const listBranches = (projectId: string): Promise<Branches> =>
+    client.call("branch.list", { project_id: projectId }).then(
+      (branches) => ({ state: "read", branches }),
+      () => ({ state: "failed" }),
+    );
+
+  // Every project the Interface adds is trusted: Trust is the trust question's one answer that adds (FLOW-NEW-SESSION-R25).
+  const addProject = async (path: string) => {
     if (view.phase !== "connected") return undefined;
     setAdding({ state: "sending" });
     try {
-      const project = await client.call("project.add", { host_id: view.hello.host.id, path, trusted });
+      const project = await client.call("project.add", { host_id: view.hello.host.id, path, trusted: true });
       setAdding(undefined);
       connection.current?.reload("projects");
       return project;
@@ -429,6 +438,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The session controls under the active session show its own values, as Core lists them (FLOW-NEW-SESSION-R12);
   // they change nothing during a session. Absent until the session's workspace and project are known.
   const listed = sessions.state === "ready" ? sessions.sessions.find((s) => s.id === shown?.id) : undefined;
+  // Ersa can't reach the sessions: the composer says so and is unavailable until it does (FLOW-SEND-MESSAGE-R06).
+  const away = view.phase === "connected" ? undefined : view.phase === "failed" ? "unreachable" : "reconnecting";
   const listedWorkspace = listed && workspaces[listed.workspace_id];
   const listedProject = listedWorkspace && projectById.get(listedWorkspace.project_id);
   const sessionControls = listed && listedWorkspace && sessionShown(listed, listedWorkspace, backends[listed.host_id] ?? []);
@@ -530,15 +541,18 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           <ErrorBoundary what="The composer" resetKey={shown.id}>
             <Composer
               key={shown.id}
-              unavailable={view.phase === "connected" ? undefined : "Core is not connected."}
+              unavailable={away}
+              // An open permission request holds the focal glow; the box shows focus by its edge alone.
+              quietFocus={listed?.tile.pending.some((p) => p.kind === "permission")}
               // A kept session's first message that did not go through: why, and the text when it is to go again.
               sending={shown.message ?? (firstSendHere && { state: "failed", message: firstSendHere.message })}
               initialText={firstSendHere?.text}
               onSend={(text) => follower.current?.send(text) ?? Promise.resolve(false)}
-            />
-            {sessionControls && listedProject && hello && (
-              <div className="stage-controls">
-                <SessionControls
+              controls={
+                sessionControls &&
+                listedProject &&
+                hello && (
+                  <SessionControls
                   hosts={[hello.host]}
                   localHostId={hello.host.id}
                   projects={[listedProject]}
@@ -548,9 +562,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                   onChoose={() => {}}
                   disabled
                   used={used}
-                />
-              </div>
-            )}
+                  />
+                )
+              }
+            />
           </ErrorBoundary>
         </main>
       ) : hello && screenProjects && showsScreen({ composing, starting, activeId }, view.phase === "connected") ? (
@@ -568,7 +583,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onStart={start}
               starting={starting}
               onChooseFolder={chooseFolder}
+              onListBranches={listBranches}
               onAddProject={addProject}
+              away={away}
               adding={adding}
             />
           </ErrorBoundary>

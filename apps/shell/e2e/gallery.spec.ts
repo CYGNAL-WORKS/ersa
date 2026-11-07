@@ -170,9 +170,27 @@ test("a focused input's edge is the accent, in both themes", async ({ page }) =>
       probe.remove();
       return color;
     });
-    for (const input of [".composer-input[data-force=focus]", ".session-heading-input[data-force=focus]"]) {
+    for (const input of [".composer-box[data-force=focus]", ".session-heading-input[data-force=focus]"]) {
       const edge = await column.locator(input).first().evaluate((el) => getComputedStyle(el).borderTopColor);
       expect(edge, `${input} in ${theme}`).toBe(accent);
+    }
+    // The focused box holds the focal glow, unless a permission request holds it (docs/design/COMPOSER.md, Focus).
+    const glow = (selector: string) => column.locator(selector).first().evaluate((el) => getComputedStyle(el).boxShadow);
+    expect(await glow(".composer-box[data-force=focus]:not([data-quiet-focus])"), `the glow in ${theme}`).not.toBe("none");
+    expect(await glow(".composer-box[data-force=focus][data-quiet-focus]"), `no glow in ${theme}`).toBe("none");
+  }
+});
+
+// Send keeps its fill under the pointer and pressed, the pointer's material laid over it (docs/design/COMPOSER.md,
+// The composer): a fill the browser drops would read as a missing button, which a screenshot's threshold may pass.
+test("send keeps its primary fill under the pointer and pressed, in both themes", async ({ page }) => {
+  await page.goto("/gallery.html");
+  for (const theme of ["light", "dark"]) {
+    for (const state of ["hover", "pressed"]) {
+      const send = page.locator(`[data-theme="${theme}"] .composer-send[data-force="${state}"]`).first();
+      const image = await send.evaluate((el) => getComputedStyle(el).backgroundImage);
+      // Two layers: the pointer's material, then the primary fill beneath it.
+      expect(image.match(/linear-gradient/g)?.length, `${state} in ${theme}: ${image}`).toBe(2);
     }
   }
 });
@@ -245,7 +263,7 @@ test("a project heading's actions show with keyboard focus, and More's menu work
 });
 
 // What a heading's actions do (LAY-SHELL, A heading's actions): New session opens the screen for its own project,
-// and More withdraws trust at once but asks before trusting (ADR 0018). The gallery keeps each call on the page.
+// and More withdraws trust at once but asks before trusting (ADR 0028). The gallery keeps each call on the page.
 test("a project heading's New session and More act on that project, and trusting asks first", async ({ page }) => {
   await page.goto("/gallery.html?component=RailTree&theme=light");
   const tree = page.getByRole("figure", { name: "Projects", exact: true });
@@ -348,8 +366,10 @@ test("every session control is reachable and works from the keyboard", async ({ 
     await page.keyboard.press("Enter");
     const list = screen.getByRole("listbox");
     await expect(list).toBeVisible();
-    // Focus starts on the chosen option.
-    await expect(list.locator('[aria-selected="true"]')).toBeFocused();
+    // Focus starts in the list's search box where it has one, the workspace list's base branch, else on the chosen option.
+    const search = list.getByRole("searchbox");
+    if ((await search.count()) > 0) await expect(search).toBeFocused();
+    else await expect(list.locator('[aria-selected="true"]')).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(list).toHaveCount(0);
     await expect(chip).toBeFocused();
@@ -357,13 +377,14 @@ test("every session control is reachable and works from the keyboard", async ({ 
   }
 
   // A choice from the keyboard changes the value and leaves focus on the chip.
-  const workspace = screen.getByRole("button", { name: "Workspace: New workspace" });
+  // The workspace list opens in its search box; the option above it is Project folder.
+  const workspace = screen.getByRole("button", { name: "Workspace: New workspace from main" });
   await workspace.focus();
   await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("ArrowUp");
   await page.keyboard.press("Enter");
-  const root = screen.getByRole("button", { name: "Workspace: Root workspace" });
-  await expect(root).toBeFocused();
+  const folder = screen.getByRole("button", { name: "Workspace: Project folder" });
+  await expect(folder).toBeFocused();
 });
 
 // The rail's foot (LAY-SHELL, The foot; issue #155): Retry attaches again, focus comes back to it when the retry

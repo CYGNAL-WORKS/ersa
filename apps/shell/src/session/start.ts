@@ -3,6 +3,7 @@
 // its first turn. A start that fails takes back what it made and says why in the backend's own words.
 // Kept free of React so the tests drive it with a fake client.
 
+import { t } from "../catalog";
 import { type BridgeError, type CoreClient, describeError } from "../core/client";
 import type { Session, SessionCreateParams, Workspace } from "../protocol/core-api.gen";
 import type { BackendChoices, SessionValues, WorkspaceKind } from "./controls";
@@ -49,14 +50,15 @@ const NEVER_RAN: readonly Session["state"][] = ["error", "ended"];
  */
 export async function startSession(client: Pick<CoreClient, "call">, values: SessionValues, text: string): Promise<StartOutcome> {
   const { backend } = values;
-  if (!backend) return { ok: false, message: "No backend is available on this host." };
+  if (!backend) return { ok: false, message: t("composer.noBackendError") };
 
   let made: Workspace | undefined;
   let session: Session | undefined;
   try {
     let workspace: Workspace;
     if (values.workspace === "isolated") {
-      workspace = made = await client.call("workspace.create", { project_id: values.project_id });
+      // From the chosen base branch; with none, Core starts at the default branch (FLOW-NEW-SESSION-R21).
+      workspace = made = await client.call("workspace.create", values.base ? { project_id: values.project_id, base: values.base } : { project_id: values.project_id });
     } else {
       const root = (await client.call("workspace.list", { project_id: values.project_id })).find((w) => w.kind === "root");
       if (!root) return { ok: false, message: "This project has no root workspace in Core." };
@@ -104,6 +106,14 @@ const KEY = "new_session";
 
 /** Each value's key, so the patch names every one. */
 const FIELDS = ["host_id", "project_id", "workspace", "backend", "model", "effort", "permission_mode"] as const;
+
+/**
+ * What is remembered of the values a session started with, in this window as in Core's settings: the values FIELDS
+ * names, so never the base branch, since each new session starts at the default branch (FLOW-NEW-SESSION-R21).
+ */
+export function remembered(values: SessionValues): SessionValues {
+  return Object.fromEntries(FIELDS.filter((f) => values[f] !== undefined).map((f) => [f, values[f]])) as unknown as SessionValues;
+}
 
 /**
  * The settings patch that remembers `values` as the last its project started a session with (FLOW-NEW-SESSION-R02).
