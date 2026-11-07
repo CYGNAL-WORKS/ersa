@@ -1,4 +1,4 @@
-/* A session control: a pill on the canvas, quiet until pointed at, whose choices unfold beneath it.
+/* A session control: a pill on the canvas, quiet until pointed at, whose choices unfold from it.
    `data-force` lets the gallery show a state without a pointer. */
 
 /* Exactly the chip's height, with no line box beneath it, so a list above measures from the chip. */
@@ -92,8 +92,8 @@
   }
 }
 
-/* The choices: a transient layer beneath the chip, which it unfolds from. */
-/* Anchored to its chip, space-xs from it: beneath where the window has room, else above, re-placed as it grows. */
+/* The choices: a transient layer anchored to its chip, space-xs from it, beneath where the window has room, else
+   above, placed again as it grows. */
 .chip-list {
   position: fixed;
   inset: auto;
@@ -177,7 +177,16 @@
   background: var(--color-accent);
 }
 
+/* A label longer than the list is wide, such as a long branch name, is cut with an ellipsis, so the status stays in
+   view at the trailing edge and the list never scrolls sideways. */
+.chip-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .chip-option-status {
+  flex: none;
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
