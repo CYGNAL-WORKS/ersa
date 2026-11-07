@@ -72,10 +72,14 @@ export function willCopy(a: Attached, workspace: string | undefined): boolean {
   return a.copied.copied;
 }
 
+/** A path's last part, by either slash and past any trailing one: `notes/todo.md` is `todo.md`. */
+export function pathName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
 /** A path Ersa couldn't read, as it no longer exists: named by its last part and marked with why (R10). */
 export function unreadable(path: string, problem: string): Attached {
-  const name = path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
-  return { path, name, kind: "file", detail: "", problem };
+  return { path, name: pathName(path), kind: "file", detail: "", problem };
 }
 
 /** `list` with each of `more` it does not hold yet, in order: the same file or folder is attached once (R12). */
