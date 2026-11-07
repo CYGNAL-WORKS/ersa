@@ -12,7 +12,7 @@
       "properties": {
         "v": {
           "description": "Event schema version. Bumped when any event's meaning or shape changes, including the lifecycle events Core emits itself.",
-          "const": 3
+          "const": 4
         },
         "session_id": { "type": "string", "minLength": 1 },
         "seq": {
@@ -167,6 +167,33 @@
           "properties": {
             "session_id": { "type": "string" },
             "name": { "type": "string" }
+          }
+        },
+        "attachments": {
+          "description": "What came with the message, in the order sent: an image as base64 data, or a file or folder by the path the agent was given, relative to the workspace.",
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "media_type", "data"],
+                "properties": {
+                  "kind": { "const": "image" },
+                  "media_type": { "type": "string" },
+                  "data": { "type": "string" }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "path"],
+                "properties": {
+                  "kind": { "enum": ["file", "folder"] },
+                  "path": { "type": "string" }
+                }
+              }
+            ]
           }
         }
       }

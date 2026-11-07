@@ -36,7 +36,32 @@ export interface FirstSendFailure {
 
 export type StartOutcome =
   | { ok: true; session: Session; workspace: Workspace; firstSend?: FirstSendFailure }
-  | { ok: false; message: string };
+  | { ok: false; message: string }
+  /** Stop was chosen before the message reached the agent: nothing is left, and the message stays with the user. */
+  | { ok: false; stopped: true };
+
+/**
+ * Stop for a start under way (FLOW-SEND-MESSAGE-R03): `stop()` cancels the first message if it has not reached the
+ * agent yet, as while the new session's backend is starting. The start then takes back what it made.
+ */
+export class StartStop {
+  stopped = false;
+  private session?: string;
+  constructor(private readonly client: Pick<CoreClient, "call">) {}
+  /** The session the start created, so a stop can reach it. */
+  created(id: string) {
+    this.session = id;
+  }
+  stop() {
+    this.stopped = true;
+    // Core cancels a message not yet handed to the backend (PROTO-CORE-API-R25); before the session exists, the
+    // start sees `stopped` itself.
+    if (this.session) this.client.call("session.interrupt", { id: this.session }).catch(() => {});
+  }
+}
+
+/** Thrown inside `startSession` when a stop ends the start, so its cleanup runs. */
+const STOPPED = Symbol("stopped");
 
 /** The states a session that never ran ends in: its backend failed to start, or it was stopped while starting. */
 const NEVER_RAN: readonly Session["state"][] = ["error", "ended"];
@@ -48,7 +73,12 @@ const NEVER_RAN: readonly Session["state"][] = ["error", "ended"];
  * backend's own (R08). A session that is alive is kept whatever the first message's answer was: a slow start or a
  * message the backend already has is not a failed start, and the session opens with the error.
  */
-export async function startSession(client: Pick<CoreClient, "call">, values: SessionValues, text: string): Promise<StartOutcome> {
+export async function startSession(
+  client: Pick<CoreClient, "call">,
+  values: SessionValues,
+  text: string,
+  stop?: StartStop,
+): Promise<StartOutcome> {
   const { backend } = values;
   if (!backend) return { ok: false, message: t("composer.noBackendError") };
 
@@ -71,10 +101,17 @@ export async function startSession(client: Pick<CoreClient, "call">, values: Ses
     if (values.permission_mode) params.permission_mode = values.permission_mode;
     session = await client.call("session.create", params);
     const created = session;
+    stop?.created(created.id);
+    // Stopped before the session existed: nothing is sent.
+    if (stop?.stopped) throw STOPPED;
     try {
       await client.call("session.send", { id: created.id, text });
       return { ok: true, session: created, workspace };
     } catch (error) {
+      // A stop canceled the message before it reached the agent, which Core answers as an invalid state: take back
+      // what was made. Any other failure is judged below, so a session the backend already ran is kept.
+      const canceled = (error as BridgeError | undefined)?.kind === "rpc" && (error as Extract<BridgeError, { kind: "rpc" }>).error.data?.kind === "invalid_state";
+      if (stop?.stopped && canceled) throw STOPPED;
       // Core answers a message to a backend that failed to start once the session's run has ended, so its state
       // already says so. A session Core cannot be asked about is kept: removing a live one loses its work. After
       // an `internal` answer the backend already has the message, so the session ran: it is kept whatever its
@@ -97,6 +134,7 @@ export async function startSession(client: Pick<CoreClient, "call">, values: Ses
       await client.call("session.remove", { id }).catch(() => {});
     }
     if (made) await client.call("workspace.remove", { id: made.id }).catch(() => {});
+    if (error === STOPPED) return { ok: false, stopped: true };
     return { ok: false, message: describeError(error) };
   }
 }

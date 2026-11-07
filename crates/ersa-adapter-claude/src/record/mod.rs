@@ -31,6 +31,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
+use ersa_protocol::events::{Event, MessageAttachment, UserMessage};
+
 pub use listing::{SessionList, SessionSummary, list_sessions, summarize_session};
 pub use projection::{RecordEvent, project_record, project_record_from};
 pub use registry::{LiveCheck, LiveSession, live_session};
@@ -486,10 +488,39 @@ fn approximate_bytes(events: &[RecordEvent]) -> usize {
                 .map(String::len)
                 .sum::<usize>();
             // The event's own fields are inside it, not in a map of their own.
-            let fields = match serde_json::to_value(&e.event) {
+            let as_json = |event: &Event| match serde_json::to_value(event) {
                 Ok(serde_json::Value::Object(fields)) => fields.values().map(heap_bytes).sum(),
                 Ok(other) => heap_bytes(&other),
                 Err(_) => 0,
+            };
+            let fields = match &e.event {
+                // A user message's attachments are enums in a list, which
+                // their JSON objects would count many times over: they count
+                // as their strings and the list itself, the rest as JSON.
+                Event::UserMessage(message) if !message.attachments.is_empty() => {
+                    let attachments: usize = message
+                        .attachments
+                        .iter()
+                        .map(|attachment| match attachment {
+                            MessageAttachment::Image { media_type, data } => {
+                                media_type.len() + data.len()
+                            }
+                            MessageAttachment::File { path }
+                            | MessageAttachment::Folder { path } => path.len(),
+                        })
+                        .sum();
+                    // Built field by field, so no image is copied to be measured.
+                    let without = Event::UserMessage(UserMessage {
+                        text: message.text.clone(),
+                        origin: message.origin,
+                        peer: message.peer.clone(),
+                        attachments: Vec::new(),
+                    });
+                    as_json(&without)
+                        + attachments
+                        + message.attachments.capacity() * size_of::<MessageAttachment>()
+                }
+                event => as_json(event),
             };
             2 * size_of::<RecordEvent>() + strings + fields
         })
