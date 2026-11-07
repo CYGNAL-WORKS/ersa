@@ -121,6 +121,7 @@ export const enUS = {
     writePlaceholder: "Write to the agent",
     attachButton: "Attach",
     sendButton: "Send",
+    stopButton: "Stop",
     detectingProgress: "Detecting the backends on this host…",
     // The host has no backend to run: none installed, on the status line and as why a start is refused; or one
     // that failed detection, by the label backend.list gives it.

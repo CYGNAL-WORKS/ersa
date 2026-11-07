@@ -1,0 +1,52 @@
+{
+  "recorded_at": "2026-11-07T00:53:05.861Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "",
+    "--strict-mcp-config"
+  ],
+  "bidirectional": true,
+  "cwd_was_empty_tempdir": true,
+  "exit_code": 1,
+  "signal": null,
+  "elapsed_ms": 5614,
+  "stderr": "",
+  "stdout_lines": 7,
+  "stdout_timing_ms": [
+    477,
+    1519,
+    2960,
+    4308,
+    5022,
+    5025,
+    5034
+  ],
+  "sent": [
+    {
+      "t": 10,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Write a long, detailed essay of about 1500 words on the history of lighthouses. Do not use any tools.\"}]}}"
+    },
+    {
+      "t": 5011,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-interrupt-1\",\"request\":{\"subtype\":\"interrupt\"}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Write a long, detailed essay of about 1500 words on the history of lighthouses. Do not use any tools.",
+      "got_result": true,
+      "subtype": "error_during_execution",
+      "is_error": true
+    }
+  ]
+}

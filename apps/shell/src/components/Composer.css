@@ -130,7 +130,8 @@
     color var(--motion-quick) var(--motion-ease-out);
 }
 
-.composer-send:focus-visible {
+.composer-send:focus-visible,
+.composer-send[data-force="focus"] {
   outline: none;
   border-color: var(--color-ink);
 }
@@ -141,18 +142,19 @@
 }
 
 /* The pointer's material lies over the fill; a colour can only be a lower layer, so it is laid on as a gradient. */
-.composer-send:hover:not(:disabled),
-.composer-send[data-force="hover"]:not(:disabled) {
+.composer-send:hover:not(:disabled, [aria-disabled="true"], [data-stop]),
+.composer-send[data-force="hover"]:not(:disabled, [aria-disabled="true"], [data-stop]) {
   background: linear-gradient(var(--material-hover), var(--material-hover)), var(--material-primary);
 }
 
-.composer-send:active:not(:disabled),
-.composer-send[data-force="pressed"]:not(:disabled) {
+.composer-send:active:not(:disabled, [aria-disabled="true"], [data-stop]),
+.composer-send[data-force="pressed"]:not(:disabled, [aria-disabled="true"], [data-stop]) {
   background: linear-gradient(var(--material-pressed), var(--material-pressed)), var(--material-primary);
 }
 
 /* With nothing to send: no fill, a line edge and a faint arrow, unchanged under the pointer. */
-.composer-send:disabled {
+.composer-send:disabled,
+.composer-send[aria-disabled="true"] {
   color: var(--color-ink-faint);
   background: none;
   border-color: var(--color-line);
@@ -173,6 +175,52 @@
   border-color: transparent;
 }
 
+/* Stop takes send's place while a message is on its way or the agent works: the same square on material-tile with a
+   line edge, holding a filled square in ink. A control with an edge (DESIGN.md, Pointer and press). */
+.composer-send[data-stop] {
+  color: var(--color-ink);
+  background: var(--material-tile);
+  border-color: var(--color-line);
+}
+
+.composer-send[data-stop]:hover,
+.composer-send[data-stop][data-force="hover"] {
+  background: var(--color-surface-raised);
+  border-color: var(--color-ink-faint);
+}
+
+.composer-send[data-stop]:active,
+.composer-send[data-stop][data-force="pressed"] {
+  background: var(--color-canvas);
+}
+
+/* Keyboard focus is an ink edge on stop, and on send with nothing to send, which stop turns back into with focus. */
+.composer-send[data-stop]:focus-visible,
+.composer-send[data-stop][data-force="focus"],
+.composer-send[aria-disabled="true"]:focus-visible,
+.composer-send[aria-disabled="true"][data-force="focus"] {
+  border-color: var(--color-ink);
+}
+
+.composer-send[data-stop] svg {
+  fill: currentColor;
+}
+
+/* Send becoming stop and back crossfades: the new icon fades in. */
+.composer-send-icon {
+  display: inline-flex;
+}
+
+.composer-send-icon[data-traded] {
+  animation: composer-send-icon-in var(--motion-quick) var(--motion-ease-out);
+}
+
+@keyframes composer-send-icon-in {
+  from {
+    opacity: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .composer-status-line {
     animation: none;
@@ -181,5 +229,9 @@
   .composer-box,
   .composer-send {
     transition: none;
+  }
+
+  .composer-send-icon[data-traded] {
+    animation: none;
   }
 }

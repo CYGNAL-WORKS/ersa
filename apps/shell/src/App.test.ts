@@ -735,3 +735,34 @@ describe("the composer App draws when Core is lost", () => {
     expect(message().disabled).toBe(true);
   });
 });
+
+// Stop under a session (FLOW-SEND-MESSAGE-R03, R04): App holds stop from the send until the turn shows.
+describe("stop under a session App draws", () => {
+  // verifies: FLOW-SEND-MESSAGE-R03
+  // verifies: FLOW-SEND-MESSAGE-R04
+  it("keeps stop shown and Enter from sending when Core answers the send before the turn shows", async () => {
+    const core = fakeCore({
+      "session.subscribe": () => ({ last_seq: -1 }),
+      "session.send": () => ({ turn: 1 }),
+    });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    // The newest session shows at launch; its turn.started never arrives.
+    const message = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    fireEvent.change(message(), { target: { value: "Fix the build" } });
+    await act(async () => {
+      fireEvent.keyDown(message(), { key: "Enter" });
+    });
+    await settle();
+    const composer = screen.getByRole("form", { name: "Composer" });
+    expect(within(composer).getByRole("button", { name: "Stop" })).toBeTruthy();
+    fireEvent.change(message(), { target: { value: "And the tests" } });
+    await act(async () => {
+      fireEvent.keyDown(message(), { key: "Enter" });
+    });
+    await settle();
+    expect(core.calls.filter((c) => c.method === "session.send")).toHaveLength(1);
+    expect(message().value).toBe("And the tests");
+  });
+});

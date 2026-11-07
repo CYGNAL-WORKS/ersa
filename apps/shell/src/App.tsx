@@ -24,7 +24,7 @@ import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownA
 import { sharedSubscriptions } from "./session/subscriptions";
 import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
-import { readChoices, rememberPatch, remembered, startSession } from "./session/start";
+import { StartStop, readChoices, rememberPatch, remembered, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
 
 // The same objects every render, so effects and error-boundary keys that
@@ -301,9 +301,20 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // The first message starts the session; on a failure the screen says why and the composer keeps the message
   // (FLOW-NEW-SESSION-R08). Once started, it is the active session (R12).
+  // Stop on the new-session screen reaches the start under way (FLOW-SEND-MESSAGE-R03).
+  const startStop = useRef<StartStop>(undefined);
   const start = async (text: string, values: SessionValues) => {
     dispatch({ type: "sending" });
-    const outcome = await startSession(client, values, text);
+    const stop = new StartStop(client);
+    startStop.current = stop;
+    const outcome = await startSession(client, values, text, stop).finally(() => {
+      if (startStop.current === stop) startStop.current = undefined;
+    });
+    if (!outcome.ok && "stopped" in outcome) {
+      dispatch({ type: "stopped" });
+      connection.current?.reload("sessions");
+      return false;
+    }
     if (!outcome.ok) {
       dispatch({ type: "failed", message: outcome.message });
       // The rail may already list the session the failed start made and removed.
@@ -553,6 +564,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               sending={shown.message ?? (firstSendHere && { state: "failed", message: firstSendHere.message })}
               initialText={firstSendHere?.text}
               onSend={(text) => follower.current?.send(text) ?? Promise.resolve(false)}
+              // Stop, from sending until the turn ends: cancels the message on its way, or interrupts the turn (FLOW-SEND-MESSAGE-R03).
+              working={shown.transcript.working || shown.turnPending}
+              onStop={() => void follower.current?.interrupt()}
               controls={
                 sessionControls &&
                 listedProject &&
@@ -565,7 +579,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                   values={sessionControls.values}
                   workspaceLabel={sessionControls.workspaceLabel}
                   onChoose={() => {}}
-                  disabled
+                  readOnly
                   used={used}
                   />
                 )
@@ -591,6 +605,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onListBranches={listBranches}
               onAddProject={addProject}
               away={away}
+              onStop={() => startStop.current?.stop()}
               adding={adding}
             />
           </ErrorBoundary>

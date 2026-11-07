@@ -290,6 +290,23 @@ fn every_turn_event_falls_inside_a_turn() {
     }
 }
 
+// verifies: PROTO-CORE-API-R25
+#[test]
+fn an_interrupted_turn_completes_as_interrupted() {
+    // Recorded: an interrupt control request five seconds into a long answer.
+    // The CLI ends the turn with an error result whose terminal_reason is
+    // aborted_streaming.
+    let completed: Vec<TurnCompleted> = events(&fixture("07-stream-interrupt").raw_log())
+        .into_iter()
+        .filter_map(|e| match e {
+            Event::TurnCompleted(t) => Some(t),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(completed.len(), 1);
+    assert_eq!(completed[0].outcome, TurnOutcome::Interrupted);
+}
+
 // verifies: PROTO-CLAUDE-CODE-STREAM-R08
 // verifies: PROTO-AGENT-EVENTS-R05
 #[test]
