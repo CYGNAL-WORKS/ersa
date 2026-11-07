@@ -1633,6 +1633,7 @@
         "unshared",
         "stranded",
         "sessions",
+        "unrecorded",
         "token"
       ],
       "properties": {
@@ -1660,6 +1661,10 @@
           "type": "integer",
           "minimum": 0,
           "description": "Sessions using the workspace, leaving out any marked deleting."
+        },
+        "unrecorded": {
+          "type": "boolean",
+          "description": "Whether git has lost its record of the workspace: its checkout and reflog went with it, so commits made on a detached checkout can't be counted."
         },
         "token": {
           "type": "string",

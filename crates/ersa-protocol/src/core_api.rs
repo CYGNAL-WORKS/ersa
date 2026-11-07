@@ -499,6 +499,10 @@ pub struct WorkspaceChanges {
     pub stranded: u64,
     /// Sessions using the workspace, leaving out any marked deleting.
     pub sessions: u64,
+    /// Whether git has lost its record of the workspace, and with it the
+    /// checkout and reflog: commits made on a detached checkout can't be
+    /// counted then.
+    pub unrecorded: bool,
     /// Opaque; changes whenever anything counted above changes, or the
     /// content of an uncommitted file. `session.delete` carries it back.
     pub token: String,

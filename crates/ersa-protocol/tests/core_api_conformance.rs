@@ -186,6 +186,7 @@ fn result_examples() -> Vec<(Method, Value)> {
                 unshared: 3,
                 stranded: 1,
                 sessions: 1,
+                unrecorded: false,
                 token: "9f2c".into(),
             }),
         ),
