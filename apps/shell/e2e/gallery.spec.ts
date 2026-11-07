@@ -181,6 +181,20 @@ test("a focused input's edge is the accent, in both themes", async ({ page }) =>
   }
 });
 
+// Send keeps its fill under the pointer and pressed, the pointer's material laid over it (docs/design/COMPOSER.md,
+// The composer): a fill the browser drops would read as a missing button, which a screenshot's threshold may pass.
+test("send keeps its primary fill under the pointer and pressed, in both themes", async ({ page }) => {
+  await page.goto("/gallery.html");
+  for (const theme of ["light", "dark"]) {
+    for (const state of ["hover", "pressed"]) {
+      const send = page.locator(`[data-theme="${theme}"] .composer-send[data-force="${state}"]`).first();
+      const image = await send.evaluate((el) => getComputedStyle(el).backgroundImage);
+      // Two layers: the pointer's material, then the primary fill beneath it.
+      expect(image.match(/linear-gradient/g)?.length, `${state} in ${theme}: ${image}`).toBe(2);
+    }
+  }
+});
+
 // The open list's shadow is soft enough to sit inside the screenshots' per-pixel threshold, so it is checked here.
 // Its options take radius-md, so their corners nest within the list's (DESIGN.md, Shapes).
 test("an open chip list floats: a shadow and the floating radius, its options nested, in both themes", async ({ page }) => {

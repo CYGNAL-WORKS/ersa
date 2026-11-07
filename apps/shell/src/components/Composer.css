@@ -10,7 +10,8 @@
   width: stretch;
   max-width: var(--size-measure);
   margin: 0 auto;
-  padding: 0 var(--space-lg);
+  /* Room at the foot, so the box and its controls stay off the window's edge. */
+  padding: 0 var(--space-lg) var(--space-lg);
 }
 
 /* The status line takes no height and grows upward from the box, so the box and the session controls stay put. */
@@ -139,12 +140,15 @@
   background: var(--material-primary);
 }
 
-.composer-send:hover:not(:disabled) {
-  background: var(--material-hover), var(--material-primary);
+/* The pointer's material lies over the fill; a colour can only be a lower layer, so it is laid on as a gradient. */
+.composer-send:hover:not(:disabled),
+.composer-send[data-force="hover"]:not(:disabled) {
+  background: linear-gradient(var(--material-hover), var(--material-hover)), var(--material-primary);
 }
 
-.composer-send:active:not(:disabled) {
-  background: var(--material-pressed), var(--material-primary);
+.composer-send:active:not(:disabled),
+.composer-send[data-force="pressed"]:not(:disabled) {
+  background: linear-gradient(var(--material-pressed), var(--material-pressed)), var(--material-primary);
 }
 
 /* With nothing to send: no fill, a line edge and a faint arrow, unchanged under the pointer. */
