@@ -201,6 +201,7 @@ async fn arranging_into_a_missing_section_is_not_found_and_changes_nothing() {
 /// that is then blank, longer than 80 characters, or another section's,
 /// ignoring case; `section.rename` likewise. A refusal changes nothing.
 // verifies: FLOW-ORGANIZE-SESSIONS-R06
+// verifies: PROTO-CORE-API-R61
 #[tokio::test(flavor = "multi_thread")]
 async fn section_names_are_trimmed_and_blank_long_or_taken_ones_refused() {
     let (core, mut client) = start().await;
@@ -440,6 +441,7 @@ async fn last_activity_changes_only_when_a_turn_ends() {
 /// with `invalid_params`, renaming included. Case is compared by Unicode
 /// lowercase and nothing else, so two spellings of one accented letter are
 /// two names.
+// verifies: PROTO-CORE-API-R60
 #[tokio::test(flavor = "multi_thread")]
 async fn section_names_are_one_line_without_control_characters() {
     let (_core, mut client) = start().await;
@@ -518,6 +520,8 @@ async fn tile_with_activity(client: &mut Client, id: &str) -> (Value, Option<Val
 /// Every `session.tile` carries the session's `last_activity_at` as
 /// `session.list` has it, and a turn's end sends a tile even when the tile
 /// itself is unchanged, as the fake's `finish` turn leaves it.
+// verifies: PROTO-CORE-API-R58
+// verifies: PROTO-CORE-API-R59
 #[tokio::test(flavor = "multi_thread")]
 async fn a_tile_carries_the_last_activity_and_a_turns_end_sends_one() {
     let (core, mut client) = start().await;
