@@ -122,6 +122,13 @@ impl Server {
         if stuck > 0 {
             tracing::warn!(stuck, "marked interrupted workspaces as error");
         }
+        // A delete a previous Core stopped in the middle of shows as failed,
+        // and nothing more is deleted until the user tries again
+        // (PROTO-CORE-API-R40). Before `recover`, which reads the marks.
+        let interrupted = core.store.fail_running_deletes().await?;
+        if interrupted > 0 {
+            tracing::warn!(interrupted, "marked interrupted session deletes as failed");
+        }
         // Sessions the previous Core left running are ended before any
         // client can see them.
         core.sessions
