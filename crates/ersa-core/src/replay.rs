@@ -88,7 +88,8 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::SessionSubscribe
         | Method::SessionUnsubscribe
         | Method::SessionRawLog
-        | Method::AttachmentInspect => return None,
+        | Method::AttachmentInspect
+        | Method::SectionList => return None,
         Method::SessionCreate
         | Method::SessionStart
         | Method::SessionStop
@@ -100,6 +101,7 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::SessionAnswerQuestion
         | Method::SessionSetTitle
         | Method::SessionSetArchived
+        | Method::SessionArrange
         | Method::SessionDelete
         | Method::SessionSetMode => "the session is a replay of a recording and cannot change",
         Method::ProjectAdd
@@ -108,6 +110,9 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::WorkspaceCreate
         | Method::WorkspaceRemove
         | Method::SettingsSet
+        | Method::SectionCreate
+        | Method::SectionRename
+        | Method::SectionRemove
         | Method::HostAdd
         | Method::HostRemove
         | Method::HostProbe
@@ -176,6 +181,9 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         .filter(|mode| !mode.is_empty()),
         archived: false,
         deleting: None,
+        pinned: false,
+        section_id: None,
+        last_activity_at: None,
     };
     let transport = core
         .session_transport_for(LOCAL_HOST_ID)
