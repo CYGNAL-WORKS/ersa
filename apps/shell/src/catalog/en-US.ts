@@ -134,6 +134,25 @@ export const enUS = {
       // The project chip while the local host has no project: choosing it, or sending, opens the folder dialog.
       chooseFolderButton: "Choose a folder",
     },
+    // The workspace chip (docs/design/COMPOSER.md, The workspace list): a new workspace or the project's own folder,
+    // each with what it means, and for a git project the base branch the new workspace starts from
+    // (FLOW-NEW-SESSION-R21, R28, R29).
+    workspace: {
+      newWorkspaceLabel: "New workspace",
+      isolatedStatus: "Isolated",
+      projectFolderLabel: "Project folder",
+      sharedStatus: "Shared",
+      // What the chip reads with a new workspace and its base branch chosen.
+      newFromLabel: "New workspace from {branch}",
+      baseBranchHeading: "Base branch",
+      searchBranchesPlaceholder: "Search branches",
+      // The status of the repository's default branch in the list.
+      defaultBranchStatus: "Default",
+      noBranchMatchesEmpty: "No branch matches.",
+      readingBranchesProgress: "Reading the branches…",
+      // The project's branches could not be listed; the new workspace starts at the repository's default branch.
+      branchesFailedError: "Ersa couldn't read this project's branches. The new workspace will start at the default branch.",
+    },
     // The context ring's name, in the session controls and on a tile.
     contextRing: {
       noneLabel: "Context: none used yet",

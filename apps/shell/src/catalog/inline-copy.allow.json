@@ -34,12 +34,10 @@
     "Effort",
     "Host",
     "Model",
-    "New workspace",
     "No backend",
     "Not installed",
     "Permission mode",
     "Project",
-    "Root workspace",
     "Session controls",
     "Workspace"
   ],
@@ -75,9 +73,6 @@
     "Waiting for you",
     "You",
     "more invisible characters, each shown as"
-  ],
-  "session/controls.ts": [
-    "Root workspace"
   ],
   "session/follow.ts": [
     "Earlier events of this session are no longer held."

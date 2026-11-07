@@ -2,7 +2,8 @@
 // project, workspace, backend, model, effort and permission mode. The choices come from Core's `project.list`
 // and `backend.list`; the starting values from what the user last chose for the project, else the brief's defaults.
 
-import type { Project, Session, Workspace } from "../protocol/core-api.gen";
+import { t } from "../catalog";
+import type { Branch, Project, Session, Workspace } from "../protocol/core-api.gen";
 
 /** One choice a backend offers: a model, an effort or a permission mode (PROTO-CORE-API, `backend.list`). */
 export interface Choice {
@@ -42,6 +43,29 @@ export interface SessionValues {
   model?: string;
   effort?: string;
   permission_mode?: string;
+  /**
+   * The branch a new workspace starts from (FLOW-NEW-SESSION-R21). Never remembered: each new session starts at the
+   * repository's default branch. Absent, Core starts the workspace at the default branch, else the checked-out commit.
+   */
+  base?: string;
+}
+
+/** A project's local branches from `branch.list`, as the workspace chip offers them: being read, read, or not readable. */
+export type Branches = { state: "reading" } | { state: "read"; branches: Branch[] } | { state: "failed" };
+
+/**
+ * The base branch the workspace chip shows (FLOW-NEW-SESSION-R21): `wanted` while the project still has it, else the
+ * repository's default branch; none while the branches are unread or none is the default.
+ */
+export function baseFor(branches: readonly Branch[] | undefined, wanted?: string): string | undefined {
+  if (!branches) return undefined;
+  return branches.find((b) => b.name === wanted)?.name ?? branches.find((b) => b.default)?.name;
+}
+
+/** The branches whose names hold `query`, ignoring case and the spaces around it, in the order listed. */
+export function branchesMatching(branches: readonly Branch[], query: string): Branch[] {
+  const wanted = query.trim().toLowerCase();
+  return branches.filter((b) => b.name.toLowerCase().includes(wanted));
 }
 
 /** The version control Ersa can make isolated workspaces for. Others run in the root workspace only. */
@@ -201,7 +225,7 @@ export interface SessionShown {
   values: SessionValues;
   /** The session's backend as `backend.list` lists it, holding every value the session reports. */
   backend: BackendChoices;
-  /** The workspace as the session runs in it: its branch, or the root. */
+  /** The workspace as the session runs in it: its branch, or the project folder. */
   workspaceLabel: string;
 }
 
@@ -240,6 +264,7 @@ export function sessionShown(
       permission_mode: session.permission_mode || undefined,
     },
     backend,
-    workspaceLabel: workspace.kind === "root" ? "Root workspace" : workspace.vcs_ref,
+    // The root workspace by the name the new-session screen gives it (GLOSSARY: the project folder).
+    workspaceLabel: workspace.kind === "root" ? t("sessionControls.workspace.projectFolderLabel") : workspace.vcs_ref,
   };
 }
