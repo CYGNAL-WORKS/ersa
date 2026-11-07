@@ -79,6 +79,7 @@ methods! {
     WorkspaceCreate => "workspace.create",
     WorkspaceRemove => "workspace.remove",
     BranchList => "branch.list",
+    WorkspaceChanges => "workspace.changes",
     SessionList => "session.list",
     SessionCreate => "session.create",
     SessionStart => "session.start",
@@ -479,6 +480,32 @@ pub struct Branch {
     pub name: String,
     /// Whether this is the repository's default branch; at most one is.
     pub default: bool,
+}
+
+/// `workspace.changes`: what deleting an isolated workspace would lose, for
+/// the delete question. Params are [`IdParams`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceChanges {
+    /// Files with changes not committed, untracked files included.
+    pub uncommitted: u64,
+    /// Ignored entries git reports, a wholly ignored folder as one.
+    pub ignored: u64,
+    /// Commits reachable from the workspace's checkout, its branch or its
+    /// own reflog that no other local or remote-tracking branch holds.
+    pub unshared: u64,
+    /// Those unshared commits the workspace's branch does not hold: deleting
+    /// the folder loses them, since only the branch is kept.
+    pub stranded: u64,
+    /// Sessions using the workspace, leaving out any marked deleting.
+    pub sessions: u64,
+    /// Whether git has lost its record of the workspace, and with it the
+    /// checkout and reflog: commits made on a detached checkout can't be
+    /// counted then.
+    pub unrecorded: bool,
+    /// Opaque; changes whenever anything counted above changes, or the
+    /// content of an uncommitted file. `session.delete` carries it back.
+    pub token: String,
 }
 
 // ---------------------------------------------------------------------------

@@ -7,8 +7,8 @@ use ersa_protocol::core_api::{
     BackendInfo, BackendListParams, Branch, BranchListParams, Empty, HelloParams, HelloResult,
     Host, HostKind, HostStatus, IdParams, Project, ProjectAddParams, ProjectFindParams,
     ProjectSetTrustParams, SUPPORTED_API_VERSIONS, SettingsSetParams, StatusResult, Vcs, Workspace,
-    WorkspaceCreateParams, WorkspaceKind, WorkspaceListParams, WorkspaceRemoveParams,
-    WorkspaceState,
+    WorkspaceChanges, WorkspaceCreateParams, WorkspaceKind, WorkspaceListParams,
+    WorkspaceRemoveParams, WorkspaceState,
 };
 use ersa_protocol::events::PROJECTION_VERSION;
 use serde_json::{Map, Value};
@@ -306,7 +306,12 @@ pub(super) async fn project_remove(core: &Core, params: IdParams) -> Result<Proj
                 )));
             }
             WorkspaceKind::Root => {
-                if core.store.sessions_in_workspace(workspace.id).await? > 0 {
+                if !core
+                    .store
+                    .sessions_in_workspace(workspace.id)
+                    .await?
+                    .is_empty()
+                {
                     return Err(ApiError::invalid_state(format!(
                         "project {} has sessions in its own folder; stop and remove them first",
                         project.id
@@ -357,6 +362,66 @@ pub(super) async fn branch_list(
             name,
         })
         .collect())
+}
+
+/// What deleting an isolated workspace would lose, for the delete question
+/// (PROTO-CORE-API-R48, R46). Answers for a workspace in any state, a half-removed
+/// one included, counting what is left of it.
+pub(super) async fn workspace_changes(
+    core: &Core,
+    params: IdParams,
+) -> Result<WorkspaceChanges, ApiError> {
+    let workspace = core
+        .store
+        .workspace(params.id.clone())
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no workspace {}", params.id)))?;
+    if workspace.kind == WorkspaceKind::Root {
+        return Err(ApiError::invalid_state(format!(
+            "workspace {} is the project's own folder, whose files are never deleted",
+            workspace.id
+        )));
+    }
+    let project = find_project(core, &workspace.project_id).await?;
+    require_workspace_adapter(&project)?;
+    let transport = core
+        .transport_for(&project.host_id)
+        .ok_or_else(|| unreachable_host(&project.host_id))?;
+
+    // Every session in the workspace counts: Core cannot mark one deleting
+    // yet, so there are none to leave out.
+    // TODO(#197): leave out sessions marked deleting once the mark exists
+    let sessions = core
+        .store
+        .sessions_in_workspace(workspace.id.clone())
+        .await?;
+    let found = workspace::git_worktree_changes(
+        transport.as_ref(),
+        &project.path,
+        &workspace.path,
+        &workspace.vcs_ref,
+    )
+    .await?;
+
+    // The token is a digest of everything the counts were made from, plus
+    // the sessions, so it changes when any of them does. `session.delete`
+    // recomputes it and refuses when it differs from the one the user saw.
+    let mut digest = workspace::Digest::default();
+    for line in &found.evidence {
+        digest.add(line);
+    }
+    for id in &sessions {
+        digest.add(&format!("session {id}"));
+    }
+    Ok(WorkspaceChanges {
+        uncommitted: found.uncommitted,
+        ignored: found.ignored,
+        unshared: found.unshared,
+        stranded: found.stranded,
+        sessions: sessions.len() as u64,
+        unrecorded: found.unrecorded,
+        token: digest.finish(),
+    })
 }
 
 /// Refuses a project whose version control has no workspace adapter. Git is
@@ -532,11 +597,11 @@ pub(super) async fn workspace_remove(
     // deleted directory. Checked after the claim, because a session can
     // only be created in a `ready` workspace: one created before the claim
     // is seen here, and none can be created after it.
-    if core
+    if !core
         .store
         .sessions_in_workspace(workspace.id.clone())
         .await?
-        > 0
+        .is_empty()
     {
         core.store
             .set_workspace_state(workspace.id.clone(), workspace.state)
