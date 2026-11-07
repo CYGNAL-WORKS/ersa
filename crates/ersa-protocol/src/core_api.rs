@@ -87,6 +87,7 @@ methods! {
     SessionResume => "session.resume",
     SessionRemove => "session.remove",
     SessionSetArchived => "session.set_archived",
+    SessionDelete => "session.delete",
     SessionSend => "session.send",
     SessionInterrupt => "session.interrupt",
     AttachmentInspect => "attachment.inspect",
@@ -547,7 +548,21 @@ pub struct Session {
     /// messages until it is unarchived, or until Core accepts a resume of it.
     /// Core stores it (ADR 0026).
     pub archived: bool,
+    /// Absent unless the session is marked deleting: `running` while Core
+    /// works on its delete, `failed` after a step failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleting: Option<Deleting>,
     pub tile: Tile,
+}
+
+/// Where a session's delete is (`deleting` in `session.list`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Deleting {
+    /// Core is deleting the session.
+    Running,
+    /// A step failed; a new `session.delete` finishes it.
+    Failed,
 }
 
 /// Where a send is (`session.send_progress`, and `sending` in `session.list`).
@@ -754,6 +769,33 @@ pub struct SetTitleParams {
 pub struct SetArchivedParams {
     pub id: String,
     pub archived: bool,
+}
+
+/// `session.delete` params: the user's Delete.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionDeleteParams {
+    pub id: String,
+    /// The `token` of the `workspace.changes` the user was shown; needed for
+    /// a session in an isolated workspace, ignored for one in a root
+    /// workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+}
+
+/// `session.delete` result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionDeleteResult {
+    pub id: String,
+    /// Whether this delete took the session's workspace's folder, and its
+    /// branch unless kept. The workspace's row goes once no other session
+    /// refers to it.
+    pub workspace_deleted: bool,
+    /// Whether the workspace's branch was kept, because it holds commits
+    /// no other branch or remote holds or another worktree has it checked
+    /// out. False when the workspace stayed.
+    pub branch_kept: bool,
 }
 
 /// `session.set_mode` params.

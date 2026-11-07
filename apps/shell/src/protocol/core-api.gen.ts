@@ -160,6 +160,12 @@ export type Request =
   | {
       jsonrpc: "2.0";
       id: RequestId;
+      method: "session.delete";
+      params: SessionDeleteParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
       method: "session.send";
       params: SessionSendParams;
     }
@@ -520,6 +526,16 @@ export interface SessionSetArchivedParams {
    */
   archived: boolean;
 }
+/**
+ * The user's Delete: stops the session, deletes its isolated workspace's folder and branch when no other session uses the workspace and the branch holds no commit only it holds, deletes its record from its backend, and removes it. While it runs, requests that would change the session or its workspace answer invalid_state with detail busy.
+ */
+export interface SessionDeleteParams {
+  id: Id;
+  /**
+   * The token of the workspace.changes the user was shown. Needed for a session in an isolated workspace: when what would be lost now differs, the delete is refused with invalid_state and the new workspace.changes, as JSON text, in detail. Ignored for a root workspace.
+   */
+  token?: string;
+}
 export interface SessionSendParams {
   id: Id;
   text: string;
@@ -873,6 +889,10 @@ export interface Session {
    * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
 }
 export interface RawLogEntry {
   index: number;
@@ -1078,6 +1098,10 @@ export interface Session1 {
    * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
 }
 export interface Session2 {
   id: Id;
@@ -1110,6 +1134,10 @@ export interface Session2 {
    * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
 }
 export interface Session3 {
   id: Id;
@@ -1142,6 +1170,10 @@ export interface Session3 {
    * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
 }
 export interface Session4 {
   id: Id;
@@ -1174,6 +1206,10 @@ export interface Session4 {
    * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
 }
 export interface Session5 {
   id: Id;
@@ -1206,6 +1242,10 @@ export interface Session5 {
    * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
 }
 export interface Session6 {
   id: Id;
@@ -1238,6 +1278,21 @@ export interface Session6 {
    * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
+}
+export interface SessionDeleteResult {
+  id: Id;
+  /**
+   * Whether this delete took the session's workspace's folder, and its branch unless kept. Its row goes with it once no other session refers to it; a session whose delete kept the files, when the last to leave a workspace whose folder is gone, takes the row.
+   */
+  workspace_deleted: boolean;
+  /**
+   * Whether the workspace's branch was kept because it holds commits no other branch or remote holds, or another worktree has it checked out. False when the workspace stayed.
+   */
+  branch_kept: boolean;
 }
 export interface SessionSendResult {
   /**
@@ -1276,6 +1331,10 @@ export interface Session7 {
    * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
 }
 export interface AttachmentInspectResult {
   path: string;
@@ -1333,6 +1392,10 @@ export interface Session8 {
    * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
 }
 export interface Session9 {
   id: Id;
@@ -1365,6 +1428,10 @@ export interface Session9 {
    * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
 }
 export interface Session10 {
   id: Id;
@@ -1397,6 +1464,10 @@ export interface Session10 {
    * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
 }
 export interface Session11 {
   id: Id;
@@ -1429,6 +1500,10 @@ export interface Session11 {
    * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
   archived: boolean;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
 }
 export interface SessionSubscribeResult {
   /**
@@ -1544,6 +1619,7 @@ export interface CoreApiMethods {
   "session.resume": { params: SessionResumeParams; result: SessionResumeResult };
   "session.remove": { params: SessionRemoveParams; result: SessionRemoveResult };
   "session.set_archived": { params: SessionSetArchivedParams; result: SessionSetArchivedResult };
+  "session.delete": { params: SessionDeleteParams; result: SessionDeleteResult };
   "session.send": { params: SessionSendParams; result: SessionSendResult };
   "session.interrupt": { params: SessionInterruptParams; result: SessionInterruptResult };
   "attachment.inspect": { params: AttachmentInspectParams; result: AttachmentInspectResult };

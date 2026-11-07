@@ -46,10 +46,11 @@ use std::time::Duration;
 
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, OpenElsewhere,
-    PermissionDecision, ProcessExit, RawLine, RecordEvent, RecordSummary, SessionConfig, Transport,
+    PermissionDecision, ProcessExit, RawLine, RecordDeletion, RecordEvent, RecordSummary,
+    SessionConfig, Transport,
 };
 use ersa_protocol::core_api::rpc::Notification;
-use ersa_protocol::core_api::{Session, SessionEventParams, SessionTileParams, Tile};
+use ersa_protocol::core_api::{Deleting, Session, SessionEventParams, SessionTileParams, Tile};
 use ersa_protocol::events::{
     Envelope, ErrorCode, ErrorEvent, Event, LifecycleState, NoticeCode, NoticeLevel, SessionNotice,
 };
@@ -150,6 +151,10 @@ pub enum SessionError {
     /// Core handed a message over but can't tell whether the backend took it.
     #[error("{0}")]
     DeliveryUnknown(String),
+    /// A delete under way holds the session's workspace
+    /// ([`SessionManager::claim_workspace`]).
+    #[error("{0}")]
+    Busy(String),
 }
 
 /// Every session Core knows, and the adapters it can start them with.
@@ -168,6 +173,33 @@ pub struct SessionManager {
     /// Set by [`SessionManager::stop_all`]; no session starts after it.
     /// Read and written under the `sessions` lock.
     closing: AtomicBool,
+    /// The workspaces a `session.delete` under way has claimed, each with
+    /// the session it deletes. In memory only, so a restart drops every
+    /// claim (PROTO-CORE-API, `session.delete`).
+    claims: Claims,
+}
+
+/// Claimed workspaces, by id, with the session each delete is for.
+type Claims = Arc<Mutex<HashMap<String, String>>>;
+
+/// A workspace claimed for one delete; dropping it releases the claim, so
+/// every way out of a delete, a refusal or a failure included, releases it.
+pub struct WorkspaceClaim {
+    claims: Claims,
+    workspace_id: String,
+}
+
+impl Drop for WorkspaceClaim {
+    fn drop(&mut self) {
+        lock(&self.claims).remove(&self.workspace_id);
+    }
+}
+
+/// The refusal for a request a delete under way holds back.
+fn busy(workspace_id: &str) -> SessionError {
+    SessionError::Busy(format!(
+        "a session in workspace {workspace_id} is being deleted; try again once it is done"
+    ))
 }
 
 /// One session, live or not.
@@ -599,6 +631,7 @@ impl Handle {
             last_event_seq: hub.last_seq(),
             sending: lock(&self.sending).as_ref().map(send::Sending::phase),
             archived: row.archived,
+            deleting: row.deleting,
             tile,
         }
     }
@@ -617,6 +650,7 @@ impl SessionManager {
             tiles: Arc::default(),
             copy_pause: Duration::ZERO,
             closing: AtomicBool::new(false),
+            claims: Arc::default(),
         }
     }
 
@@ -815,6 +849,13 @@ impl SessionManager {
         }
         // Only what was named is stored and reported (PROTO-CORE-API-R16).
         self.store.insert_session(row.clone()).await?;
+        // Checked once the row exists, so a delete that claims the workspace
+        // after this check counts the new session, and one that claimed it
+        // before is seen here.
+        if let Err(busy) = self.refuse_if_claimed(&row.workspace_id) {
+            self.store.delete_session(row.id.clone()).await?;
+            return Err(busy);
+        }
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&handle.presented).title = title;
         // A new session has no record yet: the backend has not been told
@@ -936,6 +977,9 @@ impl SessionManager {
     /// Forgets a stopped session. Its record is the backend's, and stays.
     pub async fn remove(&self, id: &str) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
+        self.refuse_if_deleting(&handle)?;
+        let workspace_id = lock(&handle.row).workspace_id.clone();
+        self.refuse_if_claimed(&workspace_id)?;
         // A session whose ending is already queued is only winding down: a
         // client may have seen `session.ended` before Core let it go, and
         // can remove it, so wait for it to finish. Waited for before taking
@@ -956,6 +1000,14 @@ impl SessionManager {
         }
         let session = handle.describe();
         self.store.delete_session(id.to_string()).await?;
+        self.let_go(&handle).await;
+        Ok(session)
+    }
+
+    /// Lets go of a session whose row is gone: its scratch folder, what the
+    /// app log, the adapter and the tiles keep of it, and its subscribers.
+    async fn let_go(&self, handle: &Arc<Handle>) {
+        let id = handle.id.as_str();
         // Its scratch folder goes with it (PROTO-CORE-API-R28), once no
         // copying holds it. Never past a bound: a file system that hangs
         // leaves the folder behind, logged, rather than hold up the
@@ -999,7 +1051,6 @@ impl SessionManager {
         // The connections stay open: the client that removed the session
         // may be one of them, and the session is gone from `session.list`.
         lock(&handle.hub).subscribers.clear();
-        Ok(session)
     }
 
     /// Renames the session in its backend (PROTO-CORE-API-R12): through the
@@ -1091,6 +1142,7 @@ impl SessionManager {
     /// session stopped; nothing restarts it.
     pub async fn set_archived(&self, id: &str, archived: bool) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
+        self.refuse_if_deleting(&handle)?;
         if archived {
             self.stop(id).await?;
         }
@@ -1110,6 +1162,171 @@ impl SessionManager {
             .await?;
         lock(&handle.row).archived = archived;
         Ok(handle.describe())
+    }
+
+    // -- Deleting (PROTO-CORE-API, `session.delete`) --------------------------
+
+    /// The session's row as last written.
+    pub fn row(&self, id: &str) -> Result<SessionRow, SessionError> {
+        Ok(lock(&self.handle(id)?.row).clone())
+    }
+
+    /// Refuses a delete while the session is starting, a turn is running
+    /// in it (one waiting on the user included), or a message is being
+    /// sent to it (FLOW-ARCHIVE-DELETE-SESSION-R05). `session.delete` asks
+    /// once it holds the claim, so a send cannot start in between.
+    pub fn check_deletable(&self, id: &str) -> Result<(), SessionError> {
+        let handle = self.handle(id)?;
+        let session = handle.describe();
+        let working = matches!(
+            session.state,
+            LifecycleState::Starting | LifecycleState::Running | LifecycleState::WaitingUser
+        );
+        // A pending permission or question is a turn waiting on the user,
+        // whatever state the backend last reported.
+        let waiting = !session.tile.pending.is_empty();
+        if (handle.live().is_some() && (working || waiting)) || session.sending.is_some() {
+            return Err(SessionError::InvalidState(format!(
+                "session {id} is starting or working; stop it before deleting it"
+            )));
+        }
+        Ok(())
+    }
+
+    /// Claims workspace `workspace_id` for deleting session `session_id`,
+    /// in memory only. Refused while another delete holds it.
+    pub fn claim_workspace(
+        &self,
+        workspace_id: &str,
+        session_id: &str,
+    ) -> Result<WorkspaceClaim, SessionError> {
+        let mut claims = lock(&self.claims);
+        if claims.contains_key(workspace_id) {
+            return Err(busy(workspace_id));
+        }
+        claims.insert(workspace_id.to_string(), session_id.to_string());
+        Ok(WorkspaceClaim {
+            claims: Arc::clone(&self.claims),
+            workspace_id: workspace_id.to_string(),
+        })
+    }
+
+    /// Refuses a request that would change workspace `workspace_id` while a
+    /// delete holds it.
+    fn refuse_if_claimed(&self, workspace_id: &str) -> Result<(), SessionError> {
+        if lock(&self.claims).contains_key(workspace_id) {
+            return Err(busy(workspace_id));
+        }
+        Ok(())
+    }
+
+    /// Refuses a request about session `handle` while a delete is under
+    /// way for it, or it is marked deleting.
+    fn refuse_if_deleting(&self, handle: &Handle) -> Result<(), SessionError> {
+        let (workspace_id, deleting) = {
+            let row = lock(&handle.row);
+            (row.workspace_id.clone(), row.deleting)
+        };
+        if lock(&self.claims).get(&workspace_id) == Some(&handle.id) {
+            return Err(busy(&workspace_id));
+        }
+        if deleting.is_some() {
+            return Err(SessionError::InvalidState(format!(
+                "session {} is being deleted; delete it again to finish",
+                handle.id
+            )));
+        }
+        Ok(())
+    }
+
+    /// Whether a process other than Core's own has the session open, as
+    /// its backend's registry says, on the host `transport` reaches. Asked
+    /// once Core's own process for it has stopped, so any process the
+    /// registry names is another one. A session its backend never named has
+    /// no record anyone could have open.
+    pub async fn open_elsewhere(
+        &self,
+        id: &str,
+        transport: Arc<dyn Transport>,
+    ) -> Result<OpenElsewhere, SessionError> {
+        let row = self.row(id)?;
+        let Some(backend_id) = row.backend_session_id else {
+            return Ok(OpenElsewhere::No);
+        };
+        let adapter = self.adapter(&row.backend).ok_or_else(|| {
+            SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
+        })?;
+        Ok(ask_open_elsewhere(adapter, transport, &backend_id).await)
+    }
+
+    /// Marks the session deleting, `running`, and records whether its
+    /// delete takes the workspace's files: `files`, unless an earlier try
+    /// recorded that they stay. Returns what is recorded. Stored first, then
+    /// kept in memory, as an archive mark is.
+    pub async fn mark_deleting(&self, id: &str, files: bool) -> Result<bool, SessionError> {
+        let handle = self.handle(id)?;
+        let _op = handle.op.lock().await;
+        if handle.removed.load(Ordering::SeqCst) {
+            return Err(SessionError::NotFound(id.to_string()));
+        }
+        let recorded = self
+            .store
+            .mark_session_deleting(id.to_string(), files)
+            .await?;
+        lock(&handle.row).deleting = Some(Deleting::Running);
+        Ok(recorded)
+    }
+
+    /// Marks the session's delete failed, for the user to try again.
+    pub async fn mark_delete_failed(&self, id: &str) -> Result<(), SessionError> {
+        let handle = self.handle(id)?;
+        self.store.set_session_delete_failed(id.to_string()).await?;
+        lock(&handle.row).deleting = Some(Deleting::Failed);
+        Ok(())
+    }
+
+    /// Deletes the session's record from its backend, on the host
+    /// `transport` reaches (PROTO-CORE-API-R36). A session its backend never
+    /// named has no record to delete.
+    pub async fn delete_record(
+        &self,
+        id: &str,
+        transport: Arc<dyn Transport>,
+    ) -> Result<RecordDeletion, SessionError> {
+        let row = self.row(id)?;
+        let Some(backend_id) = row.backend_session_id else {
+            return Ok(RecordDeletion::Deleted);
+        };
+        let adapter = self.adapter(&row.backend).ok_or_else(|| {
+            SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
+        })?;
+        let cwd = row.cwd;
+        let call =
+            tokio::spawn(async move { adapter.delete_record(transport, &cwd, &backend_id).await });
+        match tokio::time::timeout(RECORD_READ, call).await {
+            Ok(Ok(deleted)) => deleted.map_err(SessionError::Adapter),
+            Ok(Err(e)) => Err(SessionError::Internal(format!("the adapter failed: {e}"))),
+            Err(_) => Err(SessionError::Internal(format!(
+                "deleting the session's record took longer than {RECORD_READ:?}"
+            ))),
+        }
+    }
+
+    /// Removes a deleted session, and with it its workspace's row when
+    /// `workspace_id` names one, in one transaction; then lets go of it as
+    /// `session.remove` does.
+    pub async fn finish_delete(
+        &self,
+        id: &str,
+        workspace_id: Option<String>,
+    ) -> Result<(), SessionError> {
+        let handle = self.handle(id)?;
+        let _op = handle.op.lock().await;
+        self.store
+            .finish_session_delete(id.to_string(), workspace_id)
+            .await?;
+        self.let_go(&handle).await;
+        Ok(())
     }
 
     /// Takes effect on the session's next start.
@@ -1487,6 +1704,22 @@ fn is_rfc3339(text: &str) -> bool {
 ///
 /// Notices are not part of the record, so one reaches the clients reading
 /// the session now; with none reading, there is nobody to tell.
+/// Asks `adapter` whether another process has session `backend_id` open,
+/// for at most [`OPEN_ELSEWHERE_CHECK`]: a check that panics or hangs could
+/// not tell, so its answer is unknown.
+async fn ask_open_elsewhere(
+    adapter: Arc<dyn Adapter>,
+    transport: Arc<dyn Transport>,
+    backend_id: &str,
+) -> OpenElsewhere {
+    let id = backend_id.to_string();
+    let check = tokio::spawn(async move { adapter.open_elsewhere(transport, &id).await });
+    match tokio::time::timeout(OPEN_ELSEWHERE_CHECK, check).await {
+        Ok(Ok(answer)) => answer,
+        Ok(Err(_)) | Err(_) => OpenElsewhere::Unknown,
+    }
+}
+
 async fn notice_if_open_elsewhere(
     handle: &Handle,
     adapter: Arc<dyn Adapter>,
@@ -1494,14 +1727,7 @@ async fn notice_if_open_elsewhere(
     backend_id: &str,
     consequence: &str,
 ) {
-    let id = backend_id.to_string();
-    let check = tokio::spawn(async move { adapter.open_elsewhere(transport, &id).await });
-    let answer = match tokio::time::timeout(OPEN_ELSEWHERE_CHECK, check).await {
-        Ok(Ok(answer)) => answer,
-        // A check that panicked or hung could not tell.
-        Ok(Err(_)) | Err(_) => OpenElsewhere::Unknown,
-    };
-    let notice = match answer {
+    let notice = match ask_open_elsewhere(adapter, transport, backend_id).await {
         OpenElsewhere::No => return,
         OpenElsewhere::Yes { pid } => SessionNotice {
             level: NoticeLevel::Warning,
@@ -2473,6 +2699,7 @@ mod tests {
             effort: None,
             permission_mode: None,
             archived: false,
+            deleting: None,
         };
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&manager.sessions).insert(handle.id.clone(), handle);
