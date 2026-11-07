@@ -1,33 +1,40 @@
-/* A session control: a pill on the canvas, quiet until pointed at, whose choices unfold beneath it.
+/* A session control: a pill on the canvas, quiet until pointed at, whose choices unfold from it.
    `data-force` lets the gallery show a state without a pointer. */
 
+/* Exactly the chip's height, with no line box beneath it, so a list above measures from the chip. */
 .chip-root {
   position: relative;
-  display: inline-block;
+  display: inline-flex;
 }
 
+/* A pill (docs/design/COMPOSER.md, The session controls): size-control high, no fill and an edge in no colour at
+   rest, its text ink-muted. A control without an edge (DESIGN.md, Pointer and press). */
 .chip {
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
+  box-sizing: border-box;
+  height: var(--size-control);
+  padding: 0 var(--space-sm);
   font: inherit;
   font-size: var(--type-ui-small-size);
   line-height: var(--type-ui-small-leading);
-  color: var(--color-ink);
+  color: var(--color-ink-muted);
   background: transparent;
-  border: var(--line-hairline) solid var(--color-line);
+  border: var(--line-hairline) solid transparent;
   border-radius: var(--radius-pill);
-  padding: var(--space-xs) var(--space-sm);
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background var(--motion-quick) var(--motion-ease-out),
+    border-color var(--motion-quick) var(--motion-ease-out),
+    color var(--motion-quick) var(--motion-ease-out);
 }
 
-.chip-prefix {
-  color: var(--color-ink-muted);
-}
-
-/* A where chip's icon leads it, faint beside the value. */
-.chip-icon {
+/* A prefix, such as Effort, before the value; a where chip's icon leading it; the chevron of one that opens a list. */
+.chip-prefix,
+.chip-icon,
+.chip-chevron {
   display: inline-flex;
   color: var(--color-ink-faint);
 }
@@ -35,30 +42,31 @@
 /* :where() adds no specificity, so the pressed and open states below still win. */
 .chip:hover:not(:disabled):not([data-open]):where(:not(:focus-visible)),
 .chip[data-force="hover"] {
-  background: var(--color-surface);
-  border-color: var(--color-ink-faint);
+  color: var(--color-ink);
+  background: var(--material-hover);
 }
 
-/* Pressed sinks to the canvas, as a button does; open stands on the surface with the stronger edge. */
 .chip:active:not(:disabled),
 .chip[data-force="pressed"] {
-  background: var(--color-canvas);
-  border-color: var(--color-ink-muted);
+  color: var(--color-ink);
+  background: var(--material-pressed);
 }
 
-.chip[data-open] {
-  background: var(--color-surface);
-  border-color: var(--color-ink-muted);
+/* Open, it stands on the raised surface with a line edge, whatever the pointer does, pressing included. */
+.chip[data-open],
+.chip[data-open]:active:not(:disabled) {
+  color: var(--color-ink);
+  background: var(--color-surface-raised);
+  border-color: var(--color-line);
 }
 
-/* Focus takes the accent, as a button's does: edge and value. */
 .chip:focus-visible,
 .chip[data-force="focus"] {
   outline: none;
-  border-color: var(--color-accent);
-  color: var(--color-accent);
+  border-color: var(--color-ink);
 }
 
+/* Unavailable: ink-faint, unchanged under the pointer. */
 .chip:disabled {
   color: var(--color-ink-faint);
   cursor: default;
@@ -68,24 +76,41 @@
   color: var(--color-ink-faint);
 }
 
-/* Still being found out, not refused: muted rather than faint, with the pending glyph. */
-.chip[data-pending]:disabled {
+/* Under a running session the chips show its values: the same pills, as at rest, that do not open. */
+.chip[data-read-only] {
   color: var(--color-ink-muted);
 }
 
-/* The choices: a transient layer beneath the chip, which it unfolds from. */
+/* An invitation to act, such as Choose a folder, reads ink. */
+.chip[data-invites] {
+  color: var(--color-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chip {
+    transition: none;
+  }
+}
+
+/* The choices: a transient layer anchored to its chip, space-xs from it, beneath where the window has room, else
+   above, placed again as it grows. */
 .chip-list {
-  position: absolute;
-  left: 0;
+  position: fixed;
+  inset: auto;
+  position-area: block-end span-inline-end;
+  position-try-fallbacks: flip-block;
   z-index: var(--stack-menu);
   display: flex;
   flex-direction: column;
-  min-width: max-content;
-  margin: var(--space-xs) 0 0;
+  /* At least as wide as its chip, at most size-menu. */
+  min-width: anchor-size(width);
+  width: max-content;
+  max-width: var(--size-menu);
+  margin: var(--space-xs) 0;
   padding: var(--space-xs);
   list-style: none;
-  font-size: var(--type-ui-small-size);
-  line-height: var(--type-ui-small-leading);
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
   background: var(--color-surface);
   border: var(--line-hairline) solid var(--color-line);
   border-radius: var(--radius-lg);
@@ -106,11 +131,15 @@
   }
 }
 
+/* An option (docs/design/COMPOSER.md, A chip's list): size-control high, radius-md, padded space-sm at the sides,
+   in ui; a control without an edge (DESIGN.md, Pointer and press). */
 .chip-option {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  padding: var(--space-xs) var(--space-sm);
+  box-sizing: border-box;
+  min-height: var(--size-control);
+  padding: 0 var(--space-sm);
   color: var(--color-ink);
   border: var(--line-hairline) solid transparent;
   /* An option in a floating layer: radius-md nests within the list's radius-lg (DESIGN.md, Shapes). */
@@ -119,22 +148,21 @@
   cursor: pointer;
 }
 
-/* Hover darkens the edge as well as the fill, as a button's does: surface-raised alone barely differs. */
-.chip-option:hover:not([aria-disabled="true"]):where(:not(:focus-visible)),
-.chip-option[data-force="hover"] {
-  background: var(--color-surface-raised);
-  border-color: var(--color-ink-faint);
+.chip-option:hover:not([aria-disabled="true"]),
+.chip-option[data-force="hover"]:not([aria-disabled="true"]) {
+  background: var(--material-hover);
 }
 
 .chip-option:active:not([aria-disabled="true"]),
-.chip-option[data-force="pressed"] {
-  background: var(--color-canvas);
-  border-color: var(--color-ink-muted);
+.chip-option[data-force="pressed"]:not([aria-disabled="true"]) {
+  background: var(--material-pressed);
 }
 
-.chip-option:focus-visible {
+/* Keyboard focus is an ink edge, so the focused option stays distinct from the one under the pointer. */
+.chip-option:focus-visible,
+.chip-option[data-force="focus"] {
   outline: none;
-  border-color: var(--color-accent);
+  border-color: var(--color-ink);
 }
 
 .chip-option-mark {
@@ -149,13 +177,24 @@
   background: var(--color-accent);
 }
 
+/* A label longer than the list is wide, such as a long branch name, is cut with an ellipsis, so the status stays in
+   view at the trailing edge and the list never scrolls sideways. */
+.chip-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .chip-option-status {
+  flex: none;
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
   margin-left: auto;
   padding-left: var(--space-md);
-  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  color: var(--color-ink-faint);
 }
 
 /* Shown, with its status, but nothing to choose. */
@@ -163,9 +202,9 @@
   cursor: default;
 }
 
-/* Muted, not faint: that it is there but cannot run is something the user needs to read. */
+/* Unavailable: ink-faint, keeping its status, unchanged under the pointer. */
 .chip-option[aria-disabled="true"] .chip-option-label {
-  color: var(--color-ink-muted);
+  color: var(--color-ink-faint);
 }
 
 /* The project list (docs/design/COMPOSER.md, The project list): the widest list, its options two lines tall. */
@@ -207,6 +246,8 @@
 }
 
 .chip-option-caution {
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
   grid-area: caution;
   display: inline-flex;
   align-items: center;
@@ -221,6 +262,8 @@
 
 /* Right to left, so the ellipsis falls at the path's start and the folder's own name stays in view. */
 .chip-option-detail {
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
   grid-area: detail;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -245,6 +288,8 @@
   margin-left: auto;
   padding-left: var(--space-md);
   font: inherit;
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
   color: var(--color-ink-faint);
 }
 
@@ -327,12 +372,6 @@
   overflow-y: auto;
 }
 
-/* Each branch is size-control high, so eight of them fill size-list-max exactly; they read as the options above
-   them do, so the list keeps one type size and one status tone. */
-.chip-section-options .chip-option {
-  box-sizing: border-box;
-  min-height: var(--size-control);
-}
 
 /* Nothing matches, or nothing to list yet. It wraps to the list's width rather than widening the list. */
 .chip-section-note {
