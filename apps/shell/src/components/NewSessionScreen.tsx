@@ -11,7 +11,9 @@ import {
   startingProject,
   valuesFor,
 } from "../session/controls";
+import type { Attached } from "../session/attachments";
 import type { Sending } from "../session/follow";
+import type { AttachWhat } from "./AttachMenu";
 import { Composer, type Unavailable } from "./Composer";
 import { type ControlKey, type Host, SessionControls } from "./SessionControls";
 import { TrustQuestion, folderName } from "./TrustQuestion";
@@ -36,7 +38,11 @@ interface NewSessionScreenProps {
   /** The project the user chose New session for; else the local host's most recently used (FLOW-NEW-SESSION-R15). */
   projectId?: string;
   /** Starts the session with the first message; resolves true once it has started. */
-  onStart: (text: string, values: SessionValues) => Promise<boolean>;
+  onStart: (text: string, values: SessionValues, attachments: readonly Attached[]) => Promise<boolean>;
+  /** Opens the system's dialog for files, images or a folder and reads each path picked (FLOW-SEND-MESSAGE-R07). */
+  onAttach?: (what: AttachWhat, workspace: string | undefined) => Promise<Attached[]>;
+  /** Each project's root workspace, by project id: the workspace a session in the project folder runs in. */
+  rootWorkspaces?: Readonly<Record<string, string>>;
   starting?: Sending;
   /**
    * Opens the system's folder dialog on the local host and finds whether the folder picked is already a project
@@ -245,6 +251,9 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   // A new workspace starts from the base branch the chip shows: the one chosen, else the default (R21, R29).
   const base = chosen.workspace === "isolated" && branches?.state === "read" ? baseFor(branches.branches, wanted.base) : undefined;
   const values: SessionValues = base === undefined ? chosen : { ...chosen, base };
+  // Attachments are judged against the project folder's root workspace when it is chosen, and against none for a new
+  // workspace, which is not made yet and holds nothing (FLOW-SEND-MESSAGE-R17).
+  const attachTo = project && values.workspace === "root" ? props.rootWorkspaces?.[project.id] : undefined;
 
   const onChoose = (key: ControlKey, id: string) => {
     if (key === "host") {
@@ -313,14 +322,16 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           sending={starting}
           onStop={props.onStop}
           onWrite={hold}
-          onSend={(text) => {
+          onAttach={props.onAttach && ((what) => props.onAttach?.(what, attachTo) ?? Promise.resolve([]))}
+          workspace={attachTo}
+          onSend={(text, attachments) => {
             hold();
             // With no project, sending opens the folder dialog and the message stays for the user to send (R19).
             if (!project) {
               void addProject();
               return Promise.resolve(false);
             }
-            return onStart(text, values);
+            return onStart(text, values, attachments);
           }}
         />
         <SessionControls
