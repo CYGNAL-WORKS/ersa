@@ -251,26 +251,45 @@ const INSPECT_LIMIT: Duration = Duration::from_secs(30);
 /// of Core's.
 static INSPECTING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
 
-/// The most workspace folders being resolved at once for `attachment.inspect`.
-/// Resolving one happens before an inspect takes its place, so a workspace on
-/// a drive that stops answering holds these threads, never the inspects'.
-static RESOLVING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+/// A workspace folder's resolution, once it is done: its canonical path, or
+/// why it can't be read.
+type Resolution = Option<Result<std::path::PathBuf, ()>>;
+
+/// The workspace folders being resolved for `attachment.inspect`, by path.
+/// Each folder is resolved by one thread at a time, which every inspect of
+/// that workspace waits on, so a workspace on a drive that stops answering
+/// holds one thread, never an inspect's place nor another workspace's answer.
+static RESOLVING: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, tokio::sync::watch::Receiver<Resolution>>>,
+> = std::sync::LazyLock::new(Default::default);
 
 /// How long `attachment.inspect` waits for a workspace folder to resolve,
 /// past which every file and folder is taken to be copied.
 const RESOLVE_LIMIT: Duration = Duration::from_secs(5);
 
-/// The workspace folder as send resolves it (an error when it can't be read),
-/// or `None` when it does not answer in time or too many are being resolved
-/// already.
-async fn resolve_workspace(path: String) -> Option<std::io::Result<std::path::PathBuf>> {
-    let place = RESOLVING.try_acquire().ok()?;
-    let job = tokio::task::spawn_blocking(move || {
-        let _place = place;
-        std::fs::canonicalize(path)
-    });
-    match tokio::time::timeout(RESOLVE_LIMIT, job).await {
-        Ok(Ok(resolved)) => Some(resolved),
+/// The workspace folder as send resolves it (`Err` when it can't be read),
+/// or `None` when it does not answer in time.
+async fn resolve_workspace(path: String) -> Option<Result<std::path::PathBuf, ()>> {
+    let mut resolution = {
+        let mut resolving = RESOLVING.lock().expect("resolving lock");
+        match resolving.get(&path) {
+            // Already being resolved: wait on that one.
+            Some(rx) => rx.clone(),
+            None => {
+                let (tx, rx) = tokio::sync::watch::channel(None);
+                resolving.insert(path.clone(), rx.clone());
+                tokio::task::spawn_blocking(move || {
+                    let resolved = std::fs::canonicalize(&path).map_err(|_| ());
+                    let _ = tx.send(Some(resolved));
+                    RESOLVING.lock().expect("resolving lock").remove(&path);
+                });
+                rx
+            }
+        }
+    };
+    let done = tokio::time::timeout(RESOLVE_LIMIT, resolution.wait_for(Option::is_some)).await;
+    match done {
+        Ok(Ok(resolved)) => resolved.clone(),
         _ => None,
     }
 }

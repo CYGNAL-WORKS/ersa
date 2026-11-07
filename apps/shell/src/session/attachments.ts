@@ -12,7 +12,7 @@ export interface Attached {
   kind: AttachmentInspectResult["kind"];
   /** Its detail: a size, a line count, or that it is a folder (FLOW-SEND-MESSAGE-R09). */
   detail: string;
-  /** Whether sending copies it, as Core judged it for one workspace, or for none yet (FLOW-SEND-MESSAGE-R14). */
+  /** Whether sending copies it, as Core judged it for one workspace, or for none yet (FLOW-SEND-MESSAGE-R17). */
   copied?: { workspace: string | undefined; copied: boolean };
   /** Why Ersa can't send it, said beside it; the message waits until it is removed (FLOW-SEND-MESSAGE-R10). */
   problem?: string;
@@ -60,7 +60,7 @@ export function attached(info: AttachmentInspectResult, workspace?: string): Att
 }
 
 /**
- * Whether sending `a` copies it into the workspace's `.ersa` folder (FLOW-SEND-MESSAGE-R14): Core's `copied`
+ * Whether sending `a` copies it into the workspace's `.ersa` folder (FLOW-SEND-MESSAGE-R17): Core's `copied`
  * alone, since Core alone resolves links and junctions. One Core judged for another workspace than the composer's
  * now, as after choosing another on the new-session screen, is taken to be copied, so the note never says a copy
  * won't happen when it may.

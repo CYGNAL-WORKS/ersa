@@ -252,7 +252,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   const base = chosen.workspace === "isolated" && branches?.state === "read" ? baseFor(branches.branches, wanted.base) : undefined;
   const values: SessionValues = base === undefined ? chosen : { ...chosen, base };
   // Attachments are judged against the project folder's root workspace when it is chosen, and against none for a new
-  // workspace, which is not made yet and holds nothing (FLOW-SEND-MESSAGE-R14).
+  // workspace, which is not made yet and holds nothing (FLOW-SEND-MESSAGE-R17).
   const attachTo = project && values.workspace === "root" ? props.rootWorkspaces?.[project.id] : undefined;
 
   const onChoose = (key: ControlKey, id: string) => {

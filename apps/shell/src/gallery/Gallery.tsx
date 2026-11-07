@@ -415,7 +415,7 @@ const room = (node: ReactNode) => <div className="gallery-room">{node}</div>;
 const statusRoom = (node: ReactNode) => <div className="gallery-status-room">{node}</div>;
 /** Room above a composer for its attach menu, which opens upward from attach. */
 const menuRoom = (node: ReactNode) => <div className="gallery-room-before gallery-list-above">{node}</div>;
-/** A message's attachments (FLOW-SEND-MESSAGE-R09, R14): a file in the workspace, an image, and a folder Core copies. */
+/** A message's attachments (FLOW-SEND-MESSAGE-R09, R17): a file in the workspace, an image, and a folder Core copies. */
 const galleryWorkspace = "w-gallery";
 const inWorkspace = { workspace: galleryWorkspace, copied: false };
 const galleryAttachments: [Attached, Attached, Attached] = [
