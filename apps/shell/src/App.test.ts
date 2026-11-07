@@ -902,6 +902,6 @@ describe("reading the paths picked", () => {
     answers[9]?.();
     await settle();
     expect(inspects()).toBe(10);
-    expect(Array.from(document.querySelectorAll(".composer-attachment-name")).map((n) => n.textContent)).toEqual(picked.map((p) => p.slice(-6)));
+    expect(Array.from(document.querySelectorAll(".attachment-name")).map((n) => n.textContent)).toEqual(picked.map((p) => p.slice(-6)));
   });
 });

@@ -142,6 +142,8 @@ describe("an attachment Ersa can't send", () => {
     await act(async () => {});
     const marked = document.querySelector(".composer-attachment[data-problem]");
     expect(marked?.textContent).toBe("shot.pngThis image is too large.");
+    // The danger glyph in place of its icon.
+    expect(marked?.querySelector('.glyph[data-tone="danger"]')).not.toBeNull();
     expect(screen.getByRole("alert").textContent).toBe("This image is too large.");
     // Said beside the attachment, not in the status line.
     expect(statusLine()).toBeNull();

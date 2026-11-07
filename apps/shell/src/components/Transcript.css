@@ -88,36 +88,6 @@
   border-radius: var(--radius-md);
 }
 
-/* A file or folder: the composer's attachment without its detail or remove: its icon and its name, cut with an
-   ellipsis. */
-.transcript-attachment {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-sm);
-  box-sizing: border-box;
-  min-width: 0;
-  height: var(--size-control-lg);
-  padding: 0 var(--space-sm);
-  font-size: var(--type-ui-small-size);
-  line-height: var(--type-ui-small-leading);
-  color: var(--color-ink);
-  background: var(--material-tile);
-  border: var(--line-hairline) solid var(--color-line);
-  border-radius: var(--radius-md);
-  white-space: nowrap;
-}
-
-.transcript-attachment-icon {
-  display: inline-flex;
-  color: var(--color-ink-muted);
-}
-
-.transcript-attachment-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* A new turn: the gap before every user message but the first grows to space-xxxl, so turns read as groups (DESIGN.md, Layout). */
 .transcript-user ~ .transcript-user {
   margin-top: calc(var(--space-xxxl) - var(--space-md));
