@@ -1222,14 +1222,10 @@ async fn a_failed_session_still_lists_as_failed_after_core_restarts() {
         .await;
     client.events_until("session.ended").await;
     assert_eq!(session_row(&mut client, &id).await["state"], "error");
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
+    drop(client);
 
     // Listed, not opened: its state comes from how Core saw it end.
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
-    let core = start_with_adapters(dir, |_| {}, adapters).await;
-    let mut client = core.client().await;
+    let (_core, mut client) = restarted(core).await;
     let row = session_row(&mut client, &id).await;
     assert_eq!(row["state"], "error");
     assert_eq!(row["tile"]["state"], "error");
@@ -1325,12 +1321,8 @@ async fn a_session_starts_with_the_model_effort_and_permission_mode_it_names() {
         (Some("model-b"), Some("low"), "auto")
     );
 
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
-    let core = start_with_adapters(dir, |_| {}, adapters).await;
-    let mut client = core.client().await;
+    drop(client);
+    let (_core, mut client) = restarted(core).await;
     assert_eq!(chosen(&session_row(&mut client, &id).await), named);
 }
 
@@ -1361,12 +1353,8 @@ async fn a_session_that_names_none_leaves_them_to_its_backend() {
         (None, None, "ask")
     );
 
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::new(1))];
-    let core = start_with_adapters(dir, |_| {}, adapters).await;
-    let mut client = core.client().await;
+    drop(client);
+    let (_core, mut client) = restarted(core).await;
     let row = session_row(&mut client, &id).await;
     assert!(absent(&row), "{row:#}");
 }
