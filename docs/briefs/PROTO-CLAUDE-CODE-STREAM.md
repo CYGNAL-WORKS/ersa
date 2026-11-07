@@ -110,11 +110,11 @@ A session's title is the backend's, so renaming a session from Ersa renames it i
 
 ### Deleting
 
-When the user deletes a session (FLOW-ARCHIVE-DELETE-SESSION), the adapter deletes its record file, `<session id>.jsonl`, and the folder of the same name beside it, which holds the session's subagent transcripts and stored tool results; it deletes nothing else of the CLI's. It deletes only when the live-session registry shows no process other than Core's own has the session open, never when the registry cannot say, and a record already gone counts as deleted. PROTO-CLAUDE-CODE-STREAM-R31 to R33 are its requirements. This and appending a `custom-title` entry (R22) are the only changes the adapter makes to the CLI's files.
+When the user deletes a session (FLOW-ARCHIVE-DELETE-SESSION), the adapter deletes its record file, `<session id>.jsonl`, and the folder of the same name beside it, which holds the session's subagent transcripts and stored tool results; it deletes nothing else of the CLI's. It deletes only when the live-session registry shows no process has the session open, Core having stopped its own first (PROTO-CORE-API, `session.delete`), never when the registry cannot say, and a record already gone counts as deleted. PROTO-CLAUDE-CODE-STREAM-R31, R33 and R37 are its requirements. This and appending a `custom-title` entry (R22) are the only changes the adapter makes to the CLI's files.
 
 ### Live-session registry
 
-The CLI writes `~/.claude/sessions/<pid>.json` for each running process, naming the session it has open. Before resuming a session the adapter reads the registry and reports one of three answers: not open, open by a running process (with its pid), or unknown (a registry file it could not read). Core's resume asks before starting the backend and turns an open or unknown answer into a `session.notice` (`PROTO-AGENT-EVENTS`), since resuming a session another process has open would interleave both transcripts in one record. Core asks the same before appending a title to the record of a session it is not running.
+The CLI writes `~/.claude/sessions/<pid>.json` for each running process, naming the session it has open. Before resuming a session the adapter reads the registry and reports one of three answers: not open, open by running processes (with every pid that has it open), or unknown (a registry file it could not read). Core's resume asks before starting the backend and turns an open or unknown answer into a `session.notice` (`PROTO-AGENT-EVENTS`), since resuming a session another process has open would interleave both transcripts in one record. Core asks the same before appending a title to the record of a session it is not running.
 
 ## Control channel
 
@@ -241,7 +241,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R24**: When the session's project is trusted, the adapter shall send `workspaceTrust` with `accepted: true` and the project's root as `directory` in the `initialize` request, and otherwise shall send no `workspaceTrust`.
 - **PROTO-CLAUDE-CODE-STREAM-R28**: When forking a session, the adapter shall start the CLI in the original's stored workspace path with `--resume` and the original's backend session id and `--fork-session`, store the `session_id` the new process reports as the fork's, and write nothing to the original's record.
 - **PROTO-CLAUDE-CODE-STREAM-R31**: When deleting a session, the adapter shall delete its record file and the folder of the same name beside it, and nothing else of the CLI's.
-- **PROTO-CLAUDE-CODE-STREAM-R32**: The adapter shall delete a session's record only when the live-session registry shows no process other than Core's own has the session open, and shall refuse when the registry cannot say.
+- ~~**PROTO-CLAUDE-CODE-STREAM-R32**~~: retired 2026-11-07 (it exempted Core's own process, which the registry can't tell apart), replaced by R37.
 - **PROTO-CLAUDE-CODE-STREAM-R33**: When the record of a session being deleted is already gone, the adapter shall count it as deleted.
 - **PROTO-CLAUDE-CODE-STREAM-R25**: When a user message has attachments, the adapter shall send each image as a base64 `image` content block and the files and folders as one `<ersa-attachments>` text block of `file: ` and `folder: ` lines, after the user's text block.
 - **PROTO-CLAUDE-CODE-STREAM-R26**: When projecting a user entry, the adapter shall project its `image` blocks and an `<ersa-attachments>` text block to the `user.message` event's attachments, and shall leave them out of its text.
@@ -251,6 +251,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R34**: When projecting an `isMeta` user entry in which every text block, and every line of it, starts with `[Image: source: ` and ends with `]`, the adapter shall project it only to `backend.passthrough`.
 - **PROTO-CLAUDE-CODE-STREAM-R35**: When starting a new session, the adapter shall pass `--session-id` with an id Core chose and stored as the session's backend session id.
 - **PROTO-CLAUDE-CODE-STREAM-R36**: When renaming a starting session, the adapter shall hold a rename until the CLI has answered `initialize` and then send `rename_session`, and shall report the latest `system/session_title_changed` as the session's title until its record holds one.
+- **PROTO-CLAUDE-CODE-STREAM-R37**: The adapter shall delete a session's record only when the live-session registry shows no process with the session open, and shall refuse when the registry cannot say.
 
 ## Out of scope
 
@@ -268,6 +269,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 ## Changes
 
+- 2026-11-07: from #252 inbox: Core stops its own process before deleting a session, since the registry can't tell it apart, so the record is deleted only when no process has it open: PROTO-CLAUDE-CODE-STREAM-R32 retired for R37. The registry's answer names every process that has the session open, for `session.fork`'s count.
 - 2026-11-07: owner's decision that rename works at once, using the CLI's own naming: a new session starts with `--session-id`, so its id is known at once, and the CLI takes `rename_session` before the first message, writing `custom-title` with the record (checked by hand on 2.1.316). PROTO-CLAUDE-CODE-STREAM-R35 and R36 added.
 - 2026-11-07: from #240 inbox: what fixture 2.1.316/07-attachments shows: the CLI's `[Image: source: …]` entry projects only to `backend.passthrough` (PROTO-CLAUDE-CODE-STREAM-R34 added), and `last-prompt` stays at the prompt before a message of attachments alone.
 - 2026-11-06: open question on what the CLI keys its trust record to outside a git repository. No requirement IDs changed.
