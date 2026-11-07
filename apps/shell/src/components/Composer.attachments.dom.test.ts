@@ -25,7 +25,8 @@ type Props = {
   workspace?: string;
   initialAttachments?: Attached[];
   initialText?: string;
-  onAttach?: (what: AttachWhat | readonly string[]) => Promise<Attached[]>;
+  onAttach?: (what: AttachWhat) => Promise<Attached[]>;
+  onRead?: (paths: readonly string[]) => Promise<Attached[]>;
   onSend?: (text: string, attachments: readonly Attached[]) => Promise<boolean>;
 };
 const draw = (props: Props = {}) =>
@@ -193,9 +194,9 @@ describe("pasting and dropping attachments", () => {
   // verifies: FLOW-SEND-MESSAGE-R08
   it("attaches an image pasted into the words inline, by its bytes, and pastes text as text", async () => {
     const onSend = vi.fn(async (_text: string, _attachments: readonly Attached[]) => true);
-    render(draw({ onSend }));
+    render(draw({ onSend, onRead: async () => [] }));
     const png = new File([new Uint8Array([137, 80, 78, 71, 1, 2, 3])], "image.png", { type: "image/png" });
-    const pasted = fireEvent.paste(words(), { clipboardData: { files: [png] } });
+    const pasted = fireEvent.paste(words(), { clipboardData: { files: [png], getData: () => "" } });
     // The image is the composer's, not the words'.
     expect(pasted).toBe(false);
     await act(async () => {});
@@ -205,33 +206,34 @@ describe("pasting and dropping attachments", () => {
     });
     const [, sent] = onSend.mock.calls[0] ?? [];
     expect(sendable(sent ?? [])).toEqual([{ kind: "image", media_type: "image/png", data: btoa(String.fromCharCode(137, 80, 78, 71, 1, 2, 3)) }]);
-    // Text alone pastes as it would.
-    expect(fireEvent.paste(words(), { clipboardData: { files: [] } })).toBe(true);
+    // Text alone pastes as it would, and so does text with a picture of it, as copied cells.
+    expect(fireEvent.paste(words(), { clipboardData: { files: [], getData: () => "Words" } })).toBe(true);
+    expect(fireEvent.paste(words(), { clipboardData: { files: [png], getData: () => "A1	B1" } })).toBe(true);
   });
 
   // verifies: FLOW-SEND-MESSAGE-R08
   it("edges the box in the accent while files are dragged over it, and attaches what is dropped on it alone", async () => {
     let emit: (event: DragDrop) => void = () => {};
     const dragDrop = vi.fn((handler: (event: DragDrop) => void) => ((emit = handler), () => {}));
-    const onAttach = vi.fn(async (what: AttachWhat | readonly string[]) => (typeof what === "string" ? [] : [notes]));
+    const onRead = vi.fn(async (_paths: readonly string[]) => [notes]);
     // Where the box lies: jsdom lays nothing out.
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue({ left: 0, top: 100, right: 400, bottom: 200 } as DOMRect);
-    render(createElement(Composer, { autoFocus: false, onSend: async () => true, workspace: "w-1", onAttach, dragDrop }));
+    render(createElement(Composer, { autoFocus: false, onSend: async () => true, workspace: "w-1", onRead, dragDrop }));
     const box = () => screen.getByRole("form", { name: "Composer" });
     act(() => emit({ type: "over", x: 50, y: 150 }));
     expect(box().hasAttribute("data-drag-over")).toBe(true);
     act(() => emit({ type: "over", x: 50, y: 20 }));
     expect(box().hasAttribute("data-drag-over")).toBe(false);
     // Dropped off the box: nothing is attached.
-    await act(async () => emit({ type: "drop", x: 50, y: 20, paths: ["D:\work\repo\notes.md"] }));
-    expect(onAttach).not.toHaveBeenCalled();
+    await act(async () => emit({ type: "drop", x: 50, y: 20, paths: ["D:/work/repo/notes.md"] }));
+    expect(onRead).not.toHaveBeenCalled();
     act(() => emit({ type: "over", x: 50, y: 150 }));
     act(() => emit({ type: "leave" }));
     expect(box().hasAttribute("data-drag-over")).toBe(false);
     // Dropped on it: each path is read and attached.
     act(() => emit({ type: "over", x: 50, y: 150 }));
-    await act(async () => emit({ type: "drop", x: 50, y: 150, paths: ["D:\work\repo\notes.md"] }));
-    expect(onAttach).toHaveBeenCalledWith(["D:\work\repo\notes.md"]);
+    await act(async () => emit({ type: "drop", x: 50, y: 150, paths: ["D:/work/repo/notes.md"] }));
+    expect(onRead).toHaveBeenCalledWith(["D:/work/repo/notes.md"]);
     expect(box().hasAttribute("data-drag-over")).toBe(false);
     expect(shown()).toEqual(["notes.md212 lines"]);
     vi.restoreAllMocks();
@@ -241,13 +243,39 @@ describe("pasting and dropping attachments", () => {
   it("takes no drop while it is unavailable", async () => {
     let emit: (event: DragDrop) => void = () => {};
     const dragDrop = (handler: (event: DragDrop) => void) => ((emit = handler), () => {});
-    const onAttach = vi.fn(async () => [notes]);
+    const onRead = vi.fn(async () => [notes]);
     vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue({ left: 0, top: 100, right: 400, bottom: 200 } as DOMRect);
-    render(createElement(Composer, { autoFocus: false, onSend: async () => true, onAttach, dragDrop, unavailable: "reconnecting" }));
+    render(createElement(Composer, { autoFocus: false, onSend: async () => true, onRead, dragDrop, unavailable: "reconnecting" }));
     act(() => emit({ type: "over", x: 50, y: 150 }));
     expect(screen.getByRole("form", { name: "Composer" }).hasAttribute("data-drag-over")).toBe(false);
-    await act(async () => emit({ type: "drop", x: 50, y: 150, paths: ["D:\a.md"] }));
-    expect(onAttach).not.toHaveBeenCalled();
+    await act(async () => emit({ type: "drop", x: 50, y: 150, paths: ["D:/a.md"] }));
+    expect(onRead).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
+  });
+});
+
+describe("a drop over a layer above the box", () => {
+  // verifies: FLOW-SEND-MESSAGE-R08
+  it("is not the box's: what the window shows there takes it", async () => {
+    let emit: (event: DragDrop) => void = () => {};
+    const dragDrop = (handler: (event: DragDrop) => void) => ((emit = handler), () => {});
+    const onRead = vi.fn(async () => [notes]);
+    vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue({ left: 0, top: 100, right: 400, bottom: 200 } as DOMRect);
+    const layer = document.createElement("div");
+    document.body.append(layer);
+    const at = vi.fn(() => layer as Element | null);
+    Object.defineProperty(document, "elementFromPoint", { value: at, configurable: true });
+    render(createElement(Composer, { autoFocus: false, onSend: async () => true, onRead, dragDrop }));
+    act(() => emit({ type: "over", x: 50, y: 150 }));
+    expect(screen.getByRole("form", { name: "Composer" }).hasAttribute("data-drag-over")).toBe(false);
+    await act(async () => emit({ type: "drop", x: 50, y: 150, paths: ["D:/a.md"] }));
+    expect(onRead).not.toHaveBeenCalled();
+    // Where the box itself shows, it takes the drop.
+    at.mockImplementation(() => screen.getByRole("textbox", { name: "Message" }));
+    await act(async () => emit({ type: "drop", x: 50, y: 150, paths: ["D:/a.md"] }));
+    expect(onRead).toHaveBeenCalledWith(["D:/a.md"]);
+    layer.remove();
+    delete (document as unknown as Record<string, unknown>).elementFromPoint;
     vi.restoreAllMocks();
   });
 });

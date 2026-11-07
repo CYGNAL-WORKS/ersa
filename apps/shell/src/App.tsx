@@ -386,22 +386,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // picked, and only those. A path Core can't read is attached marked with why, so the message waits until it is
   // removed (R10). Without the Shell, as in tests that give none, attach is unavailable.
   const pickFiles = shell?.pickFiles;
-  const attach =
-    pickFiles && pickFolder && view.phase === "connected"
-      ? async (what: AttachWhat | readonly string[], workspace: string | undefined): Promise<Attached[]> => {
+  // Reading the paths the user names, picked or dropped on the box (FLOW-SEND-MESSAGE-R08, R13): `attachment.inspect`
+  // for each, and only those.
+  const read =
+    view.phase === "connected"
+      ? async (paths: readonly string[], workspace: string | undefined): Promise<Attached[]> => {
           const host_id = view.hello.host.id;
-          // Paths dropped on the box (FLOW-SEND-MESSAGE-R08) are read as the dialog's are.
-          let paths: readonly string[];
-          try {
-            paths =
-              typeof what !== "string"
-                ? what
-                : what === "folder"
-                  ? [await pickFolder()].filter((p): p is string => p !== null)
-                  : await pickFiles(what === "images");
-          } catch {
-            return [];
-          }
           // At most INSPECTS_AT_ONCE in flight, the rest queued: Core reads that many at once and refuses more, which
           // would mark good paths unreadable. Kept in the order picked.
           const read: Attached[] = new Array(paths.length);
@@ -420,6 +410,18 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           };
           await Promise.all(Array.from({ length: Math.min(INSPECTS_AT_ONCE, paths.length) }, worker));
           return read;
+        }
+      : undefined;
+  const attach =
+    pickFiles && pickFolder && read
+      ? async (what: AttachWhat, workspace: string | undefined): Promise<Attached[]> => {
+          let paths: string[];
+          try {
+            paths = what === "folder" ? [await pickFolder()].filter((p): p is string => p !== null) : await pickFiles(what === "images");
+          } catch {
+            return [];
+          }
+          return read(paths, workspace);
         }
       : undefined;
 
@@ -618,6 +620,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               initialText={firstSendHere?.text}
               initialAttachments={firstSendHere?.attachments}
               onAttach={attach && ((what) => attach(what, listed?.workspace_id))}
+              onRead={read && ((paths) => read(paths, listed?.workspace_id))}
               dragDrop={shell?.onDragDrop}
               workspace={listed?.workspace_id}
               onSend={(text, attachments) => follower.current?.send(text, sendable(attachments)) ?? Promise.resolve(false)}
@@ -658,6 +661,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               projectId={composing?.projectId}
               onStart={start}
               onAttach={attach}
+              onRead={read}
               dragDrop={shell?.onDragDrop}
               rootWorkspaces={rootWorkspaces}
               starting={starting?.state === "sending" ? { state: "sending", progress: startProgress } : starting}

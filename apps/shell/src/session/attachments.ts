@@ -101,21 +101,26 @@ export function sendable(list: readonly Attached[]): Attachment[] {
 // Each pasted image gets its own key in place of a path, so two pastes are two attachments.
 let pastes = 0;
 
+/** The most inline image bytes Core takes in one message (PROTO-CORE-API, Turns and attachments: 10 MiB). */
+export const INLINE_MAX = 10 * 1024 * 1024;
+
 /**
  * An image pasted into the composer, attached inline (FLOW-SEND-MESSAGE-R08): named as pasted, its detail its size.
- * Whether the backend takes its kind and size is Core's to say when the message is sent (R10).
+ * One larger than Core takes inline, or one that can't be read, is attached marked with why, so the message waits
+ * until it is removed (R10), rather than fail to send or vanish; it is not read when too large. Whether the backend
+ * takes its kind is Core's to say when the message is sent.
  */
 export async function pastedImage(file: Blob): Promise<Attached> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  // btoa takes a string of bytes; built in chunks, so a large image does not overflow the call stack.
-  let binary = "";
-  for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
   pastes += 1;
-  return {
-    path: `pasted:${pastes}`,
-    name: t("composer.attachment.pastedName"),
-    kind: "image",
-    detail: size(bytes.length),
-    inline: { media_type: file.type, data: btoa(binary) },
-  };
+  const pasted = { path: `pasted:${pastes}`, name: t("composer.attachment.pastedName"), kind: "image" as const, detail: size(file.size) };
+  if (file.size > INLINE_MAX) return { ...pasted, problem: t("composer.attachment.pastedTooLargeError") };
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    // btoa takes a string of bytes; built in chunks, so a large image does not overflow the call stack.
+    let binary = "";
+    for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+    return { ...pasted, inline: { media_type: file.type, data: btoa(binary) } };
+  } catch {
+    return { ...pasted, problem: t("composer.attachment.pastedUnreadableError") };
+  }
 }

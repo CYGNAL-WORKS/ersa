@@ -60,7 +60,7 @@
 }
 
 /* Under the pointer, unfocused, its edge is ink-faint. */
-.composer-box:hover:not(:focus-within):not([data-unavailable]),
+.composer-box:hover:not(:focus-within):not([data-unavailable]):not([data-drag-over]),
 .composer-box[data-force="hover"] {
   border-color: var(--color-ink-faint);
 }

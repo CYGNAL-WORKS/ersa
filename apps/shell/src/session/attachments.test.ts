@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AttachmentInspectResult } from "../protocol/core-api.gen";
-import { addAll, attached, detail, sendable, size, willCopy } from "./attachments";
+import { INLINE_MAX, addAll, attached, detail, pastedImage, sendable, size, willCopy } from "./attachments";
 
 const info = (over: Partial<AttachmentInspectResult>): AttachmentInspectResult => ({
   path: "D:\\work\\repo\\notes.md",
@@ -65,5 +65,24 @@ describe("adding attachments", () => {
       { kind: "image", path: "C:\\pics\\a.png" },
       { kind: "folder", path: "D:\\work\\repo\\src" },
     ]);
+  });
+});
+
+describe("a pasted image", () => {
+  // verifies: FLOW-SEND-MESSAGE-R08
+  // verifies: FLOW-SEND-MESSAGE-R10
+  it("goes inline, and one too large to send or that can't be read is marked with why, unread", async () => {
+    const png = await pastedImage(new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" }));
+    expect(png).toMatchObject({ name: "Pasted image", kind: "image", detail: "3 bytes", inline: { media_type: "image/png", data: btoa("\x01\x02\x03") } });
+    expect(png.problem).toBeUndefined();
+    // Too large: its size is known without reading it.
+    let read = false;
+    const huge = { size: INLINE_MAX + 1, type: "image/png", arrayBuffer: async () => ((read = true), new ArrayBuffer(0)) } as unknown as Blob;
+    const big = await pastedImage(huge);
+    expect(big).toMatchObject({ detail: "10 MB", problem: "This image is larger than 10 MB, the most Ersa sends in one message." });
+    expect(big.inline).toBeUndefined();
+    expect(read).toBe(false);
+    const gone = { size: 10, type: "image/png", arrayBuffer: async () => Promise.reject(new Error("gone")) } as unknown as Blob;
+    expect(await pastedImage(gone)).toMatchObject({ problem: "Ersa couldn't read this image." });
   });
 });
