@@ -91,12 +91,14 @@ export function compare(pr, author) {
   return { number: pr.number, title: pr.title, compared: true, rounds: rounds.length, blocked: rounds.filter((s) => s.verdict === "blocked").length, findings };
 }
 
-export function report(results) {
+export function report(results, author) {
   const lines = [];
   const compared = results.filter((r) => r.compared);
   const findings = compared.flatMap((r) => r.findings.map((f) => ({ ...f, pr: r.number })));
   const unnamed = findings.filter((f) => !f.named);
-  lines.push(`${results.length} pull request(s) merged since the last pass; ${compared.length} compared; ${findings.length} blocking finding(s) at merge, ${unnamed.length} not named in the author's Review section.`);
+  // The login is named so a run under another account (a second gh login, a
+  // CI token) that finds no merge review anywhere says why.
+  lines.push(`${results.length} pull request(s) merged since the last pass; ${compared.length} compared, counting merge reviews posted by ${author}; ${findings.length} blocking finding(s) at merge, ${unnamed.length} not named in the author's Review section.`);
   for (const r of results) {
     if (!r.compared) {
       lines.push(`\n#${r.number} ${r.title}: not compared (${r.why}).`);
@@ -120,7 +122,8 @@ function fetchPullRequest(n, { run: r, cacheDir }) {
     } catch {}
   }
   const x = r("gh", ["pr", "view", String(n), "--json", "number,title,body,reviews"]);
-  if (!x.ok) throw new Error(`gh pr view ${n} failed: ${x.err.split("\n")[0]}`);
+  // The whole error on one line: a timeout is appended after gh's own lines.
+  if (!x.ok) throw new Error(`gh pr view ${n} failed: ${x.err.replace(/\s*\n\s*/g, " ").slice(0, 300)}`);
   let pr;
   try {
     pr = JSON.parse(x.out);
@@ -160,7 +163,7 @@ function lessons(argv, r, cacheDir) {
     .map((n) => fetchPullRequest(n, { run: r, cacheDir }))
     .filter((pr) => !PASS_SUBJECT.test(pr.title ?? ""))
     .map((pr) => compare(pr, me.out));
-  return { code: 0, stdout: `${report(results)}\n` };
+  return { code: 0, stdout: `${report(results, me.out)}\n` };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
