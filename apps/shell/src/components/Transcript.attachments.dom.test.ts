@@ -99,16 +99,37 @@ describe("a message's attachments in the transcript", () => {
   });
 
   // verifies: FLOW-SEND-MESSAGE-R11
+  it("keeps an image's place when it fails to draw after its place is set, the icon and its name in it", () => {
+    const header = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 2, 128, 0, 0, 1, 224, 8, 6, 0, 0, 0];
+    draw(message([{ kind: "image", media_type: "image/png", data: btoa(String.fromCharCode(...header)) }]));
+    const place = document.querySelector(".attachment-image") as HTMLElement;
+    fireEvent.error(screen.getByRole("img", { name: "Attached image" }));
+    expect(document.querySelector(".attachment-image")).toBe(place);
+    expect(place.style.getPropertyValue("--image-width")).toBe("640px");
+    expect(place.textContent).toBe("Attached image");
+    expect(place.querySelector("svg")).not.toBeNull();
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R11
+  it("fades the image in once it is drawn", () => {
+    draw(message([{ kind: "image", media_type: "image/png", data: "iVBOR" }]));
+    const place = document.querySelector(".attachment-image") as HTMLElement;
+    expect(place.dataset.state).toBe("drawing");
+    fireEvent.load(screen.getByRole("img", { name: "Attached image" }));
+    expect(place.dataset.state).toBe("drawn");
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R11
   it("shows the bubble at once, its image's box already at the size its header states, before the image draws", () => {
     // A PNG header stating 640 by 480, and no image data after it: the image never draws.
     const header = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 2, 128, 0, 0, 1, 224, 8, 6, 0, 0, 0];
     draw(message([{ kind: "image", media_type: "image/png", data: btoa(String.fromCharCode(...header)) }]));
     const bubble = screen.getByRole("group", { name: "You" });
     expect(bubble.hasAttribute("data-decoding")).toBe(false);
-    const image = screen.getByRole("img", { name: "Attached image" });
-    expect(image.hasAttribute("data-sized")).toBe(true);
-    expect(image.style.getPropertyValue("--image-width")).toBe("640px");
-    expect(image.style.getPropertyValue("--image-ratio")).toBe("640 / 480");
-    expect(Number(image.style.getPropertyValue("--image-aspect"))).toBeCloseTo(640 / 480);
+    const place = document.querySelector(".attachment-image") as HTMLElement;
+    expect(place.hasAttribute("data-sized")).toBe(true);
+    expect(place.style.getPropertyValue("--image-width")).toBe("640px");
+    expect(place.style.getPropertyValue("--image-ratio")).toBe("640 / 480");
+    expect(Number(place.style.getPropertyValue("--image-aspect"))).toBeCloseTo(640 / 480);
   });
 });

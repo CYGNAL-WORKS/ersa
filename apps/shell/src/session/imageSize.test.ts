@@ -32,7 +32,24 @@ describe("an image's size from its header", () => {
     const jpeg = [0xff, 0xd8, 0xff, 0xe0, ...be16(16), ...text("JFIF"), 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0xff, 0xc0, ...be16(17), 8, ...be16(600), ...be16(800), 3, 0, 0, 0];
     expect(imageSize(base64(jpeg))).toEqual({ width: 800, height: 600 });
 
+    // A segment before the frame holding the bytes FF C0 is passed over whole, not read as the frame.
+    const decoy = [0xff, 0xd8, 0xff, 0xe2, ...be16(10), 0xff, 0xc0, 0, 17, 8, 0, 1, 0, 2, 0xff, 0xc0, ...be16(17), 8, ...be16(600), ...be16(800), 3, 0, 0, 0];
+    expect(imageSize(base64(decoy))).toEqual({ width: 800, height: 600 });
+
     expect(imageSize(base64(text("not an image at all")))).toBeUndefined();
     expect(imageSize("%%% not base64")).toBeUndefined();
+  });
+  // verifies: FLOW-SEND-MESSAGE-R11
+  it("swaps a JPEG's width and height when its EXIF orientation turns it a quarter", () => {
+    // EXIF in Motorola order: a directory of one entry, Orientation (0x0112), SHORT, count 1, the value.
+    const exif = (orientation: number) => {
+      const body = [...text("Exif"), 0, 0, ...text("MM"), 0, 42, ...be32(8), ...be16(1), ...be16(0x0112), ...be16(3), ...be32(1), ...be16(orientation), 0, 0, ...be32(0)];
+      return [0xff, 0xe1, ...be16(body.length + 2), ...body];
+    };
+    const photo = (orientation: number) => [0xff, 0xd8, ...exif(orientation), 0xff, 0xc0, ...be16(17), 8, ...be16(3024), ...be16(4032), 3, 0, 0, 0];
+    expect(imageSize(base64(photo(6)))).toEqual({ width: 3024, height: 4032 });
+    expect(imageSize(base64(photo(8)))).toEqual({ width: 3024, height: 4032 });
+    expect(imageSize(base64(photo(1)))).toEqual({ width: 4032, height: 3024 });
+    expect(imageSize(base64(photo(3)))).toEqual({ width: 4032, height: 3024 });
   });
 });
