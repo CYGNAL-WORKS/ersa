@@ -106,11 +106,7 @@ async fn counts_uncommitted_files_untracked_included_and_ignored_entries() {
     // one staged and then deleted leaves its staged content in the index,
     // which goes with the workspace.
     std::fs::remove_file(folder.join("old.txt")).unwrap();
-    write(
-        &folder.join("gone.txt"),
-        "staged, then deleted
-",
-    );
+    write(&folder.join("gone.txt"), "staged, then deleted\n");
     git(&folder, &["add", "gone.txt"]);
     std::fs::remove_file(folder.join("gone.txt")).unwrap();
     // Ignored: a file, a wholly ignored folder as one, and an ignored file
@@ -312,16 +308,8 @@ async fn files_left_after_git_forgot_the_worktree_all_count() {
     git(&repo, &["add", "same.txt"]);
     commit(&repo, "same");
     let (workspace, folder) = workspace_of(&mut client, &repo).await;
-    write(
-        &folder.join("a.txt"),
-        "a
-",
-    );
-    write(
-        &folder.join("x.log"),
-        "x
-",
-    );
+    write(&folder.join("a.txt"), "a\n");
+    write(&folder.join("x.log"), "x\n");
     // A removal that failed on Windows: git deleted its record of the
     // worktree, and a file it could not delete is left with the rest.
     let name = folder.file_name().unwrap();
@@ -346,11 +334,7 @@ async fn a_worktree_recorded_with_relative_paths_is_found() {
     let (workspace, folder) = workspace_of(&mut client, &repo).await;
     git(&folder, &["checkout", "--quiet", "--detach"]);
     commit(&folder, "detached");
-    write(
-        &folder.join("a.txt"),
-        "a
-",
-    );
+    write(&folder.join("a.txt"), "a\n");
     assert_eq!(
         counts(&changes(&mut client, &workspace).await),
         [1, 0, 1, 1, 0]
@@ -405,4 +389,151 @@ async fn a_detached_checkout_counts_without_a_reflog() {
         counts(&changes(&mut client, &workspace).await),
         [0, 0, 1, 1, 0]
     );
+}
+
+// cites PROTO-CORE-API-R46 once planning PR 245 adds it
+#[tokio::test(flavor = "multi_thread")]
+async fn without_git_s_record_only_the_branch_s_commits_count() {
+    let (core, mut client) = setup().await;
+    let repo = core.dir.path().join("repo");
+    git_repo(&repo);
+    let (workspace, folder) = workspace_of(&mut client, &repo).await;
+    let branch = workspace["vcs_ref"].as_str().unwrap().to_string();
+    commit(&folder, "on the branch");
+    git(&folder, &["checkout", "--quiet", "--detach"]);
+    commit(&folder, "detached");
+    git(&folder, &["checkout", "--quiet", &branch]);
+    write(&folder.join("a.txt"), "a\n");
+    assert_eq!(
+        counts(&changes(&mut client, &workspace).await),
+        [1, 0, 2, 1, 0]
+    );
+
+    // git deletes its record: the checkout and its reflog go with it.
+    let name = folder.file_name().unwrap();
+    std::fs::remove_dir_all(repo.join(".git").join("worktrees").join(name)).unwrap();
+    let forgotten = changes(&mut client, &workspace).await;
+    // README.md and a.txt left; the branch's commit; nothing stranded.
+    assert_eq!(counts(&forgotten), [2, 0, 1, 0, 0], "{forgotten}");
+
+    // The repository's own checkout moving changes nothing counted, so it
+    // leaves the token alone.
+    write(&repo.join("README.md"), "changed elsewhere");
+    git(&repo, &["commit", "--quiet", "-am", "elsewhere"]);
+    let again = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&again), [2, 0, 1, 0, 0]);
+    assert_eq!(again["token"], forgotten["token"]);
+}
+
+/// A repository at `dir/<name>` cloned from a new one at `dir/<name>-upstream`,
+/// so its one commit is on its remote.
+fn pushed_clone(dir: &Path, name: &str) -> PathBuf {
+    let upstream = dir.join(format!("{name}-upstream"));
+    git_repo(&upstream);
+    let clone = dir.join(name);
+    git(
+        dir,
+        &[
+            "clone",
+            "--quiet",
+            &upstream.display().to_string(),
+            &clone.display().to_string(),
+        ],
+    );
+    clone
+}
+
+// cites PROTO-CORE-API-R49 once planning PR 245 adds it
+#[tokio::test(flavor = "multi_thread")]
+async fn a_nested_repository_counts_once_when_it_holds_work() {
+    let (core, mut client) = setup().await;
+    let repo = core.dir.path().join("repo");
+    git_repo(&repo);
+    let (workspace, folder) = workspace_of(&mut client, &repo).await;
+
+    // Clean, and its commit on its remote: nothing to lose.
+    let nested = folder.join("nested");
+    git(
+        &folder,
+        &[
+            "clone",
+            "--quiet",
+            &pushed_clone(core.dir.path(), "source")
+                .display()
+                .to_string(),
+            "nested",
+        ],
+    );
+    let clean = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&clean), [0, 0, 0, 0, 0], "{clean}");
+
+    // A change inside it counts it, once, however many files changed.
+    write(&nested.join("one.txt"), "1\n");
+    write(&nested.join("two.txt"), "2\n");
+    let dirty = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&dirty), [1, 0, 0, 0, 0], "{dirty}");
+    assert_ne!(dirty["token"], clean["token"]);
+
+    // Committed: clean again, but the commit is on no remote.
+    git(&nested, &["add", "."]);
+    commit(&nested, "work");
+    let committed = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&committed), [1, 0, 0, 0, 0], "{committed}");
+    assert_ne!(committed["token"], dirty["token"]);
+
+    // Pushed: nothing to lose again.
+    git(
+        &nested,
+        &["push", "--quiet", "origin", "HEAD:refs/heads/work"],
+    );
+    let pushed = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&pushed), [0, 0, 0, 0, 0], "{pushed}");
+}
+
+// cites PROTO-CORE-API-R49 once planning PR 245 adds it
+#[tokio::test(flavor = "multi_thread")]
+async fn a_submodule_counts_when_it_holds_commits_its_remote_does_not() {
+    let (core, mut client) = setup().await;
+    let repo = core.dir.path().join("repo");
+    git_repo(&repo);
+    let source = pushed_clone(core.dir.path(), "source");
+    let allow_files = ["-c", "protocol.file.allow=always"];
+    let source_path = source.display().to_string();
+    git(
+        &repo,
+        &[
+            &allow_files[..],
+            &["submodule", "add", "--quiet", &source_path, "sub"],
+        ]
+        .concat(),
+    );
+    commit(&repo, "submodule");
+    let (workspace, folder) = workspace_of(&mut client, &repo).await;
+
+    // Not checked out yet: an empty folder holds nothing.
+    assert_eq!(
+        counts(&changes(&mut client, &workspace).await),
+        [0, 0, 0, 0, 0]
+    );
+    git(
+        &folder,
+        &[
+            &allow_files[..],
+            &["submodule", "update", "--init", "--quiet"],
+        ]
+        .concat(),
+    );
+    let clean = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&clean), [0, 0, 0, 0, 0], "{clean}");
+
+    // A commit on a branch of its own, then back on the recorded commit:
+    // the workspace shows no change, yet the commit is held nowhere else.
+    let sub = folder.join("sub");
+    git(&sub, &["checkout", "--quiet", "-b", "work"]);
+    commit(&sub, "work");
+    git(&sub, &["checkout", "--quiet", "--detach", "HEAD~1"]);
+    assert_eq!(git(&folder, &["status", "--porcelain"]), "");
+    let held = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&held), [1, 0, 0, 0, 0], "{held}");
+    assert_ne!(held["token"], clean["token"]);
 }
