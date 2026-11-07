@@ -197,6 +197,20 @@ fn result_examples() -> Vec<(Method, Value)> {
                 lines: None,
                 media_type: Some("image/png".into()),
                 target: Some("D:/elsewhere/a.png".into()),
+                copied: None,
+            }),
+        ),
+        (
+            Method::AttachmentInspect,
+            to_value(&Inspected {
+                path: "D:/notes/a.md".into(),
+                name: "a.md".into(),
+                kind: AttachmentKind::File,
+                size_bytes: Some(12),
+                lines: Some(1),
+                media_type: None,
+                target: None,
+                copied: Some(true),
             }),
         ),
         (Method::SessionUnsubscribe, to_value(&Empty {})),
@@ -377,6 +391,7 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&InspectParams {
                 host_id: "local".into(),
                 path: "D:/shots/a.png".into(),
+                workspace_id: Some("w-1".into()),
             }),
         ),
         (

@@ -388,7 +388,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const pickFiles = shell?.pickFiles;
   const attach =
     pickFiles && pickFolder && view.phase === "connected"
-      ? async (what: AttachWhat): Promise<Attached[]> => {
+      ? async (what: AttachWhat, workspace: string | undefined): Promise<Attached[]> => {
           const host_id = view.hello.host.id;
           let paths: string[];
           try {
@@ -403,7 +403,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           const worker = async () => {
             for (let at = next++; at < paths.length; at = next++) {
               const path = paths[at] as string;
-              read[at] = await client.call("attachment.inspect", { host_id, path }).then(attached, (error) => unreadable(path, describeError(error)));
+              // With the workspace, Core says whether sending copies it (FLOW-SEND-MESSAGE-R14).
+              const params = workspace === undefined ? { host_id, path } : { host_id, path, workspace_id: workspace };
+              read[at] = await client.call("attachment.inspect", params).then(
+                (info) => attached(info, workspace),
+                (error) => unreadable(path, describeError(error)),
+              );
             }
           };
           await Promise.all(Array.from({ length: Math.min(INSPECTS_AT_ONCE, paths.length) }, worker));
@@ -485,6 +490,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const order = projectOrder(knownList ?? [], sessions.state === "ready" ? sessions.sessions : undefined, orderedBy.current, workspaces);
   orderedBy.current = order.kept;
   const screenProjects = knownList && order.projects;
+
+  // Each project's root workspace, for attachments on the new-session screen judged against the project folder.
+  const rootWorkspaces: Record<string, string> = {};
+  for (const w of Object.values(workspaces)) if (w.kind === "root") rootWorkspaces[w.project_id] = w.id;
 
   const projectById = new Map(projectList?.map((p) => [p.id, p]));
 
@@ -601,8 +610,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               sending={shown.message ?? firstSendHere?.sending}
               initialText={firstSendHere?.text}
               initialAttachments={firstSendHere?.attachments}
-              onAttach={attach}
-              workspace={listedWorkspace?.path}
+              onAttach={attach && ((what) => attach(what, listed?.workspace_id))}
+              workspace={listed?.workspace_id}
               onSend={(text, attachments) => follower.current?.send(text, sendable(attachments)) ?? Promise.resolve(false)}
               // Stop, from sending until the turn ends: cancels the message on its way, or interrupts the turn (FLOW-SEND-MESSAGE-R03).
               working={shown.transcript.working || shown.turnPending}
@@ -641,6 +650,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               projectId={composing?.projectId}
               onStart={start}
               onAttach={attach}
+              rootWorkspaces={rootWorkspaces}
               starting={starting?.state === "sending" ? { state: "sending", progress: startProgress } : starting}
               onChooseFolder={chooseFolder}
               onListBranches={listBranches}
