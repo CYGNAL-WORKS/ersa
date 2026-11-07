@@ -392,6 +392,7 @@ async fn git_records(
     let common = std::path::Path::new(repo).join(common);
     let records = common.join("worktrees");
     let path = path.to_string();
+    let stop = deadline.at.into_std();
     let found = tokio::task::spawn_blocking(move || -> std::io::Result<Option<String>> {
         let key = location_key(&path);
         // Anything but a missing file is an error, never "no record": a
@@ -402,6 +403,10 @@ async fn git_records(
             other => other?,
         };
         for entry in entries {
+            // The walk stops itself at the deadline, as the file reads do.
+            if std::time::Instant::now() >= stop {
+                return Err(std::io::ErrorKind::TimedOut.into());
+            }
             let admin = entry?.path();
             // `gitdir` holds `<worktree folder>/.git`, relative to the
             // record's own folder when git writes relative paths
@@ -429,7 +434,12 @@ async fn git_records(
         .await
         .map_err(|_| deadline.expired("finding git's records of the worktree".into()))?
         .map_err(|e| failed(e.to_string()))?
-        .map_err(|e| failed(e.to_string()))?;
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::TimedOut => {
+                deadline.expired("finding git's records of the worktree".into())
+            }
+            _ => failed(e.to_string()),
+        })?;
     Ok(GitRecords {
         common: common.display().to_string(),
         worktree,
@@ -510,15 +520,71 @@ async fn count_files(
     // Every untracked file, each its own entry.
     let args = status("--untracked-files=all", false);
     let output = query_env(transport, repo, &args, env, deadline).await?;
+    let entries = parse_status(&checked(output, "git status failed")?.stdout);
+
+    // Submodules: the index's entries of mode 160000. A clean one is not in
+    // `status`, yet commits made in it may be held nowhere else. Without
+    // git's records there is no index: a submodule's folder is then listed
+    // as an untracked nested repository.
+    let submodules = match records.worktree {
+        Some(_) => {
+            let args = [
+                git_dir.as_str(),
+                work_tree.as_str(),
+                "ls-files",
+                "--stage",
+                "-z",
+            ];
+            let output = query(transport, repo, &args, deadline).await?;
+            submodule_paths(&checked(output, "git ls-files failed")?.stdout)
+        }
+        None => BTreeSet::new(),
+    };
+
     let mut to_read = Vec::new();
-    for entry in parse_status(&checked(output, "git status failed")?.stdout) {
-        changes.evidence.push(format!("status {}", entry.raw));
+    let mut repositories = submodules.clone();
+    let mut counted = BTreeSet::new();
+    for entry in entries {
+        // Without git's records, the staged deletions are the repository's
+        // own checkout measured against an empty index: they say nothing
+        // about the folder, so they stay out of the token too.
+        if records.worktree.is_some() || entry.kind == '?' {
+            changes.evidence.push(format!("status {}", entry.raw));
+        }
         if entry.gone_from_folder() {
+            continue;
+        }
+        // `-uall` lists a folder only when it is a nested repository; it is
+        // judged as one, below, like a submodule.
+        if entry.kind == '?' && entry.path.ends_with('/') {
+            repositories.insert(entry.path.trim_end_matches('/').to_string());
+            continue;
+        }
+        if submodules.contains(&entry.path) {
+            // A submodule `status` lists has changed against the commit,
+            // which counts it; it is also looked into, below, for the token.
+            changes.uncommitted += 1;
+            counted.insert(entry.path);
             continue;
         }
         changes.uncommitted += 1;
         if entry.folder_differs() {
             to_read.push(entry.path);
+        }
+    }
+
+    // Each submodule and nested repository: its HEAD and status go into the
+    // token, and one with work of its own counts once.
+    for relative in &repositories {
+        let dir = std::path::Path::new(path).join(relative);
+        let Some(nested) = inspect_repository(transport, &dir, deadline).await? else {
+            continue;
+        };
+        changes
+            .evidence
+            .push(format!("repository {relative} {}", nested.evidence));
+        if nested.has_work && !counted.contains(relative) {
+            changes.uncommitted += 1;
         }
     }
 
@@ -562,6 +628,95 @@ async fn count_files(
         .ok_or_else(expired)?;
     changes.evidence.extend(contents);
     Ok(())
+}
+
+/// The paths of the submodules in `git ls-files --stage -z` output: the
+/// entries of mode 160000, each `<mode> <object> <stage>` and a tab before the path.
+fn submodule_paths(lines: &[String]) -> BTreeSet<String> {
+    lines
+        .join("\n")
+        .split('\0')
+        .filter_map(|entry| entry.split_once('\t'))
+        .filter(|(stage, _)| stage.starts_with("160000 "))
+        .map(|(_, path)| path.to_string())
+        .collect()
+}
+
+/// What deleting a submodule's or nested repository's folder would lose.
+struct Repository {
+    /// Uncommitted changes, or commits none of its branches' remotes hold.
+    has_work: bool,
+    /// Its HEAD, a digest of its status, and whether it has such commits.
+    evidence: String,
+}
+
+/// Looks into the submodule or nested repository at `dir`; `None` when it
+/// has no `.git` of its own (a submodule never checked out), which holds
+/// nothing, and where git would find the workspace's repository instead.
+async fn inspect_repository(
+    transport: &dyn Transport,
+    dir: &std::path::Path,
+    deadline: Deadline,
+) -> Result<Option<Repository>, VcsError> {
+    let marker = dir.join(".git");
+    let found = tokio::task::spawn_blocking(move || marker.try_exists());
+    let found = tokio::time::timeout_at(deadline.at, found)
+        .await
+        .map_err(|_| deadline.expired("looking into a nested repository".into()))?
+        .map_err(|e| e.to_string())
+        .and_then(|found| found.map_err(|e| e.to_string()))
+        .map_err(|detail| VcsError::Failed {
+            message: "looking into a nested repository failed".into(),
+            stderr: detail,
+        })?;
+    if !found {
+        return Ok(None);
+    }
+    let dir = dir.display().to_string();
+
+    let head = ["rev-parse", "--verify", "--quiet", "HEAD"];
+    let output = query(transport, &dir, &head, deadline).await?;
+    // Exit 1: no commit yet.
+    let head = if output.exit.code == Some(1) {
+        None
+    } else {
+        let output = checked(output, "git could not read a nested repository's checkout")?;
+        commit_ids(&output.stdout).next()
+    };
+
+    let status = [
+        "--no-optional-locks",
+        "status",
+        "--porcelain=v2",
+        "-z",
+        "--untracked-files=all",
+    ];
+    let output = query(transport, &dir, &status, deadline).await?;
+    let output = checked(output, "git status failed in a nested repository")?;
+    let entries = parse_status(&output.stdout);
+    let dirty = entries.iter().any(|entry| entry.kind != '!');
+    let mut digest = Digest::default();
+    for entry in &entries {
+        digest.add(&entry.raw);
+    }
+
+    // Its checkout and branches, less what its remote-tracking branches
+    // hold: one commit is enough to know.
+    let mut args = vec!["rev-list", "--max-count=1"];
+    args.extend(head.as_deref());
+    args.extend(["--branches", "--not", "--remotes"]);
+    let output = query(transport, &dir, &args, deadline).await?;
+    let output = checked(output, "git could not list a nested repository's commits")?;
+    let unshared = commit_ids(&output.stdout).next().is_some();
+
+    Ok(Some(Repository {
+        has_work: dirty || unshared,
+        evidence: format!(
+            "{} {} {unshared}",
+            head.as_deref().unwrap_or("none"),
+            digest.finish()
+        ),
+    }))
 }
 
 /// One entry of `git status --porcelain=v2 -z`.
@@ -1190,6 +1345,32 @@ mod tests {
         );
         assert!(entries[1].raw.ends_with("\0old name"));
         assert!(entries[0].folder_differs() && !entries[1].folder_differs());
+    }
+
+    // cites PROTO-CORE-API-R47 once planning PR 245 adds it
+    #[tokio::test(start_paused = true)]
+    async fn counting_changes_gives_git_sixty_seconds_in_all() {
+        let started = tokio::time::Instant::now();
+        let result = git_worktree_changes(&hanging_git(), "repo", "folder", "branch").await;
+        assert_eq!(started.elapsed(), Duration::from_secs(60));
+        match result {
+            Err(VcsError::Failed { message, .. }) => {
+                assert!(message.contains("60 seconds"), "{message}")
+            }
+            other => panic!("expected a timed-out git failure, got {other:?}"),
+        }
+    }
+
+    // cites PROTO-CORE-API-R47 once planning PR 245 adds it
+    #[test]
+    fn reading_a_file_stops_at_the_deadline() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("big");
+        std::fs::write(&file, vec![7u8; 256 * 1024]).unwrap();
+        let later = std::time::Instant::now() + Duration::from_secs(60);
+        assert!(content_digest(&file, later).is_some());
+        // A deadline already passed stops the read before its first chunk.
+        assert_eq!(content_digest(&file, std::time::Instant::now()), None);
     }
 
     #[test]
