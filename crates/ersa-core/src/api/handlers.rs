@@ -365,7 +365,7 @@ pub(super) async fn branch_list(
 }
 
 /// What deleting an isolated workspace would lose, for the delete question
-/// (PROTO-CORE-API-R38). Answers for a workspace in any state, a half-removed
+/// (PROTO-CORE-API-R48, R46). Answers for a workspace in any state, a half-removed
 /// one included, counting what is left of it.
 pub(super) async fn workspace_changes(
     core: &Core,

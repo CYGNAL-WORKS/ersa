@@ -287,7 +287,7 @@ const CHANGES_TIMEOUT: Duration = Duration::from_secs(60);
 const REVISIONS_PER_CALL: usize = 200;
 
 /// What deleting an isolated workspace would lose: its folder's files, and
-/// commits nothing but the workspace holds (PROTO-CORE-API-R38).
+/// commits nothing but the workspace holds (PROTO-CORE-API-R48, and R46 when git has lost its record).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WorktreeChanges {
     /// Files with changes not committed, untracked files included.
@@ -1355,7 +1355,7 @@ mod tests {
         timed_out_at_ten_seconds(result, started);
     }
 
-    // verifies: PROTO-CORE-API-R38
+    // verifies: PROTO-CORE-API-R48
     #[test]
     fn status_entries_keep_spaces_and_a_renamed_file_s_original_path() {
         // As the transport hands it over: `-z` output, split into lines at
@@ -1382,7 +1382,7 @@ mod tests {
         assert!(entries[0].folder_differs() && !entries[1].folder_differs());
     }
 
-    // cites PROTO-CORE-API-R47 once planning PR 245 adds it
+    // verifies: PROTO-CORE-API-R47
     #[tokio::test(start_paused = true)]
     async fn counting_changes_gives_git_sixty_seconds_in_all() {
         let started = tokio::time::Instant::now();
@@ -1396,7 +1396,7 @@ mod tests {
         }
     }
 
-    // cites PROTO-CORE-API-R47 once planning PR 245 adds it
+    // verifies: PROTO-CORE-API-R47
     #[test]
     fn reading_a_file_stops_at_the_deadline() {
         let dir = tempfile::tempdir().unwrap();
@@ -1408,7 +1408,7 @@ mod tests {
         assert_eq!(content_digest(&file, std::time::Instant::now()), None);
     }
 
-    // cites PROTO-CORE-API-R47 once planning PR 245 adds it
+    // verifies: PROTO-CORE-API-R47
     #[tokio::test]
     async fn blocking_reads_past_the_cap_are_refused_not_queued() {
         // Eight reads that have not answered hold every place.
