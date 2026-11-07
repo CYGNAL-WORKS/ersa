@@ -53,7 +53,7 @@ test("a pending merge review older than an hour is a run that died, and the head
 });
 
 const QUEUE_FAILED = "The run failed: adding it to the merge queue failed: GraphQL: API rate limit already exceeded";
-const errored = (over) => mark("ERROR", { description: QUEUE_FAILED, startedAt: ago(RETRY_MS + 1000), ...over });
+const errored = (over) => mark("ERROR", { startedAt: ago(RETRY_MS + 1000), ...over });
 
 test("a merge review that failed for a cause that may clear is retried after a backoff, behind fresh heads", () => {
   assert.equal(RETRY_MS, 15 * 60 * 1000);
@@ -67,8 +67,6 @@ test("a merge review that failed for a cause that may clear is retried after a b
   assert.deepEqual(picked.review.map((p) => p.number), [9, 3, 4]);
   assert.deepEqual(select([pr({ statusCheckRollup: [ci({ startedAt: ago(RETRY_UNTIL_MS + 1000) }), errored()] })], NOW).review, [], "a head that keeps failing is left to the owner");
   assert.deepEqual(select([pr({ statusCheckRollup: [{ context: "ext", state: "SUCCESS" }, errored()] })], NOW).review, [], "with no CI time the cap holds");
-  for (const description of ["The review ran past 70 minutes and was ended; the poller's log says what it was doing.", "The run failed: claude returned no result: error_max_turns", undefined])
-    assert.deepEqual(select([pr({ statusCheckRollup: [ci(), errored({ description })] })], NOW).review, [], `an error that repeats is the owner's: ${description}`);
 });
 
 test("one retry runs at a time, counting a retry an earlier tick started", async () => {
@@ -83,6 +81,20 @@ test("one retry runs at a time, counting a retry an earlier tick started", async
   await settle(() => started === 2);
   reviews[1].end(0);
   assert.equal((await run).code, 0);
+});
+
+test("a retry starts only when its error's description says the cause may clear", async () => {
+  const prs = [pr({ statusCheckRollup: [ci(), errored()] })];
+  for (const description of [QUEUE_FAILED, "The run failed: gh api --paginate repos/o/r/pulls/7/reviews failed: HTTP 502: Bad Gateway", "posting the review failed 3 times: read tcp: connection reset by peer"])
+    assert.equal((await drive(["--once"], { prs, statuses: () => ({ ok: true, out: description }) })).reviews.length, 1, description);
+  for (const description of ["The review ran past 70 minutes and was ended; the poller's log says what it was doing.", "The run failed: claude returned no result: error_max_turns", ""]) {
+    const got = await drive(["--once"], { prs, statuses: () => ({ ok: true, out: description }) });
+    assert.equal(got.reviews.length, 0, description);
+    assert.match(got.logs.join("\n"), /does not clear on its own/);
+  }
+  const down = await drive(["--once"], { prs, statuses: () => ({ ok: false, out: "", err: "HTTP 403: API rate limit exceeded" }) });
+  assert.equal(down.reviews.length, 0, "an unreadable cause is not retried this tick");
+  assert.match(down.logs.join("\n"), /could not read why its merge review failed: HTTP 403/);
 });
 
 test("every open pull request not reviewed this tick says why, and a tick with nothing to review logs it", async () => {
@@ -186,7 +198,7 @@ const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 // review ends with `exit` (or with what `start` resolves to, for a test that
 // holds a review open); `reviews` lists each review started. A wait between
 // ticks lets the test run and no more, unless `sleep` says otherwise.
-async function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list = () => null, start, lockPath, alive, sleep = () => new Promise((r) => setImmediate(r)), now = () => NOW } = {}) {
+async function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }), list = () => null, statuses = () => ({ ok: true, out: QUEUE_FAILED }), start, lockPath, alive, sleep = () => new Promise((r) => setImmediate(r)), now = () => NOW } = {}) {
   const calls = [];
   const logs = [];
   const reviews = [];
@@ -195,6 +207,7 @@ async function drive(argv, { prs = [pr()], exit = 0, git = () => ({ ok: true }),
   const run = (cmd, args, cwd) => {
     calls.push({ cmd, args, cwd });
     if (cmd === "gh" && args[1] === "list") return list() ?? ok(JSON.stringify(prs.map(marked)));
+    if (cmd === "gh" && /\/commits\/.*\/statuses$/.test(args[1] ?? "")) return { status: 0, err: "", ...statuses() };
     if (cmd === "gh") return ok();
     if (cmd === "git") return { ok: true, status: 0, out: "", err: "", ...git(args, cwd) };
     throw new Error(`unexpected ${cmd}`);
