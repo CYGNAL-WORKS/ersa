@@ -52,7 +52,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 - **FLOW-ARCHIVE-DELETE-SESSION-R07**: When deleting the workspace or branch fails, Ersa shall keep the session, stopped, say what failed, and offer to try again.
 - **FLOW-ARCHIVE-DELETE-SESSION-R08**: When what a deletion would lose has changed in any way since the user was asked, Ersa shall ask again before deleting.
 - **FLOW-ARCHIVE-DELETE-SESSION-R09**: When the user confirms a delete, Ersa shall delete the session's record from its backend, so that neither the rail, after a restart or when Ersa lists the backend's sessions, nor the backend's own tools list it again.
-- **FLOW-ARCHIVE-DELETE-SESSION-R10**: When `workspace.changes` reports `unrecorded`, the delete question shall say that commits made on a detached checkout can't be counted and may be lost with the folder.
+- **FLOW-ARCHIVE-DELETE-SESSION-R10**: When `workspace.changes` reports `unrecorded`, the delete question shall say that commits made on a detached checkout can't be counted and may be lost with the folder, in place of a count of them.
 
 ## Out of scope
 
