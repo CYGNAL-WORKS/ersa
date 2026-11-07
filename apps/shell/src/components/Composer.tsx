@@ -1,4 +1,4 @@
-import { ArrowUp, Plus } from "lucide-react";
+import { ArrowUp, Plus, Square } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { t } from "../catalog";
 import type { Sending } from "../session/follow";
@@ -28,8 +28,12 @@ interface ComposerProps {
   statusTaken?: boolean;
   /** The session controls, beneath the box in the same column, space-xs below it (docs/design/COMPOSER.md). */
   controls?: ReactNode;
-  /** For the gallery: send shown under the pointer or pressed. */
-  forceSend?: "hover" | "pressed";
+  /** The agent is working on a turn: Enter does not send, and what is written stays for when it ends (FLOW-SEND-MESSAGE-R04). */
+  working?: boolean;
+  /** Stop: offered in send's place from the moment the user sends until the turn ends (FLOW-SEND-MESSAGE-R03). */
+  onStop?: () => void;
+  /** For the gallery: send or stop shown under the pointer, pressed, or with keyboard focus. */
+  forceSend?: "hover" | "pressed" | "focus";
   /** A permission request is open and holds the focal glow, so focus shows on the box's edge alone. */
   quietFocus?: boolean;
   /** For the gallery: text already typed, and a pointer or keyboard state shown without one. */
@@ -45,28 +49,39 @@ interface ComposerProps {
  * Where the user writes to the agent (docs/design/COMPOSER.md): the status line above the box, and the box holding
  * attach, the words and send. Enter sends; Shift+Enter starts a new line (FLOW-SEND-MESSAGE-R01).
  */
-export function Composer({ unavailable, sending, onSend, onWrite, tall, statusTaken, controls, forceSend, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
+export function Composer({ unavailable, sending, onSend, onWrite, tall, statusTaken, controls, forceSend, working, onStop, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const words = useRef<HTMLTextAreaElement>(null);
   useImperativeHandle(inputRef, () => words.current as HTMLTextAreaElement);
   const busy = sending?.state === "sending";
-  const canSend = !unavailable && !busy && text.trim() !== "";
+  const canSend = !unavailable && !busy && !working && text.trim() !== "";
+  // From the moment of sending until the turn ends, the button is stop.
+  const stopping = (busy || !!working) && onStop !== undefined && !unavailable;
+  // The icon fades in only when send and stop trade places, not as the composer appears.
+  const [traded, setTraded] = useState(false);
+  const wasStopping = useRef(stopping);
+  if (wasStopping.current !== stopping) {
+    wasStopping.current = stopping;
+    if (!traded) setTraded(true);
+  }
 
-  // When the box becomes unavailable while the user is in it, focus goes back to the words once it is available
-  // again. Read as the box turns unavailable, before the words are disabled and lose focus.
+  // When the box becomes unavailable while the user is in it, focus goes back where it was, the words or the
+  // send-or-stop button, once it is available again. Read as the box turns unavailable, before they are disabled.
+  const button = useRef<HTMLButtonElement>(null);
   const wasUnavailable = useRef(unavailable !== undefined);
-  const refocus = useRef(false);
+  const refocus = useRef<HTMLElement | null>(null);
   if (unavailable !== undefined && !wasUnavailable.current) {
     const at = typeof document === "undefined" ? null : document.activeElement;
-    refocus.current = at !== null && at === words.current;
+    refocus.current = at === words.current || at === button.current ? (at as HTMLElement) : null;
   }
   wasUnavailable.current = unavailable !== undefined;
   useEffect(() => {
     if (unavailable === undefined && refocus.current) {
-      refocus.current = false;
+      const back = refocus.current;
+      refocus.current = null;
       // Only if focus went nowhere meanwhile: a user who moved on, to the rail say, keeps their place.
       const at = document.activeElement;
-      if (at === null || at === document.body) words.current?.focus({ preventScroll: true });
+      if (at === null || at === document.body) back.focus({ preventScroll: true });
     }
   }, [unavailable]);
 
@@ -79,6 +94,7 @@ export function Composer({ unavailable, sending, onSend, onWrite, tall, statusTa
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+      // While a message is on its way or the agent works, Enter does nothing and the words stay.
       event.preventDefault();
       void send();
     }
@@ -119,8 +135,30 @@ export function Composer({ unavailable, sending, onSend, onWrite, tall, statusTa
           }}
           onKeyDown={onKeyDown}
         />
-        <button type="submit" className="composer-send" data-force={forceSend} aria-label={t("composer.sendButton")} disabled={!canSend}>
-          <Icon icon={ArrowUp} size="icon" />
+        {/* One button, send or stop, so keyboard focus stays on it as it turns from one to the other. With nothing to
+            send it stays focusable, so focus on stop survives the turn ending; unavailable, it is disabled. */}
+        <button
+          ref={button}
+          type={stopping ? "button" : "submit"}
+          className="composer-send"
+          data-stop={stopping || undefined}
+          data-force={forceSend}
+          aria-label={t(stopping ? "composer.stopButton" : "composer.sendButton")}
+          aria-disabled={(!stopping && !canSend) || undefined}
+          disabled={unavailable !== undefined}
+          onClick={(event) => {
+            if (stopping) {
+              event.preventDefault();
+              onStop?.();
+            } else if (!canSend) {
+              event.preventDefault();
+            }
+          }}
+        >
+          {/* Keyed, so the icon fades in as send and stop trade places. */}
+          <span key={stopping ? "stop" : "send"} className="composer-send-icon" data-traded={traded || undefined}>
+            <Icon icon={stopping ? Square : ArrowUp} size={stopping ? "icon-sm" : "icon"} />
+          </span>
         </button>
       </form>
       {controls}

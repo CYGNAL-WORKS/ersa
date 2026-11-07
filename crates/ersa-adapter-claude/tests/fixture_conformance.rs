@@ -428,6 +428,15 @@ fn host_messages_serialise_to_the_recorded_stdin_lines() {
                     })),
                 )
             }
+            // Stop: the driver's interrupt, recorded ending a turn (fixture 2.1.316/07).
+            (Some("control_request"), Some(subtype)) if subtype == "interrupt" => {
+                HostMessage::control_request(
+                    line["request_id"].as_str().unwrap(),
+                    HostRequest::Interrupt {
+                        cancel_queued: None,
+                    },
+                )
+            }
             (Some("control_request"), Some(subtype)) if subtype == "rename_session" => {
                 let request = &line["request"];
                 HostMessage::control_request(
