@@ -65,15 +65,15 @@ test("each blocking new finding by this account is set against the Review sectio
       ["medium", "crates/ersa-core/src/stale.rs:1", false],
     ],
   );
-  assert.match(report([got]), /1 pull request\(s\) merged since the last pass; 1 compared; 3 blocking finding\(s\) at merge, 2 not named/);
-  assert.match(report([got]), /send\.rs:40 \(aaaaaaa\), NOT NAMED by the author: hangs\./);
-  assert.match(report([got]), /stale\.rs:1 \(ccccccc\), NOT NAMED/);
+  assert.match(report([got], ME), /1 pull request\(s\) merged since the last pass; 1 compared; 3 blocking finding\(s\) at merge, 2 not named/);
+  assert.match(report([got], ME), /send\.rs:40 \(aaaaaaa\), NOT NAMED by the author: hangs\./);
+  assert.match(report([got], ME), /stale\.rs:1 \(ccccccc\), NOT NAMED/);
 });
 
 test("a pull request with no merge review by this account, or no Review section, is reported as not compared", () => {
   assert.deepEqual(compare({ number: 1, title: "A", body: body("x"), reviews: [mine("LGTM"), { author: { login: "someone" }, body: state("a".repeat(40), []) }] }, ME), { number: 1, title: "A", compared: false, why: "no merge review" });
   assert.deepEqual(compare({ number: 2, title: "B", body: "## Summary\n\nonly", reviews: [mine(state("a".repeat(40), []))] }, ME), { number: 2, title: "B", compared: false, why: "no Review section in the body" });
-  assert.match(report([compare({ number: 1, title: "A", body: "", reviews: [] }, ME)]), /#1 A: not compared \(no merge review\)\./);
+  assert.match(report([compare({ number: 1, title: "A", body: "", reviews: [] }, ME)], ME), /#1 A: not compared \(no merge review\)\./);
 });
 
 test("main finds the last pass, reads each pull request once and keeps the answer, and takes --since", () => {
