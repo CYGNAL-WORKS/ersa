@@ -113,6 +113,7 @@ const session = (id: string, title: string, created_at: string, tile: Session["t
   title,
   state: tile.state,
   created_at,
+  archived: false,
   tile,
 });
 
