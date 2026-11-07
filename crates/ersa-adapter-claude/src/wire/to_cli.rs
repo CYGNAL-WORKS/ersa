@@ -23,10 +23,15 @@ pub enum HostMessage {
 impl HostMessage {
     /// A user turn holding one text block.
     pub fn user_text(text: impl Into<String>) -> Self {
+        Self::user(vec![InputBlock::Text { text: text.into() }])
+    }
+
+    /// A user turn holding `content`, as a message with attachments is sent.
+    pub fn user(content: Vec<InputBlock>) -> Self {
         HostMessage::User(UserInput {
             message: UserInputMessage {
                 role: "user".to_string(),
-                content: vec![InputBlock::Text { text: text.into() }],
+                content,
             },
             parent_tool_use_id: None,
         })
@@ -78,7 +83,23 @@ pub struct UserInputMessage {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum InputBlock {
-    Text { text: String },
+    Text {
+        text: String,
+    },
+    /// An image the agent sees, sent as base64 (PROTO-CLAUDE-CODE-STREAM, User message).
+    Image {
+        source: ImageSource,
+    },
+}
+
+/// Where an image block's bytes are: inline, as base64.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ImageSource {
+    /// Always `base64`.
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub media_type: String,
+    pub data: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
