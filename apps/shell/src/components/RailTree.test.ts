@@ -16,6 +16,7 @@ const session = (id: string, workspace_id: string, title: string): Session => ({
   state: "idle",
   created_at: "2026-11-01T09:00:00.000Z",
   archived: false,
+  pinned: false,
   title,
   tile: { state: "idle", pending: [] },
 });

@@ -632,6 +632,30 @@
               "$ref": "#/$defs/request_id"
             },
             "method": {
+              "const": "session.arrange"
+            },
+            "params": {
+              "$ref": "#/$defs/session.arrange.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
               "const": "session.delete"
             },
             "params": {
@@ -877,6 +901,102 @@
             },
             "params": {
               "$ref": "#/$defs/session.raw_log.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "section.list"
+            },
+            "params": {
+              "$ref": "#/$defs/section.list.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "section.create"
+            },
+            "params": {
+              "$ref": "#/$defs/section.create.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "section.rename"
+            },
+            "params": {
+              "$ref": "#/$defs/section.rename.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
+              "const": "section.remove"
+            },
+            "params": {
+              "$ref": "#/$defs/section.remove.params"
             }
           }
         },
@@ -1710,6 +1830,7 @@
         "state",
         "created_at",
         "archived",
+        "pinned",
         "tile"
       ],
       "properties": {
@@ -1766,14 +1887,51 @@
           "type": "boolean",
           "description": "Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume."
         },
+        "pinned": {
+          "type": "boolean",
+          "description": "Whether the user pinned the session. Core stores it; session.arrange sets it."
+        },
+        "section_id": {
+          "$ref": "#/$defs/id",
+          "description": "The section the user put the session in, from section.list; absent when in none. Core stores it; session.arrange sets it, and section.remove clears it."
+        },
+        "last_activity_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended."
+        },
         "deleting": {
           "enum": [
             "running",
             "failed"
           ],
-          "description": "Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived and session.remove answer invalid_state while it is set."
+          "description": "Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set."
         }
       }
+    },
+    "section": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "created_at"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "A section the user made to group sessions in the rail."
     },
     "tile": {
       "type": "object",
@@ -2409,6 +2567,37 @@
     "session.set_archived.result": {
       "$ref": "#/$defs/session"
     },
+    "session.arrange.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "pinned": {
+          "type": "boolean",
+          "description": "Pins or unpins the session; left as it was when absent."
+        },
+        "section_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Puts the session in this section, or in none when null; left as it was when absent. A section that does not exist answers not_found."
+        }
+      },
+      "description": "Changes the fields given and leaves the others. A session marked deleting answers invalid_state."
+    },
+    "session.arrange.result": {
+      "$ref": "#/$defs/session"
+    },
     "session.delete.params": {
       "type": "object",
       "additionalProperties": false,
@@ -2767,6 +2956,72 @@
         "$ref": "#/$defs/raw_log_entry"
       }
     },
+    "section.list.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {},
+      "description": "No fields."
+    },
+    "section.list.result": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/section"
+      },
+      "description": "In the order they were made."
+    },
+    "section.create.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Core trims it and refuses with invalid_params one that is then blank, longer than 80 characters, or another section's, ignoring case."
+        }
+      }
+    },
+    "section.create.result": {
+      "$ref": "#/$defs/section"
+    },
+    "section.rename.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string",
+          "description": "Core trims it and refuses with invalid_params one that is then blank, longer than 80 characters, or another section's, ignoring case."
+        }
+      }
+    },
+    "section.rename.result": {
+      "$ref": "#/$defs/section"
+    },
+    "section.remove.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      },
+      "description": "Removes the section and puts its sessions in no section."
+    },
+    "section.remove.result": {
+      "$ref": "#/$defs/section",
+      "description": "The section as it was."
+    },
     "backend.list.params": {
       "type": "object",
       "additionalProperties": false,
@@ -2985,6 +3240,11 @@
         },
         "tile": {
           "$ref": "#/$defs/tile"
+        },
+        "last_activity_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The session's last_activity_at as session.list has it: when its latest turn ended; absent until one has. Every tile carries it, and a turn's end sends a tile even when the tile itself is unchanged."
         }
       }
     },

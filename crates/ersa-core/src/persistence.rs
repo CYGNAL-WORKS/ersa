@@ -24,6 +24,7 @@ use serde_json::{Map, Value};
 
 use crate::settings;
 
+mod sections;
 mod sessions;
 
 pub use sessions::SessionRow;
@@ -39,6 +40,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("persistence/0005_root_workspace.sql"),
     include_str!("persistence/0006_session_archived.sql"),
     include_str!("persistence/0007_session_deleting.sql"),
+    include_str!("persistence/0008_session_arrangement.sql"),
 ];
 
 /// The id of the local host's row, which always exists.
@@ -601,7 +603,14 @@ mod tests {
         let conn = Connection::open(&path).expect("open");
         let version = user_version(&conn).expect("user_version");
         assert_eq!(version, MIGRATIONS.len());
-        for table in ["hosts", "projects", "workspaces", "sessions", "settings"] {
+        for table in [
+            "hosts",
+            "projects",
+            "workspaces",
+            "sessions",
+            "settings",
+            "sections",
+        ] {
             let found: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
@@ -741,6 +750,10 @@ mod tests {
                 // Migration 7's.
                 "deleting",
                 "delete_files",
+                // Migration 8's.
+                "pinned",
+                "section_id",
+                "last_activity_at",
             ]
         );
     }

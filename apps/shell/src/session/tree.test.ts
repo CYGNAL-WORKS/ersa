@@ -12,6 +12,7 @@ const session = (id: string, workspace_id: string, created_at: string): Session 
   state: "idle",
   created_at,
   archived: false,
+  pinned: false,
   tile: { state: "idle", pending: [] },
 });
 const ids = (sessions: Session[]) => sessions.map((s) => s.id);

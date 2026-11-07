@@ -24,6 +24,7 @@ const session: Session = {
   state: "running",
   created_at: "2026-11-01T00:00:00Z",
   archived: false,
+  pinned: false,
   tile: { state: "running", pending: [] },
 };
 
