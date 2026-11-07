@@ -350,6 +350,18 @@ Will be copied into the workspace's .ersa folder
 
 Remove {name}
 
+### `composer.attachment.pastedName`
+
+Pasted image
+
+### `composer.attachment.pastedTooLargeError`
+
+This image is larger than 10 MB, the most Ersa sends in one message.
+
+### `composer.attachment.pastedUnreadableError`
+
+Ersa couldn't read this image.
+
 ## `newSession`
 
 ## `sessionControls`

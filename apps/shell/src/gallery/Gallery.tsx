@@ -939,6 +939,17 @@ const entries: Entry[] = [
       ],
       ["Starting the backend", statusRoom(<Composer {...attachProps} initialText="Match the mockup." sending={{ state: "sending", progress: { phase: "starting" } }} onStop={() => {}} />)],
       ["Can't tell whether it was sent", statusRoom(<Composer {...attachProps} initialText="Match the mockup." initialAttachments={galleryAttachments} sending={{ state: "unknown" }} />)],
+      // FLOW-SEND-MESSAGE-R08: files dragged over the box, and an image pasted into the words.
+      ["Files dragged over the box", <Composer {...attachProps} forceDragOver />],
+      ["Files dragged over the box, focused", <Composer {...attachProps} forceDragOver force="focus" />],
+      [
+        "A pasted image",
+        <Composer
+          {...attachProps}
+          initialText="This is the layout I mean."
+          initialAttachments={[{ path: "pasted:1", name: "Pasted image", kind: "image", detail: "84 KB", inline: { media_type: "image/png", data: "" } }]}
+        />,
+      ],
     ],
   },
   {

@@ -5,6 +5,15 @@
 import type { Session } from "../protocol/core-api.gen";
 import type { CoreClient } from "./client";
 
+/**
+ * A drag from the file manager over the window (FLOW-SEND-MESSAGE-R08): the pointer moving over it, in CSS pixels
+ * from the window's top left; the paths dropped there; or the drag leaving or canceled.
+ */
+export type DragDrop =
+  | { type: "over"; x: number; y: number }
+  | { type: "drop"; x: number; y: number; paths: string[] }
+  | { type: "leave" };
+
 /** The Shell's controls the window uses, beside the bridge to Core. */
 export interface ShellControl {
   /** Calls `handler` each time the user chooses Quit from the tray icon; returns a way to stop. */
@@ -24,6 +33,8 @@ export interface ShellControl {
    * they canceled (FLOW-SEND-MESSAGE-R07, R13).
    */
   pickFiles(images: boolean): Promise<string[]>;
+  /** Hears files, images and folders dragged from the file manager over the window; returns a function that stops. */
+  onDragDrop(handler: (event: DragDrop) => void): () => void;
 }
 
 const BUSY = new Set<string>(["starting", "running", "waiting_user"]);
