@@ -21,26 +21,31 @@ import { fileURLToPath } from "node:url";
 
 // A loop keyword counts only where a command starts, so prose in a commit
 // message or a pull request body ("wait while the review runs") is not a loop.
-const AT = String.raw`(?:^|[;&|({"'\x60]|\b(?:then|do|else)\s|-Command\s)\s*`;
-const LOOP = new RegExp(String.raw`${AT}(?:while|until)\b|${AT}do\s*\{|${AT}for\s*\(\(?\s*;\s*;\s*\)|\bsetInterval\b`, "m");
-const GH = /\bgh(?:\.exe)?["']?(?:\s+-{1,2}(?!-)[\w-]+(?:[ =][^\s-]\S*)?)*\s+(?:pr|run|api|issue|workflow|repo|release|search|label|status)\b/i;
+// PowerShell keywords ignore case, so the match does too. Every repeated part
+// can match a stretch of text one way only, so no input makes these backtrack.
+const AT = String.raw`(?:^|[;&|({"'\x60]|\b(?:then|do|else)\s|-Command\s)[ \t]*`;
+const LOOP = new RegExp(String.raw`${AT}(?:while|until)\b|${AT}do\s*\{|${AT}for\s*\(\(?\s*;\s*;\s*\)`, "mi");
+// A command that repeats on its own clock needs no sleep.
+const REPEAT = /\bsetInterval\b|\bwatch\s+(?:-n|--interval)\b/;
+const GH = /\bgh(?:\.exe)?["']?(?:\s+-{1,2}(?!-)[\w-]+(?:[ =][^\s-]\S*)?)*\s+[a-z]/i;
 const SLEEP = /\b(?:sleep|Start-Sleep|setTimeout)\b|\btimeout(?:\.exe)?\s+\/t\b|\bread\s+-t\b/i;
 // A script the command runs: one that starts a command, or one a shell is
 // given. A script the command only names (rm, cat, pkill -f) is not read, so
 // cleaning up a watcher is never blocked.
-const SCRIPT = /(?:^|[;&|(\n]\s*|\b(?:bash|sh|zsh|pwsh|powershell)(?:\.exe)?["']?\s+(?:-[\w-]+\s+(?:[\w.-]+\s+(?=-))?)*|\b(?:nohup|setsid|exec|source|start|timeout\s+\S+|Start-Process(?:\s+-FilePath)?)\s+|(?:^|\s)[&.]\s+)["']?((?:[A-Za-z]:)?[^\s"';&|]*\.(?:sh|bash|ps1))(?=["'\s;&|]|$)/gm;
+const SCRIPT = /(?:^|[;&|(\n][ \t]*|\b(?:bash|sh|zsh|pwsh|powershell)(?:\.exe)?["']?\s+(?:-[\w-]+\s+(?:[\w.][\w.-]*\s+(?=-))?)*|\b(?:nohup|setsid|exec|source|start|timeout\s+\S+|Start-Process(?:\s+-FilePath)?)\s+|(?:^|\s)[&.][ \t]+)["']?((?:[A-Za-z]:)?[^\s"';&|]*\.(?:sh|bash|ps1))(?=["'\s;&|]|$)/gm;
 // The files an agent writes that can hold a loop; a note or a ticket in .scratch/ cannot.
 const RUNNABLE = /\.(?:sh|bash|ps1|psm1|cmd|bat|js|mjs|cjs|ts|py)$|(?:^|[\\/])[^.\\/]+$/i;
 
 // Whether text holds a loop that polls GitHub.
-export const polls = (text) => LOOP.test(text) && GH.test(text) && SLEEP.test(text);
+export const polls = (text) => GH.test(text) && ((LOOP.test(text) && SLEEP.test(text)) || REPEAT.test(text));
 
-// The local shell scripts a command names, resolved against dir. A network
-// path is left out: opening one before the permission prompt would send the
-// owner's Windows credentials to that host.
-export function scriptsIn(command, dir) {
+// The local shell scripts a command names, resolved against dir; on Windows a
+// Git Bash drive path (/d/x.sh) is read as d:/x.sh. A network path is left
+// out: opening one before the permission prompt would send the owner's
+// Windows credentials to that host.
+export function scriptsIn(command, dir, platform = process.platform) {
   return [...command.matchAll(SCRIPT)]
-    .map((m) => resolve(dir, m[1].replace(/^\/([a-z])\//i, "$1:/")))
+    .map((m) => resolve(dir, platform === "win32" ? m[1].replace(/^\/([a-z])\//i, "$1:/") : m[1]))
     .filter((p) => !/^[\\/]{2}/.test(p));
 }
 
@@ -72,11 +77,12 @@ function read(file) {
 // The text the tool call would run or write, as far as it polls.
 function inspected(payload) {
   const input = payload?.tool_input ?? {};
-  const dir = payload?.cwd ?? process.cwd();
+  const dir = typeof payload?.cwd === "string" ? payload.cwd : process.cwd();
   if (typeof input.command === "string") return [input.command, ...scriptsIn(input.command, dir).map(read)];
   const file = input.file_path;
   if (typeof file !== "string" || !RUNNABLE.test(file) || !throwaway(file, dir)) return [];
-  return [input.content, input.new_string, ...(input.edits ?? []).map((e) => e?.new_string)].filter((t) => typeof t === "string");
+  const edits = Array.isArray(input.edits) ? input.edits.map((e) => e?.new_string) : [];
+  return [input.content, input.new_string, ...edits].filter((t) => typeof t === "string");
 }
 
 function main() {

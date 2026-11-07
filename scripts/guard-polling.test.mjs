@@ -14,8 +14,9 @@ import { polls, scriptsIn } from "./hooks/guard-polling.mjs";
 const HOOK = join(fileURLToPath(import.meta.url), "..", "hooks", "guard-polling.mjs");
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 
+// The hook's exit code, or null when it does not answer within 10 seconds.
 function exitCode(payload) {
-  return spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ cwd: ROOT, ...payload }) }).status;
+  return spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ cwd: ROOT, ...payload }), timeout: 10_000 }).status;
 }
 
 const WATCHER = `while true; do
@@ -36,6 +37,11 @@ test("finds loops that repeat without a fixed count, call gh and sleep", () => {
     'powershell -Command "while ($true) { gh pr view 5; Start-Sleep 60 }"',
     "if ok; then while true; do gh pr view 5; sleep 9; done; fi",
     "powershell -Command while ($true) { gh pr view 5; Start-Sleep 60 }",
+    "While ($true) { gh pr view 1; Start-Sleep 30 }",
+    "while (1) { gh pr view 5; timeout /t 30 }",
+    "while true; do gh project item-list; sleep 1; done",
+    "watch -n 30 gh pr view 1",
+    'setInterval(() => execSync("gh pr view 5"), 30000)',
   ]) {
     assert.ok(polls(t), t);
   }
@@ -48,6 +54,7 @@ test("passes a loop with a fixed count, a wait gh ends itself, and a loop withou
     "until grep -q Ready dev.log; do sleep 0.5; done",
     "while true; do gh pr view 5; done", // no sleep: a mistake, but not a poll
     "high api while sleep", // gh only as part of another word
+    "while true; do thigh pr view; sleep 1; done",
     'git commit -m "Wait on gh pr checks while the review runs; sleep 5 between"',
     'gh pr create --body "poll until done with gh pr view, then sleep"',
     'gh pr comment 5 --body "Fixed: the poller would sleep while CI ran"',
@@ -86,9 +93,15 @@ test("names each local shell script a command runs, never a network path", () =>
   assert.deepEqual(scriptsIn("bash ./a.sh 1 && pwsh -File b.ps1", "/r").map((p) => p.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "")), ["/r/a.sh", "/r/b.ps1"]);
   // Only Windows opens a network path from such a name; elsewhere both are local paths.
   if (process.platform === "win32") assert.deepEqual(scriptsIn("bash \\\\host.example\\s\\x.sh; bash //host.example/s/y.sh", "/r"), []);
-  for (const c of ["nohup ./w.sh &", "setsid ./w.sh", "timeout 5 ./w.sh", "source w.sh", "pwsh -ExecutionPolicy Bypass -File w.ps1", "Start-Process -FilePath C:\\t\\w.ps1"]) {
+  for (const c of ["nohup ./w.sh &", "setsid ./w.sh", "timeout 5 ./w.sh", "source w.sh", ". ./w.sh", "pwsh -ExecutionPolicy Bypass -File w.ps1", "Start-Process -FilePath C:\\t\\w.ps1"]) {
     assert.equal(scriptsIn(c, "/r").length, 1, c);
   }
+});
+
+test("reads a Git Bash drive path as a drive only on Windows", () => {
+  const as = (platform) => scriptsIn("bash /a/w.sh", "/r", platform)[0].replace(/\\/g, "/").toLowerCase();
+  assert.ok(as("win32").includes("a:/w.sh"), as("win32"));
+  assert.ok(!as("linux").includes("a:"), as("linux"));
 });
 
 test("treats .scratch/ as throwaway from a subfolder of the repository", () => {
@@ -97,14 +110,20 @@ test("treats .scratch/ as throwaway from a subfolder of the repository", () => {
   assert.equal(exitCode({ cwd, tool_input: { file_path: join(ROOT, "apps", "poller.mjs"), content: WATCHER } }), 0);
 });
 
-// A regex that backtracks blocks the event loop, so the check runs in a child
+// A regex that backtracks blocks the event loop, so each check runs in a child
 // with a deadline: a regression fails in seconds rather than hanging the run.
-test("answers at once on a long run of gh flags", () => {
-  const text = `while x; do gh${" --a".repeat(40)}; sleep 1; done`;
-  const code = `import { polls } from ${JSON.stringify(new URL("./hooks/guard-polling.mjs", import.meta.url).href)}; process.stdout.write(String(polls(${JSON.stringify(text)})));`;
-  const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], { encoding: "utf8", timeout: 2000 });
-  assert.equal(r.error?.code, undefined, "polls() did not answer within 2 seconds");
-  assert.equal(r.stdout, "false");
+function inTime(fn, text) {
+  const code = `import * as g from ${JSON.stringify(new URL("./hooks/guard-polling.mjs", import.meta.url).href)}; import { readFileSync } from "node:fs"; process.stdout.write(JSON.stringify(g.${fn}(readFileSync(0, "utf8"), "/r")));`;
+  const r = spawnSync(process.execPath, ["--input-type=module", "-e", code], { input: text, encoding: "utf8", timeout: 2000 });
+  assert.equal(r.error?.code, undefined, `${fn}() did not answer within 2 seconds`);
+  return JSON.parse(r.stdout);
+}
+
+test("answers at once on input built to make a pattern backtrack", () => {
+  assert.equal(inTime("polls", `while x; do gh${" --a".repeat(40)}; sleep 1; done`), false);
+  assert.deepEqual(inTime("scriptsIn", `bash ${"-a ".repeat(40)}x`), []);
+  assert.equal(inTime("polls", `gh pr view 5${"\n".repeat(120_000)}`), false);
+  assert.deepEqual(inTime("scriptsIn", "\n".repeat(120_000)), []);
 });
 
 test("blocks writing a polling script outside the repository or under .scratch/", () => {
@@ -112,6 +131,7 @@ test("blocks writing a polling script outside the repository or under .scratch/"
   assert.equal(exitCode({ tool_input: { file_path: join(tmpdir(), "watch"), content: WATCHER } }), 2);
   assert.equal(exitCode({ tool_input: { file_path: join(ROOT, ".scratch", "watch.sh"), content: WATCHER } }), 2);
   assert.equal(exitCode({ tool_input: { file_path: join(tmpdir(), "watch.sh"), old_string: "x", new_string: WATCHER } }), 2);
+  assert.equal(exitCode({ tool_input: { file_path: join(tmpdir(), "watch.sh"), edits: [{ old_string: "x", new_string: WATCHER }] } }), 2);
 });
 
 test("passes writing the repository's own scripts, which review covers, and notes in .scratch/", () => {
@@ -125,6 +145,8 @@ test("runs on every tool that can start or write a loop", () => {
   assert.deepEqual(entry.matcher.split("|").sort(), ["Bash", "Edit", "Monitor", "MultiEdit", "PowerShell", "Write"]);
 });
 
-test("passes input it cannot read", () => {
+test("passes input it cannot read, and fields of an unexpected type", () => {
   assert.equal(spawnSync(process.execPath, [HOOK], { input: "not json" }).status, 0);
+  assert.equal(exitCode({ cwd: 5, tool_input: { command: "bash a.sh" } }), 0);
+  assert.equal(exitCode({ tool_input: { file_path: join(tmpdir(), "w.sh"), edits: {} } }), 0);
 });
