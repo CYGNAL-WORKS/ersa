@@ -40,10 +40,19 @@ pub struct SessionRow {
     /// deleting (FLOW-ARCHIVE-DELETE-SESSION). A new session is not, so
     /// `insert_session` leaves it to the column's default.
     pub deleting: Option<Deleting>,
+    /// Whether the user pinned the session, and the section they put it in
+    /// (ADR 0026). A new session is neither, so `insert_session` leaves both
+    /// to the columns' defaults.
+    pub pinned: bool,
+    pub section_id: Option<String>,
+    /// RFC 3339: when the session's latest turn ended, `None` until one has
+    /// (PROTO-CORE-API-R37).
+    pub last_activity_at: Option<String>,
 }
 
 const SESSION_COLUMNS: &str = "s.id, s.workspace_id, s.host_id, s.backend, s.backend_session_id, \
-     s.mode, w.path, s.model, s.effort, s.permission_mode, s.archived, s.deleting";
+     s.mode, w.path, s.model, s.effort, s.permission_mode, s.archived, s.deleting, \
+     s.pinned, s.section_id, s.last_activity_at";
 
 impl Store {
     /// Records a new session, but only while its workspace is `ready`, in
@@ -144,6 +153,56 @@ impl Store {
             conn.execute(
                 "UPDATE sessions SET archived = ?2 WHERE id = ?1",
                 params![id, archived],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Changes the arrangement fields given (ADR 0026): `pinned` when
+    /// `Some`, and the section when `Some`, `Some(None)` being no section.
+    /// Returns `false`, changing nothing, when the section named does not
+    /// exist.
+    pub async fn arrange_session(
+        &self,
+        id: String,
+        pinned: Option<bool>,
+        section_id: Option<Option<String>>,
+    ) -> Result<bool> {
+        self.call(move |conn| {
+            let tx = conn.transaction()?;
+            if let Some(Some(section_id)) = &section_id {
+                let exists = tx
+                    .query_row("SELECT 1 FROM sections WHERE id = ?1", [section_id], |_| {
+                        Ok(())
+                    })
+                    .optional()?
+                    .is_some();
+                if !exists {
+                    return Ok(false);
+                }
+            }
+            // `COALESCE` keeps the pin when none is given; the `CASE` keeps
+            // the section unless one (or none, as NULL) is given.
+            tx.execute(
+                "UPDATE sessions SET
+                     pinned = COALESCE(?2, pinned),
+                     section_id = CASE WHEN ?3 THEN ?4 ELSE section_id END
+                 WHERE id = ?1",
+                params![id, pinned, section_id.is_some(), section_id.flatten()],
+            )?;
+            tx.commit()?;
+            Ok(true)
+        })
+        .await
+    }
+
+    /// Records when the session's latest turn ended (PROTO-CORE-API-R37).
+    pub async fn set_session_last_activity(&self, id: String, at: String) -> Result<()> {
+        self.call(move |conn| {
+            conn.execute(
+                "UPDATE sessions SET last_activity_at = ?2 WHERE id = ?1",
+                params![id, at],
             )?;
             Ok(())
         })
@@ -293,5 +352,8 @@ fn session_row(row: &Row) -> rusqlite::Result<SessionRow> {
             // The column's check allows only the two.
             Some(_) => Some(Deleting::Failed),
         },
+        pinned: row.get(12)?,
+        section_id: row.get(13)?,
+        last_activity_at: row.get(14)?,
     })
 }

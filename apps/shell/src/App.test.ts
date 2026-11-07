@@ -30,6 +30,7 @@ const session = (id: string, project_id: string, created_at: string): Session =>
   state: "ended",
   created_at,
   archived: false,
+  pinned: false,
   tile: { state: "ended", pending: [] },
 });
 
