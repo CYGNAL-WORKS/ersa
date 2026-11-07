@@ -30,7 +30,9 @@ use serde_json::{Map, Value};
 /// range of raw-log lines.
 ///
 /// 3: `usage.updated` carries `turn_output_tokens`.
-pub const PROJECTION_VERSION: u32 = 3;
+///
+/// 4: `user.message` carries the message's `attachments`.
+pub const PROJECTION_VERSION: u32 = 4;
 
 /// One event as Core streams it: a typed payload plus where it came from.
 ///
@@ -311,6 +313,20 @@ pub struct UserMessage {
     pub origin: MessageOrigin,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub peer: Option<Peer>,
+    /// What came with the message, in the order sent; none when empty
+    /// (PROTO-AGENT-EVENTS, `user.message`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<MessageAttachment>,
+}
+
+/// One attachment of a user message: an image the agent saw, or a file or
+/// folder by the path it was given, relative to the workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum MessageAttachment {
+    Image { media_type: String, data: String },
+    File { path: String },
+    Folder { path: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

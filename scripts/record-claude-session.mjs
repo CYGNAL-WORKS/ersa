@@ -10,6 +10,10 @@
 // replaced by the session id once `system/init` has named one; for example
 // 'control:{"subtype":"rename_session","title":"x","session_id":"$SESSION_ID"}'.
 //
+// A message of the form `content:<json>` is sent as a user message whose
+// content blocks are `<json>`, an array, as a message with attachments goes
+// (PROTO-CLAUDE-CODE-STREAM, User message).
+//
 // It auto-allows every tool call, and the CLI runs with the user's own
 // settings loaded (`--setting-sources user,project,local`, as Ersa runs it), so
 // whatever the model chooses to run, runs with the user's hooks and rules.
@@ -331,7 +335,8 @@ if (initialized) {
       continue;
     }
     const result = waitFor((m) => m.type === "result", 300_000);
-    send({ type: "user", message: { role: "user", content: [{ type: "text", text }] } });
+    const content = text.startsWith("content:") ? JSON.parse(text.slice("content:".length)) : [{ type: "text", text }];
+    send({ type: "user", message: { role: "user", content } });
     const res = await result;
     turns.push({ turn: n + 1, text, got_result: !!res, subtype: res?.subtype ?? null, is_error: res?.is_error ?? null });
     if (!res) break;

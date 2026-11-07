@@ -25,7 +25,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::BACKEND;
-use crate::projector::{kind_of, plain_text, reply_events, tool_result_events};
+use crate::projector::{kind_of, reply_events, tool_result_events};
 use crate::wire::{LocalCommandOutput, MessageContent, RecordEntry, RecordUser};
 
 /// The longest record line read as an entry. A tool result can run to
@@ -494,21 +494,24 @@ fn user_events(user: RecordUser) -> Vec<Event> {
     if !results.is_empty() {
         return results;
     }
-    let text = match content {
-        MessageContent::Text(text) => Some(text),
-        MessageContent::Blocks(blocks) => plain_text(&blocks),
+    // Its images and its list of files and folders are its attachments, never
+    // its text (PROTO-CLAUDE-CODE-STREAM-R26).
+    let (text, attachments) = match content {
+        MessageContent::Text(text) => (Some(text), Vec::new()),
+        MessageContent::Blocks(blocks) => crate::attachments::split_blocks(&blocks),
     };
-    match text {
-        Some(text) => vec![Event::UserMessage(UserMessage {
-            text,
+    match (text, attachments.is_empty()) {
+        (None, true) => Vec::new(),
+        (text, _) => vec![Event::UserMessage(UserMessage {
+            text: text.unwrap_or_default(),
             origin: if from_cli {
                 MessageOrigin::System
             } else {
                 MessageOrigin::Human
             },
             peer: None,
+            attachments,
         })],
-        None => Vec::new(),
     }
 }
 

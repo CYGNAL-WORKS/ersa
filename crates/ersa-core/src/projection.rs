@@ -494,6 +494,7 @@ mod tests {
                     text: "hi".into(),
                     origin: MessageOrigin::Human,
                     peer: None,
+                    attachments: Vec::new(),
                 }),
             ),
             recorded("a1", "2026-10-30T00:00:01.000Z", text("a1")),
