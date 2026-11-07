@@ -669,6 +669,15 @@ const entries: Entry[] = [
       ["Under the pointer", <ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="hover" /></ul>],
       ["Pressed", <ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="pressed" /></ul>],
       ["Keyboard focus, its path shown", room(<ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="focus" /></ul>)],
+      ["A folder", <ul className="transcript-attachments"><AttachmentChip kind="folder" name="components" path="apps/shell/src/components" /></ul>],
+      [
+        "A long path, its name cut and its path wrapped",
+        room(
+          <ul className="transcript-attachments">
+            <AttachmentChip kind="file" name="generated_protocol_bindings_for_the_session_stream_and_core_api.rs" path="target/debug/build/ersa-core-6f3c2a9e1b7d4c0f/out/generated_protocol_bindings_for_the_session_stream_and_core_api.rs" force="focus" />
+          </ul>,
+        ),
+      ],
       ["An image the window can't show", <ul className="transcript-attachments"><AttachmentChip kind="image" name="Attached image" /></ul>],
     ],
   },
