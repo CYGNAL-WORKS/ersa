@@ -1230,3 +1230,78 @@ fn a_title_leaves_out_attachments_and_passes_over_a_prompt_of_attachments_alone(
     );
     assert_eq!(title_of(vec![alone]), None);
 }
+
+/// A user entry the CLI wrote itself, with `content` as given.
+fn meta(content: Value) -> Value {
+    json!({"type": "user", "uuid": "m", "isMeta": true, "message": {"role": "user", "content": content}})
+}
+
+// R34 (on #241 until it merges): the CLI's note of where it cached an image passes through.
+#[test]
+fn the_clis_note_of_a_cached_image_passes_through() {
+    // Recorded beside the prompt with an image (fixture 2.1.316/07).
+    let fixture = record_fixtures()
+        .into_iter()
+        .find(|f| f.name.ends_with("07-attachments"))
+        .expect("the attachments fixture");
+    let events: Vec<Event> = project_record(&fixture.text)
+        .into_iter()
+        .map(|e| e.event)
+        .collect();
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, Event::UserMessage(m) if m.text.starts_with("[Image: source: ")))
+    );
+    assert!(events.iter().any(|e| matches!(e, Event::BackendPassthrough(p) if p.payload.to_string().contains("[Image: source: "))));
+
+    // Several images, one line each, still pass through.
+    let two = meta(
+        json!([{"type": "text", "text": "[Image: source: C:/a/1.png]\n[Image: source: C:/a/2.png]"}]),
+    );
+    assert!(
+        !events_of(&[two])
+            .iter()
+            .any(|e| matches!(e, Event::UserMessage(_)))
+    );
+}
+
+// R34 (on #241 until it merges): only a note that is nothing but image sources passes through.
+#[test]
+fn a_cli_note_with_anything_else_in_it_is_still_shown() {
+    let mixed =
+        meta(json!([{"type": "text", "text": "[Image: source: C:/a/1.png]\nAnd something else"}]));
+    let events = events_of(&[mixed]);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::UserMessage(m) if m.origin == MessageOrigin::System))
+    );
+}
+
+// R34 (on #241 until it merges): the same words typed by the user are their message.
+#[test]
+fn the_same_words_typed_by_the_user_are_their_message() {
+    let typed = prompt_with(Some("[Image: source: x]"), &[]);
+    let events = events_of(&[typed]);
+    assert!(events.iter().any(|e| matches!(e, Event::UserMessage(m)
+        if m.origin == MessageOrigin::Human && m.text == "[Image: source: x]")));
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R27
+#[test]
+fn a_recorded_prompt_of_a_file_list_alone_leaves_the_title_at_the_prompt_before() {
+    // Fixture 2.1.316/07: the CLI leaves last-prompt at the first prompt, and the
+    // second prompt, a list alone, titles nothing.
+    let fixture = record_fixtures()
+        .into_iter()
+        .find(|f| f.name.ends_with("07-attachments"))
+        .expect("the attachments fixture");
+    let lines: Vec<String> = fixture.text.lines().map(String::from).collect();
+    assert_eq!(
+        title_of(lines).as_deref(),
+        Some(
+            "What colour is the attached image? Then say which attachment paths you were given. Do not open or read them, and do not use any tools."
+        )
+    );
+}
