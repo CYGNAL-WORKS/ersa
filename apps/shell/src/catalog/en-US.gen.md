@@ -246,6 +246,38 @@ Reconnecting to Core…
 
 ## `composer`
 
+### `composer.name`
+
+Composer
+
+### `composer.messageLabel`
+
+Message
+
+### `composer.writePlaceholder`
+
+Write to the agent
+
+### `composer.attachButton`
+
+Attach
+
+### `composer.sendButton`
+
+Send
+
+### `composer.detectingProgress`
+
+Detecting the backends on this host…
+
+### `composer.noBackendError`
+
+No backend is available on this host. Install Claude Code or GitHub Copilot on it to start a session.
+
+### `composer.backendFailedError`
+
+{label} isn't working on this host. Check that it's installed and signed in, then open New session again.
+
 ## `newSession`
 
 ## `sessionControls`

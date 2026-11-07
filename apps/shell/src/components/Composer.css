@@ -1,59 +1,185 @@
-/* The composer: an input on the pane's surface, meeting the transcript at a line. */
+/* The composer (docs/design/COMPOSER.md, The composer): one column at the measure, centred, holding the status
+   line and the box; the session controls follow it, space-xs apart. It sits on the canvas with no line above it:
+   the transcript fades out behind it. */
 
 .composer {
   display: flex;
   flex-direction: column;
-  gap: var(--space-sm);
-  padding: var(--space-md) var(--space-lg) var(--space-lg);
-  border-top: var(--line-hairline) solid var(--color-line);
+  gap: var(--space-xs);
+  box-sizing: border-box;
+  width: stretch;
+  max-width: var(--size-measure);
+  margin: 0 auto;
+  /* Room at the foot, so the box and its controls stay off the window's edge. */
+  padding: 0 var(--space-lg) var(--space-lg);
 }
 
-.composer-input {
-  box-sizing: border-box;
+/* The status line takes no height and grows upward from the box, so the box and the session controls stay put. */
+.composer-status {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 0;
+}
+
+/* One line, size-control high at least, padded space-sm at the sides, in ui-small and ink-muted. */
+.composer-status-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-height: var(--size-control);
+  margin: 0;
+  padding: 0 var(--space-sm);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  color: var(--color-ink-muted);
+  overflow-wrap: anywhere;
+  animation: composer-status-in var(--motion-settle) var(--motion-ease-out);
+}
+
+/* It opens upward, growing and fading in. */
+@keyframes composer-status-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-xs));
+  }
+}
+
+/* The box: attach, the words, then send, aligned to the bottom so the buttons stay by the last line. */
+.composer-box {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--material-composer);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+  transition:
+    border-color var(--motion-quick) var(--motion-ease-out),
+    box-shadow var(--motion-settle) var(--motion-ease-out);
+}
+
+/* Under the pointer, unfocused, its edge is ink-faint. */
+.composer-box:hover:not(:focus-within):not([data-unavailable]),
+.composer-box[data-force="hover"] {
+  border-color: var(--color-ink-faint);
+}
+
+/* Focused, the edge is the accent and the box holds the screen's one focal glow; while a permission request is
+   open the glow stays on the request and the box shows focus by its edge alone. */
+.composer-box:focus-within,
+.composer-box[data-force="focus"] {
+  border-color: var(--color-accent);
+  box-shadow: var(--glow-focal);
+}
+
+.composer-box[data-quiet-focus]:focus-within,
+.composer-box[data-quiet-focus][data-force="focus"] {
+  box-shadow: none;
+}
+
+/* One line, or three on the new-session screen, growing with the words. */
+.composer-words {
+  field-sizing: content;
+  min-height: 1lh;
+  flex: 1;
+  min-width: 0;
+  /* The line counts are of text, so padding sits outside them. */
+  box-sizing: content-box;
   resize: none;
-  padding: var(--space-sm) var(--space-md);
+  padding: var(--space-xs) var(--space-sm);
   font-family: var(--type-prose-family);
   font-size: var(--type-prose-size);
   line-height: var(--type-prose-leading);
   color: var(--color-ink);
-  background: var(--color-surface);
-  border: var(--line-hairline) solid var(--color-line);
-  border-radius: var(--radius-md);
-}
-
-.composer-input::placeholder {
-  color: var(--color-ink-faint);
-}
-
-.composer-input:hover:not(:disabled):not(:focus-visible),
-.composer-input[data-force="hover"] {
-  border-color: var(--color-ink-faint);
-}
-
-/* Focus takes the accent on the edge, as the button's does. */
-.composer-input:focus-visible,
-.composer-input[data-force="focus"] {
+  background: none;
+  border: none;
   outline: none;
-  border-color: var(--color-accent);
 }
 
-.composer-input:disabled {
+.composer-words[data-tall] {
+  min-height: 3lh;
+}
+
+.composer-words::placeholder {
   color: var(--color-ink-faint);
+}
+
+/* Attach is the quiet icon button (Icon.css) at size-control-lg; send is the primary button made square. */
+.composer-attach {
+  box-sizing: border-box;
+  width: var(--size-control-lg);
+  height: var(--size-control-lg);
+}
+
+.composer-send {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--size-control-lg);
+  height: var(--size-control-lg);
+  padding: 0;
+  border: var(--line-hairline) solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background var(--motion-quick) var(--motion-ease-out),
+    border-color var(--motion-quick) var(--motion-ease-out),
+    color var(--motion-quick) var(--motion-ease-out);
+}
+
+.composer-send:focus-visible {
+  outline: none;
+  border-color: var(--color-ink);
+}
+
+.composer-send {
+  color: var(--color-accent-ink);
+  background: var(--material-primary);
+}
+
+/* The pointer's material lies over the fill; a colour can only be a lower layer, so it is laid on as a gradient. */
+.composer-send:hover:not(:disabled),
+.composer-send[data-force="hover"]:not(:disabled) {
+  background: linear-gradient(var(--material-hover), var(--material-hover)), var(--material-primary);
+}
+
+.composer-send:active:not(:disabled),
+.composer-send[data-force="pressed"]:not(:disabled) {
+  background: linear-gradient(var(--material-pressed), var(--material-pressed)), var(--material-primary);
+}
+
+/* With nothing to send: no fill, a line edge and a faint arrow, unchanged under the pointer. */
+.composer-send:disabled {
+  color: var(--color-ink-faint);
+  background: none;
+  border-color: var(--color-line);
+  cursor: default;
+}
+
+/* Unavailable: the box is canvas, and the words, their placeholder, attach and send read ink-faint, unchanged under
+   the pointer. */
+.composer-box[data-unavailable] {
   background: var(--color-canvas);
 }
 
-.composer-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-md);
+.composer-box[data-unavailable] .composer-words {
+  color: var(--color-ink-faint);
 }
 
-.composer-hint,
-.composer-foot .problem {
-  margin: 0;
-  color: var(--color-ink-muted);
-  font-size: var(--type-ui-small-size);
-  line-height: var(--type-ui-small-leading);
-  overflow-wrap: anywhere;
+.composer-box[data-unavailable] .composer-send:disabled {
+  border-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-status-line {
+    animation: none;
+  }
+
+  .composer-box,
+  .composer-send {
+    transition: none;
+  }
 }

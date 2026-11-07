@@ -143,3 +143,8 @@
   height: var(--size-control);
   margin-inline-start: auto;
 }
+
+/* Room above a composer for its status line, which grows upward. */
+.gallery-status-room {
+  padding-top: var(--size-control);
+}
