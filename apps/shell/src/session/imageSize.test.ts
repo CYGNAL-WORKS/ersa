@@ -47,9 +47,30 @@ describe("an image's size from its header", () => {
       return [0xff, 0xe1, ...be16(body.length + 2), ...body];
     };
     const photo = (orientation: number) => [0xff, 0xd8, ...exif(orientation), 0xff, 0xc0, ...be16(17), 8, ...be16(3024), ...be16(4032), 3, 0, 0, 0];
-    expect(imageSize(base64(photo(6)))).toEqual({ width: 3024, height: 4032 });
-    expect(imageSize(base64(photo(8)))).toEqual({ width: 3024, height: 4032 });
-    expect(imageSize(base64(photo(1)))).toEqual({ width: 4032, height: 3024 });
-    expect(imageSize(base64(photo(3)))).toEqual({ width: 4032, height: 3024 });
+    // Every quarter turn swaps, the transposed and transverse ones too; the half turn and upright don't.
+    for (const turned of [5, 6, 7, 8]) expect(imageSize(base64(photo(turned)))).toEqual({ width: 3024, height: 4032 });
+    for (const upright of [1, 2, 3, 4]) expect(imageSize(base64(photo(upright)))).toEqual({ width: 4032, height: 3024 });
   });
-});
+
+  // verifies: FLOW-SEND-MESSAGE-R11
+  it("reads the orientation in Intel order too, and keeps it past a later metadata segment", () => {
+    const le32 = (n: number) => [n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff];
+    // EXIF in Intel order, as many Android phones and cameras write it.
+    const intel = [...text("Exif"), 0, 0, ...text("II"), 42, 0, ...le32(8), ...le16(1), ...le16(0x0112), ...le16(3), ...le32(1), ...le16(6), 0, 0, ...le32(0)];
+    // An XMP segment after the EXIF one, as phones and editors often add.
+    const xmp = text("http://ns.adobe.com/xap/1.0/\0<x:xmpmeta/>");
+    const segment = (body: number[]) => [0xff, 0xe1, ...be16(body.length + 2), ...body];
+    const photo = [0xff, 0xd8, ...segment(intel), ...segment(xmp), 0xff, 0xc0, ...be16(17), 8, ...be16(3024), ...be16(4032), 3, 0, 0, 0];
+    expect(imageSize(base64(photo))).toEqual({ width: 3024, height: 4032 });
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R11
+  it("reads no orientation past the end of its own segment", () => {
+    // A directory that claims two entries where the segment's length holds one: the second, an Orientation of 6,
+    // follows in the file but is not this segment's, so the photo is not turned.
+    const entry = (tag: number, value: number) => [...be16(tag), ...be16(3), ...be32(1), ...be16(value), 0, 0];
+    const held = [...text("Exif"), 0, 0, ...text("MM"), 0, 42, ...be32(8), ...be16(2), ...entry(0x0128, 2)];
+    const beyond = entry(0x0112, 6);
+    const photo = [0xff, 0xd8, 0xff, 0xe1, ...be16(held.length + 2), ...held, ...beyond, 0xff, 0xc0, ...be16(17), 8, ...be16(3024), ...be16(4032), 3, 0, 0, 0];
+    expect(imageSize(base64(photo))).toEqual({ width: 4032, height: 3024 });
+  });});
