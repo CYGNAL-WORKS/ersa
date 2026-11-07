@@ -33,7 +33,7 @@ export interface Envelope {
   /**
    * Event schema version. Bumped when any event's meaning or shape changes, including the lifecycle events Core emits itself.
    */
-  v: 3;
+  v: 4;
   session_id: string;
   /**
    * Gap-free and increasing within a session; assigned by Core.
@@ -111,6 +111,20 @@ export interface UserMessage {
     session_id: string;
     name: string;
   };
+  /**
+   * What came with the message, in the order sent: an image as base64 data, or a file or folder by the path the agent was given, relative to the workspace.
+   */
+  attachments?: (
+    | {
+        kind: "image";
+        media_type: string;
+        data: string;
+      }
+    | {
+        kind: "file" | "folder";
+        path: string;
+      }
+  )[];
 }
 export interface AssistantText {
   type: "assistant.text";

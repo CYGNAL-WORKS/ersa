@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::{is_session_id, project_dir};
-use crate::projector::plain_text;
 use crate::wire::{ContentBlock, MessageContent, RecordEntry, RecordUser};
 
 /// How much of each end of a record is read.
@@ -254,7 +253,12 @@ fn prompt(user: &RecordUser) -> Option<String> {
             {
                 return None;
             }
-            plain_text(blocks).as_deref().and_then(non_empty)
+            // Its images and list of attachments are not its words: a prompt
+            // of attachments alone titles nothing (PROTO-CLAUDE-CODE-STREAM-R27).
+            crate::attachments::split_blocks(blocks)
+                .0
+                .as_deref()
+                .and_then(non_empty)
         }
     }
 }
