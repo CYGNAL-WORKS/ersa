@@ -75,7 +75,7 @@ describe("the new-session screen", () => {
         p1: { host_id: "local", project_id: "p1", workspace: "root", backend: "claude-code", model: "sonnet", effort: "medium", permission_mode: "acceptEdits" },
       },
     });
-    expect(chips(html)).toContain("Workspace: Root workspace");
+    expect(chips(html)).toContain("Workspace: Project folder");
     expect(chips(html)).toContain("Model: Sonnet");
     expect(chips(html)).toContain("Permission mode: Accept edits");
   });
@@ -119,7 +119,7 @@ describe("the new-session screen", () => {
   // verifies: FLOW-NEW-SESSION-R06
   it("offers the root workspace only for a project without a workspace adapter", () => {
     const html = render({ projectId: "p2", open: "workspace" });
-    expect(chips(html)).toContain("Workspace: Root workspace");
+    expect(chips(html)).toContain("Workspace: Project folder");
     expect(html).not.toContain("New workspace");
   });
 
