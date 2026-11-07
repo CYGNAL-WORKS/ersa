@@ -24,7 +24,7 @@ export const tauriClient: CoreClient = {
 
 /**
  * A listener Tauri registers asynchronously, as a function that stops it: stopping before it has registered
- * unlistens as soon as it does. One that fails to register hears nothing, which is all a caller can do about it.
+ * unlistens as soon as it does. One that fails to register hears nothing; it says why in the console.
  */
 function listening(registered: Promise<() => void>): () => void {
   let stopped = false;
@@ -34,7 +34,7 @@ function listening(registered: Promise<() => void>): () => void {
       if (stopped) stop();
       else unlisten = stop;
     },
-    () => {},
+    (error) => console.error(error),
   );
   return () => {
     stopped = true;

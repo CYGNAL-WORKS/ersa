@@ -774,6 +774,24 @@ describe("the attachments App gives the composer", () => {
     vi.restoreAllMocks();
   });
 
+  // verifies: FLOW-SEND-MESSAGE-R08
+  it("takes files dropped on the new-session screen's box, read on its host for a new workspace", async () => {
+    const shell = fakeShell();
+    let emit: (event: DragDrop) => void = () => {};
+    shell.onDragDrop.mockImplementation((handler) => ((emit = handler), () => {}));
+    vi.spyOn(HTMLFormElement.prototype, "getBoundingClientRect").mockReturnValue({ left: 0, top: 100, right: 400, bottom: 200 } as DOMRect);
+    const core = await screenWith([project("alpha")], shell, {
+      "attachment.inspect": (params: { path: string }) => ({ path: params.path, name: "notes.md", kind: "file", size_bytes: 9, lines: 1, copied: true }),
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Workspace:/ }));
+    fireEvent.click(screen.getByRole("option", { name: /New workspace/ }));
+    act(() => emit({ type: "drop", x: 10, y: 150, paths: ["D:/code/alpha/notes.md"] }));
+    await settle();
+    expect(core.calls.filter((c) => c.method === "attachment.inspect").map((c) => c.params)).toEqual([{ host_id: "local", path: "D:/code/alpha/notes.md" }]);
+    expect(shown()).toEqual(["notes.md1 lineWill be copied into the workspace's .ersa folder"]);
+    vi.restoreAllMocks();
+  });
+
   // verifies: FLOW-SEND-MESSAGE-R16
   it("shows where a session's message is, and where a new session's first message is", async () => {
     const core = fakeCore({ "session.subscribe": () => ({ last_seq: -1 }), "session.send": () => new Promise(() => {}) });

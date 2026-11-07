@@ -382,9 +382,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         }
       : undefined;
 
-  // Attaching (FLOW-SEND-MESSAGE-R07, R13): the Shell's dialog on this computer, then `attachment.inspect` for each path
-  // picked, and only those. A path Core can't read is attached marked with why, so the message waits until it is
-  // removed (R10). Without the Shell, as in tests that give none, attach is unavailable.
+  // Attaching from the menu (FLOW-SEND-MESSAGE-R07): the Shell's dialog on this computer, then `read` below for the
+  // paths picked. A path Core can't read is attached marked with why, so the message waits until it is removed (R10).
+  // Without the Shell, as in tests that give none, attach is unavailable.
   const pickFiles = shell?.pickFiles;
   // Reading the paths the user names, picked or dropped on the box (FLOW-SEND-MESSAGE-R08, R13): `attachment.inspect`
   // for each, and only those.

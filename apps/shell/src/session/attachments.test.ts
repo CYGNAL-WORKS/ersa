@@ -85,4 +85,12 @@ describe("a pasted image", () => {
     const gone = { size: 10, type: "image/png", arrayBuffer: async () => Promise.reject(new Error("gone")) } as unknown as Blob;
     expect(await pastedImage(gone)).toMatchObject({ problem: "Ersa couldn't read this image." });
   });
+
+  // verifies: FLOW-SEND-MESSAGE-R08
+  it("keeps the pasted image's own kind, and two pastes are two attachments", async () => {
+    const jpeg = await pastedImage(new Blob([new Uint8Array([255, 216, 255])], { type: "image/jpeg" }));
+    const again = await pastedImage(new Blob([new Uint8Array([255, 216, 255])], { type: "image/jpeg" }));
+    expect(sendable([jpeg])).toEqual([{ kind: "image", media_type: "image/jpeg", data: btoa("\xff\xd8\xff") }]);
+    expect(addAll([jpeg], [again])).toHaveLength(2);
+  });
 });
