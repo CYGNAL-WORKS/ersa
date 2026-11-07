@@ -1291,13 +1291,23 @@ fn the_same_words_typed_by_the_user_are_their_message() {
 // verifies: PROTO-CLAUDE-CODE-STREAM-R27
 #[test]
 fn a_recorded_prompt_of_a_file_list_alone_leaves_the_title_at_the_prompt_before() {
-    // Fixture 2.1.316/07: the CLI leaves last-prompt at the first prompt, and the
-    // second prompt, a list alone, titles nothing.
+    // Fixture 2.1.316/07 without the CLI's own last-prompt entries, so the title
+    // comes from the adapter reading the prompts: the second, a list alone,
+    // titles nothing, and the first does.
     let fixture = record_fixtures()
         .into_iter()
         .find(|f| f.name.ends_with("07-attachments"))
         .expect("the attachments fixture");
-    let lines: Vec<String> = fixture.text.lines().map(String::from).collect();
+    let lines: Vec<String> = fixture
+        .text
+        .lines()
+        .filter(|line| !line.contains("\"type\":\"last-prompt\""))
+        .map(String::from)
+        .collect();
+    assert!(
+        lines.len() < fixture.text.lines().count(),
+        "the fixture's last-prompt entries are gone"
+    );
     assert_eq!(
         title_of(lines).as_deref(),
         Some(
