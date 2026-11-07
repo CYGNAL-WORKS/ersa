@@ -1,5 +1,5 @@
 //! `workspace.changes`, what deleting a workspace would lose, driven over the
-//! socket against temporary git repositories (PROTO-CORE-API-R38).
+//! socket against temporary git repositories (PROTO-CORE-API-R45 to R49).
 
 mod support;
 
@@ -85,7 +85,8 @@ fn repo_with_ignores(dir: &Path) -> PathBuf {
     repo
 }
 
-// verifies: PROTO-CORE-API-R38
+// verifies: PROTO-CORE-API-R48
+// verifies: PROTO-CORE-API-R45
 #[tokio::test(flavor = "multi_thread")]
 async fn counts_uncommitted_files_untracked_included_and_ignored_entries() {
     let (core, mut client) = setup().await;
@@ -121,7 +122,7 @@ async fn counts_uncommitted_files_untracked_included_and_ignored_entries() {
     assert_eq!(counts(&found), [6, 3, 0, 0, 0], "{found}");
 }
 
-// verifies: PROTO-CORE-API-R38
+// verifies: PROTO-CORE-API-R48
 #[tokio::test(flavor = "multi_thread")]
 async fn the_token_changes_with_anything_counted_and_not_with_ignored_content() {
     let (core, mut client) = setup().await;
@@ -180,7 +181,7 @@ async fn the_token_changes_with_anything_counted_and_not_with_ignored_content() 
     expect_new(&with_session);
 }
 
-// verifies: PROTO-CORE-API-R38
+// verifies: PROTO-CORE-API-R48
 #[tokio::test(flavor = "multi_thread")]
 async fn counts_commits_no_other_branch_holds_from_the_branch_checkout_and_reflog() {
     let (core, mut client) = setup().await;
@@ -228,7 +229,7 @@ async fn counts_commits_no_other_branch_holds_from_the_branch_checkout_and_reflo
     );
 }
 
-// verifies: PROTO-CORE-API-R38
+// verifies: PROTO-CORE-API-R48
 #[tokio::test(flavor = "multi_thread")]
 async fn a_commit_on_a_remote_tracking_branch_is_shared() {
     let (core, mut client) = setup().await;
@@ -264,7 +265,7 @@ async fn a_commit_on_a_remote_tracking_branch_is_shared() {
     );
 }
 
-// verifies: PROTO-CORE-API-R38
+// verifies: PROTO-CORE-API-R48
 #[tokio::test(flavor = "multi_thread")]
 async fn a_half_removed_workspace_is_counted_for_what_is_left() {
     let (core, mut client) = setup().await;
@@ -298,7 +299,7 @@ async fn a_half_removed_workspace_is_counted_for_what_is_left() {
     );
 }
 
-// verifies: PROTO-CORE-API-R38
+// verifies: PROTO-CORE-API-R46
 #[tokio::test(flavor = "multi_thread")]
 async fn files_left_after_git_forgot_the_worktree_all_count() {
     let (core, mut client) = setup().await;
@@ -323,7 +324,7 @@ async fn files_left_after_git_forgot_the_worktree_all_count() {
     assert_eq!(counts(&found), [4, 1, 0, 0, 0], "{found}");
 }
 
-// verifies: PROTO-CORE-API-R38
+// verifies: PROTO-CORE-API-R48
 #[tokio::test(flavor = "multi_thread")]
 async fn a_worktree_recorded_with_relative_paths_is_found() {
     let (core, mut client) = setup().await;
@@ -347,7 +348,7 @@ async fn a_worktree_recorded_with_relative_paths_is_found() {
     );
 }
 
-// verifies: PROTO-CORE-API-R38
+// verifies: PROTO-CORE-API-R48
 #[tokio::test(flavor = "multi_thread")]
 async fn a_root_workspace_is_refused() {
     let (core, mut client) = setup().await;
@@ -373,7 +374,7 @@ async fn a_root_workspace_is_refused() {
     assert_eq!(kind(&error), "not_found", "{error}");
 }
 
-// verifies: PROTO-CORE-API-R38
+// verifies: PROTO-CORE-API-R48
 #[tokio::test(flavor = "multi_thread")]
 async fn a_detached_checkout_counts_without_a_reflog() {
     let (core, mut client) = setup().await;
@@ -392,7 +393,7 @@ async fn a_detached_checkout_counts_without_a_reflog() {
     );
 }
 
-// cites PROTO-CORE-API-R46 once planning PR 245 adds it
+// verifies: PROTO-CORE-API-R46
 #[tokio::test(flavor = "multi_thread")]
 async fn without_git_s_record_only_the_branch_s_commits_count() {
     let (core, mut client) = setup().await;
@@ -444,7 +445,7 @@ fn pushed_clone(dir: &Path, name: &str) -> PathBuf {
     clone
 }
 
-// cites PROTO-CORE-API-R49 once planning PR 245 adds it
+// verifies: PROTO-CORE-API-R49
 #[tokio::test(flavor = "multi_thread")]
 async fn a_nested_repository_counts_once_when_it_holds_work() {
     let (core, mut client) = setup().await;
@@ -491,7 +492,7 @@ async fn a_nested_repository_counts_once_when_it_holds_work() {
     assert_eq!(counts(&pushed), [0, 0, 0, 0, 0], "{pushed}");
 }
 
-// cites PROTO-CORE-API-R49 once planning PR 245 adds it
+// verifies: PROTO-CORE-API-R49
 #[tokio::test(flavor = "multi_thread")]
 async fn a_submodule_counts_when_it_holds_commits_its_remote_does_not() {
     let (core, mut client) = setup().await;
@@ -539,7 +540,7 @@ async fn a_submodule_counts_when_it_holds_commits_its_remote_does_not() {
     assert_ne!(held["token"], clean["token"]);
 }
 
-// verifies: PROTO-CORE-API-R38
+// verifies: PROTO-CORE-API-R48
 #[tokio::test(flavor = "multi_thread")]
 async fn the_token_follows_tracked_files_content_and_the_index() {
     let (core, mut client) = setup().await;
@@ -572,8 +573,8 @@ async fn the_token_follows_tracked_files_content_and_the_index() {
     assert_ne!(restaged["token"], staged["token"]);
 }
 
-// cites PROTO-CORE-API-R46 once planning PR 245 adds it
-// cites PROTO-CORE-API-R49 once planning PR 245 adds it
+// verifies: PROTO-CORE-API-R46
+// verifies: PROTO-CORE-API-R49
 #[tokio::test(flavor = "multi_thread")]
 async fn a_submodule_whose_history_went_with_git_s_record_counts() {
     let (core, mut client) = setup().await;
@@ -615,7 +616,7 @@ async fn a_submodule_whose_history_went_with_git_s_record_counts() {
     assert_eq!(counts(&found), [3, 0, 0, 0, 0], "{found}");
 }
 
-// cites PROTO-CORE-API-R46 once planning PR 245 adds it
+// verifies: PROTO-CORE-API-R46
 #[tokio::test(flavor = "multi_thread")]
 async fn without_git_s_record_the_token_follows_the_files_left_and_the_branch() {
     let (core, mut client) = setup().await;
@@ -675,7 +676,7 @@ async fn without_git_s_record_the_token_follows_the_files_left_and_the_branch() 
     expect_new(&committed);
 }
 
-// cites PROTO-CORE-API-R46 once planning PR 245 adds it
+// verifies: PROTO-CORE-API-R46
 #[tokio::test(flavor = "multi_thread")]
 async fn without_git_s_record_the_token_follows_ignored_entries_and_nested_repositories() {
     let (core, mut client) = setup().await;
@@ -704,7 +705,7 @@ async fn without_git_s_record_the_token_follows_ignored_entries_and_nested_repos
     assert_ne!(committed["token"], ignored["token"]);
 }
 
-// cites PROTO-CORE-API-R47 once planning PR 245 adds it
+// verifies: PROTO-CORE-API-R47
 #[tokio::test(flavor = "multi_thread")]
 async fn other_requests_on_the_connection_never_wait_for_it() {
     let (core, mut client) = setup().await;
