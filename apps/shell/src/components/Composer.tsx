@@ -25,10 +25,12 @@ interface ComposerProps {
   /** Sends the text and attachments; resolves true once Core accepted them, and the composer clears. */
   onSend: (text: string, attachments: readonly Attached[]) => Promise<boolean>;
   /**
-   * Reads each path the user names: picked in the system's dialog for files, images or a folder, or dropped on the box
-   * (FLOW-SEND-MESSAGE-R07, R08, R13); absent where nothing can be attached, and attach is then unavailable.
+   * Opens the system's dialog for files, images or a folder and reads each path picked (FLOW-SEND-MESSAGE-R07, R13);
+   * absent where nothing can be attached, and attach is then unavailable.
    */
-  onAttach?: (what: AttachWhat | readonly string[]) => Promise<Attached[]>;
+  onAttach?: (what: AttachWhat) => Promise<Attached[]>;
+  /** Reads each path dropped on the box (R08, R13); absent, the box takes no drop. */
+  onRead?: (paths: readonly string[]) => Promise<Attached[]>;
   /** Hears drags from the file manager over the window, so the box takes what is dropped on it (R08). */
   dragDrop?: ShellControl["onDragDrop"];
   /** For the gallery: the box as while files are dragged over it. */
@@ -69,7 +71,7 @@ interface ComposerProps {
  * Where the user writes to the agent (docs/design/COMPOSER.md): the status line above the box, and the box holding
  * attach, the words and send. Enter sends; Shift+Enter starts a new line (FLOW-SEND-MESSAGE-R01).
  */
-export function Composer({ unavailable, sending, onSend, onWrite, onAttach, dragDrop, forceDragOver, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, tall, statusTaken, controls, forceSend, working, onStop, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
+export function Composer({ unavailable, sending, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, tall, statusTaken, controls, forceSend, working, onStop, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const [attachments, setAttachments] = useState<Attached[]>(initialAttachments ?? []);
   const words = useRef<HTMLTextAreaElement>(null);
@@ -114,7 +116,7 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, drag
     // The same file or folder is attached once (R12).
     if (more.length > 0) setAttachments((now) => addAll(now, more));
   };
-  const attach = async (what: AttachWhat | readonly string[]) => {
+  const attach = async (what: AttachWhat) => {
     if (onAttach) add(await onAttach(what));
   };
 
@@ -123,28 +125,36 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, drag
   const box = useRef<HTMLFormElement>(null);
   const [dragOver, setDragOver] = useState(false);
   const canDrop = useRef(false);
-  canDrop.current = onAttach !== undefined && unavailable === undefined;
-  const attachRef = useRef(attach);
-  attachRef.current = attach;
+  canDrop.current = onRead !== undefined && unavailable === undefined;
+  const read = async (paths: readonly string[]) => {
+    if (onRead) add(await onRead(paths));
+  };
+  const readRef = useRef(read);
+  readRef.current = read;
   useEffect(() => {
     if (!dragDrop) return;
+    // On the box itself: what the window shows at that point, so a layer over the box takes nothing for it.
     const over = (x: number, y: number) => {
       const r = box.current?.getBoundingClientRect();
-      return r !== undefined && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+      if (r === undefined || x < r.left || x > r.right || y < r.top || y > r.bottom) return false;
+      const at = typeof document.elementFromPoint === "function" ? document.elementFromPoint(x, y) : null;
+      return at === null || box.current?.contains(at) === true;
     };
     return dragDrop((event) => {
       if (event.type === "leave") return setDragOver(false);
       const onBox = canDrop.current && over(event.x, event.y);
       if (event.type === "over") return setDragOver(onBox);
       setDragOver(false);
-      if (onBox && event.paths.length > 0) void attachRef.current(event.paths);
+      if (onBox && event.paths.length > 0) void readRef.current(event.paths);
     });
   }, [dragDrop]);
 
-  // An image pasted into the words is attached inline (R08); anything else pastes as text, as it would.
+  // An image pasted into the words is attached inline (R08), where the composer takes attachments. A clipboard that
+  // holds text too, as a copied range of cells with its picture, pastes its text, as it would.
   const paste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!onRead) return;
     const images = Array.from(event.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
-    if (images.length === 0) return;
+    if (images.length === 0 || (event.clipboardData?.getData("text/plain") ?? "") !== "") return;
     event.preventDefault();
     void Promise.all(images.map(pastedImage)).then(add);
   };
