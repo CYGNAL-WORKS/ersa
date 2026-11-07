@@ -13,6 +13,15 @@ describe("the context ring", () => {
     expect(draw(0.84)).not.toContain("data-near-full");
   });
 
+  // verifies: FLOW-SEND-MESSAGE-R16
+  it("as a send's copy gauge, never turns caution and has no readout or name of its own", () => {
+    const html = renderToStaticMarkup(createElement(ContextRing, { used: 0.95, mark: true }));
+    expect(html).not.toContain("data-near-full");
+    expect(html).not.toContain("context-ring-readout");
+    expect(html).toContain('aria-hidden="true"');
+    expect(html).not.toContain("aria-label");
+  });
+
   it("draws a tile's ring smaller, with no readout", () => {
     const html = draw(0.42, "ring-sm");
     expect(html).toContain('viewBox="0 0 12 12"');

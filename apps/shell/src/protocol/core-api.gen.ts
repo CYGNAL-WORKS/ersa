@@ -304,6 +304,18 @@ export type Attachment =
       media_type: string;
       data: string;
     };
+export type AttachmentInspectParams = AttachmentInspectParams1 & AttachmentInspectParams2;
+export type AttachmentInspectParams1 = {
+  [k: string]: unknown | undefined;
+};
+/**
+ * An identifier Core issues.
+ */
+export type Id1 = string;
+/**
+ * An identifier Core issues.
+ */
+export type Id2 = string;
 /**
  * Core's answer to one request. Validate `result` against the `<method>.result` definition of the request's method.
  */
@@ -519,9 +531,10 @@ export interface SessionSendParams {
 export interface SessionInterruptParams {
   id: Id;
 }
-export interface AttachmentInspectParams {
-  host_id: Id;
+export interface AttachmentInspectParams2 {
   path: string;
+  workspace_id?: Id1;
+  host_id?: Id2;
 }
 export interface SessionDecidePermissionParams {
   id: Id;
@@ -1276,6 +1289,10 @@ export interface AttachmentInspectResult {
    * Where a link points.
    */
   target?: string;
+  /**
+   * Whether a send would copy it into the workspace's scratch folder: true for a file or folder whose target, resolved as a send resolves it, is outside workspace_id, or for any file or folder given a host_id; false for an image, which goes inline, and for a path inside the workspace.
+   */
+  copied: boolean;
 }
 export interface Session8 {
   id: Id;
