@@ -65,7 +65,7 @@ test("each blocking new finding by this account is set against the Review sectio
       ["medium", "crates/ersa-core/src/stale.rs:1", false],
     ],
   );
-  assert.match(report([got], ME), /1 pull request\(s\) merged since the last pass; 1 compared; 3 blocking finding\(s\) at merge, 2 not named/);
+  assert.match(report([got], ME), /1 pull request\(s\) merged since the last pass; 1 compared, counting merge reviews posted by KPandaK; 3 blocking finding\(s\) at merge, 2 not named/);
   assert.match(report([got], ME), /send\.rs:40 \(aaaaaaa\), NOT NAMED by the author: hangs\./);
   assert.match(report([got], ME), /stale\.rs:1 \(ccccccc\), NOT NAMED/);
 });
