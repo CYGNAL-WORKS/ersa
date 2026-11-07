@@ -24,7 +24,7 @@ Their fills and edges change over `motion-quick` with `motion-ease-out`. Send be
 
 ## The status line
 
-One line above the box, `size-control` high at least, showing one message at a time, first that Ersa can't reach the sessions, then a send whose outcome Ersa can't tell, then a refused message, then detecting backends, then a send on its way; padded `space-sm` at the sides, in `ui-small` and `ink-muted`. It is empty, and keeps no height, while there is nothing to say. The composer keeps its box and session controls where they are: the status line opens upward, growing and fading in over `motion-settle` with `motion-ease-out`, and closes the same way.
+One line above the box, `size-control` high at least, showing one message at a time, first that Ersa can't reach the sessions, then a send whose outcome Ersa can't tell, then a refused message, then detecting backends, then a host with no backend, then a send on its way; padded `space-sm` at the sides, in `ui-small` and `ink-muted`. It is empty, and keeps no height, while there is nothing to say. The composer keeps its box and session controls where they are: the status line opens upward, growing and fading in over `motion-settle` with `motion-ease-out`, and closes the same way.
 
 | When | It says | Leading mark | The box |
 |---|---|---|---|
@@ -32,6 +32,7 @@ One line above the box, `size-control` high at least, showing one message at a t
 | Ersa can't tell whether a message was sent | that, and that the transcript shows it if it arrived | a glyph at `size-glyph` in `caution` | as at rest, the message kept |
 | A message was refused | the reason, in the user's terms | a glyph at `size-glyph` in `danger` | as at rest, the message kept |
 | Backends are being detected | that it is detecting the backends on this host | none | unavailable |
+| The host lists its backends and none can run (a failed listing is FLOW-NEW-SESSION-R11's) | With every backend `missing`: "No backend is available on this host. Install Claude Code or GitHub Copilot on it to start a session." With any backend in `error`: that backend by its label and what to do, such as "Claude Code isn't working on this host. Check that it's installed and signed in, then open New session again." (`backend.list` carries no reason for an error yet) | none | unavailable |
 | A message is on its way | how much is copied, as a share, or that the backend is starting | the ring at `size-ring`, its arc filling to the share over `motion-settle` | as at rest, stop offered |
 
 A refused message's line is announced to assistive technology as an alert. When the box becomes unavailable, keyboard focus returns to the words once it is available again. **Unavailable**, the box is `canvas`, the words and their placeholder read `ink-faint`, and attach and send read `ink-faint` with no fill and do not change under the pointer.
@@ -81,13 +82,13 @@ Add project… ends the list. **With no projects** the chip reads Choose a folde
 
 ## The workspace list
 
-Two options, New workspace and Project folder, each with a status in `ink-faint`: "Isolated" and "Shares files with you". For a git project with New workspace chosen, a `line` hairline follows them and then the base branch:
+Two options, New workspace and Project folder, each with a status in `ink-faint`: "Isolated" and "Shared". For a git project with New workspace chosen, a `line` hairline follows them and then the base branch:
 
 - A heading, "Base branch", in `ui-small` and `ink-muted`, padded `space-xs` by `space-sm`.
 - **The search box**: `size-control` high, `radius-md`, on `canvas` with a `line` edge, a search icon at `size-icon-sm` in `ink-faint` inside its leading edge, its text `ui` in `ink` and its placeholder `ink-faint`. Focused, its edge is `accent`, with no glow. Typing narrows the branches beneath it.
-- **The branches**, as options with the option mark, names in `ui`, and "Default" as the status of the repository's default branch. They scroll after eight rows. With nothing matching, a note in `ui-small` and `ink-muted` says no branch matches.
+- **The branches**, as options with the option mark, names in `ui`, and "Default" as the status of the repository's default branch. They scroll past `size-list-max`, eight rows. With nothing matching, a note in `ui-small` and `ink-muted` says no branch matches. While the branches are read, the same note says "Reading the branches…"; when they can't be read, it leads with a danger glyph at `size-glyph`, as the rail's unreadable list does, and says "Ersa couldn't read this project's branches. The new workspace will start at the default branch." (FLOW-NEW-SESSION-R28). In both, the search box is unavailable and opening the list moves keyboard focus to the chosen option. When the branches arrive, the list grows to hold them over `motion-quick` with `motion-ease-out`.
 
-The chip reads the choice: "New workspace from" and the branch, or "Project folder".
+The chip reads the choice: "New workspace from" and the branch, or "Project folder". With New workspace chosen and no branch to name, while the branches are read or when they can't be, it reads "New workspace" (FLOW-NEW-SESSION-R28).
 
 ## The trust question
 

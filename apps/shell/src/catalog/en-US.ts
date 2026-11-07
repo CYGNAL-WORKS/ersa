@@ -103,7 +103,20 @@ export const enUS = {
     },
   },
   transcript: {},
-  composer: {},
+  // The composer (docs/design/COMPOSER.md): the box's parts, and the status line's note while backends are detected
+  // (FLOW-NEW-SESSION-R23). That Ersa can't reach the sessions is said in the rail foot's words.
+  composer: {
+    name: "Composer",
+    messageLabel: "Message",
+    writePlaceholder: "Write to the agent",
+    attachButton: "Attach",
+    sendButton: "Send",
+    detectingProgress: "Detecting the backends on this host…",
+    // The host has no backend to run: none installed, on the status line and as why a start is refused; or one
+    // that failed detection, by the label backend.list gives it.
+    noBackendError: "No backend is available on this host. Install Claude Code or GitHub Copilot on it to start a session.",
+    backendFailedError: "{label} isn't working on this host. Check that it's installed and signed in, then open New session again.",
+  },
   newSession: {},
   sessionControls: {
     // The host chip's name for the host Ersa runs on.
@@ -121,6 +134,25 @@ export const enUS = {
       // The project chip while the local host has no project: choosing it, or sending, opens the folder dialog.
       chooseFolderButton: "Choose a folder",
     },
+    // The workspace chip (docs/design/COMPOSER.md, The workspace list): a new workspace or the project's own folder,
+    // each with what it means, and for a git project the base branch the new workspace starts from
+    // (FLOW-NEW-SESSION-R21, R28, R29).
+    workspace: {
+      newWorkspaceLabel: "New workspace",
+      isolatedStatus: "Isolated",
+      projectFolderLabel: "Project folder",
+      sharedStatus: "Shared",
+      // What the chip reads with a new workspace and its base branch chosen.
+      newFromLabel: "New workspace from {branch}",
+      baseBranchHeading: "Base branch",
+      searchBranchesPlaceholder: "Search branches",
+      // The status of the repository's default branch in the list.
+      defaultBranchStatus: "Default",
+      noBranchMatchesEmpty: "No branch matches.",
+      readingBranchesProgress: "Reading the branches…",
+      // The project's branches could not be listed; the new workspace starts at the repository's default branch.
+      branchesFailedError: "Ersa couldn't read this project's branches. The new workspace will start at the default branch.",
+    },
     // The context ring's name, in the session controls and on a tile.
     contextRing: {
       noneLabel: "Context: none used yet",
@@ -131,18 +163,14 @@ export const enUS = {
   trust: {
     // A project the user has not trusted, on its heading in the rail and in the project chip's list.
     notTrustedStatus: "Not trusted",
-    // The trust question (ADR 0018), asked when a folder becomes a project and when the user trusts one later. It
-    // says what trust lets run, that it covers every workspace of the project, and that it lasts until withdrawn
-    // (FLOW-NEW-SESSION-R16, retired; ticket 226 builds its replacement).
+    // The trust question (ADR 0028), asked when a folder becomes a project and when the user trusts one later. It reads
+    // like the Claude Code CLI's folder-trust prompt: the safety check and what agents can do there
+    // (FLOW-NEW-SESSION-R24), answered by Cancel or Trust (R25).
     question: {
       title: "Trust {name}?",
-      runsDetail:
-        "A trusted project’s own configuration runs in its sessions: hooks and MCP servers that start programs on this computer, and settings that change what the agent may do without asking.",
-      coversDetail:
-        "Trust covers every workspace of the project and lasts until you withdraw it. Claude Code also records it for the whole repository the project is in, and applies it outside Ersa.",
-      untrustedDetail: "Untrusted, its sessions use only your own settings.",
-      addTrustedButton: "Add, trusted",
-      addUntrustedButton: "Add, not trusted",
+      safetyDetail:
+        "Is this a project you created or one you trust, like your own code, a well-known open source project, or work from your team? If not, review what's in this folder first.",
+      agentsDetail: "Agents will be able to read, edit, and run files here.",
       trustButton: "Trust",
       cancelButton: "Cancel",
     },

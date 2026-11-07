@@ -222,6 +222,38 @@ Reconnecting to Core…
 
 ## `composer`
 
+### `composer.name`
+
+Composer
+
+### `composer.messageLabel`
+
+Message
+
+### `composer.writePlaceholder`
+
+Write to the agent
+
+### `composer.attachButton`
+
+Attach
+
+### `composer.sendButton`
+
+Send
+
+### `composer.detectingProgress`
+
+Detecting the backends on this host…
+
+### `composer.noBackendError`
+
+No backend is available on this host. Install Claude Code or GitHub Copilot on it to start a session.
+
+### `composer.backendFailedError`
+
+{label} isn't working on this host. Check that it's installed and signed in, then open New session again.
+
 ## `newSession`
 
 ## `sessionControls`
@@ -254,6 +286,50 @@ Ctrl+O
 
 Choose a folder
 
+### `sessionControls.workspace.newWorkspaceLabel`
+
+New workspace
+
+### `sessionControls.workspace.isolatedStatus`
+
+Isolated
+
+### `sessionControls.workspace.projectFolderLabel`
+
+Project folder
+
+### `sessionControls.workspace.sharedStatus`
+
+Shared
+
+### `sessionControls.workspace.newFromLabel`
+
+New workspace from {branch}
+
+### `sessionControls.workspace.baseBranchHeading`
+
+Base branch
+
+### `sessionControls.workspace.searchBranchesPlaceholder`
+
+Search branches
+
+### `sessionControls.workspace.defaultBranchStatus`
+
+Default
+
+### `sessionControls.workspace.noBranchMatchesEmpty`
+
+No branch matches.
+
+### `sessionControls.workspace.readingBranchesProgress`
+
+Reading the branches…
+
+### `sessionControls.workspace.branchesFailedError`
+
+Ersa couldn't read this project's branches. The new workspace will start at the default branch.
+
 ### `sessionControls.contextRing.noneLabel`
 
 Context: none used yet
@@ -274,25 +350,13 @@ Not trusted
 
 Trust {name}?
 
-### `trust.question.runsDetail`
+### `trust.question.safetyDetail`
 
-A trusted project’s own configuration runs in its sessions: hooks and MCP servers that start programs on this computer, and settings that change what the agent may do without asking.
+Is this a project you created or one you trust, like your own code, a well-known open source project, or work from your team? If not, review what's in this folder first.
 
-### `trust.question.coversDetail`
+### `trust.question.agentsDetail`
 
-Trust covers every workspace of the project and lasts until you withdraw it. Claude Code also records it for the whole repository the project is in, and applies it outside Ersa.
-
-### `trust.question.untrustedDetail`
-
-Untrusted, its sessions use only your own settings.
-
-### `trust.question.addTrustedButton`
-
-Add, trusted
-
-### `trust.question.addUntrustedButton`
-
-Add, not trusted
+Agents will be able to read, edit, and run files here.
 
 ### `trust.question.trustButton`
 
