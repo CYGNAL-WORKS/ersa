@@ -90,13 +90,15 @@ export const SLOTS = 2;
 export const STALE_MS = 60 * 60 * 1000;
 export const LOCK_STALE_MS = 3 * STALE_MS;
 // A review whose own run failed for a cause that may clear on its own (its
-// error status matches TRANSIENT: a rate limit, the network, the queue) is
-// retried this long after the status was set. Retries go behind every head due
+// error status's description, which gh's rollup leaves out and the tick reads
+// over REST, matches TRANSIENT: a rate limit, the network, a GitHub server
+// error, or the queue after the review was posted, which a retry redoes without
+// reviewing again) is retried this long after the status was set. Retries go behind every head due
 // for its first review, and only one runs at a time, so failed heads never take
 // every slot. Retries end once the head's CI passed RETRY_UNTIL_MS ago (a CI
 // rerun moves that); the error is then the owner's. Any other error, a review
 // ended at its time limit included, is the owner's at once.
-export const TRANSIENT = /rate limit|merge queue|ECONNRESET|ETIMEDOUT|network|\b50[234]\b/i;
+export const TRANSIENT = /rate limit|too many requests|merge queue|HTTP (5\d\d|408|429)\b|connection reset|timeout|error connecting|network/i;
 export const RETRY_MS = 15 * 60 * 1000;
 export const RETRY_UNTIL_MS = 6 * 60 * 60 * 1000;
 // How long a run of the scheduled task starts reviews for, counted from its
@@ -116,7 +118,8 @@ const FIELDS = "number,isDraft,isCrossRepository,headRefOid,labels,autoMergeRequ
 const VERDICT = { SUCCESS: "passed", FAILURE: "blocks the merge", ERROR: "failed to run", PENDING: "is running or waits for the gate" };
 
 // Which pull requests a tick acts on: `review` the heads to review, the one
-// whose CI passed first leading and retries (marked `retry`) last, `disarm` the numbers whose auto-merge must go, and `skip` every other
+// whose CI passed first leading and errored heads due a retry (marked `retry`,
+// for the tick to read why they failed) last, `disarm` the numbers whose auto-merge must go, and `skip` every other
 // open pull request with why it is not reviewed, so a tick with nothing to
 // review says what it is waiting for. Pure, so a test can drive every case
 // with gh's JSON alone.
@@ -132,7 +135,7 @@ export function select(prs, now = Date.now()) {
     const mark = normalizeChecks(pr.statusCheckRollup).find((c) => c.name === MERGE_REVIEW);
     // A pending time gh did not give reads as stale: the lock keeps a running review safe from the retake.
     const stale = mark?.status === "PENDING" && !(now - Date.parse(mark.startedAt ?? "") <= STALE_MS);
-    const retry = mark?.status === "COMPLETED" && mark.conclusion === "ERROR" && TRANSIENT.test(mark.description ?? "") && !(now - Date.parse(mark.startedAt ?? "") < RETRY_MS) && now - passedAt(pr.statusCheckRollup, -Infinity) < RETRY_UNTIL_MS;
+    const retry = mark?.status === "COMPLETED" && mark.conclusion === "ERROR" && !(now - Date.parse(mark.startedAt ?? "") < RETRY_MS) && now - passedAt(pr.statusCheckRollup, -Infinity) < RETRY_UNTIL_MS;
     const reviewed = Boolean(mark) && !stale && !retry;
     const held = (pr.labels ?? []).some((l) => l.name === "hold");
     if (pr.autoMergeRequest && (!reviewed || held)) disarm.push(pr.number);
@@ -333,6 +336,13 @@ function tick(run, start, dirs, log, now, running, until) {
   for (const [i, { number: n, head, retry }] of due.entries()) {
     // One retry runs at a time, counting those started by earlier ticks.
     if (retry && [...running.values()].some((x) => x.retry)) continue;
+    if (retry) {
+      const why = run("gh", ["api", `repos/{owner}/{repo}/commits/${head}/statuses`, "--jq", `[.[] | select(.context == "${MERGE_REVIEW}")][0].description`]);
+      if (!why.ok || !TRANSIENT.test(why.out)) {
+        log(`#${n} at ${head.slice(0, 7)}: ${why.ok ? "its merge review failed for a cause that does not clear on its own; the owner's to look at" : `could not read why its merge review failed: ${why.err}`}`.replace(/\s+/g, " "));
+        continue;
+      }
+    }
     const later = due.slice(i + 1).map((p) => `#${p.number}`);
     if (!free.length) return log(`${[`#${n}`, ...later].join(", ")} wait for a free slot`);
     if (now() > until) return log(`out of time; ${[`#${n}`, ...later].join(", ")} wait for the next run`);
