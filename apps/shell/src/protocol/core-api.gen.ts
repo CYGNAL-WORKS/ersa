@@ -1223,7 +1223,7 @@ export interface AttachmentInspectResult {
    */
   target?: string;
   /**
-   * Whether session.send would copy it into the session's scratch folder in workspace_id, by send's own decision: false for an image, which goes inline, and for one send would refuse; true without a workspace_id, as for a new workspace not made yet.
+   * Whether a send would copy it into the workspace's scratch folder: true for a file or folder whose target, resolved as a send resolves it, is outside workspace_id, or for any file or folder given a host_id; false for an image, which goes inline, and for a path inside the workspace.
    */
   copied: boolean;
 }

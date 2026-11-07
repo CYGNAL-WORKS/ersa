@@ -2,7 +2,6 @@
 //! parsed params and returns the typed result or an [`ApiError`]; the work
 //! is the session manager's.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use ersa_adapter::{BackendChoices, Direction, PermissionDecision, SessionConfig};
@@ -261,9 +260,9 @@ static RESOLVING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 /// past which every file and folder is taken to be copied.
 const RESOLVE_LIMIT: Duration = Duration::from_secs(5);
 
-/// The workspace folder as send resolves it (an error when it can't be read,
-/// which send refuses), or `None` when it does not answer in time or too many
-/// are being resolved already.
+/// The workspace folder as send resolves it (an error when it can't be read),
+/// or `None` when it does not answer in time or too many are being resolved
+/// already.
 async fn resolve_workspace(path: String) -> Option<std::io::Result<std::path::PathBuf>> {
     let place = RESOLVING.try_acquire().ok()?;
     let job = tokio::task::spawn_blocking(move || {
@@ -333,8 +332,6 @@ pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspec
         _ => None,
     };
     let judged_path = path.clone();
-    let work = Arc::new(attachments::Work::default());
-    let judge_work = Arc::clone(&work);
     tokio::task::spawn_blocking(move || {
         let _place = place;
         let read = attachments::inspect(&path, &images);
@@ -344,12 +341,8 @@ pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspec
         };
         let _ = read_tx.send(read);
         if let (Some(kind), Some(workspace)) = (kind, judging) {
-            let _ = judged_tx.send(attachments::copies(
-                &judged_path,
-                kind,
-                &workspace,
-                &judge_work,
-            ));
+            let folder = kind == AttachmentKind::Folder;
+            let _ = judged_tx.send(attachments::copies(&judged_path, folder, &workspace));
         }
     });
     let mut inspected = match tokio::time::timeout_at(deadline, read_rx).await {
@@ -365,22 +358,24 @@ pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspec
             )));
         }
     };
-    // An image goes inline, never copied; without a workspace, as a new one
-    // not made yet, every file and folder is. A workspace that can't be read is
-    // one send refuses: nothing is copied. A judgment that is not done by the
-    // deadline, or a workspace that did not resolve in time, is taken to be a
-    // copy, so the note never says one won't happen when it may.
+    // An image goes inline, never copied; given a host, as for a new workspace
+    // not made yet, every file and folder is. Where the workspace itself can't
+    // be read, or did not resolve in time, or the judgment is not done by the
+    // deadline, it is taken to be a copy, so the note never says one won't
+    // happen when it may; the send judges it again. A folder holding the
+    // workspace is refused (PROTO-CORE-API-R44).
     inspected.copied = match (&inspected.kind, &workspace) {
         (AttachmentKind::Image, _) => false,
-        (_, None) | (_, Some(None)) => true,
-        (_, Some(Some(Err(_)))) => false,
+        (_, None) | (_, Some(None)) | (_, Some(Some(Err(_)))) => true,
         (_, Some(Some(Ok(_)))) => match tokio::time::timeout_at(deadline, judged_rx).await {
-            Ok(Ok(copied)) => copied,
-            _ => {
-                // The check stops at its next step.
-                work.stop();
-                true
+            Ok(Ok(Ok(copied))) => copied,
+            Ok(Ok(Err(reason))) => {
+                return Err(ApiError::new(
+                    ersa_protocol::core_api::ErrorKind::AttachmentRefused,
+                    reason,
+                ));
             }
+            _ => true,
         },
     };
     Ok(inspected)
