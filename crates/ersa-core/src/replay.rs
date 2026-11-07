@@ -195,6 +195,8 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         effort: None,
         project_trusted: false,
         project_path: String::new(),
+        // A recording names its session itself, as it did when recorded.
+        backend_session_id: None,
         extra: Value::Null,
     };
     core.sessions
