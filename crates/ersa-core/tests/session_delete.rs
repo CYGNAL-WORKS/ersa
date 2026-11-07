@@ -819,7 +819,9 @@ async fn a_folder_missing_while_git_still_lists_it_keeps_the_row() {
         .await;
     *fake.delete_refusal.lock().unwrap() = None;
     client.result("session.stop", json!({ "id": second })).await;
-    client.result("session.remove", json!({ "id": second })).await;
+    client
+        .result("session.remove", json!({ "id": second }))
+        .await;
     std::fs::remove_dir_all(&folder).unwrap();
 
     let shown = token(&mut client, &workspace).await;

@@ -1177,16 +1177,28 @@ pub async fn git_worktree_delete(
     Ok(false)
 }
 
-/// Whether git lists a worktree at `path` of the repository at `repo`,
-/// prunable ones included: git keeps a worktree's record until it is
-/// removed or pruned, even with its folder gone.
-pub async fn git_worktree_listed(
+/// Whether the git worktree at `path` of the repository at `repo` is gone:
+/// git no longer lists it (it keeps a worktree's record, prunable, until it
+/// is removed or pruned, even with its folder gone) and nothing is at
+/// `path`. The look at the folder shares `workspace.changes`'s cap on
+/// blocking reads and is given [`GIT_QUERY_TIMEOUT`].
+pub async fn git_worktree_gone(
     transport: &dyn Transport,
     repo: &str,
     path: &str,
 ) -> Result<bool, VcsError> {
     let listed = git_worktree_list(transport, repo).await?;
-    Ok(find(&listed, path).await.is_some())
+    if find(&listed, path).await.is_some() {
+        return Ok(false);
+    }
+    let folder = path.to_string();
+    let exists = blocking(
+        deadline(),
+        "looking for the workspace's folder",
+        move |_| Ok(std::path::Path::new(&folder).try_exists()?),
+    )
+    .await?;
+    Ok(!exists)
 }
 
 /// Deletes the folder at `path` and everything in it, retried while files
