@@ -85,6 +85,7 @@ methods! {
     SessionStop => "session.stop",
     SessionResume => "session.resume",
     SessionRemove => "session.remove",
+    SessionSetArchived => "session.set_archived",
     SessionSend => "session.send",
     SessionInterrupt => "session.interrupt",
     AttachmentInspect => "attachment.inspect",
@@ -515,6 +516,10 @@ pub struct Session {
     /// Absent unless a send is under way: its phase.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sending: Option<SendPhase>,
+    /// Whether the user archived the session: put away, stopped, and refused
+    /// messages until it is unarchived, or until Core accepts a resume of it.
+    /// Core stores it (ADR 0026).
+    pub archived: bool,
     pub tile: Tile,
 }
 
@@ -644,8 +649,15 @@ pub struct SessionSendResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InspectParams {
-    pub host_id: String,
     pub path: String,
+    /// The workspace the attachment is for, whose host reads the path: the
+    /// result then says whether sending would copy it. Exactly one of this
+    /// and `host_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    /// The host that reads the path, for a workspace not made yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_id: Option<String>,
 }
 
 /// `attachment.inspect` result: what the composer shows for a path.
@@ -667,6 +679,11 @@ pub struct Inspected {
     /// Where a link points.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// Whether a send would copy it into the workspace's scratch folder: true
+    /// for a file or folder whose target, resolved as a send resolves it, is
+    /// outside `workspace_id`, or for any file or folder given a host; false
+    /// for an image, which goes inline, and for a path inside the workspace.
+    pub copied: bool,
 }
 
 /// `session.decide_permission` params.
@@ -701,6 +718,15 @@ pub struct AnswerQuestionParams {
 pub struct SetTitleParams {
     pub id: String,
     pub title: String,
+}
+
+/// `session.set_archived` params. Archiving stops a live session first, as
+/// `session.stop` does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetArchivedParams {
+    pub id: String,
+    pub archived: bool,
 }
 
 /// `session.set_mode` params.

@@ -584,6 +584,30 @@
               "$ref": "#/$defs/request_id"
             },
             "method": {
+              "const": "session.set_archived"
+            },
+            "params": {
+              "$ref": "#/$defs/session.set_archived.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
               "const": "session.send"
             },
             "params": {
@@ -1587,6 +1611,7 @@
         "permission_mode",
         "state",
         "created_at",
+        "archived",
         "tile"
       ],
       "properties": {
@@ -1638,6 +1663,10 @@
         "sending": {
           "$ref": "#/$defs/send_phase",
           "description": "Absent unless a send is under way: its phase."
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume."
         }
       }
     },
@@ -2240,6 +2269,26 @@
     "session.remove.result": {
       "$ref": "#/$defs/session"
     },
+    "session.set_archived.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "archived"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "Archiving stops a live session first, as session.stop does."
+        }
+      }
+    },
+    "session.set_archived.result": {
+      "$ref": "#/$defs/session"
+    },
     "session.send.params": {
       "type": "object",
       "additionalProperties": false,
@@ -2294,16 +2343,32 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "host_id",
         "path"
       ],
-      "properties": {
-        "host_id": {
-          "$ref": "#/$defs/id"
+      "oneOf": [
+        {
+          "required": [
+            "workspace_id"
+          ]
         },
+        {
+          "required": [
+            "host_id"
+          ]
+        }
+      ],
+      "properties": {
         "path": {
           "type": "string",
           "minLength": 1
+        },
+        "workspace_id": {
+          "$ref": "#/$defs/id",
+          "description": "The workspace the attachment is for, whose host reads the path; the result then says whether sending would copy it. Exactly one of this and host_id."
+        },
+        "host_id": {
+          "$ref": "#/$defs/id",
+          "description": "The host that reads the path, for a workspace not made yet."
         }
       }
     },
@@ -2313,7 +2378,8 @@
       "required": [
         "path",
         "name",
-        "kind"
+        "kind",
+        "copied"
       ],
       "properties": {
         "path": {
@@ -2346,6 +2412,10 @@
         "target": {
           "type": "string",
           "description": "Where a link points."
+        },
+        "copied": {
+          "type": "boolean",
+          "description": "Whether a send would copy it into the workspace's scratch folder: true for a file or folder whose target, resolved as a send resolves it, is outside workspace_id, or for any file or folder given a host_id; false for an image, which goes inline, and for a path inside the workspace."
         }
       }
     },

@@ -127,6 +127,32 @@ export const enUS = {
     // that failed detection, by the label backend.list gives it.
     noBackendError: "No backend is available on this host. Install Claude Code or GitHub Copilot on it to start a session.",
     backendFailedError: "{label} isn't working on this host. Check that it's installed and signed in, then open New session again.",
+    // The status line while a message is on its way (FLOW-SEND-MESSAGE-R16), and when Ersa can't tell whether it
+    // reached the agent (R15), which never says it failed.
+    copyingProgress: "Copying attachments, {percent} percent done…",
+    startingProgress: "Starting the backend…",
+    unknownNote: "Ersa can't tell whether your message reached the agent. If it did, the transcript shows it.",
+    // The attach menu (docs/design/COMPOSER.md, The attach menu; FLOW-SEND-MESSAGE-R07).
+    attach: {
+      menuLabel: "Attach",
+      filesButton: "Add files…",
+      imagesButton: "Add images…",
+      folderButton: "Add a folder…",
+      pasteNote: "You can also paste attachments, or drop them on the box.",
+      imagesFilterLabel: "Images",
+    },
+    // An attachment above the words (docs/design/COMPOSER.md, Attachments; FLOW-SEND-MESSAGE-R09, R17).
+    attachment: {
+      listLabel: "Attachments",
+      bytesDetail: { one: "{count} byte", other: "{count} bytes" },
+      linesDetail: { one: "{count} line", other: "{count} lines" },
+      folderDetail: "Folder",
+      copiedNote: "Will be copied into the workspace's .ersa folder",
+      kilobytesDetail: "{size} KB",
+      megabytesDetail: "{size} MB",
+      gigabytesDetail: "{size} GB",
+      removeLabel: "Remove {name}",
+    },
   },
   newSession: {},
   sessionControls: {

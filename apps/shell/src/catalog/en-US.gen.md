@@ -282,6 +282,90 @@ No backend is available on this host. Install Claude Code or GitHub Copilot on i
 
 {label} isn't working on this host. Check that it's installed and signed in, then open New session again.
 
+### `composer.copyingProgress`
+
+Copying attachments, {percent} percent done…
+
+### `composer.startingProgress`
+
+Starting the backend…
+
+### `composer.unknownNote`
+
+Ersa can't tell whether your message reached the agent. If it did, the transcript shows it.
+
+### `composer.attach.menuLabel`
+
+Attach
+
+### `composer.attach.filesButton`
+
+Add files…
+
+### `composer.attach.imagesButton`
+
+Add images…
+
+### `composer.attach.folderButton`
+
+Add a folder…
+
+### `composer.attach.pasteNote`
+
+You can also paste attachments, or drop them on the box.
+
+### `composer.attach.imagesFilterLabel`
+
+Images
+
+### `composer.attachment.listLabel`
+
+Attachments
+
+### `composer.attachment.bytesDetail`
+
+#### `one`
+
+{count} byte
+
+#### `other`
+
+{count} bytes
+
+### `composer.attachment.linesDetail`
+
+#### `one`
+
+{count} line
+
+#### `other`
+
+{count} lines
+
+### `composer.attachment.folderDetail`
+
+Folder
+
+### `composer.attachment.copiedNote`
+
+Will be copied into the workspace's .ersa folder
+
+### `composer.attachment.kilobytesDetail`
+
+{size} KB
+
+### `composer.attachment.megabytesDetail`
+
+{size} MB
+
+### `composer.attachment.gigabytesDetail`
+
+{size} GB
+
+### `composer.attachment.removeLabel`
+
+Remove {name}
+
 ## `newSession`
 
 ## `sessionControls`

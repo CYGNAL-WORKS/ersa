@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { t } from "./catalog";
 import "./App.css";
 import { Button } from "./components/Button";
+import type { AttachWhat } from "./components/AttachMenu";
 import { Composer } from "./components/Composer";
 import { RailFoot } from "./components/RailFoot";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -22,7 +23,8 @@ import { contextUsed, tileOf } from "./session/tile";
 import { type Answers, type Decision, answering } from "./session/answers";
 import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./session/shelf";
 import { sharedSubscriptions } from "./session/subscriptions";
-import { type Follower, type SessionView, type Sending, follow } from "./session/follow";
+import { type Attached, attached, sendable, unreadable } from "./session/attachments";
+import { type Follower, type SendProgress, type SessionView, type Sending, follow, progressOf } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { StartStop, readChoices, rememberPatch, remembered, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
@@ -31,6 +33,9 @@ import { mergeWorkspaces } from "./session/workspaces";
 // depend on a list see no change while Core's phase stays the same.
 const UNAVAILABLE = { state: "unavailable" } as const;
 const LOADING = { state: "loading" } as const;
+
+/** How many `attachment.inspect` reads Core runs at once; it refuses more (PROTO-CORE-API, Sending). */
+const INSPECTS_AT_ONCE = 8;
 
 /** The projects part of the view, whatever phase Core is in. */
 function projectsOf(view: CoreView): ProjectsView {
@@ -107,6 +112,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   useEffect(() => {
     const running = connect(client, setView, undefined, (notification) => {
+      // Where a send is (FLOW-SEND-MESSAGE-R16): the active session's, or the first message of a session starting.
+      if (notification.method === "session.send_progress") {
+        follower.current?.progress(notification.params);
+        if (notification.params.session_id === startStop.current?.session) setStartProgress(progressOf(notification.params));
+        return;
+      }
       if (notification.method !== "session.event") return;
       // Each follower takes only its own session's events.
       follower.current?.receive(notification.params.event);
@@ -303,11 +314,13 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // (FLOW-NEW-SESSION-R08). Once started, it is the active session (R12).
   // Stop on the new-session screen reaches the start under way (FLOW-SEND-MESSAGE-R03).
   const startStop = useRef<StartStop>(undefined);
-  const start = async (text: string, values: SessionValues) => {
+  const [startProgress, setStartProgress] = useState<SendProgress>();
+  const start = async (text: string, values: SessionValues, attachments: readonly Attached[]) => {
     dispatch({ type: "sending" });
+    setStartProgress(undefined);
     const stop = new StartStop(client);
     startStop.current = stop;
-    const outcome = await startSession(client, values, text, stop).finally(() => {
+    const outcome = await startSession(client, values, text, stop, sendable(attachments)).finally(() => {
       if (startStop.current === stop) startStop.current = undefined;
     });
     if (!outcome.ok && "stopped" in outcome) {
@@ -327,7 +340,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     // Known at once, so the rail puts the new session's tile under its project as it appears (FLOW-NEW-SESSION-R13).
     setWorkspaces((known) => ({ ...known, [outcome.workspace.id]: outcome.workspace }));
     connection.current?.reload("sessions");
-    dispatch({ type: "started", id: outcome.session.id, text, firstSend: outcome.firstSend });
+    dispatch({ type: "started", id: outcome.session.id, text, attachments, firstSend: outcome.firstSend });
     return true;
   };
 
@@ -371,6 +384,41 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // A refusal goes; a rename still on its way stays, so its answer is shown.
   const resetRename = (id: string) => setRenaming(({ [id]: was, ...rest }) => (was?.state === "sending" ? { ...rest, [id]: was } : rest));
+
+  // Attaching (FLOW-SEND-MESSAGE-R07, R13): the Shell's dialog on this computer, then `attachment.inspect` for each path
+  // picked, and only those. A path Core can't read is attached marked with why, so the message waits until it is
+  // removed (R10). Without the Shell, as in tests that give none, attach is unavailable.
+  const pickFiles = shell?.pickFiles;
+  const attach =
+    pickFiles && pickFolder && view.phase === "connected"
+      ? async (what: AttachWhat, workspace: string | undefined): Promise<Attached[]> => {
+          const host_id = view.hello.host.id;
+          let paths: string[];
+          try {
+            paths = what === "folder" ? [await pickFolder()].filter((p): p is string => p !== null) : await pickFiles(what === "images");
+          } catch {
+            return [];
+          }
+          // At most INSPECTS_AT_ONCE in flight, the rest queued: Core reads that many at once and refuses more, which
+          // would mark good paths unreadable. Kept in the order picked.
+          const read: Attached[] = new Array(paths.length);
+          let next = 0;
+          const worker = async () => {
+            for (let at = next++; at < paths.length; at = next++) {
+              const path = paths[at] as string;
+              // With the workspace, read on its own host, Core says whether sending copies it (FLOW-SEND-MESSAGE-R17); a new
+              // workspace not made yet names the host.
+              const params = workspace === undefined ? { host_id, path } : { path, workspace_id: workspace };
+              read[at] = await client.call("attachment.inspect", params).then(
+                (info) => attached(info, workspace),
+                (error) => unreadable(path, describeError(error)),
+              );
+            }
+          };
+          await Promise.all(Array.from({ length: Math.min(INSPECTS_AT_ONCE, paths.length) }, worker));
+          return read;
+        }
+      : undefined;
 
   // A git project's local branches, for the base branch a new workspace starts from (FLOW-NEW-SESSION-R21). Branches
   // that cannot be listed leave the base to Core, which starts the workspace at the default branch.
@@ -446,6 +494,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const order = projectOrder(knownList ?? [], sessions.state === "ready" ? sessions.sessions : undefined, orderedBy.current, workspaces);
   orderedBy.current = order.kept;
   const screenProjects = knownList && order.projects;
+
+  // Each project's root workspace, for attachments on the new-session screen judged against the project folder.
+  const rootWorkspaces: Record<string, string> = {};
+  for (const w of Object.values(workspaces)) if (w.kind === "root") rootWorkspaces[w.project_id] = w.id;
 
   const projectById = new Map(projectList?.map((p) => [p.id, p]));
 
@@ -561,9 +613,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               // An open permission request holds the focal glow; the box shows focus by its edge alone.
               quietFocus={listed?.tile.pending.some((p) => p.kind === "permission")}
               // A kept session's first message that did not go through: why, and the text when it is to go again.
-              sending={shown.message ?? (firstSendHere && { state: "failed", message: firstSendHere.message })}
+              sending={shown.message ?? firstSendHere?.sending}
               initialText={firstSendHere?.text}
-              onSend={(text) => follower.current?.send(text) ?? Promise.resolve(false)}
+              initialAttachments={firstSendHere?.attachments}
+              onAttach={attach && ((what) => attach(what, listed?.workspace_id))}
+              workspace={listed?.workspace_id}
+              onSend={(text, attachments) => follower.current?.send(text, sendable(attachments)) ?? Promise.resolve(false)}
               // Stop, from sending until the turn ends: cancels the message on its way, or interrupts the turn (FLOW-SEND-MESSAGE-R03).
               working={shown.transcript.working || shown.turnPending}
               onStop={() => void follower.current?.interrupt()}
@@ -600,7 +655,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               lastUsed={lastUsed}
               projectId={composing?.projectId}
               onStart={start}
-              starting={starting}
+              onAttach={attach}
+              rootWorkspaces={rootWorkspaces}
+              starting={starting?.state === "sending" ? { state: "sending", progress: startProgress } : starting}
               onChooseFolder={chooseFolder}
               onListBranches={listBranches}
               onAddProject={addProject}
