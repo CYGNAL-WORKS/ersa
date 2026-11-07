@@ -231,6 +231,13 @@ async fn the_name_the_cli_announces_for_a_rename_is_the_one_shown() {
         .then_stdout([announced(&stdout, &unique)])
         .then_pause(Duration::from_millis(300))
         .then_stdout([rename_answer()])
+        // Asked for the same name again, it announces the same unique one.
+        .wait_for_stdin(is("rename_session"))
+        .then_stdout([announced(&stdout, &unique)])
+        .then_pause(Duration::from_millis(300))
+        .then_stdout([json!({"type": "control_response",
+            "response": {"subtype": "success", "request_id": "ersa-rename-3"}})
+        .to_string()])
         .hold_open();
     let home = tempdir();
     let core = claude_core(&transport, home.path()).await;
@@ -240,6 +247,11 @@ async fn the_name_the_cli_announces_for_a_rename_is_the_one_shown() {
         .unwrap()
         .to_string();
 
+    let renamed = client
+        .result("session.set_title", json!({ "id": id, "title": NAMED }))
+        .await;
+    assert_eq!(renamed["title"], unique.as_str());
+    assert_eq!(listed_title(&mut client, &id).await, unique.as_str());
     let renamed = client
         .result("session.set_title", json!({ "id": id, "title": NAMED }))
         .await;

@@ -2284,7 +2284,7 @@ async fn run_pipeline(pipeline: Pipeline) {
                 tracing::error!(session = %handle.id, "a live session has no view; its events are lost");
                 continue;
             };
-            let title_before = view.announced_title().map(String::from);
+            let title_before = view.announced_title().map(|(count, _)| count);
             let mut events = Vec::new();
             for item in batch {
                 match item {
@@ -2297,8 +2297,12 @@ async fn run_pipeline(pipeline: Pipeline) {
                 }
             }
             let announced = view.backend_session_id().map(String::from);
-            let title_after = view.announced_title().map(String::from);
-            let retitled = title_after.filter(|title| title_before.as_ref() != Some(title));
+            // Any announcement in this batch, the same title again included:
+            // the latest is the session's.
+            let retitled = view
+                .announced_title()
+                .filter(|(count, _)| title_before != Some(*count))
+                .map(|(_, title)| title.to_string());
             let (tile, turn) = (view.tile().clone(), view.turn());
             (events, tile, turn, announced, retitled)
         };
