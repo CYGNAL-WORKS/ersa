@@ -15,7 +15,8 @@
 // as it starts on a head. A head with the status is reviewed, being reviewed,
 // or clean and waiting for the gate; a pending status older than an hour is
 // one of the last two gone stale (a run that died with the machine, a gate
-// that may pass now), and the head is taken up again. Heads are due in the
+// that may pass now), and the head is taken up again. An error status (the
+// run itself failed) is retried after RETRY_MS, one such head a tick. Heads are due in the
 // order their CI passed, so a pull request pushed again and again never keeps
 // an older one waiting. Each tick starts a review in every free slot (SLOTS of
 // them, each with its own checkout) and leaves it running: in a terminal the
@@ -86,6 +87,11 @@ export const SLOTS = 2;
 // never be taken over.
 export const STALE_MS = 60 * 60 * 1000;
 export const LOCK_STALE_MS = 3 * STALE_MS;
+// A review whose own run failed (its status is an error, say queueing hit
+// GitHub's rate limit) is retried this long after the status was set. Retries
+// go behind every head due for its first review, one a tick at most, so a head
+// that always errors never takes every slot.
+export const RETRY_MS = 15 * 60 * 1000;
 // How long a run of the scheduled task starts reviews for, counted from its
 // start, heads that cannot be prepared included: a review takes about an hour,
 // so the last one it starts ends within the two hours the task allows it.
@@ -119,15 +125,18 @@ export function select(prs, now = Date.now()) {
     const mark = normalizeChecks(pr.statusCheckRollup).find((c) => c.name === MERGE_REVIEW);
     // A pending time gh did not give reads as stale: the lock keeps a running review safe from the retake.
     const stale = mark?.status === "PENDING" && !(now - Date.parse(mark.startedAt ?? "") <= STALE_MS);
-    const reviewed = Boolean(mark) && !stale;
+    const retry = mark?.status === "COMPLETED" && mark.conclusion === "ERROR" && !(now - Date.parse(mark.startedAt ?? "") < RETRY_MS);
+    const reviewed = Boolean(mark) && !stale && !retry;
     const held = (pr.labels ?? []).some((l) => l.name === "hold");
     if (pr.autoMergeRequest && (!reviewed || held)) disarm.push(pr.number);
     const ci = ciRefusals(pr.statusCheckRollup);
     if (reviewed) skip.push({ number: pr.number, why: `its merge review ${VERDICT[mark.status === "COMPLETED" ? mark.conclusion : "PENDING"] ?? "has a status this poller cannot read"}${held ? ", and it is on hold" : ""}` });
     else if (ci.length) skip.push({ number: pr.number, why: ci.join(", and ") });
-    else review.push({ number: pr.number, head: pr.headRefOid, since: passedAt(pr.statusCheckRollup, now) });
+    else review.push({ number: pr.number, head: pr.headRefOid, retry, since: passedAt(pr.statusCheckRollup, now) });
   }
-  review.sort((a, b) => a.since - b.since || a.number - b.number);
+  review.sort((a, b) => a.retry - b.retry || a.since - b.since || a.number - b.number);
+  const firstRetry = review.findIndex((r) => r.retry);
+  if (firstRetry >= 0) for (const r of review.splice(firstRetry + 1)) skip.push({ number: r.number, why: "its merge review failed to run, and another failed head is retried this tick" });
   return { review: review.map(({ number, head }) => ({ number, head })), disarm, skip };
 }
 

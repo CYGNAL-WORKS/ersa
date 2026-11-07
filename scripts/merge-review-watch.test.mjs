@@ -10,7 +10,7 @@ import { PassThrough } from "node:stream";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { INTERVAL_MS, LOCK_STALE_MS, ENDED, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select, startReview } from "./merge-review-watch.mjs";
+import { INTERVAL_MS, LOCK_STALE_MS, ENDED, RETRY_MS, SLOTS, STALE_MS, START_WINDOW_MS, lock, main, select, startReview } from "./merge-review-watch.mjs";
 
 const HEAD = "b".repeat(40);
 const NOW = Date.parse("2026-11-04T12:00:00Z");
@@ -50,6 +50,17 @@ test("a pending merge review older than an hour is a run that died, and the head
   assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: ago(STALE_MS + 1000) })] })], NOW).review, [{ number: 7, head: HEAD }]);
   assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: ago(STALE_MS - 1000) })] })], NOW).review, []);
   assert.deepEqual(select([pr({ statusCheckRollup: [ci(), mark("PENDING", { startedAt: undefined })] })], NOW).review, [{ number: 7, head: HEAD }], "a pending status with no time is stale, not reviewed forever");
+});
+
+test("a merge review whose own run failed is retried after a backoff, behind fresh heads and one a tick", () => {
+  const failed = (n, at) => pr({ number: n, statusCheckRollup: [ci(), mark("ERROR", { startedAt: at })] });
+  assert.deepEqual(select([failed(7, ago(RETRY_MS - 1000))], NOW).review, []);
+  assert.deepEqual(select([failed(7, ago(RETRY_MS + 1000))], NOW).review, [{ number: 7, head: HEAD }]);
+  assert.deepEqual(select([failed(7, undefined)], NOW).review, [{ number: 7, head: HEAD }], "an error with no time is retried, not left for good");
+  assert.deepEqual(select([pr({ autoMergeRequest: { enabledAt: ago(1000) }, statusCheckRollup: [ci(), mark("ERROR", { startedAt: ago(RETRY_MS + 1000) })] })], NOW).disarm, [7]);
+  const picked = select([failed(3, ago(2 * RETRY_MS)), failed(4, ago(2 * RETRY_MS)), pr({ number: 9, statusCheckRollup: [ci({ startedAt: ago(1000) })] })], NOW);
+  assert.deepEqual(picked.review.map((p) => p.number), [9, 3]);
+  assert.deepEqual(picked.skip, [{ number: 4, why: "its merge review failed to run, and another failed head is retried this tick" }]);
 });
 
 test("every open pull request not reviewed this tick says why, and a tick with nothing to review logs it", async () => {
