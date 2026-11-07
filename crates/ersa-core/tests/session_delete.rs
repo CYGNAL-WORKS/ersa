@@ -755,3 +755,46 @@ async fn a_failed_check_of_the_changes_releases_the_claim_and_deletes_nothing() 
     std::fs::rename(&hidden, repo.join(".git")).unwrap();
     assert!(branch_exists(&repo, &branch_of(&workspace)));
 }
+
+/// A session whose delete kept the shared workspace's files, then left
+/// behind when another session's delete took them, takes the workspace's
+/// row with it when its own delete finishes: no workspace is left listed
+/// with its folder gone.
+// verifies: PROTO-CORE-API-R35
+#[tokio::test(flavor = "multi_thread")]
+async fn the_last_session_out_of_a_workspace_whose_files_went_takes_its_row() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let (project, _repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, folder) = isolated(&mut client, &project).await;
+    let first = idle_session(&mut client, &workspace).await;
+    let second = idle_session(&mut client, &workspace).await;
+
+    // The first delete, shared, keeps the files and fails at the record.
+    *fake.delete_refusal.lock().unwrap() = Some(OpenElsewhere::Unknown);
+    let shown = token(&mut client, &workspace).await;
+    client
+        .error("session.delete", json!({ "id": first, "token": shown }))
+        .await;
+    *fake.delete_refusal.lock().unwrap() = None;
+
+    // The second, counted alone, takes the files; the first still refers
+    // to the workspace, so its row stays for now.
+    let shown = token(&mut client, &workspace).await;
+    let result = client
+        .result("session.delete", json!({ "id": second, "token": shown }))
+        .await;
+    assert_eq!(result["workspace_deleted"], true);
+    assert!(!folder.exists());
+    assert!(workspace_listed(&mut client, &project, &workspace).await);
+
+    // The first, tried again, keeps the files as recorded, and being the
+    // last out of a workspace whose folder is gone, takes the row.
+    let shown = token(&mut client, &workspace).await;
+    let result = client
+        .result("session.delete", json!({ "id": first, "token": shown }))
+        .await;
+    assert_eq!(result["workspace_deleted"], false);
+    assert!(!workspace_listed(&mut client, &project, &workspace).await);
+    assert!(backend_ids(&fake.records).is_empty());
+}

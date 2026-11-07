@@ -1179,14 +1179,22 @@ pub async fn git_worktree_delete(
 
 /// Deletes the folder at `path` and everything in it, retried while files
 /// are busy, as worktree removal is. A link inside is removed, never
-/// followed. A folder already gone is not an error.
+/// followed. A folder already gone is not an error. Each try is given
+/// [`GIT_TIMEOUT`], as a git call is: a folder on a drive that stops
+/// answering fails the delete, leaving its thread behind, rather than hold
+/// the delete for ever.
 async fn remove_folder(path: &str) -> Result<(), VcsError> {
     let mut backoff = REMOVE_FIRST_BACKOFF;
     let mut attempt = 1;
     loop {
         let folder = path.to_string();
-        let removed = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&folder))
+        let removal = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&folder));
+        let removed = tokio::time::timeout(GIT_TIMEOUT, removal)
             .await
+            .map_err(|_| VcsError::Failed {
+                message: format!("deleting the workspace's folder {path} did not finish"),
+                stderr: format!("still running after {} seconds", GIT_TIMEOUT.as_secs()),
+            })?
             .map_err(|e| VcsError::Incomplete(std::io::Error::other(e.to_string())))?;
         match removed {
             Ok(()) => return Ok(()),
