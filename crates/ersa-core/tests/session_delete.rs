@@ -850,3 +850,53 @@ async fn a_folder_missing_while_git_still_lists_it_keeps_the_row() {
     assert_eq!(result["workspace_deleted"], false);
     assert!(workspace_listed(&mut client, &project, &workspace).await);
 }
+
+/// Once the session is marked deleting with its files to go, the workspace
+/// is `error`, before its folder is touched: here a locked worktree stops
+/// the delete at step 5 with every file in place, and the workspace still
+/// takes no new session. The finished delete removes its row.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workspace_leaves_ready_when_the_session_is_marked_before_its_folder_is_touched() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let (project, repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, folder) = isolated(&mut client, &project).await;
+    let id = idle_session(&mut client, &workspace).await;
+    std::fs::write(folder.join("kept.txt"), "kept\n").unwrap();
+    git(&repo, &["worktree", "lock", folder.to_str().unwrap()]);
+
+    let shown = token(&mut client, &workspace).await;
+    let error = client
+        .error("session.delete", json!({ "id": id, "token": shown }))
+        .await;
+    assert_eq!(kind(&error), "vcs_error", "{error}");
+    assert!(folder.join("kept.txt").is_file(), "the folder is untouched");
+    assert_eq!(
+        listed(&mut client, &id).await.unwrap()["deleting"],
+        "failed"
+    );
+    let workspaces = client
+        .result("workspace.list", json!({ "project_id": project["id"] }))
+        .await;
+    let state = workspaces
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == workspace["id"])
+        .map(|w| w["state"].clone());
+    assert_eq!(state, Some(json!("error")));
+    let error = client
+        .error(
+            "session.create",
+            json!({ "workspace_id": workspace["id"], "backend": fake::BACKEND }),
+        )
+        .await;
+    assert_eq!(kind(&error), "invalid_state", "{error}");
+
+    git(&repo, &["worktree", "unlock", folder.to_str().unwrap()]);
+    let fresh = token(&mut client, &workspace).await;
+    client
+        .result("session.delete", json!({ "id": id, "token": fresh }))
+        .await;
+    assert!(!workspace_listed(&mut client, &project, &workspace).await);
+}
