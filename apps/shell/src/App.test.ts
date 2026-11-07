@@ -29,6 +29,7 @@ const session = (id: string, project_id: string, created_at: string): Session =>
   permission_mode: "default",
   state: "ended",
   created_at,
+  archived: false,
   tile: { state: "ended", pending: [] },
 });
 
