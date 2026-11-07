@@ -509,9 +509,12 @@ fn approximate_bytes(events: &[RecordEvent]) -> usize {
                             | MessageAttachment::Folder { path } => path.len(),
                         })
                         .sum();
+                    // Built field by field, so no image is copied to be measured.
                     let without = Event::UserMessage(UserMessage {
+                        text: message.text.clone(),
+                        origin: message.origin,
+                        peer: message.peer.clone(),
                         attachments: Vec::new(),
-                        ..message.clone()
                     });
                     as_json(&without)
                         + attachments

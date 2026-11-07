@@ -496,12 +496,16 @@ fn user_events(user: RecordUser) -> Vec<Event> {
     }
     // Its images and its list of files and folders are its attachments, never
     // its text (PROTO-CLAUDE-CODE-STREAM-R26).
+    let has_image = matches!(&content, MessageContent::Blocks(blocks)
+        if blocks.iter().any(|b| matches!(b, crate::wire::ContentBlock::Image { .. })));
     let (text, attachments) = match content {
         MessageContent::Text(text) => (Some(text), Vec::new()),
         MessageContent::Blocks(blocks) => crate::attachments::split_blocks(&blocks),
     };
     match (text, attachments.is_empty()) {
-        (None, true) => Vec::new(),
+        // Images the adapter cannot read leave a prompt with nothing to show,
+        // but it was still a turn: it stays in the transcript, empty.
+        (None, true) if !has_image => Vec::new(),
         (text, _) => vec![Event::UserMessage(UserMessage {
             text: text.unwrap_or_default(),
             origin: if from_cli {

@@ -316,7 +316,7 @@ async fn start_returns_only_after_the_initialize_answer_is_recorded() {
     assert_eq!(lines[1].dir, Direction::Backend);
     assert_eq!(lines[1].line, init_answer());
 
-    session.send_user("hi").await.expect("send");
+    session.send_message(&text("hi")).await.expect("send");
     assert_eq!(transport.stdin_lines().len(), 2);
     assert!(transport.stub_failures().is_empty());
     session.stop().await.expect("stop");
@@ -519,7 +519,7 @@ async fn a_permission_round_trips_against_a_stub_of_fixture_11() {
         .start(Arc::new(transport.clone()), config(), sink.clone())
         .await
         .expect("start");
-    session.send_user(PROMPT).await.expect("send");
+    session.send_message(&text(PROMPT)).await.expect("send");
     let ask = sink
         .wait_for_line(WAIT, |l| is_kind(l, "control_request/can_use_tool"))
         .await;
@@ -726,6 +726,30 @@ folder: src
 }
 
 #[tokio::test]
+async fn a_path_with_a_line_break_is_refused_before_anything_is_written() {
+    let transport = ready_stub();
+    let sink = Arc::new(RecordingSink::new());
+    let session = adapter()
+        .start(Arc::new(transport.clone()), config(), sink.clone())
+        .await
+        .expect("start");
+    let written = transport.stdin_lines().len();
+    let message = ersa_adapter::OutgoingMessage {
+        text: "Look".into(),
+        attachments: vec![ersa_adapter::OutgoingAttachment::File {
+            path: "a\nb".into(),
+        }],
+    };
+    assert!(matches!(
+        session.send_message(&message).await,
+        Err(AdapterError::Protocol(_))
+    ));
+    // Nothing reached the CLI, so Core reads it as not sent.
+    assert_eq!(transport.stdin_lines().len(), written);
+    session.stop().await.expect("stop");
+}
+
+#[tokio::test]
 async fn an_unsupported_cli_request_is_refused_rather_than_left_hanging() {
     let hook = json!({
         "type": "control_request",
@@ -770,7 +794,7 @@ async fn after_stop_the_session_is_not_running_and_stderr_is_drained() {
         "reported once, before stop returned"
     );
     assert!(matches!(
-        session.send_user("too late").await,
+        session.send_message(&text("too late")).await,
         Err(AdapterError::NotRunning)
     ));
     // Stderr is diagnostics, never part of the raw log. It is drained by its
@@ -856,7 +880,7 @@ async fn stop_kills_a_cli_that_stopped_reading_without_waiting_on_a_stuck_write(
 
     let stuck = tokio::spawn({
         let session = session.clone();
-        async move { session.send_user("into a full pipe").await }
+        async move { session.send_message(&text("into a full pipe")).await }
     });
     // The write is recorded, then blocks holding the stdin lock.
     sink.wait_for_line(WAIT, |l| l.line.contains("into a full pipe"))
@@ -871,7 +895,7 @@ async fn stop_kills_a_cli_that_stopped_reading_without_waiting_on_a_stuck_write(
         Err(AdapterError::NotRunning | AdapterError::Io(_))
     ));
     assert!(matches!(
-        session.send_user("after stop").await,
+        session.send_message(&text("after stop")).await,
         Err(AdapterError::NotRunning)
     ));
 }
@@ -1087,4 +1111,12 @@ async fn a_cli_that_never_reads_initialize_fails_start_with_its_stderr() {
     assert!(message.contains("initialize"), "{message}");
     assert!(message.contains("fatal: cannot read input"), "{message}");
     assert_eq!(sink.exit_codes(), [None], "killed");
+}
+
+/// A message of words alone, as Core sends one (PROTO-CORE-API, Turns and attachments).
+fn text(words: &str) -> ersa_adapter::OutgoingMessage {
+    ersa_adapter::OutgoingMessage {
+        text: words.into(),
+        attachments: Vec::new(),
+    }
 }
