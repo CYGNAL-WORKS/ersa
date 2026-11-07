@@ -78,6 +78,82 @@
   box-shadow: none;
 }
 
+/* With attachments the box wraps: they take its full width above the words (docs/design/COMPOSER.md, Attachments). */
+.composer-box:has(.composer-attachments) {
+  flex-wrap: wrap;
+}
+
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  flex: none;
+  width: stretch;
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-xs) var(--space-xs) 0;
+  list-style: none;
+}
+
+/* An attachment: size-control-lg high on material-tile, a line edge, radius-md; icon, name, detail, then remove. */
+.composer-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  min-width: 0;
+  height: var(--size-control-lg);
+  padding: 0 var(--space-xs) 0 var(--space-sm);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  background: var(--material-tile);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+  animation: composer-attachment-in var(--motion-quick) var(--motion-ease-out);
+}
+
+@keyframes composer-attachment-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.composer-attachment-icon {
+  display: inline-flex;
+  color: var(--color-ink-muted);
+}
+
+.composer-attachment-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-ink);
+}
+
+.composer-attachment-detail {
+  flex: none;
+  color: var(--color-ink-faint);
+}
+
+/* Why Ersa can't send it, in danger, in place of its detail (FLOW-SEND-MESSAGE-R10). */
+.composer-attachment-problem {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-danger);
+}
+
+/* Remove: a size-control-sm square with a cross in ink-faint; the quiet icon button's states (Icon.css) apply. */
+.composer-attachment-remove {
+  flex: none;
+  box-sizing: border-box;
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
+  border-radius: var(--radius-sm);
+  color: var(--color-ink-faint);
+}
+
 /* One line, or three on the new-session screen, growing with the words. */
 .composer-words {
   field-sizing: content;
@@ -231,7 +307,8 @@
     transition: none;
   }
 
-  .composer-send-icon[data-traded] {
+  .composer-send-icon[data-traded],
+  .composer-attachment {
     animation: none;
   }
 }
