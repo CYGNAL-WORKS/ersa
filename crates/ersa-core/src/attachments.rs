@@ -323,10 +323,7 @@ fn check(
             let folder = attachment.kind == AttachmentKind::Folder;
             let resolved = fs::canonicalize(given)?;
             work.step()?;
-            if folder && workspace.starts_with(&resolved) {
-                return Err(reason(format!("{path} holds the session's workspace")));
-            }
-            if let Ok(inside) = resolved.strip_prefix(workspace) {
+            if let Some(inside) = locate(&resolved, workspace, folder, path).map_err(reason)? {
                 let path = relative(inside);
                 return Ok(Checked::Ready(if folder {
                     OutgoingAttachment::Folder { path }
@@ -753,6 +750,36 @@ pub fn sniff_image(bytes: &[u8], media_types: &[&'static str]) -> Option<&'stati
     media_types.iter().copied().find(|&t| t == kind)
 }
 
+/// Where a file or folder resolved to `resolved` lies for `workspace`, both
+/// canonical: its path inside the workspace, or `None` when it lies outside
+/// and sending copies it. A folder that holds the workspace can never be sent.
+/// The one placement `session.send` and `attachment.inspect` share
+/// (PROTO-CORE-API-R44).
+fn locate<'a>(
+    resolved: &'a Path,
+    workspace: &Path,
+    folder: bool,
+    path: &str,
+) -> Result<Option<&'a Path>, String> {
+    if folder && workspace.starts_with(resolved) {
+        return Err(format!("{path} holds the session's workspace"));
+    }
+    Ok(resolved.strip_prefix(workspace).ok())
+}
+
+/// Whether sending the file or folder at `path` into `workspace` (canonical,
+/// as `prepare` makes it) copies it (PROTO-CORE-API-R44): where its target
+/// lies, resolved as a send resolves it, through links, junctions and `..`. It
+/// measures nothing; a copy's size is the send's to refuse. Refused with the
+/// reason for a folder that holds the workspace. A path that no longer
+/// resolves is taken to be copied: the send judges it again.
+pub fn copies(path: &str, folder: bool, workspace: &Path) -> Result<bool, String> {
+    let Some(resolved) = named_path(path).ok().and_then(|p| fs::canonicalize(p).ok()) else {
+        return Ok(true);
+    };
+    Ok(locate(&resolved, workspace, folder, path)?.is_none())
+}
+
 /// Why `attachment.inspect` can't answer.
 #[derive(Debug, PartialEq, Eq)]
 pub enum InspectError {
@@ -801,6 +828,7 @@ pub fn inspect(path: &str, media_types: &[&'static str]) -> Result<Inspected, In
         lines: None,
         media_type: None,
         target,
+        copied: false,
     };
     if meta.is_dir() {
         return Ok(inspected);

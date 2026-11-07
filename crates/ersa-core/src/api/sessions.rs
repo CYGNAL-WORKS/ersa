@@ -8,8 +8,8 @@ use ersa_adapter::{BackendChoices, Direction, PermissionDecision, SessionConfig}
 use ersa_protocol::core_api::{
     AnswerQuestionParams, Attachment, AttachmentKind, Choice, DecidePermissionParams, Empty,
     IdParams, InspectParams, Inspected, RawDirection, RawLogEntry, RawLogParams, Session,
-    SessionCreateParams, SessionSendParams, SessionSendResult, SetModeParams, SetTitleParams,
-    SubscribeParams, SubscribeResult, WorkspaceState,
+    SessionCreateParams, SessionSendParams, SessionSendResult, SetArchivedParams, SetModeParams,
+    SetTitleParams, SubscribeParams, SubscribeResult, WorkspaceState,
 };
 use serde_json::Value;
 
@@ -118,6 +118,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         model: params.model.clone(),
         effort: params.effort.clone(),
         permission_mode: (!permission_mode.is_empty()).then(|| permission_mode.clone()),
+        archived: false,
     };
     let config = SessionConfig {
         cwd: workspace.path,
@@ -170,11 +171,26 @@ pub(super) async fn start(core: &Core, params: IdParams) -> Result<Session, ApiE
     ))
 }
 
-/// Answered like a reserved method until its milestone, whatever the id.
-pub(super) async fn resume(_: &Core, _: IdParams) -> Result<Session, ApiError> {
+/// Restarting a session is milestone M1, and until then it is answered like
+/// a reserved method, for an unknown id too. Core clears an archived
+/// session's mark only once it accepts a resume, so a refused resume leaves
+/// the session archived, as it was.
+pub(super) async fn resume(_core: &Core, _params: IdParams) -> Result<Session, ApiError> {
     Err(ApiError::invalid_state(
         "session.resume is milestone M1 and not implemented yet",
     ))
+}
+
+/// `session.set_archived`: archiving stops a live session first, as
+/// `session.stop` does.
+pub(super) async fn set_archived(
+    core: &Core,
+    params: SetArchivedParams,
+) -> Result<Session, ApiError> {
+    Ok(core
+        .sessions
+        .set_archived(&params.id, params.archived)
+        .await?)
 }
 
 pub(super) async fn stop(core: &Core, params: IdParams) -> Result<Session, ApiError> {
@@ -235,12 +251,86 @@ const INSPECT_LIMIT: Duration = Duration::from_secs(30);
 /// of Core's.
 static INSPECTING: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(8);
 
-/// `attachment.inspect` (PROTO-CORE-API-R24), on the local host: the only
-/// one Core reaches yet.
-pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspected, ApiError> {
-    if params.host_id != LOCAL_HOST_ID {
-        return Err(ApiError::not_found(format!("no host {}", params.host_id)));
+/// A workspace folder's resolution, once it is done: its canonical path, or
+/// why it can't be read.
+type Resolution = Option<Result<std::path::PathBuf, ()>>;
+
+/// The workspace folders being resolved for `attachment.inspect`, by path.
+/// Each folder is resolved by one thread at a time, which every inspect of
+/// that workspace waits on, so a workspace on a drive that stops answering
+/// holds one thread, never an inspect's place nor another workspace's answer.
+static RESOLVING: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, tokio::sync::watch::Receiver<Resolution>>>,
+> = std::sync::LazyLock::new(Default::default);
+
+/// How long `attachment.inspect` waits for a workspace folder to resolve,
+/// past which every file and folder is taken to be copied.
+const RESOLVE_LIMIT: Duration = Duration::from_secs(5);
+
+/// The workspace folder as send resolves it (`Err` when it can't be read),
+/// or `None` when it does not answer in time.
+async fn resolve_workspace(path: String) -> Option<Result<std::path::PathBuf, ()>> {
+    let mut resolution = {
+        let mut resolving = RESOLVING.lock().expect("resolving lock");
+        match resolving.get(&path) {
+            // Already being resolved: wait on that one.
+            Some(rx) => rx.clone(),
+            None => {
+                let (tx, rx) = tokio::sync::watch::channel(None);
+                resolving.insert(path.clone(), rx.clone());
+                tokio::task::spawn_blocking(move || {
+                    let resolved = std::fs::canonicalize(&path).map_err(|_| ());
+                    let _ = tx.send(Some(resolved));
+                    RESOLVING.lock().expect("resolving lock").remove(&path);
+                });
+                rx
+            }
+        }
+    };
+    let done = tokio::time::timeout(RESOLVE_LIMIT, resolution.wait_for(Option::is_some)).await;
+    match done {
+        Ok(Ok(resolved)) => resolved.clone(),
+        _ => None,
     }
+}
+
+/// `attachment.inspect` (PROTO-CORE-API-R24, R44), on the local host: the
+/// only one Core reaches yet. With a workspace, it also answers whether
+/// sending would copy the path, by send's own decision.
+pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspected, ApiError> {
+    // A workspace reads the path on its own host.
+    let (host, workspace) = match (params.workspace_id, params.host_id) {
+        (Some(id), None) => {
+            let workspace = core
+                .store
+                .workspace(id.clone())
+                .await?
+                .ok_or_else(|| ApiError::not_found(format!("no workspace {id}")))?;
+            let project = core
+                .store
+                .project(workspace.project_id.clone())
+                .await?
+                .ok_or_else(|| {
+                    ApiError::not_found(format!("no project {}", workspace.project_id))
+                })?;
+            (project.host_id, Some(workspace.path))
+        }
+        (None, Some(host)) => (host, None),
+        _ => {
+            return Err(ApiError::invalid_params(
+                "name either the workspace or the host, not both",
+            ));
+        }
+    };
+    if host != LOCAL_HOST_ID {
+        return Err(ApiError::not_found(format!("no host {host}")));
+    }
+    // Resolved before a place is taken. `Some(None)`: a workspace that did
+    // not resolve in time, whose files and folders are taken to be copied.
+    let workspace = match workspace {
+        Some(path) => Some(resolve_workspace(path).await),
+        None => None,
+    };
     let images = core.sessions.image_types();
     let path = params.path;
     let place = INSPECTING.try_acquire().map_err(|_| {
@@ -249,20 +339,65 @@ pub(super) async fn inspect(core: &Core, params: InspectParams) -> Result<Inspec
         )
     })?;
     // A blocking thread: a network drive that no longer answers holds that
-    // thread, never the request, which is answered at the limit.
-    let job = tokio::task::spawn_blocking(move || {
+    // thread, never the request, which is answered at the limit. The path is
+    // read and answered first, then whether sending copies it is judged, so a
+    // judgment that runs long never fails a path that was read; one deadline
+    // covers both.
+    let deadline = tokio::time::Instant::now() + INSPECT_LIMIT;
+    let (read_tx, read_rx) = tokio::sync::oneshot::channel();
+    let (judged_tx, judged_rx) = tokio::sync::oneshot::channel();
+    let judging = match &workspace {
+        Some(Some(Ok(resolved))) => Some(resolved.clone()),
+        _ => None,
+    };
+    let judged_path = path.clone();
+    tokio::task::spawn_blocking(move || {
         let _place = place;
-        attachments::inspect(&path, &images)
+        let read = attachments::inspect(&path, &images);
+        let kind = match &read {
+            Ok(i) if i.kind != AttachmentKind::Image => Some(i.kind),
+            _ => None,
+        };
+        let _ = read_tx.send(read);
+        if let (Some(kind), Some(workspace)) = (kind, judging) {
+            let folder = kind == AttachmentKind::Folder;
+            let _ = judged_tx.send(attachments::copies(&judged_path, folder, &workspace));
+        }
     });
-    match tokio::time::timeout(INSPECT_LIMIT, job).await {
-        Ok(Ok(Ok(inspected))) => Ok(inspected),
-        Ok(Ok(Err(InspectError::NotFound(message)))) => Err(ApiError::not_found(message)),
-        Ok(Ok(Err(InspectError::Invalid(message)))) => Err(ApiError::invalid_params(message)),
-        Ok(Err(e)) => Err(ApiError::internal(format!("inspecting failed: {e}"))),
-        Err(_) => Err(ApiError::invalid_params(format!(
-            "the path did not answer within {INSPECT_LIMIT:?}"
-        ))),
-    }
+    let mut inspected = match tokio::time::timeout_at(deadline, read_rx).await {
+        Ok(Ok(Ok(inspected))) => inspected,
+        Ok(Ok(Err(InspectError::NotFound(message)))) => return Err(ApiError::not_found(message)),
+        Ok(Ok(Err(InspectError::Invalid(message)))) => {
+            return Err(ApiError::invalid_params(message));
+        }
+        Ok(Err(e)) => return Err(ApiError::internal(format!("inspecting failed: {e}"))),
+        Err(_) => {
+            return Err(ApiError::invalid_params(format!(
+                "the path did not answer within {INSPECT_LIMIT:?}"
+            )));
+        }
+    };
+    // An image goes inline, never copied; given a host, as for a new workspace
+    // not made yet, every file and folder is. Where the workspace itself can't
+    // be read, or did not resolve in time, or the judgment is not done by the
+    // deadline, it is taken to be a copy, so the note never says one won't
+    // happen when it may; the send judges it again. A folder holding the
+    // workspace is refused (PROTO-CORE-API-R44).
+    inspected.copied = match (&inspected.kind, &workspace) {
+        (AttachmentKind::Image, _) => false,
+        (_, None) | (_, Some(None)) | (_, Some(Some(Err(_)))) => true,
+        (_, Some(Some(Ok(_)))) => match tokio::time::timeout_at(deadline, judged_rx).await {
+            Ok(Ok(Ok(copied))) => copied,
+            Ok(Ok(Err(reason))) => {
+                return Err(ApiError::new(
+                    ersa_protocol::core_api::ErrorKind::AttachmentRefused,
+                    reason,
+                ));
+            }
+            _ => true,
+        },
+    };
+    Ok(inspected)
 }
 
 pub(super) async fn interrupt(core: &Core, params: IdParams) -> Result<Session, ApiError> {

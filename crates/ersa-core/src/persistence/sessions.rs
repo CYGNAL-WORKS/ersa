@@ -1,4 +1,5 @@
-//! Sessions: what finds each one again in its backend, and its mode.
+//! Sessions: what finds each one again in its backend, its mode, and the
+//! user's arrangement of it (ADR 0026).
 //!
 //! A session's history is the backend's own session record (ADR 0017), and
 //! so are its title and when it began. Nothing projected is stored here, and
@@ -31,10 +32,13 @@ pub struct SessionRow {
     /// The workspace's path on the session's host, where the backend runs:
     /// the directory its record is filed under. Read from the workspace.
     pub cwd: String,
+    /// Whether the user archived the session (ADR 0026). A new session is
+    /// not archived, so `insert_session` leaves it to the column's default.
+    pub archived: bool,
 }
 
 const SESSION_COLUMNS: &str = "s.id, s.workspace_id, s.host_id, s.backend, s.backend_session_id, \
-     s.mode, w.path, s.model, s.effort, s.permission_mode";
+     s.mode, w.path, s.model, s.effort, s.permission_mode, s.archived";
 
 impl Store {
     /// Records a new session, but only while its workspace is `ready`, in
@@ -129,6 +133,18 @@ impl Store {
         .await
     }
 
+    /// Marks the session archived, or not (ADR 0026).
+    pub async fn set_session_archived(&self, id: String, archived: bool) -> Result<()> {
+        self.call(move |conn| {
+            conn.execute(
+                "UPDATE sessions SET archived = ?2 WHERE id = ?1",
+                params![id, archived],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
     /// Forgets a session. Its record is the backend's, and stays.
     pub async fn delete_session(&self, id: String) -> Result<()> {
         self.call(move |conn| {
@@ -164,5 +180,8 @@ fn session_row(row: &Row) -> rusqlite::Result<SessionRow> {
         model: row.get(7)?,
         effort: row.get(8)?,
         permission_mode: row.get(9)?,
+        // SQLite has no boolean type: the column holds 0 or 1, which
+        // rusqlite reads as a `bool`.
+        archived: row.get(10)?,
     })
 }

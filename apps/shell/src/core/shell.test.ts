@@ -11,6 +11,7 @@ const inState = (id: string, state: Session["tile"]["state"]): Session => ({
   permission_mode: "default",
   state,
   created_at: "2026-11-01T09:00:00.000Z",
+  archived: false,
   tile: { state, pending: [] },
 });
 
@@ -30,6 +31,7 @@ function fakes(listed: Session[] | Error | "never", wasHidden = true) {
     hide: vi.fn(async () => {}),
     quit: vi.fn(async () => {}),
     pickFolder: vi.fn(async () => null),
+    pickFiles: vi.fn(async () => []),
   };
   return { client, shell };
 }

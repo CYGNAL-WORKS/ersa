@@ -1,0 +1,35 @@
+/* Attach and its menu (docs/design/COMPOSER.md, The attach menu): a chip's list (Chip.css) that opens upward from
+   attach, space-xs above it, and below it only where the window has no room above. */
+
+.attach-root {
+  position: relative;
+  display: inline-flex;
+}
+
+/* Open, attach is pressed and reads ink, whatever the pointer does. */
+.icon-button.composer-attach[aria-expanded="true"] {
+  color: var(--color-ink);
+  background: var(--material-pressed);
+}
+
+.chip-list.attach-menu {
+  position-area: block-start span-inline-end;
+  animation-name: attach-menu-in;
+}
+
+/* It slides space-xs toward its place: up from attach. */
+@keyframes attach-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-xs));
+  }
+}
+
+/* The note beneath the choices: attachments can also be pasted or dropped. It widens the menu up to size-menu, then wraps. */
+.attach-menu-note {
+  margin: 0;
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  color: var(--color-ink-faint);
+}

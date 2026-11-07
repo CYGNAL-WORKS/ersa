@@ -133,7 +133,7 @@ describe("starting a session from the new-session screen", () => {
       ok: true,
       session: { id: "s1", state: "starting" },
       workspace: { id: "w-new" },
-      firstSend: { message: "the session is still starting; try again shortly", giveBack: true },
+      firstSend: { sending: { state: "failed", message: "the session is still starting; try again shortly" }, giveBack: true },
     });
     expect(methods()).not.toContain("session.stop");
     expect(methods()).not.toContain("workspace.remove");
@@ -176,7 +176,7 @@ describe("starting a session from the new-session screen", () => {
       },
     });
     const outcome = await startSession(client, values("isolated"), "Fix the build");
-    expect(outcome).toMatchObject({ ok: true, firstSend: { message: "Core is not connected.", giveBack: true } });
+    expect(outcome).toMatchObject({ ok: true, firstSend: { sending: { state: "failed", message: "Core is not connected." }, giveBack: true } });
     expect(methods()).not.toContain("session.remove");
   });
 
@@ -312,5 +312,32 @@ describe("the values remembered for a project", () => {
     expect(lastUsedFrom({ new_session: { last_used: { p1: { workspace: "elsewhere" }, p2: values("root") } } })).toEqual({
       p2: { ...values("root"), project_id: "p2" },
     });
+  });
+});
+
+describe("a first message with attachments", () => {
+  // verifies: FLOW-SEND-MESSAGE-R13
+  it("sends them with the first message", async () => {
+    const { client, calls } = fakeClient(working);
+    await startSession(client, values("isolated"), "Look", undefined, [{ kind: "folder", path: "D:\p\src" }]);
+    expect(calls.find((c) => c.method === "session.send")?.params).toEqual({ id: "s1", text: "Look", attachments: [{ kind: "folder", path: "D:\p\src" }] });
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R10
+  // verifies: FLOW-SEND-MESSAGE-R15
+  it("keeps the session and says which attachment Core refused, or that Ersa can't tell where the message went", async () => {
+    const refused: BridgeError = { kind: "rpc", error: { code: -32000, message: "session.send: refused", data: { kind: "attachment_refused", detail: "Too large.", index: 0 } } };
+    const alive = { "session.list": () => [{ id: "s1", state: "idle" }] };
+    const a = await startSession(fakeClient({ ...working, ...alive, "session.send": () => Promise.reject(refused) }).client, values("isolated"), "Look", undefined, [{ kind: "image", path: "D:\big.png" }]);
+    expect(a).toMatchObject({ ok: true, firstSend: { sending: { state: "failed", message: "Too large.", index: 0 }, giveBack: true } });
+    const lost: BridgeError = { kind: "unavailable", message: "Ersa got no answer in time.", sent: true };
+    const b = await startSession(fakeClient({ ...working, ...alive, "session.send": () => Promise.reject(lost) }).client, values("isolated"), "Look");
+    expect(b).toMatchObject({ ok: true, firstSend: { sending: { state: "unknown" }, giveBack: true } });
+    // Handed over just before the backend stopped: the session is kept, though it reads as an error.
+    const handed: BridgeError = { kind: "rpc", error: { code: -32000, message: "session.send: handed over", data: { kind: "delivery_unknown" } } };
+    const stopped = fakeClient({ ...working, "session.list": () => [{ id: "s1", state: "error" }], "session.send": () => Promise.reject(handed) });
+    const c = await startSession(stopped.client, values("isolated"), "Look");
+    expect(c).toMatchObject({ ok: true, firstSend: { sending: { state: "unknown" } } });
+    expect(stopped.methods()).not.toContain("session.remove");
   });
 });

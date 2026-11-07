@@ -148,6 +148,12 @@ export type Request =
   | {
       jsonrpc: "2.0";
       id: RequestId;
+      method: "session.set_archived";
+      params: SessionSetArchivedParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
       method: "session.send";
       params: SessionSendParams;
     }
@@ -292,6 +298,18 @@ export type Attachment =
       media_type: string;
       data: string;
     };
+export type AttachmentInspectParams = AttachmentInspectParams1 & AttachmentInspectParams2;
+export type AttachmentInspectParams1 = {
+  [k: string]: unknown | undefined;
+};
+/**
+ * An identifier Core issues.
+ */
+export type Id1 = string;
+/**
+ * An identifier Core issues.
+ */
+export type Id2 = string;
 /**
  * Core's answer to one request. Validate `result` against the `<method>.result` definition of the request's method.
  */
@@ -486,6 +504,13 @@ export interface SessionResumeParams {
 export interface SessionRemoveParams {
   id: Id;
 }
+export interface SessionSetArchivedParams {
+  id: Id;
+  /**
+   * Archiving stops a live session first, as session.stop does.
+   */
+  archived: boolean;
+}
 export interface SessionSendParams {
   id: Id;
   text: string;
@@ -497,9 +522,10 @@ export interface SessionSendParams {
 export interface SessionInterruptParams {
   id: Id;
 }
-export interface AttachmentInspectParams {
-  host_id: Id;
+export interface AttachmentInspectParams2 {
   path: string;
+  workspace_id?: Id1;
+  host_id?: Id2;
 }
 export interface SessionDecidePermissionParams {
   id: Id;
@@ -801,6 +827,10 @@ export interface Session {
   last_event_seq?: number;
   tile: Tile;
   sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
 }
 export interface RawLogEntry {
   index: number;
@@ -969,6 +999,10 @@ export interface Session1 {
   last_event_seq?: number;
   tile: Tile;
   sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
 }
 export interface Session2 {
   id: Id;
@@ -997,6 +1031,10 @@ export interface Session2 {
   last_event_seq?: number;
   tile: Tile;
   sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
 }
 export interface Session3 {
   id: Id;
@@ -1025,6 +1063,10 @@ export interface Session3 {
   last_event_seq?: number;
   tile: Tile;
   sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
 }
 export interface Session4 {
   id: Id;
@@ -1053,6 +1095,10 @@ export interface Session4 {
   last_event_seq?: number;
   tile: Tile;
   sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
 }
 export interface Session5 {
   id: Id;
@@ -1081,12 +1127,10 @@ export interface Session5 {
   last_event_seq?: number;
   tile: Tile;
   sending?: SendPhase1;
-}
-export interface SessionSendResult {
   /**
-   * The turn the message starts or joins; absent when Core has not projected the message yet.
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
    */
-  turn?: number;
+  archived: boolean;
 }
 export interface Session6 {
   id: Id;
@@ -1115,27 +1159,16 @@ export interface Session6 {
   last_event_seq?: number;
   tile: Tile;
   sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
 }
-export interface AttachmentInspectResult {
-  path: string;
-  name: string;
-  kind: "file" | "image" | "folder";
+export interface SessionSendResult {
   /**
-   * For a file or image.
+   * The turn the message starts or joins; absent when Core has not projected the message yet.
    */
-  size_bytes?: number;
-  /**
-   * A text file's line count, for one of at most 10 MB.
-   */
-  lines?: number;
-  /**
-   * For an image, told by its first bytes.
-   */
-  media_type?: string;
-  /**
-   * Where a link points.
-   */
-  target?: string;
+  turn?: number;
 }
 export interface Session7 {
   id: Id;
@@ -1164,6 +1197,35 @@ export interface Session7 {
   last_event_seq?: number;
   tile: Tile;
   sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
+}
+export interface AttachmentInspectResult {
+  path: string;
+  name: string;
+  kind: "file" | "image" | "folder";
+  /**
+   * For a file or image.
+   */
+  size_bytes?: number;
+  /**
+   * A text file's line count, for one of at most 10 MB.
+   */
+  lines?: number;
+  /**
+   * For an image, told by its first bytes.
+   */
+  media_type?: string;
+  /**
+   * Where a link points.
+   */
+  target?: string;
+  /**
+   * Whether a send would copy it into the workspace's scratch folder: true for a file or folder whose target, resolved as a send resolves it, is outside workspace_id, or for any file or folder given a host_id; false for an image, which goes inline, and for a path inside the workspace.
+   */
+  copied: boolean;
 }
 export interface Session8 {
   id: Id;
@@ -1192,6 +1254,10 @@ export interface Session8 {
   last_event_seq?: number;
   tile: Tile;
   sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
 }
 export interface Session9 {
   id: Id;
@@ -1220,6 +1286,10 @@ export interface Session9 {
   last_event_seq?: number;
   tile: Tile;
   sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
 }
 export interface Session10 {
   id: Id;
@@ -1248,6 +1318,42 @@ export interface Session10 {
   last_event_seq?: number;
   tile: Tile;
   sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
+}
+export interface Session11 {
+  id: Id;
+  workspace_id: Id;
+  host_id: Id;
+  backend: string;
+  /**
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   */
+  model?: string;
+  /**
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   */
+  effort?: string;
+  /**
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
+   */
+  permission_mode: string;
+  mode?: string;
+  title?: string;
+  state: AgentEvents.SessionState["state"];
+  created_at: string;
+  /**
+   * Absent when the session has no events yet.
+   */
+  last_event_seq?: number;
+  tile: Tile;
+  sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
 }
 export interface SessionSubscribeResult {
   /**
@@ -1330,6 +1436,7 @@ export type SessionStartResult = Session;
 export type SessionStopResult = Session;
 export type SessionResumeResult = Session;
 export type SessionRemoveResult = Session;
+export type SessionSetArchivedResult = Session;
 export type SessionInterruptResult = Session;
 export type SessionDecidePermissionResult = Session;
 export type SessionAnswerQuestionResult = Session;
@@ -1360,6 +1467,7 @@ export interface CoreApiMethods {
   "session.stop": { params: SessionStopParams; result: SessionStopResult };
   "session.resume": { params: SessionResumeParams; result: SessionResumeResult };
   "session.remove": { params: SessionRemoveParams; result: SessionRemoveResult };
+  "session.set_archived": { params: SessionSetArchivedParams; result: SessionSetArchivedResult };
   "session.send": { params: SessionSendParams; result: SessionSendResult };
   "session.interrupt": { params: SessionInterruptParams; result: SessionInterruptResult };
   "attachment.inspect": { params: AttachmentInspectParams; result: AttachmentInspectResult };
