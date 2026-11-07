@@ -15,7 +15,7 @@ afterEach(cleanup);
 const draw = (transcript: Shown) =>
   render(createElement(Transcript, { title: "Attachments", view: { id: "s1", transcript, stream: { state: "live" } }, onDecide: () => {} }));
 
-const replayed = () => events("07-attachments").reduce(apply, emptyTranscript);
+const replayed = () => events("2.1.316-07-attachments").reduce(apply, emptyTranscript);
 
 describe("a message's attachments in the transcript", () => {
   // verifies: FLOW-SEND-MESSAGE-R11
@@ -24,7 +24,7 @@ describe("a message's attachments in the transcript", () => {
     const bubbles = screen.getAllByRole("group", { name: "You" });
     const first = bubbles[0] as HTMLElement;
     const list = within(first).getByRole("list", { name: "Attachments" });
-    const image = within(list).getByRole("img", { name: "Attached image" }) as HTMLImageElement;
+    const image = within(list).getByRole("img", { name: "Attached image 1 of 1" }) as HTMLImageElement;
     expect(image.src).toMatch(/^data:image\/png;base64,iVBOR/);
     const named = within(list).getAllByRole("listitem").filter((li) => li.querySelector("img") === null);
     expect(named.map((li) => [li.textContent, li.getAttribute("title")])).toEqual([
@@ -45,7 +45,8 @@ describe("a message's attachments in the transcript", () => {
     expect(alone.querySelector(".transcript-text")).toBeNull();
   });
 
-  it("shows only an image's own kinds as images", () => {
+  // verifies: FLOW-SEND-MESSAGE-R11
+  it("shows an image of a kind the window does not show as one by name, still there", () => {
     const envelope: Envelope = {
       v: EVENT_VERSION,
       session_id: "s1",
@@ -56,5 +57,6 @@ describe("a message's attachments in the transcript", () => {
     };
     draw(apply(emptyTranscript, envelope));
     expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByRole("listitem").textContent).toBe("Attached image 1 of 1");
   });
 });

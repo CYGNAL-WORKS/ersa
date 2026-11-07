@@ -74,12 +74,12 @@ fn fixture(name: &str) -> PathBuf {
     fixtures.join(format!("{named}.jsonl"))
 }
 
-/// Where the capture of fixture `name` is kept: by the fixture's own name.
+/// Where the capture of fixture `name` is kept: by its name, and another
+/// version's by `<version>-<name>`, so two versions' fixtures never share one.
 fn capture_path(name: &str) -> PathBuf {
-    let own = name.rsplit('/').next().unwrap_or(name);
     repo_root()
         .join("apps/shell/src/session/replays")
-        .join(format!("{own}.json"))
+        .join(format!("{}.json", name.replace('/', "-")))
 }
 
 /// Serves `name` and returns what the Interface sees of it: the session
@@ -346,7 +346,6 @@ async fn permission_capture_is_current() {
 }
 
 // verifies: ARCH-CORE-R11
-// verifies: FLOW-SEND-MESSAGE-R11
 #[tokio::test]
 async fn attachments_capture_is_current() {
     check("2.1.316/07-attachments").await;
