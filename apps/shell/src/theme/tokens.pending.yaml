@@ -1,0 +1,3 @@
+size:
+  # The largest an attached image shows in the transcript, either way; it keeps its proportions.
+  attachment-image: 224px

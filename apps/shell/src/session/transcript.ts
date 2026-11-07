@@ -16,8 +16,12 @@ import type {
 export const EVENT_VERSION: Envelope["v"] = 4;
 
 /** One block of the transcript. `key` is stable while the block changes, so it updates in place. */
+/** What came with a user's message, as the event carries it (PROTO-AGENT-EVENTS, user.message). */
+export type MessageAttachment = NonNullable<Extract<Envelope["event"], { type: "user.message" }>["attachments"]>[number];
+
 export type Item =
-  | { kind: "user"; key: string; text: string }
+  /** The user's words, and what came with them in the order sent (FLOW-SEND-MESSAGE-R11). */
+  | { kind: "user"; key: string; text: string; attachments?: MessageAttachment[] }
   /** The agent's words. Several events share a block and grow its text until one is `final`. */
   | { kind: "assistant"; key: string; text: string; final: boolean }
   | { kind: "thinking"; key: string; summary?: string; final: boolean }
@@ -87,7 +91,12 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
     case "session.notice":
       return add(next, { kind: "notice", key: `notice:${envelope.seq}`, message: event.message });
     case "user.message":
-      return add(next, { kind: "user", key: `user:${envelope.seq}`, text: event.text });
+      return add(next, {
+        kind: "user",
+        key: `user:${envelope.seq}`,
+        text: event.text,
+        ...(event.attachments?.length ? { attachments: event.attachments } : {}),
+      });
     case "assistant.text":
       return put(next, { kind: "assistant", key: `text:${event.block_id}`, text: event.text, final: event.final });
     case "assistant.thinking":
