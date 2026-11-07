@@ -55,6 +55,6 @@ The composer sends words with Enter, keeps what was typed meanwhile (R01, R02), 
 
 ## Changes
 
-- 2026-11-07: R14 reworded to say what "from outside" always meant: a file or folder judged by its target, as Core reports it in `attachment.inspect`'s `copied` (PROTO-CORE-API-R44). Meaning kept.
+- 2026-11-07: R14 reworded to say what "from outside" always meant: a file or folder judged by its target, as Core reports it in `attachment.inspect`'s `copied` (PROTO-CORE-API-R44); a link inside the workspace whose target is outside it now gets the note, as it is copied. No requirement IDs changed.
 - 2026-11-05: from #173 merge review, before any of it shipped: stop is offered from the moment of sending and cancels a send that hasn't reached the agent (R03 reworded); a refused attachment is marked itself (R10); an outside attachment says where it will be copied (R14); a send whose outcome Ersa can't tell says so (R15); a copy shows its progress (R16); refusing likely secrets is an open question.
 - 2026-11-05: created ready from the owner's composer mockup and decisions: send and stop, a refused message kept with its reason, the composer unavailable while Ersa can't reach the sessions, and attachments (the attach menu, paste and drop, removable, images inline and files as paths, copied into the scratch folder from outside the workspace). FLOW-SEND-MESSAGE-R01 to R14 added; R01 and R02 describe what is built.
