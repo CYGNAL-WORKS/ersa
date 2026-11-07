@@ -167,8 +167,9 @@ impl Store {
 
     /// Marks the session deleting, `running`, and records whether the delete
     /// takes the workspace's files: `files` the first time, and after that
-    /// only ever narrowed, so files once to stay still stay. Returns what is
-    /// recorded.
+    /// only ever narrowed, so files once to stay still stay. When the record
+    /// says they go, the workspace's state becomes `error` in the same
+    /// transaction, so no session can start in it. Returns what is recorded.
     pub async fn mark_session_deleting(&self, id: String, files: bool) -> Result<bool> {
         self.call(move |conn| {
             let tx = conn.transaction()?;
@@ -184,6 +185,13 @@ impl Store {
                 [&id],
                 |row| row.get(0),
             )?;
+            if recorded {
+                tx.execute(
+                    "UPDATE workspaces SET state = 'error'
+                     WHERE id = (SELECT workspace_id FROM sessions WHERE id = ?1)",
+                    [&id],
+                )?;
+            }
             tx.commit()?;
             Ok(recorded)
         })
