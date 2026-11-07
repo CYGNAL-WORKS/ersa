@@ -35,6 +35,8 @@ describe("a chip as a pill (docs/design/COMPOSER.md, The session controls)", () 
     expect(shown).not.toContain("chip-chevron");
     expect(shown).toMatch(/<button[^>]*disabled/);
     expect(shown).toContain("data-read-only");
+    // It opens nothing, so it names no list to assistive technology.
+    expect(shown).not.toContain("aria-haspopup");
     expect(shown).toContain("Alpha");
   });
 
@@ -47,6 +49,8 @@ describe("a chip as a pill (docs/design/COMPOSER.md, The session controls)", () 
   it("reads a placeholder that invites the user, such as Choose a folder, in ink", () => {
     expect(html({ value: undefined, placeholder: "Choose a folder", invites: true })).toContain("data-invites");
     expect(html({ value: undefined, placeholder: "No backend" })).not.toContain("data-invites");
+    // Once a value is chosen it reads as any chip does.
+    expect(html({ placeholder: "Choose a folder", invites: true })).not.toContain("data-invites");
     // Unavailable, as while the first folder is added, it reads ink-faint like any chip.
     expect(html({ value: undefined, placeholder: "Choose a folder", invites: true, disabled: true })).not.toContain("data-invites");
   });

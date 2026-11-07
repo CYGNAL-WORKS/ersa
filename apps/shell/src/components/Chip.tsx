@@ -243,15 +243,15 @@ export function Chip({ name, icon, prefix, value, reads, placeholder, problem, p
         type="button"
         className="chip"
         aria-label={`${name}: ${shown}`}
-        aria-haspopup="listbox"
-        aria-expanded={open}
+        // A read-only chip shows a value and opens nothing, so it names no list.
+        aria-haspopup={readOnly ? undefined : "listbox"}
+        aria-expanded={readOnly ? undefined : open}
         aria-controls={open ? listId : undefined}
         data-force={force}
         data-open={open || undefined}
-        data-pending={pending || undefined}
         data-read-only={readOnly || undefined}
         // Unavailable, it reads ink-faint like any chip.
-        data-invites={(invites && chosen === undefined && !disabled) || undefined}
+        data-invites={(invites && chosen === undefined && !disabled && !readOnly) || undefined}
         style={{ anchorName: anchor } as CSSProperties}
         disabled={disabled || readOnly}
         onClick={() => (open ? setOpen(false) : show())}
