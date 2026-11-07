@@ -139,9 +139,15 @@ async fn finish(
                 // longer `ready`, so no new session starts in it while the
                 // claim is gone (`workspace.remove` takes it from `error`).
                 if !e.is_refusal() {
-                    core.store
+                    let marked = core
+                        .store
                         .set_workspace_state(workspace.id.clone(), WorkspaceState::Error)
-                        .await?;
+                        .await;
+                    // The git failure is the cause to report; a store that
+                    // also failed is logged.
+                    if let Err(store) = marked {
+                        tracing::error!(workspace = %workspace.id, error = %store, "could not mark a workspace error");
+                    }
                 }
                 return Err(e.into());
             }
@@ -189,17 +195,9 @@ async fn files_taken(core: &Core, workspace: &Workspace) -> bool {
     let Some(transport) = core.transport_for(&project.host_id) else {
         return false;
     };
-    let listed =
-        workspace::git_worktree_listed(transport.as_ref(), &project.path, &workspace.path).await;
-    if !matches!(listed, Ok(false)) {
-        return false;
-    }
-    let path = workspace.path.clone();
-    let look = tokio::task::spawn_blocking(move || std::path::Path::new(&path).try_exists());
-    matches!(
-        tokio::time::timeout(std::time::Duration::from_secs(5), look).await,
-        Ok(Ok(Ok(false)))
-    )
+    let gone =
+        workspace::git_worktree_gone(transport.as_ref(), &project.path, &workspace.path).await;
+    matches!(gone, Ok(true))
 }
 
 /// The refusal for a session another process has open, or may have.
