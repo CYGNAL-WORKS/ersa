@@ -284,6 +284,27 @@ const twoTurns: Event[] = [
   { type: "user.message", origin: "human", text: "Now delete probe.txt." },
   { type: "assistant.text", block_id: "m3/0", text: "Deleted. probe.txt no longer exists.", final: true },
 ];
+// FLOW-SEND-MESSAGE-R11: a message with an image, a file and a folder, then one of a file alone. The image is a
+// drawn mockup, wider than tall, so it shows at the largest size either way.
+const mockup = btoa(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300"><rect width="480" height="300" fill="lavender"/>' +
+    '<rect x="24" y="24" width="120" height="252" rx="8" fill="lightsteelblue"/><rect x="168" y="24" width="288" height="40" rx="8" fill="white"/>' +
+    '<rect x="168" y="236" width="288" height="40" rx="8" fill="royalblue"/></svg>',
+);
+const withAttachments: Event[] = [
+  {
+    type: "user.message",
+    origin: "human",
+    text: "Make the composer match this mockup.",
+    attachments: [
+      { kind: "image", media_type: "image/svg+xml", data: mockup },
+      { kind: "file", path: "docs/design/COMPOSER.md" },
+      { kind: "folder", path: "apps/shell/src/components" },
+    ],
+  },
+  { type: "assistant.text", block_id: "m1/0", text: "I'll start with the attachments above the words.", final: true },
+  { type: "user.message", origin: "human", text: "", attachments: [{ kind: "file", path: "docs/design/DESIGN.md" }] },
+];
 // A path with no break in it, which must wrap inside the bubble rather than widen it.
 const longPath: Event[] = [
   {
@@ -330,6 +351,7 @@ const transcriptStates: [string, SessionView, answers?: Record<string, Answer>][
   ["Answered", sessionView(answered)],
   ["Two turns", sessionView(twoTurns)],
   ["Long path", sessionView(longPath)],
+  ["Attachments", sessionView(withAttachments)],
   ["Failed", sessionView(failing)],
   ["Not receiving events", sessionView([], { stream: { state: "failed", message: "Core closed the connection" } })],
 ];
