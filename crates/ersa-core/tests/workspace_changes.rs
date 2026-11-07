@@ -102,8 +102,17 @@ async fn counts_uncommitted_files_untracked_included_and_ignored_entries() {
     write(&folder.join("a.txt"), "a\n");
     write(&folder.join("notes/b.txt"), "b\n");
     write(&folder.join("notes/c.txt"), "c\n");
-    // A tracked file deleted from the folder leaves nothing in it to lose.
+    // A tracked file deleted from the folder leaves nothing in it to lose;
+    // one staged and then deleted leaves its staged content in the index,
+    // which goes with the workspace.
     std::fs::remove_file(folder.join("old.txt")).unwrap();
+    write(
+        &folder.join("gone.txt"),
+        "staged, then deleted
+",
+    );
+    git(&folder, &["add", "gone.txt"]);
+    std::fs::remove_file(folder.join("gone.txt")).unwrap();
     // Ignored: a file, a wholly ignored folder as one, and an ignored file
     // in an untracked folder.
     write(&folder.join("x.log"), "x\n");
@@ -112,7 +121,7 @@ async fn counts_uncommitted_files_untracked_included_and_ignored_entries() {
     write(&folder.join("notes/d.log"), "d\n");
 
     let found = changes(&mut client, &workspace).await;
-    assert_eq!(counts(&found), [5, 3, 0, 0, 0], "{found}");
+    assert_eq!(counts(&found), [6, 3, 0, 0, 0], "{found}");
 }
 
 // verifies: PROTO-CORE-API-R38
@@ -294,19 +303,63 @@ async fn a_half_removed_workspace_is_counted_for_what_is_left() {
 
 // verifies: PROTO-CORE-API-R38
 #[tokio::test(flavor = "multi_thread")]
-async fn a_folder_git_does_not_list_is_refused() {
+async fn files_left_after_git_forgot_the_worktree_all_count() {
+    let (core, mut client) = setup().await;
+    let repo = repo_with_ignores(core.dir.path());
+    // Committed, and with no line ending for git to convert, so it is
+    // unchanged against the repository's own index on every platform.
+    write(&repo.join("same.txt"), "same");
+    git(&repo, &["add", "same.txt"]);
+    commit(&repo, "same");
+    let (workspace, folder) = workspace_of(&mut client, &repo).await;
+    write(
+        &folder.join("a.txt"),
+        "a
+",
+    );
+    write(
+        &folder.join("x.log"),
+        "x
+",
+    );
+    // A removal that failed on Windows: git deleted its record of the
+    // worktree, and a file it could not delete is left with the rest.
+    let name = folder.file_name().unwrap();
+    std::fs::remove_dir_all(repo.join(".git").join("worktrees").join(name)).unwrap();
+    std::fs::remove_file(folder.join("old.txt")).unwrap();
+    // git cannot say which were committed, so every file left counts:
+    // README.md, .gitignore, same.txt and a.txt (git never lists the
+    // `.git` file); ignored ones are still ignored.
+    let found = changes(&mut client, &workspace).await;
+    assert_eq!(counts(&found), [4, 1, 0, 0, 0], "{found}");
+}
+
+// verifies: PROTO-CORE-API-R38
+#[tokio::test(flavor = "multi_thread")]
+async fn a_worktree_recorded_with_relative_paths_is_found() {
     let (core, mut client) = setup().await;
     let repo = core.dir.path().join("repo");
     git_repo(&repo);
+    // git 2.48 and later then write the record's `gitdir` relative to it;
+    // older versions ignore the setting.
+    git(&repo, &["config", "worktree.useRelativePaths", "true"]);
     let (workspace, folder) = workspace_of(&mut client, &repo).await;
-    // git forgets the worktree, leaving its folder: git can no longer say
-    // what in it is uncommitted.
-    let name = folder.file_name().unwrap();
-    std::fs::remove_dir_all(repo.join(".git").join("worktrees").join(name)).unwrap();
-    let error = client
-        .error("workspace.changes", json!({ "id": workspace["id"] }))
-        .await;
-    assert_eq!(kind(&error), "vcs_error", "{error}");
+    git(&folder, &["checkout", "--quiet", "--detach"]);
+    commit(&folder, "detached");
+    write(
+        &folder.join("a.txt"),
+        "a
+",
+    );
+    assert_eq!(
+        counts(&changes(&mut client, &workspace).await),
+        [1, 0, 1, 1, 0]
+    );
+    std::fs::remove_dir_all(&folder).unwrap();
+    assert_eq!(
+        counts(&changes(&mut client, &workspace).await),
+        [0, 0, 1, 1, 0]
+    );
 }
 
 // verifies: PROTO-CORE-API-R38
