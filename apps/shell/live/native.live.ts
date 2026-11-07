@@ -1,9 +1,9 @@
 import path from "node:path";
 import { expect, test } from "./harness";
 
-// The harness answers what Playwright cannot reach (#207): a system dialog and a drop from the file manager. No screen
-// of Ersa opens a dialog or takes a drop yet, so the window's own script asks, exactly as the Interface does through
-// Tauri's API, and the check reads what the window received.
+// The harness answers what Playwright cannot reach (#207): a system dialog and a drop from the file manager. Here the
+// window's own script asks, exactly as the Interface does through Tauri's API, and the check reads what the window
+// received; attach.live.ts and paste-drop.live.ts drive the composer's own dialogs and drops.
 
 test("a system dialog is answered from the test", async ({ ersa }) => {
   const { page } = ersa;

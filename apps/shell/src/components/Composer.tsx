@@ -1,7 +1,8 @@
 import { ArrowUp, Square, X } from "lucide-react";
-import { type KeyboardEvent, type ReactNode, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { t } from "../catalog";
-import { type Attached, addAll, same, willCopy } from "../session/attachments";
+import type { ShellControl } from "../core/shell";
+import { type Attached, addAll, pastedImage, same, willCopy } from "../session/attachments";
 import type { Sending } from "../session/follow";
 import { type AttachWhat, AttachMenu } from "./AttachMenu";
 import { AttachmentChip } from "./AttachmentChip";
@@ -29,6 +30,12 @@ interface ComposerProps {
    * absent where nothing can be attached, and attach is then unavailable.
    */
   onAttach?: (what: AttachWhat) => Promise<Attached[]>;
+  /** Reads each path dropped on the box (R08, R13); absent, the box takes no drop. */
+  onRead?: (paths: readonly string[]) => Promise<Attached[]>;
+  /** Hears drags from the file manager over the window, so the box takes what is dropped on it (R08). */
+  dragDrop?: ShellControl["onDragDrop"];
+  /** For the gallery: the box as while files are dragged over it. */
+  forceDragOver?: boolean;
   /** The session's workspace, by id; absent while it is not made yet, so every file and folder will be copied (R17). */
   workspace?: string;
   /** Attachments already added: a message given back to send again, or the gallery's. */
@@ -65,7 +72,7 @@ interface ComposerProps {
  * Where the user writes to the agent (docs/design/COMPOSER.md): the status line above the box, and the box holding
  * attach, the words and send. Enter sends; Shift+Enter starts a new line (FLOW-SEND-MESSAGE-R01).
  */
-export function Composer({ unavailable, sending, onSend, onWrite, onAttach, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, tall, statusTaken, controls, forceSend, working, onStop, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
+export function Composer({ unavailable, sending, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, tall, statusTaken, controls, forceSend, working, onStop, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const [attachments, setAttachments] = useState<Attached[]>(initialAttachments ?? []);
   const words = useRef<HTMLTextAreaElement>(null);
@@ -106,11 +113,51 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, work
     setAttachments((now) => now.filter((_, i) => i !== at));
   };
 
-  const attach = async (what: AttachWhat) => {
-    if (!onAttach) return;
-    const more = await onAttach(what);
+  const add = (more: readonly Attached[]) => {
     // The same file or folder is attached once (R12).
     if (more.length > 0) setAttachments((now) => addAll(now, more));
+  };
+  const attach = async (what: AttachWhat) => {
+    if (onAttach) add(await onAttach(what));
+  };
+
+  // Files dragged from the file manager (FLOW-SEND-MESSAGE-R08): while over the box its edge is the accent, and what
+  // is dropped on it is attached; dropped anywhere else, nothing is. Read as each event arrives, so the latest values.
+  const box = useRef<HTMLFormElement>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const canDrop = useRef(false);
+  canDrop.current = onRead !== undefined && unavailable === undefined;
+  const read = async (paths: readonly string[]) => {
+    if (onRead) add(await onRead(paths));
+  };
+  const readRef = useRef(read);
+  readRef.current = read;
+  useEffect(() => {
+    if (!dragDrop) return;
+    // On the box itself: what the window shows at that point, so a layer over the box takes nothing for it.
+    const over = (x: number, y: number) => {
+      const r = box.current?.getBoundingClientRect();
+      if (r === undefined || x < r.left || x > r.right || y < r.top || y > r.bottom) return false;
+      const at = typeof document.elementFromPoint === "function" ? document.elementFromPoint(x, y) : null;
+      return at === null || box.current?.contains(at) === true;
+    };
+    return dragDrop((event) => {
+      if (event.type === "leave") return setDragOver(false);
+      const onBox = canDrop.current && over(event.x, event.y);
+      if (event.type === "over") return setDragOver(onBox);
+      setDragOver(false);
+      if (onBox && event.paths.length > 0) void readRef.current(event.paths);
+    });
+  }, [dragDrop]);
+
+  // An image pasted into the words is attached inline (R08), where the composer takes attachments. A clipboard that
+  // holds text too, as a copied range of cells with its picture, pastes its text, as it would.
+  const paste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!onRead) return;
+    const images = Array.from(event.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
+    if (images.length === 0 || (event.clipboardData?.getData("text/plain") ?? "") !== "") return;
+    event.preventDefault();
+    void Promise.all(images.map(pastedImage)).then(add);
   };
   // From the moment of sending until the turn ends, the button is stop.
   const stopping = (busy || !!working) && onStop !== undefined && !unavailable;
@@ -169,7 +216,9 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, work
         {!statusTaken && <StatusLine unavailable={unavailable} sending={sending} marked={refusedHere} />}
       </div>
       <form
+        ref={box}
         className="composer-box"
+        data-drag-over={dragOver || forceDragOver || undefined}
         aria-label={t("composer.name")}
         data-unavailable={unavailable !== undefined || undefined}
         data-quiet-focus={quietFocus || undefined}
@@ -207,6 +256,7 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, work
             onWrite?.();
           }}
           onKeyDown={onKeyDown}
+          onPaste={paste}
         />
         {/* One button, send or stop, so keyboard focus stays on it as it turns from one to the other. With nothing to
             send it stays focusable, so focus on stop survives the turn ending; unavailable, it is disabled. */}
