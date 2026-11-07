@@ -77,6 +77,9 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, work
   // The attachments last sent, so a refusal naming one by its place marks that one (R10), even if others went since.
   const sent = useRef<readonly Attached[]>([]);
   const refused = sending?.state === "failed" ? sending : undefined;
+  // The attachment refused, while it is still here to be marked: its reason is said beside it, not in the status line.
+  const refusedOne = refused?.index === undefined ? undefined : sent.current[refused.index];
+  const refusedHere = refusedOne !== undefined && attachments.some((a) => same(a.path, refusedOne.path));
   useEffect(() => {
     const at = refused?.index;
     const which = at === undefined ? undefined : sent.current[at];
@@ -159,7 +162,7 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, work
     <div className="composer">
       {/* Takes no height and grows upward, so the box and the session controls stay where they are. */}
       <div className="composer-status">
-        {!statusTaken && <StatusLine unavailable={unavailable} sending={sending} marked={held} />}
+        {!statusTaken && <StatusLine unavailable={unavailable} sending={sending} marked={refusedHere} />}
       </div>
       <form
         className="composer-box"
@@ -285,7 +288,7 @@ function StatusLine({ unavailable, sending, marked }: { unavailable?: Unavailabl
       </p>
     );
   }
-  // A refusal naming an attachment is said beside it; when none is marked, as one already removed, it is said here.
+  // A refusal naming an attachment is said beside it; when that one is gone, as removed while the send was on its way, it is said here.
   if (sending?.state === "failed" && (sending.index === undefined || !marked)) {
     return (
       <p className="composer-status-line" role="alert">
