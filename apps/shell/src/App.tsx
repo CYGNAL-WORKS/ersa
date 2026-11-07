@@ -382,6 +382,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         }
       : undefined;
 
+  // A refusal goes; a rename still on its way stays, so its answer is shown.
+  const resetRename = (id: string) => setRenaming(({ [id]: was, ...rest }) => (was?.state === "sending" ? { ...rest, [id]: was } : rest));
+
   // Attaching from the menu (FLOW-SEND-MESSAGE-R07): the Shell's dialog on this computer, then `read` below for the
   // paths picked. A path Core can't read is attached marked with why, so the message waits until it is removed (R10).
   // Without the Shell, as in tests that give none, attach is unavailable.
@@ -566,6 +569,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onNewSession={newSession}
               collapsed={collapsed}
               onToggle={toggleProject}
+              onRename={rename}
+              renaming={renaming}
+              onRenameReset={resetRename}
+              offline={view.phase !== "connected"}
               onSetTrust={setTrust}
               trusting={trusting}
               keepingTrust={keepingTrust}
@@ -603,9 +610,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onRename={(title) => rename(shown.id, title)}
               renaming={renaming[shown.id]}
               // A refusal goes; a rename still on its way stays, so its answer is shown.
-              onRenameReset={() =>
-                setRenaming(({ [shown.id]: was, ...rest }) => (was?.state === "sending" ? { ...rest, [shown.id]: was } : rest))
-              }
+              onRenameReset={() => resetRename(shown.id)}
               renameDisabled={view.phase !== "connected"}
             />
           </ErrorBoundary>

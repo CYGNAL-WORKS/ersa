@@ -106,6 +106,17 @@ describe("the rail's tree", () => {
     expect(open).not.toContain("rail-heading-tip");
   });
 
+  it("offers Rename as unavailable, with its reason, while Ersa can't reach Core", () => {
+    const html = render({
+      sessions: { state: "ready", sessions: [session("a", "w-ersa", "One")] },
+      workspaces: { "w-ersa": { project_id: "ersa" } },
+      onRename: async () => true,
+      offline: true,
+      initialTileMenu: "a",
+    });
+    expect(html).toMatch(/role="menuitem"[^>]*aria-disabled="true"[^>]*>.*Rename.*Available once Ersa reaches your sessions/);
+  });
+
   it("is empty when Ersa can't reach the sessions, and loading while it first connects", () => {
     expect(render({ projects: { state: "unavailable" }, sessions: { state: "unavailable" } })).not.toContain("<p");
     expect(render({ projects: { state: "loading" }, sessions: { state: "loading" } })).toContain("Loading…");
