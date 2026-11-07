@@ -12,7 +12,7 @@ import {
   valuesFor,
 } from "../session/controls";
 import type { Sending } from "../session/follow";
-import { Composer } from "./Composer";
+import { Composer, type Unavailable } from "./Composer";
 import { type ControlKey, type Host, SessionControls } from "./SessionControls";
 import { TrustQuestion, folderName } from "./TrustQuestion";
 import "./NewSessionScreen.css";
@@ -45,6 +45,8 @@ interface NewSessionScreenProps {
   onChooseFolder?: () => Promise<FolderChoice>;
   /** Adds the folder as a trusted project on the local host (FLOW-NEW-SESSION-R25); resolves to the project once Core added it. */
   onAddProject: (path: string) => Promise<Project | undefined>;
+  /** Ersa can't reach the sessions: trying again, or no longer trying (FLOW-SEND-MESSAGE-R06). */
+  away?: Extract<Unavailable, "reconnecting" | "unreachable">;
   /**
    * Reads a git project's local branches, for the base branch a new workspace starts from (FLOW-NEW-SESSION-R21);
    * resolves to why they could not be read rather than failing. Absent, the workspace chip offers no base branch.
@@ -257,12 +259,19 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     }
   };
 
-  const unavailable =
-    hostBackends === undefined
-      ? "Detecting the backends on this host…"
-      : available(hostBackends).length === 0
-        ? "No backend is available on this host."
-        : undefined;
+  // The box is unavailable while Ersa can't reach the sessions, while the host's backends are being detected
+  // (FLOW-NEW-SESSION-R23), and while the host has no backend to run.
+  // With none to run, the line names a backend that failed detection, else says none is installed (R07).
+  const failed = hostBackends?.find((b) => b.status === "error");
+  const unavailable: Unavailable | undefined =
+    props.away ??
+    (hostBackends === undefined
+      ? "detecting"
+      : available(hostBackends).length > 0
+        ? undefined
+        : failed
+          ? { failedBackend: failed.label }
+          : "no-backend");
 
   return (
     <section ref={screen} className="new-session" aria-label="New session">
@@ -290,6 +299,11 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
         </div>
         <Composer
           inputRef={words}
+          tall
+          // The trust question, or why a folder could not be added, opens in the status line's place, and the
+          // question holds the focal glow while it is open (docs/design/COMPOSER.md, The trust question).
+          statusTaken={asking !== undefined || adding?.state === "failed"}
+          quietFocus={asking !== undefined}
           autoFocus={props.autoFocus ?? true}
           force={props.forceFocus ? "focus" : undefined}
           initialText={props.initialText}
