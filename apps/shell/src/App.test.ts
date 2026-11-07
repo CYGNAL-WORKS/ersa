@@ -664,7 +664,9 @@ describe("the attachments App gives the composer", () => {
     "D:/code/beta/src": { path: "D:/code/beta/src", name: "src", kind: "folder", copied: true },
   };
   const inspect = (params: { host_id: string; path: string; workspace_id?: string }) => {
-    if (params.host_id !== "local") throw new Error("wrong host");
+    // Exactly one of the workspace and the host.
+    if ((params.host_id === undefined) === (params.workspace_id === undefined)) throw new Error("name one of workspace or host");
+    if (params.host_id !== undefined && params.host_id !== "local") throw new Error("wrong host");
     const info = inspected[params.path] as Record<string, unknown> | undefined;
     if (!info) throw { kind: "rpc", error: { code: -32000, message: "attachment.inspect: missing", data: { kind: "not_found", detail: "This file no longer exists." } } };
     // Without a workspace Core says every file and folder is copied.
@@ -693,9 +695,9 @@ describe("the attachments App gives the composer", () => {
     expect(shell.pickFiles.mock.calls).toEqual([[false], [true]]);
     expect(shell.pickFolder).toHaveBeenCalledTimes(1);
     expect(core.calls.filter((c) => c.method === "attachment.inspect").map((c) => c.params)).toEqual([
-      { host_id: "local", path: "D:/code/beta/notes.md", workspace_id: "w-beta" },
-      { host_id: "local", path: "C:/pics/shot.png", workspace_id: "w-beta" },
-      { host_id: "local", path: "D:/code/beta/src", workspace_id: "w-beta" },
+      { path: "D:/code/beta/notes.md", workspace_id: "w-beta" },
+      { path: "C:/pics/shot.png", workspace_id: "w-beta" },
+      { path: "D:/code/beta/src", workspace_id: "w-beta" },
     ]);
     // R14: the note follows what Core says for the session's workspace; an image goes inline.
     expect(shown()).toEqual(["notes.md12 lines", "shot.png2 KB", "srcFolderWill be copied into the workspace's .ersa folder"]);
@@ -817,7 +819,7 @@ describe("the attachments of a new session's first message", () => {
     await attachNotes();
     expect(shown()).toEqual(["notes.md12 linesWill be copied into the workspace's .ersa folder"]);
     expect(core.calls.filter((c) => c.method === "attachment.inspect").map((c) => c.params)).toEqual([
-      { host_id: "local", path: "D:/code/alpha/notes.md", workspace_id: "w-alpha" },
+      { path: "D:/code/alpha/notes.md", workspace_id: "w-alpha" },
       { host_id: "local", path: "D:/code/alpha/notes.md" },
     ]);
   });
