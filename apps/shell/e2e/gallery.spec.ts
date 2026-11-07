@@ -373,8 +373,10 @@ test("every session control is reachable and works from the keyboard", async ({ 
   const names = await chips.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
   expect(names.length).toBe(6);
 
-  // Tab from the composer reaches each chip in turn.
+  // Tab from the composer reaches send, which keeps focus with nothing to send, then each chip in turn.
   await screen.locator("textarea").focus();
+  await page.keyboard.press("Tab");
+  expect(await page.evaluate(() => document.activeElement?.getAttribute("aria-label"))).toBe("Send");
   const reached: (string | null)[] = [];
   for (let i = 0; i < names.length; i++) {
     await page.keyboard.press("Tab");

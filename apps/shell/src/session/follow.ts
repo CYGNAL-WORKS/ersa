@@ -7,7 +7,7 @@
 
 import type { Envelope } from "../protocol/agent-events.gen";
 import { hasSeq } from "../core/checks";
-import { type CoreClient, describeError } from "../core/client";
+import { type BridgeError, type CoreClient, describeError } from "../core/client";
 import { type Transcript, apply, emptyTranscript } from "./transcript";
 
 /** The key that starts the notice saying Core no longer holds a session's earliest events. */
@@ -32,6 +32,11 @@ export interface SessionView {
     | { state: "failed"; message: string; gap?: true };
   /** The composer's message, while it is on its way or after it was refused. */
   message?: Sending;
+  /**
+   * Core accepted the message, and its turn has not shown on the subscription yet: Core can answer the send before
+   * the turn's events reach the window, and stop stays offered meanwhile (FLOW-SEND-MESSAGE-R03, R04).
+   */
+  turnPending?: boolean;
 }
 
 export interface Follower {
@@ -41,8 +46,13 @@ export interface Follower {
   attached(): void;
   /** The window lost its connection to Core. */
   detached(): void;
-  /** Sends the user's message. Resolves true once Core accepted it. */
+  /** Sends the user's message. Resolves true once Core accepted it; false when it was refused or stopped. */
   send(text: string): Promise<boolean>;
+  /**
+   * Stop (FLOW-SEND-MESSAGE-R03): cancels a message not yet handed to the agent, which stays with the user and is not
+   * refused, or else interrupts the turn the agent is working on.
+   */
+  interrupt(): Promise<void>;
   /** Stops following; `update` is never called again. */
   stop(): void;
 }
@@ -55,6 +65,10 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
   // The last event before a gap this follower already resubscribed for, so
   // one gap costs one resubscribe, not one per event behind it.
   let resumedAt: number | undefined;
+  // Stop was chosen while a message was on its way: its failure is the stop's doing, not a refusal.
+  let stopping = false;
+  // A turn showed on the subscription since the latest send began, so its answer needs no pending turn.
+  let turnSeen = false;
 
   const set = (change: (view: SessionView) => SessionView) => {
     if (stopped) return;
@@ -161,7 +175,11 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         if (transcript === v.transcript) return v;
         // The missing event arrived after all: the stream is live again.
         const stream = v.stream.state === "failed" && v.stream.gap ? { state: "live" as const } : v.stream;
-        return { ...v, transcript, stream };
+        // The turn the send started has shown: the transcript says whether it still works.
+        const type = envelope.event?.type;
+        const turned = type === "turn.started" || type === "turn.completed" || type === "session.ended";
+        if (turned) turnSeen = true;
+        return { ...v, transcript, stream, turnPending: turned ? undefined : v.turnPending };
       });
     },
 
@@ -173,15 +191,31 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
     },
 
     async send(text) {
+      stopping = false;
+      turnSeen = false;
       set((v) => ({ ...v, message: { state: "sending" } }));
       try {
         await client.call("session.send", { id, text });
-        set((v) => ({ ...v, message: undefined }));
+        const pending = !turnSeen;
+        set((v) => ({ ...v, message: undefined, turnPending: pending || undefined }));
         return true;
       } catch (error) {
-        set((v) => ({ ...v, message: { state: "failed", message: describeError(error) } }));
+        // Only Core's cancel, answered as an invalid state, is the stop's doing; any other failure is still shown.
+        const stopped = stopping && (error as BridgeError | undefined)?.kind === "rpc" && (error as Extract<BridgeError, { kind: "rpc" }>).error.data?.kind === "invalid_state";
+        set((v) => ({ ...v, message: stopped ? undefined : { state: "failed", message: describeError(error) } }));
         return false;
+      } finally {
+        stopping = false;
       }
+    },
+
+    async interrupt() {
+      if (view.message?.state === "sending") stopping = true;
+      // Best effort: a turn that ended meanwhile, or a lost connection, leaves nothing to stop. A stop that never
+      // reached Core stopped nothing, so a failure of the send after it is still a refusal to show.
+      await client.call("session.interrupt", { id }).catch(() => {
+        stopping = false;
+      });
     },
 
     stop() {
