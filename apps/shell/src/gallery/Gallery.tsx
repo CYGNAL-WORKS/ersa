@@ -692,6 +692,7 @@ const entries: Entry[] = [
           backends={oneBackend}
           initialText="Find why the reconnect test is flaky."
           starting={{ state: "sending" }}
+          onStop={() => {}}
         />,
       ],
       [
@@ -816,7 +817,11 @@ const entries: Entry[] = [
       // A permission request holds the screen's focal glow, so the box shows focus by its edge alone.
       ["Focus, a permission request open", <Composer autoFocus={false} onSend={async () => false} force="focus" quietFocus />],
       ["Typed", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again, then summarise what failed." />],
-      ["Sending", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." sending={{ state: "sending" }} />],
+      // From the moment of sending until the turn ends, send is stop.
+      ["Sending", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." sending={{ state: "sending" }} onStop={() => {}} />],
+      ["The agent working", <Composer autoFocus={false} onSend={async () => false} initialText="Then update the changelog." working onStop={() => {}} />],
+      ["Stop under the pointer", <Composer autoFocus={false} onSend={async () => false} working onStop={() => {}} forceSend="hover" />],
+      ["Stop pressed", <Composer autoFocus={false} onSend={async () => false} working onStop={() => {}} forceSend="pressed" />],
       [
         "Refused",
         statusRoom(
