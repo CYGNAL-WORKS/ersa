@@ -690,6 +690,41 @@ async fn interrupt_sends_the_interrupt_control_request() {
     session.stop().await.expect("stop");
 }
 
+// verifies: PROTO-CLAUDE-CODE-STREAM-R25
+#[tokio::test]
+async fn a_message_with_attachments_is_sent_as_its_text_its_images_then_its_list() {
+    let transport = ready_stub();
+    let sink = Arc::new(RecordingSink::new());
+    let session = adapter()
+        .start(Arc::new(transport.clone()), config(), sink.clone())
+        .await
+        .expect("start");
+    let message = ersa_adapter::OutgoingMessage {
+        text: "Look".into(),
+        attachments: vec![
+            ersa_adapter::OutgoingAttachment::Folder { path: "src".into() },
+            ersa_adapter::OutgoingAttachment::Image {
+                media_type: "image/png".into(),
+                data: "AAAA".into(),
+            },
+        ],
+    };
+    session.send_message(&message).await.expect("send");
+
+    let sent = parse(&transport.stdin_lines()[1]);
+    assert_eq!(
+        sent,
+        json!({"type": "user", "message": {"role": "user", "content": [
+            {"type": "text", "text": "Look"},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AAAA"}},
+            {"type": "text", "text": "<ersa-attachments>
+folder: src
+</ersa-attachments>"},
+        ]}})
+    );
+    session.stop().await.expect("stop");
+}
+
 #[tokio::test]
 async fn an_unsupported_cli_request_is_refused_rather_than_left_hanging() {
     let hook = json!({
