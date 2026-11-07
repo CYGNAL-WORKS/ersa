@@ -285,7 +285,7 @@
   }
 
   .composer-send-icon[data-traded],
-  .composer-attachment {
+  .attachment.composer-attachment {
     animation: none;
   }
 }
