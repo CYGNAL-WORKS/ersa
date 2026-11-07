@@ -188,16 +188,11 @@ describe("adding a project from the new-session screen", () => {
     expect(shell.pickFolder).toHaveBeenCalledTimes(1);
     expect(paramsOf(core, "project.find")).toEqual({ host_id: "local", path: "D:/clones/stranger" });
 
-    // The question names the folder, says what trust lets run, that it covers every workspace, and that it lasts.
+    // The question is asked before anything is added.
     const question = screen.getByRole("region", { name: "Trust stranger?" });
-    expect(question.textContent).toContain("D:/clones/stranger");
-    expect(question.textContent).toMatch(/hooks and MCP servers/);
-    expect(question.textContent).toMatch(/every workspace of the project/);
-    expect(question.textContent).toMatch(/until you withdraw it/);
-    expect(document.activeElement).toBe(within(question).getByRole("button", { name: "Cancel" }));
     expect(methods(core)).not.toContain("project.add");
 
-    fireEvent.click(within(question).getByRole("button", { name: "Add, trusted" }));
+    fireEvent.click(within(question).getByRole("button", { name: "Trust" }));
     await settle();
     expect(paramsOf(core, "project.add")).toEqual({ host_id: "local", path: "D:/clones/stranger", trusted: true });
     expect(trustQuestion()).toBeNull();
@@ -205,13 +200,52 @@ describe("adding a project from the new-session screen", () => {
     expect(document.activeElement).toBe(words());
   });
 
-  // The untrusted answer of ADR 0018, which ticket 226 removes (FLOW-NEW-SESSION-R25); it cites nothing meanwhile.
-  it("adds the folder not trusted when the user says so", async () => {
-    const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger"));
+  // verifies: FLOW-NEW-SESSION-R24
+  it("asks as the CLI does: the folder's path, the safety check, and what agents can do there, and nothing more", async () => {
+    await screenWith([project("alpha")], fakeShell("D:/clones/stranger"));
     await addFromChip();
-    fireEvent.click(screen.getByRole("button", { name: "Add, not trusted" }));
+    const question = screen.getByRole("region", { name: "Trust stranger?" });
+    const lines = [...question.querySelectorAll("p")].map((p) => p.textContent);
+    expect(lines).toEqual([
+      "Trust stranger?",
+      "D:/clones/stranger",
+      "Is this a project you created or one you trust, like your own code, a well-known open source project, or work from your team? If not, review what's in this folder first.",
+      "Agents will be able to read, edit, and run files here.",
+    ]);
+    expect(question.textContent).not.toMatch(/repositor/i);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R25
+  it("offers Cancel, focused, then Trust, which adds the project trusted, and no way to add it untrusted", async () => {
+    const core = await screenWith([project("alpha")], fakeShell("D:/clones/stranger", "D:/clones/stranger"));
+    await addFromChip();
+    let question = screen.getByRole("region", { name: "Trust stranger?" });
+    const answers = within(question).getAllByRole("button");
+    expect(answers.map((b) => b.textContent)).toEqual(["Cancel", "Trust"]);
+    // Neither answer is primary: trusting is never the default.
+    expect(answers.map((b) => b.getAttribute("data-variant"))).toEqual(["quiet", "quiet"]);
+    expect(document.activeElement).toBe(answers[0]);
+
+    // The arrows move between the answers; Cancel, as Enter on it does, adds nothing.
+    fireEvent.keyDown(answers[0]!, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(answers[1]);
+    fireEvent.keyDown(answers[1]!, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(answers[0]);
+    // Away from the answers, as in the explanation when it scrolls, the arrows are left alone.
+    fireEvent.keyDown(question.querySelector(".trust-question-body")!, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(answers[0]);
+    fireEvent.click(answers[0]!);
     await settle();
-    expect(paramsOf(core, "project.add")).toEqual({ host_id: "local", path: "D:/clones/stranger", trusted: false });
+    expect(trustQuestion()).toBeNull();
+    expect(methods(core)).not.toContain("project.add");
+
+    await addFromChip();
+    question = screen.getByRole("region", { name: "Trust stranger?" });
+    fireEvent.click(within(question).getByRole("button", { name: "Trust" }));
+    await settle();
+    expect(core.calls.filter((c) => c.method === "project.add").map((c) => c.params)).toEqual([
+      { host_id: "local", path: "D:/clones/stranger", trusted: true },
+    ]);
     expect(chipValue()).toBe("Project: stranger");
   });
 
@@ -295,7 +329,7 @@ describe("adding a project from the new-session screen", () => {
     expect(shell.pickFolder).toHaveBeenCalledTimes(1);
     expect(words().value).toBe("Fix the build");
 
-    fireEvent.click(screen.getByRole("button", { name: "Add, trusted" }));
+    fireEvent.click(screen.getByRole("button", { name: "Trust" }));
     await settle();
     expect(chipValue()).toBe("Project: stranger");
     // The message waits for the user to send it: nothing was started.
@@ -352,6 +386,162 @@ describe("the tree App draws in the rail", () => {
   });
 });
 
+// A new workspace's base branch (FLOW-NEW-SESSION-R21, R28, R29): App reads the project's branches with `branch.list` and
+// creates the workspace from the one the workspace chip shows.
+describe("the base branch App gives a new workspace", () => {
+  const branches = [
+    { name: "feature/rail", default: false },
+    { name: "main", default: true },
+    { name: "release/1.0", default: false },
+  ];
+  const starting = {
+    "branch.list": () => branches,
+    "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", vcs_ref: "ersa/new" }),
+    "session.create": (params: { workspace_id: string }) => ({ ...session("s-new", "alpha", "2026-11-03T09:00:00Z"), workspace_id: params.workspace_id }),
+    "session.send": () => ({ turn: 1 }),
+    "settings.set": () => ({}),
+  };
+  const workspaceChip = () => screen.getByRole("button", { name: /^Workspace:/ });
+  const send = async (text: string) => {
+    fireEvent.change(words(), { target: { value: text } });
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    await settle();
+  };
+
+  // verifies: FLOW-NEW-SESSION-R21
+  // verifies: FLOW-NEW-SESSION-R29
+  it("starts at the default branch, narrows the branches by the search box, and creates the workspace from the one chosen", async () => {
+    const core = await screenWith([project("alpha")], undefined, starting);
+    expect(paramsOf(core, "branch.list")).toEqual({ project_id: "alpha" });
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from main");
+
+    // Opened, the list offers both workspaces with what each means, then the base branch, with focus in its search box.
+    fireEvent.click(workspaceChip());
+    const list = screen.getByRole("listbox", { name: "Workspace" });
+    expect(within(list).getByRole("option", { name: /New workspace/ }).textContent).toContain("Isolated");
+    expect(within(list).getByRole("option", { name: /Project folder/ }).textContent).toContain("Shared");
+    const search = within(list).getByRole("searchbox", { name: "Search branches" });
+    expect(document.activeElement).toBe(search);
+    const base = within(list).getByRole("group", { name: "Base branch" });
+    expect(within(base).getAllByRole("option").map((o) => o.textContent)).toEqual(["feature/rail", "mainDefault", "release/1.0"]);
+    expect(within(base).getByRole("option", { name: /main/ }).getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.change(search, { target: { value: "REL" } });
+    expect(within(base).getAllByRole("option").map((o) => o.textContent)).toEqual(["release/1.0"]);
+    fireEvent.change(search, { target: { value: "nothing" } });
+    expect(within(base).queryAllByRole("option")).toEqual([]);
+    expect(list.textContent).toContain("No branch matches.");
+    fireEvent.change(search, { target: { value: "rel" } });
+    fireEvent.click(within(base).getByRole("option", { name: "release/1.0" }));
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from release/1.0");
+
+    await send("Fix the build");
+    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha", base: "release/1.0" });
+  });
+
+  // verifies: FLOW-NEW-SESSION-R21
+  it("chooses the first match with Enter in the search box", async () => {
+    const core = await screenWith([project("alpha")], undefined, starting);
+    fireEvent.click(workspaceChip());
+    const search = screen.getByRole("searchbox", { name: "Search branches" });
+    fireEvent.change(search, { target: { value: "feat" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from feature/rail");
+    expect(document.activeElement).toBe(workspaceChip());
+    await send("Fix the build");
+    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha", base: "feature/rail" });
+  });
+
+  it("opens with the search box empty each time", async () => {
+    await screenWith([project("alpha")], undefined, starting);
+    fireEvent.click(workspaceChip());
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "rel" } });
+    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" });
+    fireEvent.click(workspaceChip());
+    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("");
+    expect(within(screen.getByRole("group", { name: "Base branch" })).getAllByRole("option")).toHaveLength(3);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R29
+  it("names the project folder when it is chosen, and offers no base branch for it", async () => {
+    const core = await screenWith([project("alpha")], undefined, starting);
+    fireEvent.click(workspaceChip());
+    fireEvent.click(screen.getByRole("option", { name: /Project folder/ }));
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: Project folder");
+    fireEvent.click(workspaceChip());
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    await send("What does this do?");
+    expect(methods(core)).not.toContain("workspace.create");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R28
+  it("says while the branches are read, with nothing to search, and leaves the base to Core's default", async () => {
+    // Core has not answered branch.list yet.
+    const core = await screenWith([project("alpha")], undefined, { ...starting, "branch.list": () => new Promise(() => {}) });
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace");
+    fireEvent.click(workspaceChip());
+    const list = screen.getByRole("listbox", { name: "Workspace" });
+    expect(list.querySelector(".chip-section-note")?.textContent).toBe("Reading the branches…");
+    expect(list.querySelector(".chip-section-note .glyph")).toBeNull();
+    expect((within(list).getByRole("searchbox") as HTMLInputElement).disabled).toBe(true);
+    // Focus goes to the chosen option, since the search box cannot be used.
+    expect(document.activeElement).toBe(within(list).getByRole("option", { name: /New workspace/ }));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await send("Fix the build");
+    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha" });
+  });
+
+  it("grows to hold the branches when they arrive while the list is open, and the search box can then be used", async () => {
+    let answer: (listed: typeof branches) => void = () => {};
+    await screenWith([project("alpha")], undefined, { ...starting, "branch.list": () => new Promise((r) => (answer = r)) });
+    fireEvent.click(workspaceChip());
+    const group = () => screen.getByRole("group", { name: "Base branch" });
+    expect(group().hasAttribute("data-grow")).toBe(false);
+    await act(async () => answer(branches));
+    await settle();
+    expect(group().hasAttribute("data-grow")).toBe(true);
+    expect(within(group()).getAllByRole("option")).toHaveLength(3);
+    expect((screen.getByRole("searchbox") as HTMLInputElement).disabled).toBe(false);
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from main");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R28
+  it("says the branches could not be read, and leaves the base to Core's default", async () => {
+    const core = await screenWith([project("alpha")], undefined, {
+      ...starting,
+      "branch.list": () => {
+        throw { kind: "rpc", error: { code: -32000, message: "git is not installed", data: { kind: "invalid_state" } } };
+      },
+    });
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace");
+    fireEvent.click(workspaceChip());
+    const list = screen.getByRole("listbox", { name: "Workspace" });
+    const note = list.querySelector(".chip-section-note");
+    expect(note?.textContent).toBe("Ersa couldn't read this project's branches. The new workspace will start at the default branch.");
+    expect(note?.querySelector('.glyph[data-tone="danger"]')).not.toBeNull();
+    expect((within(list).getByRole("searchbox") as HTMLInputElement).disabled).toBe(true);
+    expect(document.activeElement).toBe(within(list).getByRole("option", { name: /New workspace/ }));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await send("Fix the build");
+    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha" });
+  });
+
+  // verifies: FLOW-NEW-SESSION-R21
+  it("starts every new session at the default branch, the base chosen for the last one forgotten", async () => {
+    const core = await screenWith([project("alpha")], undefined, starting);
+    fireEvent.click(workspaceChip());
+    fireEvent.click(screen.getByRole("option", { name: "release/1.0" }));
+    await send("Fix the build");
+    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha", base: "release/1.0" });
+    expect(JSON.stringify(paramsOf(core, "settings.set"))).not.toContain("release/1.0");
+
+    fireEvent.click(screen.getByRole("button", { name: "New session in alpha" }));
+    await settle();
+    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from main");
+  });
+});
+
 // LAY-SHELL, The rail (New session, Collapsing): a layout brief, so no requirement IDs.
 describe("the rail's New session and collapsing", () => {
   const rail = () => screen.getByRole("navigation", { name: "Rail" });
@@ -395,5 +585,39 @@ describe("the rail's New session and collapsing", () => {
     fireEvent.click(toggle("beta"));
     expect(toggle("beta").getAttribute("aria-expanded")).toBe("true");
     expect(toggle("beta").closest(".rail-project")?.hasAttribute("data-collapsed")).toBe(false);
+  });
+});
+
+// The composer while Ersa can't reach the sessions (FLOW-SEND-MESSAGE-R06): App tells it so whichever view holds it.
+describe("the composer App draws when Core is lost", () => {
+  // verifies: FLOW-SEND-MESSAGE-R06
+  it("says Ersa can't reach the sessions and is unavailable on the new-session screen", async () => {
+    // A host with a backend to run, so the box is available until Core is lost.
+    const core = await screenWith([project("alpha")]);
+    // Chosen with New session, the screen stays while Core is away.
+    fireEvent.click(screen.getByRole("button", { name: "New session in alpha" }));
+    const message = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    expect(screen.getByRole("region", { name: "New session" })).toBeTruthy();
+    expect(message().disabled).toBe(false);
+    core.drop();
+    await settle();
+    expect(screen.getByRole("region", { name: "New session" })).toBeTruthy();
+    expect(document.querySelector(".composer-status-line")?.textContent).toBe("Ersa can't reach your sessions. It's trying again.");
+    expect(message().disabled).toBe(true);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R06
+  it("says Ersa can't reach the sessions and is unavailable under a session", async () => {
+    const core = fakeCore();
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    // The newest session shows at launch.
+    const message = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+    expect(message().disabled).toBe(false);
+    core.drop();
+    await settle();
+    expect(document.querySelector(".composer-status-line")?.textContent).toBe("Ersa can't reach your sessions. It's trying again.");
+    expect(message().disabled).toBe(true);
   });
 });

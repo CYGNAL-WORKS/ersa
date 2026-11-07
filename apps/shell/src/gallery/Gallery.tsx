@@ -24,7 +24,7 @@ import type { CoreView } from "../core/connection";
 import type { Envelope, Event } from "../protocol/agent-events.gen";
 import type { CoreHelloResult, Project, Session } from "../protocol/core-api.gen";
 import type { Answer } from "../session/answers";
-import type { BackendChoices, Choice } from "../session/controls";
+import { type BackendChoices, type Choice, branchesMatching } from "../session/controls";
 import type { SessionView } from "../session/follow";
 import { type ShelfShows, shelfTone } from "../session/shelf";
 import { tileOf } from "../session/tile";
@@ -371,6 +371,27 @@ const copilot = (status: BackendChoices["status"]): BackendChoices => ({
   permission_modes: [],
 });
 
+const galleryBranches = [
+  { name: "feature/rail-tree", default: false },
+  { name: "feature/workspace-chip", default: false },
+  { name: "fix/reconnect", default: false },
+  { name: "main", default: true },
+  { name: "release/0.1", default: false },
+];
+const branchOptions = galleryBranches.map((b) => ({ id: b.name, label: b.name, status: b.default ? "Default" : undefined }));
+/** The workspace chip's base branch section, saying `empty` with nothing to list (docs/design/COMPOSER.md, The workspace list). */
+const baseSection = (listed: typeof branchOptions, empty = "No branch matches.") => ({
+  heading: "Base branch",
+  placeholder: "Search branches",
+  narrow: (query: string) => {
+    const names = new Set(branchesMatching(listed.map((o) => ({ name: o.id, default: false })), query).map((b) => b.name));
+    return listed.filter((o) => names.has(o.id));
+  },
+  value: "main",
+  onChoose: () => {},
+  empty,
+});
+
 const newSession = {
   hosts: [hello.host],
   localHostId: hello.host.id,
@@ -380,16 +401,22 @@ const newSession = {
   // The folder dialog is there, so Add project… can be taken; in the gallery it is always canceled.
   onChooseFolder: async () => ({ kind: "canceled" }) as const,
   onAddProject: async () => undefined,
+  // A git project's branches, for a new workspace's base branch.
+  onListBranches: async () => ({ state: "read", branches: galleryBranches }) as const,
   autoFocus: false,
 } as const;
 const oneBackend = { local: [claudeCode] };
 
 /** Room beneath a specimen for a chip's open choices, which lie over what follows. */
 const room = (node: ReactNode) => <div className="gallery-room">{node}</div>;
+/** Room above a composer for its status line, which grows upward over what is above it. */
+const statusRoom = (node: ReactNode) => <div className="gallery-status-room">{node}</div>;
+/** More room, for a list with a section beneath its options. */
+const tallRoom = (node: ReactNode) => <div className="gallery-room gallery-room-tall">{node}</div>;
 
 const chipOptions = [
-  { id: "isolated", label: "New workspace" },
-  { id: "root", label: "Root workspace" },
+  { id: "isolated", label: "New workspace", status: "Isolated" },
+  { id: "root", label: "Project folder", status: "Shared" },
 ];
 const chip = { name: "Workspace", value: "isolated", options: chipOptions, onChoose: () => {} };
 const projectChip = {
@@ -657,6 +684,7 @@ const entries: Entry[] = [
       ["A chip open", room(<NewSessionScreen {...newSession} backends={oneBackend} open="permission_mode" />)],
       // FLOW-NEW-SESSION-R14: most recently used first, with path, kind and trust, the chosen one marked.
       ["The project chip open", room(<NewSessionScreen {...newSession} backends={oneBackend} projectId="p2" open="project" />)],
+      ["The workspace chip open", tallRoom(<NewSessionScreen {...newSession} backends={oneBackend} open="workspace" />)],
       [
         "Starting",
         <NewSessionScreen
@@ -695,6 +723,39 @@ const entries: Entry[] = [
       ["Open, two lines and an action", room(<Chip {...projectChip} forceOption={{ id: "p2", state: "hover" }} />)],
       // The action as it will be once it can be taken, with its shortcut.
       ["Open, the action available", room(<Chip {...projectChip} action={{ ...projectChip.action, onChoose: () => {} }} />)],
+      ["Reads its choice", <Chip {...chip} reads="New workspace from main" />],
+      ["Open, a section to search", tallRoom(<Chip {...chip} reads="New workspace from main" section={baseSection(branchOptions)} initialOpen />)],
+      [
+        "Open, more branches than fit",
+        tallRoom(
+          <Chip
+            {...chip}
+            reads="New workspace from main"
+            section={baseSection([...branchOptions, ...["a", "b", "c", "d", "e"].map((n) => ({ id: `topic/${n}`, label: `topic/${n}`, status: undefined }))])}
+            initialOpen
+          />,
+        ),
+      ],
+      [
+        "Open, the section narrowed",
+        tallRoom(<Chip {...chip} reads="New workspace from main" section={baseSection(branchOptions)} initialQuery="feat" initialOpen />),
+      ],
+      [
+        "Open, nothing in the section matches",
+        tallRoom(<Chip {...chip} reads="New workspace from main" section={baseSection(branchOptions)} initialQuery="hotfix" initialOpen />),
+      ],
+      [
+        "Open, the section being read",
+        tallRoom(<Chip {...chip} section={{ ...baseSection([], "Reading the branches…"), unavailable: true }} initialOpen />),
+      ],
+      [
+        "Open, the section unreadable",
+        tallRoom(<Chip {...chip} section={{
+              ...baseSection([], "Ersa couldn't read this project's branches. The new workspace will start at the default branch."),
+              unavailable: true,
+              problem: true,
+            }} initialOpen />),
+      ],
       [
         "Open, with statuses",
         room(
@@ -730,9 +791,10 @@ const entries: Entry[] = [
       ["Empty", <Composer autoFocus={false} onSend={async () => false} />],
       [
         "Under a session, with its values",
-        <>
-          <Composer autoFocus={false} onSend={async () => false} />
-          <div className="stage-controls">
+        <Composer
+          autoFocus={false}
+          onSend={async () => false}
+          controls={
             <SessionControls
               hosts={[hello.host]}
               localHostId={hello.host.id}
@@ -744,23 +806,31 @@ const entries: Entry[] = [
               disabled
               used={0.42}
             />
-          </div>
-        </>,
+          }
+        />,
       ],
       ["Hover", <Composer autoFocus={false} onSend={async () => false} force="hover" />],
+      ["Send under the pointer", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." forceSend="hover" />],
+      ["Send pressed", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." forceSend="pressed" />],
       ["Focus", <Composer autoFocus={false} onSend={async () => false} force="focus" />],
+      // A permission request holds the screen's focal glow, so the box shows focus by its edge alone.
+      ["Focus, a permission request open", <Composer autoFocus={false} onSend={async () => false} force="focus" quietFocus />],
       ["Typed", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again, then summarise what failed." />],
       ["Sending", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." sending={{ state: "sending" }} />],
       [
         "Refused",
-        <Composer
-          autoFocus={false}
-          onSend={async () => false}
-          initialText="Run the tests again."
-          sending={{ state: "failed", message: refusal }}
-        />,
+        statusRoom(
+          <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." sending={{ state: "failed", message: refusal }} />,
+        ),
       ],
-      ["Core not connected", <Composer autoFocus={false} onSend={async () => false} unavailable="Core is not connected." />],
+      [
+        "Can't reach the sessions, trying again",
+        statusRoom(<Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." unavailable="reconnecting" />),
+      ],
+      ["Can't reach the sessions", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="unreachable" />)],
+      ["Detecting backends", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="detecting" />)],
+      ["No backend", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="no-backend" />)],
+      ["A backend not working", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable={{ failedBackend: "Claude Code" }} />)],
     ],
   },
   {
