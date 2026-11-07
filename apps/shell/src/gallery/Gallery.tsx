@@ -717,6 +717,11 @@ const entries: Entry[] = [
       ["Disabled", <Chip {...chip} disabled />],
       ["With a prefix", <Chip name="Effort" prefix="Effort" value="high" options={[{ id: "high", label: "High" }]} onChoose={() => {}} />],
       ["A problem", <Chip name="Backend" placeholder="No backend" problem options={[]} onChoose={() => {}} />],
+      // Under a running session: the session's value, without the chevron, unchanged under the pointer.
+      ["In a session", <Chip {...chip} readOnly />],
+      ["Detecting backends", <Chip name="Backend" placeholder="Detecting backends…" pending options={[]} onChoose={() => {}} disabled />],
+      // Where the window has no room beneath, the list opens above its chip.
+      ["Open above", <div className="gallery-room-before">{<Chip {...chip} initialOpen forceAbove />}</div>],
       ["Open", room(<Chip {...chip} initialOpen />)],
       ["Open, an option hovered", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "hover" }} />)],
       ["Open, an option pressed", room(<Chip {...chip} initialOpen forceOption={{ id: "root", state: "pressed" }} />)],
@@ -772,6 +777,22 @@ const entries: Entry[] = [
           />,
         ),
       ],
+      [
+        "Open, an unavailable option under the pointer",
+        room(
+          <Chip
+            name="Backend"
+            value="claude-code"
+            options={[
+              { id: "claude-code", label: "Claude Code", status: "2.1.302" },
+              { id: "copilot", label: "GitHub Copilot", status: "Not installed", unavailable: true },
+            ]}
+            onChoose={() => {}}
+            initialOpen
+            forceOption={{ id: "copilot", state: "hover" }}
+          />,
+        ),
+      ],
     ],
   },
   {
@@ -803,7 +824,7 @@ const entries: Entry[] = [
               values={{ host_id: hello.host.id, project_id: "p1", workspace: "isolated", backend: "claude-code", model: "opus", effort: "high", permission_mode: "default" }}
               workspaceLabel="ersa/fix-reconnect"
               onChoose={() => {}}
-              disabled
+              readOnly
               used={0.42}
             />
           }

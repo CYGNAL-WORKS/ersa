@@ -20,3 +20,32 @@ describe("the action that ends a chip's list", () => {
     expect(available).toContain("Ctrl+O");
   });
 });
+
+describe("a chip as a pill (docs/design/COMPOSER.md, The session controls)", () => {
+  const options = [{ id: "a", label: "Alpha" }];
+  const html = (props: Partial<Parameters<typeof Chip>[0]> = {}) =>
+    renderToStaticMarkup(createElement(Chip, { name: "Workspace", value: "a", options, onChoose: () => {}, ...props }));
+
+  it("ends with a chevron when it opens a list", () => {
+    expect(html()).toContain("chip-chevron");
+  });
+
+  it("under a running session shows its value without the chevron, and does not open", () => {
+    const shown = html({ readOnly: true });
+    expect(shown).not.toContain("chip-chevron");
+    expect(shown).toMatch(/<button[^>]*disabled/);
+    expect(shown).toContain("data-read-only");
+    expect(shown).toContain("Alpha");
+  });
+
+  it("while detecting, leads with the context ring's track and a turning arc, and has no chevron", () => {
+    const shown = html({ value: undefined, placeholder: "Detecting backends…", pending: true, options: [], disabled: true });
+    expect(shown).toContain("chip-detecting");
+    expect(shown).not.toContain("chip-chevron");
+  });
+
+  it("opens its list above it when asked, as where the window has no room beneath", () => {
+    expect(html({ initialOpen: true, forceAbove: true })).toMatch(/class="chip-list"[^>]*data-above/);
+    expect(html({ initialOpen: true })).not.toMatch(/data-above/);
+  });
+});

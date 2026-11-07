@@ -1,22 +1,33 @@
-/* The session controls: a row of chips beneath the composer, the context ring at its end. */
+/* The session controls (docs/design/COMPOSER.md, The session controls): one row beneath the box, size-control high
+   at least, in ui-small, its chips space-xs apart. Where the session runs leads it; how it runs, and then the
+   context ring, trail it. A narrow column wraps the chips rather than scroll. */
 
 .session-controls {
   display: flex;
-  align-items: flex-start;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-md);
+  gap: var(--space-xs);
+  min-height: var(--size-control);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
 }
 
-/* Related controls, so the inline gap; a narrow stage wraps them rather than scroll. */
-.session-controls-chips {
+.session-controls-where,
+.session-controls-how {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-sm);
+  align-items: center;
+  gap: var(--space-xs);
   min-width: 0;
 }
 
-/* The ring centres on the chips' first row. */
-.session-controls > .context-ring {
+/* The trailing group keeps to the trailing edge when the row wraps. */
+.session-controls-how {
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.session-controls-how > .context-ring {
   flex: none;
-  padding-block: var(--space-xs);
 }

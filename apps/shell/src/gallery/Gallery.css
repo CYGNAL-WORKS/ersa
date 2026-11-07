@@ -140,3 +140,8 @@
 .gallery-status-room {
   padding-top: var(--size-control);
 }
+
+/* Room above a specimen whose list opens above its chip. */
+.gallery-room-before {
+  padding-top: var(--size-card-max);
+}
