@@ -575,7 +575,7 @@ impl Adapter for ClaudeAdapter {
     /// Deletes the session's record file and the folder of the same name
     /// beside it, on this machine (PROTO-CLAUDE-CODE-STREAM, Deleting), only
     /// when the live-session registry shows no process has it open
-    /// (PROTO-CLAUDE-CODE-STREAM-R32). Core stops its own process for the
+    /// (PROTO-CLAUDE-CODE-STREAM-R37). Core stops its own process for the
     /// session first, and a CLI removes its registry file as it exits, so any
     /// process still listed is another one. The registry is read and the
     /// files deleted on one thread, one straight after the other.

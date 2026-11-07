@@ -297,6 +297,7 @@ async fn a_root_workspace_is_never_touched_and_needs_no_token() {
 
 // verifies: FLOW-ARCHIVE-DELETE-SESSION-R08
 // verifies: PROTO-CORE-API-R40
+// verifies: PROTO-CORE-API-R53
 #[tokio::test(flavor = "multi_thread")]
 async fn a_stale_token_is_refused_with_the_new_changes_after_the_stop_and_nothing_goes() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -338,6 +339,7 @@ async fn a_stale_token_is_refused_with_the_new_changes_after_the_stop_and_nothin
     assert!(!folder.exists());
 }
 
+// verifies: PROTO-CORE-API-R54
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_in_an_isolated_workspace_needs_a_token() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -461,6 +463,8 @@ async fn the_claim_holds_off_other_requests_until_the_delete_ends() {
 /// Another process with the session open, or a registry that cannot say,
 /// refuses the delete with nothing deleted or marked, and releases the
 /// claim.
+// verifies: PROTO-CORE-API-R52
+// verifies: PROTO-CORE-API-R56
 #[tokio::test(flavor = "multi_thread")]
 async fn refused_with_nothing_deleted_when_another_process_has_the_session_open() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -482,7 +486,12 @@ async fn refused_with_nothing_deleted_when_another_process_has_the_session_open(
                 "{error}"
             );
         }
+        // Stopped before the registry was asked, and left stopped.
+        assert_eq!(fake.stats.stops.load(Ordering::SeqCst), 1);
+        let checks = fake.stats.open_checks.lock().unwrap().len();
+        assert!(checks >= 1, "the registry was asked");
         let row = listed(&mut client, &id).await.expect("still listed");
+        assert_eq!(row["state"], "ended", "{row}");
         assert!(row.get("deleting").is_none(), "{row}");
         assert!(folder.is_dir());
         assert!(branch_exists(&repo, &branch_of(&workspace)));
@@ -780,6 +789,7 @@ async fn a_failed_check_of_the_changes_releases_the_claim_and_deletes_nothing() 
 /// row with it when its own delete finishes: no workspace is left listed
 /// with its folder gone.
 // verifies: PROTO-CORE-API-R35
+// verifies: PROTO-CORE-API-R55
 #[tokio::test(flavor = "multi_thread")]
 async fn the_last_session_out_of_a_workspace_whose_files_went_takes_its_row() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -821,6 +831,7 @@ async fn the_last_session_out_of_a_workspace_whose_files_went_takes_its_row() {
 /// A folder missing for some other reason (a drive unplugged, a folder
 /// deleted by hand) while git still lists the worktree keeps the row: Ersa
 /// did not delete those files, and their worktree and branch stay findable.
+// verifies: PROTO-CORE-API-R55
 #[tokio::test(flavor = "multi_thread")]
 async fn a_folder_missing_while_git_still_lists_it_keeps_the_row() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -855,6 +866,7 @@ async fn a_folder_missing_while_git_still_lists_it_keeps_the_row() {
 /// is `error`, before its folder is touched: here a locked worktree stops
 /// the delete at step 5 with every file in place, and the workspace still
 /// takes no new session. The finished delete removes its row.
+// verifies: PROTO-CORE-API-R57
 #[tokio::test(flavor = "multi_thread")]
 async fn a_workspace_leaves_ready_when_the_session_is_marked_before_its_folder_is_touched() {
     let fake = Arc::new(FakeAdapter::new(1));
