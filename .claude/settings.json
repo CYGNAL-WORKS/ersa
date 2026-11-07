@@ -17,6 +17,15 @@
         ]
       },
       {
+        "matcher": "Bash|PowerShell|Monitor|Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hooks/guard-polling.mjs"
+          }
+        ]
+      },
+      {
         "matcher": "Bash|PowerShell",
         "hooks": [
           {
