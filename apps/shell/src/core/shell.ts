@@ -19,6 +19,11 @@ export interface ShellControl {
   quit(): Promise<void>;
   /** Opens the system's folder dialog on this computer; the folder the user picked, or null when they canceled. */
   pickFolder(): Promise<string | null>;
+  /**
+   * Opens the system's dialog for files, or for images alone, on this computer: the paths the user picked, none when
+   * they canceled (FLOW-SEND-MESSAGE-R07, R13).
+   */
+  pickFiles(images: boolean): Promise<string[]>;
 }
 
 const BUSY = new Set<string>(["starting", "running", "waiting_user"]);

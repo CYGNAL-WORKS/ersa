@@ -98,6 +98,7 @@ fn session() -> Session {
         created_at: "2026-10-31T12:00:00Z".into(),
         last_event_seq: Some(41),
         sending: Some(SendPhase::Copying),
+        archived: true,
         tile: tile(),
     }
 }
@@ -179,6 +180,7 @@ fn result_examples() -> Vec<(Method, Value)> {
         ),
         (Method::SessionList, to_value(&vec![session()])),
         (Method::SessionCreate, to_value(&session())),
+        (Method::SessionSetArchived, to_value(&session())),
         (
             Method::SessionSend,
             to_value(&SessionSendResult { turn: Some(2) }),
@@ -197,6 +199,20 @@ fn result_examples() -> Vec<(Method, Value)> {
                 lines: None,
                 media_type: Some("image/png".into()),
                 target: Some("D:/elsewhere/a.png".into()),
+                copied: false,
+            }),
+        ),
+        (
+            Method::AttachmentInspect,
+            to_value(&Inspected {
+                path: "D:/notes/a.md".into(),
+                name: "a.md".into(),
+                kind: AttachmentKind::File,
+                size_bytes: Some(12),
+                lines: Some(1),
+                media_type: None,
+                target: None,
+                copied: true,
             }),
         ),
         (Method::SessionUnsubscribe, to_value(&Empty {})),
@@ -375,8 +391,17 @@ fn params_examples() -> Vec<(Method, Value)> {
         (
             Method::AttachmentInspect,
             to_value(&InspectParams {
-                host_id: "local".into(),
                 path: "D:/shots/a.png".into(),
+                workspace_id: Some("w-1".into()),
+                host_id: None,
+            }),
+        ),
+        (
+            Method::AttachmentInspect,
+            to_value(&InspectParams {
+                path: "D:/shots/a.png".into(),
+                workspace_id: None,
+                host_id: Some("local".into()),
             }),
         ),
         (
@@ -417,6 +442,13 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&SetTitleParams {
                 id: "s-1".into(),
                 title: "t".into(),
+            }),
+        ),
+        (
+            Method::SessionSetArchived,
+            to_value(&SetArchivedParams {
+                id: "s-1".into(),
+                archived: true,
             }),
         ),
         (
