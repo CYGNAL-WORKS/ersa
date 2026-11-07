@@ -118,6 +118,18 @@ describe("the status line above the box", () => {
     expect(document.activeElement).toBe(words());
   });
 
+  it("returns focus to stop when the box is available again, if stop had it", () => {
+    const { rerender } = render(draw({ working: true, onStop: () => {} }));
+    const button = document.querySelector(".composer-send") as HTMLButtonElement;
+    button.focus();
+    rerender(draw({ working: true, onStop: () => {}, unavailable: "reconnecting" }));
+    const passing = document.body.appendChild(document.createElement("button"));
+    passing.focus();
+    passing.remove();
+    rerender(draw({ working: true, onStop: () => {} }));
+    expect(document.activeElement).toBe(button);
+  });
+
   it("leaves focus where the user moved it while the box was unavailable", () => {
     const elsewhere = document.body.appendChild(document.createElement("button"));
     const { rerender } = render(draw());
