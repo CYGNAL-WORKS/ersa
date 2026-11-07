@@ -37,6 +37,22 @@ test("a new workspace starts at the default branch, and is made from the base br
   // R21, R29: the chip names a new workspace from the default branch, not the one the folder has checked out.
   const chip = screen.getByRole("button", { name: /^Workspace:/ });
   await expect(chip).toHaveAccessibleName("Workspace: New workspace from main");
+
+  // In a short window the list has no room beneath its chip, so it opens above it (docs/design/COMPOSER.md, A chip's
+  // list), then beneath again where there is room.
+
+  await page.setViewportSize({ width: 1000, height: 420 });
+  await chip.click();
+  await expect(screen.getByRole("listbox", { name: "Workspace" })).toBeVisible();
+  const opened = await screen.evaluate(() => {
+    const list = document.querySelector(".chip-list")!.getBoundingClientRect();
+    const from = document.querySelector(".chip[data-open]")!.getBoundingClientRect();
+    return { listBottom: list.bottom, listTop: list.top, chipTop: from.top };
+  });
+  expect(opened.listBottom).toBeLessThanOrEqual(opened.chipTop);
+  expect(opened.listTop).toBeGreaterThanOrEqual(0);
+  await page.keyboard.press("Escape");
+  await page.setViewportSize({ width: 1400, height: 900 });
   await chip.click();
   const list = screen.getByRole("listbox", { name: "Workspace" });
   const search = list.getByRole("searchbox", { name: "Search branches" });

@@ -98,6 +98,7 @@ fn session() -> Session {
         created_at: "2026-10-31T12:00:00Z".into(),
         last_event_seq: Some(41),
         sending: Some(SendPhase::Copying),
+        archived: true,
         tile: tile(),
     }
 }
@@ -179,6 +180,7 @@ fn result_examples() -> Vec<(Method, Value)> {
         ),
         (Method::SessionList, to_value(&vec![session()])),
         (Method::SessionCreate, to_value(&session())),
+        (Method::SessionSetArchived, to_value(&session())),
         (
             Method::SessionSend,
             to_value(&SessionSendResult { turn: Some(2) }),
@@ -417,6 +419,13 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&SetTitleParams {
                 id: "s-1".into(),
                 title: "t".into(),
+            }),
+        ),
+        (
+            Method::SessionSetArchived,
+            to_value(&SetArchivedParams {
+                id: "s-1".into(),
+                archived: true,
             }),
         ),
         (
