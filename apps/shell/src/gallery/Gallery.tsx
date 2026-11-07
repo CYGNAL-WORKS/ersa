@@ -415,6 +415,8 @@ const oneBackend = { local: [claudeCode] };
 
 /** Room beneath a specimen for a chip's open choices, which lie over what follows. */
 const room = (node: ReactNode) => <div className="gallery-room">{node}</div>;
+/** Room above a composer for its status line, which grows upward over what is above it. */
+const statusRoom = (node: ReactNode) => <div className="gallery-status-room">{node}</div>;
 /** More room, for a list with a section beneath its options. */
 const tallRoom = (node: ReactNode) => <div className="gallery-room gallery-room-tall">{node}</div>;
 
@@ -856,9 +858,10 @@ const entries: Entry[] = [
       ["Empty", <Composer autoFocus={false} onSend={async () => false} />],
       [
         "Under a session, with its values",
-        <>
-          <Composer autoFocus={false} onSend={async () => false} />
-          <div className="stage-controls">
+        <Composer
+          autoFocus={false}
+          onSend={async () => false}
+          controls={
             <SessionControls
               hosts={[hello.host]}
               localHostId={hello.host.id}
@@ -870,23 +873,31 @@ const entries: Entry[] = [
               disabled
               used={0.42}
             />
-          </div>
-        </>,
+          }
+        />,
       ],
       ["Hover", <Composer autoFocus={false} onSend={async () => false} force="hover" />],
+      ["Send under the pointer", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." forceSend="hover" />],
+      ["Send pressed", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." forceSend="pressed" />],
       ["Focus", <Composer autoFocus={false} onSend={async () => false} force="focus" />],
+      // A permission request holds the screen's focal glow, so the box shows focus by its edge alone.
+      ["Focus, a permission request open", <Composer autoFocus={false} onSend={async () => false} force="focus" quietFocus />],
       ["Typed", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again, then summarise what failed." />],
       ["Sending", <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." sending={{ state: "sending" }} />],
       [
         "Refused",
-        <Composer
-          autoFocus={false}
-          onSend={async () => false}
-          initialText="Run the tests again."
-          sending={{ state: "failed", message: refusal }}
-        />,
+        statusRoom(
+          <Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." sending={{ state: "failed", message: refusal }} />,
+        ),
       ],
-      ["Core not connected", <Composer autoFocus={false} onSend={async () => false} unavailable="Core is not connected." />],
+      [
+        "Can't reach the sessions, trying again",
+        statusRoom(<Composer autoFocus={false} onSend={async () => false} initialText="Run the tests again." unavailable="reconnecting" />),
+      ],
+      ["Can't reach the sessions", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="unreachable" />)],
+      ["Detecting backends", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="detecting" />)],
+      ["No backend", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable="no-backend" />)],
+      ["A backend not working", statusRoom(<Composer autoFocus={false} onSend={async () => false} unavailable={{ failedBackend: "Claude Code" }} />)],
     ],
   },
   {
