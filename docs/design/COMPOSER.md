@@ -43,7 +43,7 @@ Attachments sit in the box above the words, across its full width, wrapping, `sp
 
 - **An attachment** is `size-control-lg` high on `material-tile`, with a `line` edge and `radius-md`, padded `space-sm` at the leading edge and `space-xs` at the trailing one, its parts `space-sm` apart, in `ui-small`. From the leading edge: its icon at `size-icon-sm` in `ink-muted` (an image, a file or a folder), its name in `ink` cut with an ellipsis, its detail in `ink-faint` (a size such as 84 KB, a line count such as 212 lines, or "folder"), and remove.
 - **Remove** is an icon button `size-control-sm` square, `radius-sm`, with a cross at `size-icon-xs` in `ink-faint`; under the pointer it takes `material-hover` and reads `ink`, pressed `material-pressed`, and with keyboard focus its edge turns `ink`. Removing one moves keyboard focus to the next attachment's remove, else to the words.
-- **One Ersa will copy** (`attachment.inspect`'s `copied`, or any attachment for a new workspace) says, after its detail, that it will be copied to the workspace's `.ersa` folder, in `ink-faint`.
+- **One Ersa will copy** (`attachment.inspect`'s `copied`) says, after its detail, that it will be copied to the workspace's `.ersa` folder, in `ink-faint`.
 - **One Ersa can't send** shows a glyph at `size-glyph` in `danger` in place of its icon, and its detail gives the reason in `danger`.
 - **Dragging over the box**, its edge is `accent`, with no glow, until the drop or the drag leaves.
 - An attachment fades in over `motion-quick` as it is added and out as it is removed.
