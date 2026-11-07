@@ -12,7 +12,11 @@ import type { Sending } from "../session/follow";
 import type { AttachWhat } from "./AttachMenu";
 import { Composer } from "./Composer";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  delete (document as unknown as Record<string, unknown>).elementFromPoint;
+});
 
 const notes: Attached = { path: "D:\\work\\repo\\notes.md", name: "notes.md", kind: "file", detail: "212 lines", copied: { workspace: "w-1", copied: false } };
 const shot: Attached = { path: "C:\\pics\\shot.png", name: "shot.png", kind: "image", detail: "84 KB" };
@@ -236,7 +240,6 @@ describe("pasting and dropping attachments", () => {
     expect(onRead).toHaveBeenCalledWith(["D:/work/repo/notes.md"]);
     expect(box().hasAttribute("data-drag-over")).toBe(false);
     expect(shown()).toEqual(["notes.md212 lines"]);
-    vi.restoreAllMocks();
   });
 
   // verifies: FLOW-SEND-MESSAGE-R08
@@ -250,7 +253,6 @@ describe("pasting and dropping attachments", () => {
     expect(screen.getByRole("form", { name: "Composer" }).hasAttribute("data-drag-over")).toBe(false);
     await act(async () => emit({ type: "drop", x: 50, y: 150, paths: ["D:/a.md"] }));
     expect(onRead).not.toHaveBeenCalled();
-    vi.restoreAllMocks();
   });
 });
 
@@ -275,7 +277,5 @@ describe("a drop over a layer above the box", () => {
     await act(async () => emit({ type: "drop", x: 50, y: 150, paths: ["D:/a.md"] }));
     expect(onRead).toHaveBeenCalledWith(["D:/a.md"]);
     layer.remove();
-    delete (document as unknown as Record<string, unknown>).elementFromPoint;
-    vi.restoreAllMocks();
   });
 });
