@@ -1492,7 +1492,10 @@ async fn archiving_a_running_session_stops_it_and_keeps_it_and_its_workspace() {
     client.events_until("session.started").await;
 
     let response = client
-        .call("session.set_archived", json!({ "id": id, "archived": true }))
+        .call(
+            "session.set_archived",
+            json!({ "id": id, "archived": true }),
+        )
         .await;
     support::assert_valid("session.set_archived", &response);
     let archived = &response["result"];
@@ -1561,7 +1564,10 @@ async fn a_message_to_an_archived_session_is_refused() {
         .await;
     client.events_until("session.started").await;
     client
-        .result("session.set_archived", json!({ "id": id, "archived": true }))
+        .result(
+            "session.set_archived",
+            json!({ "id": id, "archived": true }),
+        )
         .await;
 
     let response = client
@@ -1599,7 +1605,10 @@ async fn unarchiving_clears_the_mark_and_leaves_the_session_stopped() {
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
     client
-        .result("session.set_archived", json!({ "id": id, "archived": true }))
+        .result(
+            "session.set_archived",
+            json!({ "id": id, "archived": true }),
+        )
         .await;
     let starts = stats.starts.load(Ordering::SeqCst);
 
@@ -1635,7 +1644,10 @@ async fn resuming_an_archived_session_clears_the_mark_first() {
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;
     client
-        .result("session.set_archived", json!({ "id": id, "archived": true }))
+        .result(
+            "session.set_archived",
+            json!({ "id": id, "archived": true }),
+        )
         .await;
 
     let error = client.error("session.resume", json!({ "id": id })).await;
