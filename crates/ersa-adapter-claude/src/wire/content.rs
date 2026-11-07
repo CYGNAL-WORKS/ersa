@@ -50,6 +50,13 @@ pub enum ContentBlock {
         #[serde(flatten)]
         extra: Extra,
     },
+    /// An image a user message carries, as base64 (PROTO-CLAUDE-CODE-STREAM,
+    /// User message; recorded in fixture 2.1.316/07).
+    Image {
+        source: Value,
+        #[serde(flatten)]
+        extra: Extra,
+    },
     #[serde(untagged)]
     Other(Value),
 }

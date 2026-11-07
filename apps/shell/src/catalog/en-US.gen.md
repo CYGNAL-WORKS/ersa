@@ -266,6 +266,10 @@ Attach
 
 Send
 
+### `composer.stopButton`
+
+Stop
+
 ### `composer.detectingProgress`
 
 Detecting the backends on this host…
