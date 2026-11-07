@@ -4,7 +4,7 @@ type: flow
 title: Arrange sessions in the rail
 status: ready
 references: [LAY-SHELL, PROTO-CORE-API]
-adrs: [0026]
+adrs: [0029]
 ---
 
 # Arrange sessions in the rail
@@ -36,7 +36,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 - **Deleting a section** puts its sessions in "No section" and asks nothing, since no session is lost.
 - **A name already taken or too long.** Two sections may not share a name, ignoring case, and a name has at most 80 characters; the name field says so and keeps the name typed.
 - **Saving fails.** When Core refuses or can't be reached, the change is undone in the rail and the rail says why. Nothing is kept only in the window.
-- **A rename the backend refuses** (a blank or too-long title, or a record that is gone) keeps the field open with the reason. A session its backend has no session record for yet, such as a new session before its first turn or a fork before its first message, offers Rename as unavailable, with the reason; a session with a record can be renamed, titled or not.
+- **A rename the backend refuses** (a blank or too-long title, or a record that is gone) keeps the field open with the reason. Rename is available on every session, a starting one included: the new name shows at once, and Ersa gives it to the backend once the backend has recorded the session (PROTO-CORE-API-R51). The user's name shows in place of the name the backend generates.
 - **Nothing to show.** Showing active sessions with every session archived, the rail says there are no active sessions. Changing what is shown never closes the active session, even when its tile leaves the rail. Starting a session while showing archived sessions only switches the rail to show active sessions, so the new tile is in view.
 - **A project whose sessions are all pinned** has its tiles in the Pinned group; its heading follows `LAY-SHELL` (Projects), and a collapsed heading counts only the tiles under it.
 - **Last activity** moves a tile only when a turn ends, never while a reply streams, and never because the session's state changed.
@@ -77,7 +77,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 
 ## Changes
 
-- 2026-11-06: from #231 inbox: Rename is unavailable until the session's backend has a session record for it, which a fork lacks until its first message, so the tile reports `recorded` (PROTO-CORE-API-R42). No requirement IDs changed.
+- 2026-11-07: owner's decision (ADR 0029): Rename is available on every session, a starting one included. No requirement IDs changed.
 - 2026-11-05: from #174 merge review: starting a session while the rail shows archived sessions only switches it to show active sessions (R21), so FLOW-NEW-SESSION-R13 always has a place for the tile.
 - 2026-11-05: from #174 merge review: the menu item is All sessions, not View all, so it doesn't read like Show ▸ All; R16's order takes creation for a session with no activity yet (reworded before it shipped); R19 and R20 added for the page's loading and failed states and what it hides.
 - 2026-11-05: owner: View all opens the sessions page, as the desktop harness's does. R16 to R18 added.

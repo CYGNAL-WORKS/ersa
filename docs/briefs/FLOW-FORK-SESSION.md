@@ -46,6 +46,11 @@ The user chooses **Fork** in a tile's menu (`LAY-SHELL`, The rail).
 - Forking from an earlier reply than the last finished one.
 - Forking into a new isolated workspace.
 
+## Open questions
+
+- What a fork is named. The owner expects it to be named as Claude Code names one, likely the original's name marked as a fork; the CLI's fork is not yet recorded, so this is decided when forking is built.
+
 ## Changes
 
+- 2026-11-07: open question on how a fork is named. No requirement IDs changed.
 - 2026-11-05: created from the owner's decisions of 2026-11-05: Fork starts a new session from the last finished reply, unavailable with the reason while a reply runs or before one has finished. R01 to R04 added.
