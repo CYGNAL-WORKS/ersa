@@ -78,9 +78,3 @@ export function TrustQuestion({ name, path, purpose, onTrust, onDismiss, takeFoc
     </section>
   );
 }
-
-/** A folder's last name, for a question about a project not yet added. */
-export function folderName(path: string): string {
-  // Windows paths separate with a backslash, others with a slash.
-  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-}

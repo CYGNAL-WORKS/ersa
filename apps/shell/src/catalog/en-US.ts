@@ -105,7 +105,7 @@ export const enUS = {
   transcript: {
     attachment: {
       listLabel: "Attachments",
-      imageLabel: "Attached image",
+      imageLabel: "Attached image {n} of {count}",
     },
   },
   // The composer (docs/design/COMPOSER.md): the box's parts, and the status line's note while backends are detected

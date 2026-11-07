@@ -11,12 +11,12 @@ import {
   startingProject,
   valuesFor,
 } from "../session/controls";
-import type { Attached } from "../session/attachments";
+import { type Attached, pathName } from "../session/attachments";
 import type { Sending } from "../session/follow";
 import type { AttachWhat } from "./AttachMenu";
 import { Composer, type Unavailable } from "./Composer";
 import { type ControlKey, type Host, SessionControls } from "./SessionControls";
-import { TrustQuestion, folderName } from "./TrustQuestion";
+import { TrustQuestion } from "./TrustQuestion";
 import "./NewSessionScreen.css";
 
 /**
@@ -293,7 +293,7 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
         <div ref={above} className="new-session-above">
           {asking !== undefined && (
             <TrustQuestion
-              name={folderName(asking)}
+              name={pathName(asking)}
               path={asking}
               purpose="add"
               onTrust={() => void answer(true)}

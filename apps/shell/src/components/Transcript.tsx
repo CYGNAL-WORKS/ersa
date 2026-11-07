@@ -1,13 +1,13 @@
-import { File, Folder } from "lucide-react";
 import { type ReactNode, memo, useLayoutEffect, useRef } from "react";
 import { t } from "../catalog";
 import type { PermissionRequested, ToolInput } from "../protocol/agent-events.gen";
 import type { Answer, Decision } from "../session/answers";
 import type { SessionView, Sending } from "../session/follow";
+import { pathName } from "../session/attachments";
 import { stateText } from "../session/states";
 import { type Item, type MessageAttachment, isOpen } from "../session/transcript";
 import { Button } from "./Button";
-import { Icon } from "./Icon";
+import { AttachmentChip } from "./AttachmentChip";
 import { PermissionAnswers } from "./PermissionAnswers";
 import { SessionTitle } from "./SessionTitle";
 import "./Transcript.css";
@@ -112,36 +112,28 @@ interface BlockProps {
   onDecide: Decide;
 }
 
-const KIND_ICON = { file: File, folder: Folder } as const;
-
-/** A path's last part, as the composer named it: `notes/todo.md` is `todo.md`. */
-function lastPart(path: string): string {
-  return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
-}
-
 /**
- * What came with a user's message, above its words (FLOW-SEND-MESSAGE-R11): an image as the image, a file or folder
- * by its name, with its path as the agent was given it on hover. Only an image's own kinds show as images.
+ * What came with a user's message, above its words (FLOW-SEND-MESSAGE-R11): an image as the image, numbered among the
+ * message's images; a file or folder by its name, with its path as the agent was given it on hover. An image of a kind
+ * the window does not show as one is still there, by name.
  */
 function MessageAttachments({ attachments }: { attachments: readonly MessageAttachment[] }) {
+  const images = attachments.filter((a) => a.kind === "image").length;
+  let image = 0;
   return (
     <ul className="transcript-attachments" aria-label={t("transcript.attachment.listLabel")}>
-      {attachments.map((a, i) =>
-        a.kind === "image" ? (
-          a.media_type.startsWith("image/") && (
-            <li key={i} className="transcript-attachment-image">
-              <img src={`data:${a.media_type};base64,${a.data}`} alt={t("transcript.attachment.imageLabel")} />
-            </li>
-          )
-        ) : (
-          <li key={i} className="transcript-attachment" title={a.path}>
-            <span className="transcript-attachment-icon">
-              <Icon icon={KIND_ICON[a.kind]} size="icon-sm" />
-            </span>
-            <span className="transcript-attachment-name">{lastPart(a.path)}</span>
+      {attachments.map((a, i) => {
+        if (a.kind !== "image") return <AttachmentChip key={i} kind={a.kind} name={pathName(a.path)} title={a.path} />;
+        image += 1;
+        const label = t("transcript.attachment.imageLabel", { n: image, count: images });
+        return a.media_type.toLowerCase().startsWith("image/") ? (
+          <li key={i} className="transcript-attachment-image">
+            <img src={`data:${a.media_type};base64,${a.data}`} alt={label} />
           </li>
-        ),
-      )}
+        ) : (
+          <AttachmentChip key={i} kind="image" name={label} />
+        );
+      })}
     </ul>
   );
 }
