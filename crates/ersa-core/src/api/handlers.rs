@@ -419,6 +419,7 @@ pub(super) async fn workspace_changes(
         unshared: found.unshared,
         stranded: found.stranded,
         sessions: sessions.len() as u64,
+        unrecorded: found.unrecorded,
         token: digest.finish(),
     })
 }

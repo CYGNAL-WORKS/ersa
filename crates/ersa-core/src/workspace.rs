@@ -299,6 +299,9 @@ pub struct WorktreeChanges {
     pub unshared: u64,
     /// Those of them the branch does not hold.
     pub stranded: u64,
+    /// git has no record of the worktree: its checkout and reflog are gone,
+    /// so commits only they held can't be counted.
+    pub unrecorded: bool,
     /// One line per thing that went into the counts, and the content of
     /// each uncommitted file: what the token is a digest of, so the token
     /// changes when any of them does.
@@ -323,6 +326,10 @@ pub async fn git_worktree_changes(
     let deadline = Deadline::after(CHANGES_TIMEOUT);
     let mut changes = WorktreeChanges::default();
     let records = git_records(transport, repo, path, deadline).await?;
+    changes.unrecorded = records.worktree.is_none();
+    if changes.unrecorded {
+        changes.evidence.push("unrecorded".to_string());
+    }
     let folder = path.to_string();
     // `try_exists`, not `exists`: a folder Core may not look into is an
     // error, never a folder that is gone, whose files would go uncounted.

@@ -834,6 +834,10 @@ export interface WorkspaceChanges {
    */
   sessions: number;
   /**
+   * Whether git has lost its record of the workspace: its checkout and reflog went with it, so commits made on a detached checkout can't be counted.
+   */
+  unrecorded: boolean;
+  /**
    * Opaque; changes whenever the uncommitted files or their content, the unshared commits, the set of ignored entries or the counted sessions change. session.delete carries it.
    */
   token: string;
@@ -1034,6 +1038,10 @@ export interface WorkspaceChangesResult {
    * Sessions using the workspace, leaving out any marked deleting.
    */
   sessions: number;
+  /**
+   * Whether git has lost its record of the workspace: its checkout and reflog went with it, so commits made on a detached checkout can't be counted.
+   */
+  unrecorded: boolean;
   /**
    * Opaque; changes whenever the uncommitted files or their content, the unshared commits, the set of ignored entries or the counted sessions change. session.delete carries it.
    */
