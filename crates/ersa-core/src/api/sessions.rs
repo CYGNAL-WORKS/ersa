@@ -9,8 +9,7 @@ use ersa_protocol::core_api::{
     AnswerQuestionParams, Attachment, AttachmentKind, Choice, DecidePermissionParams, Empty,
     IdParams, InspectParams, Inspected, RawDirection, RawLogEntry, RawLogParams, Session,
     SessionCreateParams, SessionSendParams, SessionSendResult, SetArchivedParams, SetModeParams,
-    SetTitleParams,
-    SubscribeParams, SubscribeResult, WorkspaceState,
+    SetTitleParams, SubscribeParams, SubscribeResult, WorkspaceState,
 };
 use serde_json::Value;
 
