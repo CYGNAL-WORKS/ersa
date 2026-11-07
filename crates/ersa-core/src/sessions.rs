@@ -1094,6 +1094,14 @@ impl SessionManager {
         if archived {
             self.stop(id).await?;
         }
+        // Taken after the stop, which takes it itself. Held while marking,
+        // so two marks of one session land in the store and in memory in
+        // the same order, and a `session.remove` (which also holds it) is
+        // either finished, and seen here, or waits for the mark.
+        let _op = handle.op.lock().await;
+        if handle.removed.load(Ordering::SeqCst) {
+            return Err(SessionError::NotFound(id.to_string()));
+        }
         // Stored first, then kept in memory: a store that fails leaves both
         // as they were, so `session.list` never reports what a restart would
         // lose.
