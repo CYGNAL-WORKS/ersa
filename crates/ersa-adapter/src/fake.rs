@@ -67,6 +67,11 @@ enum Step {
     Line(String),
     /// Wait for the next stdin line no earlier step has consumed, and check it.
     AwaitStdin(StdinCheck),
+    /// Wait this long before the next step.
+    Pause(std::time::Duration),
+    /// A pause under way: wait until then. Kept as a deadline, so a read that
+    /// is dropped mid-pause and started again does not wait twice.
+    Until(tokio::time::Instant),
 }
 
 /// The check a paused stdout applies to the stdin line it waited for. `Err`
@@ -140,6 +145,13 @@ impl FakeTransport {
         self.script
             .stdout
             .extend(stdout.into_iter().map(|l| Step::Line(l.into())));
+        self
+    }
+
+    /// After the steps so far, waits `pause` before the rest of the script,
+    /// as a backend that takes a while to answer does.
+    pub fn then_pause(mut self, pause: std::time::Duration) -> Self {
+        self.script.stdout.push(Step::Pause(pause));
         self
     }
 
@@ -421,6 +433,16 @@ impl LineReader for FakeReader {
                 // Taking a line happens in one step with no await before it,
                 // so a dropped call can never lose one.
                 Some(Step::Line(line)) => return Ok(Some(line)),
+                Some(Step::Pause(pause)) => {
+                    let until = tokio::time::Instant::now() + pause;
+                    self.steps.push_front(Step::Until(until));
+                }
+                Some(Step::Until(until)) => {
+                    // Put back while waiting, as for stdin below.
+                    self.steps.push_front(Step::Until(until));
+                    tokio::time::sleep_until(until).await;
+                    self.steps.pop_front();
+                }
                 Some(Step::AwaitStdin(check)) => {
                     // Put the step back while waiting: if this future is
                     // dropped mid-wait, the next call starts the wait again
