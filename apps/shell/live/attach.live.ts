@@ -52,7 +52,7 @@ test("attaches files, an image and a folder from the attach menu, and the agent 
   await expect(list.getByRole("listitem")).toHaveCount(3);
   // R09, R14: each by name and detail; the image from outside the workspace says it will be copied.
   await expect(list.getByRole("listitem").nth(0)).toHaveText(/notes\.md\s*2 lines/);
-  await expect(list.getByRole("listitem").nth(1)).toHaveText(/dot\.png.*Copied into the workspace's \.ersa folder/);
+  await expect(list.getByRole("listitem").nth(1)).toHaveText(/dot\.png.*Will be copied into the workspace's \.ersa folder/);
   await expect(list.getByRole("listitem").nth(2)).toHaveText(/docs\s*Folder/);
   await ersa.shot("attached");
 

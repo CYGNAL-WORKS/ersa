@@ -44,7 +44,7 @@ export function ContextRing({ used, size = "ring", turning, mark }: ContextRingP
     <span
       className="context-ring"
       data-size={size}
-      data-near-full={nearFull(share) || undefined}
+      data-near-full={(!mark && nearFull(share)) || undefined}
       role={mark ? undefined : "img"}
       aria-hidden={mark || undefined}
       aria-label={mark ? undefined : percent === undefined ? t("sessionControls.contextRing.noneLabel") : t("sessionControls.contextRing.usedLabel", { percent })}
