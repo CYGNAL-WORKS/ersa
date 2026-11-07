@@ -130,7 +130,8 @@
     color var(--motion-quick) var(--motion-ease-out);
 }
 
-.composer-send:focus-visible {
+.composer-send:focus-visible,
+.composer-send[data-force="focus"] {
   outline: none;
   border-color: var(--color-ink);
 }
@@ -193,7 +194,11 @@
   background: var(--color-canvas);
 }
 
-.composer-send[data-stop]:focus-visible {
+/* Keyboard focus is an ink edge on stop, and on send with nothing to send, which stop turns back into with focus. */
+.composer-send[data-stop]:focus-visible,
+.composer-send[data-stop][data-force="focus"],
+.composer-send[aria-disabled="true"]:focus-visible,
+.composer-send[aria-disabled="true"][data-force="focus"] {
   border-color: var(--color-ink);
 }
 
@@ -204,6 +209,9 @@
 /* Send becoming stop and back crossfades: the new icon fades in. */
 .composer-send-icon {
   display: inline-flex;
+}
+
+.composer-send-icon[data-traded] {
   animation: composer-send-icon-in var(--motion-quick) var(--motion-ease-out);
 }
 
@@ -223,7 +231,7 @@
     transition: none;
   }
 
-  .composer-send-icon {
+  .composer-send-icon[data-traded] {
     animation: none;
   }
 }

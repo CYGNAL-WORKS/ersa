@@ -32,8 +32,8 @@ interface ComposerProps {
   working?: boolean;
   /** Stop: offered in send's place from the moment the user sends until the turn ends (FLOW-SEND-MESSAGE-R03). */
   onStop?: () => void;
-  /** For the gallery: send shown under the pointer or pressed. */
-  forceSend?: "hover" | "pressed";
+  /** For the gallery: send or stop shown under the pointer, pressed, or with keyboard focus. */
+  forceSend?: "hover" | "pressed" | "focus";
   /** A permission request is open and holds the focal glow, so focus shows on the box's edge alone. */
   quietFocus?: boolean;
   /** For the gallery: text already typed, and a pointer or keyboard state shown without one. */
@@ -57,22 +57,31 @@ export function Composer({ unavailable, sending, onSend, onWrite, tall, statusTa
   const canSend = !unavailable && !busy && !working && text.trim() !== "";
   // From the moment of sending until the turn ends, the button is stop.
   const stopping = (busy || !!working) && onStop !== undefined && !unavailable;
+  // The icon fades in only when send and stop trade places, not as the composer appears.
+  const [traded, setTraded] = useState(false);
+  const wasStopping = useRef(stopping);
+  if (wasStopping.current !== stopping) {
+    wasStopping.current = stopping;
+    if (!traded) setTraded(true);
+  }
 
-  // When the box becomes unavailable while the user is in it, focus goes back to the words once it is available
-  // again. Read as the box turns unavailable, before the words are disabled and lose focus.
+  // When the box becomes unavailable while the user is in it, focus goes back where it was, the words or the
+  // send-or-stop button, once it is available again. Read as the box turns unavailable, before they are disabled.
+  const button = useRef<HTMLButtonElement>(null);
   const wasUnavailable = useRef(unavailable !== undefined);
-  const refocus = useRef(false);
+  const refocus = useRef<HTMLElement | null>(null);
   if (unavailable !== undefined && !wasUnavailable.current) {
     const at = typeof document === "undefined" ? null : document.activeElement;
-    refocus.current = at !== null && at === words.current;
+    refocus.current = at === words.current || at === button.current ? (at as HTMLElement) : null;
   }
   wasUnavailable.current = unavailable !== undefined;
   useEffect(() => {
     if (unavailable === undefined && refocus.current) {
-      refocus.current = false;
+      const back = refocus.current;
+      refocus.current = null;
       // Only if focus went nowhere meanwhile: a user who moved on, to the rail say, keeps their place.
       const at = document.activeElement;
-      if (at === null || at === document.body) words.current?.focus({ preventScroll: true });
+      if (at === null || at === document.body) back.focus({ preventScroll: true });
     }
   }, [unavailable]);
 
@@ -129,6 +138,7 @@ export function Composer({ unavailable, sending, onSend, onWrite, tall, statusTa
         {/* One button, send or stop, so keyboard focus stays on it as it turns from one to the other. With nothing to
             send it stays focusable, so focus on stop survives the turn ending; unavailable, it is disabled. */}
         <button
+          ref={button}
           type={stopping ? "button" : "submit"}
           className="composer-send"
           data-stop={stopping || undefined}
@@ -146,7 +156,7 @@ export function Composer({ unavailable, sending, onSend, onWrite, tall, statusTa
           }}
         >
           {/* Keyed, so the icon fades in as send and stop trade places. */}
-          <span key={stopping ? "stop" : "send"} className="composer-send-icon">
+          <span key={stopping ? "stop" : "send"} className="composer-send-icon" data-traded={traded || undefined}>
             <Icon icon={stopping ? Square : ArrowUp} size={stopping ? "icon-sm" : "icon"} />
           </span>
         </button>

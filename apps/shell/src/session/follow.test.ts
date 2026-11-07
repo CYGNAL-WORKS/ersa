@@ -303,3 +303,39 @@ describe("stop", () => {
     expect(last().message).toEqual({ state: "failed", message: "the session is a replay of a recording and cannot change" });
   });
 });
+
+describe("a stop that did not cancel the message", () => {
+  // verifies: FLOW-SEND-MESSAGE-R05
+  it("still shows the send's refusal when the interrupt never reached Core, or the send failed for another reason", async () => {
+    for (const interrupt of [() => Promise.reject({ kind: "unavailable", message: "gone" }), () => Promise.resolve({})]) {
+      let refuse: (error: BridgeError) => void = () => {};
+      const { follower, last } = following({
+        "session.send": () => new Promise((_, reject) => (refuse = reject)),
+        "session.interrupt": interrupt,
+      });
+      const sent = follower.send("hello");
+      await settle();
+      await follower.interrupt();
+      refuse({ kind: "rpc", error: { code: -32000, message: "the backend could not be reached", data: { kind: "internal" } } } as never);
+      expect(await sent).toBe(false);
+      expect(last().message).toEqual({ state: "failed", message: "the backend could not be reached" });
+    }
+  });
+});
+
+describe("a stop that never reached Core", () => {
+  // verifies: FLOW-SEND-MESSAGE-R05
+  it("leaves the send's refusal to show, even one Core gives as an invalid state", async () => {
+    let refuse: (error: BridgeError) => void = () => {};
+    const { follower, last } = following({
+      "session.send": () => new Promise((_, reject) => (refuse = reject)),
+      "session.interrupt": () => Promise.reject({ kind: "unavailable", message: "gone" }),
+    });
+    const sent = follower.send("hello");
+    await settle();
+    await follower.interrupt();
+    refuse(replayRefusal("session.send"));
+    expect(await sent).toBe(false);
+    expect(last().message).toEqual({ state: "failed", message: "the session is a replay of a recording and cannot change" });
+  });
+});

@@ -108,8 +108,10 @@ export async function startSession(
       await client.call("session.send", { id: created.id, text });
       return { ok: true, session: created, workspace };
     } catch (error) {
-      // A stop canceled the message before it reached the agent: take back what was made.
-      if (stop?.stopped) throw STOPPED;
+      // A stop canceled the message before it reached the agent, which Core answers as an invalid state: take back
+      // what was made. Any other failure is judged below, so a session the backend already ran is kept.
+      const canceled = (error as BridgeError | undefined)?.kind === "rpc" && (error as Extract<BridgeError, { kind: "rpc" }>).error.data?.kind === "invalid_state";
+      if (stop?.stopped && canceled) throw STOPPED;
       // Core answers a message to a backend that failed to start once the session's run has ended, so its state
       // already says so. A session Core cannot be asked about is kept: removing a live one loses its work. After
       // an `internal` answer the backend already has the message, so the session ran: it is kept whatever its
@@ -132,7 +134,7 @@ export async function startSession(
       await client.call("session.remove", { id }).catch(() => {});
     }
     if (made) await client.call("workspace.remove", { id: made.id }).catch(() => {});
-    if (error === STOPPED || stop?.stopped) return { ok: false, stopped: true };
+    if (error === STOPPED) return { ok: false, stopped: true };
     return { ok: false, message: describeError(error) };
   }
 }
