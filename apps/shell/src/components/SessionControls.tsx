@@ -1,4 +1,4 @@
-import { Folder, Plus } from "lucide-react";
+import { Folder, GitBranch, Monitor, Plus } from "lucide-react";
 import { t } from "../catalog";
 import type { CoreHelloResult, Project } from "../protocol/core-api.gen";
 import {
@@ -39,6 +39,8 @@ interface SessionControlsProps {
   onAddProject?: () => void;
   /** While the first message is on its way, nothing changes. */
   disabled?: boolean;
+  /** Under a running session: its values, as pills that do not open (docs/design/COMPOSER.md, The session controls). */
+  readOnly?: boolean;
   /** The context ring's share used; absent before the session has used any. */
   used?: number;
   /** For the gallery: one chip shown open, or in a pointer or keyboard state. */
@@ -108,21 +110,24 @@ const choiceOptions = (choices: readonly Choice[]): ChipOption[] => choices.map(
  * permission mode, with the context ring at the row's end (LAY-SHELL). The backend chip shows only when the host
  * has more than one backend, or none to run, and lists a missing backend with its status (FLOW-NEW-SESSION-R07).
  */
-export function SessionControls({ hosts, localHostId, projects, backends, values, branches, workspaceLabel, onChoose, onAddProject, disabled, used, open, force }: SessionControlsProps) {
+export function SessionControls({ hosts, localHostId, projects, backends, values, branches, workspaceLabel, onChoose, onAddProject, disabled, readOnly, used, open, force }: SessionControlsProps) {
   const project = projects.find((p) => p.id === values.project_id);
   const backend = backends?.find((b) => b.name === values.backend);
   const chip = (key: ControlKey) => ({
     onChoose: (id: string) => onChoose(key, id),
     disabled,
+    readOnly,
     initialOpen: open === key,
     force: force?.key === key ? force.state : undefined,
   });
 
   return (
     <div className="session-controls" role="group" aria-label="Session controls">
-      <div className="session-controls-chips">
+      {/* Where the session runs leads the row; how it runs, and the context ring, trail it. */}
+      <div className="session-controls-where">
         <Chip
           name="Host"
+          icon={Monitor}
           value={values.host_id}
           // A session runs in a project, so a host with none has nothing to start yet.
           options={hosts.map((h) => {
@@ -152,6 +157,7 @@ export function SessionControls({ hosts, localHostId, projects, backends, values
           (workspaceLabel === undefined ? (
             <Chip
               name="Workspace"
+              icon={GitBranch}
               value={values.workspace}
               // It names the workspace the session will start in: a new one with its base branch, or the project folder (R29).
               reads={
@@ -164,8 +170,16 @@ export function SessionControls({ hosts, localHostId, projects, backends, values
               {...chip("workspace")}
             />
           ) : (
-            <Chip name="Workspace" value={values.workspace} options={[{ id: values.workspace, label: workspaceLabel }]} {...chip("workspace")} />
+            <Chip
+              name="Workspace"
+              icon={GitBranch}
+              value={values.workspace}
+              options={[{ id: values.workspace, label: workspaceLabel }]}
+              {...chip("workspace")}
+            />
           ))}
+      </div>
+      <div className="session-controls-how">
         {backends === undefined ? (
           <Chip name="Backend" placeholder="Detecting backends…" pending options={[]} onChoose={() => {}} disabled />
         ) : (
@@ -199,8 +213,8 @@ export function SessionControls({ hosts, localHostId, projects, backends, values
             )}
           </>
         )}
+        <ContextRing used={used} />
       </div>
-      <ContextRing used={used} />
     </div>
   );
 }
