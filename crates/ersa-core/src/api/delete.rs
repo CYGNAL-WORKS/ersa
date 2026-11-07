@@ -24,7 +24,7 @@
 
 use ersa_adapter::{OpenElsewhere, RecordDeletion};
 use ersa_protocol::core_api::{
-    SessionDeleteParams, SessionDeleteResult, Workspace, WorkspaceKind,
+    SessionDeleteParams, SessionDeleteResult, Workspace, WorkspaceKind, WorkspaceState,
 };
 
 use super::{ApiError, handlers};
@@ -123,13 +123,29 @@ async fn finish(
         let transport = core
             .transport_for(&project.host_id)
             .ok_or_else(|| handlers::unreachable_host(&project.host_id))?;
-        branch_kept = workspace::git_worktree_delete(
+        let deleted = workspace::git_worktree_delete(
             transport.as_ref(),
             &project.path,
             &workspace.path,
             &workspace.vcs_ref,
         )
-        .await?;
+        .await;
+        branch_kept = match deleted {
+            Ok(kept) => kept,
+            Err(e) => {
+                // A refusal (a locked worktree) left the files as they were.
+                // Anything else may have left them half gone, or still going
+                // on a thread that outlived its limit: the workspace is no
+                // longer `ready`, so no new session starts in it while the
+                // claim is gone (`workspace.remove` takes it from `error`).
+                if !e.is_refusal() {
+                    core.store
+                        .set_workspace_state(workspace.id.clone(), WorkspaceState::Error)
+                        .await?;
+                }
+                return Err(e.into());
+            }
+        };
     }
     match core.sessions.delete_record(id, session_transport).await {
         Ok(RecordDeletion::Deleted) => {}
@@ -146,12 +162,12 @@ async fn finish(
     // delete of another session in it took them (this one's record kept
     // them, since it shared the workspace then); in either case only once
     // no session refers to it.
-    let folder_gone = !files && !folder_exists(&workspace.path).await;
     let isolated = workspace.kind == WorkspaceKind::Isolated;
+    let taken_earlier = isolated && !files && files_taken(core, workspace).await;
     core.sessions
         .finish_delete(
             id,
-            (isolated && (files || folder_gone)).then(|| workspace.id.clone()),
+            (isolated && (files || taken_earlier)).then(|| workspace.id.clone()),
         )
         .await?;
     Ok(SessionDeleteResult {
@@ -161,16 +177,28 @@ async fn finish(
     })
 }
 
-/// Whether anything is at `path`; a folder Core may not look into, or that
-/// does not answer within five seconds, counts as there, so its row is kept.
-async fn folder_exists(path: &str) -> bool {
-    let path = path.to_string();
-    let look = tokio::task::spawn_blocking(move || {
-        std::path::Path::new(&path).try_exists().unwrap_or(true)
-    });
-    !matches!(
+/// Whether an isolated workspace's files were deleted already: git no
+/// longer lists its worktree, and its folder is gone. A folder missing while
+/// git still lists the worktree (a drive unplugged, a folder deleted by
+/// hand) was not deleted by Ersa, and anything Core cannot tell counts as
+/// still there, so the row is kept.
+async fn files_taken(core: &Core, workspace: &Workspace) -> bool {
+    let Ok(project) = handlers::find_project(core, &workspace.project_id).await else {
+        return false;
+    };
+    let Some(transport) = core.transport_for(&project.host_id) else {
+        return false;
+    };
+    let listed =
+        workspace::git_worktree_listed(transport.as_ref(), &project.path, &workspace.path).await;
+    if !matches!(listed, Ok(false)) {
+        return false;
+    }
+    let path = workspace.path.clone();
+    let look = tokio::task::spawn_blocking(move || std::path::Path::new(&path).try_exists());
+    matches!(
         tokio::time::timeout(std::time::Duration::from_secs(5), look).await,
-        Ok(Ok(false))
+        Ok(Ok(Ok(false)))
     )
 }
 
