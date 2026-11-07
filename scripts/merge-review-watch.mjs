@@ -128,7 +128,7 @@ export function select(prs, now = Date.now()) {
     const mark = normalizeChecks(pr.statusCheckRollup).find((c) => c.name === MERGE_REVIEW);
     // A pending time gh did not give reads as stale: the lock keeps a running review safe from the retake.
     const stale = mark?.status === "PENDING" && !(now - Date.parse(mark.startedAt ?? "") <= STALE_MS);
-    const retry = mark?.status === "COMPLETED" && mark.conclusion === "ERROR" && !(now - Date.parse(mark.startedAt ?? "") < RETRY_MS) && now - passedAt(pr.statusCheckRollup, now) < RETRY_UNTIL_MS;
+    const retry = mark?.status === "COMPLETED" && mark.conclusion === "ERROR" && !(now - Date.parse(mark.startedAt ?? "") < RETRY_MS) && now - passedAt(pr.statusCheckRollup, -Infinity) < RETRY_UNTIL_MS;
     const reviewed = Boolean(mark) && !stale && !retry;
     const held = (pr.labels ?? []).some((l) => l.name === "hold");
     if (pr.autoMergeRequest && (!reviewed || held)) disarm.push(pr.number);
