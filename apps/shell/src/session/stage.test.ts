@@ -80,10 +80,27 @@ describe("the stage", () => {
   });
 
   it("opens a kept session with why its first message did not go through, and gives the text back when it should", () => {
-    const giveBack = run([{ type: "sending" }, { type: "started", id: "s1", text: "Fix it", firstSend: { message: "still starting", giveBack: true } }]);
-    expect(giveBack.firstSend).toEqual({ id: "s1", text: "Fix it", message: "still starting" });
-    const kept = run([{ type: "sending" }, { type: "started", id: "s1", text: "Fix it", firstSend: { message: "not projected", giveBack: false } }]);
-    expect(kept.firstSend).toEqual({ id: "s1", message: "not projected" });
+    const giveBack = run([{ type: "sending" }, { type: "started", id: "s1", text: "Fix it", firstSend: { sending: { state: "failed", message: "still starting" }, giveBack: true } }]);
+    expect(giveBack.firstSend).toEqual({ id: "s1", text: "Fix it", attachments: undefined, sending: { state: "failed", message: "still starting" } });
+    const kept = run([{ type: "sending" }, { type: "started", id: "s1", text: "Fix it", firstSend: { sending: { state: "failed", message: "not projected" }, giveBack: false } }]);
+    expect(kept.firstSend).toEqual({ id: "s1", sending: { state: "failed", message: "not projected" } });
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R10
+  it("gives a first message's attachments back with it, the one Core refused marked with why", () => {
+    const a = { path: "D:\\w\\a.png", name: "a.png", kind: "image" as const, detail: "84 KB" };
+    const b = { path: "D:\\w\\b.md", name: "b.md", kind: "file" as const, detail: "3 lines" };
+    const refused = run([
+      { type: "sending" },
+      { type: "started", id: "s1", text: "Look", attachments: [a, b], firstSend: { sending: { state: "failed", message: "This image is too large.", index: 0 }, giveBack: true } },
+    ]);
+    expect(refused.firstSend?.attachments).toEqual([{ ...a, problem: "This image is too large." }, b]);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R15
+  it("opens a session whose first message Ersa can't tell arrived as that, never as failed, keeping the message", () => {
+    const unknown = run([{ type: "sending" }, { type: "started", id: "s1", text: "Look", firstSend: { sending: { state: "unknown" }, giveBack: true } }]);
+    expect(unknown.firstSend).toMatchObject({ text: "Look", sending: { state: "unknown" } });
   });
 
   // verifies: FLOW-NEW-SESSION-R03
