@@ -735,6 +735,21 @@ describe("the attachments App gives the composer", () => {
     expect(methods(core)).not.toContain("session.send");
   });
 
+  // verifies: FLOW-SEND-MESSAGE-R10
+  // R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
+  it("shows a folder Core refuses, as one holding the workspace, as that attachment's refusal and nothing else", async () => {
+    const shell = fakeShell("D:/code");
+    const holds = { kind: "rpc", error: { code: -32000, message: "attachment.inspect: D:/code holds the session's workspace", data: { kind: "attachment_refused" } } };
+    const core = fakeCore({ "session.subscribe": () => ({ last_seq: -1 }), "attachment.inspect": () => Promise.reject(holds) });
+    render(createElement(App, { client: core.client, shell }));
+    await settle();
+    await settle();
+    await choose("Add a folder…");
+    expect(shown()).toEqual(["codeD:/code holds the session's workspace"]);
+    expect(screen.getAllByRole("alert").map((a) => a.textContent)).toEqual(["D:/code holds the session's workspace"]);
+    expect(document.querySelector(".composer-status-line")).toBeNull();
+  });
+
   // verifies: FLOW-SEND-MESSAGE-R16
   it("shows where a session's message is, and where a new session's first message is", async () => {
     const core = fakeCore({ "session.subscribe": () => ({ last_seq: -1 }), "session.send": () => new Promise(() => {}) });

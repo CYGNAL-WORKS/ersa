@@ -888,6 +888,14 @@ async fn inspect_refuses_a_workspace_it_does_not_know() {
         )
         .await;
     assert_eq!(refused["data"]["kind"], "not_found", "{refused:#}");
+    let refused = s
+        .client
+        .error(
+            "attachment.inspect",
+            json!({ "path": path(&inside), "host_id": "h-none" }),
+        )
+        .await;
+    assert_eq!(refused["data"]["kind"], "not_found", "{refused:#}");
 }
 
 // verifies: FLOW-SEND-MESSAGE-R14
@@ -946,26 +954,30 @@ async fn inspect_takes_the_workspace_or_the_host_not_both_nor_neither() {
     }
 }
 
-// verifies: FLOW-SEND-MESSAGE-R14
 // R44-PLACEHOLDER: cites PROTO-CORE-API R44 once #243 merges
 #[tokio::test]
-async fn inspect_says_not_copied_for_what_send_refuses() {
+async fn inspect_refuses_a_folder_that_holds_the_workspace() {
     let mut s = setup(FakeAdapter::new(1)).await;
-    // A folder holding the workspace: send refuses it, so nothing is copied.
     let holding = s.workspace.parent().unwrap().to_path_buf();
-    assert_eq!(s.copied(&holding).await, json!(false));
-    // A folder past the copy limits: send refuses it too.
-    let big = s.outside.join("big");
-    std::fs::create_dir_all(&big).unwrap();
-    let large = std::fs::File::create(big.join("large.bin")).unwrap();
-    large
-        .set_len(ersa_core::attachments::COPY_BYTES + 1)
-        .unwrap();
-    assert_eq!(s.copied(&big).await, json!(false));
-    // A folder from outside within the limits is copied.
+    let refused = s
+        .client
+        .error(
+            "attachment.inspect",
+            json!({ "path": path(&holding), "workspace_id": s.workspace_id }),
+        )
+        .await;
+    assert_eq!(refused["data"]["kind"], "attachment_refused", "{refused:#}");
+    assert!(
+        refused["message"]
+            .as_str()
+            .unwrap()
+            .contains("holds the session's workspace"),
+        "{refused:#}"
+    );
+    // A folder inside the workspace is not a copy.
+    file(&s.workspace, "docs/a.md", b"x\n");
+    assert_eq!(s.copied(&s.workspace.join("docs")).await, json!(false));
+    // A folder from outside is copied, whatever its size: inspect measures nothing.
     file(&s.outside, "small/a.txt", b"x\n");
     assert_eq!(s.copied(&s.outside.join("small")).await, json!(true));
-    // A workspace folder that is gone: send refuses the message, so nothing is copied.
-    std::fs::remove_dir_all(&s.workspace).unwrap();
-    assert_eq!(s.copied(&s.outside.join("small")).await, json!(false));
 }
