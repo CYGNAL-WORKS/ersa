@@ -71,6 +71,8 @@ Before writing or rewriting a brief for an area, read the matching file under `d
 
 - `draft` briefs may be rewritten freely by planning sessions.
 - `ready` and `built` briefs change in a planning pass that lists the requirement IDs added, retired, or reworded, and updates the tests that cite retired IDs in the same change.
+- A section that mirrors a behavior of a vendor's CLI or app (a prompt's words, a dialog's answers and their order) cites the recording or screenshot under `docs/briefs/protocol/fixtures/` that shows it, and says no more than the vendor does. Ersa looks like the harnesses people already use; a brief that invents words for a behavior the vendor already has is redone when the owner sees it.
+- A `## Built so far` section is one paragraph, written in the planning commit that closes a merged ticket's inbox line, never ahead of the merge. The manifest fails a brief whose Built so far holds two paragraphs, which is what a union merge of two planning commits leaves.
 - Each brief ends with a `## Changes` section, newest first, one line per change. Briefs merge with git's union driver (`.gitattributes`), so two branches that each add a Changes line or a requirement merge by keeping both lines; after such a merge, read the section and run the manifest check, which reports a requirement defined twice and a bullet label (bold, or a method name in code) repeated under one section name. A rewritten bullet or paragraph survives such a merge as both its old and new wording, and the check sees only bullets whose label stayed the same; keep the version the brief's newest change says.
 
 ## Manifest

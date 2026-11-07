@@ -108,13 +108,29 @@ for (const file of walk(BRIEFS_DIR)) {
   let parent = "";
   let fence = "";
   const labels = new Set();
+  // "Built so far" is one paragraph by rule (docs/briefs/README.md); two is
+  // what a union merge of two planning commits leaves, each telling a
+  // different story of what is built.
+  let builtParagraphs = 0;
+  let inParagraph = false;
+  const checkBuilt = () => {
+    if (section === "Built so far" && builtParagraphs > 1) problems.push(`${fm.id}: Built so far holds ${builtParagraphs} paragraphs; a union merge kept both, keep the one the newest Changes line describes`);
+    builtParagraphs = 0;
+    inParagraph = false;
+  };
   for (const line of text.split(/\r?\n/)) {
     // A fence closes only on its own marker, at least as long, with nothing after it.
     const f = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
     if (f && !fence && !(f[1][0] === "`" && f[2].includes("`"))) fence = f[1];
     else if (f && fence && f[1][0] === fence[0] && f[1].length >= fence.length && !f[2].trim()) fence = "";
     const fenced = fence !== "";
-    if (!fenced && /^#{1,6}\s/.test(line)) section = line.replace(/^#+\s*/, "").trim();
+    if (!fenced && /^#{1,6}\s/.test(line)) {
+      checkBuilt();
+      section = line.replace(/^#+\s*/, "").trim();
+    } else if (section === "Built so far" && !fenced && !f) {
+      if (!line.trim()) inParagraph = false;
+      else if (!inParagraph) [builtParagraphs, inParagraph] = [builtParagraphs + 1, true];
+    }
     if (!fenced && /^(#{1,6}|[-*])\s/.test(line)) parent = line;
     const b = !fenced && /^(\s*)[-*]\s+(\*\*.+?\*\*|`[^`]+`)/.exec(line);
     if (b && !new RegExp(REQ_ID.source).test(b[2])) {
@@ -134,6 +150,7 @@ for (const file of walk(BRIEFS_DIR)) {
       (isRetired ? retired : active).add(id);
     }
   }
+  checkBuilt();
   // An unclosed fence would hide every bullet after it from the check above.
   if (fence) problems.push(`${fm.id}: a code fence (${fence}) is never closed`);
   for (const [id, n] of seen) if (n > 1) problems.push(`${fm.id}: requirement ${id} is defined ${n} times`);

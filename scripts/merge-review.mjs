@@ -79,9 +79,11 @@ const RANK = { high: 0, medium: 1, low: 2 };
 // "Medium, blocks the merge": the severity, then what blocking() makes of it.
 const category = (f) => `${f.severity[0].toUpperCase()}${f.severity.slice(1)}, ${blocking([f]).length ? "blocks the merge" : "does not block"}`;
 
-export function reviewBody({ head, findings, dismissed, outcome }) {
+export function reviewBody({ head, findings, dismissed, outcome, superseded = "" }) {
   const block = blocking(findings);
-  const state = JSON.stringify({ head, verdict: block.length ? "blocked" : "clean", findings }).replace(/--/g, "-\\u002d");
+  // `superseded` names the head the pull request moved to while this review
+  // ran: the verdict stands for what it read, but it is not a round.
+  const state = JSON.stringify({ head, verdict: block.length ? "blocked" : "clean", findings, ...(superseded ? { superseded } : {}) }).replace(/--/g, "-\\u002d");
   const line = (f) => `- **${f.severity}**${f.origin === "listed" ? " (still open)" : ""}, \`${f.location}\`: ${f.defect} Failure: ${f.scenario}`;
   return [
     MARK,
@@ -275,7 +277,17 @@ function review(argv, run, sleep) {
       else if (g.code === 1) [verdict, summary, outcome] = ["pending", `Clean; the merge gate does not pass yet: ${g.reasons.join("; ")}`, `The merge gate does not pass yet; the merge review tries again within the hour, or at once after a push:\n\n${g.stdout}`];
       else [code, verdict, outcome] = [2, "error", `The merge gate could not run:\n\n${g.stderr}`];
     }
-    const url = fresh ? post(run, sleep, me, n, head, reviewBody({ head, findings, dismissed, outcome })) : "";
+    // A review takes 10 to 40 minutes and the head may move meanwhile. The
+    // verdict is posted for what it read, marked superseded so the session
+    // does not count it as a round, and the old head is not enqueued: the
+    // next review reads the new head and carries these findings as listed.
+    const current = run("gh", ["pr", "view", n, "--json", "headRefOid", "--jq", ".headRefOid"]);
+    const superseded = current.ok && current.out && current.out !== head ? current.out : "";
+    if (superseded) {
+      queue = false;
+      outcome = `${outcome}\n\nSuperseded: the pull request's head moved to ${superseded.slice(0, 7)} while this review ran, so this is not a round. The next review reads the new head; fix what this one names there.`;
+    }
+    const url = fresh ? post(run, sleep, me, n, head, reviewBody({ head, findings, dismissed, outcome, superseded })) : "";
     if (!block.length && !labels.includes("hold") && owner.length && !labels.includes("needs-owner")) must("gh", ["pr", "edit", n, "--add-label", "needs-owner"]);
     // The enqueue comes before the green status: a run that dies between the
     // two leaves a pending status, which the poller takes up again, rather
