@@ -39,7 +39,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 - **Archive while the session needs the user**: the pending requests are withdrawn with the stop, as when the session is stopped.
 - **The active session** archived or deleted: the transcript area shows the new-session screen.
 - **A session started elsewhere** (FLOW-RESUME-SESSION) is archived and deleted the same way, and deleting it deletes it from the backend's own tools too.
-- **The session is open in another process**, such as the backend's own terminal: Ersa says where and deletes nothing, since the other process would go on writing its record.
+- **The session is open in another process**, such as the backend's own terminal: Ersa has stopped the session by then, since it can't otherwise tell the other process from its own; it says where, deletes nothing, and the session stays stopped, since the other process would go on writing its record.
 
 ## Requirements
 
@@ -65,6 +65,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 
 ## Changes
 
+- 2026-11-07: from #252 inbox: a delete refused because the session is open in another process leaves the session stopped. No requirement IDs added or retired.
 - 2026-11-07: from #244 inbox: when git has lost a workspace's record, the delete question says commits made on a detached checkout can't be counted (R10).
 - 2026-11-06: from #236 inbox: a refused Resume leaves the session archived (PROTO-CORE-API-R43); R03 reworded to say a resume clears the mark once Core accepts it, its meaning kept.
 - 2026-11-05: from #174 merge review: R01 names the pin and the section it keeps, since Arrangement now covers more. Meaning unchanged.
