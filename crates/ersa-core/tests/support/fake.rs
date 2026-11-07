@@ -630,21 +630,17 @@ impl Projector for FakeProjector {
                 state: LifecycleState::Running,
                 reason: None,
             })],
-            (Direction::Backend, Some("interrupted")) => {
+            (Direction::Backend, Some(ended @ ("interrupted" | "completed"))) => {
+                let interrupted = ended == "interrupted";
                 vec![Event::TurnCompleted(TurnCompleted {
                     turn: self.turn,
-                    outcome: TurnOutcome::Interrupted,
+                    outcome: if interrupted {
+                        TurnOutcome::Interrupted
+                    } else {
+                        TurnOutcome::Success
+                    },
                     duration_ms: 0,
-                    is_error: true,
-                    final_text: None,
-                })]
-            }
-            (Direction::Backend, Some("completed")) => {
-                vec![Event::TurnCompleted(TurnCompleted {
-                    turn: self.turn,
-                    outcome: TurnOutcome::Success,
-                    duration_ms: 0,
-                    is_error: false,
+                    is_error: interrupted,
                     final_text: None,
                 })]
             }

@@ -51,7 +51,8 @@ pub struct SessionRow {
 }
 
 const SESSION_COLUMNS: &str = "s.id, s.workspace_id, s.host_id, s.backend, s.backend_session_id, \
-     s.mode, w.path, s.model, s.effort, s.permission_mode, s.archived, s.deleting, s.pinned, s.section_id,      s.last_activity_at";
+     s.mode, w.path, s.model, s.effort, s.permission_mode, s.archived, s.deleting, \
+     s.pinned, s.section_id, s.last_activity_at";
 
 impl Store {
     /// Records a new session, but only while its workspace is `ready`, in
