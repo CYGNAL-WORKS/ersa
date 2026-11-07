@@ -1,5 +1,5 @@
 {
-  "ersa_commit": "5b3d878c9b634e49c8dcd940f8472e98adefd6f4",
+  "ersa_commit": "d22f34d0de95f1079c6c10a6ed71eed7c70a9ab2",
   "notifications": [
     {
       "kind": "notification",
@@ -532,6 +532,7 @@
   ],
   "sessions": [
     {
+      "archived": false,
       "backend": "claude-code",
       "created_at": "2026-01-01T00:00:00Z",
       "host_id": "local",
@@ -549,6 +550,7 @@
   ],
   "sessions_after": [
     {
+      "archived": false,
       "backend": "claude-code",
       "created_at": "2026-01-01T00:00:00Z",
       "host_id": "local",
