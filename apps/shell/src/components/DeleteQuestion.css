@@ -22,14 +22,6 @@
   animation: delete-question-in var(--motion-settle) var(--motion-ease-out);
 }
 
-/* Once open, it keeps its bottom edge where centering put it, and grows upward (DeleteQuestion.tsx). */
-.delete-question[data-anchored] {
-  --delete-question-bottom: 0;
-  top: auto;
-  bottom: var(--delete-question-bottom);
-  margin-block: 0;
-}
-
 /* The gallery draws it in place, where its states sit side by side. */
 .delete-question[data-inline] {
   position: static;

@@ -154,12 +154,6 @@ describe("the delete question's buttons", () => {
     expect(calls).toEqual(["cancel"]);
   });
 
-  it("keeps its bottom edge where it opened, so the buttons hold still as it grows", () => {
-    const dialog = show({ kind: "reading" });
-    expect(dialog.hasAttribute("data-anchored")).toBe(true);
-    expect(dialog.style.getPropertyValue("--delete-question-bottom")).toMatch(/px$/);
-  });
-
   it("can't be confirmed while it reads what would be lost", () => {
     const dialog = show({ kind: "reading" });
     expect(dialog.textContent).toContain("Checking what would be lost…");
