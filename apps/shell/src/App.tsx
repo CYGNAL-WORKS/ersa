@@ -300,9 +300,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // New session shows the screen; leaving it, by choosing a session, leaves nothing behind (FLOW-NEW-SESSION-R03).
   const newSession = (project: Project) => dispatch({ type: "newSession", projectId: project.id });
-  // The projects whose headings the user collapsed, kept while the window is open (LAY-SHELL, Collapsing).
+  // The groups whose headings the user collapsed, by RailTree's groupKey, kept while the window is open (LAY-SHELL, Collapsing).
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
-  const toggleProject = (id: string) =>
+  const toggleGroup = (id: string) =>
     setCollapsed((was) => {
       const next = new Set(was);
       if (!next.delete(id)) next.add(id);
@@ -351,11 +351,25 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       // Core answers with the title as the backend will list it.
       const renamed = await client.call("session.set_title", { id, title });
       setRenaming(({ [id]: _, ...rest }) => rest);
-      connection.current?.renamed(id, renamed.title ?? title);
+      connection.current?.changed(id, { title: renamed.title ?? title });
       return true;
     } catch (error) {
       setRenaming((r) => ({ ...r, [id]: { state: "failed", message: describeError(error) } }));
       return false;
+    }
+  };
+
+  // Pin and Unpin on a tile (FLOW-ORGANIZE-SESSIONS-R01): Core stores the pin, and the rail moves the tile once Core
+  // has it. A refusal leaves the tile where Core has it and says why beneath it until the next try (R15).
+  const [pinning, setPinning] = useState<Record<string, Sending>>({});
+  const pin = async (id: string, pinned: boolean) => {
+    setPinning((p) => ({ ...p, [id]: { state: "sending" } }));
+    try {
+      const arranged = await client.call("session.arrange", { id, pinned });
+      setPinning(({ [id]: _, ...rest }) => rest);
+      connection.current?.changed(id, { pinned: arranged.pinned });
+    } catch (error) {
+      setPinning((p) => ({ ...p, [id]: { state: "failed", message: describeError(error) } }));
     }
   };
 
@@ -568,7 +582,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onSelect={select}
               onNewSession={newSession}
               collapsed={collapsed}
-              onToggle={toggleProject}
+              onToggle={toggleGroup}
+              onPin={pin}
+              pinning={pinning}
               onRename={rename}
               renaming={renaming}
               onRenameReset={resetRename}

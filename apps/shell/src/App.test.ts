@@ -668,8 +668,8 @@ describe("a tile's menu, and renaming on the tile", () => {
       // The key may send its own contextmenu event after the keydown: the menu stays at the tile, on its first item.
       fireEvent.contextMenu(tile("Fix the build"), { clientX: 0, clientY: 0 });
       expect(menu()?.getAttribute("data-place")).toBe("below");
-      // From the keyboard, focus goes to the first item.
-      expect(document.activeElement?.textContent).toMatch(/^Rename/);
+      // From the keyboard, focus goes to the first item, Pin (LAY-SHELL, A tile's menu).
+      expect(document.activeElement?.textContent).toBe("Pin");
       fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
       expect(document.activeElement).toBe(tile("Fix the build"));
     }
@@ -711,6 +711,97 @@ describe("a tile's menu, and renaming on the tile", () => {
     expect(field()?.value).toBe("Fix it");
     const reason = document.getElementById(field()?.getAttribute("aria-errormessage") ?? "");
     expect(reason?.textContent).toContain("has not named this session yet");
+  });
+});
+
+// FLOW-ORGANIZE-SESSIONS (step 1; Variations and errors: Saving fails); docs/design/RAIL.md (A group heading).
+describe("pinning a session from its tile", () => {
+  const rail = () => screen.getByRole("navigation", { name: "Rail" });
+  const more = (title: string) => within(rail()).getByRole("button", { name: `More for ${title}` });
+  // The group a tile is in, by its heading's name; a tile is found by its title.
+  const groupOf = (title: string) =>
+    [...rail().querySelectorAll<HTMLElement>(".session")]
+      .find((el) => el.textContent?.includes(title))
+      ?.closest(".rail-project")
+      ?.querySelector(".rail-heading-name")?.textContent;
+  const arranges = (core: ReturnType<typeof fakeCore>) => core.calls.filter((c) => c.method === "session.arrange").map((c) => c.params);
+  // Core keeps the pins: session.arrange changes what session.list answers, as it does.
+  async function open(refuse?: string) {
+    let listed = sessions.map((s, i) => ({ ...s, title: i === 0 ? "Fix the build" : "Write the notes" }));
+    const core = fakeCore({
+      "session.list": () => listed,
+      "session.arrange": (params: { id: string; pinned: boolean }) => {
+        if (refuse) throw { kind: "rpc", error: { code: -32010, message: refuse } };
+        listed = listed.map((s) => (s.id === params.id ? { ...s, pinned: params.pinned } : s));
+        return listed.find((s) => s.id === params.id);
+      },
+    });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    return core;
+  }
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R01
+  it("moves a pinned tile to a leading Pinned group, and Unpin returns it to its project", async () => {
+    const core = await open();
+    // Nothing pinned: no Pinned group.
+    expect(within(rail()).queryByRole("button", { name: /^Pinned/ })).toBeNull();
+    expect(groupOf("Fix the build")).toBe("alpha");
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    expect(arranges(core)).toEqual([{ id: "s1", pinned: true }]);
+    expect(groupOf("Fix the build")).toBe("Pinned");
+    // It leads the rail, before every project, and its project keeps its heading.
+    const headings = [...rail().querySelectorAll(".rail-heading-name")].map((el) => el.textContent);
+    expect(headings).toEqual(["Pinned", "alpha", "beta", "gamma"]);
+    expect(groupOf("Write the notes")).toBe("beta");
+
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unpin" }));
+    await settle();
+    await settle();
+    expect(arranges(core)).toEqual([
+      { id: "s1", pinned: true },
+      { id: "s1", pinned: false },
+    ]);
+    expect(groupOf("Fix the build")).toBe("alpha");
+    expect(within(rail()).queryByRole("button", { name: /^Pinned/ })).toBeNull();
+  });
+
+  it("collapses the Pinned group like any group", async () => {
+    await open();
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    const pinned = within(rail()).getByRole("button", { name: /^Pinned/ });
+    fireEvent.click(pinned);
+    expect(pinned.getAttribute("aria-expanded")).toBe("false");
+    expect(pinned.textContent).toContain("1 session");
+    expect(document.getElementById(pinned.getAttribute("aria-controls") ?? "")?.hasAttribute("inert")).toBe(true);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R15
+  it("leaves the tile where Core has it and says why when Core refuses the pin", async () => {
+    const core = await open("session.arrange: the session is being deleted");
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    expect(arranges(core)).toEqual([{ id: "s1", pinned: true }]);
+    expect(groupOf("Fix the build")).toBe("alpha");
+    expect(within(rail()).queryByRole("button", { name: /^Pinned/ })).toBeNull();
+    const alert = within(rail()).getByRole("alert");
+    expect(alert.textContent).toContain("Ersa can't pin this session.");
+    expect(alert.textContent).toContain("the session is being deleted");
+    // Trying again takes the old reason away.
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    expect(within(rail()).queryByRole("alert")).toBeNull();
+    await settle();
   });
 });
 
