@@ -538,7 +538,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // case a session the rail cannot place yet waits rather than sit at the end.
   const workspaceErrors: Record<string, string> = {};
   for (const [id, failure] of Object.entries(workspaceReads)) if (failure !== null) workspaceErrors[id] = failure;
-  const placing = projectList !== undefined && (!allRead || unknownWorkspaces !== unknownRead);
+  const placing = projectList !== undefined && !allRead;
+  // The projects were read again for a workspace no read had listed, and that read has not answered.
+  const reading = allRead && unknownWorkspaces !== unknownRead;
 
   // The title as last listed, so the header keeps it while the list reloads
   // or Core is away.
@@ -620,6 +622,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               workspaces={workspaces}
               workspaceErrors={workspaceErrors}
               placing={placing}
+              reading={reading}
               activeId={shownId}
               onSelect={select}
               onNewSession={newSession}
