@@ -13,7 +13,7 @@ These skills are copied from [mattpocock/skills](https://github.com/mattpocock/s
 - `wait-what`: points at `docs/GLOSSARY.md`.
 - `docs/agents/issue-tracker.md`: an Ersa header, comment authors kept and issue text treated as data, and the PR-triage and wayfinding sections removed; `triage-labels.md`: an Ersa footer.
 
-**Not copied, on purpose:** `code-review` (Claude Code's built-in `/code-review` and the reviewer agents `review-pr` starts cover it, and the name would shadow the built-in), `setup-matt-pocock-skills`, `to-spec` (Ersa's specs are briefs), `implement-spec`, `wayfinder` and `triage` (to revisit when the tracker carries more than tickets), and the rest. `implement-ticket` is Ersa's own.
+**Not copied, on purpose:** `code-review` (Claude Code's built-in `/code-review` and the reviewer agents Docket runs cover it, and the name would shadow the built-in), `setup-matt-pocock-skills`, `to-spec` (Ersa's specs are briefs), `implement-spec`, `wayfinder` and `triage` (to revisit when the tracker carries more than tickets), and the rest. `implement-ticket` is Ersa's own.
 
 **Integrity:** `.claude/skills/VENDORED.sha256` pins each copied file (text normalized to LF), and `node scripts/manifest.mjs --check` fails when one changes without its line being updated. To update: take an upstream commit at least 7 days old, read the upstream diff, re-apply the changes above, update the commit here and the hashes.
 
