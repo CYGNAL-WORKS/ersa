@@ -4,7 +4,7 @@ description: "Implement a piece of work based on a spec or set of tickets."
 disable-model-invocation: true
 ---
 
-> **Ersa adaptation.** This is the owner's interactive flow. Sessions the orchestrator starts use `implement-ticket` instead. Tickets are GitHub issues (`docs/agents/issue-tracker.md`). Commit before reviewing. "code-review" below is Claude Code's built-in `/code-review`; run it as `/code-review high` on the branch.
+> **Ersa adaptation.** This is the owner's interactive flow. Sessions the orchestrator starts use `implement-ticket` instead. Tickets are GitHub issues (`docs/agents/issue-tracker.md`). Before building, write the plan with its assumptions and have the `assumption-checker` agent try to disprove them (`implement-ticket` step 2). Skip the "code-review" step below: Docket's merge review is the only review a change gets (ADR 0030).
 
 Implement the work described by the user in the spec or tickets.
 
