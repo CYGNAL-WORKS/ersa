@@ -236,7 +236,7 @@ test("a project heading's actions show with keyboard focus, and More's menu work
   await page.goto("/gallery.html?component=RailTree&theme=light");
   const tree = page.getByRole("figure", { name: "Projects", exact: true });
   // ersa's heading: the empty Pinned group before it is drawn closed.
-  const heading = tree.locator('.rail-heading[data-slide="project:p1"]');
+  const heading = tree.locator('.rail-heading[data-slide="heading:p1"]');
   const actions = heading.locator(".rail-heading-actions");
   await expect(actions).toHaveCSS("opacity", "0");
   await heading.getByRole("button", { name: "ersa", exact: true }).focus();
@@ -329,14 +329,14 @@ test("a project heading's menu at the window's foot opens above More, in view", 
 test("a collapsed heading counts its sessions, and an untrusted one keeps its words in the shield's tooltip", async ({ page }) => {
   await page.goto("/gallery.html?component=RailTree&theme=light");
   const open = page.getByRole("figure", { name: "Projects", exact: true });
-  await expect(open.locator('.rail-heading[data-slide="project:p1"] .rail-heading-count')).toBeHidden();
+  await expect(open.locator('.rail-heading[data-slide="heading:p1"] .rail-heading-count')).toBeHidden();
   await expect(open.getByRole("button", { name: /^stranger/ })).toHaveAccessibleName("stranger Not trusted");
 
   const folded = page.getByRole("figure", { name: "Collapsed, not trusted", exact: true });
   const heading = folded.getByRole("button", { name: /^ersa/ });
   await expect(heading).toHaveAccessibleName(/^ersa Not trusted Needs you 3 sessions$/);
   await expect(folded.locator(".rail-heading-trust")).toBeHidden();
-  await expect(folded.locator('.rail-heading[data-slide="project:p1"] .rail-heading-count')).toBeVisible();
+  await expect(folded.locator('.rail-heading[data-slide="heading:p1"] .rail-heading-count')).toBeVisible();
   const tip = folded.locator(".rail-heading-tip");
   await expect(tip).toBeHidden();
   await folded.locator(".rail-heading-shield").hover();
