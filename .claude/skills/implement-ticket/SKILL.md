@@ -70,7 +70,7 @@ Fixing findings:
 Pushing:
 
 - While your head is `queued` or `reviewing`, push nothing: a new head cancels the running review, and the next one restates the same findings. Hold the commit (an inbox line closed, baselines, a merge of main) and push it with the fixes. A push that is not meant to be reviewed goes behind `gh pr ready --undo` first, since Docket skips a draft; `gh pr ready` does not rerun CI. A turn never ends on a draft.
-- Always pass `--head` with the head you just pushed: Docket syncs about once a minute, and until then it still describes the old head.
+- Always put the head you just pushed in the request's `head=`: Docket syncs about once a minute, and until then it still describes the old head.
 
 ## 6. End the turn
 

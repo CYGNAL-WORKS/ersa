@@ -31,7 +31,7 @@ const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const PASS_SUBJECT = /^Harness: lessons from/;
 
 // The record a merge review body carries: the marker line, then the marker with the JSON.
-export function parseState(body) {
+function parseState(body) {
   const m = /^<!-- merge-review -->\s*<!-- merge-review (.*?) -->/s.exec(body ?? "");
   try {
     return m ? JSON.parse(m[1]) : null;
@@ -40,7 +40,7 @@ export function parseState(body) {
   }
 }
 
-// A stalled git or gh call ends after two minutes, as in the review and the gate.
+// A stalled git or gh call ends after two minutes.
 function run(cmd, args) {
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 2 * 60 * 1000 });
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: [(r.stderr ?? "").trim(), r.error?.message].filter(Boolean).join("; ") };
@@ -128,7 +128,7 @@ function fetchPullRequest(n, { run: r, cacheDir }) {
       if (cached && typeof cached === "object" && !Array.isArray(cached)) return cached;
     } catch {}
   }
-  const x = r("gh", ["pr", "view", String(n), "--json", "number,title,body,reviews"]);
+  const x = r("gh", ["pr", "view", String(n), "--json", "number,title,reviews"]);
   // The whole error on one line: a timeout is appended after gh's own lines.
   if (!x.ok) throw new Error(`gh pr view ${n} failed: ${x.err.replace(/\s*\n\s*/g, " ").slice(0, 300)}`);
   let pr;
