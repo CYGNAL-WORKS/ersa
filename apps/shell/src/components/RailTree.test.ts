@@ -124,4 +124,11 @@ describe("the rail's tree", () => {
     expect(render({ projects: { state: "unavailable" }, sessions: { state: "unavailable" } })).not.toContain("<p");
     expect(render({ projects: { state: "loading" }, sessions: { state: "loading" } })).toContain("Loading…");
   });
+
+  it("says when nothing archived is there to show, and why the arrangement could not be read or saved", () => {
+    expect(render({ show: "archived", sessions: { state: "ready", sessions: [session("s1", "w", "Fix")] } })).toContain("No archived sessions.");
+    expect(render({ show: "all", sessions: { state: "ready", sessions: [] } })).not.toContain("sessions.</p>");
+    expect(render({ arrangeProblem: { kind: "read", message: "Core is away" } })).toContain("Ersa can&#x27;t read how you arranged the rail.");
+    expect(render({ arrangeProblem: { kind: "save", message: "disk full" } })).toContain("disk full");
+  });
 });

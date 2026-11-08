@@ -8,6 +8,46 @@
 
 New session
 
+### `rail.arrange.label`
+
+Arrange sessions
+
+### `rail.arrange.groupByButton`
+
+Group by
+
+### `rail.arrange.showButton`
+
+Show
+
+### `rail.arrange.resetButton`
+
+Reset to defaults
+
+### `rail.arrange.groupByProjectButton`
+
+Project
+
+### `rail.arrange.groupByDateButton`
+
+Date
+
+### `rail.arrange.groupByNoneButton`
+
+None
+
+### `rail.arrange.showActiveButton`
+
+Active
+
+### `rail.arrange.showArchivedButton`
+
+Archived
+
+### `rail.arrange.showAllButton`
+
+All
+
 ### `rail.tree.label`
 
 Projects and sessions
@@ -32,6 +72,22 @@ Ersa can't read your projects.
 
 Ersa can't read your sessions.
 
+### `rail.tree.arrangeReadError`
+
+Ersa can't read how you arranged the rail.
+
+### `rail.tree.arrangeSaveError`
+
+Ersa couldn't save that change to the rail.
+
+### `rail.tree.noActiveEmpty`
+
+No active sessions.
+
+### `rail.tree.noArchivedEmpty`
+
+No archived sessions.
+
 ### `rail.tree.boundaryName`
 
 The projects and sessions
@@ -39,6 +95,22 @@ The projects and sessions
 ### `rail.group.pinnedHeading`
 
 Pinned
+
+### `rail.group.todayHeading`
+
+Today
+
+### `rail.group.yesterdayHeading`
+
+Yesterday
+
+### `rail.group.previous7DaysHeading`
+
+Previous 7 days
+
+### `rail.group.olderHeading`
+
+Older
 
 ### `rail.heading.newSessionLabel`
 
