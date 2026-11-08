@@ -12,10 +12,17 @@ export function milliseconds(time: string): number {
   return time.trim().endsWith("ms") ? value : value * 1000;
 }
 
+/** Where an element's layout puts it on the page, leaving out any slide still running, which transforms it. */
+function topOf(el: HTMLElement): number {
+  let top = 0;
+  for (let at: Element | null = el; at instanceof HTMLElement; at = at.offsetParent) top += at.offsetTop;
+  return top;
+}
+
 /** Where each element marked `data-slide` under `root` sits now, by its mark: taken before the rail changes. */
 export function placesOf(root: HTMLElement): Map<string, number> {
   const places = new Map<string, number>();
-  for (const el of root.querySelectorAll<HTMLElement>("[data-slide]")) places.set(el.dataset.slide ?? "", el.getBoundingClientRect().top);
+  for (const el of root.querySelectorAll<HTMLElement>("[data-slide]")) places.set(el.dataset.slide ?? "", topOf(el));
   return places;
 }
 
@@ -35,7 +42,7 @@ export function slideFrom(root: HTMLElement, before: ReadonlyMap<string, number>
   for (const el of root.querySelectorAll<HTMLElement>("[data-slide]")) {
     const from = before.get(el.dataset.slide ?? "");
     if (from === undefined || typeof el.animate !== "function") continue;
-    const by = from - el.getBoundingClientRect().top;
+    const by = from - topOf(el);
     if (by !== 0) slides.push(el.animate([{ transform: `translateY(${by}px)` }, { transform: "none" }], { duration, easing }));
   }
   if (slides.length === 0) return;

@@ -96,7 +96,9 @@ describe("the rail's tree", () => {
     // The shield, named for assistive technology, then the same count every collapsed heading shows.
     expect(untrusted).toMatch(/<span class="rail-heading-shield" style="[^"]*" role="img" aria-label="Not trusted">/);
     expect(untrusted).toContain('<span class="rail-heading-count">2 sessions</span>');
-    expect(untrusted.indexOf("rail-heading-shield")).toBeLessThan(untrusted.indexOf("rail-heading-count"));
+    // In ersa's heading, after the empty Pinned group drawn closed before it.
+    const ersa = untrusted.slice(untrusted.indexOf('<li class="rail-project"'));
+    expect(ersa.indexOf("rail-heading-shield")).toBeLessThan(ersa.indexOf("rail-heading-count"));
     // Its words as a tooltip, which assistive technology does not read twice.
     expect(untrusted).toMatch(/<span class="rail-heading-tip" aria-hidden="true" style="[^"]*">Not trusted<\/span>/);
 

@@ -91,43 +91,41 @@ export function RailTree(props: RailTreeProps) {
       onReset: () => onRenameReset?.(s.id),
       unavailable: offline ? t("rail.tile.offlineReason") : undefined,
     };
-  // A tile pinned or unpinned moves to another group, where React draws it afresh, so the focus its menu gave back
-  // to it is lost. Once it has moved, focus goes to the tile in its new place, or, when that group is collapsed, to
-  // the group's heading.
+  // The pin on its way: where every tile and heading sat when it was chosen, and whether focus was in the rail then.
+  // One at a time: while it is saved, Pin and Unpin are unavailable on every tile, so each move is measured from the
+  // rail as the last one left it.
   const root = useRef<HTMLElement>(null);
-  const moving = useRef<string>(undefined);
-  // A pin on its way, and where every tile and heading sat when it was chosen: once Core has answered, each slides
-  // from there to its new place (DESIGN.md, Motion).
-  const sliding = useRef<{ id: string; places: Map<string, number> }>(undefined);
+  const pending = useRef<{ id: string; places: Map<string, number>; focused: boolean }>(undefined);
+  const saving = Object.values(pinning ?? {}).some((p) => p.state === "sending");
   useLayoutEffect(() => {
-    const slide = sliding.current;
-    if (slide && pinning?.[slide.id]?.state !== "sending") {
-      sliding.current = undefined;
-      if (root.current) slideFrom(root.current, slide.places);
-    }
-  });
-  useLayoutEffect(() => {
-    const id = moving.current;
-    if (id === undefined || pinning?.[id]?.state === "sending") return;
-    moving.current = undefined;
+    const pin = pending.current;
+    const el = root.current;
+    if (!pin || !el || pinning?.[pin.id]?.state === "sending") return;
+    pending.current = undefined;
+    // Core refused it: nothing moved, so nothing slides.
+    if (pinning?.[pin.id]?.state === "failed") return;
+    // Once Core has the pin, each tile and heading slides from where it sat to its new place (DESIGN.md, Motion).
+    slideFrom(el, pin.places);
+    // The tile is drawn afresh in its new group, so the focus its menu gave back is lost: it goes to the tile in its
+    // new place or, when that group is collapsed, to the group's heading.
     const lost = document.activeElement === null || document.activeElement === document.body;
-    const item = [...(root.current?.querySelectorAll<HTMLElement>("[data-session]") ?? [])].find((el) => el.dataset.session === id);
-    if (!lost || !item) return;
+    const item = [...el.querySelectorAll<HTMLElement>("[data-session]")].find((tile) => tile.dataset.session === pin.id);
+    if (!pin.focused || !lost || !item) return;
     const folded = item.closest<HTMLElement>("[inert]");
     const target = folded ? folded.closest(".rail-project")?.querySelector<HTMLElement>(".rail-heading-toggle") : item.querySelector<HTMLElement>(".session");
     target?.focus({ preventScroll: true });
   });
-  // Pin and Unpin: unavailable while Ersa can't reach Core, or while Core stores the last choice.
+  // Pin and Unpin: unavailable while Ersa can't reach Core, or while Core stores a pin.
   const pinOf = (s: Session): TilePin | undefined =>
     onPin && {
       pinned: s.pinned,
       onChoose: () => {
+        const el = root.current;
         // Only a choice made with focus in the rail (in the tile's menu) has focus to give back.
-        if (root.current?.contains(document.activeElement)) moving.current = s.id;
-        if (root.current) sliding.current = { id: s.id, places: placesOf(root.current) };
+        if (el) pending.current = { id: s.id, places: placesOf(el), focused: el.contains(document.activeElement) };
         onPin(s.id, !s.pinned);
       },
-      unavailable: offline ? t("rail.tile.offlineReason") : pinning?.[s.id]?.state === "sending" ? t("rail.tile.savingProgress") : undefined,
+      unavailable: offline ? t("rail.tile.offlineReason") : saving ? t("rail.tile.savingProgress") : undefined,
     };
   const listed = projects.state === "ready" ? projects.projects : [];
   const tree = treeOf(listed, workspaces, sessions.state === "ready" ? sessions.sessions : []);
@@ -180,7 +178,8 @@ export function RailTree(props: RailTreeProps) {
     );
   };
   // The Pinned group leads the rail, and is absent while nothing pinned is shown (LAY-SHELL, Groups).
-  const pinned = tree.pinned.length > 0 ? folded(groupKey.pinned, tree.pinned) : undefined;
+  const pinned = folded(groupKey.pinned, tree.pinned);
+  const pinnedEmpty = tree.pinned.length === 0;
   return (
     <section ref={root} className="rail-tree" aria-label={t("rail.tree.label")}>
       {projects.state === "loading" && <p className="rail-note">{t("rail.tree.loadingProgress")}</p>}
@@ -192,10 +191,12 @@ export function RailTree(props: RailTreeProps) {
           <span className="rail-note-detail">{t("rail.tree.noProjectsHint")}</span>
         </p>
       )}
-      {(pinned || tree.projects.length > 0) && (
+      {(tree.pinned.length > 0 || tree.projects.length > 0) && (
         <ul className="rail-projects">
-          {pinned && (
-            <li className="rail-project" data-collapsed={pinned.folded || undefined}>
+          {/* Always drawn, so it can open and fade in as the first session is pinned and close and fade out as the
+              last is unpinned (DESIGN.md: nothing pops in). Empty, it is closed, out of reach and not read. */}
+          <li className="rail-pinned" data-empty={pinnedEmpty || undefined} inert={pinnedEmpty || undefined} aria-hidden={pinnedEmpty || undefined}>
+            <div className="rail-project" data-collapsed={pinned.folded || undefined}>
               <div className="rail-heading" data-slide={groupKey.pinned}>
                 <GroupToggle
                   folded={pinned.folded}
@@ -212,8 +213,8 @@ export function RailTree(props: RailTreeProps) {
               <GroupTiles id={pinnedTiles} folded={pinned.folded}>
                 <ul className="rail-tiles">{tree.pinned.map(tile)}</ul>
               </GroupTiles>
-            </li>
-          )}
+            </div>
+          </li>
           {tree.projects.map(({ project, sessions }) => {
             const closed = folded(groupKey.project(project.id), sessions);
             return (
