@@ -1,6 +1,7 @@
 //! A Claude Code session driven through Core's API over the real socket,
 //! with the real Claude adapter talking to a stub CLI that replays recorded
-//! fixture 11: a prompt, a permission request, the user's allow, the reply.
+//! fixture 11: a prompt, a permission request, the user's allow, the reply;
+//! and the 2.1.316 question recordings, answered and declined.
 
 mod support;
 
@@ -8,8 +9,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ersa_adapter::Adapter;
+use ersa_adapter::recording::Recording;
 use serde_json::{Value, json};
-use support::claude::{OnTransport, fixture, isolated_claude, parse, stub};
+use support::claude::{
+    OnTransport, fixture, fixtures_of, isolated_claude, parse, stub, stub_asking_at,
+};
 use support::{Client, start_with_adapters, tempdir, workspace};
 
 async fn next_event(client: &mut Client, event_type: &str) -> Value {
@@ -216,4 +220,153 @@ async fn initialize(transport: &ersa_adapter::fake::FakeTransport, n: usize) -> 
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+}
+
+/// A Claude Code session of `recording` (a 2.1.316 question fixture) driven
+/// through Core up to its pending question: the client, the session id, the
+/// stub, the question's request id, and what the recording wrote.
+async fn asked_through_core(
+    recording: &str,
+) -> (
+    support::TestCore,
+    Client,
+    String,
+    ersa_adapter::fake::FakeTransport,
+    String,
+    Vec<String>,
+) {
+    let recording = Recording::load(&fixtures_of("2.1.316").join(format!("{recording}.jsonl")))
+        .expect("fixture loads");
+    let (stdout, sent) = (recording.stdout(), recording.sent());
+    let ask = stdout
+        .iter()
+        .position(|l| parse(l)["request"]["subtype"] == "can_use_tool")
+        .unwrap();
+    let transport = stub_asking_at(&stdout, ask);
+    let adapter = OnTransport {
+        adapter: isolated_claude().with_stop_grace(Duration::from_secs(1)),
+        transport: Arc::new(transport.clone()),
+    };
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(adapter)];
+    let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
+    let mut client = core.client().await;
+    let workspace_id = workspace(&mut client, core.dir.path()).await;
+    let session = client
+        .result(
+            "session.create",
+            json!({ "workspace_id": workspace_id, "backend": "claude-code" }),
+        )
+        .await;
+    let id = session["id"].as_str().unwrap().to_string();
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    let prompt = parse(&sent[1])["message"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    client
+        .result("session.send", json!({ "id": id, "text": prompt }))
+        .await;
+    let asked = next_event(&mut client, "question.asked").await;
+    let request_id = asked["request_id"].as_str().unwrap().to_string();
+    assert_eq!(asked["questions"].as_array().unwrap().len(), 3);
+    let row = client.result("session.list", json!({})).await[0].clone();
+    assert_eq!(
+        row["tile"]["pending"],
+        json!([{ "kind": "question", "request_id": request_id }])
+    );
+    assert_eq!(row["state"], "waiting_user");
+    (core, client, id, transport, request_id, sent)
+}
+
+// verifies: PROTO-CORE-API-R33
+#[tokio::test(flavor = "multi_thread")]
+async fn a_claude_question_is_answered_through_core() {
+    let (_core, mut client, id, transport, request_id, sent) =
+        asked_through_core("07-question-answer").await;
+    // A question is not a permission request.
+    let refused = client
+        .error(
+            "session.decide_permission",
+            json!({ "id": id, "request_id": request_id, "behavior": "allow" }),
+        )
+        .await;
+    assert_eq!(refused["data"]["kind"], "not_found", "{refused}");
+
+    let answered = client
+        .result(
+            "session.answer_question",
+            json!({ "id": id, "request_id": request_id, "answers": [
+                { "id": "0", "value": "1", "own_words": false },
+                { "id": "1", "value": ["0", "1"], "own_words": false },
+                { "id": "2", "value": "Carol, from my own words", "own_words": true },
+            ] }),
+        )
+        .await;
+    assert_eq!(answered["id"], id.as_str());
+    let event = next_event(&mut client, "question.answered").await;
+    assert_eq!(event["request_id"], request_id.as_str());
+    assert_eq!(event["answered_by"], "user");
+    assert_eq!(event["declined"], false);
+    assert_eq!(
+        event["answers"],
+        json!([
+            { "id": "0", "value": "1", "own_words": false },
+            { "id": "1", "value": ["0", "1"], "own_words": false },
+            { "id": "2", "value": "Carol, from my own words", "own_words": true },
+        ])
+    );
+    let completed = next_event(&mut client, "turn.completed").await;
+    assert_eq!(completed["outcome"], "success");
+    // The CLI got the recorded answer (as JSON: object keys are unordered).
+    assert_eq!(parse(&transport.stdin_lines()[2]), parse(&sent[2]));
+    assert_eq!(
+        client.result("session.list", json!({})).await[0]["tile"]["pending"],
+        json!([])
+    );
+    // Answered once; a second answer is refused.
+    let again = client
+        .error(
+            "session.answer_question",
+            json!({ "id": id, "request_id": request_id, "answers": [], "declined": true }),
+        )
+        .await;
+    assert_eq!(again["data"]["kind"], "not_found", "{again}");
+    client.result("session.stop", json!({ "id": id })).await;
+    assert_eq!(transport.stub_failures(), Vec::<String>::new());
+}
+
+// verifies: PROTO-CORE-API-R33
+#[tokio::test(flavor = "multi_thread")]
+async fn a_claude_question_is_declined_through_core() {
+    let (_core, mut client, id, transport, request_id, sent) =
+        asked_through_core("09-question-deny").await;
+    // Declining carries no answers.
+    let refused = client
+        .error(
+            "session.answer_question",
+            json!({ "id": id, "request_id": request_id, "declined": true, "answers": [
+                { "id": "0", "value": "1", "own_words": false },
+            ] }),
+        )
+        .await;
+    assert_eq!(refused["code"], -32602, "{refused}");
+
+    client
+        .result(
+            "session.answer_question",
+            json!({ "id": id, "request_id": request_id, "answers": [], "declined": true }),
+        )
+        .await;
+    let event = next_event(&mut client, "question.answered").await;
+    assert_eq!(event["request_id"], request_id.as_str());
+    assert_eq!(event["declined"], true);
+    assert_eq!(event["answered_by"], "user");
+    assert_eq!(event["answers"], json!([]));
+    next_event(&mut client, "turn.completed").await;
+    // Exactly what the recorded session wrote.
+    assert_eq!(transport.stdin_lines(), sent);
+    client.result("session.stop", json!({ "id": id })).await;
+    assert_eq!(transport.stub_failures(), Vec::<String>::new());
 }
