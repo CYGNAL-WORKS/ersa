@@ -1,6 +1,6 @@
 ---
 name: design-reviewer
-description: Reviews a diff's interface changes against docs/design/DESIGN.md in both themes and every state. The review-pr skill starts it.
+description: Reviews a diff's interface changes against docs/design/DESIGN.md in both themes and every state. Docket runs it when interface code changes.
 tools: Read, Grep, Glob
 ---
 
