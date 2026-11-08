@@ -1,5 +1,5 @@
 import { LoaderCircle } from "lucide-react";
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef } from "react";
 import { t } from "../catalog";
 import { type DeletePhase, type WhatGoes, losesWork } from "../session/deletion";
 import { Button } from "./Button";
@@ -55,21 +55,6 @@ export function DeleteQuestion({ title, backend, phase, onConfirm, onTryAgain, o
     };
     document.addEventListener("mousedown", away, true);
     return () => document.removeEventListener("mousedown", away, true);
-  }, [inline]);
-  // Centered as it opens, it then keeps its bottom edge where it was and grows upward as the counts arrive, so the
-  // buttons never move under the pointer. Measured, not designed: centered again when the window is resized.
-  useLayoutEffect(() => {
-    const el = root.current;
-    if (inline || !el) return;
-    const anchor = () => {
-      el.removeAttribute("data-anchored");
-      const bottom = window.innerHeight - el.getBoundingClientRect().bottom;
-      el.style.setProperty("--delete-question-bottom", `${bottom}px`);
-      el.setAttribute("data-anchored", "");
-    };
-    anchor();
-    window.addEventListener("resize", anchor);
-    return () => window.removeEventListener("resize", anchor);
   }, [inline]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
