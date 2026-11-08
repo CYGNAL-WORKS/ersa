@@ -69,13 +69,15 @@ export function DeleteQuestion({ title, backend, phase, onConfirm, onTryAgain, o
   };
 
   const goes = phase.kind === "asking" || phase.kind === "deleting" ? phase.goes : undefined;
-  const confirmLabel = failed
-    ? t("rail.delete.tryAgainButton")
-    : deleting
-      ? t("rail.delete.deletingProgress")
-      : goes && losesWork(goes)
-        ? t("rail.delete.deleteAndLoseButton")
-        : t("rail.delete.deleteButton");
+  // Every label the confirming button can take, and the one it shows now. All of them hold its width, so it keeps one
+  // width from phase to phase and Cancel, beside it, never moves under the pointer.
+  const labels = {
+    delete: t("rail.delete.deleteButton"),
+    lose: t("rail.delete.deleteAndLoseButton"),
+    deleting: t("rail.delete.deletingProgress"),
+    tryAgain: t("rail.delete.tryAgainButton"),
+  };
+  const shown: keyof typeof labels = failed ? "tryAgain" : deleting ? "deleting" : goes && losesWork(goes) ? "lose" : "delete";
 
   return (
     <div
@@ -117,12 +119,16 @@ export function DeleteQuestion({ title, backend, phase, onConfirm, onTryAgain, o
           onClick={failed ? onTryAgain : onConfirm}
           disabled={deleting || phase.kind === "reading"}
         >
-          {deleting && (
-            <span className="delete-question-ring" aria-hidden="true">
-              <Icon icon={LoaderCircle} size="icon-xs" />
+          {Object.entries(labels).map(([key, label]) => (
+            <span key={key} className="delete-question-label" data-shown={key === shown || undefined} aria-hidden={key !== shown || undefined}>
+              {key === "deleting" && (
+                <span className="delete-question-ring" aria-hidden="true">
+                  <Icon icon={LoaderCircle} size="icon-xs" />
+                </span>
+              )}
+              {label}
             </span>
-          )}
-          {confirmLabel}
+          ))}
         </Button>
       </div>
     </div>

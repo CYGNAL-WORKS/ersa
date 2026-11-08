@@ -123,6 +123,8 @@ export const enUS = {
       deletingProgress: "Deleting…",
       tryAgainButton: "Try again",
       failedError: "Ersa couldn't delete this session.",
+      // Core refused because another request holds the session's workspace, such as a delete from another window.
+      busyError: "Something else is changing this session or its folder. Try again in a moment.",
       // The session's workspace hasn't been read yet, so the question can't say what goes with it.
       workspaceUnknownError: "Ersa can't tell yet where this session's files are. Try again in a moment.",
     },

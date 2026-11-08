@@ -28,9 +28,14 @@
   margin: 0;
 }
 
-/* Focused only while the deletion runs, to keep the keyboard here; its edge already marks it. */
+/* Focused only while the deletion runs, to keep the keyboard here. With keyboard focus its edge reads ink, as the
+   shelf's does. */
 .delete-question:focus {
   outline: none;
+}
+
+.delete-question:focus-visible {
+  border-color: var(--color-ink);
 }
 
 @keyframes delete-question-in {
@@ -102,6 +107,21 @@
    every focused button does. */
 .delete-question-confirm:not(:disabled, :focus-visible, [data-force="focus"]) {
   color: var(--color-danger);
+}
+
+/* Its labels share one cell, so the button is as wide as the widest; only the one shown is seen. */
+.delete-question-confirm {
+  display: inline-grid;
+  justify-items: center;
+}
+
+.delete-question-label {
+  grid-area: 1 / 1;
+  visibility: hidden;
+}
+
+.delete-question-label[data-shown] {
+  visibility: visible;
 }
 
 /* While the deletion runs, the ring before its label, open by a quarter, one turn per motion-loop-ring. */

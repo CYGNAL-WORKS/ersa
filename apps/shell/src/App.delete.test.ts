@@ -115,10 +115,13 @@ describe("Delete on a tile", () => {
     expect(dialog.textContent).toContain("2 uncommitted or untracked files will be lost.");
     expect(core.calls.filter((c) => c.method === "workspace.changes").map((c) => c.params)).toEqual([{ id: "w-fix" }]);
     expect(document.activeElement?.textContent).toBe("Cancel");
+    // The rest of the window can't take focus while it asks.
+    expect(rail().hasAttribute("inert")).toBe(true);
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await settle();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(core.calls.some((c) => c.method === "session.delete")).toBe(false);
+    expect(rail().hasAttribute("inert")).toBe(false);
     expect(document.activeElement).toBe(tile("Fix the build"));
   });
 
@@ -156,6 +159,8 @@ describe("Delete on a tile", () => {
     await settle();
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
     await settle();
+    // Its tile says so at once, before Core lists it again.
+    expect(tile("Tidy the docs")?.textContent).toContain("Deleting");
     // While Tidy the docs is being deleted, Delete… on another tile asks nothing.
     fireEvent.click(deleteItem("Fix the build"));
     await settle();
@@ -186,8 +191,12 @@ describe("Delete on a tile", () => {
 
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R07
   it("keeps the question open with the reason and Try again when the deletion fails", async () => {
+    // Core marks the session's delete failed before it answers, and lists it so from then on.
+    let failed = false;
     await open({
+      "session.list": () => (failed ? listed.map((s) => (s.id === "s1" ? { ...s, deleting: "failed" as const } : s)) : listed),
       "session.delete": () => {
+        failed = true;
         throw { kind: "rpc", error: { code: -32000, message: "session.delete: x", data: { kind: "vcs_error", detail: "The folder is in use." } } };
       },
     });
@@ -197,7 +206,9 @@ describe("Delete on a tile", () => {
     await settle();
     const dialog = screen.getByRole("dialog");
     expect(dialog.textContent).toContain("The folder is in use.");
-    expect(document.activeElement?.textContent).toBe("Try again");
-    expect(tile("Fix the build")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Try again" }));
+    // The rail reads the session again: it stays, saying its deletion failed.
+    await settle();
+    expect(tile("Fix the build")?.textContent).toContain("Couldn't delete");
   });
 });
