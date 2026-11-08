@@ -111,7 +111,8 @@ export function RailTree(props: RailTreeProps) {
     onPin && {
       pinned: s.pinned,
       onChoose: () => {
-        moving.current = s.id;
+        // Only a choice made with focus in the rail (in the tile's menu) has focus to give back.
+        if (root.current?.contains(document.activeElement)) moving.current = s.id;
         onPin(s.id, !s.pinned);
       },
       unavailable: offline ? t("rail.tile.offlineReason") : pinning?.[s.id]?.state === "sending" ? t("rail.tile.savingProgress") : undefined,
