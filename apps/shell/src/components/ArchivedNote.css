@@ -1,0 +1,46 @@
+/* The archived note (FLOW-ARCHIVE-DELETE-SESSION, step 2): where the composer sits, at the same measure, so the
+   transcript reads as it does with the composer. Quiet, like the unavailable box: canvas with a line edge. */
+
+.archived {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  box-sizing: border-box;
+  width: stretch;
+  max-width: var(--size-measure);
+  margin: 0 auto;
+  padding: 0 var(--space-lg) var(--space-lg);
+}
+
+/* Why Core refused the resume: the status line's place and type. */
+.archived-problem {
+  min-height: var(--size-control);
+  padding: 0 var(--space-sm);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+/* The icon, the note, then Resume at the trailing edge. */
+.archived-note {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--color-canvas);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+
+.archived-icon {
+  display: flex;
+  flex: none;
+  color: var(--color-ink-muted);
+}
+
+.archived-words {
+  flex: 1;
+  margin: 0;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+  color: var(--color-ink-muted);
+}
