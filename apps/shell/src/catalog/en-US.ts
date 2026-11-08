@@ -48,6 +48,7 @@ export const enUS = {
       // Nothing the arrange menu's Show lets through (FLOW-ORGANIZE-SESSIONS, Nothing to show).
       noActiveEmpty: "No active sessions.",
       noArchivedEmpty: "No archived sessions.",
+      noSessionsEmpty: "No sessions.",
       // Names the tree when it fails to draw: "The projects and sessions could not be shown:".
       boundaryName: "The projects and sessions",
     },

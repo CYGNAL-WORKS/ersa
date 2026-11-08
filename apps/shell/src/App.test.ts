@@ -718,6 +718,38 @@ describe("arranging the rail", () => {
   });
 
   // verifies: FLOW-ORGANIZE-SESSIONS-R21
+  it.each([
+    ["active", "Archived", [{ rail: { show: "archived" } }, { rail: { show: "active" } }]],
+    ["archived", "All", [{ rail: { show: "archived" } }, { rail: { show: "all" } }]],
+  ] as const)("goes by what is shown when a session has started: from %s, %s chosen while it starts", async (from, chosen, expected) => {
+    let created = () => {};
+    const gate = new Promise<void>((resolve) => (created = resolve));
+    const core = await open({
+      "backend.list": () => [claude],
+      "branch.list": () => [{ name: "main", default: true }],
+      "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", vcs_ref: "ersa/new" }),
+      "session.create": async (params: { workspace_id: string }) => {
+        await gate;
+        return { ...session("s-new", "beta", "2026-11-02T14:00:00Z"), workspace_id: params.workspace_id };
+      },
+      "session.send": () => ({ turn: 1 }),
+    });
+    if (from === "archived") choose("Show", "Archived");
+    fireEvent.click(within(rail()).getByRole("button", { name: "New session" }));
+    fireEvent.change(words(), { target: { value: "Fix the build" } });
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    await settle();
+    expect(methods(core)).toContain("session.create");
+    choose("Show", chosen);
+    await settle();
+    created();
+    await settle();
+    await settle();
+    expect(sets(core).filter((p) => JSON.stringify(p).includes("show"))).toEqual(expected);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R21
   it("switches to showing active sessions when a session starts while it shows archived ones only", async () => {
     const core = await open({
       "backend.list": () => [claude],

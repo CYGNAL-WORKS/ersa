@@ -30,6 +30,7 @@ describe("the rail's tree", () => {
   ];
 
   // verifies: FLOW-NEW-SESSION-R13
+  // verifies: FLOW-ORGANIZE-SESSIONS-R08
   it("puts each session under its own project, across its workspaces, newest first", () => {
     const tree = treeOf(projects, workspaces, sessions);
     expect(byGroup(tree)).toEqual([
@@ -121,9 +122,10 @@ describe("the rail's tree as the user arranges it", () => {
     const sessions = [
       session("just-now", "w-ersa", new Date(2026, 10, 7, 0, 5).toISOString()),
       session("late-last-night", "w-engine", new Date(2026, 10, 6, 23, 55).toISOString()),
-      session("two-days", "w-ersa", at(5)),
+      // Work moves no session: only the day it was created counts.
+      { ...session("two-days", "w-ersa", at(5)), last_activity_at: now.toISOString() },
       session("seven-days", "w-gone", at(0, 1)),
-      session("eight-days", "w-ersa", new Date(2026, 9, 30, 23, 0).toISOString()),
+      { ...session("eight-days", "w-ersa", new Date(2026, 9, 30, 23, 0).toISOString()), last_activity_at: now.toISOString() },
     ];
     const tree = treeOf(projects, workspaces, sessions, { groupBy: "date", show: "active", now });
     expect(byGroup(tree)).toEqual([

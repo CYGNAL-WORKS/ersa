@@ -16,8 +16,8 @@ export function RailTop({
   force,
   arrange,
 }: {
-  /** The arrange button: the arrangement its menu names, and what its items do; absent, there is none. */
-  arrange?: ArrangeActions & {
+  /** The arrange button: the arrangement its menu names, and what its items do. */
+  arrange: ArrangeActions & {
     arrangement: Pick<RailArrangement, "groupBy" | "show">;
     /** The arrangement has not been read yet. */
     reading?: boolean;
@@ -39,7 +39,7 @@ export function RailTop({
         {t("rail.top.newSessionButton")}
       </Button>
       {/* Unavailable, as New session is, until Ersa has connected (LAY-SHELL, The foot). */}
-      {arrange && <ArrangeButton {...arrange} disabled={disabled || arrange.reading} />}
+      <ArrangeButton {...arrange} disabled={disabled || arrange.reading} />
     </div>
   );
 }
