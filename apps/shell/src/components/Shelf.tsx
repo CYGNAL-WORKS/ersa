@@ -6,6 +6,7 @@ import { type ShelfShows, shelfTone, shownRequest } from "../session/shelf";
 import type { TileView } from "../session/tile";
 import { Button } from "./Button";
 import { ContextRing } from "./ContextRing";
+import { milliseconds, reducedMotion } from "../theme/motion";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { PermissionAnswers } from "./PermissionAnswers";
 import { PermissionInput, Revealed } from "./Transcript";
@@ -206,10 +207,6 @@ function nextSaid(shows: ShelfShows): string {
   return t("rail.shelf.nextUnknownLabel", { ...at, note: t("rail.shelf.unknownNote") });
 }
 
-function reducedMotion(): boolean {
-  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
 /**
  * As the shelf moves on to another request: focus that was in the shelf goes to the shelf itself, since the
  * answer that held it has gone with the last request (R10); and its height eases from the last request's to the
@@ -272,13 +269,6 @@ function useMovingOn(root: { current: HTMLElement | null }, key: string, moved: 
       height.current = el.getBoundingClientRect().height;
     };
   });
-}
-
-/** A CSS time, in milliseconds or seconds, as milliseconds. */
-function milliseconds(time: string): number {
-  const value = parseFloat(time);
-  if (Number.isNaN(value)) return 0;
-  return time.trim().endsWith("ms") ? value : value * 1000;
 }
 
 /** Which request is shown, so the error boundary tries again once another one is. */

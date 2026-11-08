@@ -83,6 +83,7 @@ Of the rail described above, what is built is the tree grouped by project, with 
 
 ## Changes
 
+- 2026-11-07: from #262 inbox: RAIL.md (Menus) says keyboard focus follows a tile that Pin or Unpin moves to another group, or goes to that group's heading while it is collapsed. No requirement IDs changed.
 - 2026-11-06: from #227 inbox: Built so far follows #158: New session at the rail's top, and collapsing group headings. No requirement IDs changed.
 - 2026-11-06: from #214 and #215 inbox: Built so far follows the rail tree and the shelf. No requirement IDs changed.
 - 2026-11-06: the union merges of #173, #174 and #171 left two or three versions of the rail's opening, Add project, "Loading, empty and failed" and "The foot", some under The shelf; one of each kept, as the owner's decisions of 2026-11-05 say. Meaning unchanged; no requirement IDs changed.

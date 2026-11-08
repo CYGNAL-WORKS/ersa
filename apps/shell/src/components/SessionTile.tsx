@@ -47,6 +47,16 @@ export interface TileRename {
   unavailable?: string;
 }
 
+/** Pinning or unpinning a session from its tile (FLOW-ORGANIZE-SESSIONS, step 1). */
+export interface TilePin {
+  /** Whether it is pinned now: the menu offers Unpin if so, else Pin. */
+  pinned: boolean;
+  /** Pins it when unpinned, unpins it when pinned. */
+  onChoose: () => void;
+  /** Why Pin or Unpin can't be used now; given, the menu shows it unavailable with this reason. */
+  unavailable?: string;
+}
+
 /** Archive or Unarchive on the tile's menu (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3). */
 export interface TileArchive {
   /** Archive (true) or Unarchive (false), whichever the menu offered for the session as listed. */
@@ -73,6 +83,7 @@ export function SessionTile({
   shelf,
   onChevron,
   rename,
+  pin,
   archive,
   initialMenu,
   initialDraft,
@@ -88,6 +99,8 @@ export function SessionTile({
   onChevron?: (id: string) => void;
   /** Rename on the tile's menu and F2; absent, the tile has no menu. */
   rename?: TileRename;
+  /** Pin or Unpin, first on the tile's menu (LAY-SHELL, A tile's menu). */
+  pin?: TilePin;
   /** Archive or Unarchive on the tile's menu, after Rename; the menu is there only with Rename. */
   archive?: TileArchive;
   /** For the gallery: the tile's menu shown open, and the title being edited with this text. */
@@ -240,6 +253,16 @@ export function SessionTile({
         <Menu
           label={t("rail.tile.moreLabel", { title: view.title })}
           entries={[
+            ...(pin
+              ? [
+                  {
+                    kind: "item" as const,
+                    label: pin.pinned ? t("rail.tile.unpinButton") : t("rail.tile.pinButton"),
+                    unavailable: pin.unavailable,
+                    onChoose: pin.onChoose,
+                  },
+                ]
+              : []),
             {
               kind: "item",
               label: t("rail.tile.renameButton"),
@@ -410,6 +433,7 @@ export function TileItem({
     <li
       ref={item}
       className="session-item"
+      data-slide={`session:${id}`}
       data-shelf={open || undefined}
       data-tone={shelf?.tone}
       style={layer !== undefined ? ({ anchorName: anchor } as CSSProperties) : undefined}
