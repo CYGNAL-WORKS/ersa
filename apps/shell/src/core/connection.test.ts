@@ -185,7 +185,7 @@ describe("connect", () => {
     answers[0]?.([session]);
     await settle();
     connection.reload("sessions");
-    connection.renamed("s1", "Renamed");
+    connection.changed("s1", { title: "Renamed" });
     const shown = () => {
       const last = seen.at(-1);
       return last?.phase === "connected" && last.sessions.state === "ready" ? last.sessions.sessions[0]?.title : undefined;

@@ -1,14 +1,15 @@
 import { type CSSProperties, type FocusEvent, type ReactNode, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
-import { ChevronDown, Ellipsis, Plus, ShieldAlert } from "lucide-react";
+import { ChevronDown, Ellipsis, Pin, Plus, ShieldAlert } from "lucide-react";
 import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
 import { type Collapsed, collapsedOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { placesOf, slideFrom } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
-import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileArchive, type TileRename } from "./SessionTile";
+import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileArchive, type TilePin, type TileRename } from "./SessionTile";
 import { TrustQuestion } from "./TrustQuestion";
 import "./RailTree.css";
 
@@ -45,10 +46,14 @@ interface RailTreeProps {
   onChevron?: (id: string) => void;
   /** The user closed a session's shelf: Escape, or a choice or focus outside it and its tile (R06, R07). */
   onCloseShelf?: (id: string) => void;
-  /** The projects whose headings the user collapsed (LAY-SHELL, Collapsing); every other one is expanded. */
+  /** The groups the user collapsed, by `groupKey` (LAY-SHELL, Collapsing); every other one is expanded. */
   collapsed?: ReadonlySet<string>;
-  /** The user collapsed or expanded a project's heading. */
-  onToggle?: (projectId: string) => void;
+  /** The user collapsed or expanded a group's heading, named by its `groupKey`. */
+  onToggle?: (key: string) => void;
+  /** Pins or unpins a session from its tile (FLOW-ORGANIZE-SESSIONS-R01). */
+  onPin?: (id: string, pinned: boolean) => void;
+  /** Pins and unpins on their way, and why the last was refused, by session id (R15). */
+  pinning?: Readonly<Record<string, Sending>>;
   /** Renames a session through its backend from its tile; resolves true once Core has (FLOW-ORGANIZE-SESSIONS-R02). */
   onRename?: (id: string, title: string) => Promise<boolean>;
   /** Renames on their way, and why the last was refused, by session id. */
@@ -71,10 +76,16 @@ interface RailTreeProps {
   initialTileDraft?: { id: string; draft: string };
 }
 
-/** The rail's tree (LAY-SHELL, The rail): each project's heading with its sessions beneath it, and their notes. */
+/** A group's key in `collapsed`: the Pinned group's, or a project's by its id. Kept apart, so no project id can be taken for the Pinned group. */
+export const groupKey = { pinned: "pinned", project: (id: string) => `project:${id}` };
+
+/**
+ * The rail's tree (LAY-SHELL, The rail): the Pinned group, absent while nothing pinned is shown, then each project's
+ * heading with its sessions beneath it, and their notes.
+ */
 export function RailTree(props: RailTreeProps) {
   const { projects, sessions, workspaces, placing, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
-  const { onRename, renaming, onRenameReset, onArchive, archiving, offline, initialTileMenu, initialTileDraft } = props;
+  const { onRename, renaming, onRenameReset, onArchive, archiving, offline, onPin, pinning, initialTileMenu, initialTileDraft } = props;
   // Rename on a tile: unavailable only while Ersa can't reach Core. A session its backend has not named yet, such as one
   // still starting, is refused by Core, and the field says why.
   const renameOf = (s: Session): TileRename | undefined =>
@@ -84,12 +95,47 @@ export function RailTree(props: RailTreeProps) {
       onReset: () => onRenameReset?.(s.id),
       unavailable: offline ? t("rail.tile.offlineReason") : undefined,
     };
+  const root = useRef<HTMLElement>(null);
+  // The pin on its way: where every tile and heading sat when it was chosen, and whether focus was in the rail then.
+  // One at a time: while it is saved, Pin and Unpin are unavailable on every tile, so each move is measured from the
+  // rail as the last one left it.
+  const pending = useRef<{ id: string; places: Map<string, number>; focused: boolean }>(undefined);
+  const saving = Object.values(pinning ?? {}).some((p) => p.state === "sending");
+  useLayoutEffect(() => {
+    const pin = pending.current;
+    const el = root.current;
+    if (!pin || !el || pinning?.[pin.id]?.state === "sending") return;
+    pending.current = undefined;
+    // Core refused it: nothing moved, so nothing slides.
+    if (pinning?.[pin.id]?.state === "failed") return;
+    // Once Core has the pin, each tile and heading slides from where it sat to its new place (DESIGN.md, Motion).
+    slideFrom(el, pin.places);
+    // The tile is drawn afresh in its new group, so the focus its menu gave back is lost: it goes to the tile in its
+    // new place or, when that group is collapsed, to the group's heading.
+    const lost = document.activeElement === null || document.activeElement === document.body;
+    const item = [...el.querySelectorAll<HTMLElement>("[data-session-id]")].find((tile) => tile.dataset.sessionId === pin.id);
+    if (!pin.focused || !lost || !item) return;
+    const folded = item.closest<HTMLElement>("[inert]");
+    const target = folded ? folded.closest(".rail-project")?.querySelector<HTMLElement>(".rail-heading-toggle") : item.querySelector<HTMLElement>(".session");
+    target?.focus({ preventScroll: true });
+  });
+  // Pin and Unpin: unavailable while Ersa can't reach Core, or while Core stores a pin.
+  const pinOf = (s: Session): TilePin | undefined =>
+    onPin && {
+      pinned: s.pinned,
+      onChoose: () => {
+        const el = root.current;
+        // Only a choice made with focus in the rail (in the tile's menu) has focus to give back.
+        if (el) pending.current = { id: s.id, places: placesOf(el), focused: el.contains(document.activeElement) };
+        onPin(s.id, !s.pinned);
+      },
+      unavailable: offline ? t("rail.tile.offlineReason") : saving ? t("rail.tile.savingProgress") : undefined,
+    };
   const archiveOf = (s: Session): TileArchive | undefined =>
     onArchive && { onChoose: (archived) => onArchive(s.id, archived), unavailable: offline ? t("rail.tile.offlineReason") : undefined };
   // A tile that leaves the rail while keyboard focus is in it, as one archived from its menu does, hands focus to the
   // next tile, else the previous one, else New session (docs/design/RAIL.md, the rule after a deletion), unless the
   // user has put focus somewhere else meanwhile. The tiles drawn last time give the order.
-  const root = useRef<HTMLElement>(null);
   const drawn = useRef<string[]>([]);
   const focusedTile = useRef<string | undefined>(undefined);
   const trackFocus = (event: FocusEvent) => {
@@ -119,13 +165,27 @@ export function RailTree(props: RailTreeProps) {
   // A session waits to be placed while the projects or their workspaces are still being read, so it does not
   // sit at the end and then move. When the projects could not be read, every session sits at the end.
   const looseShown = projects.state === "error" || (projects.state === "ready" && !placing);
+  // The Pinned group's tiles' element, which its heading's toggle says it controls.
+  const pinnedTiles = useId();
+  // Whether a group is collapsed, and how its heading turns it.
+  const folded = (key: string, sessions: readonly Session[]) => {
+    const closed = props.collapsed?.has(key) ?? false;
+    const toggle = () => {
+      // A shelf whose tile is folded away closes with it.
+      if (!closed && shelf && sessions.some((s) => s.id === shelf.id)) onCloseShelf?.(shelf.id);
+      props.onToggle?.(key);
+    };
+    return { folded: closed, toggle };
+  };
   const tile = (s: Session) => {
     const open = shelf?.id === s.id ? shelf : undefined;
+    const pinFailed = pinning?.[s.id];
     const archive = archiving?.[s.id];
     return (
       <TileItem key={s.id} id={s.id} shelf={open} onClose={onCloseShelf}>
         {(shelfDomId) => (
-          // A tile that fails to draw takes only itself down; a new listing of the session tries again.
+          <>
+          {/* A tile that fails to draw takes only itself down; a new listing of the session tries again. */}
           <ErrorBoundary what={t("rail.tile.boundaryName")} resetKey={JSON.stringify(s)}>
             <SessionTile
               session={s}
@@ -137,6 +197,7 @@ export function RailTree(props: RailTreeProps) {
               shelf={open && { tone: open.tone, domId: shelfDomId }}
               onChevron={onChevron}
               rename={renameOf(s)}
+              pin={pinOf(s)}
               archive={archiveOf(s)}
               initialMenu={initialTileMenu === s.id}
               initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
@@ -146,10 +207,18 @@ export function RailTree(props: RailTreeProps) {
               <Problem lead={s.archived ? t("rail.tile.unarchiveError") : t("rail.tile.archiveError")} reason={archive.message} />
             )}
           </ErrorBoundary>
+          {/* Core refused a pin: the tile stays where Core has it, and this says why (FLOW-ORGANIZE-SESSIONS-R15). */}
+          {pinFailed?.state === "failed" && (
+            <Problem lead={s.pinned ? t("rail.tile.unpinError") : t("rail.tile.pinError")} reason={pinFailed.message} />
+          )}
+          </>
         )}
       </TileItem>
     );
   };
+  // The Pinned group leads the rail, and is absent while nothing pinned is shown (LAY-SHELL, Groups).
+  const pinned = folded(groupKey.pinned, tree.pinned);
+  const pinnedEmpty = tree.pinned.length === 0;
   return (
     <section ref={root} className="rail-tree" aria-label={t("rail.tree.label")}
       onFocus={trackFocus}
@@ -167,17 +236,34 @@ export function RailTree(props: RailTreeProps) {
           <span className="rail-note-detail">{t("rail.tree.noProjectsHint")}</span>
         </p>
       )}
-      {tree.projects.length > 0 && (
+      {(tree.pinned.length > 0 || tree.projects.length > 0) && (
         <ul className="rail-projects">
+          {/* Always drawn, so it can open and fade in as the first session is pinned and close and fade out as the
+              last is unpinned (DESIGN.md: nothing pops in). Empty, it is closed, out of reach and not read. */}
+          <li className="rail-pinned" data-empty={pinnedEmpty || undefined} inert={pinnedEmpty || undefined} aria-hidden={pinnedEmpty || undefined}>
+            <div className="rail-project" data-collapsed={pinned.folded || undefined}>
+              <div className="rail-heading" data-slide={groupKey.pinned}>
+                <GroupToggle
+                  folded={pinned.folded}
+                  controls={pinnedTiles}
+                  summary={collapsedOf(tree.pinned)}
+                  toggle={pinned.toggle}
+                  name={t("rail.group.pinnedHeading")}
+                >
+                  <span className="rail-heading-pin">
+                    <Icon icon={Pin} size="icon-sm" />
+                  </span>
+                </GroupToggle>
+              </div>
+              <GroupTiles id={pinnedTiles} folded={pinned.folded}>
+                <ul className="rail-tiles">{tree.pinned.map(tile)}</ul>
+              </GroupTiles>
+            </div>
+          </li>
           {tree.projects.map(({ project, sessions }) => {
-            const closed = props.collapsed?.has(project.id) ?? false;
-            const toggle = () => {
-              // A shelf whose tile is folded away closes with it.
-              if (!closed && shelf && sessions.some((s) => s.id === shelf.id)) onCloseShelf?.(shelf.id);
-              props.onToggle?.(project.id);
-            };
+            const closed = folded(groupKey.project(project.id), sessions);
             return (
-              <ProjectGroup key={project.id} project={project} {...props} folded={closed} summary={collapsedOf(sessions)} toggle={toggle}>
+              <ProjectGroup key={project.id} project={project} {...props} folded={closed.folded} summary={collapsedOf(sessions)} toggle={closed.toggle}>
                 {sessions.length > 0 && <ul className="rail-tiles">{sessions.map(tile)}</ul>}
               </ProjectGroup>
             );
@@ -227,8 +313,6 @@ function ProjectGroup({
 }) {
   // The tiles' element, which the heading's toggle says it controls.
   const tilesId = useId();
-  // The "Not trusted" tooltip is placed by the shield, which names it as its anchor.
-  const shieldAnchor = `--rail-shield-${tilesId.replace(/[^a-zA-Z0-9]/g, "")}`;
   // The More menu, while open: where focus went as it opened (RAIL.md, Menus). The gallery's open menu takes none.
   const [menu, setMenu] = useState<"item" | "menu" | "none" | undefined>(initialMenu === project.id ? "none" : undefined);
   const [asking, setAsking] = useState(initialAsking === project.id);
@@ -261,45 +345,16 @@ function ProjectGroup({
   const nameLabel = { project: project.name };
   return (
     <li className="rail-project" data-collapsed={folded || undefined}>
-      <div className="rail-heading" data-force={forced} data-open={menu ? true : undefined}>
-        <h3 className="rail-heading-title">
-          {/* The heading's name collapses and expands its tiles, and says which it is (LAY-SHELL, Collapsing). */}
-          <button type="button" className="rail-heading-toggle" aria-expanded={!folded} aria-controls={children ? tilesId : undefined} onClick={toggle}>
-            <span className="rail-heading-chevron">
-              <Icon icon={ChevronDown} size="icon-sm" />
-            </span>
-            <span className="rail-heading-name">{project.name}</span>
-            {host !== undefined && <span className="rail-heading-host">{host}</span>}
-            {/* Toward the trailing edge: "Not trusted" after its shield while expanded; collapsed, the shield alone,
-                then how many sessions it holds. The words and the count fade as the heading turns (RailTree.css). */}
-            <span className="rail-heading-status">
-              {!project.trusted && (
-                <span
-                  className="rail-heading-shield"
-                  style={{ anchorName: shieldAnchor } as CSSProperties}
-                  // Collapsed, the shield stands for the words, so it carries them to assistive technology.
-                  role={folded ? "img" : undefined}
-                  aria-label={folded ? t("trust.notTrustedStatus") : undefined}
-                >
-                  <Icon icon={ShieldAlert} size="icon-sm" />
-                </span>
-              )}
-              <span className="rail-heading-swap">
-                {!project.trusted && <span className="rail-heading-trust">{t("trust.notTrustedStatus")}</span>}
-                <span className="rail-heading-count">
-                  {/* Led by a mark in the tone of what they want, when any of them needs the user. */}
-                  {summary.tone && <span className="glyph" data-tone={summary.tone} role="img" aria-label={t("rail.tile.needsYouWant")} />}
-                  {t("rail.heading.sessionCountStatus", { count: summary.count })}
-                </span>
-              </span>
-              {!project.trusted && folded && (
-                <span className="rail-heading-tip" aria-hidden="true" style={{ positionAnchor: shieldAnchor } as CSSProperties}>
-                  {t("trust.notTrustedStatus")}
-                </span>
-              )}
-            </span>
-          </button>
-        </h3>
+      <div className="rail-heading" data-slide={groupKey.project(project.id)} data-force={forced} data-open={menu ? true : undefined}>
+        <GroupToggle
+          folded={folded}
+          controls={children ? tilesId : undefined}
+          summary={summary}
+          toggle={toggle}
+          name={project.name}
+          host={host}
+          notTrusted={!project.trusted}
+        />
         <span className="rail-heading-actions">
           {onNewSession && <IconButton icon={Plus} size="icon-sm" label={t("rail.heading.newSessionLabel", nameLabel)} onClick={() => onNewSession(project)} />}
           {onSetTrust && (
@@ -356,10 +411,90 @@ function ProjectGroup({
       {workspaceErrors[project.id] !== undefined && <Problem lead={t("rail.heading.workspacesError")} reason={workspaceErrors[project.id] ?? ""} />}
       {/* The tiles slide closed and open in this frame; folded away, they take no focus and are not read. */}
       {children && (
-        <div id={tilesId} className="rail-group-tiles" inert={folded || undefined}>
-          <div className="rail-group-tiles-inner">{children}</div>
-        </div>
+        <GroupTiles id={tilesId} folded={folded}>
+          {children}
+        </GroupTiles>
       )}
     </li>
+  );
+}
+
+/**
+ * A group heading's name, which collapses and expands its tiles and says which it is (LAY-SHELL, Collapsing): the
+ * chevron, what leads the name (the Pinned group's pin), the name and its host, and toward the trailing edge "Not
+ * trusted" and, collapsed, how many sessions it holds.
+ */
+function GroupToggle({
+  folded,
+  controls,
+  summary,
+  toggle,
+  name,
+  host,
+  notTrusted = false,
+  children,
+}: {
+  folded: boolean;
+  /** The tiles' element id, when it has tiles. */
+  controls?: string;
+  summary: Collapsed;
+  toggle: () => void;
+  name: string;
+  host?: string;
+  notTrusted?: boolean;
+  /** Drawn after the chevron, before the name. */
+  children?: ReactNode;
+}) {
+  // The "Not trusted" tooltip is placed by the shield, which names it as its anchor.
+  const shieldAnchor = `--rail-shield-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
+  return (
+    <h3 className="rail-heading-title">
+      {/* The heading's name collapses and expands its tiles, and says which it is (LAY-SHELL, Collapsing). */}
+      <button type="button" className="rail-heading-toggle" aria-expanded={!folded} aria-controls={controls} onClick={toggle}>
+        <span className="rail-heading-chevron">
+          <Icon icon={ChevronDown} size="icon-sm" />
+        </span>
+        {children}
+        <span className="rail-heading-name">{name}</span>
+        {host !== undefined && <span className="rail-heading-host">{host}</span>}
+        {/* Toward the trailing edge: "Not trusted" after its shield while expanded; collapsed, the shield alone,
+            then how many sessions it holds. The words and the count fade as the heading turns (RailTree.css). */}
+        <span className="rail-heading-status">
+          {notTrusted && (
+            <span
+              className="rail-heading-shield"
+              style={{ anchorName: shieldAnchor } as CSSProperties}
+              // Collapsed, the shield stands for the words, so it carries them to assistive technology.
+              role={folded ? "img" : undefined}
+              aria-label={folded ? t("trust.notTrustedStatus") : undefined}
+            >
+              <Icon icon={ShieldAlert} size="icon-sm" />
+            </span>
+          )}
+          <span className="rail-heading-swap">
+            {notTrusted && <span className="rail-heading-trust">{t("trust.notTrustedStatus")}</span>}
+            <span className="rail-heading-count">
+              {/* Led by a mark in the tone of what they want, when any of them needs the user. */}
+              {summary.tone && <span className="glyph" data-tone={summary.tone} role="img" aria-label={t("rail.tile.needsYouWant")} />}
+              {t("rail.heading.sessionCountStatus", { count: summary.count })}
+            </span>
+          </span>
+          {notTrusted && folded && (
+            <span className="rail-heading-tip" aria-hidden="true" style={{ positionAnchor: shieldAnchor } as CSSProperties}>
+              {t("trust.notTrustedStatus")}
+            </span>
+          )}
+        </span>
+      </button>
+    </h3>
+  );
+}
+
+/** A group's tiles, which slide closed and open in this frame; folded away, they take no focus and are not read. */
+function GroupTiles({ id, folded, children }: { id: string; folded: boolean; children: ReactNode }) {
+  return (
+    <div id={id} className="rail-group-tiles" inert={folded || undefined}>
+      <div className="rail-group-tiles-inner">{children}</div>
+    </div>
   );
 }

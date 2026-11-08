@@ -368,7 +368,8 @@ describe("the tree App draws in the rail", () => {
   /** Each project heading's name with how many tiles sit beneath it, in the rail's order. */
   function headings(): [string, number][] {
     const tree = screen.getByRole("region", { name: "Projects and sessions" });
-    return [...tree.querySelectorAll(".rail-project")].map((group) => [
+    // The Pinned group, empty, is drawn closed and hidden from everyone, so it is not one of the headings shown.
+    return [...tree.querySelectorAll(".rail-project:not([data-empty] > *)")].map((group) => [
       group.querySelector(".rail-heading-name")?.textContent ?? "",
       group.querySelectorAll(".session").length,
     ]);
@@ -668,8 +669,8 @@ describe("a tile's menu, and renaming on the tile", () => {
       // The key may send its own contextmenu event after the keydown: the menu stays at the tile, on its first item.
       fireEvent.contextMenu(tile("Fix the build"), { clientX: 0, clientY: 0 });
       expect(menu()?.getAttribute("data-place")).toBe("below");
-      // From the keyboard, focus goes to the first item.
-      expect(document.activeElement?.textContent).toMatch(/^Rename/);
+      // From the keyboard, focus goes to the first item, Pin (LAY-SHELL, A tile's menu).
+      expect(document.activeElement?.textContent).toBe("Pin");
       fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
       expect(document.activeElement).toBe(tile("Fix the build"));
     }
@@ -881,6 +882,211 @@ describe("archiving a session from its tile, and an archived session read-only",
     // The pin and the section stay: neither session.set_archived nor session.arrange was sent.
     expect(callsOf(core, "session.set_archived")).toEqual([]);
     expect(callsOf(core, "session.arrange")).toEqual([]);
+  });
+});
+
+// FLOW-ORGANIZE-SESSIONS (step 1; Variations and errors: Saving fails); docs/design/RAIL.md (A group heading).
+describe("pinning a session from its tile", () => {
+  const rail = () => screen.getByRole("navigation", { name: "Rail" });
+  const more = (title: string) => within(rail()).getByRole("button", { name: `More for ${title}` });
+  // The group a tile is in, by its heading's name; a tile is found by its title.
+  const groupOf = (title: string) =>
+    [...rail().querySelectorAll<HTMLElement>(".session")]
+      .find((el) => el.textContent?.includes(title))
+      ?.closest(".rail-project")
+      ?.querySelector(".rail-heading-name")?.textContent;
+  const arranges = (core: ReturnType<typeof fakeCore>) => core.calls.filter((c) => c.method === "session.arrange").map((c) => c.params);
+  // Core keeps the pins: session.arrange changes what session.list answers, as it does.
+  async function open(refuse?: string) {
+    let listed = sessions.map((s, i) => ({ ...s, title: i === 0 ? "Fix the build" : "Write the notes" }));
+    const core = fakeCore({
+      "session.list": () => listed,
+      "session.arrange": (params: { id: string; pinned: boolean }) => {
+        if (refuse) throw { kind: "rpc", error: { code: -32010, message: refuse } };
+        listed = listed.map((s) => (s.id === params.id ? { ...s, pinned: params.pinned } : s));
+        return listed.find((s) => s.id === params.id);
+      },
+    });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    return core;
+  }
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R01
+  it("moves a pinned tile to a leading Pinned group, and Unpin returns it to its project", async () => {
+    const core = await open();
+    // Nothing pinned: no Pinned group.
+    expect(within(rail()).queryByRole("button", { name: /^Pinned/ })).toBeNull();
+    expect(groupOf("Fix the build")).toBe("alpha");
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    expect(arranges(core)).toEqual([{ id: "s1", pinned: true }]);
+    expect(groupOf("Fix the build")).toBe("Pinned");
+    // It leads the rail, before every project, and its project keeps its heading.
+    const headings = [...rail().querySelectorAll(".rail-heading-name")].map((el) => el.textContent);
+    expect(headings).toEqual(["Pinned", "alpha", "beta", "gamma"]);
+    expect(groupOf("Write the notes")).toBe("beta");
+
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unpin" }));
+    await settle();
+    await settle();
+    expect(arranges(core)).toEqual([
+      { id: "s1", pinned: true },
+      { id: "s1", pinned: false },
+    ]);
+    expect(groupOf("Fix the build")).toBe("alpha");
+    expect(within(rail()).queryByRole("button", { name: /^Pinned/ })).toBeNull();
+  });
+
+  it("gives keyboard focus to the moved tile, or to the Pinned heading while that group is collapsed", async () => {
+    await open();
+    const tileOf = (title: string) => [...rail().querySelectorAll<HTMLElement>(".session")].find((el) => el.textContent?.includes(title));
+    tileOf("Fix the build")?.focus();
+    fireEvent.keyDown(tileOf("Fix the build") as HTMLElement, { key: "F10", shiftKey: true });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    expect(groupOf("Fix the build")).toBe("Pinned");
+    expect(document.activeElement).toBe(tileOf("Fix the build"));
+
+    const pinned = within(rail()).getByRole("button", { name: /^Pinned/ });
+    fireEvent.click(pinned);
+    tileOf("Write the notes")?.focus();
+    fireEvent.keyDown(tileOf("Write the notes") as HTMLElement, { key: "F10", shiftKey: true });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    expect(groupOf("Write the notes")).toBe("Pinned");
+    expect(document.activeElement).toBe(within(rail()).getByRole("button", { name: /^Pinned/ }));
+  });
+
+  it("slides each moved tile and heading from where it was over motion-settle with motion-ease-in-out", async () => {
+    await open();
+    // jsdom lays nothing out: each slid element sits at its order on the page, and the motion tokens are set here.
+    document.documentElement.style.setProperty("--motion-settle", "240ms");
+    document.documentElement.style.setProperty("--motion-ease-in-out", "ease-in-out");
+    const order = () => [...document.querySelectorAll<HTMLElement>("[data-slide]")];
+    const rect = vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function (this: HTMLElement) {
+      return order().indexOf(this) * 10;
+    });
+    const slid: { slide: string | undefined; keyframes: Keyframe[]; options: KeyframeAnimationOptions }[] = [];
+    HTMLElement.prototype.animate = function (this: HTMLElement, keyframes: Keyframe[], options: KeyframeAnimationOptions) {
+      slid.push({ slide: this.dataset.slide, keyframes, options });
+      return {} as Animation;
+    } as never;
+    try {
+      const before = order().map((el) => el.dataset.slide);
+      fireEvent.click(more("Write the notes"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+      await settle();
+      await settle();
+      const after = order().map((el) => el.dataset.slide);
+      // Every element that had a place and moved slides from it; the Pinned heading is new, so it appears in place.
+      const moved = after.filter((key) => key !== "pinned" && before.indexOf(key) !== after.indexOf(key));
+      expect(moved).toContain("session:s2");
+      expect(slid.map((s) => s.slide).sort()).toEqual([...moved].sort());
+      const tile = slid.find((s) => s.slide === "session:s2");
+      expect(tile?.keyframes).toEqual([{ transform: `translateY(${(before.indexOf("session:s2") - after.indexOf("session:s2")) * 10}px)` }, { transform: "none" }]);
+      expect(tile?.options).toEqual({ duration: 240, easing: "ease-in-out" });
+    } finally {
+      rect.mockRestore();
+      delete (HTMLElement.prototype as { animate?: unknown }).animate;
+      document.documentElement.removeAttribute("style");
+    }
+  });
+
+  it("slides nothing when Core refuses the pin, or when the user asked for reduced motion", async () => {
+    const animate = vi.fn(() => ({}) as Animation);
+    HTMLElement.prototype.animate = animate as never;
+    document.documentElement.style.setProperty("--motion-settle", "240ms");
+    document.documentElement.style.setProperty("--motion-ease-in-out", "ease-in-out");
+    const position = vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function (this: HTMLElement) {
+      // Each element sits at its order among every element on the page, so a note added above a tile moves it.
+      return [...document.querySelectorAll("*")].indexOf(this) * 10;
+    });
+    const reduce = (on: boolean) => vi.stubGlobal("matchMedia", (query: string) => ({ matches: on && query.includes("reduce") }) as MediaQueryList);
+    try {
+      reduce(true);
+      await open();
+      fireEvent.click(more("Write the notes"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+      await settle();
+      await settle();
+      expect(groupOf("Write the notes")).toBe("Pinned");
+      expect(animate).not.toHaveBeenCalled();
+      cleanup();
+
+      reduce(false);
+      await open("session.arrange: the session is being deleted");
+      fireEvent.click(more("Write the notes"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+      await settle();
+      await settle();
+      expect(within(rail()).getByRole("alert").textContent).toContain("the session is being deleted");
+      expect(animate).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      position.mockRestore();
+      delete (HTMLElement.prototype as { animate?: unknown }).animate;
+      document.documentElement.removeAttribute("style");
+    }
+  });
+
+  it("makes Pin and Unpin unavailable on every tile while a pin is saved", async () => {
+    let answer: () => void = () => {};
+    const core = fakeCore({
+      "session.list": () => sessions.map((s, i) => ({ ...s, title: i === 0 ? "Fix the build" : "Write the notes" })),
+      "session.arrange": (params: { id: string; pinned: boolean }) =>
+        new Promise((resolve) => (answer = () => resolve({ ...sessions[0], title: "Fix the build", pinned: params.pinned }))),
+    });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    fireEvent.click(more("Write the notes"));
+    const item = screen.getByRole("menuitem", { name: /^Pin/ });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.textContent).toContain("Saving…");
+    await act(async () => answer());
+  });
+
+  it("collapses the Pinned group like any group", async () => {
+    await open();
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    const pinned = within(rail()).getByRole("button", { name: /^Pinned/ });
+    fireEvent.click(pinned);
+    expect(pinned.getAttribute("aria-expanded")).toBe("false");
+    expect(pinned.textContent).toContain("1 session");
+    expect(document.getElementById(pinned.getAttribute("aria-controls") ?? "")?.hasAttribute("inert")).toBe(true);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R15
+  it("leaves the tile where Core has it and says why when Core refuses the pin", async () => {
+    const core = await open("session.arrange: the session is being deleted");
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    expect(arranges(core)).toEqual([{ id: "s1", pinned: true }]);
+    expect(groupOf("Fix the build")).toBe("alpha");
+    expect(within(rail()).queryByRole("button", { name: /^Pinned/ })).toBeNull();
+    const alert = within(rail()).getByRole("alert");
+    expect(alert.textContent).toContain("Ersa can't pin this session.");
+    expect(alert.textContent).toContain("the session is being deleted");
+    // Trying again takes the old reason away.
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    expect(within(rail()).queryByRole("alert")).toBeNull();
+    await settle();
   });
 });
 
