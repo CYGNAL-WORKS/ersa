@@ -106,12 +106,18 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         .await?
         .is_some_and(|p| p.trusted);
 
+    // A backend that starts a session under an id Ersa chooses gets one
+    // now: stored with the row before the backend starts, so the session can
+    // be renamed, and its record found, from the moment it exists
+    // (PROTO-CLAUDE-CODE-STREAM-R35). Any other backend names it as it
+    // starts.
+    let backend_session_id = adapter.new_session_id();
     let session = SessionRow {
         id: persistence::new_id("s"),
         workspace_id: workspace.id,
         host_id: project.host_id,
         backend: params.backend,
-        backend_session_id: None,
+        backend_session_id: backend_session_id.clone(),
         mode: params.mode,
         cwd: workspace.path.clone(),
         // Only the model and effort named; one left out is the backend's to
@@ -140,6 +146,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         // What the user answered the trust question for; a backend that
         // keeps its own trust record is told of it (ADR 0018).
         project_path: project.path.clone(),
+        backend_session_id,
         extra: Value::Null,
     };
     Ok(core

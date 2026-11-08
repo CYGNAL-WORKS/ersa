@@ -319,6 +319,32 @@ pub fn resume_args(config: &SessionConfig) -> Result<Vec<String>, AdapterError> 
     }
 }
 
+/// The arguments that start a new session under the id Core chose and
+/// stored, after [`invocation_args`]: `--session-id` with
+/// `backend_session_id`, so the CLI's `system/init` reports that id and its
+/// record is filed under it (PROTO-CLAUDE-CODE-STREAM-R35). None when Core
+/// chose no id. Never with `--resume`, which continues a session under its
+/// own id: a config asking for both is an error.
+///
+/// Like a resume id, the id must be a UUID, so it can never reach the
+/// command line as a flag.
+pub fn session_id_args(config: &SessionConfig) -> Result<Vec<String>, AdapterError> {
+    let Some(id) = &config.backend_session_id else {
+        return Ok(Vec::new());
+    };
+    if config.extra.get("resume").is_some_and(|v| !v.is_null()) {
+        return Err(AdapterError::Protocol(
+            "a resumed session keeps its own id; it cannot also start under a new one".into(),
+        ));
+    }
+    if !crate::record::is_session_id(id) {
+        return Err(AdapterError::Protocol(format!(
+            "cannot start a session as {id:?}: not a Claude Code session id"
+        )));
+    }
+    Ok(vec!["--session-id".into(), id.clone()])
+}
+
 #[async_trait]
 impl Adapter for ClaudeAdapter {
     fn backend(&self) -> &str {
@@ -352,14 +378,23 @@ impl Adapter for ClaudeAdapter {
         spec.env.extend(entrypoint_env());
     }
 
+    /// A fresh UUID, the form the CLI's own session ids take: the CLI starts
+    /// the session under it (`--session-id`), so Core knows the session's id,
+    /// and can rename it, before its first message
+    /// (PROTO-CLAUDE-CODE-STREAM-R35).
+    fn new_session_id(&self) -> Option<String> {
+        Some(uuid::Uuid::new_v4().to_string())
+    }
+
     async fn start(
         &self,
         transport: Arc<dyn Transport>,
         config: SessionConfig,
         sink: Arc<dyn AdapterSink>,
     ) -> Result<Box<dyn AdapterSession>, AdapterError> {
-        // A bad resume id fails here, before anything starts.
+        // A bad resume or session id fails here, before anything starts.
         let resume = resume_args(&config)?;
+        let session_id = session_id_args(&config)?;
 
         let mut spec = ProcessSpec {
             program: program(&config),
@@ -369,6 +404,7 @@ impl Adapter for ClaudeAdapter {
         };
         self.set_environment(&mut spec);
         spec.args.extend(resume);
+        spec.args.extend(session_id);
         let program = spec.program.clone();
         let mut process = transport.spawn(spec).await.map_err(|e| {
             // Name what was tried: "program not found" alone does not say

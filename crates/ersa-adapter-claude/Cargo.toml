@@ -16,6 +16,8 @@ serde_json.workspace = true
 tokio.workspace = true
 # Warnings for Core's log, where nothing else reports them.
 tracing.workspace = true
+# A new session's id, chosen before the CLI starts (`--session-id`).
+uuid.workspace = true
 
 # Whether a process named in the CLI's live-session registry is running, used
 # only by src/platform.rs.
