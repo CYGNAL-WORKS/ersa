@@ -440,6 +440,19 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     if (id === activeNow.current) dispatch({ type: "newSession" });
     connection.current?.reload("sessions");
   };
+  // While the user's own deletion runs, its tile reads Deleting at once (LAY-SHELL, Being deleted): Core marks the
+  // session as it starts deleting, and the rail reads the list again only once it ends.
+  const deletingId = deleteAsk?.phase.kind === "deleting" ? deleteAsk.id : undefined;
+  const railSessions = useMemo<SessionsView>(
+    () =>
+      deletingId && sessions.state === "ready"
+        ? { ...sessions, sessions: sessions.sessions.map((s) => (s.id === deletingId ? { ...s, deleting: "running" as const } : s)) }
+        : sessions,
+    [sessions, deletingId],
+  );
+  // While the question is open the rest of the window is inert, so neither a click nor Tab takes focus out of it
+  // (docs/design/RAIL.md, The delete question); it is not dimmed.
+  const behind = deleteAsk !== undefined && deleteAsk.phase.kind !== "deleted";
   // Cancel leaves everything as it was, and focus goes back to the tile.
   const cancelDelete = () => {
     const id = deleteAsk?.id;
@@ -618,14 +631,14 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   return (
     <div className="app">
-      <nav className="rail" aria-label="Rail">
+      <nav className="rail" aria-label="Rail" inert={behind}>
         {/* Unavailable until Ersa has connected (LAY-SHELL, The foot). */}
         <RailTop onNewSession={() => dispatch({ type: "newSession" })} disabled={view.phase !== "connected"} />
         <div className="rail-body">
           <ErrorBoundary what={t("rail.tree.boundaryName")} resetKey={`${projectsVersion}:${sessionsVersion}`}>
             <RailTree
               projects={projects}
-              sessions={sessions}
+              sessions={railSessions}
               workspaces={workspaces}
               workspaceErrors={workspaceErrors}
               placing={placing}
@@ -662,7 +675,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         </div>
       </nav>
       {shown ? (
-        <main className="stage">
+        <main className="stage" inert={behind}>
           {/* Tries again on each new event, and keeps the composer out of it. */}
           <ErrorBoundary what="This session" resetKey={`${shown.id}:${shown.transcript.lastSeq}`}>
             <Transcript
@@ -719,7 +732,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           </ErrorBoundary>
         </main>
       ) : hello && screenProjects && showsScreen({ composing, starting, activeId }, view.phase === "connected") ? (
-        <main className="stage">
+        <main className="stage" inert={behind}>
           <ErrorBoundary what="The new-session screen" resetKey={composing?.projectId ?? ""}>
             <NewSessionScreen
               // Drawn afresh on each New session, so its composer takes focus (FLOW-NEW-SESSION-R01).
@@ -746,7 +759,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           </ErrorBoundary>
         </main>
       ) : (
-        <main className="stage stage-empty">No session open. Start one from a project in the rail.</main>
+        <main className="stage stage-empty" inert={behind}>No session open. Start one from a project in the rail.</main>
       )}
       {deleteAsk && deleteAsk.phase.kind !== "deleted" && (
         <DeleteQuestion

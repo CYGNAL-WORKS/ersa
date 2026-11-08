@@ -39,10 +39,15 @@ export type WhatGoes =
       unrecorded: boolean;
     };
 
-/** What goes, from the session's workspace and, for an isolated one, its `workspace.changes` answer. */
-export function whatGoes(workspace: Workspace, changes: WorkspaceChanges | undefined): WhatGoes {
-  // `sessions` counts this session too: more than one, and deleting it leaves the folder to the others.
-  if (workspace.kind === "root" || !changes || changes.sessions > 1) return { kind: "filesStay", path: workspace.path };
+/**
+ * What goes, from the session's workspace and, for an isolated one, its `workspace.changes` answer. `marked`: the
+ * session is already marked deleting, after a delete that failed part way.
+ */
+export function whatGoes(workspace: Workspace, changes: WorkspaceChanges | undefined, marked = false): WhatGoes {
+  // `sessions` leaves out sessions marked deleting, so it counts this one only while it isn't. Any other session
+  // using the folder keeps it.
+  const others = changes ? changes.sessions - (marked ? 0 : 1) : 0;
+  if (workspace.kind === "root" || !changes || others > 0) return { kind: "filesStay", path: workspace.path };
   return {
     kind: "folderGoes",
     branch: workspace.vcs_ref,
@@ -79,6 +84,9 @@ export type DeletePhase =
  */
 export class Deletion {
   private token: string | undefined;
+  // Whether Core has marked the session deleting, as it does once a delete fails part way: `workspace.changes` then
+  // leaves it out of the sessions it counts.
+  private marked = false;
   private phase: DeletePhase = { kind: "reading" };
 
   constructor(
@@ -98,7 +106,12 @@ export class Deletion {
       return;
     }
     try {
-      const changes = await this.client.call("workspace.changes", { id: this.workspace.id });
+      const [changes, listed] = await Promise.all([
+        this.client.call("workspace.changes", { id: this.workspace.id }),
+        // Unread, it is taken as unmarked, which can only overstate what goes, never hide it.
+        this.client.call("session.list").catch(() => []),
+      ]);
+      this.marked = listed.some((s) => s.id === this.sessionId && s.deleting !== undefined);
       this.ask(changes, false);
     } catch (error) {
       this.set({ kind: "failed", reason: describeError(error) });
@@ -116,19 +129,25 @@ export class Deletion {
       // What would be lost changed since the question: Core answers with what it is now, and Ersa asks again (R08).
       const changes = staleChanges(error);
       if (changes) this.ask(changes, true);
-      else this.set({ kind: "failed", reason: describeError(error) });
+      else this.set({ kind: "failed", reason: reasonOf(error) });
     }
   }
 
   private ask(changes: WorkspaceChanges, changed: boolean) {
     this.token = changes.token;
-    this.set({ kind: "asking", goes: whatGoes(this.workspace, changes), changed });
+    this.set({ kind: "asking", goes: whatGoes(this.workspace, changes, this.marked), changed });
   }
 
   private set(phase: DeletePhase) {
     this.phase = phase;
     this.onPhase(phase);
   }
+}
+
+/** Why a delete failed, in the user's terms: Core's bare `busy` becomes a sentence, any other reason is Core's own. */
+function reasonOf(error: unknown): string {
+  const data = typeof error === "object" && error !== null && "error" in error ? (error as { error: { data?: { kind?: string; detail?: string } } }).error.data : undefined;
+  return data?.kind === "invalid_state" && data.detail === "busy" ? String(t("rail.delete.busyError")) : describeError(error);
 }
 
 /**

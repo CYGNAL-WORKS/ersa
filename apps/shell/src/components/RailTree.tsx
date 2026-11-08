@@ -58,7 +58,7 @@ interface RailTreeProps {
   onRenameReset?: (id: string) => void;
   /** Asks before deleting a session (FLOW-ARCHIVE-DELETE-SESSION, step 4). */
   onDelete?: (id: string) => void;
-  /** Ersa can't reach Core, so nothing can be renamed now. */
+  /** Ersa can't reach Core, so nothing can be renamed or deleted now. */
   offline?: boolean;
   /** For the gallery: a pointer or keyboard state on one tile or one heading, the menu open, the trust question asked. */
   force?: ForcedTile;
