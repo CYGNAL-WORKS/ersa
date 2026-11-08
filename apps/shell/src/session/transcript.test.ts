@@ -291,11 +291,11 @@ describe("marking hidden characters", () => {
 
 describe("a repeated question", () => {
   it("does not reopen one already answered", () => {
-    const asked = envelope(0, { type: "question.asked", request_id: "q", questions: [{ id: "a", text: "Which?", multi_select: false }] });
-    const answered = envelope(1, { type: "question.answered", request_id: "q", answers: [], answered_by: "user" });
+    const asked = envelope(0, { type: "question.asked", request_id: "q", questions: [{ id: "a", text: "Which?", multi_select: false, takes_text: false }] });
+    const answered = envelope(1, { type: "question.answered", request_id: "q", answers: [], declined: false, answered_by: "user" });
     const again = { ...asked, seq: 2 };
     const shown = play([asked, answered, again]);
-    expect(shown.items).toEqual([{ kind: "question", key: "question:q", requestId: "q", questions: [{ id: "a", text: "Which?", multi_select: false }], answered: true }]);
+    expect(shown.items).toEqual([{ kind: "question", key: "question:q", requestId: "q", questions: [{ id: "a", text: "Which?", multi_select: false, takes_text: false }], answered: true }]);
   });
 });
 
