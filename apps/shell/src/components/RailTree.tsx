@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode, useCallback, useId, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, Ellipsis, Pin, Plus, ShieldAlert } from "lucide-react";
 import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
@@ -88,14 +88,33 @@ export function RailTree(props: RailTreeProps) {
       onSave: (title) => onRename(s.id, title),
       renaming: renaming?.[s.id],
       onReset: () => onRenameReset?.(s.id),
-      unavailable: offline ? t("rail.tile.renameOfflineReason") : undefined,
+      unavailable: offline ? t("rail.tile.offlineReason") : undefined,
     };
+  // A tile pinned or unpinned moves to another group, where React draws it afresh, so the focus its menu gave back
+  // to it is lost. Once it has moved, focus goes to the tile in its new place, or, when that group is collapsed, to
+  // the group's heading.
+  const root = useRef<HTMLElement>(null);
+  const moving = useRef<string>(undefined);
+  useLayoutEffect(() => {
+    const id = moving.current;
+    if (id === undefined || pinning?.[id]?.state === "sending") return;
+    moving.current = undefined;
+    const lost = document.activeElement === null || document.activeElement === document.body;
+    const item = [...(root.current?.querySelectorAll<HTMLElement>("[data-session]") ?? [])].find((el) => el.dataset.session === id);
+    if (!lost || !item) return;
+    const folded = item.closest<HTMLElement>("[inert]");
+    const target = folded ? folded.closest(".rail-project")?.querySelector<HTMLElement>(".rail-heading-toggle") : item.querySelector<HTMLElement>(".session");
+    target?.focus({ preventScroll: true });
+  });
   // Pin and Unpin: unavailable while Ersa can't reach Core, or while Core stores the last choice.
   const pinOf = (s: Session): TilePin | undefined =>
     onPin && {
       pinned: s.pinned,
-      onChoose: () => onPin(s.id, !s.pinned),
-      unavailable: offline ? t("rail.tile.renameOfflineReason") : pinning?.[s.id]?.state === "sending" ? t("rail.tile.savingProgress") : undefined,
+      onChoose: () => {
+        moving.current = s.id;
+        onPin(s.id, !s.pinned);
+      },
+      unavailable: offline ? t("rail.tile.offlineReason") : pinning?.[s.id]?.state === "sending" ? t("rail.tile.savingProgress") : undefined,
     };
   const listed = projects.state === "ready" ? projects.projects : [];
   const tree = treeOf(listed, workspaces, sessions.state === "ready" ? sessions.sessions : []);
@@ -150,7 +169,7 @@ export function RailTree(props: RailTreeProps) {
   // The Pinned group leads the rail, and is absent while nothing pinned is shown (LAY-SHELL, Groups).
   const pinned = tree.pinned.length > 0 ? folded(groupKey.pinned, tree.pinned) : undefined;
   return (
-    <section className="rail-tree" aria-label={t("rail.tree.label")}>
+    <section ref={root} className="rail-tree" aria-label={t("rail.tree.label")}>
       {projects.state === "loading" && <p className="rail-note">{t("rail.tree.loadingProgress")}</p>}
       {projects.state === "error" && <Problem lead={t("rail.tree.projectsError")} reason={projects.message} />}
       {sessions.state === "error" && <Problem lead={t("rail.tree.sessionsError")} reason={sessions.message} />}

@@ -77,7 +77,7 @@ export const enUS = {
       // The key that does the same as Rename, at the item's trailing edge.
       renameKey: "F2",
       // Why Rename, Pin or Unpin is unavailable: each goes through Core.
-      renameOfflineReason: "Available once Ersa reaches your sessions",
+      offlineReason: "Available once Ersa reaches your sessions",
       // The field the title becomes while it is renamed on the tile.
       titleLabel: "Session title",
       // Names a tile when it fails to draw: "This session could not be shown:".
