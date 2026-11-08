@@ -793,6 +793,41 @@ describe("pinning a session from its tile", () => {
     expect(document.activeElement).toBe(within(rail()).getByRole("button", { name: /^Pinned/ }));
   });
 
+  it("slides each moved tile and heading from where it was over motion-settle with motion-ease-in-out", async () => {
+    await open();
+    // jsdom lays nothing out: each slid element sits at its order on the page, and the motion tokens are set here.
+    document.documentElement.style.setProperty("--motion-settle", "240ms");
+    document.documentElement.style.setProperty("--motion-ease-in-out", "ease-in-out");
+    const order = () => [...document.querySelectorAll<HTMLElement>("[data-slide]")];
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return { top: order().indexOf(this) * 10 } as DOMRect;
+    });
+    const slid: { slide: string | undefined; keyframes: Keyframe[]; options: KeyframeAnimationOptions }[] = [];
+    HTMLElement.prototype.animate = function (this: HTMLElement, keyframes: Keyframe[], options: KeyframeAnimationOptions) {
+      slid.push({ slide: this.dataset.slide, keyframes, options });
+      return {} as Animation;
+    } as never;
+    try {
+      const before = order().map((el) => el.dataset.slide);
+      fireEvent.click(more("Write the notes"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+      await settle();
+      await settle();
+      const after = order().map((el) => el.dataset.slide);
+      // Every element that had a place and moved slides from it; the Pinned heading is new, so it appears in place.
+      const moved = after.filter((key) => key !== "pinned" && before.indexOf(key) !== after.indexOf(key));
+      expect(moved).toContain("session:s2");
+      expect(slid.map((s) => s.slide).sort()).toEqual([...moved].sort());
+      const tile = slid.find((s) => s.slide === "session:s2");
+      expect(tile?.keyframes).toEqual([{ transform: `translateY(${(before.indexOf("session:s2") - after.indexOf("session:s2")) * 10}px)` }, { transform: "none" }]);
+      expect(tile?.options).toEqual({ duration: 240, easing: "ease-in-out" });
+    } finally {
+      rect.mockRestore();
+      delete (HTMLElement.prototype as { animate?: unknown }).animate;
+      document.documentElement.removeAttribute("style");
+    }
+  });
+
   it("collapses the Pinned group like any group", async () => {
     await open();
     fireEvent.click(more("Fix the build"));
