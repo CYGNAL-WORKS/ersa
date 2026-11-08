@@ -3,7 +3,7 @@
 // out what is decided here, so every decision is made, and tested, without drawing anything.
 
 import { t } from "../catalog";
-import { type CoreClient, describeError } from "../core/client";
+import { type CoreClient, describeError, refusalOf } from "../core/client";
 import { isBusy } from "../core/shell";
 import type { Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
 
@@ -146,7 +146,7 @@ export class Deletion {
 
 /** Why a delete failed, in the user's terms: Core's bare `busy` becomes a sentence, any other reason is Core's own. */
 function reasonOf(error: unknown): string {
-  const data = typeof error === "object" && error !== null && "error" in error ? (error as { error: { data?: { kind?: string; detail?: string } } }).error.data : undefined;
+  const data = refusalOf(error);
   return data?.kind === "invalid_state" && data.detail === "busy" ? String(t("rail.delete.busyError")) : describeError(error);
 }
 
@@ -155,8 +155,7 @@ function reasonOf(error: unknown): string {
  * JSON text in `detail` (PROTO-CORE-API-R53). Any other refusal, `busy` or a process named among them, is not one.
  */
 function staleChanges(error: unknown): WorkspaceChanges | undefined {
-  if (typeof error !== "object" || error === null || !("kind" in error) || error.kind !== "rpc" || !("error" in error)) return undefined;
-  const data = (error as { error: { data?: { kind?: string; detail?: string } } }).error.data;
+  const data = refusalOf(error);
   if (data?.kind !== "invalid_state" || !data.detail?.startsWith("{")) return undefined;
   try {
     const changes: unknown = JSON.parse(data.detail);

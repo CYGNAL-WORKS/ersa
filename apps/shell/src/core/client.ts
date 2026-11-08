@@ -6,6 +6,7 @@ import type {
   CoreApiMethods,
   CoreApiNotifications,
   CoreHelloResult,
+  ErrorData,
   Error as RpcError,
 } from "../protocol/core-api.gen";
 
@@ -47,6 +48,12 @@ export interface CoreClient {
   attach(onEvent: (event: CoreEvent) => void): Promise<Attachment>;
   /** One Core API request. Rejects with a {@link BridgeError}. */
   call<M extends Method>(method: M, params?: Params<M>): Promise<Result<M>>;
+}
+
+/** Core's refusal, when a client call was refused by Core rather than failing on the way: its kind and detail. */
+export function refusalOf(error: unknown): ErrorData | undefined {
+  if (typeof error !== "object" || error === null || !("kind" in error) || error.kind !== "rpc" || !("error" in error)) return undefined;
+  return (error as { error: RpcError }).error.data;
 }
 
 /** A readable message for anything a client call rejected with. */

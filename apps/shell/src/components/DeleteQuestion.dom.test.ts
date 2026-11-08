@@ -144,6 +144,22 @@ describe("the delete question's buttons", () => {
     }
   });
 
+  it("takes no focus away when the rest of the window is pressed, so Escape still reaches it", () => {
+    const dialog = asking(isolated);
+    // A press outside is held, so focus stays on Cancel; a press inside acts as usual.
+    expect(fireEvent.mouseDown(document.body)).toBe(false);
+    expect(document.activeElement).toBe(button("Cancel"));
+    expect(fireEvent.mouseDown(button("Delete"))).toBe(true);
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    expect(calls).toEqual(["cancel"]);
+  });
+
+  it("keeps its bottom edge where it opened, so the buttons hold still as it grows", () => {
+    const dialog = show({ kind: "reading" });
+    expect(dialog.hasAttribute("data-anchored")).toBe(true);
+    expect(dialog.style.getPropertyValue("--delete-question-bottom")).toMatch(/px$/);
+  });
+
   it("can't be confirmed while it reads what would be lost", () => {
     const dialog = show({ kind: "reading" });
     expect(dialog.textContent).toContain("Checking what would be lost…");
