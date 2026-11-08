@@ -8,7 +8,7 @@ import { type Collapsed, collapsedOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
-import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileRename } from "./SessionTile";
+import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileArchive, type TileRename } from "./SessionTile";
 import { TrustQuestion } from "./TrustQuestion";
 import "./RailTree.css";
 
@@ -55,7 +55,11 @@ interface RailTreeProps {
   renaming?: Readonly<Record<string, Sending>>;
   /** Editing a tile's title starts or ends: its earlier refusal goes. */
   onRenameReset?: (id: string) => void;
-  /** Ersa can't reach Core, so nothing can be renamed now. */
+  /** Archives a session from its tile, or unarchives an archived one (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3). */
+  onArchive?: (id: string, archived: boolean) => void;
+  /** Archives and unarchives on their way, and why the last was refused, by session id. */
+  archiving?: Readonly<Record<string, Sending>>;
+  /** Ersa can't reach Core, so nothing can be renamed or archived now. */
   offline?: boolean;
   /** For the gallery: a pointer or keyboard state on one tile or one heading, the menu open, the trust question asked. */
   force?: ForcedTile;
@@ -70,7 +74,7 @@ interface RailTreeProps {
 /** The rail's tree (LAY-SHELL, The rail): each project's heading with its sessions beneath it, and their notes. */
 export function RailTree(props: RailTreeProps) {
   const { projects, sessions, workspaces, placing, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
-  const { onRename, renaming, onRenameReset, offline, initialTileMenu, initialTileDraft } = props;
+  const { onRename, renaming, onRenameReset, onArchive, archiving, offline, initialTileMenu, initialTileDraft } = props;
   // Rename on a tile: unavailable only while Ersa can't reach Core. A session its backend has not named yet, such as one
   // still starting, is refused by Core, and the field says why.
   const renameOf = (s: Session): TileRename | undefined =>
@@ -78,8 +82,10 @@ export function RailTree(props: RailTreeProps) {
       onSave: (title) => onRename(s.id, title),
       renaming: renaming?.[s.id],
       onReset: () => onRenameReset?.(s.id),
-      unavailable: offline ? t("rail.tile.renameOfflineReason") : undefined,
+      unavailable: offline ? t("rail.tile.offlineReason") : undefined,
     };
+  const archiveOf = (s: Session): TileArchive | undefined =>
+    onArchive && { onChoose: () => onArchive(s.id, !s.archived), unavailable: offline ? t("rail.tile.offlineReason") : undefined };
   const listed = projects.state === "ready" ? projects.projects : [];
   const tree = treeOf(listed, workspaces, sessions.state === "ready" ? sessions.sessions : []);
   // A session waits to be placed while the projects or their workspaces are still being read, so it does not
@@ -87,6 +93,7 @@ export function RailTree(props: RailTreeProps) {
   const looseShown = projects.state === "error" || (projects.state === "ready" && !placing);
   const tile = (s: Session) => {
     const open = shelf?.id === s.id ? shelf : undefined;
+    const archive = archiving?.[s.id];
     return (
       <TileItem key={s.id} id={s.id} shelf={open} onClose={onCloseShelf}>
         {(shelfDomId) => (
@@ -102,9 +109,14 @@ export function RailTree(props: RailTreeProps) {
               shelf={open && { tone: open.tone, domId: shelfDomId }}
               onChevron={onChevron}
               rename={renameOf(s)}
+              archive={archiveOf(s)}
               initialMenu={initialTileMenu === s.id}
               initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
             />
+            {/* A refused archive or unarchive says why beneath the tile, which stays as it was. */}
+            {archive?.state === "failed" && (
+              <Problem lead={s.archived ? t("rail.tile.unarchiveError") : t("rail.tile.archiveError")} reason={archive.message} />
+            )}
           </ErrorBoundary>
         )}
       </TileItem>

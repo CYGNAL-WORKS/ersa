@@ -202,8 +202,14 @@
 }
 
 .session-chevron,
-.session-arc {
+.session-arc,
+.session-archived {
   display: flex;
+}
+
+/* Archived: the archive icon in ink-muted, in place of the state's mark (docs/design/RAIL.md, An archived tile). */
+.session-archived {
+  color: var(--color-ink-muted);
 }
 
 /* Starting: an arc in the accent, one turn per motion-loop-ring. */
