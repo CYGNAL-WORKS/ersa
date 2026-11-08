@@ -389,6 +389,42 @@ describe("the tree App draws in the rail", () => {
     const tree = screen.getByRole("region", { name: "Projects and sessions" });
     expect(tree.querySelectorAll(":scope > .rail-tiles")).toHaveLength(0);
   });
+
+  // A session made by another window: its workspace is read before its tile is drawn, so it never sits at the end first.
+  async function unknownAtFirst(lists: boolean) {
+    const made = { ...root("alpha"), id: "w-new", kind: "isolated" as const };
+    const later: (() => void)[] = [];
+    let reads = 0;
+    const core = fakeCore({
+      "session.list": () => [{ ...session("fresh", "alpha", "2026-11-08T09:00:00Z"), workspace_id: "w-new" }],
+      "workspace.list": (params: { project_id: string }) => {
+        if (++reads <= projects.length) return [root(params.project_id)];
+        const answer = [root(params.project_id), ...(lists && params.project_id === "alpha" ? [made] : [])];
+        return new Promise((resolve) => later.push(() => resolve(answer)));
+      },
+    });
+    render(createElement(App, { client: core.client }));
+    // Every project's first read answers, and only then is the unknown workspace read for.
+    for (let turn = 0; turn < 20 && later.length < projects.length; turn++) await settle();
+    const tree = screen.getByRole("region", { name: "Projects and sessions" });
+    expect(later).toHaveLength(projects.length);
+    expect(tree.querySelector("[data-session-id]")).toBeNull();
+    await act(async () => later.forEach((answer) => answer()));
+    await settle();
+    await settle();
+    return tree;
+  }
+
+  it("holds a new session's tile back until the read for its workspace answers, then draws it under its project", async () => {
+    const tree = await unknownAtFirst(true);
+    expect(headings()[0]).toEqual(["alpha", 1]);
+    expect(tree.querySelectorAll(":scope > .rail-tiles")).toHaveLength(0);
+  });
+
+  it("draws a session no read lists at the end, once the reads have answered", async () => {
+    const tree = await unknownAtFirst(false);
+    expect(tree.querySelectorAll(":scope > .rail-tiles [data-session-id]")).toHaveLength(1);
+  });
 });
 
 // A new workspace's base branch (FLOW-NEW-SESSION-R21, R28, R29): App reads the project's branches with `branch.list` and
