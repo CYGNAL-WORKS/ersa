@@ -57,7 +57,8 @@ Docket holds the request until your head reaches a state in the table below, or 
 | `ci-failed` | Fix the checks it lists and push. CI runs on GitHub-hosted Linux and Windows runners: a test that assumes a platform's path form or locale fails on the other one. |
 | `findings` | Fix every high and medium finding, push, and wait again (below). |
 | `merged` | Done. |
-| `waits-on-owner`, `waits-on-planning` | Report the `reason` and stop. |
+| `waits-on-owner` | Report the `reason` and stop. |
+| `waits-on-planning` | Send one message with `SendMessage` to the session that started you (`get_session` on `self` gives its id as `parentSessionId`): the pull request, the `reason`, and your inbox lines verbatim. It runs the planning pass. Then report and stop. When no session started you, report and stop. |
 | `error`, twice in a row on the same head | Report the `reason` to the owner and stop. |
 
 Fixing findings:
@@ -74,4 +75,4 @@ Pushing:
 
 ## 6. End the turn
 
-End your turn only when the pull request merged, or its state says it waits on the owner or on a planning pass, or three rounds are spent, or Docket or CI cannot run. Report the pull request link, the check results, and anything the owner must decide. If asked to change the branch later, `git pull` first: a planning commit may have been pushed to it.
+End your turn only when the pull request merged, or its state says it waits on the owner or on a planning pass, or three rounds are spent, or Docket or CI cannot run. Report the pull request link, the check results, and anything the owner must decide. When told a planning pass was pushed, `git pull` and go back to step 5 with the new head. If asked to change the branch later, `git pull` first: a planning commit may have been pushed to it.
