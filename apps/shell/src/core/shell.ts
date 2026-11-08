@@ -42,9 +42,12 @@ const BUSY = new Set<string>(["starting", "running", "waiting_user"]);
 /** How long to wait for Core's session list before counting the rail's own. */
 export const QUIT_LIST_TIMEOUT_MS = 2_000;
 
-/** The sessions a quit would interrupt: working, starting, or waiting on the user (FLOW-CLOSE-AND-QUIT-R04). */
+/** Whether a session is working, starting, or waiting on the user: Quit would interrupt it, and Delete waits for it. */
+export const isBusy = (session: Session): boolean => BUSY.has(session.tile.state);
+
+/** The sessions a quit would interrupt (FLOW-CLOSE-AND-QUIT-R04). */
 export function busySessions(sessions: readonly Session[]): number {
-  return sessions.filter((s) => BUSY.has(s.tile.state)).length;
+  return sessions.filter(isBusy).length;
 }
 
 /**

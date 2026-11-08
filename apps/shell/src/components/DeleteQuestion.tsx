@@ -35,17 +35,15 @@ export function DeleteQuestion({ title, backend, phase, onConfirm, onTryAgain, o
   const deleting = phase.kind === "deleting";
   const failed = phase.kind === "failed";
 
-  // Focus starts on Cancel, so an Enter pressed out of habit deletes nothing. Asked again, it starts there again.
-  const askedAgain = phase.kind === "asking" && phase.changed;
-  useEffect(() => {
-    if (!inline) cancel.current?.focus({ preventScroll: true });
-  }, [inline, askedAgain]);
-  // While it runs the buttons are unavailable, so the dialog itself keeps focus; a failure gives it to Try again.
+  // Each phase places focus as it begins, so it never falls out of the dialog with a button that became unavailable.
+  // Asking, and reading what to ask, it starts on Cancel, so an Enter pressed out of habit deletes nothing, however
+  // many times Ersa asks; while the deletion runs both buttons are unavailable, so the dialog itself keeps it; a
+  // failure gives it to Try again.
   useEffect(() => {
     if (inline) return;
-    if (deleting) root.current?.focus({ preventScroll: true });
-    else if (failed) confirm.current?.focus({ preventScroll: true });
-  }, [inline, deleting, failed]);
+    const to = phase.kind === "deleting" ? root : phase.kind === "failed" ? confirm : cancel;
+    to.current?.focus({ preventScroll: true });
+  }, [inline, phase]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {

@@ -12,7 +12,7 @@ type Tile = Session["tile"];
 export type TileMark = "starting" | "working" | "needsYou" | "disconnected" | "error";
 
 /** The tone a mark is drawn in; a needs-you mark's phrase takes it too. */
-export type TileTone = "accent" | "caution" | "danger" | "faint";
+export type TileTone = "accent" | "caution" | "danger" | "faint" | "muted";
 
 export interface TileView {
   title: string;
@@ -45,10 +45,18 @@ export function tileOf(session: Session, backends: Readonly<Record<string, reado
     cost: cost !== undefined && Number.isFinite(cost) ? dollars.format(cost) : undefined,
     ring: contextUsed(tile),
   };
-  return { ...base, ...stateOf(tile) };
+  return { ...base, ...(deletingOf(session) ?? stateOf(tile)) };
 }
 
 type StateView = Pick<TileView, "titleMuted" | "mark" | "tone" | "markLabel" | "phrase">;
+
+// A session being deleted, or whose deletion failed, says so before every other mark and phrase (LAY-SHELL, Being
+// deleted): the starting arc in ink-muted while Core works on it, the error mark once it failed.
+function deletingOf(session: Session): StateView | undefined {
+  if (session.deleting === "running") return { titleMuted: false, mark: "starting", tone: "muted", phrase: t("rail.tile.deletingStatus") };
+  if (session.deleting === "failed") return { titleMuted: false, mark: "error", tone: "danger", phrase: t("rail.tile.deleteFailedStatus") };
+  return undefined;
+}
 
 /**
  * The tone of what a session with pending requests wants: only questions are the accent; a permission request, or a

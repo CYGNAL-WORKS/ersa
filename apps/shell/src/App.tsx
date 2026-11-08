@@ -399,7 +399,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     (item instanceof HTMLElement ? item : document.querySelector<HTMLElement>(".rail-new-session"))?.focus({ preventScroll: true });
     setRefocus(undefined);
   }, [refocus]);
+  // The question as last drawn: a deletion that ends speaks only for the question still showing it.
+  const askNow = useRef(deleteAsk);
+  askNow.current = deleteAsk;
   const askDelete = (id: string) => {
+    // One deletion at a time: while one runs, its question stays until it ends.
+    if (askNow.current?.phase.kind === "deleting") return;
     const listed = sessions.state === "ready" ? sessions.sessions.find((s) => s.id === id) : undefined;
     if (!listed) return;
     const tile = tileOf(listed, backends);
@@ -411,12 +416,17 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       return;
     }
     const run = new Deletion(client, id, workspace, (phase) => {
+      // A question closed or replaced since hears nothing more from its run, which has nothing left to delete.
+      if (askNow.current?.run !== run) return;
       setDeleteAsk((was) => (was?.run === run ? { ...was, phase } : was));
       if (phase.kind === "deleted") deleted(id);
       // Core stopped the session before it refused or failed, so the rail reads it again (R07).
       else if (phase.kind === "failed" || (phase.kind === "asking" && phase.changed)) connection.current?.reload("sessions");
     });
-    setDeleteAsk({ ...ask, phase: { kind: "reading" }, run });
+    const asked = { ...ask, phase: { kind: "reading" } as DeletePhase, run };
+    // Known at once: a root workspace's question is ready before the next render.
+    askNow.current = asked;
+    setDeleteAsk(asked);
     void run.start();
   };
   // Deleted: focus goes to the next tile in the rail, else the previous, else New session (docs/design/RAIL.md, The

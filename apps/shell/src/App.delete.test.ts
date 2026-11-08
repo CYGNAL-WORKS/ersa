@@ -146,6 +146,44 @@ describe("Delete on a tile", () => {
     expect(document.activeElement).toBe(tile("Write the notes"));
   });
 
+  it("keeps a running deletion's question until it ends, and its end closes no other question", async () => {
+    let finish: () => void = () => {};
+    await open({
+      "session.delete": (params: { id: string }) =>
+        new Promise((resolve) => (finish = () => resolve({ id: params.id, workspace_deleted: false, branch_kept: false }))),
+    });
+    fireEvent.click(deleteItem("Tidy the docs"));
+    await settle();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
+    await settle();
+    // While Tidy the docs is being deleted, Delete… on another tile asks nothing.
+    fireEvent.click(deleteItem("Fix the build"));
+    await settle();
+    expect(screen.getByRole("dialog", { name: "Delete Tidy the docs?" })).toBeTruthy();
+    finish();
+    await settle();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Asked once it ended, and a cancelled question's run says nothing more.
+    fireEvent.click(deleteItem("Fix the build"));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }));
+    await settle();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R07
+  it("shows a failed deletion on its tile, whose menu holds Delete… alone, which asks again with what is left", async () => {
+    const core = await open({
+      "session.list": () => listed.map((s) => (s.id === "s1" ? { ...s, deleting: "failed" as const } : s)),
+    });
+    expect(tile("Fix the build")?.textContent).toContain("Couldn't delete");
+    const item = deleteItem("Fix the build");
+    expect(screen.getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Delete…"]);
+    fireEvent.click(item);
+    await settle();
+    expect(screen.getByRole("dialog", { name: "Delete Fix the build?" })).toBeTruthy();
+    expect(core.calls.filter((c) => c.method === "workspace.changes")).toHaveLength(1);
+  });
+
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R07
   it("keeps the question open with the reason and Try again when the deletion fails", async () => {
     await open({

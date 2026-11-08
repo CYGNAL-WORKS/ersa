@@ -83,6 +83,11 @@ describe("when Delete is unavailable", () => {
     for (const state of ["idle", "ended", "error", "disconnected"]) expect(deleteUnavailable(session(state), false)).toBeUndefined();
   });
 
+  it("says Ersa is deleting it while a deletion runs, and offers it again once one failed", () => {
+    expect(deleteUnavailable({ ...session("idle"), deleting: "running" }, false)).toBe("Ersa is deleting this session");
+    expect(deleteUnavailable({ ...session("idle"), deleting: "failed" }, false)).toBeUndefined();
+  });
+
   it("says why while Ersa can't reach Core", () => {
     expect(deleteUnavailable(session("idle"), true)).toBe("Available once Ersa reaches your sessions");
   });
