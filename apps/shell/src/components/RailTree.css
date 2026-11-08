@@ -270,8 +270,32 @@
   overflow: hidden;
 }
 
+/* The Pinned group opens and fades in as the first session is pinned, and closes and fades out as the last is
+   unpinned; empty, it takes no room, its gap to the next group included. */
+.rail-pinned {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition:
+    grid-template-rows var(--motion-settle) var(--motion-ease-in-out),
+    opacity var(--motion-settle) var(--motion-ease-in-out),
+    margin var(--motion-settle) var(--motion-ease-in-out);
+}
+
+.rail-pinned > .rail-project {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.rail-pinned[data-empty] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  margin-bottom: calc(-1 * var(--space-sm));
+}
+
 /* A tile pinned or unpinned slides from its old group into this frame, so the frame shows it while it slides. */
-.rail-tree[data-sliding] .rail-project:not([data-collapsed]) .rail-group-tiles-inner {
+.rail-tree[data-sliding] .rail-project:not([data-collapsed]) .rail-group-tiles-inner,
+.rail-tree[data-sliding] .rail-pinned:not([data-empty]) > .rail-project {
   overflow: visible;
 }
 
@@ -312,6 +336,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .rail-pinned,
   .rail-heading,
   .rail-heading-chevron,
   .rail-group-tiles,

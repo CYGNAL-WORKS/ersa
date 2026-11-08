@@ -368,7 +368,8 @@ describe("the tree App draws in the rail", () => {
   /** Each project heading's name with how many tiles sit beneath it, in the rail's order. */
   function headings(): [string, number][] {
     const tree = screen.getByRole("region", { name: "Projects and sessions" });
-    return [...tree.querySelectorAll(".rail-project")].map((group) => [
+    // The Pinned group, empty, is drawn closed and hidden from everyone, so it is not one of the headings shown.
+    return [...tree.querySelectorAll(".rail-project:not([data-empty] > *)")].map((group) => [
       group.querySelector(".rail-heading-name")?.textContent ?? "",
       group.querySelectorAll(".session").length,
     ]);
@@ -799,8 +800,8 @@ describe("pinning a session from its tile", () => {
     document.documentElement.style.setProperty("--motion-settle", "240ms");
     document.documentElement.style.setProperty("--motion-ease-in-out", "ease-in-out");
     const order = () => [...document.querySelectorAll<HTMLElement>("[data-slide]")];
-    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-      return { top: order().indexOf(this) * 10 } as DOMRect;
+    const rect = vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function (this: HTMLElement) {
+      return order().indexOf(this) * 10;
     });
     const slid: { slide: string | undefined; keyframes: Keyframe[]; options: KeyframeAnimationOptions }[] = [];
     HTMLElement.prototype.animate = function (this: HTMLElement, keyframes: Keyframe[], options: KeyframeAnimationOptions) {
@@ -826,6 +827,63 @@ describe("pinning a session from its tile", () => {
       delete (HTMLElement.prototype as { animate?: unknown }).animate;
       document.documentElement.removeAttribute("style");
     }
+  });
+
+  it("slides nothing when Core refuses the pin, or when the user asked for reduced motion", async () => {
+    const animate = vi.fn(() => ({}) as Animation);
+    HTMLElement.prototype.animate = animate as never;
+    document.documentElement.style.setProperty("--motion-settle", "240ms");
+    document.documentElement.style.setProperty("--motion-ease-in-out", "ease-in-out");
+    const position = vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function (this: HTMLElement) {
+      // Each element sits at its order among every element on the page, so a note added above a tile moves it.
+      return [...document.querySelectorAll("*")].indexOf(this) * 10;
+    });
+    const reduce = (on: boolean) => vi.stubGlobal("matchMedia", (query: string) => ({ matches: on && query.includes("reduce") }) as MediaQueryList);
+    try {
+      reduce(true);
+      await open();
+      fireEvent.click(more("Write the notes"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+      await settle();
+      await settle();
+      expect(groupOf("Write the notes")).toBe("Pinned");
+      expect(animate).not.toHaveBeenCalled();
+      cleanup();
+
+      reduce(false);
+      await open("session.arrange: the session is being deleted");
+      fireEvent.click(more("Write the notes"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+      await settle();
+      await settle();
+      expect(within(rail()).getByRole("alert").textContent).toContain("the session is being deleted");
+      expect(animate).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      position.mockRestore();
+      delete (HTMLElement.prototype as { animate?: unknown }).animate;
+      document.documentElement.removeAttribute("style");
+    }
+  });
+
+  it("makes Pin and Unpin unavailable on every tile while a pin is saved", async () => {
+    let answer: () => void = () => {};
+    const core = fakeCore({
+      "session.list": () => sessions.map((s, i) => ({ ...s, title: i === 0 ? "Fix the build" : "Write the notes" })),
+      "session.arrange": (params: { id: string; pinned: boolean }) =>
+        new Promise((resolve) => (answer = () => resolve({ ...sessions[0], title: "Fix the build", pinned: params.pinned }))),
+    });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    fireEvent.click(more("Write the notes"));
+    const item = screen.getByRole("menuitem", { name: /^Pin/ });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.textContent).toContain("Saving…");
+    await act(async () => answer());
   });
 
   it("collapses the Pinned group like any group", async () => {
