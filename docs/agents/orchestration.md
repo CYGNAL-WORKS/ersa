@@ -14,9 +14,9 @@ How the orchestration session runs the engineering loop: cut tickets, start impl
 
 ## Review a pull request
 
-Docket runs the merge review on the owner's machine (ADR 0030): it reviews each head whose CI passed with the reviewers `.claude/review.json` names, against the `REVIEW.md` rubric, verifies their findings, posts them as a review on the pull request, and runs the merge gate. A pull request gets no other review: the implementing session checks its plan's assumptions before coding (`implement-ticket` step 2) and leaves the diff to Docket. Docket's page (`http://127.0.0.1:4477`) shows its queue and running reviews; its README says how it decides what is due, retries and cancels. Each round:
+Docket runs the merge review on the owner's machine (ADR 0030): it reviews each head whose CI passed with the reviewers `.claude/review.json` names, against the `REVIEW.md` rubric, verifies their findings, posts them as a review on the pull request, and runs the merge gate. A pull request gets no other review: the implementing session checks its plan's assumptions before coding (`implement-ticket` step 2) and leaves the diff to Docket. Docket's page (`http://127.0.0.1:4477`) shows its queue and running reviews; its README, in the Docket repository (`KPandaK/docket`), says how it decides what is due, retries and cancels. Each round:
 
-1. The implementing session polls Docket for its own pull request and fixes what the review posts (`implement-ticket` step 5); forward nothing to it while it does. Read its end-of-turn report and relay to the owner only what it escalates: three rounds spent, a pull request waiting on the owner or a planning pass, Docket or CI not running, or a pull request no session owns. Only when a session is not polling its pull request (its turn ended before the review posted), send it every finding of the round in one message: a second message queues behind the session's turn and may never be read.
+1. The implementing session polls Docket for its own pull request and fixes what the review posts (`implement-ticket` step 5); forward nothing to it while it does. Read its end-of-turn report and relay to the owner only what it escalates: three rounds spent, a pull request waiting on the owner, Docket or CI not running, or a pull request no session owns. A session whose pull request waits on a planning pass messages you when it stops: run the pass at once (Resolve inbox entries), and take to the owner only an entry the briefs cannot settle without their call. Only when a session is not polling its pull request (its turn ended before the review posted), send it every finding of the round in one message: a second message queues behind the session's turn and may never be read.
 2. To see where any pull request stands, ask Docket (`curl -sS http://127.0.0.1:4477/pulls/<n>`); never poll GitHub for it.
 3. Stop after three fix rounds. If the third still finds a defect of medium severity or worse, take the choice to the owner (merge and follow up, or another round) rather than sending a fourth.
 
@@ -27,7 +27,7 @@ The merge gate holds a pull request while its inbox has an open entry (ADR 0025)
 1. `git worktree add --detach ../ersa-plan origin/<branch>`, then `node scripts/role.mjs planning` inside it.
 2. `git merge origin/main` if the branch is behind. Briefs, `docs/MANIFEST.md` and the ADR index merge with the union driver (`.gitattributes`), so two planning commits adding a Changes line or a requirement keep both; read the merged section once, then regenerate the manifest.
 3. Update the briefs, delete the resolved inbox lines, run `node scripts/manifest.mjs --check`, commit, `git push origin HEAD:<branch>`.
-4. Tell the implementing session to `git pull` before it pushes again. Remove the worktree when done.
+4. Tell the implementing session the pass is pushed: it pulls and waits on Docket for the new head (`implement-ticket` step 6). Remove the worktree when done.
 
 ## Merge
 
