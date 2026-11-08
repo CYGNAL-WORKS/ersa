@@ -40,6 +40,17 @@ describe("the rail's tree", () => {
     expect(tree.loose).toEqual([]);
   });
 
+  it("leaves archived sessions out, as the rail shows active sessions until it can show archived ones", () => {
+    const archived = sessions.map((s) => (s.id === "mid" || s.id === "engine" ? { ...s, archived: true } : s));
+    const tree = treeOf(projects, workspaces, [...archived, { ...session("lost", "w-gone", "2026-11-01T13:00:00.000Z"), archived: true }]);
+    expect(tree.projects.map(({ project, sessions }) => [project.id, ids(sessions)])).toEqual([
+      ["ersa", ["new", "old"]],
+      ["engine", []],
+      ["notes", []],
+    ]);
+    expect(tree.loose).toEqual([]);
+  });
+
   it("keeps the projects in the order Core lists them, whatever their sessions", () => {
     const reversed = [...projects].reverse();
     expect(treeOf(reversed, workspaces, sessions).projects.map(({ project }) => project.id)).toEqual(["notes", "engine", "ersa"]);

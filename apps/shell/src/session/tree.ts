@@ -16,9 +16,11 @@ export interface Tree {
 }
 
 /**
- * The tree. A pinned session is in the Pinned group, wherever it belongs. Any other belongs to the project of its
- * workspace; one whose workspace is not known, or whose workspace's project is not listed, is loose, so a session is
- * never missing from the rail. Pinning changes neither: unpinned, a session is back where it belongs.
+ * The tree. Archived sessions are left out: the rail shows active sessions, its default (FLOW-ARCHIVE-DELETE-SESSION,
+ * step 1), until the arrange menu's Show can ask for archived ones. A pinned session is in the Pinned group, wherever
+ * it belongs. Any other belongs to the project of its workspace; one whose workspace is not known, or whose
+ * workspace's project is not listed, is loose, so a session is never missing from the rail. Pinning changes neither:
+ * unpinned, a session is back where it belongs.
  */
 export function treeOf(
   projects: readonly Project[],
@@ -29,6 +31,7 @@ export function treeOf(
   const pinned: Session[] = [];
   const loose: Session[] = [];
   for (const s of newestFirst(sessions)) {
+    if (s.archived) continue;
     if (s.pinned) {
       pinned.push(s);
       continue;
