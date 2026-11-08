@@ -18,7 +18,7 @@ import { QuitQuestion } from "../components/QuitQuestion";
 import { RailFoot } from "../components/RailFoot";
 import { Menu, type MenuEntry } from "../components/Menu";
 import { RailTop } from "../components/RailTop";
-import { RailTree } from "../components/RailTree";
+import { groupKey, RailTree } from "../components/RailTree";
 import { SessionControls } from "../components/SessionControls";
 import { Shelf } from "../components/Shelf";
 import { SessionTitle } from "../components/SessionTitle";
@@ -198,6 +198,7 @@ const tree: Parameters<typeof RailTree>[0] = {
     document.body.dataset.railCall = `rename ${id} ${title}`;
     return true;
   },
+  onPin: (id, pinned) => (document.body.dataset.railCall = `pin ${id} ${pinned}`),
   localHost: "local",
   hostNames: { local: "WORKSTATION", devbox: "devbox" },
 };
@@ -220,7 +221,12 @@ const askingOnly: Parameters<typeof RailTree>[0] = {
       .map((s) => (s.tile.pending.length > 0 ? { ...s, tile: { ...s.tile, pending: [{ kind: "question" as const, request_id: "q1" }] } } : s)),
   },
 };
-const folded = (...ids: string[]) => new Set(ids);
+const folded = (...ids: string[]) => new Set(ids.map(groupKey.project));
+/** The tree with s1 and s4 pinned: they lead it in the Pinned group, apart from ersa and runner. */
+const pinnedTree: Parameters<typeof RailTree>[0] = {
+  ...tree,
+  sessions: { state: "ready", sessions: treeSessions.map((s) => (s.id === "s1" || s.id === "s4" ? { ...s, pinned: true } : s)) },
+};
 
 /** A transcript built the way the window builds one: by applying events. */
 function transcriptOf(events: Event[]) {
@@ -671,6 +677,9 @@ const entries: Entry[] = [
       ],
       ["Collapsed, pointer over it", <RailTree {...ersaOnly} collapsed={folded("p1")} forceHeading={{ id: "p1", state: "hover" }} />],
       ["Collapsed, keyboard focus", <RailTree {...ersaOnly} collapsed={folded("p1")} forceHeading={{ id: "p1", state: "focus" }} />],
+      ["Pinned", <RailTree {...pinnedTree} />],
+      // The Pinned group holds s1, which waits on a permission request, so its count leads with the caution mark.
+      ["Pinned, collapsed", <RailTree {...pinnedTree} collapsed={new Set([groupKey.pinned])} />],
       ["A session with no project", <RailTree {...ersaOnly} sessions={{ state: "ready", sessions: treeSessions }} />],
       ["Projects not read", <RailTree {...tree} projects={{ state: "error", message: "the database is locked" }} />],
       ["Sessions not read", <RailTree {...tree} sessions={{ state: "error", message: "the database is locked" }} />],
@@ -706,6 +715,9 @@ const entries: Entry[] = [
       ["Tile menu, open", room(<RailTree {...pairOnly} initialTileMenu="p2" />)],
       // Renaming goes through Core, so while Ersa can't reach it Rename is unavailable, with the reason.
       ["Tile menu, Rename unavailable", room(<RailTree {...pairOnly} initialTileMenu="p2" offline />)],
+      ["Tile menu, pinned", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: pointerPair.map((s) => ({ ...s, pinned: true })) }} initialTileMenu="p2" />)],
+      ["Tile menu, while a pin is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" pinning={{ p2: { state: "sending" } }} />)],
+      ["Pin refused", <RailTree {...pairOnly} pinning={{ p2: { state: "failed", message: "session.arrange: the session is being deleted" } }} />],
       ["Renaming on the tile", <RailTree {...pairOnly} initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }} />],
       [
         "A title the backend refused",

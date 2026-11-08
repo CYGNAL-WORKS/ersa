@@ -30,6 +30,10 @@ export const enUS = {
       // Names the tree when it fails to draw: "The projects and sessions could not be shown:".
       boundaryName: "The projects and sessions",
     },
+    // The Pinned group's heading (docs/design/RAIL.md, A group heading).
+    group: {
+      pinnedHeading: "Pinned",
+    },
     // A project heading (docs/design/RAIL.md, A project heading) and its More menu.
     heading: {
       newSessionLabel: "New session in {project}",
@@ -62,10 +66,17 @@ export const enUS = {
       untitledLabel: "Untitled session",
       // The tile's More button and its menu (docs/design/RAIL.md, A tile: More).
       moreLabel: "More for {title}",
+      pinButton: "Pin",
+      unpinButton: "Unpin",
+      // Pin or Unpin while Core stores the last choice.
+      savingProgress: "Saving…",
+      // Followed by Core's reason, beneath the tile.
+      pinError: "Ersa can't pin this session.",
+      unpinError: "Ersa can't unpin this session.",
       renameButton: "Rename",
       // The key that does the same as Rename, at the item's trailing edge.
       renameKey: "F2",
-      // Why Rename is unavailable: renaming goes through Core.
+      // Why Rename, Pin or Unpin is unavailable: each goes through Core.
       renameOfflineReason: "Available once Ersa reaches your sessions",
       // The field the title becomes while it is renamed on the tile.
       titleLabel: "Session title",

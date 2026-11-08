@@ -47,6 +47,16 @@ export interface TileRename {
   unavailable?: string;
 }
 
+/** Pinning or unpinning a session from its tile (FLOW-ORGANIZE-SESSIONS, step 1). */
+export interface TilePin {
+  /** Whether it is pinned now: the menu offers Unpin if so, else Pin. */
+  pinned: boolean;
+  /** Pins it when unpinned, unpins it when pinned. */
+  onChoose: () => void;
+  /** Why Pin or Unpin can't be used now; given, the menu shows it unavailable with this reason. */
+  unavailable?: string;
+}
+
 /** For the gallery: show a pointer or keyboard state on one tile without one. */
 export type ForcedTile = { id: string; state: "hover" | "focus" | "pressed" };
 
@@ -65,6 +75,7 @@ export function SessionTile({
   shelf,
   onChevron,
   rename,
+  pin,
   initialMenu,
   initialDraft,
 }: {
@@ -79,6 +90,8 @@ export function SessionTile({
   onChevron?: (id: string) => void;
   /** Rename on the tile's menu and F2; absent, the tile has no menu. */
   rename?: TileRename;
+  /** Pin or Unpin, first on the tile's menu (LAY-SHELL, A tile's menu). */
+  pin?: TilePin;
   /** For the gallery: the tile's menu shown open, and the title being edited with this text. */
   initialMenu?: boolean;
   initialDraft?: string;
@@ -229,6 +242,16 @@ export function SessionTile({
         <Menu
           label={t("rail.tile.moreLabel", { title: view.title })}
           entries={[
+            ...(pin
+              ? [
+                  {
+                    kind: "item" as const,
+                    label: pin.pinned ? t("rail.tile.unpinButton") : t("rail.tile.pinButton"),
+                    unavailable: pin.unavailable,
+                    onChoose: pin.onChoose,
+                  },
+                ]
+              : []),
             {
               kind: "item",
               label: t("rail.tile.renameButton"),

@@ -36,6 +36,10 @@ Ersa can't read your sessions.
 
 The projects and sessions
 
+### `rail.group.pinnedHeading`
+
+Pinned
+
 ### `rail.heading.newSessionLabel`
 
 New session in {project}
@@ -113,6 +117,26 @@ Untitled session
 ### `rail.tile.moreLabel`
 
 More for {title}
+
+### `rail.tile.pinButton`
+
+Pin
+
+### `rail.tile.unpinButton`
+
+Unpin
+
+### `rail.tile.savingProgress`
+
+Saving…
+
+### `rail.tile.pinError`
+
+Ersa can't pin this session.
+
+### `rail.tile.unpinError`
+
+Ersa can't unpin this session.
 
 ### `rail.tile.renameButton`
 
