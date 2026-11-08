@@ -122,7 +122,7 @@ Rename
 
 F2
 
-### `rail.tile.renameOfflineReason`
+### `rail.tile.offlineReason`
 
 Available once Ersa reaches your sessions
 
@@ -162,6 +162,14 @@ Ended
 
 Unknown state
 
+### `rail.tile.deletingStatus`
+
+Deleting
+
+### `rail.tile.deleteFailedStatus`
+
+Couldn't delete
+
 ### `rail.tile.permissionWant`
 
 Needs permission
@@ -182,9 +190,9 @@ Needs you · {count}
 
 Stop the session to delete it
 
-### `rail.delete.offlineReason`
+### `rail.delete.deletingReason`
 
-Available once Ersa reaches your sessions
+Ersa is deleting this session
 
 ### `rail.delete.title`
 

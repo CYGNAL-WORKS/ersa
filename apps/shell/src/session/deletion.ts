@@ -4,6 +4,7 @@
 
 import { t } from "../catalog";
 import { type CoreClient, describeError } from "../core/client";
+import { isBusy } from "../core/shell";
 import type { Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
 
 /**
@@ -11,11 +12,11 @@ import type { Session, Workspace, WorkspaceChanges } from "../protocol/core-api.
  * refused by Core, so the menu says to stop it first (FLOW-ARCHIVE-DELETE-SESSION-R05).
  */
 export function deleteUnavailable(session: Session, offline: boolean): string | undefined {
-  if (offline) return t("rail.delete.offlineReason");
-  // The tile's own reading of the state: pending requests decide before the state does (session/tile.ts).
-  const state: string = session.tile.state;
-  if (session.tile.pending.length > 0 || state === "starting" || state === "running" || state === "waiting_user")
-    return t("rail.delete.busyReason");
+  if (offline) return t("rail.tile.offlineReason");
+  // Core holds a running deletion's workspace, and refuses another until it ends.
+  if (session.deleting === "running") return t("rail.delete.deletingReason");
+  // Busy as Quit counts it, and also whenever a request waits on the user, since the tile then says it needs them.
+  if (isBusy(session) || session.tile.pending.length > 0) return t("rail.delete.busyReason");
   return undefined;
 }
 
