@@ -147,6 +147,12 @@
   transition: transform var(--motion-quick) var(--motion-ease-out);
 }
 
+/* The Pinned group's pin, after the chevron (docs/design/RAIL.md, A group heading). */
+.rail-heading-pin {
+  display: inline-flex;
+  color: var(--color-ink-faint);
+}
+
 .rail-project[data-collapsed] .rail-heading-chevron {
   transform: rotate(-90deg);
 }
