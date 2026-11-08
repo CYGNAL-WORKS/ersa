@@ -21,7 +21,7 @@ function copy(entries = "") {
   scratch.push(dir);
   cpSync(join(ROOT, "docs"), join(dir, "docs"), { recursive: true });
   mkdirSync(join(dir, "scripts"));
-  for (const f of ["manifest.mjs", "merge-pr.mjs"]) cpSync(join(ROOT, "scripts", f), join(dir, "scripts", f));
+  cpSync(join(ROOT, "scripts", "manifest.mjs"), join(dir, "scripts", "manifest.mjs"));
   writeFileSync(join(dir, "docs", "briefs", "INBOX.md"), `# Inbox\n\n## Open\n\n${entries}`);
   // A manifest that hangs fails this test rather than holding CI until the job's own timeout.
   const run = (...args) => spawnSync(process.execPath, [join(dir, "scripts", "manifest.mjs"), ...args], { encoding: "utf8", timeout: 60_000 });
