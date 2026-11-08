@@ -88,6 +88,10 @@ No active sessions.
 
 No archived sessions.
 
+### `rail.tree.noSessionsEmpty`
+
+No sessions.
+
 ### `rail.tree.boundaryName`
 
 The projects and sessions

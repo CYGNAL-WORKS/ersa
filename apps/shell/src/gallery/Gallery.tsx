@@ -19,7 +19,7 @@ import { QuitQuestion } from "../components/QuitQuestion";
 import { RailFoot } from "../components/RailFoot";
 import { Menu, type MenuEntry } from "../components/Menu";
 import { RailTop } from "../components/RailTop";
-import { groupKey, RailTree } from "../components/RailTree";
+import { PINNED_KEY, RailTree } from "../components/RailTree";
 import { SessionControls } from "../components/SessionControls";
 import { Shelf } from "../components/Shelf";
 import { SessionTitle } from "../components/SessionTitle";
@@ -248,7 +248,7 @@ const askingOnly: Parameters<typeof RailTree>[0] = {
       .map((s) => (s.tile.pending.length > 0 ? { ...s, tile: { ...s.tile, pending: [{ kind: "question" as const, request_id: "q1" }] } } : s)),
   },
 };
-const folded = (...ids: string[]) => new Set(ids.map(groupKey.project));
+const folded = (...ids: string[]) => new Set(ids);
 /** The tree with s1 and s4 pinned: they lead it in the Pinned group, apart from ersa and runner. */
 const pinnedTree: Parameters<typeof RailTree>[0] = {
   ...tree,
@@ -711,7 +711,7 @@ const entries: Entry[] = [
       ["Collapsed, keyboard focus", <RailTree {...ersaOnly} collapsed={folded("p1")} forceHeading={{ id: "p1", state: "focus" }} />],
       ["Pinned", <RailTree {...pinnedTree} />],
       // The Pinned group holds s1, which waits on a permission request, so its count leads with the caution mark.
-      ["Pinned, collapsed", <RailTree {...pinnedTree} collapsed={new Set([groupKey.pinned])} />],
+      ["Pinned, collapsed", <RailTree {...pinnedTree} collapsed={new Set([PINNED_KEY])} />],
       ["A session with no project", <RailTree {...ersaOnly} sessions={{ state: "ready", sessions: treeSessions }} />],
       ["Projects not read", <RailTree {...tree} projects={{ state: "error", message: "the database is locked" }} />],
       ["Sessions not read", <RailTree {...tree} sessions={{ state: "error", message: "the database is locked" }} />],

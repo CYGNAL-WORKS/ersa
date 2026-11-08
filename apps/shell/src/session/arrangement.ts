@@ -113,7 +113,11 @@ export function useRailArrangement(save: (patch: Patch) => Promise<unknown>, des
     [save, describe],
   );
   /** Core's settings, read on each connection. */
-  const read = useCallback((settings: unknown) => setStored({ settings }), []);
+  const read = useCallback((settings: unknown) => {
+    setStored({ settings });
+    // Read now, so an earlier failure to read no longer holds; a refused change still does.
+    setProblem((p) => (p?.kind === "read" ? undefined : p));
+  }, []);
   /** They could not be read: the rail is arranged by the defaults and says why. */
   const readFailed = useCallback((message: string) => {
     setStored((s) => s ?? { settings: {} });

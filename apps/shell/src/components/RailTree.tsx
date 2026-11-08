@@ -4,10 +4,10 @@ import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
-import type { GroupBy, Show } from "../session/arrangement";
+import type { ArrangeProblem, GroupBy, Show } from "../session/arrangement";
 import { type Collapsed, type DateKey, collapsedOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { placesOf, slideFrom } from "../theme/motion";
+import { type Place, placesOf, slideFrom } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileArchive, type TilePin, type TileRename } from "./SessionTile";
@@ -52,12 +52,12 @@ interface RailTreeProps {
   show?: Show;
   /** Now, whose local date the date groups count from. */
   now?: Date;
-  /** The groups the user collapsed in the grouping in use, by `groupKey` (LAY-SHELL, Collapsing); every other one is expanded. */
+  /** The groups the user collapsed in the grouping in use, by key (LAY-SHELL, Collapsing); every other one is expanded. */
   collapsed?: ReadonlySet<string>;
-  /** The user collapsed or expanded a group's heading, named by its `groupKey`. */
+  /** The user collapsed or expanded a group's heading, named by its key. */
   onToggle?: (key: string) => void;
   /** The arrangement could not be read, so the rail shows the defaults, or a change to it could not be saved, so it was undone (R15). */
-  arrangeProblem?: { kind: "read" | "save"; message: string };
+  arrangeProblem?: ArrangeProblem;
   /** Pins or unpins a session from its tile (FLOW-ORGANIZE-SESSIONS-R01). */
   onPin?: (id: string, pinned: boolean) => void;
   /** Pins and unpins on their way, and why the last was refused, by session id (R15). */
@@ -84,11 +84,8 @@ interface RailTreeProps {
   initialTileDraft?: { id: string; draft: string };
 }
 
-/**
- * A group's key in `collapsed`, as Core keeps it (PROTO-CORE-API, Settings): the Pinned group's, a project's id, or a
- * date group's key. A project's id (`p-…`) is never one of the others.
- */
-export const groupKey = { pinned: "pinned", project: (id: string) => id, date: (key: DateKey) => key };
+/** The Pinned group's key in `collapsed` (PROTO-CORE-API, Settings); every other group's is its `Group.key`. */
+export const PINNED_KEY = "pinned";
 
 /** A heading's mark for the slide when the rail regroups: apart from the tiles' `session:` marks. */
 const headingSlide = (key: string) => `heading:${key}`;
@@ -113,7 +110,7 @@ export function RailTree(props: RailTreeProps) {
   // The pin on its way: where every tile and heading sat when it was chosen, and whether focus was in the rail then.
   // One at a time: while it is saved, Pin and Unpin are unavailable on every tile, so each move is measured from the
   // rail as the last one left it.
-  const pending = useRef<{ id: string; places: Map<string, number>; focused: boolean }>(undefined);
+  const pending = useRef<{ id: string; places: Map<string, Place>; focused: boolean }>(undefined);
   const saving = Object.values(pinning ?? {}).some((p) => p.state === "sending");
   useLayoutEffect(() => {
     const pin = pending.current;
@@ -180,7 +177,7 @@ export function RailTree(props: RailTreeProps) {
   // step 4).
   const arranged = `${groupBy}/${show}`;
   const lastArranged = useRef(arranged);
-  const regroupFrom = useRef<Map<string, number>>(undefined);
+  const regroupFrom = useRef<Map<string, Place>>(undefined);
   if (lastArranged.current !== arranged) {
     lastArranged.current = arranged;
     if (root.current) regroupFrom.current = placesOf(root.current);
@@ -197,14 +194,18 @@ export function RailTree(props: RailTreeProps) {
   // so it does not sit at the end and then move. When the projects could not be read, every session sits at the
   // end. Grouped otherwise, no session waits on its project.
   const looseShown = groupBy !== "project" || projects.state === "error" || (projects.state === "ready" && !placing);
-  // Nothing the filter shows (FLOW-ORGANIZE-SESSIONS, Nothing to show; LAY-SHELL, Loading, empty and failed).
-  const noneShown =
-    sessions.state !== "ready" || tree.pinned.length > 0 || tree.groups.some((g) => g.sessions.length > 0) || tree.loose.length > 0
-      ? undefined
-      : show === "archived"
-        ? t("rail.tree.noArchivedEmpty")
-        : show === "active" && all.length > 0
-          ? t("rail.tree.noActiveEmpty")
+  // Nothing the filter shows (FLOW-ORGANIZE-SESSIONS, Nothing to show; LAY-SHELL, Loading, empty and failed). With
+  // no sessions at all, project headings say enough where there are any, and with no projects their own note does.
+  const nothing = sessions.state === "ready" && tree.pinned.length === 0 && tree.groups.every((g) => g.sessions.length === 0) && tree.loose.length === 0;
+  const blank = projects.state === "ready" && listed.length > 0 && tree.groups.length === 0;
+  const noneShown = !nothing
+    ? undefined
+    : show === "archived"
+      ? t("rail.tree.noArchivedEmpty")
+      : show === "active" && (all.length > 0 || blank)
+        ? t("rail.tree.noActiveEmpty")
+        : show === "all" && blank
+          ? t("rail.tree.noSessionsEmpty")
           : undefined;
   // The Pinned group's tiles' element, which its heading's toggle says it controls.
   const pinnedTiles = useId();
@@ -258,7 +259,7 @@ export function RailTree(props: RailTreeProps) {
     );
   };
   // The Pinned group leads the rail, and is absent while nothing pinned is shown (LAY-SHELL, Groups).
-  const pinned = folded(groupKey.pinned, tree.pinned);
+  const pinned = folded(PINNED_KEY, tree.pinned);
   const pinnedEmpty = tree.pinned.length === 0;
   return (
     <section ref={root} className="rail-tree" aria-label={t("rail.tree.label")}
@@ -280,13 +281,14 @@ export function RailTree(props: RailTreeProps) {
       {arrangeProblem && (
         <Problem lead={arrangeProblem.kind === "read" ? t("rail.tree.arrangeReadError") : t("rail.tree.arrangeSaveError")} reason={arrangeProblem.message} />
       )}
-      {(tree.pinned.length > 0 || tree.groups.length > 0) && (
+      {/* Drawn once the sessions are read even with nothing in it, so the Pinned group's frame is there to open. */}
+      {(sessions.state === "ready" || tree.groups.length > 0) && (
         <ul className="rail-projects">
           {/* Always drawn, so it can open and fade in as the first session is pinned and close and fade out as the
               last is unpinned (DESIGN.md: nothing pops in). Empty, it is closed, out of reach and not read. */}
           <li className="rail-pinned" data-empty={pinnedEmpty || undefined} inert={pinnedEmpty || undefined} aria-hidden={pinnedEmpty || undefined}>
             <div className="rail-project" data-collapsed={pinned.folded || undefined}>
-              <div className="rail-heading" data-slide={headingSlide(groupKey.pinned)}>
+              <div className="rail-heading" data-slide={headingSlide(PINNED_KEY)}>
                 <GroupToggle
                   folded={pinned.folded}
                   controls={pinnedTiles}
@@ -322,7 +324,11 @@ export function RailTree(props: RailTreeProps) {
         </ul>
       )}
       {looseShown && tree.loose.length > 0 && <ul className="rail-tiles">{tree.loose.map(tile)}</ul>}
-      {noneShown && <p className="rail-note">{noneShown}</p>}
+      {noneShown && (
+        <p key={noneShown} className="rail-note" data-slide={`note:${noneShown}`}>
+          {noneShown}
+        </p>
+      )}
     </section>
   );
 }
@@ -420,7 +426,7 @@ function ProjectGroup({
   const nameLabel = { project: project.name };
   return (
     <li className="rail-project" data-collapsed={folded || undefined}>
-      <div className="rail-heading" data-slide={headingSlide(groupKey.project(project.id))} data-force={forced} data-open={menu ? true : undefined}>
+      <div className="rail-heading" data-slide={headingSlide(project.id)} data-force={forced} data-open={menu ? true : undefined}>
         <GroupToggle
           folded={folded}
           controls={children ? tilesId : undefined}
