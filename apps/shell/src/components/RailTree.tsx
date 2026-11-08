@@ -6,7 +6,7 @@ import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
 import { type Collapsed, collapsedOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { placesOf, slideFrom } from "../theme/motion";
+import { ARRIVE, placesOf, placesWithout, slideFrom } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileArchive, type TilePin, type TileRename } from "./SessionTile";
@@ -118,6 +118,27 @@ export function RailTree(props: RailTreeProps) {
     const folded = item.closest<HTMLElement>("[inert]");
     const target = folded ? folded.closest(".rail-project")?.querySelector<HTMLElement>(".rail-heading-toggle") : item.querySelector<HTMLElement>(".session");
     target?.focus({ preventScroll: true });
+  });
+  // A new session's tile, a fork's included, slides in at its place while the others make room (DESIGN.md, Motion). New
+  // means listed for the first time since Ersa started: the first listing draws every tile in place, and a listing
+  // read again after a reconnect, an unarchived session or a pinned one bring nothing new. A new session still waiting
+  // to be placed under its project slides in once it is drawn.
+  const seen = useRef<Set<string>>(undefined);
+  const arriving = useRef(new Set<string>());
+  useLayoutEffect(() => {
+    const el = root.current;
+    if (sessions.state !== "ready" || !el) return;
+    const ids = sessions.sessions.map((s) => s.id);
+    const known = seen.current;
+    seen.current = new Set([...(known ?? []), ...ids]);
+    if (known) for (const id of ids) if (!known.has(id)) arriving.current.add(id);
+    // One that left the listing before it was drawn no longer arrives.
+    for (const id of arriving.current) if (!ids.includes(id)) arriving.current.delete(id);
+    const items = [...el.querySelectorAll<HTMLElement>("[data-session-id]")].filter((item) => arriving.current.has(item.dataset.sessionId ?? ""));
+    if (items.length === 0) return;
+    for (const item of items) arriving.current.delete(item.dataset.sessionId ?? "");
+    const marks = new Set(items.map((item) => item.dataset.slide ?? ""));
+    slideFrom(el, placesWithout(el, items), ARRIVE, marks);
   });
   // Pin and Unpin: unavailable while Ersa can't reach Core, or while Core stores a pin.
   const pinOf = (s: Session): TilePin | undefined =>

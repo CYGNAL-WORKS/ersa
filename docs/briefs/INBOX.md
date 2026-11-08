@@ -8,4 +8,5 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-08 none (DESIGN.md, Motion): a breathing mark "softens" its tone, but no token says how far. Defined `opacity.breath: 0.4` in `apps/shell/src/theme/tokens.pending.yaml` (a new custom `opacity` group, emitted as `--opacity-<name>`), used by the working glyph's loop and the needs-you chevron's one breath (from full tone to `opacity-breath` and back). Proposed for DESIGN.md.
 ## Resolved recently (optional, trimmed in planning passes)

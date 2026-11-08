@@ -13,7 +13,8 @@
 // `--motion-quick` (milliseconds), `motion.ease-out` -> `--motion-ease-out`,
 // `material.tile` -> `--material-tile`, `glow.dark.focal` -> `--glow-focal`,
 // `shadow.dark.transient` -> `--shadow-transient`, `stack.menu` -> `--stack-menu`
-// (a bare stacking number).
+// (a bare stacking number), `opacity.breath` -> `--opacity-breath` (a bare
+// number from 0 to 1).
 //
 // Pending tokens: src/theme/tokens.pending.yaml holds tokens an implementing
 // session needs before a planning commit adds them to DESIGN.md (they are
@@ -123,6 +124,7 @@ export function css(tokens) {
   for (const [name, v] of Object.entries(tokens.line)) shared.push(`  --line-${name}: ${v};`);
   for (const [name, v] of Object.entries(tokens.size)) shared.push(`  --size-${name}: ${v};`);
   for (const [name, v] of Object.entries(tokens.stack ?? {})) shared.push(`  --stack-${name}: ${v};`);
+  for (const [name, v] of Object.entries(tokens.opacity ?? {})) shared.push(`  --opacity-${name}: ${v};`);
   for (const [name, v] of Object.entries(tokens.motion)) {
     shared.push(`  --motion-${name}: ${typeof v === "number" ? `${v}ms` : v};`);
   }

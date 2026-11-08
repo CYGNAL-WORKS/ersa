@@ -224,6 +224,26 @@
   }
 }
 
+/* Working: the glyph's own tone swells and softens for as long as the session works; not a glow, so the screen's one
+   focal glow stays where it is (DESIGN.md, Motion). */
+.session-glyph[data-breath="loop"] {
+  animation: session-breath var(--motion-breath) var(--motion-ease-in-out) infinite;
+}
+
+/* A session that comes to need the user: its chevron's tone swells and fades once, and the tile stays where it is. The
+   button's own fills hold still; only the chevron in it breathes. */
+.session-chevron[data-breath="once"],
+.session-chevron-button[data-breath="once"] > * {
+  animation: session-breath var(--motion-breathe-once) var(--motion-ease-in-out);
+}
+
+/* One breath: from full tone, softening to opacity-breath and back. */
+@keyframes session-breath {
+  50% {
+    opacity: var(--opacity-breath);
+  }
+}
+
 /* Disconnected: a hollow ring with a hairline edge in ink-faint. */
 .session-glyph[data-tone="faint"] {
   background: transparent;
@@ -318,7 +338,8 @@
   border-right-color: transparent;
 }
 
-/* With reduced motion on, the arc holds still at full tone, and fills change at once. */
+/* With reduced motion on, the arc and a working glyph hold still at full tone, a chevron appears without its breath,
+   and fills change at once. */
 @media (prefers-reduced-motion: reduce) {
   .session,
   .session-mark,
@@ -328,7 +349,10 @@
     transition: none;
   }
 
-  .session-arc {
+  .session-arc,
+  .session-glyph[data-breath],
+  .session-chevron[data-breath],
+  .session-chevron-button[data-breath] > * {
     animation: none;
   }
 }

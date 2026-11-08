@@ -110,7 +110,7 @@ describe("a session's tile", () => {
   });
 
   it("draws each mark in the tone the mapping gives", () => {
-    expect(draw({ state: "running" })).toContain('<span class="glyph session-glyph" data-tone="accent" role="img" aria-label="Working">');
+    expect(draw({ state: "running" })).toContain('<span class="glyph session-glyph" data-tone="accent" data-breath="loop" role="img" aria-label="Working">');
     expect(draw({ state: "disconnected" })).toContain('<span class="glyph session-glyph" data-tone="faint" aria-hidden="true">');
     expect(draw({ state: "error" })).toContain('<span class="glyph session-glyph" data-tone="danger" aria-hidden="true">');
   });
