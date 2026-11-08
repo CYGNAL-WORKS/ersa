@@ -1,0 +1,169 @@
+import { LoaderCircle } from "lucide-react";
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef } from "react";
+import { t } from "../catalog";
+import { type DeletePhase, type WhatGoes, losesWork } from "../session/deletion";
+import { Button } from "./Button";
+import { Icon } from "./Icon";
+import "./DeleteQuestion.css";
+
+interface DeleteQuestionProps {
+  /** The session's title as its tile shows it. */
+  title: string;
+  /** The backend's own name, such as Claude Code: the conversation goes from its tools too. */
+  backend: string;
+  phase: Exclude<DeletePhase, { kind: "deleted" }>;
+  /** The user confirmed the question. */
+  onConfirm: () => void;
+  /** After a failure: ask again with what is left. */
+  onTryAgain: () => void;
+  /** Cancel, or Escape: everything stays as it was. */
+  onCancel: () => void;
+  /** For the gallery: drawn in place, taking no focus, rather than over the window. */
+  inline?: boolean;
+}
+
+/**
+ * The delete question (docs/design/RAIL.md, The delete question; FLOW-ARCHIVE-DELETE-SESSION, step 4): it names the
+ * session, says its conversation goes for good, and says what goes with it or that its files stay. Focus starts on
+ * Cancel and stays within it; while the deletion runs, both buttons and Escape wait for it to end.
+ */
+export function DeleteQuestion({ title, backend, phase, onConfirm, onTryAgain, onCancel, inline = false }: DeleteQuestionProps) {
+  const id = useId();
+  const root = useRef<HTMLDivElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
+  const confirm = useRef<HTMLButtonElement>(null);
+  const deleting = phase.kind === "deleting";
+  const failed = phase.kind === "failed";
+
+  // Focus starts on Cancel, so an Enter pressed out of habit deletes nothing. Asked again, it starts there again.
+  const askedAgain = phase.kind === "asking" && phase.changed;
+  useEffect(() => {
+    if (!inline) cancel.current?.focus({ preventScroll: true });
+  }, [inline, askedAgain]);
+  // While it runs the buttons are unavailable, so the dialog itself keeps focus; a failure gives it to Try again.
+  useEffect(() => {
+    if (inline) return;
+    if (deleting) root.current?.focus({ preventScroll: true });
+    else if (failed) confirm.current?.focus({ preventScroll: true });
+  }, [inline, deleting, failed]);
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      if (!deleting) onCancel();
+    } else if (event.key === "Tab") {
+      // Focus stays within the dialog: Tab from the last button wraps to the first, and Shift+Tab the other way.
+      const buttons = [...(root.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])];
+      const first = buttons[0];
+      const last = buttons[buttons.length - 1];
+      if (!first || !last) {
+        event.preventDefault();
+        return;
+      }
+      if (event.shiftKey && (document.activeElement === first || !root.current?.contains(document.activeElement))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (document.activeElement === last || !root.current?.contains(document.activeElement))) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+  };
+
+  const goes = phase.kind === "asking" || phase.kind === "deleting" ? phase.goes : undefined;
+  const confirmLabel = failed
+    ? t("rail.delete.tryAgainButton")
+    : deleting
+      ? t("rail.delete.deletingProgress")
+      : goes && losesWork(goes)
+        ? t("rail.delete.deleteAndLoseButton")
+        : t("rail.delete.deleteButton");
+
+  return (
+    <div
+      ref={root}
+      className="delete-question"
+      data-inline={inline || undefined}
+      role="dialog"
+      aria-modal={!inline || undefined}
+      aria-labelledby={`${id}-title`}
+      aria-describedby={`${id}-detail`}
+      aria-busy={deleting || phase.kind === "reading" || undefined}
+      tabIndex={-1}
+      onKeyDown={onKeyDown}
+    >
+      <h2 className="delete-question-title" id={`${id}-title`}>
+        {t("rail.delete.title", { title })}
+      </h2>
+      <div className="delete-question-detail" id={`${id}-detail`}>
+        {phase.kind === "asking" && phase.changed && <p>{t("rail.delete.changedDetail")}</p>}
+        <p>{t("rail.delete.conversationDetail", { backend })}</p>
+        {goes && <Goes goes={goes} />}
+        {phase.kind === "reading" && <p role="status">{t("rail.delete.readingProgress")}</p>}
+      </div>
+      {goes && <Loss goes={goes} />}
+      {goes?.kind === "folderGoes" && goes.branchKept && <p className="delete-question-kept">{t("rail.delete.branchKeptDetail")}</p>}
+      {failed && (
+        <div className="delete-question-failed" role="alert">
+          <p className="problem">{t("rail.delete.failedError")}</p>
+          <p className="delete-question-reason">{phase.reason}</p>
+        </div>
+      )}
+      <div className="delete-question-actions">
+        <Button ref={cancel} onClick={onCancel} disabled={deleting}>
+          {t("rail.delete.cancelButton")}
+        </Button>
+        <Button
+          ref={confirm}
+          className="delete-question-confirm"
+          onClick={failed ? onTryAgain : onConfirm}
+          disabled={deleting || phase.kind === "reading"}
+        >
+          {deleting && (
+            <span className="delete-question-ring" aria-hidden="true">
+              <Icon icon={LoaderCircle} size="icon-xs" />
+            </span>
+          )}
+          {confirmLabel}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** What goes with the conversation: the folder and its branch by name, or where the files stay. */
+function Goes({ goes }: { goes: WhatGoes }) {
+  if (goes.kind === "filesStay") return <p>{t("rail.delete.filesStayDetail", { path: <span className="delete-question-name">{goes.path}</span> })}</p>;
+  if (goes.branch === "") return <p>{t("rail.delete.folderDetail")}</p>;
+  const branch = <span className="delete-question-name">{goes.branch}</span>;
+  return <p>{goes.branchKept ? t("rail.delete.folderBranchKeptDetail", { branch }) : t("rail.delete.folderAndBranchDetail", { branch })}</p>;
+}
+
+// The counts read as one list: "3 uncommitted or untracked files and 12 ignored files".
+const list = new Intl.ListFormat("en-US", { type: "conjunction" });
+
+/** What is lost with the folder and exists nowhere else, led by a caution glyph; nothing when nothing is. */
+function Loss({ goes }: { goes: WhatGoes }) {
+  if (goes.kind !== "folderGoes" || !losesWork(goes)) return null;
+  const parts: string[] = [];
+  if (goes.uncommitted > 0) parts.push(String(t("rail.delete.uncommittedPart", { count: goes.uncommitted })));
+  if (goes.ignored > 0) parts.push(String(t("rail.delete.ignoredPart", { count: goes.ignored })));
+  if (goes.stranded > 0) parts.push(String(t("rail.delete.strandedPart", { count: goes.stranded })));
+  const said: ReactNode[] = [];
+  if (parts.length > 0) said.push(t("rail.delete.lossDetail", { parts: list.format(parts) }));
+  // Commits git can no longer count are named in place of a count of them (FLOW-ARCHIVE-DELETE-SESSION-R10).
+  if (goes.unrecorded) said.push(t("rail.delete.unrecordedDetail"));
+  return (
+    <p className="delete-question-loss">
+      <span className="glyph" data-tone="caution" aria-hidden="true" />
+      <span>
+        {said.map((s, i) => (
+          <span key={i}>
+            {i > 0 && " "}
+            {s}
+          </span>
+        ))}
+      </span>
+    </p>
+  );
+}

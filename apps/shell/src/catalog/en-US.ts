@@ -67,6 +67,8 @@ export const enUS = {
       renameKey: "F2",
       // Why Rename is unavailable: renaming goes through Core.
       renameOfflineReason: "Available once Ersa reaches your sessions",
+      // In the tile's menu, apart in its own group. It asks first, so it ends in an ellipsis.
+      deleteButton: "Delete…",
       // The field the title becomes while it is renamed on the tile.
       titleLabel: "Session title",
       // Names a tile when it fails to draw: "This session could not be shown:".
@@ -83,6 +85,43 @@ export const enUS = {
       questionWant: "Has a question",
       needsYouWant: "Needs you",
       needsYouCountWant: "Needs you · {count}",
+    },
+    // The delete question (docs/design/RAIL.md, The delete question; FLOW-ARCHIVE-DELETE-SESSION, step 4).
+    delete: {
+      // Beneath Delete… in the tile's menu, while the session is starting, working or waiting on the user.
+      busyReason: "Stop the session to delete it",
+      // Beneath Delete… while Ersa can't reach Core.
+      offlineReason: "Available once Ersa reaches your sessions",
+      title: "Delete {title}?",
+      // Always said: the conversation goes from the backend's own tools too ("Claude Code").
+      conversationDetail: "Its conversation is deleted for good, in {backend} too.",
+      folderAndBranchDetail: "Its folder and its branch {branch} are deleted with it.",
+      folderDetail: "Its folder is deleted with it.",
+      // A branch that holds commits no other branch or remote holds is kept; the next line says why.
+      folderBranchKeptDetail: "Its folder is deleted with it. Its branch {branch} is kept.",
+      branchKeptDetail: "The branch holds commits that exist nowhere else.",
+      // The project's own folder, or a folder another session also uses.
+      filesStayDetail: "Its files stay in {path}.",
+      // What goes with the folder and exists nowhere else, joined into one list: "3 uncommitted or untracked files and
+      // 12 ignored files will be lost."
+      uncommittedPart: { one: "{count} uncommitted or untracked file", other: "{count} uncommitted or untracked files" },
+      ignoredPart: { one: "{count} ignored file", other: "{count} ignored files" },
+      strandedPart: { one: "{count} commit no branch holds", other: "{count} commits no branch holds" },
+      lossDetail: "{parts} will be lost.",
+      // When git has lost the workspace's record (FLOW-ARCHIVE-DELETE-SESSION-R10), in place of a count of them.
+      unrecordedDetail: "Commits made on a detached checkout can't be counted and may be lost with the folder.",
+      // Asked again because what would be lost changed since the question was first asked.
+      changedDetail: "What would be lost changed since you were asked.",
+      readingProgress: "Checking what would be lost…",
+      cancelButton: "Cancel",
+      deleteButton: "Delete",
+      // When files or commits would be lost with the folder: the button says so.
+      deleteAndLoseButton: "Delete and lose them",
+      deletingProgress: "Deleting…",
+      tryAgainButton: "Try again",
+      failedError: "Ersa couldn't delete this session.",
+      // The session's workspace hasn't been read yet, so the question can't say what goes with it.
+      workspaceUnknownError: "Ersa can't tell yet where this session's files are. Try again in a moment.",
     },
     // The shelf (docs/design/RAIL.md, The shelf; FLOW-APPROVE-PERMISSION): a session's request, pulled out of its tile.
     shelf: {

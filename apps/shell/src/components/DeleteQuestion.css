@@ -1,0 +1,128 @@
+/* The delete question (docs/design/RAIL.md, The delete question): centered over the window, which is not dimmed,
+   above every other layer, on the tile's material with a line edge. */
+.delete-question {
+  position: fixed;
+  inset: 0;
+  z-index: var(--stack-dialog);
+  box-sizing: border-box;
+  width: var(--size-dialog);
+  height: fit-content;
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-lg);
+  background: var(--material-tile);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-transient);
+  color: var(--color-ink);
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+  animation: delete-question-in var(--motion-settle) var(--motion-ease-out);
+}
+
+/* The gallery draws it in place, where its states sit side by side. */
+.delete-question[data-inline] {
+  position: static;
+  margin: 0;
+}
+
+/* Focused only while the deletion runs, to keep the keyboard here; its edge already marks it. */
+.delete-question:focus {
+  outline: none;
+}
+
+@keyframes delete-question-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.delete-question-title {
+  margin: 0;
+  font-family: var(--type-heading-family);
+  font-size: var(--type-heading-size);
+  font-weight: var(--type-heading-weight);
+  line-height: var(--type-heading-leading);
+  overflow-wrap: anywhere;
+}
+
+/* What goes with it: ui in ink-muted. */
+.delete-question-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  color: var(--color-ink-muted);
+}
+
+.delete-question-detail p,
+.delete-question-kept,
+.delete-question-reason {
+  margin: 0;
+}
+
+/* The branch's name, and a path where the files stay, in mono. */
+.delete-question-name {
+  font-family: var(--type-mono-family);
+  font-size: var(--type-mono-size);
+  overflow-wrap: anywhere;
+}
+
+/* What would be lost: led by a caution glyph, in ink. The glyph sits on the first line's middle. */
+.delete-question-loss {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-sm);
+  align-items: baseline;
+  margin: 0;
+  color: var(--color-ink);
+}
+
+.delete-question-kept {
+  color: var(--color-ink-muted);
+}
+
+/* A failure's reason beneath its words, past the danger glyph, keeping its own lines. */
+.delete-question-reason {
+  padding-inline-start: calc(var(--size-glyph) + var(--space-sm));
+  color: var(--color-ink-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.delete-question-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+/* The confirming button is the plain button with its label in danger, never a danger fill. Focused, it reads as
+   every focused button does. */
+.delete-question-confirm:not(:disabled, :focus-visible, [data-force="focus"]) {
+  color: var(--color-danger);
+}
+
+/* While the deletion runs, the ring before its label, open by a quarter, one turn per motion-loop-ring. */
+.delete-question-ring {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-inline-end: var(--space-xs);
+  color: var(--color-ink-muted);
+  animation: delete-question-turn var(--motion-loop-ring) var(--motion-linear) infinite;
+}
+
+@keyframes delete-question-turn {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* With reduced motion on, the question appears at once and the ring holds still. */
+@media (prefers-reduced-motion: reduce) {
+  .delete-question,
+  .delete-question-ring {
+    animation: none;
+  }
+}
