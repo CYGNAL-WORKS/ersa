@@ -8,6 +8,7 @@ import { type CSSProperties, type ReactNode, useEffect, useId, useState } from "
 import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
 import { ContextRing } from "../components/ContextRing";
+import { ArchivedNote } from "../components/ArchivedNote";
 import { AttachmentChip } from "../components/AttachmentChip";
 import { Composer } from "../components/Composer";
 import type { Attached } from "../session/attachments";
@@ -19,6 +20,7 @@ import { RailFoot } from "../components/RailFoot";
 import { Menu, type MenuEntry } from "../components/Menu";
 import { RailTop } from "../components/RailTop";
 import { groupKey, RailTree } from "../components/RailTree";
+import { SessionTile, TileItem } from "../components/SessionTile";
 import { SessionControls } from "../components/SessionControls";
 import { Shelf } from "../components/Shelf";
 import { SessionTitle } from "../components/SessionTitle";
@@ -199,9 +201,41 @@ const tree: Parameters<typeof RailTree>[0] = {
     return true;
   },
   onPin: (id, pinned) => (document.body.dataset.railCall = `pin ${id} ${pinned}`),
+  onArchive: (id, archived) => (document.body.dataset.railCall = `archive ${id} ${archived}`),
   localHost: "local",
   hostNames: { local: "WORKSTATION", devbox: "devbox" },
 };
+/**
+ * An archived session's tile above a resting one, as the rail draws them once it can show archived sessions
+ * (docs/design/RAIL.md, An archived tile): the rail's tree leaves archived sessions out until then.
+ */
+function ArchivedTiles({ menu, force }: { menu?: boolean; force?: "hover" | "focus" | "pressed" }) {
+  const archived = { ...pointerPair[0]!, id: "a1", title: "Retire the old protocol notes", archived: true };
+  const tiles = [archived, pointerPair[1]!];
+  return (
+    <section className="rail-tree">
+      <ul className="rail-tiles">
+        {tiles.map((s) => (
+          <TileItem key={s.id} id={s.id}>
+            {() => (
+              <SessionTile
+                session={s}
+                active={false}
+                unseen={false}
+                force={s.id === "a1" ? force : undefined}
+                onSelect={() => {}}
+                rename={{ onSave: async () => true, onReset: () => {} }}
+                archive={{ onChoose: () => {} }}
+                initialMenu={menu && s.id === "a1"}
+              />
+            )}
+          </TileItem>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** One project, for the states of a heading and its tiles. */
 const ersaOnly: Parameters<typeof RailTree>[0] = {
   ...tree,
@@ -713,8 +747,15 @@ const entries: Entry[] = [
       // s1 is the active session and waits on a permission request: its chevron stays a mark, and More sits before it.
       ["Active, needs you, pointer over it", <RailTree {...ersaOnly} activeId="s1" force={{ id: "s1", state: "hover" }} />],
       ["Tile menu, open", room(<RailTree {...pairOnly} initialTileMenu="p2" />)],
-      // Renaming goes through Core, so while Ersa can't reach it Rename is unavailable, with the reason.
-      ["Tile menu, Rename unavailable", room(<RailTree {...pairOnly} initialTileMenu="p2" offline />)],
+      // Renaming and archiving go through Core, so while Ersa can't reach it both are unavailable, with the reason.
+      ["Tile menu, offline", room(<RailTree {...pairOnly} initialTileMenu="p2" offline />)],
+      ["An archived tile", <ArchivedTiles />],
+      ["An archived tile, pointer over it", <ArchivedTiles force="hover" />],
+      ["Tile menu, archived", room(<ArchivedTiles menu />)],
+      [
+        "Archive refused",
+        <RailTree {...pairOnly} archiving={{ p2: { state: "failed", message: "session.set_archived: the session is being deleted" } }} />,
+      ],
       ["Tile menu, pinned", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: pointerPair.map((s) => ({ ...s, pinned: true })) }} initialTileMenu="p2" />)],
       ["Tile menu, while a pin is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" pinning={{ p2: { state: "sending" } }} />)],
       ["Pin refused", <RailTree {...pairOnly} pinning={{ p2: { state: "failed", message: "session.arrange: the session is being deleted" } }} />],
@@ -938,6 +979,23 @@ const entries: Entry[] = [
       ["Nearly full", <ContextRing used={0.93} />],
       ["On a tile", <ContextRing used={0.42} size="ring-sm" />],
       ["On a tile, nearly full", <ContextRing used={0.93} size="ring-sm" />],
+    ],
+  },
+  {
+    // In place of the composer for an archived session (FLOW-ARCHIVE-DELETE-SESSION, step 2).
+    name: "ArchivedNote",
+    wide: true,
+    states: [
+      ["At rest", <ArchivedNote onResume={() => {}} />],
+      ["Resume under the pointer", <ArchivedNote onResume={() => {}} force="hover" />],
+      ["Resume pressed", <ArchivedNote onResume={() => {}} force="pressed" />],
+      ["Resume, keyboard focus", <ArchivedNote onResume={() => {}} force="focus" />],
+      ["Resuming", <ArchivedNote onResume={() => {}} resuming={{ state: "sending" }} />],
+      ["Resuming, keyboard focus", <ArchivedNote onResume={() => {}} resuming={{ state: "sending" }} force="focus" />],
+      [
+        "Resume refused",
+        <ArchivedNote onResume={() => {}} resuming={{ state: "failed", message: "session.resume: resuming a stopped session arrives with milestone M1" }} />,
+      ],
     ],
   },
   {

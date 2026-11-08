@@ -398,6 +398,13 @@ impl View {
     pub fn backend_session_id(&self) -> Option<&str> {
         self.backend_session_id.as_deref()
     }
+
+    /// The latest title the backend announced on its live stream
+    /// ([`Projector::announced_title`]); `None` before any, and once the
+    /// live stream is over.
+    pub fn announced_title(&self) -> Option<(u64, &str)> {
+        self.projector.as_ref()?.announced_title()
+    }
 }
 
 fn state(state: LifecycleState, reason: Option<String>) -> Event {

@@ -76,8 +76,14 @@ export const enUS = {
       renameButton: "Rename",
       // The key that does the same as Rename, at the item's trailing edge.
       renameKey: "F2",
-      // Why Rename, Pin or Unpin is unavailable: each goes through Core.
+      // Why an item that goes through Core, such as Rename, Pin or Archive, is unavailable.
       offlineReason: "Available once Ersa reaches your sessions",
+      // Archive or Unarchive, by whether the session is archived (FLOW-ARCHIVE-DELETE-SESSION).
+      archiveButton: "Archive",
+      unarchiveButton: "Unarchive",
+      // Beneath the tile, before Core's reason, when Core refuses.
+      archiveError: "Ersa can't archive this session.",
+      unarchiveError: "Ersa can't unarchive this session.",
       // The field the title becomes while it is renamed on the tile.
       titleLabel: "Session title",
       // Names a tile when it fails to draw: "This session could not be shown:".
@@ -89,6 +95,8 @@ export const enUS = {
       errorStatus: "Error",
       endedStatus: "Ended",
       unknownStateStatus: "Unknown state",
+      // Heard, not shown: the archive mark's name, on an archived session's tile.
+      archivedStatus: "Archived",
       // What a session that needs the user wants, in the tone of its chevron.
       permissionWant: "Needs permission",
       questionWant: "Has a question",
@@ -132,6 +140,14 @@ export const enUS = {
   // (FLOW-NEW-SESSION-R23). That Ersa can't reach the sessions is said in the rail foot's words.
   composer: {
     name: "Composer",
+    // In place of the box for an archived session, which opens read-only (FLOW-ARCHIVE-DELETE-SESSION, step 2).
+    archived: {
+      note: "This session is archived. Resume it to send a message.",
+      resumeButton: "Resume",
+      resumingProgress: "Resuming…",
+      // Before Core's reason, when Core refuses the resume.
+      resumeError: "Ersa can't resume this session.",
+    },
     messageLabel: "Message",
     writePlaceholder: "Write to the agent",
     attachButton: "Attach",

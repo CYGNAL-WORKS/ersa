@@ -1,0 +1,37 @@
+{"type":"custom-title","customTitle":"Named before the first message","sessionId":"4bffd0ad-a0cf-4b01-a550-a51d087134ce"}
+{"type":"agent-name","ersa_elided":true}
+{"type":"queue-operation","ersa_elided":true}
+{"type":"queue-operation","ersa_elided":true}
+{"parentUuid":null,"isSidechain":false,"promptId":"0af79bd8-b042-48ba-ae0d-cc3a4b7aa62e","type":"user","message":{"role":"user","content":[{"type":"text","text":"Reply with the single word: ok"}]},"uuid":"4fd39247-9e24-41d3-ba15-e2af4cf43f0d","timestamp":"2026-11-07T22:34:05.811Z","permissionMode":"default","promptSource":"sdk","turnOrigin":"sdk","turnPosition":{"promptIndex":0,"turnIndex":1},"userType":"external","entrypoint":"ersa","cwd":"C:/Users/user\\AppData\\Local\\Temp\\ersa-rec-L7hT9h","sessionId":"4bffd0ad-a0cf-4b01-a550-a51d087134ce","version":"2.1.316","gitBranch":"master"}
+{"type":"attachment","uuid":"84e2eb04-07b0-4c43-853a-218178fa0f9e","parentUuid":"4fd39247-9e24-41d3-ba15-e2af4cf43f0d","isSidechain":false,"attachment":{"type":"environment"},"ersa_elided":true}
+{"type":"attachment","uuid":"2251725a-16fc-401e-bcdf-3c248c9d6d83","parentUuid":"84e2eb04-07b0-4c43-853a-218178fa0f9e","isSidechain":false,"attachment":{"type":"model"},"ersa_elided":true}
+{"type":"attachment","uuid":"26dc787c-0ab3-4493-bea1-8948714e5228","parentUuid":"2251725a-16fc-401e-bcdf-3c248c9d6d83","isSidechain":false,"attachment":{"type":"output_style_instructions"},"ersa_elided":true}
+{"type":"attachment","uuid":"ea6dfb4c-4fb6-4d21-b51f-62dcbaffcf43","parentUuid":"26dc787c-0ab3-4493-bea1-8948714e5228","isSidechain":false,"attachment":{"type":"deferred_tools_delta"},"ersa_elided":true}
+{"type":"attachment","uuid":"8d8821de-6178-48f4-88f6-ba9e1b470297","parentUuid":"ea6dfb4c-4fb6-4d21-b51f-62dcbaffcf43","isSidechain":false,"attachment":{"type":"agent_listing_delta"},"ersa_elided":true}
+{"type":"attachment","uuid":"d4832d72-48b5-40d5-86ac-964a48bd0e77","parentUuid":"8d8821de-6178-48f4-88f6-ba9e1b470297","isSidechain":false,"attachment":{"type":"skill_listing"},"ersa_elided":true}
+{"type":"attachment","uuid":"492dfc2c-d423-4dbe-88ec-3bb7067f0e6e","parentUuid":"d4832d72-48b5-40d5-86ac-964a48bd0e77","isSidechain":false,"attachment":{"type":"output_style"},"ersa_elided":true}
+{"type":"last-prompt","lastPrompt":"Reply with the single word: ok","leafUuid":"492dfc2c-d423-4dbe-88ec-3bb7067f0e6e","sessionId":"4bffd0ad-a0cf-4b01-a550-a51d087134ce"}
+{"type":"custom-title","customTitle":"Named before the first message","sessionId":"4bffd0ad-a0cf-4b01-a550-a51d087134ce"}
+{"type":"agent-name","ersa_elided":true}
+{"type":"file-history-snapshot","ersa_elided":true}
+{"type":"atis-latch","ersa_elided":true}
+{"type":"attachment","uuid":"28b163e4-4671-4698-a60b-8da6409d559b","parentUuid":"492dfc2c-d423-4dbe-88ec-3bb7067f0e6e","isSidechain":false,"attachment":{"type":"session_context"},"ersa_elided":true}
+{"type":"attachment","uuid":"01e7612b-7924-4fb0-98bf-0eb76c48150b","parentUuid":"28b163e4-4671-4698-a60b-8da6409d559b","isSidechain":false,"attachment":{"type":"date"},"ersa_elided":true}
+{"type":"attachment","uuid":"85954203-bab6-4369-9c9d-c2d356d93cbe","parentUuid":"01e7612b-7924-4fb0-98bf-0eb76c48150b","isSidechain":false,"attachment":{"type":"credential_org"},"ersa_elided":true}
+{"type":"attachment","uuid":"38ac94b4-95e3-47fc-834d-cccf61735e22","parentUuid":"85954203-bab6-4369-9c9d-c2d356d93cbe","isSidechain":false,"attachment":{"type":"remote_session_change"},"ersa_elided":true}
+{"type":"attachment","uuid":"1d85e97c-44e4-4062-b7af-f6dc170010ff","parentUuid":"38ac94b4-95e3-47fc-834d-cccf61735e22","isSidechain":false,"attachment":{"type":"prompt_snapshot"},"ersa_elided":true}
+{"type":"api-request-shape","ersa_elided":true}
+{"type":"api-request-blob","ersa_elided":true}
+{"type":"api-request-blob","ersa_elided":true}
+{"type":"api-request","ersa_elided":true}
+{"type":"last-prompt","lastPrompt":"Reply with the single word: ok","leafUuid":"1d85e97c-44e4-4062-b7af-f6dc170010ff","sessionId":"4bffd0ad-a0cf-4b01-a550-a51d087134ce"}
+{"type":"custom-title","customTitle":"Named before the first message","sessionId":"4bffd0ad-a0cf-4b01-a550-a51d087134ce"}
+{"type":"agent-name","ersa_elided":true}
+{"type":"atis-latch","ersa_elided":true}
+{"parentUuid":"1d85e97c-44e4-4062-b7af-f6dc170010ff","isSidechain":false,"message":{"model":"claude-opus-5-5","id":"msg_011CgpN51YKMAwHkSjqxY23V","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"container":null,"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":44233,"cache_read_input_tokens":0,"output_tokens":4,"output_tokens_details":{"thinking_tokens":0},"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":44233,"ephemeral_5m_input_tokens":0},"inference_geo":"global","iterations":[{"input_tokens":2,"output_tokens":4,"cache_read_input_tokens":0,"cache_creation_input_tokens":44233,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":44233},"type":"message"}],"speed":"standard","fallback_credit":null},"input_transformations":[],"diagnostics":null,"context_management":null},"apiBlockIndex":0,"requestId":"req_011CgpN51Diq6K6dF8yAJzFf","requestRef":"e6e38c5c-d1c0-489f-bf61-1cc944d87c9a","requestedModel":"claude-opus-5-5","type":"assistant","uuid":"e53056bb-ed98-4c36-8a67-6406be00f049","timestamp":"2026-11-07T22:34:07.094Z","advisorModel":"claude-opus-5-5","effort":"medium","perTurnEffort":"medium","userType":"external","entrypoint":"ersa","cwd":"C:/Users/user\\AppData\\Local\\Temp\\ersa-rec-L7hT9h","sessionId":"4bffd0ad-a0cf-4b01-a550-a51d087134ce","version":"2.1.316","gitBranch":"master"}
+{"type":"attachment","uuid":"004f1a92-8899-4f05-a622-5b7c22bc378c","parentUuid":"e53056bb-ed98-4c36-8a67-6406be00f049","isSidechain":false,"attachment":{"type":"prompt_snapshot"},"ersa_elided":true}
+{"type":"last-prompt","lastPrompt":"Reply with the single word: ok","leafUuid":"004f1a92-8899-4f05-a622-5b7c22bc378c","sessionId":"4bffd0ad-a0cf-4b01-a550-a51d087134ce"}
+{"type":"custom-title","customTitle":"Named before the first message","sessionId":"4bffd0ad-a0cf-4b01-a550-a51d087134ce"}
+{"type":"agent-name","ersa_elided":true}
+{"type":"atis-latch","ersa_elided":true}
+{"type":"cost-state","ersa_elided":true}

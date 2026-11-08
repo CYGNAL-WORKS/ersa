@@ -3,6 +3,7 @@ import { t } from "./catalog";
 import "./App.css";
 import { Button } from "./components/Button";
 import type { AttachWhat } from "./components/AttachMenu";
+import { ArchivedNote } from "./components/ArchivedNote";
 import { Composer } from "./components/Composer";
 import { RailFoot } from "./components/RailFoot";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -97,6 +98,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The quit question, while it is open: how many sessions would stop, and whether Quit was chosen.
   const [quitAsk, setQuitAsk] = useState<QuitAsk & { quitting: boolean; failed?: string }>();
   const [renaming, setRenaming] = useState<Record<string, Sending>>({});
+  // Archives and unarchives on their way from a tile, and resumes from the archived note, by session id.
+  const [archiving, setArchiving] = useState<Record<string, Sending>>({});
+  const [resuming, setResuming] = useState<Record<string, Sending>>({});
   // The session whose shelf is open, and its events, followed while it is open (FLOW-APPROVE-PERMISSION).
   const [shelfId, setShelfId] = useState<string>();
   const [shelfView, setShelfView] = useState<SessionView>();
@@ -133,7 +137,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const sessions = sessionsOf(view);
   useEffect(() => {
     if (activeId === undefined && sessions.state === "ready") {
-      const newest = newestFirst(sessions.sessions)[0];
+      // Never an archived one, which the rail does not show.
+      const newest = newestFirst(sessions.sessions.filter((s) => !s.archived))[0];
       if (newest) dispatch({ type: "showNewest", id: newest.id });
     }
   }, [activeId, sessions]);
@@ -373,6 +378,35 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     }
   };
 
+  // Archive and Unarchive from a tile (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3): Core stops a live session as it
+  // archives it, and keeps its pin and section either way. The list is read again to show the change; archiving the
+  // active session shows the new-session screen, since its tile has left the rail.
+  const archive = async (id: string, archived: boolean) => {
+    setArchiving((a) => ({ ...a, [id]: { state: "sending" } }));
+    try {
+      await client.call("session.set_archived", { id, archived });
+      setArchiving(({ [id]: _, ...rest }) => rest);
+      if (archived && id === shownId) dispatch({ type: "newSession" });
+      connection.current?.reload("sessions");
+    } catch (error) {
+      setArchiving((a) => ({ ...a, [id]: { state: "failed", message: describeError(error) } }));
+    }
+  };
+
+  // Resume from an archived session's note (step 2): Core clears the archived mark as it accepts the resume, and
+  // leaves the session archived when it refuses, which the note then says (PROTO-CORE-API-R43).
+  const resume = async (id: string) => {
+    setResuming((r) => ({ ...r, [id]: { state: "sending" } }));
+    try {
+      await client.call("session.resume", { id });
+      setResuming(({ [id]: _, ...rest }) => rest);
+    } catch (error) {
+      setResuming((r) => ({ ...r, [id]: { state: "failed", message: describeError(error) } }));
+    }
+    // Read again either way: an accepted resume unarchived the session, and a refused one may have changed nothing.
+    connection.current?.reload("sessions");
+  };
+
   // Add project on the new-session screen (FLOW-NEW-SESSION-R17 to R19, R27): the Shell's folder dialog on this computer,
   // then `project.find`, so a folder that is already a project is chosen without the trust question. Without the
   // Shell, as in tests that give none, there is no dialog and Add project is unavailable.
@@ -588,6 +622,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onRename={rename}
               renaming={renaming}
               onRenameReset={resetRename}
+              onArchive={archive}
+              archiving={archiving}
               offline={view.phase !== "connected"}
               onSetTrust={setTrust}
               trusting={trusting}
@@ -631,6 +667,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             />
           </ErrorBoundary>
           <ErrorBoundary what="The composer" resetKey={shown.id}>
+            {listed?.archived ? (
+              // An archived session opens read-only: a note with Resume in place of the composer (FLOW-ARCHIVE-DELETE-SESSION-R02).
+              <ArchivedNote onResume={() => void resume(shown.id)} resuming={resuming[shown.id]} />
+            ) : (
             <Composer
               key={shown.id}
               unavailable={away}
@@ -666,6 +706,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                 )
               }
             />
+            )}
           </ErrorBoundary>
         </main>
       ) : hello && screenProjects && showsScreen({ composing, starting, activeId }, view.phase === "connected") ? (
