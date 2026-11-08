@@ -46,8 +46,8 @@ use std::time::Duration;
 
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, OpenElsewhere,
-    PermissionDecision, ProcessExit, RawLine, RecordDeletion, RecordEvent, RecordSummary,
-    SessionConfig, Transport,
+    PermissionDecision, ProcessExit, QuestionReply, RawLine, RecordDeletion, RecordEvent,
+    RecordSummary, SessionConfig, Transport,
 };
 use ersa_protocol::core_api::rpc::Notification;
 use ersa_protocol::core_api::{
@@ -1459,6 +1459,22 @@ impl SessionManager {
         let session = live.wait_ready().await?;
         let request_id = request_id.to_string();
         bounded(async move { session.decide_permission(&request_id, decision).await }).await
+    }
+
+    /// Answers the question `request_id` the session's backend is waiting on,
+    /// with the user's answers or their declining it (PROTO-CORE-API-R33).
+    /// The `question.answered` event follows from the line the adapter
+    /// writes, as `permission.decided` does from a decision.
+    pub async fn answer_question(
+        &self,
+        id: &str,
+        request_id: &str,
+        reply: QuestionReply,
+    ) -> Result<(), SessionError> {
+        let live = self.live(id)?;
+        let session = live.wait_ready().await?;
+        let request_id = request_id.to_string();
+        bounded(async move { session.answer_question(&request_id, reply).await }).await
     }
 
     /// Raw lines `from..=to` of the session's in-memory raw log, at most
