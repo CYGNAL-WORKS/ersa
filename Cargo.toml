@@ -29,7 +29,7 @@ repository = "https://github.com/CYGNAL-WORKS/ersa"
 anyhow = "1"
 async-trait = "0.1"
 # Images go to a backend inline as base64 (PROTO-CORE-API, Turns and attachments).
-base64 = "0.22"
+base64 = "0.23"
 clap = { version = "4", features = ["derive"] }
 # Only the validator: the default features fetch remote schemas over HTTP and
 # build a TLS stack, neither of which Ersa wants.
