@@ -6,7 +6,7 @@ import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
 import { type Collapsed, collapsedOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { ARRIVE, placesOf, placesWithout, slideFrom } from "../theme/motion";
+import { arrive, placesOf, slideFrom } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileArchive, type TilePin, type TileRename } from "./SessionTile";
@@ -131,14 +131,14 @@ export function RailTree(props: RailTreeProps) {
     const ids = sessions.sessions.map((s) => s.id);
     const known = seen.current;
     seen.current = new Set([...(known ?? []), ...ids]);
-    if (known) for (const id of ids) if (!known.has(id)) arriving.current.add(id);
+    // An archived one has no tile to slide in, so it never arrives; unarchived later, it is not new.
+    if (known) for (const s of sessions.sessions) if (!known.has(s.id) && !s.archived) arriving.current.add(s.id);
     // One that left the listing before it was drawn no longer arrives.
     for (const id of arriving.current) if (!ids.includes(id)) arriving.current.delete(id);
     const items = [...el.querySelectorAll<HTMLElement>("[data-session-id]")].filter((item) => arriving.current.has(item.dataset.sessionId ?? ""));
     if (items.length === 0) return;
     for (const item of items) arriving.current.delete(item.dataset.sessionId ?? "");
-    const marks = new Set(items.map((item) => item.dataset.slide ?? ""));
-    slideFrom(el, placesWithout(el, items), ARRIVE, marks);
+    arrive(el, items);
   });
   // Pin and Unpin: unavailable while Ersa can't reach Core, or while Core stores a pin.
   const pinOf = (s: Session): TilePin | undefined =>
