@@ -4,6 +4,7 @@ import "./App.css";
 import { Button } from "./components/Button";
 import type { AttachWhat } from "./components/AttachMenu";
 import { Composer } from "./components/Composer";
+import { DeleteQuestion } from "./components/DeleteQuestion";
 import { RailFoot } from "./components/RailFoot";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { type FolderChoice, NewSessionScreen } from "./components/NewSessionScreen";
@@ -23,6 +24,7 @@ import { contextUsed, tileOf } from "./session/tile";
 import { type Answers, type Decision, answering } from "./session/answers";
 import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./session/shelf";
 import { sharedSubscriptions } from "./session/subscriptions";
+import { type DeletePhase, Deletion } from "./session/deletion";
 import { type Attached, attached, sendable, unreadable } from "./session/attachments";
 import { type Follower, type SendProgress, type SessionView, type Sending, follow, progressOf } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
@@ -382,6 +384,59 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         }
       : undefined;
 
+  // The delete question, while it is open (FLOW-ARCHIVE-DELETE-SESSION, steps 4 to 6): the session, as its tile
+  // names it, where the question stands, and the round trips behind it.
+  const [deleteAsk, setDeleteAsk] = useState<{ id: string; title: string; backend: string; phase: DeletePhase; run?: Deletion }>();
+  // The tile focus goes to once the question closes, by its session's id; New session when none is left. Moved in an
+  // effect, after the new-session screen a deleted active session leaves behind has taken focus as it opened.
+  const [refocus, setRefocus] = useState<{ to?: string }>();
+  // The active session as it is when a deletion ends, which may be after the user chose another.
+  const activeNow = useRef(activeId);
+  activeNow.current = activeId;
+  useEffect(() => {
+    if (!refocus) return;
+    const item = refocus.to && document.querySelector(`.session[data-session-id="${CSS.escape(refocus.to)}"]`);
+    (item instanceof HTMLElement ? item : document.querySelector<HTMLElement>(".rail-new-session"))?.focus({ preventScroll: true });
+    setRefocus(undefined);
+  }, [refocus]);
+  const askDelete = (id: string) => {
+    const listed = sessions.state === "ready" ? sessions.sessions.find((s) => s.id === id) : undefined;
+    if (!listed) return;
+    const tile = tileOf(listed, backends);
+    const workspace = workspaces[listed.workspace_id];
+    const ask = { id, title: tile.title, backend: tile.backend };
+    // The rail places a session only once its workspace is read, so this is rare: Try again asks once it is.
+    if (!workspace) {
+      setDeleteAsk({ ...ask, phase: { kind: "failed", reason: t("rail.delete.workspaceUnknownError") } });
+      return;
+    }
+    const run = new Deletion(client, id, workspace, (phase) => {
+      setDeleteAsk((was) => (was?.run === run ? { ...was, phase } : was));
+      if (phase.kind === "deleted") deleted(id);
+      // Core stopped the session before it refused or failed, so the rail reads it again (R07).
+      else if (phase.kind === "failed" || (phase.kind === "asking" && phase.changed)) connection.current?.reload("sessions");
+    });
+    setDeleteAsk({ ...ask, phase: { kind: "reading" }, run });
+    void run.start();
+  };
+  // Deleted: focus goes to the next tile in the rail, else the previous, else New session (docs/design/RAIL.md, The
+  // delete question); the active session leaves the new-session screen in its place.
+  const deleted = (id: string) => {
+    const items = [...document.querySelectorAll<HTMLElement>(".session[data-session-id]")];
+    const at = items.findIndex((el) => el.dataset.sessionId === id);
+    const beside = at < 0 ? undefined : (items[at + 1] ?? items[at - 1]);
+    setDeleteAsk(undefined);
+    setRefocus({ to: beside?.dataset.sessionId });
+    if (id === activeNow.current) dispatch({ type: "newSession" });
+    connection.current?.reload("sessions");
+  };
+  // Cancel leaves everything as it was, and focus goes back to the tile.
+  const cancelDelete = () => {
+    const id = deleteAsk?.id;
+    setDeleteAsk(undefined);
+    setRefocus({ to: id });
+  };
+
   // A refusal goes; a rename still on its way stays, so its answer is shown.
   const resetRename = (id: string) => setRenaming(({ [id]: was, ...rest }) => (was?.state === "sending" ? { ...rest, [id]: was } : rest));
 
@@ -572,6 +627,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onRename={rename}
               renaming={renaming}
               onRenameReset={resetRename}
+              onDelete={askDelete}
               offline={view.phase !== "connected"}
               onSetTrust={setTrust}
               trusting={trusting}
@@ -681,6 +737,16 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
         </main>
       ) : (
         <main className="stage stage-empty">No session open. Start one from a project in the rail.</main>
+      )}
+      {deleteAsk && deleteAsk.phase.kind !== "deleted" && (
+        <DeleteQuestion
+          title={deleteAsk.title}
+          backend={deleteAsk.backend}
+          phase={deleteAsk.phase}
+          onConfirm={() => void deleteAsk.run?.confirm()}
+          onTryAgain={() => (deleteAsk.run ? void deleteAsk.run.start() : askDelete(deleteAsk.id))}
+          onCancel={cancelDelete}
+        />
       )}
     </div>
   );

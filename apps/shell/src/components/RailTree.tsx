@@ -3,12 +3,13 @@ import { ChevronDown, Ellipsis, Plus, ShieldAlert } from "lucide-react";
 import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
+import { deleteUnavailable } from "../session/deletion";
 import type { Sending } from "../session/follow";
 import { type Collapsed, collapsedOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
-import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileRename } from "./SessionTile";
+import { type Backends, type ForcedTile, type OpenShelf, SessionTile, type TileDelete, TileItem, type TileRename } from "./SessionTile";
 import { TrustQuestion } from "./TrustQuestion";
 import "./RailTree.css";
 
@@ -55,6 +56,8 @@ interface RailTreeProps {
   renaming?: Readonly<Record<string, Sending>>;
   /** Editing a tile's title starts or ends: its earlier refusal goes. */
   onRenameReset?: (id: string) => void;
+  /** Asks before deleting a session (FLOW-ARCHIVE-DELETE-SESSION, step 4). */
+  onDelete?: (id: string) => void;
   /** Ersa can't reach Core, so nothing can be renamed now. */
   offline?: boolean;
   /** For the gallery: a pointer or keyboard state on one tile or one heading, the menu open, the trust question asked. */
@@ -70,7 +73,7 @@ interface RailTreeProps {
 /** The rail's tree (LAY-SHELL, The rail): each project's heading with its sessions beneath it, and their notes. */
 export function RailTree(props: RailTreeProps) {
   const { projects, sessions, workspaces, placing, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
-  const { onRename, renaming, onRenameReset, offline, initialTileMenu, initialTileDraft } = props;
+  const { onRename, renaming, onRenameReset, onDelete, offline, initialTileMenu, initialTileDraft } = props;
   // Rename on a tile: unavailable only while Ersa can't reach Core. A session its backend has not named yet, such as one
   // still starting, is refused by Core, and the field says why.
   const renameOf = (s: Session): TileRename | undefined =>
@@ -80,6 +83,9 @@ export function RailTree(props: RailTreeProps) {
       onReset: () => onRenameReset?.(s.id),
       unavailable: offline ? t("rail.tile.renameOfflineReason") : undefined,
     };
+  // Delete on a tile: unavailable while the session is busy, or while Ersa can't reach Core.
+  const removeOf = (s: Session): TileDelete | undefined =>
+    onDelete && { onAsk: () => onDelete(s.id), unavailable: deleteUnavailable(s, offline ?? false) };
   const listed = projects.state === "ready" ? projects.projects : [];
   const tree = treeOf(listed, workspaces, sessions.state === "ready" ? sessions.sessions : []);
   // A session waits to be placed while the projects or their workspaces are still being read, so it does not
@@ -102,6 +108,7 @@ export function RailTree(props: RailTreeProps) {
               shelf={open && { tone: open.tone, domId: shelfDomId }}
               onChevron={onChevron}
               rename={renameOf(s)}
+              remove={removeOf(s)}
               initialMenu={initialTileMenu === s.id}
               initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
             />

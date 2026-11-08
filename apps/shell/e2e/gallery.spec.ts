@@ -7,6 +7,7 @@ const components = [
   "RailTop",
   "RailFoot",
   "QuitQuestion",
+  "DeleteQuestion",
   "RailTree",
   "Shelf",
   "AttachmentChip",
