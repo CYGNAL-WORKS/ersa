@@ -292,6 +292,10 @@ Try again
 
 Ersa couldn't delete this session.
 
+### `rail.delete.busyError`
+
+Something else is changing this session or its folder. Try again in a moment.
+
 ### `rail.delete.workspaceUnknownError`
 
 Ersa can't tell yet where this session's files are. Try again in a moment.

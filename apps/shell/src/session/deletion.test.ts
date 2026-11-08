@@ -64,6 +64,13 @@ describe("what the delete question says goes", () => {
     expect(whatGoes(isolated, { ...clean, uncommitted: 4, sessions: 2 })).toEqual({ kind: "filesStay", path: "D:\\ws\\ersa-1" });
   });
 
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R04
+  it("counts the other sessions alone once this one is marked deleting, which Core leaves out of the count", () => {
+    // Asked again after a failed delete: one other session still uses the folder, so its files stay.
+    expect(whatGoes(isolated, { ...clean, sessions: 1 }, true)).toEqual({ kind: "filesStay", path: "D:\\ws\\ersa-1" });
+    expect(whatGoes(isolated, { ...clean, sessions: 0 }, true)).toMatchObject({ kind: "folderGoes" });
+  });
+
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R10
   it("says commits on a detached checkout can't be counted when git has lost the workspace's record", () => {
     const goes = whatGoes(isolated, { ...clean, unshared: 1, unrecorded: true });
@@ -105,7 +112,7 @@ describe("the delete question against Core", () => {
     expect(phases[0]).toEqual({ kind: "reading" });
     expect(last()).toMatchObject({ kind: "asking", changed: false, goes: { uncommitted: 2 } });
     await deletion.confirm();
-    expect(calls.map((c) => [c.method, c.params])).toEqual([
+    expect(calls.filter((c) => c.method !== "session.list").map((c) => [c.method, c.params])).toEqual([
       ["workspace.changes", { id: "w1" }],
       ["session.delete", { id: "s1", token: "shown" }],
     ]);
@@ -139,7 +146,7 @@ describe("the delete question against Core", () => {
     // Asked again, not deleted: the question now counts the three files, and says it changed.
     expect(last()).toMatchObject({ kind: "asking", changed: true, goes: { uncommitted: 3 } });
     await deletion.confirm();
-    expect(calls.map((c) => c.params)).toEqual([{ id: "w1" }, { id: "s1", token: "t1" }, { id: "s1", token: "now" }]);
+    expect(calls.filter((c) => c.method !== "session.list").map((c) => c.params)).toEqual([{ id: "w1" }, { id: "s1", token: "t1" }, { id: "s1", token: "now" }]);
     expect(last()).toEqual({ kind: "deleted" });
   });
 
@@ -184,6 +191,25 @@ describe("the delete question against Core", () => {
   });
 
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R07
+  it("on Try again, says the files stay when another session shares the folder of a session marked deleting", async () => {
+    const { client } = fakeCore({
+      "session.list": [() => [{ id: "s1" }], () => [{ id: "s1", deleting: "failed" }, { id: "s2" }]],
+      "workspace.changes": [() => ({ ...clean, sessions: 2 }), () => ({ ...clean, uncommitted: 3, sessions: 1, token: "left" })],
+      "session.delete": [
+        () => {
+          throw refusal("vcs_error", "The backend could not delete the record.");
+        },
+      ],
+    });
+    const { deletion, last } = run(client);
+    await deletion.start();
+    expect(last()).toMatchObject({ kind: "asking", goes: { kind: "filesStay" } });
+    await deletion.confirm();
+    await deletion.start();
+    expect(last()).toEqual({ kind: "asking", changed: false, goes: { kind: "filesStay", path: "D:\\ws\\ersa-1" } });
+  });
+
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R07
   it("treats a refusal whose detail is not a count of changes as a failure", async () => {
     const { client } = fakeCore({
       "workspace.changes": [() => clean],
@@ -197,6 +223,21 @@ describe("the delete question against Core", () => {
     await deletion.start();
     await deletion.confirm();
     expect(last()).toEqual({ kind: "failed", reason: "The session is open in claude (process 4120)." });
+  });
+
+  it("says in a sentence why when Core answers that something else holds the session", async () => {
+    const { client } = fakeCore({
+      "workspace.changes": [() => clean],
+      "session.delete": [
+        () => {
+          throw refusal("invalid_state", "busy");
+        },
+      ],
+    });
+    const { deletion, last } = run(client);
+    await deletion.start();
+    await deletion.confirm();
+    expect(last()).toEqual({ kind: "failed", reason: "Something else is changing this session or its folder. Try again in a moment." });
   });
 
   it("fails with the reason when what would be lost can't be read", async () => {
