@@ -146,7 +146,7 @@ Rename
 
 F2
 
-### `rail.tile.renameOfflineReason`
+### `rail.tile.offlineReason`
 
 Available once Ersa reaches your sessions
 

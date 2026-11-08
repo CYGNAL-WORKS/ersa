@@ -771,6 +771,28 @@ describe("pinning a session from its tile", () => {
     expect(within(rail()).queryByRole("button", { name: /^Pinned/ })).toBeNull();
   });
 
+  it("gives keyboard focus to the moved tile, or to the Pinned heading while that group is collapsed", async () => {
+    await open();
+    const tileOf = (title: string) => [...rail().querySelectorAll<HTMLElement>(".session")].find((el) => el.textContent?.includes(title));
+    tileOf("Fix the build")?.focus();
+    fireEvent.keyDown(tileOf("Fix the build") as HTMLElement, { key: "F10", shiftKey: true });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    expect(groupOf("Fix the build")).toBe("Pinned");
+    expect(document.activeElement).toBe(tileOf("Fix the build"));
+
+    const pinned = within(rail()).getByRole("button", { name: /^Pinned/ });
+    fireEvent.click(pinned);
+    tileOf("Write the notes")?.focus();
+    fireEvent.keyDown(tileOf("Write the notes") as HTMLElement, { key: "F10", shiftKey: true });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    expect(groupOf("Write the notes")).toBe("Pinned");
+    expect(document.activeElement).toBe(within(rail()).getByRole("button", { name: /^Pinned/ }));
+  });
+
   it("collapses the Pinned group like any group", async () => {
     await open();
     fireEvent.click(more("Fix the build"));
