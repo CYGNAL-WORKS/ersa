@@ -85,11 +85,12 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Requirement**: one testable statement inside a flow or protocol brief, carrying a stable ID such as `FLOW-NEW-SESSION-R03`.
 - **ADR**: an architecture decision record. One decision per file, superseded rather than edited.
 - **Inbox**: the committed file where implementing sessions record findings that need a planning pass.
-- **Merge review**: the review posted on a pull request's head once CI passes, running the same protocol the author ran before opening it. A clean merge review lets the pull request merge; ADR 0023 says where it runs.
-- **Merge review poller**: the process on the owner's machine that runs the merge review on each pull request whose CI passed (ADR 0023).
+- **Merge review**: the review Docket posts on a pull request's head once CI passes, and the only review a change gets. A clean merge review lets the pull request merge (ADR 0030).
+- **Docket**: the review service on the owner's machine that runs the merge review on each pull request whose CI passed, gates the merge, and answers an implementing session's question about its pull request's state (ADR 0030).
+- **Assumption check**: what an implementing session runs on its plan before writing code: a fresh read-only agent tries to disprove each assumption the plan rests on.
 - **Merge queue**: GitHub's queue that merges a pull request onto `main` and runs CI on that merge before `main` moves.
 - **Manifest**: the generated index of briefs, their status, requirement coverage, and problems.
-- **Reviewer agent**: a read-only subagent that reviews one diff for one concern, such as Spec, Surface (growth that costs more to keep than it is worth), Failure or Design, and reports only findings it confirmed.
+- **Reviewer agent**: an agent the merge review runs on one diff for one concern (Spec, Code, Surface or Design) that reports only findings it confirmed.
 - **Ticket**: an ephemeral unit of implementation work sized to one fresh agent context, derived from a brief.
 - **Planning session**: an agent session that may edit briefs and ADRs. Declares itself with the planning role.
 - **Implementing session**: an agent session that builds tickets, may not edit briefs or ADRs, and writes findings to the inbox.

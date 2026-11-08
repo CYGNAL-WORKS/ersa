@@ -1,6 +1,6 @@
 # 0023: The repository is public under an organization, CI runs on hosted runners, and the merge review runs on the owner's machine outside Actions
 
-- Status: accepted
+- Status: superseded by 0030
 - Date: 2026-11-04
 - Related briefs: none
 
