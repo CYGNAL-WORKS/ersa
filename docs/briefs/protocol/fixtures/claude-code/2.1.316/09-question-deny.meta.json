@@ -1,0 +1,57 @@
+{
+  "recorded_at": "2026-11-06",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--model",
+    "haiku"
+  ],
+  "bidirectional": true,
+  "cwd_was_empty_tempdir": true,
+  "host_behavior": "Denies AskUserQuestion's can_use_tool with a message.",
+  "stderr": "",
+  "stdout_lines": 14,
+  "stdout_timing_ms": [
+    399,
+    1565,
+    3552,
+    3557,
+    3560,
+    3563,
+    3580,
+    5137,
+    5137,
+    5138,
+    5702,
+    8003,
+    8006,
+    8008
+  ],
+  "sent": [
+    {
+      "t": 11,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 1523,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Call the AskUserQuestion tool exactly once with these three questions and nothing else. 1: question 'Which color do you want?', header 'Color', single choice, options 'Red' (a warm color) and 'Blue' (a cool color). 2: question 'Which fruits do you want?', header 'Fruits', multiSelect true, options 'Apple', 'Pear', 'Plum', each with a one-word description. 3: question 'Which name do you want?', header 'Name', single choice, options 'Ann' and 'Bob', each with a one-word description. After the tool returns, reply with exactly the answers you received, verbatim, one per line.\"}]}}"
+    },
+    {
+      "t": 3557,
+      "line": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"d7df0a3d-44a7-4570-a8fe-eb171fd6e8c8\",\"response\":{\"behavior\":\"deny\",\"message\":\"The user declined to answer.\"}}}"
+    }
+  ]
+}

@@ -32,7 +32,11 @@ use serde_json::{Map, Value};
 /// 3: `usage.updated` carries `turn_output_tokens`.
 ///
 /// 4: `user.message` carries the message's `attachments`.
-pub const PROJECTION_VERSION: u32 = 4;
+///
+/// 5: `question.asked` carries each question's `header` and `takes_text` and
+/// each option's `description`; `question.answered` carries `declined`, each
+/// answer's `own_words`, and `answered_by: backend`.
+pub const PROJECTION_VERSION: u32 = 5;
 
 /// One event as Core streams it: a typed payload plus where it came from.
 ///
@@ -533,11 +537,17 @@ pub struct QuestionAsked {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Question {
+    /// Unique within the request.
     pub id: String,
     pub text: String,
+    /// A short label for the question.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub options: Option<Vec<QuestionOption>>,
     pub multi_select: bool,
+    /// The user may answer in their own words beside the options.
+    pub takes_text: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -545,13 +555,19 @@ pub struct Question {
 pub struct QuestionOption {
     pub id: String,
     pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct QuestionAnswered {
     pub request_id: String,
+    /// One per question; empty when the user declined or the backend
+    /// withdrew the question.
     pub answers: Vec<Answer>,
+    /// The user chose not to answer.
+    pub declined: bool,
     pub answered_by: AnsweredBy,
 }
 
@@ -561,9 +577,12 @@ pub struct Answer {
     /// The `id` of the question this answers.
     pub id: String,
     pub value: AnswerValue,
+    /// `value` is the user's own words, not option ids.
+    pub own_words: bool,
 }
 
-/// Free text or one option id; several option ids for a multi-select question.
+/// The user's own words or one option id; several option ids for a
+/// multi-select question.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum AnswerValue {
@@ -576,6 +595,8 @@ pub enum AnswerValue {
 pub enum AnsweredBy {
     User,
     Timeout,
+    /// The backend withdrew the question, after an interrupt say.
+    Backend,
 }
 
 // ---------------------------------------------------------------------------

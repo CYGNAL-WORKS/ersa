@@ -449,8 +449,13 @@ pub struct CanUseTool {
     pub title: Option<String>,
     #[serde(default)]
     pub blocked_path: Option<String>,
-    /// `null` reads as none.
-    #[serde(default, deserialize_with = "null_as_default")]
+    /// `null` reads as none. The question tool's request has none at all,
+    /// and none is written back as none.
+    #[serde(
+        default,
+        deserialize_with = "null_as_default",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub permission_suggestions: Vec<PermissionUpdate>,
     /// Why approval is needed, for the consent line. Usually a string, which
     /// may contain ANSI escapes; kept as raw JSON so another shape still parses.

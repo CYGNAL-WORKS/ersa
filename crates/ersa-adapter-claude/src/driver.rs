@@ -24,8 +24,8 @@ use std::time::Duration;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, ImageLimits,
     LineReader, LineWriter, OpenElsewhere, OutgoingMessage, PermissionDecision, Process,
-    ProcessExit, ProcessSpec, Projector, RecordDeletion, RecordEvent, RecordSummary, SessionConfig,
-    Transport, async_trait,
+    ProcessExit, ProcessSpec, Projector, QuestionReply, RecordDeletion, RecordEvent, RecordSummary,
+    SessionConfig, Transport, async_trait,
 };
 use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::PermissionBehavior;
@@ -33,12 +33,17 @@ use serde_json::{Value, json};
 use tokio::sync::{oneshot, watch};
 
 use crate::projector::ClaudeProjector;
+use crate::questions::{self, QUESTION_TOOL};
 use crate::record::{self, LiveCheck};
 use crate::suggestions;
 use crate::wire::{
     HostControlResponse, HostMessage, HostRequest, HostResponse, InitializeRequest, RenameSource,
     WorkspaceTrust,
 };
+
+/// The message a declined question's deny carries: what the agent reads
+/// before carrying on without answers (PROTO-CLAUDE-CODE-STREAM-R29).
+const DECLINED_MESSAGE: &str = "The user declined to answer.";
 
 /// After the process has exited, how long stdout may stay quiet before the
 /// read loop stops waiting for the rest of it. Lines the CLI wrote before
@@ -1016,6 +1021,40 @@ impl ClaudeSession {
     }
 }
 
+impl ClaudeSession {
+    /// Answers the pending `can_use_tool` request `request_id` with the
+    /// `response` `answer` builds from its raw `request` object. Only a
+    /// question when `question` is true, and only a permission request when
+    /// it is false; any other id is refused as unknown.
+    async fn respond(
+        &self,
+        request_id: &str,
+        question: bool,
+        answer: impl FnOnce(&Value) -> Result<Value, AdapterError>,
+    ) -> Result<(), AdapterError> {
+        let unknown = || AdapterError::UnknownRequest(request_id.to_string());
+        let request = lock(&self.shared.permissions)
+            .get(request_id)
+            .cloned()
+            .filter(|request| (request["tool_name"] == QUESTION_TOOL) == question)
+            .ok_or_else(unknown)?;
+        // Reserve the prompt: a second answer while this one is being
+        // written is refused, as if the prompt were already answered.
+        let _reserved = Reservation::take(&self.shared.deciding, request_id).ok_or_else(unknown)?;
+        let message = HostMessage::ControlResponse(HostControlResponse {
+            response: HostResponse::Success {
+                request_id: request_id.to_string(),
+                response: answer(&request)?,
+            },
+        });
+        self.shared.write(&message).await?;
+        // Only now, so a write that failed leaves the request answerable.
+        // The reservation is released when `_reserved` drops, after this.
+        lock(&self.shared.permissions).remove(request_id);
+        Ok(())
+    }
+}
+
 /// Dropping a session without stopping it kills the CLI rather than leaving
 /// it running with nobody to answer it.
 impl Drop for ClaudeSession {
@@ -1049,25 +1088,34 @@ impl AdapterSession for ClaudeSession {
         request_id: &str,
         decision: PermissionDecision,
     ) -> Result<(), AdapterError> {
-        let unknown = || AdapterError::UnknownRequest(request_id.to_string());
-        let request = lock(&self.shared.permissions)
-            .get(request_id)
-            .cloned()
-            .ok_or_else(unknown)?;
-        // Reserve the prompt: a second decision while this one is being
-        // written is refused, as if the prompt were already answered.
-        let _reserved = Reservation::take(&self.shared.deciding, request_id).ok_or_else(unknown)?;
-        let message = HostMessage::ControlResponse(HostControlResponse {
-            response: HostResponse::Success {
-                request_id: request_id.to_string(),
-                response: Self::answer(&request, decision)?,
-            },
-        });
-        self.shared.write(&message).await?;
-        // Only now, so a write that failed leaves the request answerable.
-        // The reservation is released when `_reserved` drops, after this.
-        lock(&self.shared.permissions).remove(request_id);
-        Ok(())
+        // A question is answered with `answer_question`, never decided.
+        self.respond(request_id, false, |request| Self::answer(request, decision))
+            .await
+    }
+
+    /// An allow whose `updatedInput` is the request's input plus `answers`,
+    /// keyed by question text, or a deny when the user declined
+    /// (PROTO-CLAUDE-CODE-STREAM-R29).
+    async fn answer_question(
+        &self,
+        request_id: &str,
+        reply: QuestionReply,
+    ) -> Result<(), AdapterError> {
+        self.respond(request_id, true, |request| match reply {
+            QuestionReply::Declined => Ok(json!({
+                "behavior": "deny",
+                "message": DECLINED_MESSAGE,
+            })),
+            QuestionReply::Answers(answers) => {
+                let mut input = request["input"].as_object().cloned().unwrap_or_default();
+                let (asked, _) = questions::asked(&input);
+                let answers =
+                    questions::to_cli(&asked, &answers).map_err(AdapterError::Protocol)?;
+                input.insert("answers".into(), Value::Object(answers));
+                Ok(json!({ "behavior": "allow", "updatedInput": input }))
+            }
+        })
+        .await
     }
 
     async fn interrupt(&self) -> Result<(), AdapterError> {

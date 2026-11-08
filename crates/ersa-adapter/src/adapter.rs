@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use ersa_protocol::core_api::Choice;
-use ersa_protocol::events::{Event, PermissionBehavior};
+use ersa_protocol::events::{Answer, Event, PermissionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -328,6 +328,18 @@ pub trait AdapterSession: Send + Sync {
         decision: PermissionDecision,
     ) -> Result<(), AdapterError>;
 
+    /// Answers the backend's pending question `request_id`, the id carried
+    /// by its `question.asked` event, with the user's answers or their
+    /// declining it. The default: the backend asks no questions, so none can
+    /// be pending.
+    async fn answer_question(
+        &self,
+        request_id: &str,
+        _reply: QuestionReply,
+    ) -> Result<(), AdapterError> {
+        Err(AdapterError::UnknownRequest(request_id.to_string()))
+    }
+
     /// Asks the backend to stop the current turn. The session stays alive.
     async fn interrupt(&self) -> Result<(), AdapterError>;
 
@@ -485,6 +497,16 @@ pub struct PermissionDecision {
     pub apply_suggestions: Vec<u32>,
 }
 
+/// The user's reply to a question, mirroring the parameters of
+/// `session.answer_question` in `PROTO-CORE-API`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum QuestionReply {
+    /// One answer per question, in `question.answered`'s shape.
+    Answers(Vec<Answer>),
+    /// The user chose not to answer.
+    Declined,
+}
+
 /// Why an adapter call failed.
 #[derive(Debug)]
 pub enum AdapterError {
@@ -495,7 +517,8 @@ pub enum AdapterError {
     Protocol(String),
     /// The session's backend process is no longer running.
     NotRunning,
-    /// `decide_permission` named a request the backend is not waiting on.
+    /// `decide_permission` or `answer_question` named a request the backend
+    /// is not waiting on, or one of the other kind.
     UnknownRequest(String),
 }
 

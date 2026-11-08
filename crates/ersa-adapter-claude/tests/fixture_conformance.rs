@@ -453,10 +453,10 @@ fn host_messages_serialise_to_the_recorded_stdin_lines() {
                     .unwrap()
                     .as_str()
                     .unwrap(),
-                &PermissionDecision::Allow {
-                    updated_input: line["response"]["response"]["updatedInput"].clone(),
-                    updated_permissions: None,
-                },
+                // An allow or a deny, whichever was recorded (a question's
+                // decline is a deny: fixture 2.1.316/09-question-deny).
+                &serde_json::from_value::<PermissionDecision>(line["response"]["response"].clone())
+                    .unwrap_or_else(|e| panic!("{at}: not a decision: {e}")),
             )
             .unwrap(),
             _ => panic!("{at}: no host message models this recorded line: {line}"),
@@ -550,6 +550,7 @@ fn the_initialize_response_and_permission_prompt_read_as_typed_payloads() {
     let mut saw_initialize = false;
     let mut saw_trust = false;
     let mut saw_prompt = false;
+    let mut saw_question = false;
     for (at, line) in fixture_lines() {
         match CliMessage::from_line(&line).unwrap() {
             CliMessage::ControlResponse(CliControlResponse {
@@ -571,6 +572,18 @@ fn the_initialize_response_and_permission_prompt_read_as_typed_payloads() {
             CliMessage::ControlRequest(CliControlRequest {
                 request: CliRequest::CanUseTool(prompt),
                 ..
+            }) if prompt.tool_name == "AskUserQuestion" => {
+                // A question: its input is the questions, it needs the user,
+                // and it offers no rules (PROTO-CLAUDE-CODE-STREAM, Questions).
+                assert!(prompt.input["questions"].is_array(), "{at}");
+                assert_eq!(prompt.requires_user_interaction, Some(true), "{at}");
+                assert!(prompt.permission_suggestions.is_empty(), "{at}");
+                assert!(prompt.description.is_none(), "{at}");
+                saw_question = true;
+            }
+            CliMessage::ControlRequest(CliControlRequest {
+                request: CliRequest::CanUseTool(prompt),
+                ..
             }) => {
                 assert_eq!(prompt.tool_name, "Bash", "{at}");
                 assert!(prompt.blocked_path.is_some(), "{at}");
@@ -586,7 +599,7 @@ fn the_initialize_response_and_permission_prompt_read_as_typed_payloads() {
             _ => {}
         }
     }
-    assert!(saw_initialize && saw_prompt && saw_trust);
+    assert!(saw_initialize && saw_prompt && saw_trust && saw_question);
 }
 
 // Unrecorded kinds, modelled from the SDK types: the shapes come from there
