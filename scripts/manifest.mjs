@@ -17,7 +17,10 @@ import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "
 import { basename, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { inboxHold, openInboxEntries } from "./merge-pr.mjs";
+// An open inbox entry is a line starting `- [ ]`. The count and the wording
+// match Docket's merge gate, which holds a pull request on the same entries.
+const openInboxEntries = (text) => text.split(/\r?\n/).filter((l) => /^\s*-\s*\[ \]/.test(l)).length;
+const inboxHold = (n) => `${n} open inbox entr${n === 1 ? "y needs" : "ies need"} a planning pass`;
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const BRIEFS_DIR = join(ROOT, "docs", "briefs");

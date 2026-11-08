@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The harness pass's first step (docs/agents/orchestration.md, Train the
-// harness): for each pull request merged since the last pass, what the merge
-// review found against what the author's own review listed.
+// harness): for each pull request merged since the last pass, what Docket's
+// merge review found, and which reviewer found it.
 //
 //   node scripts/harness-lessons.mjs [--since <commit>]
 //
@@ -10,13 +10,13 @@
 // requests are the first-parent merges since it ("Merge pull request #n"),
 // the pass's own left out. For each, the merge reviews this account posted
 // (bodies starting <!-- merge-review -->, each carrying its head, verdict and
-// findings as JSON; another account's are ignored, since anyone can post one)
-// are read, and every blocking finding (high or medium) with origin "new" is
-// set against the body's **Review** section: the finding's file is looked for
-// there, so "not named" is a lead, not a verdict. A pull request with no merge
-// review or no Review section is listed as not compared. A review marked
-// superseded is not a round, but its findings count: the review after it
-// carries them as listed.
+// findings as JSON, every finding naming the reviewers that reported it;
+// another account's are ignored, since anyone can post one) are read, and
+// every blocking finding (high or medium) with origin "new" is listed and
+// counted against each reviewer that found it. A reviewer whose count stays at
+// zero changed no merge decision in the batch. A pull request with no merge
+// review is listed as not counted. A review marked superseded is not a round,
+// but its findings count: the review after it carries them as listed.
 //
 // GitHub is read once per pull request and the answer kept under
 // .scratch/harness-lessons/<n>.json, so a second run, or one after the API
@@ -27,22 +27,23 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// The review's own reading of the state its bodies carry.
-import { parseState } from "./merge-review.mjs";
-
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 const PASS_SUBJECT = /^Harness: lessons from/;
+
+// The record a merge review body carries: the marker line, then the marker with the JSON.
+export function parseState(body) {
+  const m = /^<!-- merge-review -->\s*<!-- merge-review (.*?) -->/s.exec(body ?? "");
+  try {
+    return m ? JSON.parse(m[1]) : null;
+  } catch {
+    return null;
+  }
+}
 
 // A stalled git or gh call ends after two minutes, as in the review and the gate.
 function run(cmd, args) {
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, timeout: 2 * 60 * 1000 });
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: [(r.stderr ?? "").trim(), r.error?.message].filter(Boolean).join("; ") };
-}
-
-// The body's "## Review" section: from that heading to the next "## ".
-export function reviewSection(body) {
-  const m = /^##\s+Review\s*$([\s\S]*?)(?=^##\s|(?![\s\S]))/m.exec(body ?? "");
-  return m ? m[1].trim() : "";
 }
 
 // The pull request numbers merged by first-parent merge commits in `log`
@@ -57,14 +58,11 @@ export function mergedPullRequests(log) {
     .map(Number);
 }
 
-const fileOf = (location) => (location ?? "").split(":")[0].split("/").pop().split(" ")[0];
-
-// One pull request's comparison: the blocking findings the merge review posted,
-// each with whether the author's Review section names its file. Only reviews
-// by `author` (the account the merge review posts as) count: anyone can post a
-// review with the marker on a public repository. A superseded review's
-// findings count (the next review carries them as listed), the review itself
-// is not a round.
+// One pull request's blocking findings at merge, each with the reviewers that
+// found it. Only reviews by `author` (the account the merge review posts as)
+// count: anyone can post a review with the marker on a public repository. A
+// superseded review's findings count (the next review carries them as
+// listed), the review itself is not a round.
 export function compare(pr, author) {
   // Only a state of the shape the review writes: a body this account posted by
   // hand, or a truncated one, is not a review.
@@ -72,9 +70,7 @@ export function compare(pr, author) {
     .filter((r) => r.author?.login === author)
     .map((r) => parseState(r.body))
     .filter((s) => typeof s?.head === "string" && Array.isArray(s.findings));
-  const review = reviewSection(pr.body);
   if (!states.length) return { number: pr.number, title: pr.title, compared: false, why: "no merge review" };
-  if (!review) return { number: pr.number, title: pr.title, compared: false, why: "no Review section in the body" };
   const seen = new Set();
   const findings = [];
   for (const s of states) {
@@ -83,29 +79,40 @@ export function compare(pr, author) {
       const key = `${f.location}|${f.defect}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      const file = fileOf(f.location);
-      findings.push({ head: s.head.slice(0, 7), severity: f.severity, location: f.location, defect: f.defect, named: Boolean(file) && review.includes(file) });
+      const reviewers = Array.isArray(f.reviewers) ? f.reviewers.filter((x) => typeof x === "string") : [];
+      findings.push({ head: s.head.slice(0, 7), severity: f.severity, location: f.location, defect: f.defect, reviewers });
     }
   }
   const rounds = states.filter((s) => !s.superseded);
   return { number: pr.number, title: pr.title, compared: true, rounds: rounds.length, blocked: rounds.filter((s) => s.verdict === "blocked").length, findings };
 }
 
+// Blocking findings per reviewer, most first; a finding two reviewers both
+// reported counts for each. "unnamed" holds findings whose record names none.
+export function tally(results) {
+  const counts = new Map();
+  for (const f of results.filter((r) => r.compared).flatMap((r) => r.findings)) {
+    for (const name of f.reviewers.length ? f.reviewers : ["unnamed"]) counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+  return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
 export function report(results, author) {
   const lines = [];
   const compared = results.filter((r) => r.compared);
-  const findings = compared.flatMap((r) => r.findings.map((f) => ({ ...f, pr: r.number })));
-  const unnamed = findings.filter((f) => !f.named);
+  const findings = compared.flatMap((r) => r.findings);
   // The login is named so a run under another account (a second gh login, a
   // CI token) that finds no merge review anywhere says why.
-  lines.push(`${results.length} pull request(s) merged since the last pass; ${compared.length} compared, counting merge reviews posted by ${author}; ${findings.length} blocking finding(s) at merge, ${unnamed.length} not named in the author's Review section.`);
+  lines.push(`${results.length} pull request(s) merged since the last pass; ${compared.length} counted, from merge reviews posted by ${author}; ${findings.length} blocking finding(s) at merge.`);
+  const counts = tally(results);
+  lines.push(`Blocking findings by reviewer: ${counts.length ? counts.map(([name, n]) => `${name} ${n}`).join(", ") : "none"}. A reviewer in .claude/review.json that is not listed found none.`);
   for (const r of results) {
     if (!r.compared) {
-      lines.push(`\n#${r.number} ${r.title}: not compared (${r.why}).`);
+      lines.push(`\n#${r.number} ${r.title}: not counted (${r.why}).`);
       continue;
     }
     lines.push(`\n#${r.number} ${r.title}: ${r.rounds} review(s), ${r.blocked} blocked.`);
-    for (const f of r.findings) lines.push(`  - ${f.severity}, ${f.location} (${f.head}), ${f.named ? "named" : "NOT NAMED"} by the author: ${f.defect}`);
+    for (const f of r.findings) lines.push(`  - ${f.severity}, ${f.location} (${f.head}), found by ${f.reviewers.join(", ") || "unnamed"}: ${f.defect}`);
   }
   return lines.join("\n");
 }

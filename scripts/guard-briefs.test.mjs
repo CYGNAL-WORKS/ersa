@@ -19,12 +19,14 @@ test("blocks planning-only paths in an implementing session", () => {
   for (const p of [
     ".claude/agents/a.md",
     "D:\\repo\\.claude\\agents\\spec-reviewer.md",
-    ".claude/skills/review-pr/SKILL.md",
+    ".claude/skills/implement-ticket/SKILL.md",
     ".claude/settings.json",
     "docs/briefs/FLOW-X.md",
     "docs/adr/0001-x.md",
     "docs/GLOSSARY.md",
     "CLAUDE.md",
+    "REVIEW.md",
+    ".claude/review.json",
     "scripts/hooks/guard-briefs.mjs",
   ]) {
     assert.equal(exitCode(p, "implementing"), 2, p);
