@@ -19,6 +19,7 @@ import type { Session } from "../protocol/core-api.gen";
 import type { BackendChoices } from "../session/controls";
 import { type TileView, tileOf } from "../session/tile";
 import type { Sending } from "../session/follow";
+import { reducedMotion } from "../theme/motion";
 import { ContextRing } from "./ContextRing";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose, type MenuPlace } from "./Menu";
@@ -154,7 +155,8 @@ export function SessionTile({
   const [lastMark, setLastMark] = useState(view.mark);
   if (view.mark !== lastMark) {
     setLastMark(view.mark);
-    setBreath(needsYou);
+    // With reduced motion on it never breathes, so nothing is left waiting to breathe should motion come back on.
+    setBreath(needsYou && !reducedMotion());
   }
   // Once breathed, it is done: a chevron drawn again, as the active tile's mark or its shelf's handle, holds still. A
   // working glyph's breath loops, so it never ends.
@@ -361,8 +363,7 @@ export function TileItem({
   if (open !== wasOpen) {
     setWasOpen(open);
     // With reduced motion on, it goes at once.
-    const still = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    setClosing(open || still ? undefined : last.current);
+    setClosing(open || reducedMotion() ? undefined : last.current);
   }
   const closed = (event: AnimationEvent) => {
     if (event.animationName === "shelf-back") setClosing(undefined);

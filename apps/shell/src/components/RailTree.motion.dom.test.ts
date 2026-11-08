@@ -77,6 +77,18 @@ describe("a session that comes to need the user", () => {
     expect(container.querySelector(".session-chevron")?.getAttribute("data-breath")).toBe("once");
   });
 
+  it("leaves nothing waiting to breathe with reduced motion on", () => {
+    window.matchMedia = ((query: string) => ({ matches: query.includes("reduce") })) as never;
+    try {
+      const { container, rerender } = render(rail([session("a", "Fix", "2026-11-06T09:00:00Z", working)]));
+      rerender(rail([session("a", "Fix", "2026-11-06T09:00:00Z", asking)]));
+      expect(container.querySelector(".session-chevron-button")).not.toBeNull();
+      expect(container.querySelector("[data-breath]")).toBeNull();
+    } finally {
+      delete (window as { matchMedia?: unknown }).matchMedia;
+    }
+  });
+
   it("shows a chevron at once when the tile is first drawn needing the user", () => {
     const { container } = render(rail([session("a", "Fix", "2026-11-06T09:00:00Z", asking)]));
     expect(container.querySelector(".session-chevron-button")).not.toBeNull();
@@ -133,6 +145,13 @@ describe("a new session's tile", () => {
   it("brings nothing new when a session listed before comes back, as an unarchived one does", () => {
     const { rerender } = render(rail([older, newer]));
     rerender(rail([older]));
+    rerender(rail([older, newer]));
+    expect(slid).toEqual([]);
+  });
+
+  it("brings nothing new when a session first listed archived is unarchived", () => {
+    const { rerender } = render(rail([older]));
+    rerender(rail([older, { ...newer, archived: true }]));
     rerender(rail([older, newer]));
     expect(slid).toEqual([]);
   });

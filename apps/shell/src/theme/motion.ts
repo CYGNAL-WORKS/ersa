@@ -27,24 +27,50 @@ export function placesOf(root: HTMLElement): Map<string, number> {
 }
 
 /** A move's duration and easing, named by their motion tokens. */
-export interface Move {
+interface Move {
   duration: `--motion-${string}`;
   easing: `--motion-${string}`;
 }
 
 /** How a tile moves when the user reorders the rail (DESIGN.md, Motion: "each tile slides to its new position"). */
-export const SETTLE: Move = { duration: "--motion-settle", easing: "--motion-ease-in-out" };
+const SETTLE: Move = { duration: "--motion-settle", easing: "--motion-ease-in-out" };
 
 /** How a new session's tile slides in, and the others make room (DESIGN.md, Motion: "A new session's tile"). */
-export const ARRIVE: Move = { duration: "--motion-slow", easing: "--motion-ease-out" };
+const ARRIVE: Move = { duration: "--motion-slow", easing: "--motion-ease-out" };
 
 /**
- * Slides each element marked `data-slide` from where `before` had it to where it is now, over `move`. One that has
- * no place in `before` appears in place, unless its mark is in `arriving`: then it slides in from above by its own
- * height, fading in, over the same `move`. While they slide, `root` carries `data-sliding`, so its stylesheet can let
- * a tile show outside the frame it moved into.
+ * Slides each element marked `data-slide` from where `before` had it to where it is now, over `motion-settle` with
+ * `motion-ease-in-out` (DESIGN.md, Motion: "each tile slides to its new position"). One that is new appears in place.
  */
-export function slideFrom(root: HTMLElement, before: ReadonlyMap<string, number>, move: Move = SETTLE, arriving?: ReadonlySet<string>): void {
+export function slideFrom(root: HTMLElement, before: ReadonlyMap<string, number>): void {
+  slide(root, before, SETTLE, new Set());
+}
+
+/**
+ * Slides the new elements `arriving`, each marked `data-slide` under `root`, in at their places from above by their
+ * own height, fading in, while every other element makes room from where it sat before they were drawn: all over
+ * `motion-slow` with `motion-ease-out` (DESIGN.md, Motion: "A new session's tile"). Called in a layout effect, before
+ * the page is painted: the arriving elements are taken out of the layout while the rest are measured, then put back.
+ */
+export function arrive(root: HTMLElement, arriving: readonly HTMLElement[]): void {
+  if (reducedMotion() || arriving.length === 0) return;
+  const shown = arriving.map((el) => el.style.display);
+  for (const el of arriving) el.style.display = "none";
+  const before = placesOf(root);
+  arriving.forEach((el, i) => {
+    el.style.display = shown[i] ?? "";
+    // Taken out, it had no place: it has none to slide from.
+    before.delete(el.dataset.slide ?? "");
+  });
+  slide(root, before, ARRIVE, new Set(arriving.map((el) => el.dataset.slide ?? "")));
+}
+
+/**
+ * Slides each element marked `data-slide` from where `before` had it to where it is now, over `move`; one in
+ * `arriving` slides in from above instead, and any other new one appears in place. While they slide, `root` carries
+ * `data-sliding`, so its stylesheet can let a tile show outside the frame it moved into.
+ */
+function slide(root: HTMLElement, before: ReadonlyMap<string, number>, move: Move, arriving: ReadonlySet<string>): void {
   if (reducedMotion()) return;
   const style = getComputedStyle(root);
   const duration = milliseconds(style.getPropertyValue(move.duration));
@@ -56,7 +82,7 @@ export function slideFrom(root: HTMLElement, before: ReadonlyMap<string, number>
     const mark = el.dataset.slide ?? "";
     const from = before.get(mark);
     if (from === undefined) {
-      if (arriving?.has(mark)) {
+      if (arriving.has(mark)) {
         const keyframes = [{ opacity: 0, transform: `translateY(${-el.offsetHeight}px)` }, { opacity: 1, transform: "none" }];
         slides.push(el.animate(keyframes, { duration, easing }));
       }
@@ -72,21 +98,4 @@ export function slideFrom(root: HTMLElement, before: ReadonlyMap<string, number>
   Promise.allSettled(slides.map((slide) => slide.finished)).then(() => {
     if (root.dataset.sliding === mark) delete root.dataset.sliding;
   });
-}
-
-/**
- * Where each element marked `data-slide` under `root` sat before the elements in `arriving` were drawn: they are
- * taken out of the layout while the rest are measured, then put back. Read in a layout effect, before the page is
- * painted, so nothing flickers.
- */
-export function placesWithout(root: HTMLElement, arriving: readonly HTMLElement[]): Map<string, number> {
-  const shown = arriving.map((el) => el.style.display);
-  for (const el of arriving) el.style.display = "none";
-  const places = placesOf(root);
-  arriving.forEach((el, i) => {
-    el.style.display = shown[i] ?? "";
-    // Taken out, it had no place: it has none to slide from.
-    places.delete(el.dataset.slide ?? "");
-  });
-  return places;
 }
