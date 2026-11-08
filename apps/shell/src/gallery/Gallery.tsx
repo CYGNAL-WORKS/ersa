@@ -617,7 +617,7 @@ const shelfStates: [string, ShelfShows, more?: ShelfMore][] = [
   ["The last of three, still counted", { state: "permission", request: { ...shelfRequest, description: "Run the reconnect tests again" }, place: { n: 3, m: 3 } }],
   ["Defaulting to no", { state: "permission", request: { ...shelfRequest, blocked_path: undefined, flags: { ...flags, default_to_no: true } } }],
   ["A long input, which scrolls", { state: "permission", request: { ...shelfRequest, description: "Run every reconnect test", input: { command: longCommand } } }],
-  ["A question", { state: "question", requestId: "q1", questions: [{ id: "a", text: "Should the reconnect test retry on Windows only, or everywhere?", multi_select: false }] }],
+  ["A question", { state: "question", requestId: "q1", questions: [{ id: "a", text: "Should the reconnect test retry on Windows only, or everywhere?", multi_select: false, takes_text: false }] }],
   ["Loading", { state: "loading" }],
   ["Reading failed", { state: "failed", message: "the session's events could not be read" }],
   ["A request Ersa can't show", { state: "unknown" }],
