@@ -1,11 +1,11 @@
 ---
 name: implement-ticket
-description: Build one Ersa ticket (a GitHub issue) end to end in an implementing session started by the orchestrator, from the issue to an open pull request that has already survived adversarial review. Use when a session is told to implement an issue.
+description: Build one Ersa ticket (a GitHub issue) end to end in an implementing session started by the orchestrator, from the issue through a checked plan to a pull request that Docket's merge review passes. Use when a session is told to implement an issue.
 ---
 
 # Implement a ticket
 
-You are an implementing session, usually unattended. The orchestration session reviews and merges after you; your job is to hand it a change that has already survived review. Every skill you call may say "ask the user": in this skill, nobody is there to answer, so carry on with the most reasonable choice and record it: as an inbox line when it is a gap in a brief your code depends on, else as a pull request note.
+You are an implementing session, usually unattended. Docket reviews every head of your pull request and merges it when clean (ADR 0030); your job is a change built on checked assumptions, then fixing what the review finds. Every skill you call may say "ask the user": in this skill, nobody is there to answer, so carry on with the most reasonable choice and record it: as an inbox line when it is a gap in a brief your code depends on, else as a pull request note.
 
 ## 1. Orient
 
@@ -16,25 +16,62 @@ You are an implementing session, usually unattended. The orchestration session r
 - Find other related issues: `gh issue list --state open --search "<two or three key words>"`.
 - Search the code for what already exists in the ticket's area (types, helpers, test fixtures, fakes) and build on it before writing anything new.
 
-## 2. Build
+## 2. Plan and check its assumptions
+
+Before writing code, write the plan to `.scratch/plan.md`: the requirements in build order, the test seam for each, the code you will reuse, and an **Assumptions** list. Name every assumption the plan rests on: how you read each requirement where the words allow another reading, how a peer (the Claude CLI, git, the operating system) behaves, each value you pick that no brief names, and what the code you reuse does.
+
+Write the issue to `.scratch/issue.md` (`gh issue view <n>`), then start the `assumption-checker` agent in a fresh context with the checkout's path, the plan file and the issue file, never your reasoning about them. It reports each assumption as holds, false or open.
+
+- **False**: change the plan. When the plan was right and a brief is wrong, write an inbox line.
+- **Open** where a brief is silent and your code depends on the answer: write an inbox line, pick the most reasonable answer, and carry on.
+
+When the build turns up an assumption the plan did not name, add it to the plan, and before you push, run the checker once more on the new ones alone.
+
+## 3. Build
 
 - Work test-first with the `tdd` skill, at the ticket's **Test seams**. Tests cite requirement IDs with `verifies: <ID>` in test files, and a test for a requirement asserts every value the requirement names (a level, a code, a default), not only that something happened. Reach for `codebase-design` when the shape of an interface is the question, and `diagnosing-bugs` when something fails and the cause is unclear.
 - Plain, idiomatic code with the why commented: the owner is learning Rust.
-- Where a brief, `CONTENT.md` or `DESIGN.md` is wrong, silent, or contradicts what your code relies on, append one line to `docs/briefs/INBOX.md` and carry on. Always write the line: CI stays green with it, and the merge gate holds the pull request until a planning pass closes it (ADR 0025). Briefs, ADRs, the glossary, `CLAUDE.md`, `.claude/` and `scripts/hooks/` are planning-only; a change to the harness that your code does not depend on is a follow-up in the pull request, not an inbox line.
+- Where a brief, `CONTENT.md` or `DESIGN.md` is wrong, silent, or contradicts what your code relies on, append one line to `docs/briefs/INBOX.md` and carry on. Always write the line: CI stays green with it, and the merge gate holds the pull request until a planning pass closes it (ADR 0025). Briefs, ADRs, the glossary, `CLAUDE.md`, `REVIEW.md`, `.claude/` and `scripts/hooks/` are planning-only; a change to the harness that your code does not depend on is a follow-up in the pull request, not an inbox line.
 - When interface code needs a token `docs/design/DESIGN.md` lacks, define it in `apps/shell/src/theme/tokens.pending.yaml` (the generator merges it) and propose it as an inbox line; a planning pass moves it into DESIGN.md.
 - When a change moves the gallery's screenshots, push the branch, then run `node scripts/render-baselines.mjs` in the background (it waits up to half an hour): it renders the baselines on GitHub in CI's container and copies them into `apps/shell/e2e/__screenshots__/`. If it stops before the copy, run it again; it waits on the run already going. Open the changed images, then commit them. Docker is the owner's route, not a session's.
 - Commit as you go; commits that implement requirements end with `Implements: <IDs>`. No attribution trailers.
 
-## 3. Review adversarially
-
-When the ticket's scope is built, everything is committed, and `node scripts/check.mjs --quick` passes, run the `review-pr` skill as the author, on `git diff origin/main...HEAD`, however small the diff: the parallel reviewers, the mutation step, verified dismissals, the smallest fix per finding, and a re-review of substantial fixes. It is the same protocol the orchestration session runs at merge time, so a finding left here is a merge round later.
-
 ## 4. Check, push, open the pull request
 
-1. `git fetch origin && git rebase origin/main`, then `node scripts/check.mjs`. If the app refuses the rebase because `main` changed protected files (under `.claude/`), skip it, push as is, and say so in your report; whoever drives the pull request merges `main` in. Everything passes.
+1. When the ticket's scope is built and everything is committed: `git fetch origin && git rebase origin/main`, then `node scripts/check.mjs`. If the app refuses the rebase because `main` changed protected files (under `.claude/`), skip it, push as is, and say so in your report; whoever drives the pull request merges `main` in. Everything passes.
 2. `git push -u origin HEAD` (force-with-lease only for your own rebased branch).
-3. `gh pr create` against `main`, titled with the issue's title. Body: the `pr` skill's **Summary**, **Evidence** and **Merge Danger**, then **Requirements** (each ID and the test that verifies it), **Test seams**, **Review** (confirmed findings and their fixes, dismissed ones with reasons, follow-ups), **Inbox entries** added (verbatim), and `Fixes #<n>`. Evidence says what the tests proved, what was driven in the running app or against the real CLI, and what was not exercised.
-4. Wait for CI and for the Merge review status (`gh pr checks <n> --watch`). CI runs on GitHub-hosted Linux and Windows runners: a test that assumes a platform's path form or locale fails on the other one. The merge review runs on the owner's machine (ADR 0023): the merge review poller picks up every head whose CI passed within a few minutes while that machine is on, and the status is pending while the review runs. When CI is green and the status is not listed after a few minutes, report that the pull request waits for the merge review rather than watch indefinitely. Fix CI failures and push until it is green. The merge review posts its findings as a review on the pull request: fix every high and medium with the smallest change, push, and wait again, up to three rounds. After the third, stop and report to the owner in plain English what remains.
-   - While the Merge review status is pending on your head, push nothing: a review takes 10 to 40 minutes, a head pushed meanwhile makes the verdict stale, and the next review re-states the same findings as a round. Hold the commit (an inbox line closed, baselines, a merge of main) and push it with the fixes. A push that is not meant to be read goes behind `gh pr ready --undo` first: the poller, the review and the gate skip a draft, and `gh pr ready` does not rerun CI. A turn never ends on a draft.
-   - A review marked superseded (its head moved while it ran) is not a round; count from the next verdict.
-5. End your turn only when the pull request merged or entered the merge queue, its merge review says it waits on the owner (the `needs-owner` or `hold` label, a gate refusal, or three rounds spent) or on a planning pass (a clean review whose gate names open inbox entries), or CI cannot run. Report the pull request link, the check results, and anything the owner must decide. If asked to change the branch later, `git pull` first: a planning commit may have been pushed to it.
+3. `gh pr create` against `main`, titled with the issue's title. Body: the `pr` skill's **Summary**, **Evidence** and **Merge Danger**, then **Requirements** (each ID and the test that verifies it), **Test seams**, **Assumptions** (each with the checker's verdict and what you did about it), **Inbox entries** added (verbatim), and `Fixes #<n>`. Evidence says what the tests proved, what was driven in the running app or against the real CLI, and what was not exercised.
+
+## 5. Drive the pull request through the merge review
+
+Docket, the review service on the owner's machine, reviews each head once its CI passes, posts the findings as a review on the pull request, and adds a clean head to the merge queue. Ask it for your pull request's state, never GitHub, with a 10-minute tool timeout:
+
+```bash
+curl -sS --max-time 600 "http://127.0.0.1:4477/pulls/<n>?head=<sha of your last push>&wait=540"
+```
+
+Docket holds the request until your head reaches a state in the table below, or for 9 minutes, and answers with the pull request's state as JSON. Act only on an answer whose `head` starts with your sha: one that carries a `note` still describes your previous head. Any other answer, including a 404 for a pull request Docket has not synced yet, means ask again. When curl cannot connect, Docket is not running: report that to the owner and stop; never guess the state from GitHub.
+
+| State | Do |
+| --- | --- |
+| `ci-failed` | Fix the checks it lists and push. CI runs on GitHub-hosted Linux and Windows runners: a test that assumes a platform's path form or locale fails on the other one. |
+| `findings` | Fix every high and medium finding, push, and wait again (below). |
+| `merged` | Done. |
+| `waits-on-owner`, `waits-on-planning` | Report the `reason` and stop. |
+| `error`, twice in a row on the same head | Report the `reason` to the owner and stop. |
+
+Fixing findings:
+
+- Fix each with the smallest change that removes the defect, with a test where one is cheap. Fix low ones when trivial and list the rest as follow-ups in the pull request.
+- A fix that needs a new mechanism (a cache, a background task, a protocol field, a state machine or reducer) becomes its own ticket unless the branch is unsafe to merge without it: new mechanisms bring their own defects. So does a reshape the review names that is larger than the ticket. A gap the brief does not cover gets an inbox line when your code depends on it, and is a follow-up otherwise.
+- A finding on a planning-only path, or one that contradicts a harness rule, is the owner's: report it and stop rather than spend a round on it.
+- After the third round (`round` in the state), stop and report to the owner in plain English what remains.
+
+Pushing:
+
+- While your head is `queued` or `reviewing`, push nothing: a new head cancels the running review, and the next one restates the same findings. Hold the commit (an inbox line closed, baselines, a merge of main) and push it with the fixes. A push that is not meant to be reviewed goes behind `gh pr ready --undo` first, since Docket skips a draft; `gh pr ready` does not rerun CI. A turn never ends on a draft.
+- Always pass `--head` with the head you just pushed: Docket syncs about once a minute, and until then it still describes the old head.
+
+## 6. End the turn
+
+End your turn only when the pull request merged, or its state says it waits on the owner or on a planning pass, or three rounds are spent, or Docket or CI cannot run. Report the pull request link, the check results, and anything the owner must decide. If asked to change the branch later, `git pull` first: a planning commit may have been pushed to it.

@@ -1,6 +1,6 @@
 ---
 name: surface-reviewer
-description: Reviews a diff for growth that will cost more to keep than it is worth - duplication, dead surface, and additions bolted onto a shape that no longer fits. The review-pr skill starts it.
+description: Reviews a diff for growth that will cost more to keep than it is worth - duplication, dead surface, and additions bolted onto a shape that no longer fits. Docket runs it on every change.
 tools: Read, Grep, Glob
 ---
 

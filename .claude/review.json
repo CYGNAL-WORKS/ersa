@@ -1,0 +1,26 @@
+{
+  "rubric": "REVIEW.md",
+  "model": "opus",
+  "effort": "medium",
+  "tools": ["Read", "Grep", "Glob", "Bash"],
+  "reviewers": [
+    { "name": "spec", "instructions": ".claude/agents/spec-reviewer.md", "tools": ["Read", "Grep", "Glob", "Edit", "Write", "Bash"] },
+    { "name": "code", "instructions": ".claude/agents/code-reviewer.md", "when": { "paths": ["**"], "except": ["**/*.md"] } },
+    { "name": "surface", "instructions": ".claude/agents/surface-reviewer.md", "tools": ["Read", "Grep", "Glob"] },
+    { "name": "design", "instructions": ".claude/agents/design-reviewer.md", "tools": ["Read", "Grep", "Glob"], "when": { "paths": ["apps/shell/src/**", "apps/shell/*.html", "apps/shell/e2e/**"] } }
+  ],
+  "gate": {
+    "inboxFile": "docs/briefs/INBOX.md",
+    "ownerPaths": [
+      ".github/**",
+      "scripts/hooks/**",
+      "scripts/manifest.mjs",
+      "**/CLAUDE.md",
+      "**/CLAUDE.local.md",
+      "**/.claude/**",
+      "**/.mcp.json",
+      "REVIEW.md"
+    ],
+    "instructionPaths": ["**/CLAUDE.md", "**/CLAUDE.local.md", "**/.claude/**", "**/.mcp.json", "scripts/hooks/**"]
+  }
+}

@@ -1,6 +1,6 @@
 # 0029: The merge review runs three reviews at once
 
-- Status: accepted
+- Status: superseded by 0030
 - Date: 2026-11-07
 - Supersedes: 0027
 - Related briefs: none
