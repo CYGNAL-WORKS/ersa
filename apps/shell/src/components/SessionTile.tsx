@@ -49,8 +49,8 @@ export interface TileRename {
 
 /** Archive or Unarchive on the tile's menu (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3). */
 export interface TileArchive {
-  /** Archives the session, or unarchives it when it is archived. */
-  onChoose: () => void;
+  /** Archive (true) or Unarchive (false), whichever the menu offered for the session as listed. */
+  onChoose: (archived: boolean) => void;
   /** Why it can't be used now; given, the menu shows it unavailable with this reason. */
   unavailable?: string;
 }
@@ -253,7 +253,7 @@ export function SessionTile({
                     kind: "item" as const,
                     label: session.archived ? t("rail.tile.unarchiveButton") : t("rail.tile.archiveButton"),
                     unavailable: archive.unavailable,
-                    onChoose: archive.onChoose,
+                    onChoose: () => archive.onChoose(!session.archived),
                   },
                 ]
               : []),
@@ -413,6 +413,8 @@ export function TileItem({
       data-shelf={open || undefined}
       data-tone={shelf?.tone}
       style={layer !== undefined ? ({ anchorName: anchor } as CSSProperties) : undefined}
+      // The rail finds a tile by its session, to move focus when one leaves.
+      data-session-id={id}
       onFocus={focusIn}
       onBlur={focusOut}
       onKeyDown={keyDown}
