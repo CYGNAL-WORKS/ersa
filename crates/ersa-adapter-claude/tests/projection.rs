@@ -1011,3 +1011,306 @@ fn the_turns_output_tokens_never_decrease_and_start_again_each_turn() {
     let events = events(&log(&entries));
     assert_eq!(turn_output_tokens(&events), [vec![50, 50, 55, 57], vec![3]]);
 }
+
+// ---------------------------------------------------------------------------
+// Questions (PROTO-CLAUDE-CODE-STREAM, Questions), on the 2.1.316 recordings:
+// the CLI asks three questions (single choice, multi-select, single choice)
+// and the host answers, declines, or interrupts.
+
+const ANSWERED_ID: &str = "0b943641-f720-4e34-be39-211ee791e85a";
+const INTERRUPTED_ID: &str = "df763cc1-4136-4a49-873a-296881a62e00";
+const DECLINED_ID: &str = "d7df0a3d-44a7-4570-a8fe-eb171fd6e8c8";
+
+fn option(id: &str, label: &str, description: &str) -> QuestionOption {
+    QuestionOption {
+        id: id.into(),
+        label: label.into(),
+        description: Some(description.into()),
+    }
+}
+
+fn question(
+    id: &str,
+    text: &str,
+    header: &str,
+    options: Vec<QuestionOption>,
+    multi_select: bool,
+) -> Question {
+    Question {
+        id: id.into(),
+        text: text.into(),
+        header: Some(header.into()),
+        options: Some(options),
+        multi_select,
+        takes_text: true,
+    }
+}
+
+fn the_question(events: &[Event]) -> &QuestionAsked {
+    let asked: Vec<&QuestionAsked> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::QuestionAsked(q) => Some(q),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(asked.len(), 1, "one question.asked");
+    asked[0]
+}
+
+fn the_answer(events: &[Event]) -> &QuestionAnswered {
+    let answered: Vec<&QuestionAnswered> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::QuestionAnswered(a) => Some(a),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(answered.len(), 1, "one question.answered");
+    answered[0]
+}
+
+fn no_permission_events(events: &[Event]) {
+    assert!(
+        !events.iter().any(|e| matches!(
+            e,
+            Event::PermissionRequested(_) | Event::PermissionDecided(_)
+        )),
+        "a question is not a permission request"
+    );
+}
+
+/// The state the session moves to right after the first event `wanted` matches.
+fn state_after(events: &[Event], wanted: &dyn Fn(&Event) -> bool) -> LifecycleState {
+    let at = events.iter().position(wanted).expect("the event");
+    match &events[at + 1] {
+        Event::SessionState(s) => s.state,
+        other => panic!("expected a session.state after it, got {other:?}"),
+    }
+}
+
+// verifies: PROTO-AGENT-EVENTS-R18
+// verifies: PROTO-CLAUDE-CODE-STREAM-R30
+#[test]
+fn the_question_tool_projects_to_one_question_and_no_permission_request() {
+    let events = events(&fixture("2.1.316/07-question-answer").raw_log());
+    no_permission_events(&events);
+    assert_eq!(
+        *the_question(&events),
+        QuestionAsked {
+            request_id: ANSWERED_ID.into(),
+            questions: vec![
+                question(
+                    "0",
+                    "Which color do you want?",
+                    "Color",
+                    vec![
+                        option("0", "Red", "Warm color"),
+                        option("1", "Blue", "Cool color")
+                    ],
+                    false,
+                ),
+                question(
+                    "1",
+                    "Which fruits do you want?",
+                    "Fruits",
+                    vec![
+                        option("0", "Apple", "Crisp"),
+                        option("1", "Pear", "Juicy"),
+                        option("2", "Plum", "Tart"),
+                    ],
+                    true,
+                ),
+                question(
+                    "2",
+                    "Which name do you want?",
+                    "Name",
+                    vec![option("0", "Ann", "Short"), option("1", "Bob", "Simple")],
+                    false,
+                ),
+            ],
+        }
+    );
+    assert_eq!(
+        state_after(&events, &|e| matches!(e, Event::QuestionAsked(_))),
+        LifecycleState::WaitingUser
+    );
+}
+
+// verifies: PROTO-AGENT-EVENTS-R19
+#[test]
+fn the_hosts_answer_projects_to_the_answers_by_question_and_option_id() {
+    let events = events(&fixture("2.1.316/07-question-answer").raw_log());
+    no_permission_events(&events);
+    assert_eq!(
+        *the_answer(&events),
+        QuestionAnswered {
+            request_id: ANSWERED_ID.into(),
+            answers: vec![
+                // "Blue": the second option.
+                Answer {
+                    id: "0".into(),
+                    value: AnswerValue::One("1".into()),
+                    own_words: false,
+                },
+                // "Apple, Pear": the first two options.
+                Answer {
+                    id: "1".into(),
+                    value: AnswerValue::Many(vec!["0".into(), "1".into()]),
+                    own_words: false,
+                },
+                // No option has this label: the user's own words.
+                Answer {
+                    id: "2".into(),
+                    value: AnswerValue::One("Carol, from my own words".into()),
+                    own_words: true,
+                },
+            ],
+            declined: false,
+            answered_by: AnsweredBy::User,
+        }
+    );
+    assert_eq!(
+        state_after(&events, &|e| matches!(e, Event::QuestionAnswered(_))),
+        LifecycleState::Running
+    );
+}
+
+// verifies: PROTO-AGENT-EVENTS-R19
+#[test]
+fn a_declined_question_projects_as_declined_with_no_answers() {
+    let events = events(&fixture("2.1.316/09-question-deny").raw_log());
+    no_permission_events(&events);
+    assert_eq!(the_question(&events).request_id, DECLINED_ID);
+    assert_eq!(
+        *the_answer(&events),
+        QuestionAnswered {
+            request_id: DECLINED_ID.into(),
+            answers: Vec::new(),
+            declined: true,
+            answered_by: AnsweredBy::User,
+        }
+    );
+}
+
+// verifies: PROTO-AGENT-EVENTS-R19
+#[test]
+fn a_question_the_cli_withdraws_after_an_interrupt_is_answered_by_the_backend() {
+    let events = events(&fixture("2.1.316/08-question-interrupt").raw_log());
+    no_permission_events(&events);
+    assert_eq!(the_question(&events).request_id, INTERRUPTED_ID);
+    assert_eq!(
+        *the_answer(&events),
+        QuestionAnswered {
+            request_id: INTERRUPTED_ID.into(),
+            answers: Vec::new(),
+            declined: false,
+            answered_by: AnsweredBy::Backend,
+        }
+    );
+    let outcome = events
+        .iter()
+        .find_map(|e| match e {
+            Event::TurnCompleted(t) => Some(t.outcome),
+            _ => None,
+        })
+        .expect("the turn ends");
+    assert_eq!(outcome, TurnOutcome::Interrupted);
+}
+
+// verifies: PROTO-AGENT-EVENTS-R19
+#[test]
+fn a_question_left_unanswered_when_the_turn_ends_is_answered_by_the_backend() {
+    let out = fixture("2.1.316/07-question-answer").stdout;
+    // The request, then the turn's `result` with nothing in between.
+    let (ask, result) = (&out[3], &out[12]);
+    let events = events(&log(&[
+        (Host, USER_MESSAGE),
+        (Backend, ask),
+        (Backend, result),
+    ]));
+    no_permission_events(&events);
+    assert_eq!(
+        *the_answer(&events),
+        QuestionAnswered {
+            request_id: ANSWERED_ID.into(),
+            answers: Vec::new(),
+            declined: false,
+            answered_by: AnsweredBy::Backend,
+        }
+    );
+    let position = |wanted: &dyn Fn(&Event) -> bool| events.iter().position(wanted).unwrap();
+    assert!(
+        position(&|e| matches!(e, Event::QuestionAnswered(_)))
+            < position(&|e| matches!(e, Event::TurnCompleted(_)))
+    );
+}
+
+#[test]
+fn questions_sharing_one_text_share_its_answer() {
+    let request = json!({
+        "type": "control_request",
+        "request_id": "q",
+        "request": {
+            "subtype": "can_use_tool",
+            "tool_name": "AskUserQuestion",
+            "input": { "questions": [
+                { "question": "Which?", "options": [{ "label": "A" }, { "label": "B" }], "multiSelect": false },
+                { "question": "Which?", "options": [{ "label": "B" }, { "label": "A" }], "multiSelect": true }
+            ] }
+        }
+    })
+    .to_string();
+    let answer = json!({
+        "type": "control_response",
+        "response": { "subtype": "success", "request_id": "q", "response": {
+            "behavior": "allow",
+            "updatedInput": { "questions": [], "answers": { "Which?": "A", "Nobody asked?": "x" } }
+        } }
+    })
+    .to_string();
+    let events = events(&log(&[
+        (Host, USER_MESSAGE),
+        (Backend, &request),
+        (Host, &answer),
+    ]));
+    let answers: Vec<(&str, &AnswerValue)> = the_answer(&events)
+        .answers
+        .iter()
+        .map(|a| (a.id.as_str(), &a.value))
+        .collect();
+    // Each question reads the value against its own options; the key that
+    // names no question is left out.
+    assert_eq!(
+        answers,
+        [
+            ("0", &AnswerValue::One("0".into())),
+            ("1", &AnswerValue::Many(vec!["1".into()])),
+        ]
+    );
+}
+
+// verifies: PROTO-AGENT-EVENTS-R10
+#[test]
+fn a_question_without_questions_still_reaches_the_user_with_an_error() {
+    let request = json!({
+        "type": "control_request",
+        "request_id": "q",
+        "request": { "subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": {} }
+    })
+    .to_string();
+    let events = events(&log(&[(Host, USER_MESSAGE), (Backend, &request)]));
+    assert_eq!(
+        summary(&events),
+        [
+            "turn.started 1 User",
+            "session.state Running",
+            "user.message",
+            "error Protocol",
+            "question.asked",
+            "session.state WaitingUser",
+            "passthrough control_request/can_use_tool",
+        ]
+    );
+    assert!(the_question(&events).questions.is_empty());
+}

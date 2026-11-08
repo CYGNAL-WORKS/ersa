@@ -1,0 +1,57 @@
+{
+  "recorded_at": "2026-11-06",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "",
+    "--strict-mcp-config",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--model",
+    "haiku"
+  ],
+  "bidirectional": true,
+  "cwd_was_empty_tempdir": true,
+  "host_behavior": "Answers AskUserQuestion with an allow whose updatedInput adds answers keyed by question text: the last option's label, the first two labels joined by ', ' for multi-select, and own words for the name question; allows any other tool.",
+  "stderr": "",
+  "stdout_lines": 14,
+  "stdout_timing_ms": [
+    413,
+    1565,
+    3993,
+    4013,
+    4018,
+    4034,
+    4052,
+    5831,
+    6214,
+    6216,
+    6289,
+    9716,
+    9720,
+    9722
+  ],
+  "sent": [
+    {
+      "t": 11,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 1517,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Call the AskUserQuestion tool exactly once with these three questions and nothing else. 1: question 'Which color do you want?', header 'Color', single choice, options 'Red' (a warm color) and 'Blue' (a cool color). 2: question 'Which fruits do you want?', header 'Fruits', multiSelect true, options 'Apple', 'Pear', 'Plum', each with a one-word description. 3: question 'Which name do you want?', header 'Name', single choice, options 'Ann' and 'Bob', each with a one-word description. After the tool returns, reply with exactly the answers you received, verbatim, one per line.\"}]}}"
+    },
+    {
+      "t": 4013,
+      "line": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"0b943641-f720-4e34-be39-211ee791e85a\",\"response\":{\"behavior\":\"allow\",\"updatedInput\":{\"questions\":[{\"question\":\"Which color do you want?\",\"header\":\"Color\",\"options\":[{\"label\":\"Red\",\"description\":\"Warm color\"},{\"label\":\"Blue\",\"description\":\"Cool color\"}],\"multiSelect\":false},{\"question\":\"Which fruits do you want?\",\"header\":\"Fruits\",\"options\":[{\"label\":\"Apple\",\"description\":\"Crisp\"},{\"label\":\"Pear\",\"description\":\"Juicy\"},{\"label\":\"Plum\",\"description\":\"Tart\"}],\"multiSelect\":true},{\"question\":\"Which name do you want?\",\"header\":\"Name\",\"options\":[{\"label\":\"Ann\",\"description\":\"Short\"},{\"label\":\"Bob\",\"description\":\"Simple\"}],\"multiSelect\":false}],\"answers\":{\"Which color do you want?\":\"Blue\",\"Which fruits do you want?\":\"Apple, Pear\",\"Which name do you want?\":\"Carol, from my own words\"}}}}}"
+    }
+  ]
+}

@@ -622,6 +622,10 @@ export interface SessionAnswerQuestionParams {
   id: Id;
   request_id: string;
   answers: AgentEvents.QuestionAnswered["answers"];
+  /**
+   * True, with no answers, when the user chose not to answer.
+   */
+  declined?: boolean;
 }
 export interface SessionSetTitleParams {
   id: Id;

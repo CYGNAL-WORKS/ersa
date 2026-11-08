@@ -185,6 +185,13 @@ pub fn parse(line: &str) -> Value {
 /// A stub CLI that answers each of Ersa's lines with the recording's next
 /// stdout lines: `initialize`, then the prompt, then the permission answer.
 pub fn stub(stdout: &[String]) -> FakeTransport {
+    stub_asking_at(stdout, 4)
+}
+
+/// A stub CLI for a recording whose `can_use_tool` request is stdout line
+/// `ask`: it answers `initialize`, takes the prompt, asks, and finishes the
+/// turn once it has an answer.
+pub fn stub_asking_at(stdout: &[String], ask: usize) -> FakeTransport {
     let is = |kind: &'static str| {
         move |line: &str| {
             let v = parse(line);
@@ -204,8 +211,8 @@ pub fn stub(stdout: &[String]) -> FakeTransport {
         .wait_for_stdin(is("initialize"))
         .then_stdout([&stdout[0]])
         .wait_for_stdin(is("user"))
-        .then_stdout(&stdout[1..=4])
+        .then_stdout(&stdout[1..=ask])
         .wait_for_stdin(is("answer"))
-        .then_stdout(&stdout[5..])
+        .then_stdout(&stdout[ask + 1..])
         .hold_open()
 }

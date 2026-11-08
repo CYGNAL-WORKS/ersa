@@ -44,7 +44,7 @@ describe("the shelf moving to the next request", () => {
 
     rerender(shelf({ state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 3 } }));
     expect(screen.getByRole("status").textContent).toBe("Permission request, 2 of 3: Build the shell");
-    rerender(shelf({ state: "question", requestId: "q3", questions: [{ id: "a", text: "Which branch?", multi_select: false }], place: { n: 3, m: 3 } }));
+    rerender(shelf({ state: "question", requestId: "q3", questions: [{ id: "a", text: "Which branch?", multi_select: false, takes_text: false }], place: { n: 3, m: 3 } }));
     expect(screen.getByRole("status").textContent).toBe("Question, 3 of 3: Which branch?");
   });
 
