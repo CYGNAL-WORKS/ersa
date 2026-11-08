@@ -64,4 +64,17 @@ describe("the rail's arrangement while Core saves it", () => {
     expect(result.current.arrangement).toEqual({ groupBy: "project", show: "active", collapsed: {} });
     expect(result.current.problem).toEqual({ kind: "read", message: "Core is away" });
   });
+
+  it("stops saying the settings can't be read once a later connection reads them, but keeps saying a change was refused", async () => {
+    const { save, answers } = core();
+    const { result } = renderHook(() => useRailArrangement(save, describeError));
+    act(() => result.current.readFailed("Core is away"));
+    act(() => result.current.read({ rail: { group_by: "date" } }));
+    expect(result.current.problem).toBeUndefined();
+    expect(result.current.arrangement.groupBy).toBe("date");
+    act(() => result.current.change(choicePatch({ show: "all" })));
+    await act(async () => answers[0]!.fail(new Error("disk full")));
+    act(() => result.current.read({}));
+    expect(result.current.problem).toEqual({ kind: "save", message: "disk full" });
+  });
 });

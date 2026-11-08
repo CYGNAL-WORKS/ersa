@@ -338,6 +338,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Stop on the new-session screen reaches the start under way (FLOW-SEND-MESSAGE-R03).
   const startStop = useRef<StartStop>(undefined);
   const [startProgress, setStartProgress] = useState<SendProgress>();
+  const showing = useRef(arrangement.show);
+  showing.current = arrangement.show;
   const start = async (text: string, values: SessionValues, attachments: readonly Attached[]) => {
     dispatch({ type: "sending" });
     setStartProgress(undefined);
@@ -358,7 +360,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       return false;
     }
     // Showing archived sessions only, the rail switches to active ones, so the new tile is in view (FLOW-ORGANIZE-SESSIONS-R21).
-    if (arrangement.show === "archived") arrange(choicePatch({ show: "active" }));
+    // As it is now, not as it was when the start began: the user can change it while the session starts.
+    if (showing.current === "archived") arrange(choicePatch({ show: "active" }));
     setLastUsed((l) => ({ ...l, [values.project_id]: remembered(values) }));
     // Best effort: a failure only means the screen starts at these values in this window alone.
     client.call("settings.set", { patch: rememberPatch(values) }).catch(() => {});
@@ -644,7 +647,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               show={arrangement.show}
               now={today}
               arrangeProblem={arrangeProblem}
-              sessions={sessions}
+              sessions={arranging && sessions.state === "ready" ? { state: "loading" } : sessions}
               workspaces={workspaces}
               workspaceErrors={workspaceErrors}
               placing={placing}

@@ -2,10 +2,30 @@
    A project heading). The tile itself is SessionTile.css. */
 
 .rail-tree {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
   min-width: 0;
+}
+
+/* What a regrouping took away, fading out where it sat while the rest slides to its new place. */
+.rail-tree [data-leaving] {
+  position: absolute;
+  inset-inline: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+.rail-tree li[data-leaving] {
+  display: grid;
+  list-style: none;
+}
+
+/* Out of its group, a heading's collapsed words have nothing to say which of them it shows. */
+.rail-tree [data-leaving] .rail-heading-count,
+.rail-tree [data-leaving] .rail-heading-trust {
+  display: none;
 }
 
 /* Projects sit space-sm apart, and the tiles inside one space-xs apart. */
@@ -20,6 +40,12 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
+  transition: margin var(--motion-settle) var(--motion-ease-in-out);
+}
+
+/* Holding only the closed Pinned group, the list takes no room, its gap to what follows included. */
+.rail-projects:has(> .rail-pinned[data-empty]:only-child) {
+  margin-bottom: calc(-1 * var(--space-sm));
 }
 
 .rail-project,
