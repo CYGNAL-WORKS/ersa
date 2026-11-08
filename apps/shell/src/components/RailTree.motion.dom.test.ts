@@ -171,6 +171,33 @@ describe("a new session's tile", () => {
     expect(slid).toEqual([]);
   });
 
+  it("waits for the read of its workspace, while a tile already drawn at the rail's end stays where it is", () => {
+    const lost = session("c", "Lost", "2026-11-06T07:00:00Z", undefined, "w-lost");
+    const fresh = session("b", "Write", "2026-11-06T09:00:00Z", undefined, "w2");
+    const { container, rerender } = render(rail([older, lost]));
+    const drawn = container.querySelector('[data-session-id="c"]');
+    expect(drawn).not.toBeNull();
+    rerender(rail([older, lost, fresh], undefined, { reading: true }));
+    expect(container.querySelector('[data-session-id="b"]')).toBeNull();
+    // Drawn again while the read is out, as any change to the rail does: it still waits.
+    rerender(rail([older, lost, fresh], undefined, { reading: true }));
+    expect(container.querySelector('[data-session-id="b"]')).toBeNull();
+    expect(container.querySelector('[data-session-id="c"]')).toBe(drawn);
+    expect(slid).toEqual([]);
+    rerender(rail([older, lost, fresh]));
+    expect(slid[0]?.slide).toBe("session:b");
+  });
+
+  it("stays drawn through a read that comes after it has slid in", () => {
+    const lost = session("b", "Write", "2026-11-06T09:00:00Z", undefined, "w2");
+    const { container, rerender } = render(rail([older]));
+    rerender(rail([older, lost]));
+    const drawn = container.querySelector('[data-session-id="b"]');
+    expect(drawn).not.toBeNull();
+    rerender(rail([older, lost], undefined, { reading: true }));
+    expect(container.querySelector('[data-session-id="b"]')).toBe(drawn);
+  });
+
   it("slides in at the rail's end when no project will hold it", () => {
     const lost = session("b", "Write", "2026-11-06T09:00:00Z", undefined, "w2");
     const { rerender } = render(rail([older]));

@@ -22,6 +22,8 @@ interface RailTreeProps {
   workspaceErrors?: Readonly<Record<string, string>>;
   /** Some project's workspaces are still being read: a session not yet placed waits, rather than sit at the end. */
   placing?: boolean;
+  /** The projects are being read again for a workspace no read had listed: a new session in one waits for the answer. */
+  reading?: boolean;
   activeId?: string;
   onSelect: (id: string) => void;
   /** Opens the new-session screen for the project; nothing is created until its first message (FLOW-NEW-SESSION-R03). */
@@ -84,7 +86,7 @@ export const groupKey = { pinned: "pinned", project: (id: string) => `project:${
  * heading with its sessions beneath it, and their notes.
  */
 export function RailTree(props: RailTreeProps) {
-  const { projects, sessions, workspaces, placing, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
+  const { projects, sessions, workspaces, placing, reading, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
   const { onRename, renaming, onRenameReset, onArchive, archiving, offline, onPin, pinning, initialTileMenu, initialTileDraft } = props;
   // Rename on a tile: unavailable only while Ersa can't reach Core. A session its backend has not named yet, such as one
   // still starting, is refused by Core, and the field says why.
@@ -186,6 +188,9 @@ export function RailTree(props: RailTreeProps) {
   // A session waits to be placed while the projects or their workspaces are still being read, so it does not
   // sit at the end and then move. When the projects could not be read, every session sits at the end.
   const looseShown = projects.state === "error" || (projects.state === "ready" && !placing);
+  // A new session whose workspace is being read waits too, so it slides in once, at its place. Tiles already drawn stay.
+  const isNew = (s: Session) => seen.current !== undefined && (!seen.current.has(s.id) || arriving.current.has(s.id));
+  const loose = tree.loose.filter((s) => !(reading && workspaces[s.workspace_id] === undefined && isNew(s)));
   // The Pinned group's tiles' element, which its heading's toggle says it controls.
   const pinnedTiles = useId();
   // Whether a group is collapsed, and how its heading turns it.
@@ -291,7 +296,7 @@ export function RailTree(props: RailTreeProps) {
           })}
         </ul>
       )}
-      {looseShown && tree.loose.length > 0 && <ul className="rail-tiles">{tree.loose.map(tile)}</ul>}
+      {looseShown && loose.length > 0 && <ul className="rail-tiles">{loose.map(tile)}</ul>}
     </section>
   );
 }

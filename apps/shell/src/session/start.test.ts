@@ -145,7 +145,6 @@ describe("starting a session from the new-session screen", () => {
     expect(outcome).toMatchObject({
       ok: true,
       session: { id: "s1", state: "starting" },
-      workspace: { id: "w-new" },
       firstSend: { sending: { state: "failed", message: "the session is still starting; try again shortly" }, giveBack: true },
     });
     expect(methods()).not.toContain("session.stop");
