@@ -150,6 +150,22 @@ F2
 
 Available once Ersa reaches your sessions
 
+### `rail.tile.archiveButton`
+
+Archive
+
+### `rail.tile.unarchiveButton`
+
+Unarchive
+
+### `rail.tile.archiveError`
+
+Ersa can't archive this session.
+
+### `rail.tile.unarchiveError`
+
+Ersa can't unarchive this session.
+
 ### `rail.tile.titleLabel`
 
 Session title
@@ -181,6 +197,10 @@ Ended
 ### `rail.tile.unknownStateStatus`
 
 Unknown state
+
+### `rail.tile.archivedStatus`
+
+Archived
 
 ### `rail.tile.permissionWant`
 
@@ -277,6 +297,22 @@ Attached image
 ### `composer.name`
 
 Composer
+
+### `composer.archived.note`
+
+This session is archived. Resume it to send a message.
+
+### `composer.archived.resumeButton`
+
+Resume
+
+### `composer.archived.resumingProgress`
+
+Resuming…
+
+### `composer.archived.resumeError`
+
+Ersa can't resume this session.
 
 ### `composer.messageLabel`
 

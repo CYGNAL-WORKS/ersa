@@ -26,6 +26,7 @@ fn config(extra: Value) -> SessionConfig {
         effort: None,
         project_trusted: false,
         project_path: String::new(),
+        backend_session_id: None,
         extra,
     }
 }

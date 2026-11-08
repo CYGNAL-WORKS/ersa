@@ -2,13 +2,19 @@
 // Records a Claude Code session the way Ersa runs one, as a protocol fixture
 // pair: the live stream and the CLI's own session record for the same run.
 //
-//   node scripts/record-claude-session.mjs <name> [--keep] [--cwd <dir>] [--resume <session id>] "<message 1>" ["<message 2>" ...]
+//   node scripts/record-claude-session.mjs <name> [--keep] [--cwd <dir>] [--resume <session id> | --session-id] "<message 1>" ["<message 2>" ...]
 //
 // A message of the form `control:<json>` is sent as a host control request
 // instead, with `<json>` as its `request` object, and the recorder waits for
 // the CLI's `control_response` rather than a `result`. `$SESSION_ID` in it is
 // replaced by the session id once `system/init` has named one; for example
 // 'control:{"subtype":"rename_session","title":"x","session_id":"$SESSION_ID"}'.
+//
+// With --session-id, the CLI starts a new session under an id the recorder
+// chooses (`--session-id <uuid>`), as Ersa starts every new session
+// (PROTO-CLAUDE-CODE-STREAM, Invocation), and `$SESSION_ID` is that id from
+// the start, so a control request can name the session before its first
+// message.
 //
 // A message of the form `content:<json>` is sent as a user message whose
 // content blocks are `<json>`, an array, as a message with attachments goes
@@ -57,6 +63,7 @@
 // `initialize` exchange alone. The folder is deleted afterwards.
 
 import { spawn, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -158,9 +165,10 @@ const keep = flag("--keep");
 const trust = flag("--trust");
 const givenCwd = option("--cwd");
 const resume = option("--resume");
+const chooseId = flag("--session-id");
 const [name, ...messages] = argv;
-if (!name || (messages.length === 0) !== trust || !/^[a-z0-9-]+$/.test(name)) {
-  console.error('usage: node scripts/record-claude-session.mjs <name> [--cwd <dir>] [--resume <id>] "<message>" [...]');
+if (!name || (messages.length === 0) !== trust || !/^[a-z0-9-]+$/.test(name) || (chooseId && resume)) {
+  console.error('usage: node scripts/record-claude-session.mjs <name> [--cwd <dir>] [--resume <id> | --session-id] "<message>" [...]');
   console.error("       node scripts/record-claude-session.mjs <name> --trust");
   process.exit(1);
 }
@@ -208,7 +216,9 @@ function encodeCwd(path) {
   return `${encoded.slice(0, 200)}-${Math.abs(h).toString(36)}`;
 }
 
-const args = [...ERSA_ARGS, ...(resume ? ["--resume", resume] : [])];
+// The id a new session starts under when the recorder chooses it.
+const chosenId = chooseId ? randomUUID() : null;
+const args = [...ERSA_ARGS, ...(resume ? ["--resume", resume] : []), ...(chosenId ? ["--session-id", chosenId] : [])];
 // Removals first, then Ersa's own entrypoint.
 const env = { ...process.env };
 for (const key of ENV_REMOVED) delete env[key];
@@ -324,7 +334,7 @@ if (initialized) {
             return null;
           }
         })
-        .find((m) => m?.type === "system" && m?.subtype === "init")?.session_id;
+        .find((m) => m?.type === "system" && m?.subtype === "init")?.session_id ?? chosenId;
       const request = JSON.parse(text.slice("control:".length).replaceAll("$SESSION_ID", sessionId ?? ""));
       const id = `ersa-${request.subtype ?? "control"}-${++controls}`;
       const answer = waitFor((m) => m.type === "control_response" && m.response?.request_id === id, 60_000);

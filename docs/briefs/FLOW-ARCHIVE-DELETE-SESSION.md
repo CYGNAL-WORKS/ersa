@@ -37,7 +37,8 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 - **The session can't be stopped**: Ersa says so and deletes nothing.
 - **Another session leaves the shared workspace** between the question and the confirmation, so deleting this one would now delete the files: Ersa asks again.
 - **Archive while the session needs the user**: the pending requests are withdrawn with the stop, as when the session is stopped.
-- **The active session** archived or deleted: the transcript area shows the new-session screen.
+- **The active session** archived or deleted by the user in this window: the transcript area shows the new-session screen. A shown session that becomes archived otherwise, as when it is archived in another window, stays shown with the archived note, as an archived session opened on purpose does.
+- **At launch**, the window opens the newest session that is not archived, since the rail hides archived ones.
 - **A session started elsewhere** (FLOW-RESUME-SESSION) is archived and deleted the same way, and deleting it deletes it from the backend's own tools too.
 - **The session is open in another process**, such as the backend's own terminal: Ersa has stopped the session by then, since it can't otherwise tell the other process from its own; it says where, deletes nothing, and the session stays stopped, since the other process would go on writing its record.
 
@@ -65,6 +66,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 
 ## Changes
 
+- 2026-11-07: from #261 inbox: the active session goes to the new-session screen only when the user archives or deletes it in this window, and launch opens the newest session that is not archived; COMPOSER.md draws the archived note and RAIL.md an archived tile's line two, a refused Archive or Unarchive, and focus when a tile leaves the rail. No requirement IDs changed.
 - 2026-11-07: from #252 inbox: a delete refused because the session is open in another process leaves the session stopped. No requirement IDs added or retired.
 - 2026-11-07: from #244 inbox: when git has lost a workspace's record, the delete question says commits made on a detached checkout can't be counted (R10).
 - 2026-11-06: from #236 inbox: a refused Resume leaves the session archived (PROTO-CORE-API-R43); R03 reworded to say a resume clears the mark once Core accepts it, its meaning kept.
