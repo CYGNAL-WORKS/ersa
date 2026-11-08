@@ -6,7 +6,7 @@ import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
 import { type Collapsed, collapsedOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { placesOf, slideFrom } from "../theme/motion";
+import { arrive, placesOf, slideFrom } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileArchive, type TilePin, type TileRename } from "./SessionTile";
@@ -22,6 +22,8 @@ interface RailTreeProps {
   workspaceErrors?: Readonly<Record<string, string>>;
   /** Some project's workspaces are still being read: a session not yet placed waits, rather than sit at the end. */
   placing?: boolean;
+  /** The projects are being read again for a workspace no read had listed: a new session in one waits for the answer. */
+  reading?: boolean;
   activeId?: string;
   onSelect: (id: string) => void;
   /** Opens the new-session screen for the project; nothing is created until its first message (FLOW-NEW-SESSION-R03). */
@@ -84,7 +86,7 @@ export const groupKey = { pinned: "pinned", project: (id: string) => `project:${
  * heading with its sessions beneath it, and their notes.
  */
 export function RailTree(props: RailTreeProps) {
-  const { projects, sessions, workspaces, placing, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
+  const { projects, sessions, workspaces, placing, reading, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
   const { onRename, renaming, onRenameReset, onArchive, archiving, offline, onPin, pinning, initialTileMenu, initialTileDraft } = props;
   // Rename on a tile: unavailable only while Ersa can't reach Core. A session its backend has not named yet, such as one
   // still starting, is refused by Core, and the field says why.
@@ -118,6 +120,27 @@ export function RailTree(props: RailTreeProps) {
     const folded = item.closest<HTMLElement>("[inert]");
     const target = folded ? folded.closest(".rail-project")?.querySelector<HTMLElement>(".rail-heading-toggle") : item.querySelector<HTMLElement>(".session");
     target?.focus({ preventScroll: true });
+  });
+  // A new session's tile, a fork's included, slides in at its place while the others make room (DESIGN.md, Motion). New
+  // means listed for the first time since Ersa started: the first listing draws every tile in place, and a listing
+  // read again after a reconnect, an unarchived session or a pinned one bring nothing new. A new session still waiting
+  // to be placed under its project slides in once it is drawn.
+  const seen = useRef<Set<string>>(undefined);
+  const arriving = useRef(new Set<string>());
+  useLayoutEffect(() => {
+    const el = root.current;
+    if (sessions.state !== "ready" || !el) return;
+    const ids = sessions.sessions.map((s) => s.id);
+    const known = seen.current;
+    seen.current = new Set([...(known ?? []), ...ids]);
+    // An archived one has no tile to slide in, so it never arrives; unarchived later, it is not new.
+    if (known) for (const s of sessions.sessions) if (!known.has(s.id) && !s.archived) arriving.current.add(s.id);
+    // One that left the listing before it was drawn no longer arrives.
+    for (const id of arriving.current) if (!ids.includes(id)) arriving.current.delete(id);
+    const items = [...el.querySelectorAll<HTMLElement>("[data-session-id]")].filter((item) => arriving.current.has(item.dataset.sessionId ?? ""));
+    if (items.length === 0) return;
+    for (const item of items) arriving.current.delete(item.dataset.sessionId ?? "");
+    arrive(el, items);
   });
   // Pin and Unpin: unavailable while Ersa can't reach Core, or while Core stores a pin.
   const pinOf = (s: Session): TilePin | undefined =>
@@ -165,6 +188,9 @@ export function RailTree(props: RailTreeProps) {
   // A session waits to be placed while the projects or their workspaces are still being read, so it does not
   // sit at the end and then move. When the projects could not be read, every session sits at the end.
   const looseShown = projects.state === "error" || (projects.state === "ready" && !placing);
+  // A new session whose workspace is being read waits too, so it slides in once, at its place. Tiles already drawn stay.
+  const isNew = (s: Session) => seen.current !== undefined && (!seen.current.has(s.id) || arriving.current.has(s.id));
+  const loose = tree.loose.filter((s) => !(reading && workspaces[s.workspace_id] === undefined && isNew(s)));
   // The Pinned group's tiles' element, which its heading's toggle says it controls.
   const pinnedTiles = useId();
   // Whether a group is collapsed, and how its heading turns it.
@@ -270,7 +296,7 @@ export function RailTree(props: RailTreeProps) {
           })}
         </ul>
       )}
-      {looseShown && tree.loose.length > 0 && <ul className="rail-tiles">{tree.loose.map(tile)}</ul>}
+      {looseShown && loose.length > 0 && <ul className="rail-tiles">{loose.map(tile)}</ul>}
     </section>
   );
 }
