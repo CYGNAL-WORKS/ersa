@@ -126,6 +126,10 @@ F2
 
 Available once Ersa reaches your sessions
 
+### `rail.tile.deleteButton`
+
+Delete…
+
 ### `rail.tile.titleLabel`
 
 Session title
@@ -173,6 +177,116 @@ Needs you
 ### `rail.tile.needsYouCountWant`
 
 Needs you · {count}
+
+### `rail.delete.busyReason`
+
+Stop the session to delete it
+
+### `rail.delete.offlineReason`
+
+Available once Ersa reaches your sessions
+
+### `rail.delete.title`
+
+Delete {title}?
+
+### `rail.delete.conversationDetail`
+
+Its conversation is deleted for good, in {backend} too.
+
+### `rail.delete.folderAndBranchDetail`
+
+Its folder and its branch {branch} are deleted with it.
+
+### `rail.delete.folderDetail`
+
+Its folder is deleted with it.
+
+### `rail.delete.folderBranchKeptDetail`
+
+Its folder is deleted with it. Its branch {branch} is kept.
+
+### `rail.delete.branchKeptDetail`
+
+The branch holds commits that exist nowhere else.
+
+### `rail.delete.filesStayDetail`
+
+Its files stay in {path}.
+
+### `rail.delete.uncommittedPart`
+
+#### `one`
+
+{count} uncommitted or untracked file
+
+#### `other`
+
+{count} uncommitted or untracked files
+
+### `rail.delete.ignoredPart`
+
+#### `one`
+
+{count} ignored file
+
+#### `other`
+
+{count} ignored files
+
+### `rail.delete.strandedPart`
+
+#### `one`
+
+{count} commit no branch holds
+
+#### `other`
+
+{count} commits no branch holds
+
+### `rail.delete.lossDetail`
+
+{parts} will be lost.
+
+### `rail.delete.unrecordedDetail`
+
+Commits made on a detached checkout can't be counted and may be lost with the folder.
+
+### `rail.delete.changedDetail`
+
+What would be lost changed since you were asked.
+
+### `rail.delete.readingProgress`
+
+Checking what would be lost…
+
+### `rail.delete.cancelButton`
+
+Cancel
+
+### `rail.delete.deleteButton`
+
+Delete
+
+### `rail.delete.deleteAndLoseButton`
+
+Delete and lose them
+
+### `rail.delete.deletingProgress`
+
+Deleting…
+
+### `rail.delete.tryAgainButton`
+
+Try again
+
+### `rail.delete.failedError`
+
+Ersa couldn't delete this session.
+
+### `rail.delete.workspaceUnknownError`
+
+Ersa can't tell yet where this session's files are. Try again in a moment.
 
 ### `rail.shelf.nameLabel`
 

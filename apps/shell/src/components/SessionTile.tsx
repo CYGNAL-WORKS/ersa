@@ -47,6 +47,14 @@ export interface TileRename {
   unavailable?: string;
 }
 
+/** Delete on the tile's menu (FLOW-ARCHIVE-DELETE-SESSION, step 4): it asks first. */
+export interface TileDelete {
+  /** Opens the delete question. */
+  onAsk: () => void;
+  /** Why Delete can't be used now; given, the menu shows it unavailable with this reason. */
+  unavailable?: string;
+}
+
 /** For the gallery: show a pointer or keyboard state on one tile without one. */
 export type ForcedTile = { id: string; state: "hover" | "focus" | "pressed" };
 
@@ -65,6 +73,7 @@ export function SessionTile({
   shelf,
   onChevron,
   rename,
+  remove,
   initialMenu,
   initialDraft,
 }: {
@@ -79,6 +88,8 @@ export function SessionTile({
   onChevron?: (id: string) => void;
   /** Rename on the tile's menu and F2; absent, the tile has no menu. */
   rename?: TileRename;
+  /** Delete on the tile's menu, after a rule. */
+  remove?: TileDelete;
   /** For the gallery: the tile's menu shown open, and the title being edited with this text. */
   initialMenu?: boolean;
   initialDraft?: string;
@@ -137,6 +148,8 @@ export function SessionTile({
         className="session"
         data-force={force}
         data-needs-you={needsYou || undefined}
+        // Names the tile's session, so focus can find the tiles beside it once a session is deleted.
+        data-session-id={session.id}
         aria-current={active || undefined}
         onClick={() => onSelect(session.id)}
         onContextMenu={(event) => {
@@ -236,6 +249,13 @@ export function SessionTile({
               unavailable: rename.unavailable,
               onChoose: edit,
             },
+            // Delete stands apart in its own group, its label in danger (docs/design/RAIL.md, Menus).
+            ...(remove
+              ? ([
+                  { kind: "rule" },
+                  { kind: "item", label: t("rail.tile.deleteButton"), danger: true, unavailable: remove.unavailable, onChoose: remove.onAsk },
+                ] as const)
+              : []),
           ]}
           open={menu.open}
           place={menu.place}
@@ -442,7 +462,7 @@ function Root({
   editing,
   ref,
   ...rest
-}: HTMLAttributes<HTMLElement> & { editing: boolean; ref: Ref<HTMLElement>; "data-force"?: string; "data-needs-you"?: boolean }) {
+}: HTMLAttributes<HTMLElement> & { editing: boolean; ref: Ref<HTMLElement>; "data-force"?: string; "data-needs-you"?: boolean; "data-session-id"?: string }) {
   if (editing) {
     // The box only holds the field: choosing, the menu and its keys belong to the tile when it is a button again.
     const { onClick: _click, onContextMenu: _menu, onKeyDown: _key, ...box } = rest;
