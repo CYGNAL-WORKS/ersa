@@ -1,4 +1,4 @@
-import { Bot, ChevronRight, Ellipsis, LoaderCircle } from "lucide-react";
+import { Archive, Bot, ChevronRight, Ellipsis, LoaderCircle } from "lucide-react";
 import {
   type AnimationEvent,
   type CSSProperties,
@@ -47,6 +47,14 @@ export interface TileRename {
   unavailable?: string;
 }
 
+/** Archive or Unarchive on the tile's menu (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3). */
+export interface TileArchive {
+  /** Archive (true) or Unarchive (false), whichever the menu offered for the session as listed. */
+  onChoose: (archived: boolean) => void;
+  /** Why it can't be used now; given, the menu shows it unavailable with this reason. */
+  unavailable?: string;
+}
+
 /** For the gallery: show a pointer or keyboard state on one tile without one. */
 export type ForcedTile = { id: string; state: "hover" | "focus" | "pressed" };
 
@@ -65,6 +73,7 @@ export function SessionTile({
   shelf,
   onChevron,
   rename,
+  archive,
   initialMenu,
   initialDraft,
 }: {
@@ -79,6 +88,8 @@ export function SessionTile({
   onChevron?: (id: string) => void;
   /** Rename on the tile's menu and F2; absent, the tile has no menu. */
   rename?: TileRename;
+  /** Archive or Unarchive on the tile's menu, after Rename; the menu is there only with Rename. */
+  archive?: TileArchive;
   /** For the gallery: the tile's menu shown open, and the title being edited with this text. */
   initialMenu?: boolean;
   initialDraft?: string;
@@ -236,6 +247,16 @@ export function SessionTile({
               unavailable: rename.unavailable,
               onChoose: edit,
             },
+            ...(archive
+              ? [
+                  {
+                    kind: "item" as const,
+                    label: session.archived ? t("rail.tile.unarchiveButton") : t("rail.tile.archiveButton"),
+                    unavailable: archive.unavailable,
+                    onChoose: () => archive.onChoose(!session.archived),
+                  },
+                ]
+              : []),
           ]}
           open={menu.open}
           place={menu.place}
@@ -392,6 +413,8 @@ export function TileItem({
       data-shelf={open || undefined}
       data-tone={shelf?.tone}
       style={layer !== undefined ? ({ anchorName: anchor } as CSSProperties) : undefined}
+      // The rail finds a tile by its session, to move focus when one leaves.
+      data-session-id={id}
       onFocus={focusIn}
       onBlur={focusOut}
       onKeyDown={keyDown}
@@ -429,6 +452,13 @@ function Mark({ view }: { view: TileView }) {
     case "disconnected":
     case "error":
       return <span className="glyph session-glyph" data-tone={view.tone} aria-hidden="true" />;
+    // Line two says the state; the archive mark is named, since nothing else says the session is archived.
+    case "archived":
+      return (
+        <span className="session-archived" role="img" aria-label={view.markLabel}>
+          <Icon icon={Archive} size="icon-xs" />
+        </span>
+      );
     default:
       return null;
   }

@@ -714,6 +714,176 @@ describe("a tile's menu, and renaming on the tile", () => {
   });
 });
 
+// Archiving and unarchiving (FLOW-ARCHIVE-DELETE-SESSION, steps 1 to 3), against a fake Core whose list changes as
+// Core's would.
+describe("archiving a session from its tile, and an archived session read-only", () => {
+  const rail = () => screen.getByRole("navigation", { name: "Rail" });
+  const titled = (archived: { [id: string]: boolean } = {}) =>
+    sessions.map((s, i) => ({ ...s, title: i === 0 ? "Fix the build" : "Write the notes", archived: archived[s.id] ?? false }));
+  const tileNamed = (title: string) => [...rail().querySelectorAll<HTMLElement>(".session")].find((el) => el.textContent?.includes(title));
+  const callsOf = (core: ReturnType<typeof fakeCore>, method: Method) => core.calls.filter((c) => c.method === method).map((c) => c.params);
+  const composerBox = () => screen.queryByRole("textbox", { name: "Message" });
+  async function open(list: { current: Session[] }, more: Parameters<typeof fakeCore>[0] = {}) {
+    const core = fakeCore({ "session.list": () => list.current, ...more });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    return core;
+  }
+  function chooseArchive(title: string, item: RegExp) {
+    fireEvent.click(within(rail()).getByRole("button", { name: `More for ${title}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: item }));
+  }
+
+  it("archives through session.set_archived, and the tile leaves the rail once Core lists it archived", async () => {
+    const list = { current: titled() };
+    const core = await open(list, {
+      "session.set_archived": (params: { id: string; archived: boolean }) => {
+        list.current = titled({ [params.id]: params.archived });
+        return list.current.find((s) => s.id === params.id);
+      },
+    });
+    // The newest, Write the notes, is active; Fix the build is not.
+    chooseArchive("Fix the build", /^Archive/);
+    await settle();
+    expect(callsOf(core, "session.set_archived")).toEqual([{ id: "s1", archived: true }]);
+    expect(tileNamed("Fix the build")).toBeUndefined();
+    expect(tileNamed("Write the notes")).toBeTruthy();
+  });
+
+  it.each([
+    // The rail reads Fix the build (alpha), Write the notes (beta), Read the logs (gamma). From the middle the next tile
+    // takes focus; from the last, with no next, the previous does.
+    ["Write the notes", "Read the logs"],
+    ["Read the logs", "Write the notes"],
+  ])("moves keyboard focus from %s, archived from its menu, to %s", async (archived, next) => {
+    const three = (marks: { [id: string]: boolean } = {}) => [
+      ...titled(marks),
+      { ...session("s3", "gamma", "2026-11-03T09:00:00Z"), title: "Read the logs", archived: marks.s3 ?? false },
+    ];
+    const list = { current: three() };
+    await open(list, {
+      "session.set_archived": (params: { id: string; archived: boolean }) => {
+        list.current = three({ [params.id]: params.archived });
+        return list.current.find((s) => s.id === params.id);
+      },
+    });
+    // Fix the build is active, so the stage stays on it.
+    fireEvent.click(tileNamed("Fix the build") as HTMLElement);
+    await settle();
+    const more = within(rail()).getByRole("button", { name: `More for ${archived}` });
+    more.focus();
+    chooseArchive(archived, /^Archive/);
+    expect(document.activeElement).toBe(more);
+    await settle();
+    expect(tileNamed(archived)).toBeUndefined();
+    expect(document.activeElement).toBe(tileNamed(next));
+  });
+
+  it("shows the new-session screen when the active session is archived", async () => {
+    const list = { current: titled() };
+    await open(list, {
+      "session.set_archived": (params: { id: string; archived: boolean }) => {
+        list.current = titled({ [params.id]: params.archived });
+        return list.current.find((s) => s.id === params.id);
+      },
+    });
+    expect(composerBox()).toBeTruthy();
+    chooseArchive("Write the notes", /^Archive/);
+    await settle();
+    expect(tileNamed("Write the notes")).toBeUndefined();
+    // The new-session screen's session controls name a project chip; a session's are read-only and name no host list.
+    expect(screen.getByRole("button", { name: /^Project:/ })).toBeTruthy();
+    expect(screen.queryByText("This session is archived. Resume it to send a message.")).toBeNull();
+  });
+
+  it("keeps the tile and says why when Core refuses to archive", async () => {
+    const list = { current: titled() };
+    await open(list, {
+      "session.set_archived": () => {
+        throw { kind: "rpc", error: { code: -32010, message: "session.set_archived: the session is being deleted" } };
+      },
+    });
+    chooseArchive("Fix the build", /^Archive/);
+    await settle();
+    expect(tileNamed("Fix the build")).toBeTruthy();
+    const alert = within(rail()).getByRole("alert");
+    expect(alert.textContent).toContain("Ersa can't archive this session.");
+    expect(alert.textContent).toContain("being deleted");
+  });
+
+  it("opens with the newest session that is not archived", async () => {
+    await open({ current: titled({ s2: true }) });
+    expect(tileNamed("Write the notes")).toBeUndefined();
+    expect(screen.getByRole("heading", { name: "Fix the build" })).toBeTruthy();
+  });
+
+  /** The active session, Write the notes, archived elsewhere: a new session's tile makes App read the list again. */
+  async function archivedWhileOpen(more: Parameters<typeof fakeCore>[0] = {}) {
+    const list = { current: titled() };
+    const core = await open(list, more);
+    list.current = titled({ s2: true });
+    core.emit({ kind: "notification", method: "session.tile", params: { session_id: "s9", tile: { state: "idle", pending: [] } } } as CoreEvent);
+    await settle();
+    return { core, list };
+  }
+
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R02
+  it("shows an archived session's transcript with a note and Resume in place of the composer", async () => {
+    await archivedWhileOpen();
+    expect(screen.getByRole("heading", { name: "Write the notes" })).toBeTruthy();
+    expect(composerBox()).toBeNull();
+    expect(screen.getByText("This session is archived. Resume it to send a message.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+  });
+
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R02
+  it("leaves the session archived and says why when Core refuses the resume", async () => {
+    const { core } = await archivedWhileOpen({
+      "session.resume": () => {
+        throw { kind: "rpc", error: { code: -32010, message: "session.resume: resuming a session arrives with milestone M1" } };
+      },
+    });
+    const resume = screen.getByRole("button", { name: "Resume" });
+    resume.focus();
+    fireEvent.click(resume);
+    // Unavailable while Core answers, but never disabled, which would drop keyboard focus.
+    expect(resume.getAttribute("aria-disabled")).toBe("true");
+    expect(resume.hasAttribute("disabled")).toBe(false);
+    // Pressing it again meanwhile sends nothing more.
+    fireEvent.click(resume);
+    await settle();
+    expect(callsOf(core, "session.resume")).toEqual([{ id: "s2" }]);
+    // Focus comes back to Resume once it can be pressed again.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Resume" }));
+    const alert = screen.getAllByRole("alert").find((a) => a.classList.contains("archived-problem"));
+    expect(alert?.textContent).toContain("Ersa can't resume this session.");
+    expect(alert?.textContent).toContain("milestone M1");
+    expect(composerBox()).toBeNull();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+  });
+
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R03
+  it("brings the composer back once Core accepts the resume and lists the session unarchived, sending nothing else", async () => {
+    const holder: { list?: { current: Session[] } } = {};
+    const { core, list } = await archivedWhileOpen({
+      "session.resume": () => {
+        // Core clears the mark as it accepts the resume.
+        if (holder.list) holder.list.current = titled();
+        return {};
+      },
+    });
+    holder.list = list;
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await settle();
+    await settle();
+    expect(composerBox()).toBeTruthy();
+    // The pin and the section stay: neither session.set_archived nor session.arrange was sent.
+    expect(callsOf(core, "session.set_archived")).toEqual([]);
+    expect(callsOf(core, "session.arrange")).toEqual([]);
+  });
+});
+
 // The composer while Ersa can't reach the sessions (FLOW-SEND-MESSAGE-R06): App tells it so whichever view holds it.
 describe("the composer App draws when Core is lost", () => {
   // verifies: FLOW-SEND-MESSAGE-R06
