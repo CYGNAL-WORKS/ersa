@@ -469,3 +469,56 @@ test("the rail's foot holds still with reduced motion on", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   expect(await animations()).toEqual({ ring: "none", fade: "none" });
 });
+
+// A slide's transform would make the tile the shelf's containing block and take the shelf off its anchor, so a tile
+// holding a shelf slides by its offset, and the shelf goes with it.
+test("a shelf stays beside its tile while the tile slides", async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/gallery.html?component=Shelf&theme=light");
+  const gaps = await page.evaluate(async () => {
+    const tile = document.querySelector<HTMLElement>(".session-item[data-slide-top]")!;
+    const shelf = tile.querySelector(".shelf")!;
+    const gap = () => shelf.getBoundingClientRect().top - tile.getBoundingClientRect().top;
+    const moved = () => tile.getBoundingClientRect().top;
+    const before = { gap: gap(), top: moved() };
+    const slide = tile.animate([{ top: "24px" }, { top: "0px" }], { duration: 100000 });
+    slide.pause();
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+    return { before, during: { gap: gap(), top: moved() } };
+  });
+  expect(gaps.during.top).toBeCloseTo(gaps.before.top + 24, 0);
+  expect(gaps.during.gap).toBeCloseTo(gaps.before.gap, 0);
+});
+
+// DESIGN.md, Motion: a working session's glyph breathes its tone on a motion-breath loop; a chevron that comes to need
+// the user breathes once over motion-breathe-once; both with motion-ease-in-out. With reduced motion on, neither moves.
+test("a working glyph breathes, a new chevron breathes once, and both hold still with reduced motion on", async ({ page }) => {
+  const animations = async () => {
+    await page.goto("/gallery.html?component=RailTree&theme=light");
+    return page.evaluate(() => {
+      const glyph = document.querySelector('.session-glyph[data-breath="loop"]')!;
+      // The rail marks a chevron to breathe only as its session comes to need the user, so it is marked here.
+      const button = document.querySelector(".session-chevron-button")!;
+      button.setAttribute("data-breath", "once");
+      // The active tile's chevron is a mark, not a button; the gallery's tiles have none, so one is added.
+      const mark = document.createElement("span");
+      mark.className = "session-chevron";
+      mark.dataset.breath = "once";
+      button.parentElement!.append(mark);
+      const of = (el: Element) => {
+        const style = getComputedStyle(el);
+        return [style.animationName, style.animationDuration, style.animationTimingFunction, style.animationIterationCount].join(" ");
+      };
+      return { glyph: of(glyph), chevron: of(button.firstElementChild!), mark: of(mark) };
+    });
+  };
+  expect(await animations()).toEqual({
+    glyph: "session-breath 3s cubic-bezier(0.4, 0, 0.2, 1) infinite",
+    chevron: "session-breath 2.4s cubic-bezier(0.4, 0, 0.2, 1) 1",
+    mark: "session-breath 2.4s cubic-bezier(0.4, 0, 0.2, 1) 1",
+  });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const still = await animations();
+  expect([still.glyph.split(" ")[0], still.chevron.split(" ")[0], still.mark.split(" ")[0]]).toEqual(["none", "none", "none"]);
+});
