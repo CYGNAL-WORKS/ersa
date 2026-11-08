@@ -454,11 +454,12 @@ export function TileItem({
     <li
       ref={item}
       className="session-item"
-      // A slide's transform would take a shelf off its anchor: the tile that holds one moves with no slide.
-      data-slide={layer === undefined ? `session:${id}` : undefined}
+      data-slide={`session:${id}`}
       data-shelf={open || undefined}
       data-tone={shelf?.tone}
       style={layer !== undefined ? ({ anchorName: anchor } as CSSProperties) : undefined}
+      // A slide's transform would take the shelf off its anchor, so the tile that holds one slides by its offset.
+      data-slide-top={layer !== undefined || undefined}
       // The rail finds a tile by its session, to move focus when one leaves.
       data-session-id={id}
       onFocus={focusIn}

@@ -82,6 +82,8 @@ export async function startSession(
   text: string,
   stop?: StartStop,
   attachments: Attachment[] = [],
+  /** Told the session's workspace before the session exists, so the rail can place its tile as it appears (FLOW-NEW-SESSION-R13). */
+  onWorkspace?: (workspace: Workspace) => void,
 ): Promise<StartOutcome> {
   const { backend } = values;
   if (!backend) return { ok: false, message: t("composer.noBackendError") };
@@ -98,6 +100,7 @@ export async function startSession(
       if (!root) return { ok: false, message: "This project has no root workspace in Core." };
       workspace = root;
     }
+    onWorkspace?.(workspace);
     const params: SessionCreateParams = { workspace_id: workspace.id, backend };
     // A value the backend offers no choice of is left out: the backend decides.
     if (values.model) params.model = values.model;

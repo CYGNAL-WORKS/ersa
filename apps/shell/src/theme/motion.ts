@@ -90,7 +90,10 @@ function slide(root: HTMLElement, before: ReadonlyMap<string, number>, move: Mov
       continue;
     }
     const by = from - topOf(el);
-    if (by !== 0) slides.push(el.animate([{ transform: `translateY(${by}px)` }, { transform: "none" }], { duration, easing }));
+    if (by === 0) continue;
+    // An element marked `data-slide-top` holds something placed by anchor, which a transform would take off its anchor.
+    const keyframes = el.hasAttribute("data-slide-top") ? [{ top: `${by}px` }, { top: "0" }] : [{ transform: `translateY(${by}px)` }, { transform: "none" }];
+    slides.push(el.animate(keyframes, { duration, easing }));
   }
   if (slides.length === 0) return;
   // A later slide takes over the mark; this one clears it only if it is still its own.

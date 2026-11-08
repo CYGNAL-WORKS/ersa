@@ -155,12 +155,12 @@ describe("a new session's tile", () => {
     ]);
   });
 
-  it("keeps its slide for its place under its project when it is first drawn at the rail's end", () => {
+  it("slides in once it is drawn when it had to wait to be placed", () => {
     const placed = session("b", "Write", "2026-11-06T09:00:00Z", undefined, "w2");
     const known = { workspaces: { w: { project_id: "p" }, w2: { project_id: "p" } } };
     const { rerender } = render(rail([older]));
-    // Its workspace isn't known yet: it waits at the end of the rail and doesn't slide there.
-    rerender(rail([older, placed]));
+    // Its workspace is still being read: it isn't drawn, so nothing slides yet.
+    rerender(rail([older, placed], undefined, { placing: true }));
     expect(slid).toEqual([]);
     rerender(rail([older, placed], undefined, known));
     expect(slid.map((s) => s.slide)).toEqual(["session:b", "session:a"]);
@@ -171,13 +171,23 @@ describe("a new session's tile", () => {
     expect(slid).toEqual([]);
   });
 
-  it("leaves a tile with its shelf open still while a new one slides in, so the shelf stays on its anchor", () => {
+  it("slides in at the rail's end when no project will hold it", () => {
+    const lost = session("b", "Write", "2026-11-06T09:00:00Z", undefined, "w2");
+    const { rerender } = render(rail([older]));
+    rerender(rail([older, lost]));
+    expect(slid.map((s) => s.slide)).toEqual(["session:b"]);
+  });
+
+  it("makes room by its offset on a tile with its shelf open, so the shelf stays on its anchor", () => {
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
     const shelf = { id: "a", tone: "caution" as const, render: () => createElement("div", { className: "shelf" }) };
     const { container, rerender } = render(rail([older], undefined, { shelf }));
     expect(container.querySelector(".shelf")).not.toBeNull();
     rerender(rail([older, newer], undefined, { shelf }));
-    expect(slid.map((s) => s.slide)).toEqual(["session:b"]);
+    expect(slid.map((s) => [s.slide, s.keyframes])).toEqual([
+      ["session:b", [{ opacity: 0, transform: "translateY(-10px)" }, { opacity: 1, transform: "none" }]],
+      ["session:a", [{ top: "-10px" }, { top: "0" }]],
+    ]);
   });
 
   it("brings nothing new when a session listed before comes back, as an unarchived one does", () => {
