@@ -735,7 +735,6 @@ describe("archiving a session from its tile, and an archived session read-only",
     fireEvent.click(screen.getByRole("menuitem", { name: item }));
   }
 
-  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R02
   it("archives through session.set_archived, and the tile leaves the rail once Core lists it archived", async () => {
     const list = { current: titled() };
     const core = await open(list, {
@@ -750,6 +749,35 @@ describe("archiving a session from its tile, and an archived session read-only",
     expect(callsOf(core, "session.set_archived")).toEqual([{ id: "s1", archived: true }]);
     expect(tileNamed("Fix the build")).toBeUndefined();
     expect(tileNamed("Write the notes")).toBeTruthy();
+  });
+
+  it.each([
+    // The rail reads Fix the build (alpha), Write the notes (beta), Read the logs (gamma). From the middle the next tile
+    // takes focus; from the last, with no next, the previous does.
+    ["Write the notes", "Read the logs"],
+    ["Read the logs", "Write the notes"],
+  ])("moves keyboard focus from %s, archived from its menu, to %s", async (archived, next) => {
+    const three = (marks: { [id: string]: boolean } = {}) => [
+      ...titled(marks),
+      { ...session("s3", "gamma", "2026-11-03T09:00:00Z"), title: "Read the logs", archived: marks.s3 ?? false },
+    ];
+    const list = { current: three() };
+    await open(list, {
+      "session.set_archived": (params: { id: string; archived: boolean }) => {
+        list.current = three({ [params.id]: params.archived });
+        return list.current.find((s) => s.id === params.id);
+      },
+    });
+    // Fix the build is active, so the stage stays on it.
+    fireEvent.click(tileNamed("Fix the build") as HTMLElement);
+    await settle();
+    const more = within(rail()).getByRole("button", { name: `More for ${archived}` });
+    more.focus();
+    chooseArchive(archived, /^Archive/);
+    expect(document.activeElement).toBe(more);
+    await settle();
+    expect(tileNamed(archived)).toBeUndefined();
+    expect(document.activeElement).toBe(tileNamed(next));
   });
 
   it("shows the new-session screen when the active session is archived", async () => {
@@ -816,9 +844,18 @@ describe("archiving a session from its tile, and an archived session read-only",
         throw { kind: "rpc", error: { code: -32010, message: "session.resume: resuming a session arrives with milestone M1" } };
       },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    const resume = screen.getByRole("button", { name: "Resume" });
+    resume.focus();
+    fireEvent.click(resume);
+    // Unavailable while Core answers, but never disabled, which would drop keyboard focus.
+    expect(resume.getAttribute("aria-disabled")).toBe("true");
+    expect(resume.hasAttribute("disabled")).toBe(false);
+    // Pressing it again meanwhile sends nothing more.
+    fireEvent.click(resume);
     await settle();
     expect(callsOf(core, "session.resume")).toEqual([{ id: "s2" }]);
+    // Focus comes back to Resume once it can be pressed again.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Resume" }));
     const alert = screen.getAllByRole("alert").find((a) => a.classList.contains("archived-problem"));
     expect(alert?.textContent).toContain("Ersa can't resume this session.");
     expect(alert?.textContent).toContain("milestone M1");

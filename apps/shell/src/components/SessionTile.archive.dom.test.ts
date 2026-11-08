@@ -47,7 +47,7 @@ describe("Archive and Unarchive on a tile's menu", () => {
     const items = screen.getAllByRole("menuitem").map((i) => i.textContent);
     expect(items).toEqual(["RenameF2", "Archive"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
-    expect(onChoose).toHaveBeenCalledTimes(1);
+    expect(onChoose.mock.calls).toEqual([[true]]);
   });
 
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R03
@@ -55,7 +55,8 @@ describe("Archive and Unarchive on a tile's menu", () => {
     const onChoose = tile(true);
     expect(screen.getByRole("img", { name: "Archived" })).toBeTruthy();
     fireEvent.click(screen.getByRole("menuitem", { name: "Unarchive" }));
-    expect(onChoose).toHaveBeenCalledTimes(1);
+    // Unarchive asks to clear the mark, which keeps the pin and the section (Core sets nothing else).
+    expect(onChoose.mock.calls).toEqual([[false]]);
   });
 
   it("shows Archive unavailable with its reason, and choosing it does nothing", () => {

@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode, useCallback, useId, useRef, useState } from "react";
+import { type CSSProperties, type FocusEvent, type ReactNode, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, Ellipsis, Plus, ShieldAlert } from "lucide-react";
 import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
@@ -85,7 +85,35 @@ export function RailTree(props: RailTreeProps) {
       unavailable: offline ? t("rail.tile.offlineReason") : undefined,
     };
   const archiveOf = (s: Session): TileArchive | undefined =>
-    onArchive && { onChoose: () => onArchive(s.id, !s.archived), unavailable: offline ? t("rail.tile.offlineReason") : undefined };
+    onArchive && { onChoose: (archived) => onArchive(s.id, archived), unavailable: offline ? t("rail.tile.offlineReason") : undefined };
+  // A tile that leaves the rail while keyboard focus is in it, as one archived from its menu does, hands focus to the
+  // next tile, else the previous one, else New session (docs/design/RAIL.md, the rule after a deletion), unless the
+  // user has put focus somewhere else meanwhile. The tiles drawn last time give the order.
+  const root = useRef<HTMLElement>(null);
+  const drawn = useRef<string[]>([]);
+  const focusedTile = useRef<string | undefined>(undefined);
+  const trackFocus = (event: FocusEvent) => {
+    focusedTile.current = (event.target as Element).closest<HTMLElement>("[data-session-id]")?.dataset.sessionId;
+  };
+  useLayoutEffect(() => {
+    const section = root.current;
+    if (!section) return;
+    const items = [...section.querySelectorAll<HTMLElement>("[data-session-id]")];
+    const ids = items.map((el) => el.dataset.sessionId ?? "");
+    const before = drawn.current;
+    drawn.current = ids;
+    const gone = focusedTile.current;
+    if (gone === undefined || ids.includes(gone)) return;
+    focusedTile.current = undefined;
+    const now = document.activeElement;
+    if (now !== null && now !== document.body) return;
+    const at = before.indexOf(gone);
+    const after = before.slice(at + 1).find((id) => ids.includes(id));
+    const earlier = before.slice(0, Math.max(at, 0)).reverse().find((id) => ids.includes(id));
+    const to = after ?? earlier;
+    const target = to !== undefined ? items[ids.indexOf(to)]?.querySelector<HTMLElement>(".session") : section.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session");
+    target?.focus();
+  });
   const listed = projects.state === "ready" ? projects.projects : [];
   const tree = treeOf(listed, workspaces, sessions.state === "ready" ? sessions.sessions : []);
   // A session waits to be placed while the projects or their workspaces are still being read, so it does not
@@ -123,7 +151,13 @@ export function RailTree(props: RailTreeProps) {
     );
   };
   return (
-    <section className="rail-tree" aria-label={t("rail.tree.label")}>
+    <section ref={root} className="rail-tree" aria-label={t("rail.tree.label")}
+      onFocus={trackFocus}
+      // Focus put outside the rail is the user's: a tile leaving later takes nothing back.
+      onBlur={(event) => {
+        if (event.relatedTarget !== null && !root.current?.contains(event.relatedTarget)) focusedTile.current = undefined;
+      }}
+    >
       {projects.state === "loading" && <p className="rail-note">{t("rail.tree.loadingProgress")}</p>}
       {projects.state === "error" && <Problem lead={t("rail.tree.projectsError")} reason={projects.message} />}
       {sessions.state === "error" && <Problem lead={t("rail.tree.sessionsError")} reason={sessions.message} />}

@@ -738,8 +738,8 @@ const entries: Entry[] = [
       // s1 is the active session and waits on a permission request: its chevron stays a mark, and More sits before it.
       ["Active, needs you, pointer over it", <RailTree {...ersaOnly} activeId="s1" force={{ id: "s1", state: "hover" }} />],
       ["Tile menu, open", room(<RailTree {...pairOnly} initialTileMenu="p2" />)],
-      // Renaming goes through Core, so while Ersa can't reach it Rename is unavailable, with the reason.
-      ["Tile menu, Rename unavailable", room(<RailTree {...pairOnly} initialTileMenu="p2" offline />)],
+      // Renaming and archiving go through Core, so while Ersa can't reach it both are unavailable, with the reason.
+      ["Tile menu, offline", room(<RailTree {...pairOnly} initialTileMenu="p2" offline />)],
       ["An archived tile", <ArchivedTiles />],
       ["An archived tile, pointer over it", <ArchivedTiles force="hover" />],
       ["Tile menu, archived", room(<ArchivedTiles menu />)],
