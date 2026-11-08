@@ -8,6 +8,4 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-07 LAY-SHELL: no brief says where keyboard focus goes when Pin or Unpin moves a tile to another group (RAIL.md only says a closed menu returns focus to what opened it, and the tile is drawn afresh in its new group). Built meanwhile: focus follows the tile to its new place, or goes to its new group's heading when that group is collapsed.
-
 ## Resolved recently (optional, trimmed in planning passes)
