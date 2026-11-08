@@ -6,6 +6,7 @@ import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
 import { type Collapsed, collapsedOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { placesOf, slideFrom } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TilePin, type TileRename } from "./SessionTile";
@@ -95,6 +96,16 @@ export function RailTree(props: RailTreeProps) {
   // the group's heading.
   const root = useRef<HTMLElement>(null);
   const moving = useRef<string>(undefined);
+  // A pin on its way, and where every tile and heading sat when it was chosen: once Core has answered, each slides
+  // from there to its new place (DESIGN.md, Motion).
+  const sliding = useRef<{ id: string; places: Map<string, number> }>(undefined);
+  useLayoutEffect(() => {
+    const slide = sliding.current;
+    if (slide && pinning?.[slide.id]?.state !== "sending") {
+      sliding.current = undefined;
+      if (root.current) slideFrom(root.current, slide.places);
+    }
+  });
   useLayoutEffect(() => {
     const id = moving.current;
     if (id === undefined || pinning?.[id]?.state === "sending") return;
@@ -113,6 +124,7 @@ export function RailTree(props: RailTreeProps) {
       onChoose: () => {
         // Only a choice made with focus in the rail (in the tile's menu) has focus to give back.
         if (root.current?.contains(document.activeElement)) moving.current = s.id;
+        if (root.current) sliding.current = { id: s.id, places: placesOf(root.current) };
         onPin(s.id, !s.pinned);
       },
       unavailable: offline ? t("rail.tile.offlineReason") : pinning?.[s.id]?.state === "sending" ? t("rail.tile.savingProgress") : undefined,
@@ -184,7 +196,7 @@ export function RailTree(props: RailTreeProps) {
         <ul className="rail-projects">
           {pinned && (
             <li className="rail-project" data-collapsed={pinned.folded || undefined}>
-              <div className="rail-heading">
+              <div className="rail-heading" data-slide={groupKey.pinned}>
                 <GroupToggle
                   folded={pinned.folded}
                   controls={pinnedTiles}
@@ -287,7 +299,7 @@ function ProjectGroup({
   const nameLabel = { project: project.name };
   return (
     <li className="rail-project" data-collapsed={folded || undefined}>
-      <div className="rail-heading" data-force={forced} data-open={menu ? true : undefined}>
+      <div className="rail-heading" data-slide={groupKey.project(project.id)} data-force={forced} data-open={menu ? true : undefined}>
         <GroupToggle
           folded={folded}
           controls={children ? tilesId : undefined}

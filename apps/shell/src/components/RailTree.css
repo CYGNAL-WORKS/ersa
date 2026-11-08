@@ -270,6 +270,11 @@
   overflow: hidden;
 }
 
+/* A tile pinned or unpinned slides from its old group into this frame, so the frame shows it while it slides. */
+.rail-tree[data-sliding] .rail-project:not([data-collapsed]) .rail-group-tiles-inner {
+  overflow: visible;
+}
+
 .rail-project[data-collapsed] .rail-group-tiles {
   grid-template-rows: 0fr;
   opacity: 0;

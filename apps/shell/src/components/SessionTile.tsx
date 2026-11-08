@@ -413,6 +413,7 @@ export function TileItem({
       ref={item}
       className="session-item"
       data-session={id}
+      data-slide={`session:${id}`}
       data-shelf={open || undefined}
       data-tone={shelf?.tone}
       style={layer !== undefined ? ({ anchorName: anchor } as CSSProperties) : undefined}
