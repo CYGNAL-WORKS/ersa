@@ -213,6 +213,9 @@ const ersaOnly: Parameters<typeof RailTree>[0] = {
 const strangerOnly: Parameters<typeof RailTree>[0] = { ...tree, projects: { state: "ready", projects: [projects[3]!] }, sessions: { state: "ready", sessions: [] } };
 /** A resting tile above each forced one, so the two read apart in the screenshot. */
 const pairOnly: Parameters<typeof RailTree>[0] = { ...ersaOnly, sessions: { state: "ready", sessions: pointerPair }, activeId: undefined };
+/** One session being deleted and one whose deletion failed. */
+// Core stops a session before it deletes anything, so both are stopped.
+const beingDeleted: Session[] = pointerPair.map((s, i) => ({ ...s, tile: { ...s.tile, state: "idle" }, deleting: i === 0 ? "running" : "failed" }));
 /** ersa's sessions with a question in place of its permission request, for a collapsed heading in the accent. */
 const askingOnly: Parameters<typeof RailTree>[0] = {
   ...ersaOnly,
@@ -733,6 +736,8 @@ const entries: Entry[] = [
       // p2 is working, so Delete is unavailable with its reason; p1 is idle, so it can be deleted.
       ["Tile menu, open", room(<RailTree {...pairOnly} initialTileMenu="p2" />)],
       ["Tile menu, Delete available", room(<RailTree {...pairOnly} initialTileMenu="p1" />)],
+      // LAY-SHELL, Being deleted: Deleting while Core works on it, and Couldn't delete, whose menu holds Delete… alone.
+      ["Being deleted, and a deletion that failed", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: beingDeleted }} initialTileMenu="p2" />)],
       // Renaming and deleting go through Core, so while Ersa can't reach it both are unavailable, with the reason.
       ["Tile menu, offline", room(<RailTree {...pairOnly} initialTileMenu="p2" offline />)],
       ["Renaming on the tile", <RailTree {...pairOnly} initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }} />],

@@ -21,7 +21,7 @@ import { type TileView, tileOf } from "../session/tile";
 import type { Sending } from "../session/follow";
 import { ContextRing } from "./ContextRing";
 import { Icon, IconButton } from "./Icon";
-import { Menu, type MenuClose, type MenuPlace } from "./Menu";
+import { Menu, type MenuClose, type MenuEntry, type MenuPlace } from "./Menu";
 import { useTitleDraft } from "./SessionTitle";
 import "./SessionTile.css";
 
@@ -135,6 +135,14 @@ export function SessionTile({
     field.current?.select();
   }, [editing, initialDraft]);
   const needsYou = view.mark === "needsYou";
+  const beingDeleted = session.deleting !== undefined;
+  const deleteItem: MenuEntry | undefined = remove && {
+    kind: "item",
+    label: t("rail.tile.deleteButton"),
+    danger: true,
+    unavailable: remove.unavailable,
+    onChoose: remove.onAsk,
+  };
   // The chevron is the shelf's handle on every tile but the active one, whose requests the transcript answers
   // (FLOW-APPROVE-PERMISSION-R26); there it stays a mark that names the want.
   const handle = needsYou && !active;
@@ -165,7 +173,7 @@ export function SessionTile({
         }}
         onKeyDown={(event) => {
           if (!rename) return;
-          if (event.key === "F2") {
+          if (event.key === "F2" && !beingDeleted) {
             event.preventDefault();
             edit();
           } else if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
@@ -241,22 +249,22 @@ export function SessionTile({
       {rename && (
         <Menu
           label={t("rail.tile.moreLabel", { title: view.title })}
-          entries={[
-            {
-              kind: "item",
-              label: t("rail.tile.renameButton"),
-              keyHint: t("rail.tile.renameKey"),
-              unavailable: rename.unavailable,
-              onChoose: edit,
-            },
-            // Delete stands apart in its own group, its label in danger (docs/design/RAIL.md, Menus).
-            ...(remove
-              ? ([
-                  { kind: "rule" },
-                  { kind: "item", label: t("rail.tile.deleteButton"), danger: true, unavailable: remove.unavailable, onChoose: remove.onAsk },
-                ] as const)
-              : []),
-          ]}
+          entries={
+            // A session being deleted, or whose deletion failed, holds Delete… alone (LAY-SHELL, Being deleted).
+            beingDeleted && deleteItem
+              ? [deleteItem]
+              : [
+                  {
+                    kind: "item",
+                    label: t("rail.tile.renameButton"),
+                    keyHint: t("rail.tile.renameKey"),
+                    unavailable: rename.unavailable,
+                    onChoose: edit,
+                  },
+                  // Delete stands apart in its own group, its label in danger (docs/design/RAIL.md, Menus).
+                  ...(deleteItem ? [{ kind: "rule" } as const, deleteItem] : []),
+                ]
+          }
           open={menu.open}
           place={menu.place}
           focus={menu.focus}
@@ -432,7 +440,7 @@ function Mark({ view }: { view: TileView }) {
   switch (view.mark) {
     case "starting":
       return (
-        <span className="session-arc" aria-hidden="true">
+        <span className="session-arc" data-tone={view.tone} aria-hidden="true">
           <Icon icon={LoaderCircle} size="icon-xs" />
         </span>
       );

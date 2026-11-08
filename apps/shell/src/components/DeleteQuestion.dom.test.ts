@@ -127,6 +127,23 @@ describe("the delete question's buttons", () => {
     expect(calls).toEqual(["tryAgain"]);
   });
 
+  it("keeps focus in the dialog through Try again, and on Cancel each time it asks", () => {
+    const props = { title: "Fix the build", backend: "Claude Code", onConfirm: () => {}, onTryAgain: () => {}, onCancel: () => {} };
+    const at = (phase: Exclude<DeletePhase, { kind: "deleted" }>) => createElement(DeleteQuestion, { ...props, phase });
+    const { rerender } = render(at({ kind: "failed", reason: "The folder is in use." }));
+    expect(document.activeElement).toBe(button("Try again"));
+    rerender(at({ kind: "reading" }));
+    expect(document.activeElement).toBe(button("Cancel"));
+    rerender(at({ kind: "asking", changed: false, goes: whatGoes(isolated, clean) }));
+    expect(document.activeElement).toBe(button("Cancel"));
+    // Asked again twice in a row: focus goes back to Cancel each time.
+    for (let i = 0; i < 2; i++) {
+      (screen.getAllByRole("button")[1] as HTMLButtonElement).focus();
+      rerender(at({ kind: "asking", changed: true, goes: whatGoes(isolated, { ...clean, uncommitted: i + 1 }) }));
+      expect(document.activeElement).toBe(button("Cancel"));
+    }
+  });
+
   it("can't be confirmed while it reads what would be lost", () => {
     const dialog = show({ kind: "reading" });
     expect(dialog.textContent).toContain("Checking what would be lost…");

@@ -65,8 +65,8 @@ export const enUS = {
       renameButton: "Rename",
       // The key that does the same as Rename, at the item's trailing edge.
       renameKey: "F2",
-      // Why Rename is unavailable: renaming goes through Core.
-      renameOfflineReason: "Available once Ersa reaches your sessions",
+      // Why an item in the menu is unavailable while Ersa can't reach Core, which renaming and deleting go through.
+      offlineReason: "Available once Ersa reaches your sessions",
       // In the tile's menu, apart in its own group. It asks first, so it ends in an ellipsis.
       deleteButton: "Delete…",
       // The field the title becomes while it is renamed on the tile.
@@ -80,6 +80,9 @@ export const enUS = {
       errorStatus: "Error",
       endedStatus: "Ended",
       unknownStateStatus: "Unknown state",
+      // A session Ersa is deleting, and one whose deletion failed (LAY-SHELL, Being deleted).
+      deletingStatus: "Deleting",
+      deleteFailedStatus: "Couldn't delete",
       // What a session that needs the user wants, in the tone of its chevron.
       permissionWant: "Needs permission",
       questionWant: "Has a question",
@@ -90,8 +93,8 @@ export const enUS = {
     delete: {
       // Beneath Delete… in the tile's menu, while the session is starting, working or waiting on the user.
       busyReason: "Stop the session to delete it",
-      // Beneath Delete… while Ersa can't reach Core.
-      offlineReason: "Available once Ersa reaches your sessions",
+      // Beneath Delete… while Ersa is already deleting the session.
+      deletingReason: "Ersa is deleting this session",
       title: "Delete {title}?",
       // Always said: the conversation goes from the backend's own tools too ("Claude Code").
       conversationDetail: "Its conversation is deleted for good, in {backend} too.",

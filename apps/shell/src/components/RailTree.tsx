@@ -81,7 +81,7 @@ export function RailTree(props: RailTreeProps) {
       onSave: (title) => onRename(s.id, title),
       renaming: renaming?.[s.id],
       onReset: () => onRenameReset?.(s.id),
-      unavailable: offline ? t("rail.tile.renameOfflineReason") : undefined,
+      unavailable: offline ? t("rail.tile.offlineReason") : undefined,
     };
   // Delete on a tile: unavailable while the session is busy, or while Ersa can't reach Core.
   const removeOf = (s: Session): TileDelete | undefined =>
