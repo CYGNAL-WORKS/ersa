@@ -8,8 +8,8 @@ import type { BackendChoices } from "./controls";
 
 type Tile = Session["tile"];
 
-/** The mark at a tile's trailing edge. Idle, ended and an unknown state have none. */
-export type TileMark = "starting" | "working" | "needsYou" | "disconnected" | "error";
+/** The mark at a tile's trailing edge. Idle, ended and an unknown state have none; an archived session has its own. */
+export type TileMark = "starting" | "working" | "needsYou" | "disconnected" | "error" | "archived";
 
 /** The tone a mark is drawn in; a needs-you mark's phrase takes it too. */
 export type TileTone = "accent" | "caution" | "danger" | "faint";
@@ -45,7 +45,11 @@ export function tileOf(session: Session, backends: Readonly<Record<string, reado
     cost: cost !== undefined && Number.isFinite(cost) ? dollars.format(cost) : undefined,
     ring: contextUsed(tile),
   };
-  return { ...base, ...stateOf(tile) };
+  const state = stateOf(tile);
+  // An archived session's tile reads quieter and carries the archive mark in place of its state's (LAY-SHELL,
+  // Archived); line two still says its state.
+  if (session.archived) return { ...base, ...state, titleMuted: true, mark: "archived", tone: undefined, markLabel: t("rail.tile.archivedStatus") };
+  return { ...base, ...state };
 }
 
 type StateView = Pick<TileView, "titleMuted" | "mark" | "tone" | "markLabel" | "phrase">;

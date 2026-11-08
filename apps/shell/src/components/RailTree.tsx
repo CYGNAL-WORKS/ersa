@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode, useCallback, useId, useRef, useState } from "react";
+import { type CSSProperties, type FocusEvent, type ReactNode, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, Ellipsis, Plus, ShieldAlert } from "lucide-react";
 import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
@@ -8,7 +8,7 @@ import { type Collapsed, collapsedOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
-import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileRename } from "./SessionTile";
+import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileArchive, type TileRename } from "./SessionTile";
 import { TrustQuestion } from "./TrustQuestion";
 import "./RailTree.css";
 
@@ -55,7 +55,11 @@ interface RailTreeProps {
   renaming?: Readonly<Record<string, Sending>>;
   /** Editing a tile's title starts or ends: its earlier refusal goes. */
   onRenameReset?: (id: string) => void;
-  /** Ersa can't reach Core, so nothing can be renamed now. */
+  /** Archives a session from its tile, or unarchives an archived one (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3). */
+  onArchive?: (id: string, archived: boolean) => void;
+  /** Archives and unarchives on their way, and why the last was refused, by session id. */
+  archiving?: Readonly<Record<string, Sending>>;
+  /** Ersa can't reach Core, so nothing can be renamed or archived now. */
   offline?: boolean;
   /** For the gallery: a pointer or keyboard state on one tile or one heading, the menu open, the trust question asked. */
   force?: ForcedTile;
@@ -70,7 +74,7 @@ interface RailTreeProps {
 /** The rail's tree (LAY-SHELL, The rail): each project's heading with its sessions beneath it, and their notes. */
 export function RailTree(props: RailTreeProps) {
   const { projects, sessions, workspaces, placing, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
-  const { onRename, renaming, onRenameReset, offline, initialTileMenu, initialTileDraft } = props;
+  const { onRename, renaming, onRenameReset, onArchive, archiving, offline, initialTileMenu, initialTileDraft } = props;
   // Rename on a tile: unavailable only while Ersa can't reach Core. A session its backend has not named yet, such as one
   // still starting, is refused by Core, and the field says why.
   const renameOf = (s: Session): TileRename | undefined =>
@@ -78,8 +82,38 @@ export function RailTree(props: RailTreeProps) {
       onSave: (title) => onRename(s.id, title),
       renaming: renaming?.[s.id],
       onReset: () => onRenameReset?.(s.id),
-      unavailable: offline ? t("rail.tile.renameOfflineReason") : undefined,
+      unavailable: offline ? t("rail.tile.offlineReason") : undefined,
     };
+  const archiveOf = (s: Session): TileArchive | undefined =>
+    onArchive && { onChoose: (archived) => onArchive(s.id, archived), unavailable: offline ? t("rail.tile.offlineReason") : undefined };
+  // A tile that leaves the rail while keyboard focus is in it, as one archived from its menu does, hands focus to the
+  // next tile, else the previous one, else New session (docs/design/RAIL.md, the rule after a deletion), unless the
+  // user has put focus somewhere else meanwhile. The tiles drawn last time give the order.
+  const root = useRef<HTMLElement>(null);
+  const drawn = useRef<string[]>([]);
+  const focusedTile = useRef<string | undefined>(undefined);
+  const trackFocus = (event: FocusEvent) => {
+    focusedTile.current = (event.target as Element).closest<HTMLElement>("[data-session-id]")?.dataset.sessionId;
+  };
+  useLayoutEffect(() => {
+    const section = root.current;
+    if (!section) return;
+    const items = [...section.querySelectorAll<HTMLElement>("[data-session-id]")];
+    const ids = items.map((el) => el.dataset.sessionId ?? "");
+    const before = drawn.current;
+    drawn.current = ids;
+    const gone = focusedTile.current;
+    if (gone === undefined || ids.includes(gone)) return;
+    focusedTile.current = undefined;
+    const now = document.activeElement;
+    if (now !== null && now !== document.body) return;
+    const at = before.indexOf(gone);
+    const after = before.slice(at + 1).find((id) => ids.includes(id));
+    const earlier = before.slice(0, Math.max(at, 0)).reverse().find((id) => ids.includes(id));
+    const to = after ?? earlier;
+    const target = to !== undefined ? items[ids.indexOf(to)]?.querySelector<HTMLElement>(".session") : section.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session");
+    target?.focus();
+  });
   const listed = projects.state === "ready" ? projects.projects : [];
   const tree = treeOf(listed, workspaces, sessions.state === "ready" ? sessions.sessions : []);
   // A session waits to be placed while the projects or their workspaces are still being read, so it does not
@@ -87,6 +121,7 @@ export function RailTree(props: RailTreeProps) {
   const looseShown = projects.state === "error" || (projects.state === "ready" && !placing);
   const tile = (s: Session) => {
     const open = shelf?.id === s.id ? shelf : undefined;
+    const archive = archiving?.[s.id];
     return (
       <TileItem key={s.id} id={s.id} shelf={open} onClose={onCloseShelf}>
         {(shelfDomId) => (
@@ -102,16 +137,27 @@ export function RailTree(props: RailTreeProps) {
               shelf={open && { tone: open.tone, domId: shelfDomId }}
               onChevron={onChevron}
               rename={renameOf(s)}
+              archive={archiveOf(s)}
               initialMenu={initialTileMenu === s.id}
               initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
             />
+            {/* A refused archive or unarchive says why beneath the tile, which stays as it was. */}
+            {archive?.state === "failed" && (
+              <Problem lead={s.archived ? t("rail.tile.unarchiveError") : t("rail.tile.archiveError")} reason={archive.message} />
+            )}
           </ErrorBoundary>
         )}
       </TileItem>
     );
   };
   return (
-    <section className="rail-tree" aria-label={t("rail.tree.label")}>
+    <section ref={root} className="rail-tree" aria-label={t("rail.tree.label")}
+      onFocus={trackFocus}
+      // Focus put outside the rail is the user's: a tile leaving later takes nothing back.
+      onBlur={(event) => {
+        if (event.relatedTarget !== null && !root.current?.contains(event.relatedTarget)) focusedTile.current = undefined;
+      }}
+    >
       {projects.state === "loading" && <p className="rail-note">{t("rail.tree.loadingProgress")}</p>}
       {projects.state === "error" && <Problem lead={t("rail.tree.projectsError")} reason={projects.message} />}
       {sessions.state === "error" && <Problem lead={t("rail.tree.sessionsError")} reason={sessions.message} />}
