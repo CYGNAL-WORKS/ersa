@@ -979,6 +979,7 @@ const entries: Entry[] = [
       ["Resume pressed", <ArchivedNote onResume={() => {}} force="pressed" />],
       ["Resume, keyboard focus", <ArchivedNote onResume={() => {}} force="focus" />],
       ["Resuming", <ArchivedNote onResume={() => {}} resuming={{ state: "sending" }} />],
+      ["Resuming, keyboard focus", <ArchivedNote onResume={() => {}} resuming={{ state: "sending" }} force="focus" />],
       [
         "Resume refused",
         <ArchivedNote onResume={() => {}} resuming={{ state: "failed", message: "session.resume: resuming a stopped session arrives with milestone M1" }} />,
