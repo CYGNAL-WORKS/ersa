@@ -153,13 +153,18 @@ export function SessionTile({
   // moves a tile). Only a change into needing the user does; a tile first drawn needing the user shows it at once.
   const [breath, setBreath] = useState(false);
   const [lastMark, setLastMark] = useState(view.mark);
+  const [wasActive, setWasActive] = useState(active);
+  // Made active or left mid-breath, the chevron is drawn by another element, which would start the breath over: it ends.
+  if (active !== wasActive) {
+    setWasActive(active);
+    setBreath(false);
+  }
   if (view.mark !== lastMark) {
     setLastMark(view.mark);
     // With reduced motion on it never breathes, so nothing is left waiting to breathe should motion come back on.
     setBreath(needsYou && !reducedMotion());
   }
-  // Once breathed, it is done: a chevron drawn again, as the active tile's mark or its shelf's handle, holds still. A
-  // working glyph's breath loops, so it never ends.
+  // Once breathed, it is done. A working glyph's breath loops, so it never ends.
   const breathed = (event: AnimationEvent) => {
     if (event.animationName === "session-breath") setBreath(false);
   };
@@ -449,7 +454,8 @@ export function TileItem({
     <li
       ref={item}
       className="session-item"
-      data-slide={`session:${id}`}
+      // A slide's transform would take a shelf off its anchor: the tile that holds one moves with no slide.
+      data-slide={layer === undefined ? `session:${id}` : undefined}
       data-shelf={open || undefined}
       data-tone={shelf?.tone}
       style={layer !== undefined ? ({ anchorName: anchor } as CSSProperties) : undefined}

@@ -121,8 +121,8 @@ export function RailTree(props: RailTreeProps) {
   });
   // A new session's tile, a fork's included, slides in at its place while the others make room (DESIGN.md, Motion). New
   // means listed for the first time since Ersa started: the first listing draws every tile in place, and a listing
-  // read again after a reconnect, an unarchived session or a pinned one bring nothing new. A new session still waiting
-  // to be placed under its project slides in once it is drawn.
+  // read again after a reconnect, an unarchived session or a pinned one bring nothing new. A new session drawn at the
+  // rail's end because its workspace isn't known yet keeps its slide for its place under its project.
   const seen = useRef<Set<string>>(undefined);
   const arriving = useRef(new Set<string>());
   useLayoutEffect(() => {
@@ -135,7 +135,11 @@ export function RailTree(props: RailTreeProps) {
     if (known) for (const s of sessions.sessions) if (!known.has(s.id) && !s.archived) arriving.current.add(s.id);
     // One that left the listing before it was drawn no longer arrives.
     for (const id of arriving.current) if (!ids.includes(id)) arriving.current.delete(id);
-    const items = [...el.querySelectorAll<HTMLElement>("[data-session-id]")].filter((item) => arriving.current.has(item.dataset.sessionId ?? ""));
+    const unplaced = new Set(tree.loose.map((s) => s.id));
+    const items = [...el.querySelectorAll<HTMLElement>("[data-session-id]")].filter((item) => {
+      const id = item.dataset.sessionId ?? "";
+      return arriving.current.has(id) && !unplaced.has(id);
+    });
     if (items.length === 0) return;
     for (const item of items) arriving.current.delete(item.dataset.sessionId ?? "");
     arrive(el, items);

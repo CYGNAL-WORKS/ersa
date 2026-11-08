@@ -7,13 +7,13 @@
 import { act, cleanup, render } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Session } from "../protocol/core-api.gen";
+import type { Project, Session } from "../protocol/core-api.gen";
 import { RailTree } from "./RailTree";
 
-const session = (id: string, title: string, created_at: string, tile: Session["tile"] = { state: "idle", pending: [] }): Session => ({
+const session = (id: string, title: string, created_at: string, tile: Session["tile"] = { state: "idle", pending: [] }, workspace_id = "w"): Session => ({
   id,
   title,
-  workspace_id: "w",
+  workspace_id,
   host_id: "local",
   backend: "claude-code",
   model: "opus",
@@ -29,13 +29,16 @@ const session = (id: string, title: string, created_at: string, tile: Session["t
 const working: Session["tile"] = { state: "running", pending: [] };
 const asking: Session["tile"] = { state: "waiting_user", pending: [{ kind: "permission", request_id: "r" }] };
 
-const rail = (sessions: Session[], activeId?: string) =>
+const project: Project = { id: "p", host_id: "local", path: "D:/p", name: "p", vcs: "git", trusted: true };
+
+const rail = (sessions: Session[], activeId?: string, more: Partial<Parameters<typeof RailTree>[0]> = {}) =>
   createElement(RailTree, {
-    projects: { state: "ready", projects: [] },
-    workspaces: {},
+    projects: { state: "ready", projects: [project] },
+    workspaces: { w: { project_id: "p" } },
     sessions: { state: "ready", sessions },
     activeId,
     onSelect: () => {},
+    ...more,
   });
 
 afterEach(cleanup);
@@ -75,6 +78,15 @@ describe("a session that comes to need the user", () => {
     const { container, rerender } = render(rail([session("a", "Fix", "2026-11-06T09:00:00Z", working)], "a"));
     rerender(rail([session("a", "Fix", "2026-11-06T09:00:00Z", asking)], "a"));
     expect(container.querySelector(".session-chevron")?.getAttribute("data-breath")).toBe("once");
+  });
+
+  it("ends the breath when the tile is made active partway through, so the chevron drawn there doesn't start it over", () => {
+    const { container, rerender } = render(rail([session("a", "Fix", "2026-11-06T09:00:00Z", working)]));
+    rerender(rail([session("a", "Fix", "2026-11-06T09:00:00Z", asking)]));
+    expect(container.querySelector(".session-chevron-button")?.getAttribute("data-breath")).toBe("once");
+    rerender(rail([session("a", "Fix", "2026-11-06T09:00:00Z", asking)], "a"));
+    expect(container.querySelector(".session-chevron")).not.toBeNull();
+    expect(container.querySelector("[data-breath]")).toBeNull();
   });
 
   it("leaves nothing waiting to breathe with reduced motion on", () => {
@@ -117,6 +129,7 @@ describe("a new session's tile", () => {
     } as never;
   });
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
     delete (HTMLElement.prototype as { animate?: unknown }).animate;
     delete (window as { matchMedia?: unknown }).matchMedia;
@@ -140,6 +153,31 @@ describe("a new session's tile", () => {
       { slide: "session:b", keyframes: [{ opacity: 0, transform: "translateY(-10px)" }, { opacity: 1, transform: "none" }], options },
       { slide: "session:a", keyframes: [{ transform: "translateY(-10px)" }, { transform: "none" }], options },
     ]);
+  });
+
+  it("keeps its slide for its place under its project when it is first drawn at the rail's end", () => {
+    const placed = session("b", "Write", "2026-11-06T09:00:00Z", undefined, "w2");
+    const known = { workspaces: { w: { project_id: "p" }, w2: { project_id: "p" } } };
+    const { rerender } = render(rail([older]));
+    // Its workspace isn't known yet: it waits at the end of the rail and doesn't slide there.
+    rerender(rail([older, placed]));
+    expect(slid).toEqual([]);
+    rerender(rail([older, placed], undefined, known));
+    expect(slid.map((s) => s.slide)).toEqual(["session:b", "session:a"]);
+    expect(slid[0]?.keyframes[0]).toEqual({ opacity: 0, transform: "translateY(-10px)" });
+    // Spent: another drawing brings nothing new.
+    slid.length = 0;
+    rerender(rail([older, placed], "a", known));
+    expect(slid).toEqual([]);
+  });
+
+  it("leaves a tile with its shelf open still while a new one slides in, so the shelf stays on its anchor", () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    const shelf = { id: "a", tone: "caution" as const, render: () => createElement("div", { className: "shelf" }) };
+    const { container, rerender } = render(rail([older], undefined, { shelf }));
+    expect(container.querySelector(".shelf")).not.toBeNull();
+    rerender(rail([older, newer], undefined, { shelf }));
+    expect(slid.map((s) => s.slide)).toEqual(["session:b"]);
   });
 
   it("brings nothing new when a session listed before comes back, as an unarchived one does", () => {
