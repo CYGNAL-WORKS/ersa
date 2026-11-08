@@ -13,13 +13,13 @@
 
 /* Hover darkens the edge as well as the fill: surface-raised alone barely differs from surface. */
 /* :where() adds no specificity, so :active below still wins on a press. */
-.button:hover:not(:disabled):where(:not(:focus-visible)),
+.button:hover:not(:disabled, [aria-disabled="true"]):where(:not(:focus-visible)),
 .button[data-force="hover"] {
   background: var(--color-surface-raised);
   border-color: var(--color-ink-faint);
 }
 
-.button:active:not(:disabled),
+.button:active:not(:disabled, [aria-disabled="true"]),
 .button[data-force="pressed"] {
   background: var(--color-canvas);
   border-color: var(--color-ink-muted);
@@ -33,8 +33,10 @@
   color: var(--color-accent);
 }
 
-/* Disabled keeps the default fill and loses the edge's weight and the text's ink. */
-.button:disabled {
+/* Disabled keeps the default fill and loses the edge's weight and the text's ink. A button unavailable for a moment
+   but kept focusable (aria-disabled) looks the same. */
+.button:disabled,
+.button[aria-disabled="true"] {
   color: var(--color-ink-faint);
   cursor: default;
 }
@@ -47,13 +49,13 @@
 }
 
 /* The edge strengthens from hover to pressed, as the quiet button's does. */
-.button[data-variant="primary"]:hover:not(:disabled):where(:not(:focus-visible)),
+.button[data-variant="primary"]:hover:not(:disabled, [aria-disabled="true"]):where(:not(:focus-visible)),
 .button[data-variant="primary"][data-force="hover"] {
   background: var(--color-accent);
   border-color: var(--color-ink-muted);
 }
 
-.button[data-variant="primary"]:active:not(:disabled),
+.button[data-variant="primary"]:active:not(:disabled, [aria-disabled="true"]),
 .button[data-variant="primary"][data-force="pressed"] {
   background: var(--color-accent);
   border-color: var(--color-ink);
@@ -68,7 +70,8 @@
 }
 
 /* Disabled primary looks like a disabled quiet button: nothing to act on. */
-.button[data-variant="primary"]:disabled {
+.button[data-variant="primary"]:disabled,
+.button[data-variant="primary"][aria-disabled="true"] {
   color: var(--color-ink-faint);
   background: var(--color-surface);
   border-color: var(--color-line);

@@ -34,7 +34,8 @@ export function ArchivedNote({
           <Icon icon={Archive} size="icon-sm" />
         </span>
         <p className="archived-words">{t("composer.archived.note")}</p>
-        <Button variant="primary" onClick={onResume} disabled={busy} force={force}>
+        {/* Unavailable while Core answers, yet still focusable, so keyboard focus stays on it through a refusal. */}
+        <Button variant="primary" aria-disabled={busy || undefined} onClick={() => !busy && onResume()} force={force}>
           {busy ? t("composer.archived.resumingProgress") : t("composer.archived.resumeButton")}
         </Button>
       </div>

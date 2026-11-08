@@ -40,7 +40,6 @@ describe("the rail's tree", () => {
     expect(tree.loose).toEqual([]);
   });
 
-  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R02
   it("leaves archived sessions out, as the rail shows active sessions until it can show archived ones", () => {
     const archived = sessions.map((s) => (s.id === "mid" || s.id === "engine" ? { ...s, archived: true } : s));
     const tree = treeOf(projects, workspaces, [...archived, { ...session("lost", "w-gone", "2026-11-01T13:00:00.000Z"), archived: true }]);
