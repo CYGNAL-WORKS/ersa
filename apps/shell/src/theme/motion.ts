@@ -12,7 +12,7 @@ export function milliseconds(time: string): number {
   return time.trim().endsWith("ms") ? value : value * 1000;
 }
 
-/** Where an element's layout puts it on the page, leaving out any slide still running, which transforms it. */
+/** Where an element's layout puts it on the page: a running slide by transform is left out, one by `top` is counted. */
 function topOf(el: HTMLElement): number {
   let top = 0;
   for (let at: Element | null = el; at instanceof HTMLElement; at = at.offsetParent) top += at.offsetTop;
