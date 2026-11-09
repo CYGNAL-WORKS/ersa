@@ -8,6 +8,4 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-09 PROTO-CORE-API, FLOW-FORK-SESSION-R06: owner's decision: a fork's title and creation time are the backend's, and Ersa stores neither (the rule the briefs already give every session). A fork is named through the backend, as a user's rename is, and Core shows what the backend says. So a fork never sent a message has no title after a restart, since the CLI keeps no record of it, and `created_at` is the first entry in the fork's record once it has one, which is the original's date. `session.fork` still says `session.list` reports the marked title until the fork's own record gives one, and describes a naming the backend refuses; both need rewording.
-
 ## Resolved recently (optional, trimmed in planning passes)
