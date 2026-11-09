@@ -660,7 +660,7 @@ async fn a_record_opened_elsewhere_part_way_fails_the_delete_until_tried_again()
     let error = client.error("session.fork", json!({ "id": id })).await;
     assert_eq!(kind(&error), "invalid_state", "{error}");
     assert!(
-        error["message"].as_str().unwrap().contains("is not ready"),
+        error["message"].as_str().unwrap().contains("being deleted"),
         "{error}"
     );
 
