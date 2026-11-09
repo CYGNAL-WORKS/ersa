@@ -318,6 +318,17 @@ describe("a new session's tile", () => {
       expect(slid.find((s) => s.slide === "session:b")?.keyframes).toEqual([{ transform: "translateY(-10px)" }, { transform: "none" }]);
     });
 
+    it("slides a project's heading with its More menu open by transform, as it has no offset to slide by", () => {
+      const second: Project = { ...project, id: "q", path: "D:/q", name: "q" };
+      const more = { projects: { state: "ready", projects: [project, second] }, workspaces: { w: { project_id: "p" }, x: { project_id: "q" } }, initialMenu: "q", onSetTrust: () => {} } as const;
+      const below = session("c", "Below", "2026-11-06T07:00:00Z", undefined, "x");
+      const { container, rerender } = render(rail([newer, below], undefined, more));
+      expect(container.querySelector("[data-open] .menu")).not.toBeNull();
+      rerender(rail([older, newer, below], undefined, more));
+      expect(slid.find((s) => s.keyframes.some((k) => "top" in k))).toBeUndefined();
+      expect(slid.filter((s) => s.slide?.includes("q")).map((s) => s.keyframes)).toEqual([[{ transform: "translateY(-10px)" }, { transform: "none" }]]);
+    });
+
     it("slides untitled tiles when a corrected date created swaps their tie under Name", () => {
       const { rerender } = render(sorted([{ ...older, title: "" }, { ...newer, title: "" }], "name"));
       rerender(sorted([{ ...older, title: "", created_at: "2026-11-06T10:00:00Z" }, { ...newer, title: "" }], "name"));
