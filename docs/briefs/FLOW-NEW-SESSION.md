@@ -4,7 +4,7 @@ type: flow
 title: Start a new session
 status: ready
 references: [LAY-SHELL, PROTO-CORE-API, FLOW-RESUME-SESSION, FLOW-SEND-MESSAGE]
-adrs: [0011, 0017, 0028]
+adrs: [0011, 0017, 0028, 0031]
 ---
 
 # Start a new session
@@ -48,7 +48,7 @@ The project chip on the new-session screen is the only place a project is added;
 - **FLOW-NEW-SESSION-R28**: When a git project has a new workspace chosen and its branches are being read or could not be read, the workspace chip shall read "New workspace", with no base branch, and say in place of the branches that they are being read, or that they could not be read and the new workspace will start at the default branch; R04 shall then create the workspace from the default branch Core finds.
 - **FLOW-NEW-SESSION-R29**: When the project folder is chosen, or a new workspace is chosen and its project's branches have been read, the workspace chip shall name the workspace a session will start in: the new workspace with its base branch, or the project folder.
 - **FLOW-NEW-SESSION-R30**: While a session is running, the session controls shall let the user change its model and its permission mode, taking effect from its next turn, and shall show its effort read-only.
-- **FLOW-NEW-SESSION-R31**: When the user withdraws trust from a project, the project's heading shall say, for as long as the window stays open, that the backend's own tools keep trusting the folder.
+- **FLOW-NEW-SESSION-R31**: When the user withdraws trust from a project, a note beneath the project's heading shall say, for as long as the window stays open, that the backend's own tools keep trusting the folder.
 
 ## Verification
 

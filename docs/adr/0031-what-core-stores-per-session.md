@@ -12,7 +12,7 @@ The harness rule says Ersa never adds to or duplicates what a backend CLI owns. 
 ## Options considered
 
 1. **Keep ADR 0026's list and add the columns to it**: no work. Ersa keeps showing values the backend may contradict.
-2. **Store nothing the backend can answer**: one truth. A stopped session could not be relaunched as the user left it, since nothing in the record says which values to pass, and a backend need not report effort at all.
+2. **Store nothing the backend can answer**: one truth. The record holds a session's model and permission mode from its first message on, but not its effort, and nothing exists to read before that message.
 3. **Ask the backend for what it reports, and store only what relaunches a session**: the shown values are the backend's while it can answer, and the store holds no second truth for them.
 
 ## Decision
