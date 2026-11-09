@@ -396,3 +396,36 @@ fn the_registry_names_every_process_that_has_the_session_open() {
     };
     assert_eq!(open.iter().map(|l| l.pid).collect::<Vec<_>>(), [pid, pid]);
 }
+
+// verifies: FLOW-FORK-SESSION-R03
+#[test]
+fn a_command_with_no_output_after_it_is_a_turn_still_to_be_answered() {
+    let (done, last) = finished();
+    // A skill: the echo, then its expansion, and the reply never came.
+    let mut expansion = prompt("Do the thing the skill says");
+    expansion["isMeta"] = json!(true);
+    let text = done
+        + &entry("c", last, prompt("<command-name>/skill</command-name>"))
+        + &entry("d", "c", expansion);
+    assert_eq!(end_of(&text), ConversationEnd::Unfinished);
+}
+
+// verifies: FLOW-FORK-SESSION-R03
+#[test]
+fn a_subagents_entries_are_not_the_conversations_end() {
+    let (done, _) = finished();
+    let mut sidechain = prompt("a subagent's prompt");
+    sidechain["isSidechain"] = json!(true);
+    let text = done + &entry("c", "b", sidechain);
+    assert_eq!(end_of(&text), ConversationEnd::Finished);
+}
+
+#[test]
+fn a_fork_is_not_also_a_resume() {
+    let config = SessionConfig {
+        fork_of: Some(ORIGINAL.into()),
+        extra: json!({ "resume": ORIGINAL }),
+        ..SessionConfig::default()
+    };
+    assert!(matches!(fork_args(&config), Err(AdapterError::Protocol(_))));
+}

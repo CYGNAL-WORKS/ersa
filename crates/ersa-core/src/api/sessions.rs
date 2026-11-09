@@ -20,6 +20,7 @@ use serde_json::Value;
 use super::{ApiError, Peer};
 use crate::attachments::{self, InspectError};
 use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
+use crate::sessions::Forkable;
 use crate::state::Core;
 
 /// The most raw lines one `session.raw_log` call returns, and the most bytes
@@ -47,7 +48,6 @@ struct Starting {
     transport: Arc<dyn Transport>,
     /// The version detection found, until the backend announces its own.
     backend_version: String,
-    trusted: bool,
 }
 
 /// The workspace `id`, which must be `ready`, and its project.
@@ -90,18 +90,21 @@ async fn starting(core: &Core, project: &Project, backend: &str) -> Result<Start
     } else {
         String::new()
     };
-    // Trust is read again here, after the detection above, which can take
-    // seconds: an answer the user changed meanwhile is the one that counts.
-    let trusted = core
-        .store
-        .project(project.id.clone())
-        .await?
-        .is_some_and(|p| p.trusted);
     Ok(Starting {
         transport,
         backend_version,
-        trusted,
     })
+}
+
+/// Whether the user trusts the project now. Read last before a session
+/// starts, after whatever may have taken seconds: an answer the user changed
+/// meanwhile is the one that counts.
+async fn trusted_now(core: &Core, project: &Project) -> Result<bool, ApiError> {
+    Ok(core
+        .store
+        .project(project.id.clone())
+        .await?
+        .is_some_and(|p| p.trusted))
 }
 
 pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<Session, ApiError> {
@@ -132,8 +135,8 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
     let Starting {
         transport,
         backend_version,
-        trusted,
     } = starting(core, &project, &params.backend).await?;
+    let trusted = trusted_now(core, &project).await?;
 
     // A backend that starts a session under an id Ersa chooses gets one
     // now: stored with the row before the backend starts, so the session can
@@ -194,12 +197,16 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
     let Starting {
         transport,
         backend_version,
-        trusted,
     } = starting(core, &project, &original.backend).await?;
-    let (backend_id, adapter) = core
+    let Forkable {
+        backend_id,
+        adapter,
+        beginning,
+    } = core
         .sessions
-        .check_forkable(&params.id, Arc::clone(&transport))
+        .prepare_fork(&params.id, Arc::clone(&transport))
         .await?;
+    let trusted = trusted_now(core, &project).await?;
     let permission_mode = original
         .permission_mode
         .clone()
@@ -239,14 +246,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
     };
     Ok(core
         .sessions
-        .fork(
-            &params.id,
-            fork,
-            adapter,
-            transport,
-            config,
-            backend_version,
-        )
+        .create_with(fork, beginning, adapter, transport, config, backend_version)
         .await?)
 }
 

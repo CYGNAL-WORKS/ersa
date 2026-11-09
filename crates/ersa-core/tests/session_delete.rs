@@ -656,6 +656,13 @@ async fn a_record_opened_elsewhere_part_way_fails_the_delete_until_tried_again()
         )
         .await;
     assert_eq!(kind(&error), "invalid_state", "{error}");
+    // Nor a fork of the session marked deleting in it.
+    let error = client.error("session.fork", json!({ "id": id })).await;
+    assert_eq!(kind(&error), "invalid_state", "{error}");
+    assert!(
+        error["message"].as_str().unwrap().contains("is not ready"),
+        "{error}"
+    );
 
     // What is left: nothing of the folder, nor the branch.
     *fake.delete_refusal.lock().unwrap() = None;

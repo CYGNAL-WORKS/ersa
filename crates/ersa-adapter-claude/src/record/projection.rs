@@ -66,14 +66,7 @@ pub fn project_record_from<R: BufRead + Seek>(
     limit: u64,
 ) -> io::Result<Vec<RecordEvent>> {
     let lines = scan_lines(reader, limit)?.lines;
-    let entries: Vec<&Value> = lines
-        .iter()
-        .filter_map(|line| match line {
-            Line::Entry { chain, .. } => Some(chain),
-            Line::Failed(_) => None,
-        })
-        .collect();
-    let Conversation { chain, problem } = conversation(&entries);
+    let Conversation { chain, problem } = conversation_of(&lines);
 
     let mut projector = RecordProjector::default();
     let mut out = Vec::new();
@@ -126,17 +119,12 @@ pub fn conversation_end_from<R: BufRead + Seek>(
     limit: u64,
 ) -> io::Result<ConversationEnd> {
     let Scan { lines, torn } = scan_lines(reader, limit)?;
-    let entries: Vec<&Value> = lines
-        .iter()
-        .filter_map(|line| match line {
-            Line::Entry { chain, .. } => Some(chain),
-            Line::Failed(_) => None,
-        })
-        .collect();
-    let Conversation { chain, .. } = conversation(&entries);
+    let Conversation { chain, .. } = conversation_of(&lines);
 
     let unreadable_end = matches!(lines.last(), Some(Line::Failed(_)));
     let mut nearest_end = (torn || unreadable_end).then_some(ConversationEnd::Unfinished);
+    // Walking back, a command's output comes before its echo.
+    let mut local_output_follows = false;
     for line in lines.iter().rev() {
         let Line::Entry {
             offset,
@@ -147,13 +135,24 @@ pub fn conversation_end_from<R: BufRead + Seek>(
             continue;
         };
         let kind = fields.get("type").and_then(Value::as_str);
-        if !matches!(kind, Some("user" | "assistant")) || !on_conversation(&chain, fields) {
+        if !on_conversation(&chain, fields) {
+            continue;
+        }
+        if kind == Some("system")
+            && fields.get("subtype").and_then(Value::as_str) == Some("local_command")
+        {
+            local_output_follows = true;
+            continue;
+        }
+        if !matches!(kind, Some("user" | "assistant")) {
             continue;
         }
         let Some(value) = entry_at(reader, *offset, *len)? else {
             continue;
         };
-        match entry_end(&value) {
+        let end = entry_end(&value, local_output_follows);
+        local_output_follows = false;
+        match end {
             Some(ConversationEnd::Finished) => {
                 return Ok(nearest_end.unwrap_or(ConversationEnd::Finished));
             }
@@ -167,8 +166,9 @@ pub fn conversation_end_from<R: BufRead + Seek>(
 }
 
 /// What one `user` or `assistant` entry says of how the conversation ends;
-/// `None` for one the CLI wrote beside the conversation.
-fn entry_end(value: &Value) -> Option<ConversationEnd> {
+/// `None` for one the CLI wrote beside the conversation, which a command's
+/// echo is only when its output follows.
+fn entry_end(value: &Value, local_output_follows: bool) -> Option<ConversationEnd> {
     match RecordEntry::deserialize(value) {
         Ok(RecordEntry::Assistant(reply)) => {
             if reply.message.model == "<synthetic>" {
@@ -190,10 +190,23 @@ fn entry_end(value: &Value) -> Option<ConversationEnd> {
             Some(ConversationEnd::Interrupted)
         }
         Ok(RecordEntry::User(user)) if user.is_aside() => None,
+        Ok(RecordEntry::User(user)) if user.is_command_echo() && local_output_follows => None,
         // A prompt or a tool result waits for a reply; so does an entry
         // whose shape has drifted, for all Ersa can tell.
         _ => Some(ConversationEnd::Unfinished),
     }
+}
+
+/// The conversation's chain among a record's lines.
+fn conversation_of(lines: &[Line]) -> Conversation {
+    let entries: Vec<&Value> = lines
+        .iter()
+        .filter_map(|line| match line {
+            Line::Entry { chain, .. } => Some(chain),
+            Line::Failed(_) => None,
+        })
+        .collect();
+    conversation(&entries)
 }
 
 /// A record's lines, read once.

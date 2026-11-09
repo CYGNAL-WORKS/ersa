@@ -333,6 +333,11 @@ pub fn fork_args(config: &SessionConfig) -> Result<Vec<String>, AdapterError> {
     let Some(id) = &config.fork_of else {
         return Ok(Vec::new());
     };
+    if config.extra.get("resume").is_some_and(|v| !v.is_null()) {
+        return Err(AdapterError::Protocol(
+            "a session is either resumed or forked, not both".into(),
+        ));
+    }
     if !crate::record::is_session_id(id) {
         return Err(AdapterError::Protocol(format!(
             "cannot fork {id:?}: not a Claude Code session id"

@@ -1,5 +1,5 @@
 //! `session.fork` (FLOW-FORK-SESSION): when a session can be forked, and
-//! starting the fork.
+//! what its fork begins with.
 
 use ersa_adapter::ConversationEnd;
 
@@ -17,33 +17,55 @@ pub struct Beginning {
     pub record: Arc<Vec<RecordEvent>>,
 }
 
+/// A session that can be forked, as [`SessionManager::prepare_fork`] found it.
+pub struct Forkable {
+    /// The backend's id for the session.
+    pub backend_id: String,
+    pub adapter: Arc<dyn Adapter>,
+    /// What its fork begins with.
+    pub beginning: Beginning,
+}
+
+/// Lowers a session's `forking` flag when dropped.
+struct ForkRead(Arc<AtomicBool>);
+
+impl Drop for ForkRead {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+/// What the reads for a fork need, moved into a task of their own.
+struct ForkReads {
+    id: String,
+    backend: String,
+    backend_id: String,
+    cwd: String,
+    /// How many processes in the registry can be Core's own.
+    own: usize,
+    adapter: Arc<dyn Adapter>,
+    transport: Arc<dyn Transport>,
+}
+
 impl SessionManager {
     /// Refuses a fork of session `id` unless its conversation, as its record
     /// holds it, ends with a finished reply and nothing else is writing it
-    /// (FLOW-FORK-SESSION-R03), each case with its own message. Returns the
-    /// backend's id for the session and its adapter.
-    pub async fn check_forkable(
+    /// (FLOW-FORK-SESSION-R03), each case with its own message.
+    ///
+    /// The slow reads run in one task, and the session's `forking` flag stays
+    /// raised until that task ends, even after this request has given up on
+    /// it: a disk that hangs then holds one stuck read per session, not one
+    /// per try.
+    pub async fn prepare_fork(
         &self,
         id: &str,
         transport: Arc<dyn Transport>,
-    ) -> Result<(String, Arc<dyn Adapter>), SessionError> {
+    ) -> Result<Forkable, SessionError> {
         let handle = self.handle(id)?;
         self.refuse_if_deleting(&handle)?;
         let row = lock(&handle.row).clone();
         self.refuse_if_claimed(&row.workspace_id)?;
-
-        let session = handle.describe();
-        let live = handle.live().is_some();
-        let turn_running = matches!(
-            session.state,
-            LifecycleState::Running | LifecycleState::WaitingUser
-        );
-        if (live && (turn_running || !session.tile.pending.is_empty())) || session.sending.is_some()
-        {
-            return Err(SessionError::InvalidState(format!(
-                "a turn is running in session {id}; it can be forked once the reply finishes"
-            )));
-        }
+        refuse_if_turn_running(&handle)?;
 
         let Some(backend_id) = row.backend_session_id else {
             return Err(SessionError::InvalidState(
@@ -54,80 +76,124 @@ impl SessionManager {
             SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
         })?;
 
-        let end = {
-            let (adapter, transport, cwd, id) = (
-                Arc::clone(&adapter),
-                Arc::clone(&transport),
-                row.cwd.clone(),
-                backend_id.clone(),
-            );
-            bounded(async move { adapter.conversation_end(transport, &cwd, &id).await }).await?
-        };
-        let refused = match end {
-            Some(ConversationEnd::Finished) => None,
-            None => Some(format!("the {} backend cannot fork a session", row.backend)),
-            Some(ConversationEnd::NoReply) => Some(format!(
-                "no reply has finished in session {id} yet; it can be forked after the first one"
-            )),
-            Some(ConversationEnd::Interrupted) => Some(format!(
-                "the last turn in session {id} was interrupted; it can be forked once a reply \
-                 finishes"
-            )),
-            Some(ConversationEnd::Unfinished) => Some(format!(
-                "the record of session {id} ends part way through a turn; it can be forked once \
-                 a reply finishes"
-            )),
-        };
-        if let Some(refused) = refused {
-            return Err(SessionError::InvalidState(refused));
-        }
-
-        // The registry can't tell Core's own process from another, so it is
-        // counted out; a registry that cannot say does not refuse
-        // (PROTO-CORE-API, `session.fork`).
-        let own = usize::from(live);
-        if let OpenElsewhere::Yes { pids } =
-            ask_open_elsewhere(Arc::clone(&adapter), transport, &backend_id).await
-            && pids.len() > own
-        {
+        if handle.forking.swap(true, Ordering::SeqCst) {
             return Err(SessionError::InvalidState(format!(
-                "another process ({}) has session {id} open; close it there to fork it",
-                pids_named(&pids)
+                "an earlier fork of session {id} is still reading its record; try again once it \
+                 has finished"
             )));
         }
-        Ok((backend_id, adapter))
+        let held = ForkRead(Arc::clone(&handle.forking));
+        let reads = ForkReads {
+            id: id.to_string(),
+            backend: row.backend,
+            backend_id: backend_id.clone(),
+            cwd: row.cwd,
+            own: usize::from(handle.live().is_some()),
+            adapter: Arc::clone(&adapter),
+            transport,
+        };
+        let reading = tokio::spawn(async move {
+            let _held = held;
+            read_for_fork(reads).await
+        });
+        let record = match tokio::time::timeout(ADAPTER_CALL, reading).await {
+            Ok(Ok(record)) => record?,
+            Ok(Err(e)) => return Err(SessionError::Internal(format!("the adapter failed: {e}"))),
+            Err(_) => {
+                return Err(SessionError::InvalidState(format!(
+                    "the record of session {id} could not be read within {ADAPTER_CALL:?}"
+                )));
+            }
+        };
+
+        // Those reads can take seconds, and a message sent meanwhile starts
+        // a turn the fork would copy part of.
+        refuse_if_turn_running(&handle)?;
+        Ok(Forkable {
+            backend_id,
+            adapter,
+            beginning: Beginning {
+                title: handle.describe().title,
+                record,
+            },
+        })
+    }
+}
+
+fn refuse_if_turn_running(handle: &Handle) -> Result<(), SessionError> {
+    let session = handle.describe();
+    let turn_running = matches!(
+        session.state,
+        LifecycleState::Running | LifecycleState::WaitingUser
+    );
+    if (handle.live().is_some() && (turn_running || !session.tile.pending.is_empty()))
+        || session.sending.is_some()
+    {
+        return Err(SessionError::InvalidState(format!(
+            "a turn is running in session {}; it can be forked once the reply finishes",
+            handle.id
+        )));
+    }
+    Ok(())
+}
+
+/// How the record ends, then who has it open, then the conversation the fork
+/// begins with. A record that can't be read can't be said to end with a
+/// finished reply, so that too is a refusal (FLOW-FORK-SESSION-R03).
+async fn read_for_fork(reads: ForkReads) -> Result<Arc<Vec<RecordEvent>>, SessionError> {
+    let ForkReads {
+        id,
+        backend,
+        backend_id,
+        cwd,
+        own,
+        adapter,
+        transport,
+    } = reads;
+    let unreadable = |e: AdapterError| {
+        SessionError::InvalidState(format!("the record of session {id} could not be read: {e}"))
+    };
+    let end = adapter
+        .conversation_end(Arc::clone(&transport), &cwd, &backend_id)
+        .await
+        .map_err(unreadable)?;
+    let refused = match end {
+        Some(ConversationEnd::Finished) => None,
+        None => Some(format!("the {backend} backend cannot fork a session")),
+        Some(ConversationEnd::NoReply) => Some(format!(
+            "no reply has finished in session {id} yet; it can be forked after the first one"
+        )),
+        Some(ConversationEnd::Interrupted) => Some(format!(
+            "the last turn in session {id} was interrupted; it can be forked once a reply finishes"
+        )),
+        Some(ConversationEnd::Unfinished) => Some(format!(
+            "the record of session {id} ends part way through a turn; it can be forked once a \
+             reply finishes"
+        )),
+    };
+    if let Some(refused) = refused {
+        return Err(SessionError::InvalidState(refused));
     }
 
-    /// Starts `row`, a fork of session `id`, from a copy of its conversation
-    /// and, until the backend's record gives one, under its title.
-    pub async fn fork(
-        &self,
-        id: &str,
-        row: SessionRow,
-        adapter: Arc<dyn Adapter>,
-        transport: Arc<dyn Transport>,
-        config: SessionConfig,
-        backend_version: String,
-    ) -> Result<Session, SessionError> {
-        let handle = self.handle(id)?;
-        let original = lock(&handle.row).clone();
-        let title = handle.describe().title;
-        let record = {
-            let (adapter, transport, id) = (
-                Arc::clone(&adapter),
-                Arc::clone(&transport),
-                original.backend_session_id.unwrap_or_default(),
-            );
-            bounded(async move { adapter.read_record(transport, &original.cwd, &id).await }).await?
+    // The registry can't tell Core's own process from another, so it is
+    // counted out, and the message can't say which is which; a registry that
+    // cannot say does not refuse (PROTO-CORE-API, `session.fork`).
+    if let OpenElsewhere::Yes { pids } =
+        ask_open_elsewhere(Arc::clone(&adapter), Arc::clone(&transport), &backend_id).await
+        && pids.len() > own
+    {
+        let whose = if own > 0 {
+            "more processes than Ersa's own"
+        } else {
+            "another process"
         };
-        self.create_with(
-            row,
-            Beginning { title, record },
-            adapter,
-            transport,
-            config,
-            backend_version,
-        )
-        .await
+        return Err(SessionError::InvalidState(format!(
+            "{whose} ({}) has session {id} open; close it there to fork it",
+            pids_named(&pids)
+        )));
     }
+    adapter
+        .read_record(transport, &cwd, &backend_id)
+        .await
+        .map_err(unreadable)
 }

@@ -189,8 +189,15 @@ pub fn conversation_end(
     let Some(path) = find_record(claude_home, cwd, session_id)? else {
         return Ok(ConversationEnd::NoReply);
     };
-    let file = fs::File::open(&path)?;
-    let len = file.metadata()?.len();
+    let (file, metadata) = open_record(&path)?;
+    conversation_end_from(&mut io::BufReader::new(file), metadata.len())
+}
+
+/// A record file, opened to read, within the size Ersa reads.
+fn open_record(path: &Path) -> io::Result<(fs::File, fs::Metadata)> {
+    let file = fs::File::open(path)?;
+    let metadata = file.metadata()?;
+    let len = metadata.len();
     if len > MAX_RECORD_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -200,7 +207,7 @@ pub fn conversation_end(
             ),
         ));
     }
-    conversation_end_from(&mut io::BufReader::new(file), len)
+    Ok((file, metadata))
 }
 
 /// A token for the state of session `session_id`'s record: its file's size
@@ -384,18 +391,8 @@ struct ReadRecord {
 }
 
 fn read_record_at(path: &Path) -> io::Result<ReadRecord> {
-    let file = fs::File::open(path)?;
-    let metadata = file.metadata()?;
+    let (file, metadata) = open_record(path)?;
     let len = metadata.len();
-    if len > MAX_RECORD_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "the session record {} is {len} bytes, more than the {MAX_RECORD_BYTES} Ersa reads",
-                path.display()
-            ),
-        ));
-    }
     let mut reader = io::BufReader::new(file);
     Ok(ReadRecord {
         len,
