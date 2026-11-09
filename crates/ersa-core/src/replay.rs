@@ -187,6 +187,7 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         last_activity_at: None,
         forked_from: None,
         forked_through: None,
+        forked_at: None,
     };
     let transport = core
         .session_transport_for(LOCAL_HOST_ID)

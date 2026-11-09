@@ -1,0 +1,104 @@
+{
+  "recorded_at": "2026-11-09T02:49:50.745Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--session-id",
+    "fe705d77-e41d-4e23-a6de-846c6ca46f13"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "fe705d77-e41d-4e23-a6de-846c6ca46f13",
+  "session_record": "record/20-fork-of-worktree-original.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 2595,
+  "stderr": "",
+  "stdout_lines": 15,
+  "stdout_timing_ms": [
+    950,
+    981,
+    982,
+    1378,
+    1383,
+    1939,
+    1939,
+    1939,
+    1989,
+    1996,
+    1996,
+    1999,
+    2000,
+    2001,
+    2025
+  ],
+  "sent": [
+    {
+      "t": 9,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 951,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-rename_session-1\",\"request\":{\"subtype\":\"rename_session\",\"title\":\"Titled original\",\"source\":\"host\",\"session_id\":\"fe705d77-e41d-4e23-a6de-846c6ca46f13\"}}"
+    },
+    {
+      "t": 982,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with the single word: titled\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "control": "rename_session",
+      "got_response": true,
+      "subtype": "success"
+    },
+    {
+      "turn": 2,
+      "text": "Reply with the single word: titled",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}

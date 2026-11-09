@@ -21,7 +21,8 @@
 // `fork_original`: the original's record, line count and SHA-256, before and
 // after the run. --session-id may join it, to name the fork. --cut-original
 // first cuts the original's record to its first <lines> lines, which is what
-// a process killed part way through a turn leaves.
+// a process killed part way through a turn leaves. --original-cwd names where
+// the original ran, for a fork that starts in another folder.
 //
 // A message of the form `content:<json>` is sent as a user message whose
 // content blocks are `<json>`, an array, as a message with attachments goes
@@ -175,6 +176,7 @@ const resume = option("--resume");
 const chooseId = flag("--session-id");
 const fork = flag("--fork-session");
 const cutOriginal = option("--cut-original");
+const originalCwd = option("--original-cwd");
 const [name, ...messages] = argv;
 if (!name || (messages.length === 0) !== trust || !/^[a-z0-9-]+$/.test(name) || (chooseId && resume && !fork) || (fork && !resume) || (cutOriginal !== undefined && !fork)) {
   console.error('usage: node scripts/record-claude-session.mjs <name> [--cwd <dir>] [--resume <id> [--fork-session [--cut-original <lines>]]] [--session-id] "<message>" [...]');
@@ -235,7 +237,7 @@ const args = [
 ];
 
 // The original's record, as a fork must leave it.
-const originalPath = fork ? join(homedir(), ".claude", "projects", encodeCwd(cwd), `${resume}.jsonl`) : null;
+const originalPath = fork ? join(homedir(), ".claude", "projects", encodeCwd(originalCwd ?? cwd), `${resume}.jsonl`) : null;
 if (cutOriginal !== undefined) {
   const lines = readFileSync(originalPath, "utf8").split("\n").filter((l) => l.trim());
   writeFileSync(originalPath, lines.slice(0, Number(cutOriginal)).join("\n") + "\n");

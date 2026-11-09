@@ -429,3 +429,43 @@ fn a_fork_is_not_also_a_resume() {
     };
     assert!(matches!(fork_args(&config), Err(AdapterError::Protocol(_))));
 }
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R38
+#[test]
+fn a_fork_started_in_another_folder_finds_the_original_and_leaves_it_as_it_was() {
+    let meta = meta("21-fork-into-worktree-renamed");
+    let args: Vec<&str> = meta["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a.as_str().unwrap())
+        .collect();
+    assert!(args.contains(&"--fork-session"));
+    let chosen = args[args.iter().position(|a| *a == "--session-id").unwrap() + 1];
+    assert_eq!(meta["session_id"], chosen);
+    assert_eq!(
+        meta["fork_original"]["before"],
+        meta["fork_original"]["after"]
+    );
+    // The conversation came with it, into the fork's own record.
+    let copy = record("21-fork-into-worktree-renamed");
+    let original = messages(&record("20-fork-of-worktree-original"));
+    assert_eq!(messages(&copy)[..original.len()], original[..]);
+}
+
+// verifies: FLOW-FORK-SESSION-R06
+#[test]
+fn a_fork_is_renamed_over_the_title_it_copied() {
+    let copy = record("21-fork-into-worktree-renamed");
+    let titles: Vec<String> = copy
+        .lines()
+        .map(parse)
+        .filter(|e| e["type"] == "custom-title")
+        .map(|e| e["customTitle"].as_str().unwrap().to_string())
+        .collect();
+    assert!(!titles.is_empty());
+    assert!(
+        titles.iter().all(|t| t == "Titled original (fork)"),
+        "{titles:?}"
+    );
+}
