@@ -162,6 +162,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         forked_from: None,
         forked_through: None,
         forked_at: None,
+        forked_title: None,
     };
     let config = SessionConfig {
         cwd: workspace.path,
@@ -213,13 +214,13 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         .sessions
         .prepare_fork(&params.id, Arc::clone(&transport))
         .await?;
+    let trusted = trusted_now(core, &project).await?;
     let made_for_it = original_workspace.kind == WorkspaceKind::Isolated;
     let workspace = if made_for_it {
         new_workspace_at_head(core, &project, &original_workspace).await?
     } else {
         original_workspace
     };
-    let trusted = trusted_now(core, &project).await?;
 
     let permission_mode = original
         .permission_mode
@@ -252,6 +253,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
             .rev()
             .find_map(|event| event.message_id.clone()),
         forked_at: Some(persistence::now_rfc3339()),
+        forked_title: beginning.title.clone(),
     };
     let config = SessionConfig {
         cwd: workspace.path.clone(),

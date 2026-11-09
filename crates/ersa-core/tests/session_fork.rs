@@ -11,7 +11,7 @@ use ersa_adapter::{ConversationEnd, OpenElsewhere};
 use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter};
-use support::{Client, TestCore, git, git_repo, kind, start_with_adapters, tempdir, workspace};
+use support::{Client, TestCore, git, kind, project, start_with_adapters, tempdir, workspace};
 
 async fn start(fake: &Arc<FakeAdapter>) -> (TestCore, Client) {
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
@@ -54,6 +54,12 @@ async fn idle(core: &TestCore, client: &mut Client, extra: Value) -> String {
         .as_str()
         .unwrap()
         .to_string();
+    settle(client, &id).await;
+    id
+}
+
+/// Waits for a created session's backend, then takes a turn in it.
+async fn settle(client: &mut Client, id: &str) {
     client
         .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
         .await;
@@ -61,8 +67,37 @@ async fn idle(core: &TestCore, client: &mut Client, extra: Value) -> String {
     client
         .result("session.send", json!({ "id": id, "text": "idle" }))
         .await;
-    wait_for_state(client, &id, "idle").await;
-    id
+    wait_for_state(client, id, "idle").await;
+}
+
+/// Waits for the fork of a session of the fake's to start, then takes away
+/// the record the fake made it: the CLI writes none before the first message.
+async fn without_a_record_of_its_own(fake: &FakeAdapter, original_backend_id: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while fake.records.lock().unwrap().len() < 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fork never started"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    fake.records
+        .lock()
+        .unwrap()
+        .retain(|id, _| id == original_backend_id);
+}
+
+/// Core started again over the same folder and records.
+async fn restarted(core: TestCore, client: &mut Client, fake: &FakeAdapter) -> (TestCore, Client) {
+    client.result("core.shutdown", json!({})).await;
+    let TestCore { dir, task, .. } = core;
+    task.await.unwrap().unwrap();
+    let again: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(Arc::clone(
+        &fake.records,
+    )))];
+    let core = start_with_adapters(dir, |_| {}, again).await;
+    let client = core.client().await;
+    (core, client)
 }
 
 /// The refusal of a fork asked for now.
@@ -162,8 +197,8 @@ async fn a_fork_copies_the_originals_setup_and_conversation_and_leaves_it_as_it_
     assert_eq!(fork["title"], "Original (fork)");
 
     let fork_id = fork["id"].as_str().unwrap().to_string();
-    // The backend's session comes from a copy of the original's, in its
-    // workspace, and reports an id of its own.
+    // The backend's session comes from a copy of the original's and reports
+    // an id of its own.
     client
         .result("session.subscribe", json!({ "id": fork_id, "from_seq": 0 }))
         .await;
@@ -531,39 +566,18 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
         .await;
     let fork = client.result("session.fork", json!({ "id": id })).await;
     let fork_id = fork["id"].as_str().unwrap().to_string();
-    // The fork's backend wrote no record, as the CLI writes none yet: the
-    // fake makes one as it starts, so that goes once it has.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while fake.records.lock().unwrap().len() < 2 {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the fork never started"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    let own: Vec<String> = fake
-        .records
+    without_a_record_of_its_own(&fake, &backend_id).await;
+    // The original goes on without it, under a new name.
+    keep("reply-2", "after the fork");
+    fake.records
         .lock()
         .unwrap()
-        .keys()
-        .filter(|k| **k != backend_id)
-        .cloned()
-        .collect();
-    for key in own {
-        fake.records.lock().unwrap().remove(&key);
-    }
-    // The original goes on without it.
-    keep("reply-2", "after the fork");
+        .get_mut(&backend_id)
+        .unwrap()
+        .push(fake::recorded_title("Later"));
 
     let made_at = fork["created_at"].clone();
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
-    let again: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(Arc::clone(
-        &fake.records,
-    )))];
-    let core = start_with_adapters(dir, |_| {}, again).await;
-    let mut client = core.client().await;
+    let (_core, mut client) = restarted(core, &mut client, &fake).await;
 
     client
         .result("session.subscribe", json!({ "id": fork_id, "from_seq": 0 }))
@@ -682,14 +696,7 @@ async fn a_read_that_outlives_its_request_still_holds_back_the_next_fork() {
 /// A git repository at `dir/repo` added as a project, with an isolated
 /// workspace on a commit of its own; returns the project and the workspace.
 async fn isolated_workspace(client: &mut Client, dir: &std::path::Path) -> (Value, Value) {
-    let repo = dir.join("repo");
-    git_repo(&repo);
-    let project = client
-        .result(
-            "project.add",
-            json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false }),
-        )
-        .await;
+    let project = project(client, dir).await;
     let workspace = client
         .result("workspace.create", json!({ "project_id": project["id"] }))
         .await;
@@ -699,14 +706,7 @@ async fn isolated_workspace(client: &mut Client, dir: &std::path::Path) -> (Valu
 /// A git repository at `dir/repo` added as a project; returns its root
 /// workspace.
 async fn root_workspace(client: &mut Client, dir: &std::path::Path) -> Value {
-    let repo = dir.join("repo");
-    git_repo(&repo);
-    let project = client
-        .result(
-            "project.add",
-            json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false }),
-        )
-        .await;
+    let project = project(client, dir).await;
     let workspaces = client
         .result("workspace.list", json!({ "project_id": project["id"] }))
         .await;
@@ -728,14 +728,7 @@ async fn idle_in(client: &mut Client, workspace: &Value) -> String {
         )
         .await;
     let id = session["id"].as_str().unwrap().to_string();
-    client
-        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
-        .await;
-    client.events_until("session.started").await;
-    client
-        .result("session.send", json!({ "id": id, "text": "idle" }))
-        .await;
-    wait_for_state(client, &id, "idle").await;
+    settle(client, &id).await;
     id
 }
 
@@ -865,6 +858,69 @@ async fn a_fork_of_an_untitled_session_has_no_title() {
     let fork = forked(&mut client, &id).await;
 
     assert_eq!(fork["title"], Value::Null);
+}
+
+// verifies: FLOW-FORK-SESSION-R06
+#[tokio::test(flavor = "multi_thread")]
+async fn an_untitled_originals_later_title_is_not_its_forks() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    let backend_id = fake.records.lock().unwrap().keys().next().unwrap().clone();
+    let fork = forked(&mut client, &id).await;
+    let fork_id = fork["id"].as_str().unwrap().to_string();
+    without_a_record_of_its_own(&fake, &backend_id).await;
+    fake.records
+        .lock()
+        .unwrap()
+        .get_mut(&backend_id)
+        .unwrap()
+        .push(fake::recorded_title("Later"));
+
+    let (_core, mut client) = restarted(core, &mut client, &fake).await;
+
+    assert_eq!(row(&mut client, &fork_id).await["title"], Value::Null);
+}
+
+// verifies: FLOW-FORK-SESSION-R06
+#[tokio::test(flavor = "multi_thread")]
+async fn a_rename_while_a_fork_starts_comes_after_the_name_core_gives_it() {
+    let fake = Arc::new(FakeAdapter::with_chosen_ids());
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    client
+        .result("session.set_title", json!({ "id": id, "title": "Orig" }))
+        .await;
+    let titles = || fake.stats.rename_titles.lock().unwrap().clone();
+
+    let gate = fake.stats.rename_gate.lock().await;
+    let fork_id = forked(&mut client, &id).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while titles().len() < 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fork was not named"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let mut renaming = core.client().await;
+    let (asked, title) = (fork_id.clone(), json!("Mine"));
+    let renamed = tokio::spawn(async move {
+        renaming
+            .result("session.set_title", json!({ "id": asked, "title": title }))
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(titles(), ["Orig", "Orig (fork)"]);
+
+    drop(gate);
+    renamed.await.unwrap();
+
+    assert_eq!(titles(), ["Orig", "Orig (fork)", "Mine"]);
+    assert_eq!(row(&mut client, &fork_id).await["title"], "Mine");
 }
 
 // verifies: FLOW-FORK-SESSION-R05

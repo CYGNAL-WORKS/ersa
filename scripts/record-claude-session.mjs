@@ -2,7 +2,7 @@
 // Records a Claude Code session the way Ersa runs one, as a protocol fixture
 // pair: the live stream and the CLI's own session record for the same run.
 //
-//   node scripts/record-claude-session.mjs <name> [--keep] [--cwd <dir>] [--resume <session id> [--fork-session [--cut-original <lines>]]] [--session-id] "<message 1>" ["<message 2>" ...]
+//   node scripts/record-claude-session.mjs <name> [--keep] [--cwd <dir>] [--resume <session id> [--fork-session [--cut-original <lines>] [--original-cwd <dir>]]] [--session-id] "<message 1>" ["<message 2>" ...]
 //
 // A message of the form `control:<json>` is sent as a host control request
 // instead, with `<json>` as its `request` object, and the recorder waits for
@@ -178,8 +178,8 @@ const fork = flag("--fork-session");
 const cutOriginal = option("--cut-original");
 const originalCwd = option("--original-cwd");
 const [name, ...messages] = argv;
-if (!name || (messages.length === 0) !== trust || !/^[a-z0-9-]+$/.test(name) || (chooseId && resume && !fork) || (fork && !resume) || (cutOriginal !== undefined && !fork)) {
-  console.error('usage: node scripts/record-claude-session.mjs <name> [--cwd <dir>] [--resume <id> [--fork-session [--cut-original <lines>]]] [--session-id] "<message>" [...]');
+if (!name || (messages.length === 0) !== trust || !/^[a-z0-9-]+$/.test(name) || (chooseId && resume && !fork) || (fork && !resume) || (cutOriginal !== undefined && !fork) || (originalCwd !== undefined && !fork)) {
+  console.error('usage: node scripts/record-claude-session.mjs <name> [--cwd <dir>] [--resume <id> [--fork-session [--cut-original <lines>] [--original-cwd <dir>]]] [--session-id] "<message>" [...]');
   console.error("       node scripts/record-claude-session.mjs <name> --trust");
   process.exit(1);
 }

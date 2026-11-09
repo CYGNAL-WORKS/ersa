@@ -759,6 +759,7 @@ mod tests {
                 "forked_from",
                 "forked_through",
                 "forked_at",
+                "forked_title",
             ]
         );
     }
