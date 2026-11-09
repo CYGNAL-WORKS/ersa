@@ -47,7 +47,7 @@ The project chip on the new-session screen is the only place a project is added;
 - **FLOW-NEW-SESSION-R27**: When the user chooses Add project, or presses Ctrl+O on the new-session screen, with the local host chosen, Ersa shall open the system's folder dialog; once the user picks a folder that is not yet a project, Ersa shall ask the trust question (R24), and once they answer Trust, add the project as R25 says and choose it in the session controls.
 - **FLOW-NEW-SESSION-R28**: When a git project has a new workspace chosen and its branches are being read or could not be read, the workspace chip shall read "New workspace", with no base branch, and say in place of the branches that they are being read, or that they could not be read and the new workspace will start at the default branch; R04 shall then create the workspace from the default branch Core finds.
 - **FLOW-NEW-SESSION-R29**: When the project folder is chosen, or a new workspace is chosen and its project's branches have been read, the workspace chip shall name the workspace a session will start in: the new workspace with its base branch, or the project folder.
-- **FLOW-NEW-SESSION-R30**: While a session is running, the session controls shall let the user change its model and its permission mode, taking effect from its next turn, and shall show its effort read-only.
+- **FLOW-NEW-SESSION-R30**: While a session is running, the session controls shall let the user change its model, effort and permission mode, taking effect from its next turn; when a change is refused, the chip shall keep its value and the status line shall say why until the user sends or opens a chip.
 - **FLOW-NEW-SESSION-R31**: When the user withdraws trust from a project, a note beneath the project's heading shall say, for as long as the window stays open, that the backend's own tools keep trusting the folder.
 
 ## Verification
@@ -60,7 +60,6 @@ New session shows the new-session screen and creates nothing until the first mes
 
 ## Open questions
 
-- How a running session's effort can change: Claude Desktop changes it, but the CLI has no recorded way and reports no effort (`claude-code/2.1.316/stream-controls-2026-11-09.txt`).
 - The mode control (a named preset, milestone M3) and where it sits among the session controls.
 - Which session a reopened window shows when several were running (FLOW-RESUME-SESSION).
 - How the user picks a folder on a remote host, which the system's folder dialog cannot browse (FLOW-REMOTE-SESSION).
@@ -69,7 +68,7 @@ New session shows the new-session screen and creates nothing until the first mes
 
 ## Changes
 
-- 2026-11-09: owner's decisions from the audit against Claude Desktop: a running session's model and permission mode can change (R30), its models come from the backend (PROTO-CORE-API-R66), and withdrawing trust says that the backend's own tools keep it (R31). Two open questions closed.
+- 2026-11-09: owner's decisions from the audit against Claude Desktop: a running session's model, effort and permission mode can change (R30), its models come from the backend (PROTO-CORE-API-R66), and withdrawing trust says that the backend's own tools keep it (R31). Two open questions closed.
 - 2026-11-06: Built so far follows #184 and #226 as one paragraph; a union merge had left two. No requirement IDs changed.
 - 2026-11-06: Built so far follows #184: new workspaces start from the chosen base branch (R21, R22). No requirement IDs changed.
 - 2026-11-06: from #229 inbox: what the workspace chip shows while the branches are read and when they can't be, and that the new workspace then starts at the default branch (R28); R22 retired for R29, which names the base branch only once the branches have been read.

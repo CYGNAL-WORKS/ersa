@@ -37,7 +37,7 @@ An attachment is a file, an image or a folder that goes with a message. The user
 - **FLOW-SEND-MESSAGE-R16**: While a message is on its way to the agent, the composer shall show where it is: how far its attachments are copied, or that the backend is starting.
 - **FLOW-SEND-MESSAGE-R17**: Before the message is sent, a file or folder whose target is outside the session's workspace shall say that it will be copied into the workspace, and where.
 - **FLOW-SEND-MESSAGE-R18**: While the agent is working, Enter with words or an attachment in the composer shall send them as one message, which waits and runs when the turn ends, and the composer shall clear once the session has accepted it.
-- **FLOW-SEND-MESSAGE-R19**: While a sent message waits for the turn to end, the status line above the composer's box shall say so, from the session's `waiting` so that it survives a reload: one waiting message by its first words, or the name of its first attachment when it has none, and several by how many.
+- **FLOW-SEND-MESSAGE-R19**: While a sent message waits for the turn to end, the status line above the composer's box shall say so, from the session's `waiting` so that it survives a reload. In the window that sent it, one waiting message shall be named by its first words, or by its first attachment when it has none; otherwise, and when several wait, the line shall say how many.
 - **FLOW-SEND-MESSAGE-R20**: When the user chooses stop while a message waits, Ersa shall interrupt only the running turn, and the waiting message shall run next.
 
 ## Verification
