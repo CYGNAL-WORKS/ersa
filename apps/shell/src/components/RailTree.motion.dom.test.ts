@@ -320,7 +320,7 @@ describe("a new session's tile", () => {
 
     it("slides a project's heading with its More menu open by transform, as it has no offset to slide by", () => {
       const second: Project = { ...project, id: "q", path: "D:/q", name: "q" };
-      const more = { projects: { state: "ready", projects: [project, second] }, workspaces: { w: { project_id: "p" }, x: { project_id: "q" } }, initialMenu: "q", onSetTrust: () => {} } as const;
+      const more: Partial<Parameters<typeof RailTree>[0]> = { projects: { state: "ready", projects: [project, second] }, workspaces: { w: { project_id: "p" }, x: { project_id: "q" } }, initialMenu: "q", onSetTrust: () => {} };
       const below = session("c", "Below", "2026-11-06T07:00:00Z", undefined, "x");
       const { container, rerender } = render(rail([newer, below], undefined, more));
       expect(container.querySelector("[data-open] .menu")).not.toBeNull();
