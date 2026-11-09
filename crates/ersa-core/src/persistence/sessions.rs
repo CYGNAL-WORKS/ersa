@@ -144,6 +144,19 @@ impl Store {
         .await
     }
 
+    /// Forgets which session a fork was copied from, once it has a record of
+    /// its own (FLOW-FORK-SESSION-R09).
+    pub async fn clear_fork_link(&self, id: String) -> Result<()> {
+        self.call(move |conn| {
+            conn.execute(
+                "UPDATE sessions SET forked_from = NULL, forked_through = NULL WHERE id = ?1",
+                params![id],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
     pub async fn set_session_mode(&self, id: String, mode: String) -> Result<()> {
         self.call(move |conn| {
             conn.execute(

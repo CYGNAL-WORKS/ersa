@@ -15,18 +15,9 @@ pub struct Beginning {
     /// 2.1.316/15-fork-named-no-message), so until then this is the only
     /// place the copied conversation can be read from.
     pub record: Arc<Vec<RecordEvent>>,
-    /// For a fork: what is left to do once its backend is ready.
-    pub fork: Option<ForkStart>,
-}
-
-/// What a fork's start still has to do.
-pub struct ForkStart {
-    /// Keeps the original's `forking` flag raised until the fork's backend
-    /// is ready, by when the CLI has read the record it copies.
-    pub hold: Arc<ForkHold>,
-    /// The name to give it in the backend, a titled original's (R07). The
-    /// backend keeps it, as it keeps any name a session is given.
-    pub name: Option<String>,
+    /// For a fork: keeps the original's `forking` flag raised until the
+    /// fork's backend is ready, by when the CLI has read the record it copies.
+    pub fork_hold: Option<Arc<ForkHold>>,
 }
 
 /// How a fork's title ends.
@@ -45,6 +36,8 @@ pub struct Forkable {
     /// The backend's id for the session.
     pub backend_id: String,
     pub adapter: Arc<dyn Adapter>,
+    /// The name its fork's backend is to give it (R08), a titled original's.
+    pub name: Option<String>,
     /// What its fork begins with.
     pub beginning: Beginning,
 }
@@ -149,17 +142,14 @@ impl SessionManager {
         self.refuse_fork_if_busy(id)?;
         let handle = self.handle(id)?;
         refuse_if_turn_running(&handle)?;
-        let title = handle.describe().title.as_deref().map(fork_title);
         Ok(Forkable {
             backend_id,
             adapter,
+            name: handle.describe().title.as_deref().map(fork_title),
             beginning: Beginning {
-                fork: Some(ForkStart {
-                    hold: held,
-                    name: title.clone(),
-                }),
-                title,
+                title: None,
                 record,
+                fork_hold: Some(held),
             },
         })
     }

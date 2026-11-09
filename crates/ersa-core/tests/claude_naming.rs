@@ -376,13 +376,11 @@ async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversat
     let stdout = recorded();
     let transport = FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(is("initialize"))
-        .then_stdout([&stdout[0]])
-        // Every process's stdin is one list to the stub: the fork's stub
-        // answers the original's `initialize`, then sees its own. Only the
-        // fork is renamed, and the name it announces is the backend's.
-        .wait_for_stdin(is("initialize"))
-        .wait_for_stdin(is("rename_session"))
-        .then_stdout([announced(&stdout, "Chosen by the CLI"), rename_answer()])
+        // As the CLI does for `--name`: announced before it answers.
+        .then_stdout([
+            announced(&stdout, &format!("{NAMED} (fork)")),
+            stdout[0].clone(),
+        ])
         .hold_open();
     let home = tempdir();
     let core = claude_core(&transport, home.path()).await;
@@ -413,7 +411,9 @@ async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversat
         .result("session.fork", json!({ "id": original }))
         .await;
     let id = fork["id"].as_str().unwrap().to_string();
-    assert_eq!(fork["title"], format!("{NAMED} (fork)"));
+    // Core holds no title of its own for it.
+    // verifies: FLOW-FORK-SESSION-R08
+    assert_eq!(fork["title"], Value::Null);
 
     // A session of its own, from a copy of the original.
     // `session.fork` answers once the row exists; the CLI starts after it.
@@ -434,6 +434,9 @@ async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversat
     let resume = at("--resume").expect("--resume");
     assert_eq!(spawned.args[resume + 1], original_backend_id);
     assert!(at("--fork-session").is_some(), "{:?}", spawned.args);
+    // verifies: PROTO-CLAUDE-CODE-STREAM-R45
+    let name = at("--name").expect("--name");
+    assert_eq!(spawned.args[name + 1], format!("{NAMED} (fork)"));
     let chosen = spawned.args[at("--session-id").expect("--session-id") + 1].clone();
     assert_ne!(chosen, original_backend_id);
 
@@ -468,32 +471,21 @@ async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversat
     );
     assert_eq!(std::fs::read(&record).unwrap(), before);
 
-    // Named in the CLI as the fork it is, under the id it was started with.
     // verifies: FLOW-FORK-SESSION-R08
+    // The title it shows is the one the backend announced, with no rename.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        let rename = transport
-            .stdin_lines()
-            .iter()
-            .map(|l| parse(l))
-            .find(|l| l["request"]["subtype"] == "rename_session");
-        if let Some(rename) = rename {
-            assert_eq!(rename["request"]["title"], format!("{NAMED} (fork)"));
-            assert_eq!(rename["request"]["session_id"], chosen.as_str());
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the fork was not named"
-        );
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    // The title it shows from then on is the one the backend announced.
-    while listed_title(&mut client, &id).await != "Chosen by the CLI" {
+    while listed_title(&mut client, &id).await != format!("{NAMED} (fork)").as_str() {
         assert!(
             tokio::time::Instant::now() < deadline,
             "the announced title never showed"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    assert!(
+        !transport
+            .stdin_lines()
+            .iter()
+            .any(|l| parse(l)["request"]["subtype"] == "rename_session"),
+        "no rename is needed"
+    );
 }
