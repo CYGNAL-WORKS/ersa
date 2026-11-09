@@ -133,8 +133,9 @@ describe("connect", () => {
     const view = seen.at(-1);
     const listed = view?.phase === "connected" && view.sessions.state === "ready" ? view.sessions.sessions[0] : undefined;
     expect([listed?.title, listed?.created_at]).toEqual(["From the backend", "2026-10-31T09:00:00.000Z"]);
-    // The same last activity again is no new turn's end.
+    // The same last activity again is no new turn's end, and neither is a tile with none.
     notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
+    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile } });
     await settle();
     expect(reads).toBe(2);
   });
@@ -160,6 +161,20 @@ describe("connect", () => {
     answer([{ ...session, last_activity_at: "2026-11-01T14:00:00.000Z" }]);
     await settle();
     expect(activity()).toBe("2026-11-01T15:00:00.000Z");
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R10
+  it("takes a newer last activity from the list, which Core can write before its tile arrives", async () => {
+    let reads = 0;
+    const later = { ...session, last_activity_at: "2026-11-01T15:00:00.000Z" };
+    const { client, notify } = fakeClient({ ...answering, "session.list": () => Promise.resolve(reads++ === 0 ? [session] : [later]) });
+    const seen: CoreView[] = [];
+    connect(client, (v) => seen.push(v));
+    await settle();
+    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
+    await settle();
+    const view = seen.at(-1);
+    expect(view?.phase === "connected" && view.sessions.state === "ready" && view.sessions.sessions[0]?.last_activity_at).toBe("2026-11-01T15:00:00.000Z");
   });
 
   it("keeps each session's tile current, and reads the list again for a session it lacks", async () => {

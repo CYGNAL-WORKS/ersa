@@ -201,7 +201,7 @@ export function RailTree(props: RailTreeProps) {
     const target = to !== undefined ? open[openIds.indexOf(to)]?.querySelector<HTMLElement>(".session") : section.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session");
     target?.focus();
   });
-  const { groupBy = "project", sortBy = DEFAULT_ARRANGEMENT.sortBy, show = "active", now = new Date() } = props;
+  const { groupBy = DEFAULT_ARRANGEMENT.groupBy, sortBy = DEFAULT_ARRANGEMENT.sortBy, show = DEFAULT_ARRANGEMENT.show, now = new Date() } = props;
   // A new grouping or filter: where every tile and heading sat before it, taken while the page still shows the old
   // one (this render has not reached it yet), so each slides to its new place once it has (FLOW-ORGANIZE-SESSIONS,
   // step 4). So too when what the sort reads of a session differs from the listing before, as it does when the user
@@ -304,6 +304,11 @@ export function RailTree(props: RailTreeProps) {
       </TileItem>
     );
   };
+  const tiles = (shown: readonly Session[]) => (
+    <ul className="rail-tiles" ref={movesInPlace}>
+      {shown.map(tile)}
+    </ul>
+  );
   // The Pinned group leads the rail, and is absent while nothing pinned is shown (LAY-SHELL, Groups).
   const pinned = folded(PINNED_KEY, tree.pinned);
   const pinnedEmpty = tree.pinned.length === 0;
@@ -348,28 +353,28 @@ export function RailTree(props: RailTreeProps) {
                 </GroupToggle>
               </div>
               <GroupTiles id={pinnedTiles} folded={pinned.folded}>
-                <ul className="rail-tiles" ref={movesInPlace}>{tree.pinned.map(tile)}</ul>
+                {tiles(tree.pinned)}
               </GroupTiles>
             </div>
           </li>
           {tree.groups.map((group) => {
             const closed = folded(group.key, group.sessions);
-            const tiles = group.sessions.length > 0 && <ul className="rail-tiles" ref={movesInPlace}>{group.sessions.map(tile)}</ul>;
+            const held = group.sessions.length > 0 && tiles(group.sessions);
             if (group.kind === "date")
               return (
                 <DateGroup key={group.key} name={t(DATE_NAMES[group.key])} slide={headingSlide(group.key)} folded={closed.folded} summary={collapsedOf(group.sessions)} toggle={closed.toggle}>
-                  {tiles}
+                  {held}
                 </DateGroup>
               );
             return (
               <ProjectGroup key={group.key} project={group.project} {...props} folded={closed.folded} summary={collapsedOf(group.sessions)} toggle={closed.toggle}>
-                {tiles}
+                {held}
               </ProjectGroup>
             );
           })}
         </ul>
       )}
-      {looseShown && loose.length > 0 && <ul className="rail-tiles" ref={movesInPlace}>{loose.map(tile)}</ul>}
+      {looseShown && loose.length > 0 && tiles(loose)}
       {noneShown && (
         <p key={noneShown} className="rail-note" data-slide={`note:${noneShown}`}>
           {noneShown}

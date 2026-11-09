@@ -107,9 +107,9 @@ function sortedBy(sessions: readonly Session[], sortBy: SortBy): Session[] {
   return newestFirst(sessions).sort(SORTS[sortBy].compare);
 }
 
-/** What the chosen sort reads of a session: while it holds, the tile keeps its place (R10). */
-export function sortValueOf(session: Session, sortBy: SortBy): string | undefined {
-  return SORTS[sortBy].read(session);
+/** What the chosen sort reads of a session, its tie-break included: while it holds, the tile keeps its place (R10). */
+export function sortValueOf(session: Session, sortBy: SortBy): string {
+  return `${SORTS[sortBy].read(session)}/${session.created_at}`;
 }
 
 /** Whether the filter shows the session (R11): showing All, an archived one too, its tile marked as archived. */

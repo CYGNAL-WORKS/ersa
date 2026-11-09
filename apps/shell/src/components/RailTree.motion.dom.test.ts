@@ -289,7 +289,9 @@ describe("a new session's tile", () => {
       const insert = Node.prototype.insertBefore;
       const moved: (string | undefined)[] = [];
       const put = vi.spyOn(Node.prototype, "insertBefore");
+      // As the real method does, it refuses a node not on the page.
       Element.prototype.moveBefore = function (this: Element, node: Node, before: Node | null) {
+        if (!node.isConnected) throw new DOMException("not connected", "HierarchyRequestError");
         moved.push((node as HTMLElement).dataset.sessionId);
         insert.call(this, node, before);
       } as never;
@@ -300,9 +302,26 @@ describe("a new session's tile", () => {
         rerender(sorted([newer, older, { ...third, last_activity_at: "2026-11-06T10:00:00Z" }], "last_activity"));
         expect(moved).toEqual(["b", "a"]);
         expect(put.mock.calls.filter(([node]) => (node as HTMLElement).dataset?.sessionId !== undefined)).toEqual([]);
+        // A new session's tile is not on the page yet, so it is inserted.
+        rerender(sorted([newer, older, { ...third, last_activity_at: "2026-11-06T10:00:00Z" }, session("n", "New", "2026-11-06T11:00:00Z")], "last_activity"));
+        expect(put.mock.calls.map(([node]) => (node as HTMLElement).dataset?.sessionId)).toContain("n");
+        expect(moved).not.toContain("n");
       } finally {
         delete (Element.prototype as { moveBefore?: unknown }).moveBefore;
       }
+    });
+
+    it("slides a tile with its menu open by its offset, so the menu stays on its anchor", () => {
+      const { rerender } = render(rail([older, newer], undefined, { sortBy: "last_activity", initialTileMenu: "a", onRename: () => Promise.resolve(true) }));
+      rerender(rail([ended, newer], undefined, { sortBy: "last_activity", initialTileMenu: "a", onRename: () => Promise.resolve(true) }));
+      expect(slid.find((s) => s.slide === "session:a")?.keyframes).toEqual([{ top: "10px" }, { top: "0" }]);
+      expect(slid.find((s) => s.slide === "session:b")?.keyframes).toEqual([{ transform: "translateY(-10px)" }, { transform: "none" }]);
+    });
+
+    it("slides untitled tiles when a corrected date created swaps their tie under Name", () => {
+      const { rerender } = render(sorted([{ ...older, title: "" }, { ...newer, title: "" }], "name"));
+      rerender(sorted([{ ...older, title: "", created_at: "2026-11-06T10:00:00Z" }, { ...newer, title: "" }], "name"));
+      expect(slid).toEqual(swapped);
     });
 
     it("draws tiles coming back after Core was lost in place", () => {
