@@ -6,7 +6,7 @@ import { type ShelfShows, shelfTone, shownRequest } from "../session/shelf";
 import type { TileView } from "../session/tile";
 import { Button } from "./Button";
 import { ContextRing } from "./ContextRing";
-import { milliseconds, reducedMotion } from "../theme/motion";
+import { HeightEase, reducedMotion } from "../theme/motion";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { PermissionAnswers } from "./PermissionAnswers";
 import { PermissionInput, Revealed } from "./Transcript";
@@ -214,9 +214,8 @@ function nextSaid(shows: ShelfShows): string {
  * motion on.
  */
 function useMovingOn(root: { current: HTMLElement | null }, key: string, moved: boolean) {
-  const height = useRef<number>(undefined);
+  const ease = useRef(new HeightEase()).current;
   const lastKey = useRef(key);
-  const easing = useRef<Animation>(undefined);
   const focused = useRef(false);
   useEffect(() => {
     const el = root.current;
@@ -243,31 +242,12 @@ function useMovingOn(root: { current: HTMLElement | null }, key: string, moved: 
     const changed = lastKey.current !== key;
     lastKey.current = key;
     if (!changed) {
-      // Another render of the same request leaves a running ease alone; otherwise its height is the one to ease
-      // from next.
-      if (!easing.current) height.current = el.getBoundingClientRect().height;
+      // Another render of the same request leaves a running ease alone.
+      ease.hold(el);
       return;
     }
     if (moved && focused.current && !el.contains(document.activeElement)) el.focus();
-    // An ease still running starts the next from where it has got to, and the new height is measured without it.
-    const from = easing.current ? el.getBoundingClientRect().height : height.current;
-    easing.current?.cancel();
-    easing.current = undefined;
-    const to = el.getBoundingClientRect().height;
-    height.current = to;
-    if (!moved || from === undefined || from === to || typeof el.animate !== "function" || reducedMotion()) return;
-    // The duration and curve are the motion tokens, read from the page so the tokens stay the one source.
-    const style = getComputedStyle(el);
-    const duration = milliseconds(style.getPropertyValue("--motion-settle"));
-    const curve = style.getPropertyValue("--motion-ease-out").trim();
-    if (!duration || !curve) return;
-    const animation = el.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration, easing: curve });
-    easing.current = animation;
-    animation.onfinish = () => {
-      if (easing.current !== animation) return;
-      easing.current = undefined;
-      height.current = el.getBoundingClientRect().height;
-    };
+    ease.change(el, moved);
   });
 }
 
