@@ -21,7 +21,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Scratch folder**: the folder inside a workspace where Ersa puts copies of attachments from outside it, ignored by version control.
 - **Effort**: how much reasoning a backend spends per turn, in the backend's own levels. Chosen when a session starts.
 - **Permission mode**: a backend's rule for which of the agent's actions ask the user first, in the backend's own names. Chosen when a session starts.
-- **Session**: one conversation with one agent, in one workspace, on one host. An ordinary backend session: its history is the backend's session record, and Ersa stores only what finds it again (host, project, workspace, backend, and the backend's session id), its mode, and the user's arrangement of it (ADR 0026). Its title is the backend's.
+- **Session**: one conversation with one agent, in one workspace, on one host. An ordinary backend session: its history is the backend's session record, and Ersa stores only what finds it again (host, project, workspace, backend, and the backend's session id), its mode, the user's arrangement of it, and the values to relaunch it with (ADR 0031). Its title is the backend's.
 - **Fork**: a new session that starts from a copy of another session's conversation up to its last finished reply, in the same workspace, and continues on its own. The session it was made from is unchanged.
 - **Archived session**: a session the user has put away: stopped, hidden from the rail unless the user shows archived sessions, and opened read-only until the user resumes or unarchives it. Its record and workspace stay.
 - **Session record**: the backend's own record of a session, which the backend resumes from and its own tools list. The history of a session, whether its turns were taken in Ersa or elsewhere. Retention is the backend's, except that deleting a session in Ersa deletes its record.
@@ -58,7 +58,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Group**: a run of tiles in the rail under one heading. The user chooses how the rail groups: by project, section or date, or not at all; pinned sessions lead in their own group whichever is chosen.
 - **Section**: a group the user makes and names to arrange sessions across projects. A session is in one section or in none; a section stays while empty.
 - **Pinned session**: a session the user has pinned, so it leads the rail in the Pinned group whatever the grouping. Pinning changes neither its project nor its section.
-- **Arrangement**: how the user has organized their sessions: which are pinned, in which section, and archived, and how the rail groups, sorts and filters them and which groups are collapsed. Set from a tile's menu and the arrange menu, and kept across restarts.
+- **Arrangement**: how the user has organized their sessions: which are pinned, in which section, archived and unseen, and how the rail groups, sorts and filters them and which groups are collapsed. Set from a tile's menu and the arrange menu, and kept across restarts.
 - **Tile menu**: the menu of actions on one session, opened from its tile's More button, a right-click or the context-menu key.
 - **Unseen session**: a session that went idle after working while it was not the active session, or that the user marked as unread, until the user makes it active or marks it as read.
 - **Foot**: the bottom of the rail. Empty unless Ersa can't reach Core.
@@ -66,7 +66,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Context ring**: the circular gauge showing the share of its context window a session has used, on its tile and in the session controls.
 - **Transcript**: the main area rendering the active session's projection as a document with cards. *Not: chat history, chat log.*
 - **Composer**: the input area beneath the transcript where the user writes to the agent. *Not: chat box, input box, prompt box.*
-- **Session controls**: the row of chips beneath the composer naming where and how a session runs: host, project, workspace, backend, model, effort and permission mode, with the context ring. Set before the first message; shown during the session.
+- **Session controls**: the row of chips beneath the composer naming where and how a session runs: host, project, workspace, backend, model, effort and permission mode, with the context ring. Set before the first message; shown during the session, where the model and permission mode can still change.
 - **Sessions page**: what the transcript area shows after View all: every session in one list, active or archived, with search. Choosing one opens it.
 - **New-session screen**: what the transcript area shows while no session is active: the composer and the session controls, ready for the first message, which starts the session.
 - **Workbench**: the right-hand area holding panes.
