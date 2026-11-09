@@ -599,6 +599,45 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
 }
 
 /// A fork whose first message never came, its original since deleted.
+// verifies: FLOW-FORK-SESSION-R07
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_with_a_record_of_its_own_shows_its_title_and_date() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    let original = fake.records.lock().unwrap().keys().next().unwrap().clone();
+    client
+        .result("session.set_title", json!({ "id": id, "title": "Orig" }))
+        .await;
+    let fork = forked(&mut client, &id).await;
+    let fork_id = fork["id"].as_str().unwrap().to_string();
+    assert_eq!(fork["title"], "Orig (fork)");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while fake.records.lock().unwrap().len() < 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fork never started"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // Its record starts with the entries it copied, which keep their times.
+    let reply = fake::recorded_reply("reply-1", "the reply");
+    let copied_at = reply.ts.clone().unwrap();
+    assert_ne!(fork["created_at"], copied_at.as_str());
+    for (key, record) in fake.records.lock().unwrap().iter_mut() {
+        if *key != original {
+            record.push(reply.clone());
+            record.push(fake::recorded_title("From the backend"));
+        }
+    }
+
+    let (_core, mut client) = restarted(core, &mut client, &fake).await;
+
+    let listed = row(&mut client, &fork_id).await;
+    assert_eq!(listed["title"], "From the backend");
+    assert_eq!(listed["created_at"], copied_at.as_str());
+}
+
 // verifies: FLOW-FORK-SESSION-R01
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_whose_conversation_is_gone_says_so() {

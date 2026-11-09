@@ -412,6 +412,16 @@ impl Adapter for FakeAdapter {
 
     /// Titled by its latest rename, else its last prompt, as Claude Code
     /// titles a print-mode session, and begun at its first entry.
+    async fn record_version(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        backend_session_id: &str,
+    ) -> Result<Option<String>, AdapterError> {
+        let records = self.records.lock().unwrap();
+        Ok(records.get(backend_session_id).map(|r| r.len().to_string()))
+    }
+
     async fn summarize_record(
         &self,
         _transport: Arc<dyn Transport>,
