@@ -369,82 +369,6 @@ async fn a_session_stopped_before_its_first_message_keeps_its_id_and_has_no_reco
     assert_eq!(kind(&error), "invalid_state", "{error:#}");
 }
 
-/// A session started and stopped whose record names it [`NAMED`]; returns
-/// its id and its record.
-async fn stopped_and_named(
-    core: &TestCore,
-    client: &mut Client,
-    transport: &FakeTransport,
-    home: &Path,
-) -> (String, PathBuf) {
-    let original = create(core, client).await["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    initialize_sent(transport).await;
-    client
-        .result("session.stop", json!({ "id": original }))
-        .await;
-    let cwd = transport.spawned()[0].cwd.clone().unwrap();
-    let record = write_record(home, &cwd, &chosen_id(transport));
-    // Reading the stopped session takes its title from the record.
-    client
-        .result(
-            "session.subscribe",
-            json!({ "id": original, "from_seq": 0 }),
-        )
-        .await;
-    client.events_until("session.ended").await;
-    assert_eq!(listed_title(client, &original).await, NAMED);
-    (original, record)
-}
-
-// verifies: FLOW-FORK-SESSION-R06
-#[tokio::test(flavor = "multi_thread")]
-async fn the_title_a_fork_copied_is_not_shown_in_place_of_its_own() {
-    let stdout = recorded();
-    let refused = json!({"type": "control_response",
-        "response": {"subtype": "error", "request_id": "ersa-rename-2", "error": "no"}})
-    .to_string();
-    // As fixture 2.1.316/21: the CLI announces the copied title as it starts.
-    let transport = FakeTransport::new(Vec::<String>::new())
-        .wait_for_stdin(is("initialize"))
-        .then_stdout([announced(&stdout, NAMED), stdout[0].clone()])
-        .wait_for_stdin(is("rename_session"))
-        .then_stdout([refused])
-        .hold_open();
-    let home = tempdir();
-    let core = claude_core(&transport, home.path()).await;
-    let mut client = core.client().await;
-    let (original, _) = stopped_and_named(&core, &mut client, &transport, home.path()).await;
-
-    let id = client
-        .result("session.fork", json!({ "id": original }))
-        .await["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    let marked = format!("{NAMED} (fork)");
-    // Through the announcement and the refused name, and for a while after:
-    // nothing else comes to replace a title shown wrongly.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    let mut named_at = None;
-    loop {
-        assert_eq!(listed_title(&mut client, &id).await, marked.as_str());
-        let named = transport
-            .stdin_lines()
-            .iter()
-            .any(|l| parse(l)["request"]["subtype"] == "rename_session");
-        let now = tokio::time::Instant::now();
-        if named && now - *named_at.get_or_insert(now) > Duration::from_millis(300) {
-            break;
-        }
-        assert!(now < deadline, "the fork was not named");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-}
-
 // verifies: FLOW-FORK-SESSION-R01
 // verifies: PROTO-CLAUDE-CODE-STREAM-R38
 #[tokio::test(flavor = "multi_thread")]
@@ -457,10 +381,27 @@ async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversat
     let home = tempdir();
     let core = claude_core(&transport, home.path()).await;
     let mut client = core.client().await;
-    let (original, record) = stopped_and_named(&core, &mut client, &transport, home.path()).await;
+    let original = create(&core, &mut client).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    initialize_sent(&transport).await;
+    client
+        .result("session.stop", json!({ "id": original }))
+        .await;
     let original_backend_id = chosen_id(&transport);
     let cwd = transport.spawned()[0].cwd.clone().unwrap();
+    let record = write_record(home.path(), &cwd, &original_backend_id);
     let before = std::fs::read(&record).unwrap();
+    // Reading the stopped session takes its title from the record.
+    client
+        .result(
+            "session.subscribe",
+            json!({ "id": original, "from_seq": 0 }),
+        )
+        .await;
+    client.events_until("session.ended").await;
+    assert_eq!(listed_title(&mut client, &original).await, NAMED);
 
     let fork = client
         .result("session.fork", json!({ "id": original }))

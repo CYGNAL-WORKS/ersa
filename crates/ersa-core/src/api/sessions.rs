@@ -161,8 +161,6 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         last_activity_at: None,
         forked_from: None,
         forked_through: None,
-        forked_at: None,
-        forked_title: None,
     };
     let config = SessionConfig {
         cwd: workspace.path,
@@ -252,8 +250,6 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
             .iter()
             .rev()
             .find_map(|event| event.message_id.clone()),
-        forked_at: Some(persistence::now_rfc3339()),
-        forked_title: beginning.title.clone(),
     };
     let config = SessionConfig {
         cwd: workspace.path.clone(),

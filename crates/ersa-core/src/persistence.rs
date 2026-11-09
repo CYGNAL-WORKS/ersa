@@ -758,8 +758,6 @@ mod tests {
                 // Migration 9's.
                 "forked_from",
                 "forked_through",
-                "forked_at",
-                "forked_title",
             ]
         );
     }

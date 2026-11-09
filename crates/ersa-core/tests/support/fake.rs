@@ -60,8 +60,7 @@ pub struct Stats {
     pub stops: AtomicUsize,
     /// The configuration of every session started, in order.
     pub configs: Mutex<Vec<SessionConfig>>,
-    /// Renames sent to a running backend, and renames written to a record.
-    pub live_renames: AtomicUsize,
+    /// Renames written to a record.
     /// The title of every rename a running backend was sent, in order, as
     /// it arrives; held there while a test has `rename_gate`.
     pub rename_titles: Mutex<Vec<String>>,
@@ -617,7 +616,6 @@ impl AdapterSession for FakeSession {
             json!({ "t": "rename", "title": title }).to_string(),
         );
         self.keep(recorded_title(title));
-        self.stats.live_renames.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
