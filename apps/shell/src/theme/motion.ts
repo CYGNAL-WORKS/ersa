@@ -32,23 +32,27 @@ export function placesOf(root: HTMLElement): Map<string, Place> {
   return places;
 }
 
-/** A move's duration and easing, named by their motion tokens, and how an element with no earlier place comes in. */
+/** A move's duration and easing, named by their motion tokens, how an element with no earlier place comes in, and whether one that has gone fades out. */
 interface Move {
   duration: `--motion-${string}`;
   easing: `--motion-${string}`;
   enters: "fade" | "slide";
+  leaves: boolean;
 }
 
 /** How a tile moves when the user reorders the rail (DESIGN.md, Motion: "each tile slides to its new position"). */
-const SETTLE: Move = { duration: "--motion-settle", easing: "--motion-ease-in-out", enters: "fade" };
+const SETTLE: Move = { duration: "--motion-settle", easing: "--motion-ease-in-out", enters: "fade", leaves: false };
+
+/** How the rail regroups: as a reorder, with what the new grouping or filter takes away fading out (DESIGN.md: nothing pops in). */
+const REGROUP: Move = { ...SETTLE, leaves: true };
 
 /** How a new session's tile slides in, and the others make room (DESIGN.md, Motion: "A new session's tile"). */
-const ARRIVE: Move = { duration: "--motion-slow", easing: "--motion-ease-out", enters: "slide" };
+const ARRIVE: Move = { duration: "--motion-slow", easing: "--motion-ease-out", enters: "slide", leaves: false };
 
 /**
  * Fades out an element React has just removed, where it sat: put back under `root`, out of the layout (the rail's
- * stylesheet places `data-leaving`), out of reach, and with its marks gone so nothing takes it for what is on the page
- * and it never fades twice. Bare copies of the ancestors it left with go with it, so it looks as it did among them.
+ * stylesheet places `data-leaving`), out of reach, and with its marks gone so nothing takes it for what is on the page.
+ * Bare copies of the ancestors it left with go with it, so it looks as it did among them.
  */
 function fadeOut(root: HTMLElement, el: HTMLElement, top: number, timing: KeyframeAnimationOptions): void {
   if (typeof el.animate !== "function") return;
@@ -74,10 +78,15 @@ function fadeOut(root: HTMLElement, el: HTMLElement, top: number, timing: Keyfra
 /**
  * Slides each element marked `data-slide` from where `before` had it to where it is now, over `motion-settle` with
  * `motion-ease-in-out` (DESIGN.md, Motion: "each tile slides to its new position"). One that is new fades in where it
- * is, and one that has gone fades out where it was (DESIGN.md: nothing pops in).
+ * is. `before` may be old by now, as a pin's is while it saves, so one that has gone is left gone.
  */
 export function slideFrom(root: HTMLElement, before: ReadonlyMap<string, Place>): void {
   slide(root, before, SETTLE);
+}
+
+/** As `slideFrom`, for `before` taken just now, as the rail regroups: one that has gone fades out where it was. */
+export function regroup(root: HTMLElement, before: ReadonlyMap<string, Place>): void {
+  slide(root, before, REGROUP);
 }
 
 /**
@@ -101,7 +110,7 @@ export function arrive(root: HTMLElement, arriving: readonly HTMLElement[]): voi
 
 /**
  * Slides each element marked `data-slide` from where `before` had it to where it is now, over `move`; one `before`
- * has no place for comes in as `move` enters, and one no longer there fades out. While they slide, `root` carries
+ * has no place for comes in as `move` enters, and one no longer there fades out if `move` leaves. While they slide, `root` carries
  * `data-sliding`, so its stylesheet can let a tile show outside the frame it moved into.
  */
 function slide(root: HTMLElement, before: ReadonlyMap<string, Place>, move: Move): void {
@@ -130,8 +139,7 @@ function slide(root: HTMLElement, before: ReadonlyMap<string, Place>, move: Move
     const keyframes = el.hasAttribute("data-slide-top") ? [{ top: `${by}px` }, { top: "0" }] : [{ transform: `translateY(${by}px)` }, { transform: "none" }];
     slides.push(el.animate(keyframes, { duration, easing }));
   }
-  // An element that has faded already has lost its mark, should a slide taken earlier come round to it again.
-  for (const [mark, { el, top }] of before) if (el && !marks.has(mark) && !el.isConnected && el.dataset.slide === mark) fadeOut(root, el, top, { duration, easing });
+  if (move.leaves) for (const [mark, { el, top }] of before) if (el && !marks.has(mark)) fadeOut(root, el, top, { duration, easing });
   if (slides.length === 0) return;
   // A later slide takes over the mark; this one clears it only if it is still its own.
   const mark = String(performance.now());
