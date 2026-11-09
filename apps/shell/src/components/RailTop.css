@@ -12,3 +12,9 @@
   gap: var(--space-sm);
   min-width: 0;
 }
+
+/* The arrange button: open, it is pressed and reads ink, whatever the pointer does (docs/design/RAIL.md, The rail). */
+.icon-button.rail-arrange[aria-expanded="true"] {
+  color: var(--color-ink);
+  background: var(--material-pressed);
+}
