@@ -18,7 +18,7 @@ You are an implementing session, usually unattended. Docket reviews every head o
 
 ## 2. Plan and check its assumptions
 
-Before writing code, write the plan to `.scratch/plan.md`: the requirements in build order, the test seam for each, the code you will reuse, and an **Assumptions** list. Name every assumption the plan rests on: how you read each requirement where the words allow another reading, how a peer (the Claude CLI, git, the operating system) behaves, each value you pick that no brief names, and what the code you reuse does.
+Before writing code, write the plan to `.scratch/plan.md`: the requirements in build order, the test seam for each, the code you will reuse, and an **Assumptions** list. Name every assumption the plan rests on: how you read each requirement where the words allow another reading, how a peer (the Claude CLI, git, the operating system) behaves, each value you pick that no brief names, and what the code you reuse does. For a change to the interface, the plan also lists every element the change can add, remove or resize, and for each: how it arrives, how it leaves, how the space around it changes (`docs/design/DESIGN.md`: nothing pops in), where keyboard focus goes when it goes, and how its busy state looks with focus on it.
 
 Write the issue to `.scratch/issue.md` (`gh issue view <n>`), then start the `assumption-checker` agent in a fresh context with the checkout's path, the plan file and the issue file, never your reasoning about them. It reports each assumption as holds, false or open.
 
@@ -30,6 +30,7 @@ When the build turns up an assumption the plan did not name, add it to the plan,
 ## 3. Build
 
 - Work test-first with the `tdd` skill, at the ticket's **Test seams**. Tests cite requirement IDs with `verifies: <ID>` in test files, and a test for a requirement asserts every value the requirement names (a level, a code, a default), not only that something happened. Reach for `codebase-design` when the shape of an interface is the question, and `diagnosing-bugs` when something fails and the cause is unclear.
+- Before you push, and again after each fix, prove each citing test: in this checkout, undo the line that carries the requirement's value (never the assertion), see the test fail, and restore the line. Do it at the place the user reaches too, since a test of a module says nothing about whether `App` passes it the value. Vary what the requirement varies (a time zone, a media type, a byte order, letter case), and have a fake's answer change when the requirement says the state changes.
 - Plain, idiomatic code with the why commented: the owner is learning Rust.
 - Where a brief, `CONTENT.md` or `DESIGN.md` is wrong, silent, or contradicts what your code relies on, append one line to `docs/briefs/INBOX.md` and carry on. Always write the line: CI stays green with it, and the merge gate holds the pull request until a planning pass closes it (ADR 0025). Briefs, ADRs, the glossary, `CLAUDE.md`, `REVIEW.md`, `.claude/` and `scripts/hooks/` are planning-only; a change to the harness that your code does not depend on is a follow-up in the pull request, not an inbox line.
 - When interface code needs a token `docs/design/DESIGN.md` lacks, define it in `apps/shell/src/theme/tokens.pending.yaml` (the generator merges it) and propose it as an inbox line; a planning pass moves it into DESIGN.md.
