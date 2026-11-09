@@ -7,7 +7,7 @@ mod support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_adapter::{ConversationEnd, OpenElsewhere};
+use ersa_adapter::{ConversationEnd, OpenElsewhere, SessionConfig};
 use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter};
@@ -81,22 +81,36 @@ async fn without_a_record_of_its_own(fake: &FakeAdapter, original_backend_id: &s
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
+    without_a_record_of_its_own_now(fake, original_backend_id);
+}
+
+/// How the backend of the fork of a session was started, once it has been.
+async fn fork_config(fake: &FakeAdapter) -> SessionConfig {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(config) = fake.stats.configs.lock().unwrap().get(1) {
+            return config.clone();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fork never started"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// The fake's id for the fork of the session whose id is `original`.
+fn fork_backend_id(fake: &FakeAdapter, original: &str) -> String {
+    let records = fake.records.lock().unwrap();
+    records.keys().find(|k| *k != original).unwrap().clone()
+}
+
+/// Takes away every record but the original's.
+fn without_a_record_of_its_own_now(fake: &FakeAdapter, original_backend_id: &str) {
     fake.records
         .lock()
         .unwrap()
         .retain(|id, _| id == original_backend_id);
-}
-
-/// Waits for the fake to have been sent `count` renames.
-async fn renames_reach(fake: &FakeAdapter, count: usize) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while fake.stats.rename_titles.lock().unwrap().len() < count {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the fork was not named"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
 }
 
 /// Core started again over the same folder and records.
@@ -206,7 +220,7 @@ async fn a_fork_copies_the_originals_setup_and_conversation_and_leaves_it_as_it_
     assert_eq!(fork["section_id"], section["id"]);
     assert_eq!(fork["pinned"], false);
     assert_eq!(fork["archived"], false);
-    assert_eq!(fork["title"], "Original (fork)");
+    assert_eq!(fork["title"], Value::Null);
 
     let fork_id = fork["id"].as_str().unwrap().to_string();
     // The backend's session comes from a copy of the original's and reports
@@ -218,7 +232,10 @@ async fn a_fork_copies_the_originals_setup_and_conversation_and_leaves_it_as_it_
     let started = events.last().unwrap();
     assert_ne!(started["event"]["backend_session_id"], backend_id.as_str());
     let config = fake.stats.configs.lock().unwrap()[1].clone();
-    assert_eq!(config.fork_of.as_deref(), Some(backend_id.as_str()));
+    let fork_of = config.fork_of.clone().expect("a fork");
+    assert_eq!(fork_of.original, backend_id);
+    // verifies: FLOW-FORK-SESSION-R08
+    assert_eq!(fork_of.name.as_deref(), Some("Original (fork)"));
     let first = fake.stats.configs.lock().unwrap()[0].clone();
     assert_ne!(config.cwd, first.cwd);
     assert_eq!(config.model.as_deref(), Some("model-b"));
@@ -611,6 +628,50 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
 }
 
 /// A fork whose first message never came, its original since deleted.
+// verifies: FLOW-FORK-SESSION-R09
+#[tokio::test(flavor = "multi_thread")]
+async fn a_forks_link_to_its_original_goes_once_it_has_a_record() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    let original = fake.records.lock().unwrap().keys().next().unwrap().clone();
+    fake.records
+        .lock()
+        .unwrap()
+        .get_mut(&original)
+        .unwrap()
+        .push(fake::recorded_reply("reply-1", "the original's reply"));
+    let fork_id = forked(&mut client, &id).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let started = fork_config(&fake).await;
+    assert!(started.fork_of.is_some());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while fake.records.lock().unwrap().len() < 2 {
+        assert!(tokio::time::Instant::now() < deadline, "never started");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Seen with a record of its own, as Core starts.
+    let (core, mut client) = restarted(core, &mut client, &fake).await;
+    assert_eq!(row(&mut client, &fork_id).await["id"], fork_id.as_str());
+
+    // With that record gone there is nothing left to fall back on.
+    without_a_record_of_its_own_now(&fake, &original);
+    let (_core, mut client) = restarted(core, &mut client, &fake).await;
+    client
+        .result("session.subscribe", json!({ "id": fork_id, "from_seq": 0 }))
+        .await;
+    let events = client.events_until("session.ended").await;
+    assert!(
+        !events
+            .iter()
+            .any(|e| e["event"]["text"] == "the original's reply"),
+        "{events:#?}"
+    );
+}
+
 // verifies: FLOW-FORK-SESSION-R08
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_with_a_record_of_its_own_shows_its_title_and_date() {
@@ -623,7 +684,7 @@ async fn a_fork_with_a_record_of_its_own_shows_its_title_and_date() {
         .await;
     let fork = forked(&mut client, &id).await;
     let fork_id = fork["id"].as_str().unwrap().to_string();
-    assert_eq!(fork["title"], "Orig (fork)");
+    assert_eq!(fork["title"], Value::Null);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while fake.records.lock().unwrap().len() < 2 {
         assert!(
@@ -880,7 +941,7 @@ async fn the_original_cannot_be_deleted_until_its_forks_backend_is_ready() {
 // verifies: FLOW-FORK-SESSION-R08
 #[tokio::test(flavor = "multi_thread")]
 async fn a_long_title_is_shortened_to_fit_with_its_mark() {
-    let fake = Arc::new(FakeAdapter::with_chosen_ids());
+    let fake = Arc::new(FakeAdapter::new(1));
     let (core, mut client) = start(&fake).await;
     let id = idle(&core, &mut client, json!({})).await;
     let title = "t".repeat(200);
@@ -890,43 +951,37 @@ async fn a_long_title_is_shortened_to_fit_with_its_mark() {
 
     let fork = forked(&mut client, &id).await;
 
-    let got = fork["title"].as_str().unwrap();
-    assert_eq!(got.chars().count(), 200);
-    assert_eq!(got, format!("{} (fork)", "t".repeat(193)));
-    // The same name goes to the backend.
-    renames_reach(&fake, 2).await;
-    assert_eq!(fake.stats.rename_titles.lock().unwrap()[1], got);
+    // Core holds none of its own: the name goes to the backend.
+    assert_eq!(fork["title"], Value::Null);
+    let name = fork_config(&fake).await.fork_of.unwrap().name.unwrap();
+    assert_eq!(name.chars().count(), 200);
+    assert_eq!(name, format!("{} (fork)", "t".repeat(193)));
 }
 
 // verifies: FLOW-FORK-SESSION-R08
 #[tokio::test(flavor = "multi_thread")]
-async fn a_refused_name_leaves_the_mark_until_the_forks_record_gives_the_copied_title() {
-    let fake = Arc::new(FakeAdapter::with_chosen_ids());
+async fn a_fork_its_backend_did_not_name_has_no_title_until_its_record_gives_one() {
+    let fake = Arc::new(FakeAdapter::new(1));
     let (core, mut client) = start(&fake).await;
     let id = idle(&core, &mut client, json!({})).await;
+    let original = fake.records.lock().unwrap().keys().next().unwrap().clone();
     client
         .result("session.set_title", json!({ "id": id, "title": "Orig" }))
         .await;
-    fake.stats
-        .rename_refused
-        .store(true, std::sync::atomic::Ordering::SeqCst);
 
-    let fork_id = forked(&mut client, &id).await["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    renames_reach(&fake, 2).await;
-    // The fork works, and is still marked.
+    // The fake's backend announces no name.
+    let fork = forked(&mut client, &id).await;
+    let fork_id = fork["id"].as_str().unwrap().to_string();
+    assert_eq!(fork["title"], Value::Null);
     settle(&mut client, &fork_id).await;
-    assert_eq!(row(&mut client, &fork_id).await["title"], "Orig (fork)");
+    assert_eq!(row(&mut client, &fork_id).await["title"], Value::Null);
 
     // Its record gives the title the backend copied, seen as it ends.
-    let config = fake.stats.configs.lock().unwrap()[1].clone();
+    let backend_id = fork_backend_id(&fake, &original);
     fake.records
         .lock()
         .unwrap()
-        .get_mut(config.backend_session_id.as_deref().unwrap())
+        .get_mut(&backend_id)
         .unwrap()
         .push(fake::recorded_title("Orig"));
     client
@@ -975,40 +1030,6 @@ async fn an_untitled_originals_later_title_is_not_its_forks() {
     let (_core, mut client) = restarted(core, &mut client, &fake).await;
 
     assert_eq!(row(&mut client, &fork_id).await["title"], Value::Null);
-}
-
-// verifies: FLOW-FORK-SESSION-R08
-#[tokio::test(flavor = "multi_thread")]
-async fn a_rename_while_a_fork_starts_comes_after_the_name_core_gives_it() {
-    let fake = Arc::new(FakeAdapter::with_chosen_ids());
-    let (core, mut client) = start(&fake).await;
-    let id = idle(&core, &mut client, json!({})).await;
-    client
-        .result("session.set_title", json!({ "id": id, "title": "Orig" }))
-        .await;
-    let titles = || fake.stats.rename_titles.lock().unwrap().clone();
-
-    let gate = fake.stats.rename_gate.lock().await;
-    let fork_id = forked(&mut client, &id).await["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    renames_reach(&fake, 2).await;
-    let mut renaming = core.client().await;
-    let (asked, title) = (fork_id.clone(), json!("Mine"));
-    let renamed = tokio::spawn(async move {
-        renaming
-            .result("session.set_title", json!({ "id": asked, "title": title }))
-            .await
-    });
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    assert_eq!(titles(), ["Orig", "Orig (fork)"]);
-
-    drop(gate);
-    renamed.await.unwrap();
-
-    assert_eq!(titles(), ["Orig", "Orig (fork)", "Mine"]);
-    assert_eq!(row(&mut client, &fork_id).await["title"], "Mine");
 }
 
 // verifies: FLOW-FORK-SESSION-R05

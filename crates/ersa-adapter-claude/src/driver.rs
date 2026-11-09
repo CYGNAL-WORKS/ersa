@@ -330,9 +330,10 @@ pub fn resume_args(config: &SessionConfig) -> Result<Vec<String>, AdapterError> 
 /// (fixtures 2.1.316/13 to 19, PROTO-CLAUDE-CODE-STREAM-R38). None unless
 /// `fork_of` is set. Like a resume id, it must be a session id.
 pub fn fork_args(config: &SessionConfig) -> Result<Vec<String>, AdapterError> {
-    let Some(id) = &config.fork_of else {
+    let Some(fork) = &config.fork_of else {
         return Ok(Vec::new());
     };
+    let id = &fork.original;
     if config.extra.get("resume").is_some_and(|v| !v.is_null()) {
         return Err(AdapterError::Protocol(
             "a session is either resumed or forked, not both".into(),
@@ -343,7 +344,13 @@ pub fn fork_args(config: &SessionConfig) -> Result<Vec<String>, AdapterError> {
             "cannot fork {id:?}: not a Claude Code session id"
         )));
     }
-    Ok(vec!["--resume".into(), id.clone(), "--fork-session".into()])
+    let mut args = vec!["--resume".into(), id.clone(), "--fork-session".into()];
+    // The CLI announces the name before it answers `initialize`
+    // (PROTO-CLAUDE-CODE-STREAM-R45).
+    if let Some(name) = &fork.name {
+        args.extend(["--name".into(), name.clone()]);
+    }
+    Ok(args)
 }
 
 /// The arguments that start a new session under the id Core chose and

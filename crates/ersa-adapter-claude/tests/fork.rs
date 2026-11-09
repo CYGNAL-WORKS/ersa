@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::{RecordingSink, fixture, fixtures_root};
+use ersa_adapter::ForkOf;
 use ersa_adapter::fake::FakeTransport;
 use ersa_adapter::{Adapter, AdapterError, ConversationEnd, SessionConfig};
 use ersa_adapter_claude::record::{
@@ -167,10 +168,7 @@ fn the_cli_copies_the_originals_title_as_it_stands() {
 // verifies: PROTO-CLAUDE-CODE-STREAM-R38
 #[test]
 fn fork_args_name_the_original_and_ask_for_a_fork() {
-    let config = SessionConfig {
-        fork_of: Some(ORIGINAL.into()),
-        ..SessionConfig::default()
-    };
+    let config = fork_of(ORIGINAL);
     assert_eq!(
         fork_args(&config).unwrap(),
         ["--resume", ORIGINAL, "--fork-session"]
@@ -178,12 +176,42 @@ fn fork_args_name_the_original_and_ask_for_a_fork() {
     assert!(fork_args(&SessionConfig::default()).unwrap().is_empty());
 }
 
+// verifies: PROTO-CLAUDE-CODE-STREAM-R45
 #[test]
-fn a_fork_of_something_that_is_no_session_id_never_reaches_the_command_line() {
+fn a_titled_sessions_fork_is_named_at_launch() {
     let config = SessionConfig {
-        fork_of: Some("--dangerously".into()),
+        fork_of: Some(ForkOf {
+            original: ORIGINAL.into(),
+            name: Some("Titled (fork)".into()),
+        }),
         ..SessionConfig::default()
     };
+    assert_eq!(
+        fork_args(&config).unwrap(),
+        [
+            "--resume",
+            ORIGINAL,
+            "--fork-session",
+            "--name",
+            "Titled (fork)"
+        ]
+    );
+}
+
+/// A config that forks `original`, with no name.
+fn fork_of(original: &str) -> SessionConfig {
+    SessionConfig {
+        fork_of: Some(ForkOf {
+            original: original.into(),
+            name: None,
+        }),
+        ..SessionConfig::default()
+    }
+}
+
+#[test]
+fn a_fork_of_something_that_is_no_session_id_never_reaches_the_command_line() {
+    let config = fork_of("--dangerously");
     assert!(matches!(fork_args(&config), Err(AdapterError::Protocol(_))));
 }
 
@@ -202,7 +230,7 @@ async fn the_adapter_forks_in_the_stored_path_under_the_id_core_chose() {
         cwd: "C:/work".into(),
         permission_mode: "default".into(),
         backend_session_id: Some(FORK.into()),
-        fork_of: Some(ORIGINAL.into()),
+        fork_of: fork_of(ORIGINAL).fork_of,
         ..SessionConfig::default()
     };
     let sink = Arc::new(RecordingSink::new());
@@ -420,7 +448,7 @@ fn a_subagents_entries_are_not_the_conversations_end() {
 #[test]
 fn a_fork_is_not_also_a_resume() {
     let config = SessionConfig {
-        fork_of: Some(ORIGINAL.into()),
+        fork_of: fork_of(ORIGINAL).fork_of,
         extra: json!({ "resume": ORIGINAL }),
         ..SessionConfig::default()
     };

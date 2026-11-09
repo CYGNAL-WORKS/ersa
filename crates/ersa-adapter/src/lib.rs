@@ -42,7 +42,7 @@ pub mod fake;
 // Re-exported at the crate root so users write `ersa_adapter::Transport`
 // rather than reaching into private module paths.
 pub use adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, ForkOf,
     ImageLimits, OpenElsewhere, OutgoingAttachment, OutgoingMessage, PermissionDecision, Projected,
     Projector, QuestionReply, RecordDeletion, RecordEvent, RecordSummary, SessionConfig,
 };

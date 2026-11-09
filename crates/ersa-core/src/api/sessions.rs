@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ersa_adapter::{
-    BackendChoices, Direction, PermissionDecision, QuestionReply, SessionConfig, Transport,
+    BackendChoices, Direction, ForkOf, PermissionDecision, QuestionReply, SessionConfig, Transport,
 };
 use ersa_protocol::core_api::{
     AnswerQuestionParams, ArrangeParams, Attachment, AttachmentKind, Choice,
@@ -207,6 +207,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
     let Forkable {
         backend_id,
         adapter,
+        name,
         beginning,
     } = core
         .sessions
@@ -259,7 +260,10 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         project_trusted: trusted,
         project_path: project.path.clone(),
         backend_session_id,
-        fork_of: Some(backend_id),
+        fork_of: Some(ForkOf {
+            original: backend_id,
+            name,
+        }),
         extra: Value::Null,
     };
     let created = core
