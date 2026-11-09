@@ -61,9 +61,11 @@ pub struct Stats {
     /// The configuration of every session started, in order.
     pub configs: Mutex<Vec<SessionConfig>>,
     /// The title of every rename a running backend was sent, in order, as
-    /// it arrives; held there while a test has `rename_gate`.
+    /// it arrives; held there while a test has `rename_gate`, and refused
+    /// after it while `rename_refused` is set.
     pub rename_titles: Mutex<Vec<String>>,
     pub rename_gate: tokio::sync::Mutex<()>,
+    pub rename_refused: std::sync::atomic::AtomicBool,
     /// Renames written to a record.
     pub record_renames: AtomicUsize,
     /// For every time Core asked whether another process has a session
@@ -621,6 +623,9 @@ impl AdapterSession for FakeSession {
             .unwrap()
             .push(title.to_string());
         drop(self.stats.rename_gate.lock().await);
+        if self.stats.rename_refused.load(Ordering::SeqCst) {
+            return Err(AdapterError::Protocol("the fake refused the name".into()));
+        }
         self.sink.record(
             Direction::Host,
             json!({ "t": "rename", "title": title }).to_string(),

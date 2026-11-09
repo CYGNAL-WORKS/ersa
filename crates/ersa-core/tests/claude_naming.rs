@@ -377,6 +377,12 @@ async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversat
     let transport = FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(is("initialize"))
         .then_stdout([&stdout[0]])
+        // Every process's stdin is one list to the stub: the fork's stub
+        // answers the original's `initialize`, then sees its own. Only the
+        // fork is renamed, and the name it announces is the backend's.
+        .wait_for_stdin(is("initialize"))
+        .wait_for_stdin(is("rename_session"))
+        .then_stdout([announced(&stdout, "Chosen by the CLI"), rename_answer()])
         .hold_open();
     let home = tempdir();
     let core = claude_core(&transport, home.path()).await;
@@ -479,6 +485,14 @@ async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversat
         assert!(
             tokio::time::Instant::now() < deadline,
             "the fork was not named"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    // The title it shows from then on is the one the backend announced.
+    while listed_title(&mut client, &id).await != "Chosen by the CLI" {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the announced title never showed"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
