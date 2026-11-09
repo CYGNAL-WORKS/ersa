@@ -1,13 +1,10 @@
-import { Archive, Bot, ChevronRight, Ellipsis, LoaderCircle } from "lucide-react";
+import { Archive, Bot, ChevronRight, LoaderCircle } from "lucide-react";
 import {
   type AnimationEvent,
   type CSSProperties,
   type FocusEvent,
-  type HTMLAttributes,
   type KeyboardEvent,
   type ReactNode,
-  type Ref,
-  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
@@ -18,12 +15,10 @@ import { t } from "../catalog";
 import type { Session } from "../protocol/core-api.gen";
 import type { BackendChoices } from "../session/controls";
 import { type TileView, tileOf } from "../session/tile";
-import type { Sending } from "../session/follow";
 import { reducedMotion } from "../theme/motion";
 import { ContextRing } from "./ContextRing";
-import { Icon, IconButton } from "./Icon";
-import { Menu, type MenuClose, type MenuEntry, type MenuPlace } from "./Menu";
-import { useTitleDraft } from "./SessionTitle";
+import { Icon } from "./Icon";
+import { SessionRoot, type TileActions, useTileMenu } from "./TileMenu";
 import "./SessionTile.css";
 
 /** Each host's backends, by host id, as `backend.list` gives them. */
@@ -34,44 +29,6 @@ export interface OpenShelf {
   id: string;
   tone: "accent" | "caution";
   render: (domId: string) => ReactNode;
-}
-
-/** Renaming a session on its tile (FLOW-ORGANIZE-SESSIONS, step 2). */
-export interface TileRename {
-  /** Renames the session through its backend; resolves true once Core has (FLOW-ORGANIZE-SESSIONS-R02). */
-  onSave: (title: string) => Promise<boolean>;
-  /** A rename on its way, or why the last was refused. */
-  renaming?: Sending;
-  /** Editing starts or ends: an earlier refusal is no longer the user's concern. */
-  onReset: () => void;
-  /** Why Rename can't be used now; given, the menu shows it unavailable with this reason, and F2 does nothing. */
-  unavailable?: string;
-}
-
-/** Delete on the tile's menu (FLOW-ARCHIVE-DELETE-SESSION, step 4): it asks first. */
-export interface TileDelete {
-  /** Opens the delete question. */
-  onAsk: () => void;
-  /** Why Delete can't be used now; given, the menu shows it unavailable with this reason. */
-  unavailable?: string;
-}
-
-/** Pinning or unpinning a session from its tile (FLOW-ORGANIZE-SESSIONS, step 1). */
-export interface TilePin {
-  /** Whether it is pinned now: the menu offers Unpin if so, else Pin. */
-  pinned: boolean;
-  /** Pins it when unpinned, unpins it when pinned. */
-  onChoose: () => void;
-  /** Why Pin or Unpin can't be used now; given, the menu shows it unavailable with this reason. */
-  unavailable?: string;
-}
-
-/** Archive or Unarchive on the tile's menu (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3). */
-export interface TileArchive {
-  /** Archive (true) or Unarchive (false), whichever the menu offered for the session as listed. */
-  onChoose: (archived: boolean) => void;
-  /** Why it can't be used now; given, the menu shows it unavailable with this reason. */
-  unavailable?: string;
 }
 
 /** For the gallery: show a pointer or keyboard state on one tile without one. */
@@ -97,7 +54,7 @@ export function SessionTile({
   remove,
   initialMenu,
   initialDraft,
-}: {
+}: TileActions & {
   session: Session;
   backends?: Backends;
   active: boolean;
@@ -107,67 +64,20 @@ export function SessionTile({
   /** Its shelf is open: the shelf's tone, which the chevron and the want take, and the shelf's element id. */
   shelf?: { tone: "accent" | "caution"; domId: string };
   onChevron?: (id: string) => void;
-  /** Rename on the tile's menu and F2; absent, the tile has no menu. */
-  rename?: TileRename;
-  /** Pin or Unpin, first on the tile's menu (LAY-SHELL, A tile's menu). */
-  pin?: TilePin;
-  /** Archive or Unarchive on the tile's menu, after Rename; the menu is there only with Rename. */
-  archive?: TileArchive;
-  /** Delete on the tile's menu, after a rule. */
-  remove?: TileDelete;
   /** For the gallery: the tile's menu shown open, and the title being edited with this text. */
   initialMenu?: boolean;
   initialDraft?: string;
 }) {
   const view = tileOf(session, backends);
-  const tile = useRef<HTMLElement>(null);
-  const more = useRef<HTMLButtonElement>(null);
-  const field = useRef<HTMLInputElement>(null);
-  // The More button names the anchor the menu opens below.
-  const anchor = `--tile-more-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
-  // The tile's menu: whether it is open, where it sits, where focus went, and what opened it, which takes focus back.
-  // Kept as it closes, so the menu fades out where it was.
-  const [menu, setMenu] = useState<{ open: boolean; place: MenuPlace; focus: "item" | "menu" | "none"; from: "more" | "tile" }>(
-    { open: initialMenu ?? false, place: { anchor }, focus: "none", from: "more" },
-  );
-  const opener = useRef(menu.from);
-  opener.current = menu.from;
-  const closeMenu = useCallback((how: MenuClose) => {
-    setMenu((was) => ({ ...was, open: false }));
-    // Closing gives focus back to what opened it, unless the user put focus somewhere else.
-    if (how !== "away") (opener.current === "more" ? more.current : tile.current)?.focus({ preventScroll: true });
-  }, []);
-  const insideMenu = useCallback(() => [more.current], []);
-
-  // The title being edited on the tile, in place of the title; undefined while it is only shown.
-  // The title being edited on the tile, in place of the title (useTitleDraft, shared with the header).
-  const { draft, setDraft, busy, refused, edit, onFieldKey } = useTitleDraft({
-    title: session.title ?? "",
-    untitled: !session.title,
-    onRename: rename?.onSave,
-    renaming: rename?.renaming,
-    onReset: rename?.onReset,
-    disabled: rename?.unavailable !== undefined,
-    initialDraft,
-    field,
-    home: tile,
-  });
-  // The field takes focus as it opens, its text selected to type over.
-  const editing = draft !== undefined;
-  useEffect(() => {
-    if (!editing || initialDraft !== undefined) return;
-    field.current?.focus();
-    field.current?.select();
-  }, [editing, initialDraft]);
   const needsYou = view.mark === "needsYou";
-  const beingDeleted = session.deleting !== undefined;
-  const deleteItem: MenuEntry | undefined = remove && {
-    kind: "item",
-    label: t("rail.tile.deleteButton"),
-    danger: true,
-    unavailable: remove.unavailable,
-    onChoose: remove.onAsk,
-  };
+  const { root, editing, rootHandlers, titleField, moreAndMenu } = useTileMenu({
+    session,
+    title: view.title,
+    actions: { rename, pin, archive, remove },
+    beforeChevron: needsYou,
+    initialMenu,
+    initialDraft,
+  });
   // A session that comes to need the user: its chevron breathes once where it is (DESIGN.md, Motion: status never
   // moves a tile). Only a change into needing the user does; a tile first drawn needing the user shows it at once.
   const [breath, setBreath] = useState(false);
@@ -194,61 +104,21 @@ export function SessionTile({
   return (
     <>
       {/* The tile makes its session active; the chevron, laid over its trailing square, opens its shelf. */}
-      <Root
-        ref={tile}
+      <SessionRoot
+        ref={root}
         editing={editing}
         className="session"
         data-force={force}
         data-needs-you={needsYou || undefined}
         aria-current={active || undefined}
         onClick={() => onSelect(session.id)}
-        onContextMenu={(event) => {
-          if (!rename) return;
-          // A right-click opens the tile's menu at the pointer. The context-menu key and Shift+F10 may send this
-          // event too, after their own keydown has opened the menu at the tile: that one stays.
-          event.preventDefault();
-          setMenu((was) =>
-            was.open && was.focus === "item" && was.from === "tile"
-              ? was
-              : { open: true, place: { x: event.clientX, y: event.clientY }, focus: "menu", from: "tile" },
-          );
-        }}
-        onKeyDown={(event) => {
-          if (!rename) return;
-          if (event.key === "F2" && !beingDeleted) {
-            event.preventDefault();
-            edit();
-          } else if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
-            // The context-menu key and Shift+F10 open the same menu, at the tile, with focus on its first item.
-            event.preventDefault();
-            setMenu({ open: true, place: { anchor }, focus: "item", from: "tile" });
-          }
-        }}
+        {...rootHandlers}
       >
         <span className="session-backend" role="img" aria-label={view.backend}>
           <Icon icon={Bot} size="icon-sm" />
         </span>
         {editing ? (
-          <input
-            ref={field}
-            className="session-title-field"
-            aria-label={t("rail.tile.titleLabel")}
-            value={draft}
-            readOnly={busy}
-            aria-invalid={refused !== undefined || undefined}
-            aria-errormessage={refused !== undefined ? `${anchor}-refused` : undefined}
-            onChange={(event) => {
-              setDraft(event.target.value);
-              // Typing again leaves an earlier refusal behind.
-              if (refused !== undefined) rename?.onReset();
-            }}
-            // Enter saves and Escape restores the title as it was (FLOW-ORGANIZE-SESSIONS, step 2), as in the header.
-            onKeyDown={(event) => onFieldKey(event, { enter: true })}
-            // Leaving the field without Enter restores the title too, unless a rename is on its way or was refused.
-            onBlur={() => {
-              if (!busy && refused === undefined) setDraft(undefined);
-            }}
-          />
+          titleField
         ) : (
           <span className="session-title" data-muted={(view.titleMuted && !unseen) || undefined} data-unseen={unseen || undefined}>
             {view.title}
@@ -270,76 +140,8 @@ export function SessionTile({
           {view.phrase && view.cost && " · "}
           {view.cost}
         </span>
-      </Root>
-      {rename && !editing && (
-        <IconButton
-          ref={more}
-          className="session-more"
-          icon={Ellipsis}
-          size="icon-sm"
-          label={t("rail.tile.moreLabel", { title: view.title })}
-          aria-haspopup="menu"
-          aria-expanded={menu.open}
-          data-before-chevron={needsYou || undefined}
-          style={{ anchorName: anchor } as CSSProperties}
-          // A click the keyboard made (Enter or Space) has no pointer presses to count.
-          onClick={(event) =>
-            setMenu(menu.open ? { ...menu, open: false } : { open: true, place: { anchor }, focus: event.detail === 0 ? "item" : "menu", from: "more" })
-          }
-        />
-      )}
-      {rename && (
-        <Menu
-          label={t("rail.tile.moreLabel", { title: view.title })}
-          entries={
-            // A session being deleted, or whose deletion failed, holds Delete… alone (LAY-SHELL, Being deleted).
-            beingDeleted && deleteItem
-              ? [deleteItem]
-              : [
-                  ...(pin
-                    ? [
-                        {
-                          kind: "item" as const,
-                          label: pin.pinned ? t("rail.tile.unpinButton") : t("rail.tile.pinButton"),
-                          unavailable: pin.unavailable,
-                          onChoose: pin.onChoose,
-                        },
-                      ]
-                    : []),
-                  {
-                    kind: "item",
-                    label: t("rail.tile.renameButton"),
-                    keyHint: t("rail.tile.renameKey"),
-                    unavailable: rename.unavailable,
-                    onChoose: edit,
-                  },
-                  ...(archive
-                    ? [
-                        {
-                          kind: "item" as const,
-                          label: session.archived ? t("rail.tile.unarchiveButton") : t("rail.tile.archiveButton"),
-                          unavailable: archive.unavailable,
-                          onChoose: () => archive.onChoose(!session.archived),
-                        },
-                      ]
-                    : []),
-                  // Delete stands apart in its own group, its label in danger (docs/design/RAIL.md, Menus).
-                  ...(deleteItem ? [{ kind: "rule" } as const, deleteItem] : []),
-                ]
-          }
-          open={menu.open}
-          place={menu.place}
-          focus={menu.focus}
-          inside={insideMenu}
-          onClose={closeMenu}
-        />
-      )}
-      {/* A refused title keeps the field open, with the reason beneath the tile. */}
-      {editing && refused !== undefined && (
-        <p id={`${anchor}-refused`} className="problem session-rename-problem" role="alert">
-          {refused}
-        </p>
-      )}
+      </SessionRoot>
+      {moreAndMenu}
       {handle && (
         <button
           type="button"
@@ -504,7 +306,7 @@ export function TileItem({
 }
 
 /** The state's mark, named where line two doesn't already name it. */
-function Mark({ view, breath, onAnimationEnd }: { view: TileView; breath: boolean; onAnimationEnd: (event: AnimationEvent) => void }) {
+export function Mark({ view, breath, onAnimationEnd }: { view: TileView; breath?: boolean; onAnimationEnd?: (event: AnimationEvent) => void }) {
   switch (view.mark) {
     case "starting":
       return (
@@ -536,21 +338,4 @@ function Mark({ view, breath, onAnimationEnd }: { view: TileView; breath: boolea
     default:
       return null;
   }
-}
-
-/**
- * The tile's root: the button that makes its session active, or, while its title is being edited, a box of the same
- * look holding the field, since a field can't sit inside a button.
- */
-function Root({
-  editing,
-  ref,
-  ...rest
-}: HTMLAttributes<HTMLElement> & { editing: boolean; ref: Ref<HTMLElement>; "data-force"?: string; "data-needs-you"?: boolean }) {
-  if (editing) {
-    // The box only holds the field: choosing, the menu and its keys belong to the tile when it is a button again.
-    const { onClick: _click, onContextMenu: _menu, onKeyDown: _key, ...box } = rest;
-    return <div ref={ref as Ref<HTMLDivElement>} data-editing {...box} />;
-  }
-  return <button ref={ref as Ref<HTMLButtonElement>} type="button" {...rest} />;
 }
