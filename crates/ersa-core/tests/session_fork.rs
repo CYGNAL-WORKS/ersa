@@ -109,7 +109,7 @@ async fn forked(client: &mut Client, id: &str) -> Value {
 }
 
 // verifies: FLOW-FORK-SESSION-R01
-// verifies: FLOW-FORK-SESSION-R02
+// verifies: FLOW-FORK-SESSION-R05
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_copies_the_originals_setup_and_conversation_and_leaves_it_as_it_was() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -203,7 +203,7 @@ async fn a_fork_copies_the_originals_setup_and_conversation_and_leaves_it_as_it_
     }
 }
 
-// verifies: FLOW-FORK-SESSION-R02
+// verifies: FLOW-FORK-SESSION-R05
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_of_an_archived_session_is_not_archived() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -564,7 +564,7 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
         .collect();
     assert_eq!(shown.len(), 1, "{events:#?}");
     assert_eq!(shown[0]["event"]["text"], "the reply");
-    // verifies: FLOW-FORK-SESSION-R02
+    // verifies: FLOW-FORK-SESSION-R05
     assert_eq!(
         row(&mut client, &fork_id).await["section_id"],
         section["id"]
