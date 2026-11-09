@@ -21,12 +21,14 @@ export interface ArrangeActions {
   onGroupBy: (groupBy: GroupBy) => void;
   onShow: (show: Show) => void;
   onReset: () => void;
+  /** Shows the sessions page (FLOW-ORGANIZE-SESSIONS, step 9). */
+  onAllSessions: () => void;
 }
 
 /**
  * The arrange menu's items (LAY-SHELL, The arrange button): Group by ▸ and Show ▸, each naming its current choice and
- * its submenu marking it, then Reset to defaults apart. Sort by ▸ goes after Group by, and New section and All
- * sessions in the group with Reset, as they are built.
+ * its submenu marking it, then Reset to defaults and All sessions apart. Sort by ▸ goes after Group by, and New section
+ * in the group with Reset, as they are built.
  */
 export function arrangeEntries(arrangement: Pick<RailArrangement, "groupBy" | "show">, actions: ArrangeActions): MenuEntry[] {
   return [
@@ -44,6 +46,7 @@ export function arrangeEntries(arrangement: Pick<RailArrangement, "groupBy" | "s
     },
     { kind: "rule" },
     { kind: "item", label: t("rail.arrange.resetButton"), onChoose: actions.onReset },
+    { kind: "item", label: t("rail.arrange.allSessionsButton"), onChoose: actions.onAllSessions },
   ];
 }
 
