@@ -32,10 +32,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
+use ersa_adapter::ConversationEnd;
 use ersa_protocol::events::{Event, MessageAttachment, UserMessage};
 
 pub use listing::{SessionList, SessionSummary, list_sessions, summarize_session};
-pub use projection::{RecordEvent, project_record, project_record_from};
+pub use projection::{RecordEvent, conversation_end_from, project_record, project_record_from};
 pub use registry::{LiveCheck, LiveSession, live_session};
 
 /// The longest encoded directory name the CLI uses whole; a longer one is cut
@@ -176,6 +177,30 @@ pub fn read_record(
         Some(path) => Ok(read_record_at(&path)?.events),
         None => Ok(Vec::new()),
     }
+}
+
+/// How session `session_id`'s conversation ends, as its record holds it
+/// ([`conversation_end_from`]). A session with no record has no reply yet.
+pub fn conversation_end(
+    claude_home: &Path,
+    cwd: &str,
+    session_id: &str,
+) -> io::Result<ConversationEnd> {
+    let Some(path) = find_record(claude_home, cwd, session_id)? else {
+        return Ok(ConversationEnd::NoReply);
+    };
+    let file = fs::File::open(&path)?;
+    let len = file.metadata()?.len();
+    if len > MAX_RECORD_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "the session record {} is {len} bytes, more than the {MAX_RECORD_BYTES} Ersa reads",
+                path.display()
+            ),
+        ));
+    }
+    conversation_end_from(&mut io::BufReader::new(file), len)
 }
 
 /// A token for the state of session `session_id`'s record: its file's size

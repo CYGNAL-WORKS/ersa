@@ -314,6 +314,7 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
         Method::SessionSetArchived => to_json(sessions::set_archived(core, parse(params)?).await),
         Method::SessionArrange => to_json(sessions::arrange(core, parse(params)?).await),
         Method::SessionDelete => to_json(delete::delete(core, parse(params)?).await),
+        Method::SessionFork => to_json(sessions::fork(core, parse(params)?).await),
         Method::SessionSend => to_json(sessions::send(core, &conn.peer(), parse(params)?).await),
         Method::SessionInterrupt => to_json(sessions::interrupt(core, parse(params)?).await),
         Method::SessionDecidePermission => {
@@ -377,6 +378,8 @@ pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
                     | Method::SessionArrange
                     // Stops the session, runs git and deletes files.
                     | Method::SessionDelete
+                    // Reads the session's record, then starts a backend.
+                    | Method::SessionFork
                     | Method::SessionSend
                     | Method::SessionInterrupt
                     | Method::SessionDecidePermission
@@ -461,6 +464,10 @@ pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Resp
         },
         Some(Method::SessionDelete) => match parse(params) {
             Ok(params) => to_json(delete::delete(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionFork) => match parse(params) {
+            Ok(params) => to_json(sessions::fork(core, params).await),
             Err((e, _)) => Err(e),
         },
         Some(Method::SessionSend) => match parse(params) {

@@ -33,7 +33,7 @@ use tokio::sync::watch;
 
 use crate::api::ApiError;
 use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
-use crate::sessions::SessionError;
+use crate::sessions::{Beginning, SessionError};
 use crate::state::Core;
 use crate::transport::MAX_PROCESS_LINE_BYTES;
 use crate::workspace;
@@ -103,6 +103,7 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::SessionSetArchived
         | Method::SessionArrange
         | Method::SessionDelete
+        | Method::SessionFork
         | Method::SessionSetMode => "the session is a replay of a recording and cannot change",
         Method::ProjectAdd
         | Method::ProjectSetTrust
@@ -197,12 +198,16 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         project_path: String::new(),
         // A recording names its session itself, as it did when recorded.
         backend_session_id: None,
+        fork_of: None,
         extra: Value::Null,
     };
     core.sessions
         .create_with(
             session,
-            Some(title),
+            Beginning {
+                title: Some(title),
+                ..Beginning::default()
+            },
             Arc::new(ReplayAdapter {
                 inner: adapter,
                 lines: Arc::new(lines),

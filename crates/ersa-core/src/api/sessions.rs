@@ -2,14 +2,17 @@
 //! parsed params and returns the typed result or an [`ApiError`]; the work
 //! is the session manager's.
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_adapter::{BackendChoices, Direction, PermissionDecision, QuestionReply, SessionConfig};
+use ersa_adapter::{
+    BackendChoices, Direction, PermissionDecision, QuestionReply, SessionConfig, Transport,
+};
 use ersa_protocol::core_api::{
     AnswerQuestionParams, ArrangeParams, Attachment, AttachmentKind, Choice,
-    DecidePermissionParams, Empty, IdParams, InspectParams, Inspected, RawDirection, RawLogEntry,
-    RawLogParams, Session, SessionCreateParams, SessionSendParams, SessionSendResult,
-    SetArchivedParams, SetModeParams, SetTitleParams, SubscribeParams, SubscribeResult,
+    DecidePermissionParams, Empty, IdParams, InspectParams, Inspected, Project, RawDirection,
+    RawLogEntry, RawLogParams, Session, SessionCreateParams, SessionSendParams, SessionSendResult,
+    SetArchivedParams, SetModeParams, SetTitleParams, SubscribeParams, SubscribeResult, Workspace,
     WorkspaceState,
 };
 use serde_json::Value;
@@ -38,12 +41,22 @@ async fn find(core: &Core, id: &str) -> Result<Session, ApiError> {
     Ok(core.sessions.get(id)?)
 }
 
-pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<Session, ApiError> {
+/// What starting a session in a workspace takes, looked up the same way
+/// for a new session and a fork.
+struct Starting {
+    transport: Arc<dyn Transport>,
+    /// The version detection found, until the backend announces its own.
+    backend_version: String,
+    trusted: bool,
+}
+
+/// The workspace `id`, which must be `ready`, and its project.
+async fn ready_workspace(core: &Core, id: &str) -> Result<(Workspace, Project), ApiError> {
     let workspace = core
         .store
-        .workspace(params.workspace_id.clone())
+        .workspace(id.to_string())
         .await?
-        .ok_or_else(|| ApiError::not_found(format!("no workspace {}", params.workspace_id)))?;
+        .ok_or_else(|| ApiError::not_found(format!("no workspace {id}")))?;
     if workspace.state != WorkspaceState::Ready {
         return Err(ApiError::invalid_state(format!(
             "workspace {} is not ready",
@@ -55,6 +68,44 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         .project(workspace.project_id.clone())
         .await?
         .ok_or_else(|| ApiError::not_found(format!("no project {}", workspace.project_id)))?;
+    Ok((workspace, project))
+}
+
+async fn starting(core: &Core, project: &Project, backend: &str) -> Result<Starting, ApiError> {
+    let transport = core
+        .session_transport_for(&project.host_id)
+        .ok_or_else(|| {
+            ApiError::new(
+                ersa_protocol::core_api::ErrorKind::TransportError,
+                format!("host {} cannot be reached", project.host_id),
+            )
+        })?;
+    let backend_version = if project.host_id == LOCAL_HOST_ID {
+        core.local_backends()
+            .await
+            .into_iter()
+            .find(|d| d.backend.name == backend)
+            .and_then(|d| d.version)
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    // Trust is read again here, after the detection above, which can take
+    // seconds: an answer the user changed meanwhile is the one that counts.
+    let trusted = core
+        .store
+        .project(project.id.clone())
+        .await?
+        .is_some_and(|p| p.trusted);
+    Ok(Starting {
+        transport,
+        backend_version,
+        trusted,
+    })
+}
+
+pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<Session, ApiError> {
+    let (workspace, project) = ready_workspace(core, &params.workspace_id).await?;
     let Some(adapter) = core.sessions.adapter(&params.backend) else {
         return Err(ApiError::new(
             ersa_protocol::core_api::ErrorKind::BackendMissing,
@@ -78,33 +129,11 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         .clone()
         .unwrap_or_else(|| BackendChoices::default_of(&choices.permission_modes));
 
-    let transport = core
-        .session_transport_for(&project.host_id)
-        .ok_or_else(|| {
-            ApiError::new(
-                ersa_protocol::core_api::ErrorKind::TransportError,
-                format!("host {} cannot be reached", project.host_id),
-            )
-        })?;
-    // The version detection found, until the backend announces its own.
-    let backend_version = if project.host_id == LOCAL_HOST_ID {
-        core.local_backends()
-            .await
-            .into_iter()
-            .find(|d| d.backend.name == params.backend)
-            .and_then(|d| d.version)
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-
-    // Trust is read again here, after the detection above, which can take
-    // seconds: an answer the user changed meanwhile is the one that counts.
-    let trusted = core
-        .store
-        .project(project.id.clone())
-        .await?
-        .is_some_and(|p| p.trusted);
+    let Starting {
+        transport,
+        backend_version,
+        trusted,
+    } = starting(core, &project, &params.backend).await?;
 
     // A backend that starts a session under an id Ersa chooses gets one
     // now: stored with the row before the backend starts, so the session can
@@ -147,11 +176,77 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         // keeps its own trust record is told of it (ADR 0018).
         project_path: project.path.clone(),
         backend_session_id,
+        fork_of: None,
         extra: Value::Null,
     };
     Ok(core
         .sessions
         .create(session, transport, config, backend_version)
+        .await?)
+}
+
+/// `session.fork` (FLOW-FORK-SESSION): a new session from a copy of the
+/// conversation of `params.id`, in its workspace and with its backend,
+/// model, effort, permission mode and section, not pinned or archived.
+pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiError> {
+    let original = core.sessions.row(&params.id)?;
+    let (workspace, project) = ready_workspace(core, &original.workspace_id).await?;
+    let Starting {
+        transport,
+        backend_version,
+        trusted,
+    } = starting(core, &project, &original.backend).await?;
+    let (backend_id, adapter) = core
+        .sessions
+        .check_forkable(&params.id, Arc::clone(&transport))
+        .await?;
+    let permission_mode = original
+        .permission_mode
+        .clone()
+        .unwrap_or_else(|| BackendChoices::default_of(&adapter.choices().permission_modes));
+    // Chosen and stored before the backend starts, as for a new session, so
+    // a fork can be renamed before its first message. A backend without
+    // host-chosen ids names it when it starts instead (R28).
+    let backend_session_id = adapter.new_session_id();
+    let fork = SessionRow {
+        id: persistence::new_id("s"),
+        workspace_id: workspace.id,
+        host_id: project.host_id,
+        backend: original.backend,
+        backend_session_id: backend_session_id.clone(),
+        mode: original.mode,
+        // The stored path, never the one the backend reports (R28).
+        cwd: workspace.path.clone(),
+        model: original.model.clone(),
+        effort: original.effort.clone(),
+        permission_mode: original.permission_mode,
+        archived: false,
+        deleting: None,
+        pinned: false,
+        section_id: original.section_id,
+        last_activity_at: None,
+    };
+    let config = SessionConfig {
+        cwd: workspace.path,
+        permission_mode,
+        model: original.model,
+        effort: original.effort,
+        project_trusted: trusted,
+        project_path: project.path,
+        backend_session_id,
+        fork_of: Some(backend_id),
+        extra: Value::Null,
+    };
+    Ok(core
+        .sessions
+        .fork(
+            &params.id,
+            fork,
+            adapter,
+            transport,
+            config,
+            backend_version,
+        )
         .await?)
 }
 

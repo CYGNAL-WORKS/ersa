@@ -64,8 +64,10 @@ use crate::persistence::{self, SessionRow, Store, now_rfc3339};
 use crate::projection::View;
 use crate::raw_log::RawLog;
 
+mod fork;
 mod send;
 
+pub use fork::Beginning;
 pub use send::Pacer;
 
 /// How many events may wait for one subscriber before it counts as unable
@@ -846,18 +848,25 @@ impl SessionManager {
         let adapter = self.adapters.get(&row.backend).cloned().ok_or_else(|| {
             SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
         })?;
-        self.create_with(row, None, adapter, transport, config, backend_version)
-            .await
+        self.create_with(
+            row,
+            Beginning::default(),
+            adapter,
+            transport,
+            config,
+            backend_version,
+        )
+        .await
     }
 
     /// [`SessionManager::create`] with a given adapter rather than the
-    /// registered one for the session's backend, and a title to show until
-    /// the record gives one: the replay server's, which feeds a recording in
-    /// place of a backend.
+    /// registered one for the session's backend, and what the session
+    /// `begin`s with: the replay server's, which feeds a recording in place
+    /// of a backend, and a fork's.
     pub async fn create_with(
         &self,
         row: SessionRow,
-        title: Option<String>,
+        begin: Beginning,
         adapter: Arc<dyn Adapter>,
         transport: Arc<dyn Transport>,
         config: SessionConfig,
@@ -878,11 +887,16 @@ impl SessionManager {
             return Err(busy);
         }
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
-        lock(&handle.presented).title = title;
+        lock(&handle.presented).title = begin.title;
         // A new session has no record yet: the backend has not been told
-        // anything, so its events are the live stream's from the start.
-        let (view, events) =
-            View::open(&handle.id, &handle.backend, Some(adapter.projector()), &[]);
+        // anything, so its events are the live stream's from the start. A
+        // fork starts from the conversation it copies.
+        let (view, events) = View::open(
+            &handle.id,
+            &handle.backend,
+            Some(adapter.projector()),
+            &begin.record,
+        );
         lock(&handle.hub).install(&handle.id, view, &events);
         {
             // Registered and launched under the lock `stop_all` takes, so a
@@ -1826,6 +1840,16 @@ fn is_rfc3339(text: &str) -> bool {
 /// Asks `adapter` whether another process has session `backend_id` open,
 /// for at most [`OPEN_ELSEWHERE_CHECK`]: a check that panics or hangs could
 /// not tell, so its answer is unknown.
+/// The processes a registry named, as a message says them: `pid 7`, or
+/// `pids 7, 9`.
+pub(crate) fn pids_named(pids: &[u32]) -> String {
+    let list: Vec<String> = pids.iter().map(u32::to_string).collect();
+    match list.len() {
+        1 => format!("pid {}", list[0]),
+        _ => format!("pids {}", list.join(", ")),
+    }
+}
+
 async fn ask_open_elsewhere(
     adapter: Arc<dyn Adapter>,
     transport: Arc<dyn Transport>,
@@ -1848,13 +1872,14 @@ async fn notice_if_open_elsewhere(
 ) {
     let notice = match ask_open_elsewhere(adapter, transport, backend_id).await {
         OpenElsewhere::No => return,
-        OpenElsewhere::Yes { pid } => SessionNotice {
+        OpenElsewhere::Yes { pids } => SessionNotice {
             level: NoticeLevel::Warning,
             code: NoticeCode::SessionOpenElsewhere,
             message: format!(
-                "Another process (pid {pid}) has this session open, and {consequence}."
+                "Another process ({}) has this session open, and {consequence}.",
+                pids_named(&pids)
             ),
-            pid: Some(pid),
+            pid: pids.first().copied(),
         },
         OpenElsewhere::Unknown => SessionNotice {
             level: NoticeLevel::Info,
@@ -1881,15 +1906,15 @@ async fn notice_if_open_elsewhere(
 /// write halfway would leave half a line in the backend's stdin, which the
 /// next line would be glued onto. A call still stuck when the request gives
 /// up finishes, or fails, when the session is stopped.
-async fn bounded(
-    call: impl std::future::Future<Output = Result<(), AdapterError>> + Send + 'static,
-) -> Result<(), SessionError> {
+async fn bounded<T: Send + 'static>(
+    call: impl std::future::Future<Output = Result<T, AdapterError>> + Send + 'static,
+) -> Result<T, SessionError> {
     match tokio::time::timeout(ADAPTER_CALL, tokio::spawn(call)).await {
         Ok(Ok(result)) => result.map_err(SessionError::Adapter),
         Ok(Err(e)) => Err(SessionError::Internal(format!("the adapter failed: {e}"))),
         Err(_) => Err(SessionError::Adapter(AdapterError::Io(io::Error::new(
             io::ErrorKind::TimedOut,
-            format!("the backend did not take the line within {ADAPTER_CALL:?}"),
+            format!("the backend did not answer within {ADAPTER_CALL:?}"),
         )))),
     }
 }
@@ -2161,6 +2186,7 @@ async fn run_session(task: SessionTask) {
     // still leaves the fact startup repairs from.
     sink.app_log.flushed().await;
 
+    let is_fork = config.fork_of.is_some();
     let mut cancel = live.cancel.subscribe();
     let as_sink: Arc<dyn AdapterSink> = sink.clone();
     // The start runs in a task of its own, so an adapter that panics fails
@@ -2185,6 +2211,11 @@ async fn run_session(task: SessionTask) {
         Some(Ok(session)) => {
             let session: Arc<dyn AdapterSession> = Arc::from(session);
             *lock(&handle.start_failure) = None;
+            // Before the session can be sent anything, so a first message's
+            // lines come after this.
+            if is_fork {
+                sink.record_fact(LifecycleFact::ForkReady);
+            }
             started.send_replace(Started::Ready(Arc::clone(&session)));
             sink.start_finished(Ok(()));
             // A stop that arrived as the start completed saw nothing to stop.

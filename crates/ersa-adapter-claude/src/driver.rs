@@ -22,10 +22,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, ImageLimits,
-    LineReader, LineWriter, OpenElsewhere, OutgoingMessage, PermissionDecision, Process,
-    ProcessExit, ProcessSpec, Projector, QuestionReply, RecordDeletion, RecordEvent, RecordSummary,
-    SessionConfig, Transport, async_trait,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
+    ImageLimits, LineReader, LineWriter, OpenElsewhere, OutgoingMessage, PermissionDecision,
+    Process, ProcessExit, ProcessSpec, Projector, QuestionReply, RecordDeletion, RecordEvent,
+    RecordSummary, SessionConfig, Transport, async_trait,
 };
 use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::PermissionBehavior;
@@ -324,12 +324,30 @@ pub fn resume_args(config: &SessionConfig) -> Result<Vec<String>, AdapterError> 
     }
 }
 
+/// The arguments that fork an earlier session, after [`invocation_args`]:
+/// `--resume` with the original's id, and `--fork-session`, so the CLI copies
+/// its conversation into a new record and leaves the original's as it was
+/// (fixtures 2.1.316/13 to 19, PROTO-CLAUDE-CODE-STREAM-R28). None unless
+/// `fork_of` is set. Like a resume id, it must be a session id.
+pub fn fork_args(config: &SessionConfig) -> Result<Vec<String>, AdapterError> {
+    let Some(id) = &config.fork_of else {
+        return Ok(Vec::new());
+    };
+    if !crate::record::is_session_id(id) {
+        return Err(AdapterError::Protocol(format!(
+            "cannot fork {id:?}: not a Claude Code session id"
+        )));
+    }
+    Ok(vec!["--resume".into(), id.clone(), "--fork-session".into()])
+}
+
 /// The arguments that start a new session under the id Core chose and
 /// stored, after [`invocation_args`]: `--session-id` with
 /// `backend_session_id`, so the CLI's `system/init` reports that id and its
 /// record is filed under it (PROTO-CLAUDE-CODE-STREAM-R35). None when Core
-/// chose no id. Never with `--resume`, which continues a session under its
-/// own id: a config asking for both is an error.
+/// chose no id. A fork takes one too, beside its `--resume` (fixture
+/// 2.1.316/16). Never with a plain `--resume`, which continues a session
+/// under its own id: a config asking for both is an error.
 ///
 /// Like a resume id, the id must be a UUID, so it can never reach the
 /// command line as a flag.
@@ -399,6 +417,7 @@ impl Adapter for ClaudeAdapter {
     ) -> Result<Box<dyn AdapterSession>, AdapterError> {
         // A bad resume or session id fails here, before anything starts.
         let resume = resume_args(&config)?;
+        let fork = fork_args(&config)?;
         let session_id = session_id_args(&config)?;
 
         let mut spec = ProcessSpec {
@@ -409,6 +428,7 @@ impl Adapter for ClaudeAdapter {
         };
         self.set_environment(&mut spec);
         spec.args.extend(resume);
+        spec.args.extend(fork);
         spec.args.extend(session_id);
         let program = spec.program.clone();
         let mut process = transport.spawn(spec).await.map_err(|e| {
@@ -554,6 +574,18 @@ impl Adapter for ClaudeAdapter {
         self.records.forget(backend_session_id);
     }
 
+    /// How the record's conversation ends, read from this machine's files.
+    async fn conversation_end(
+        &self,
+        _transport: Arc<dyn Transport>,
+        cwd: &str,
+        backend_session_id: &str,
+    ) -> Result<Option<ConversationEnd>, AdapterError> {
+        let home = self.claude_home()?;
+        let (cwd, id) = (cwd.to_string(), backend_session_id.to_string());
+        blocking(move || record::conversation_end(&home, &cwd, &id).map(Some)).await
+    }
+
     /// The record's title and first time, from its head and tail
     /// (PROTO-CLAUDE-CODE-STREAM-R16), read from this machine's files.
     async fn summarize_record(
@@ -608,7 +640,9 @@ impl Adapter for ClaudeAdapter {
         let check = tokio::task::spawn_blocking(move || record::live_session(&home, &id)).await;
         match check {
             Ok(LiveCheck::NotOpen) => OpenElsewhere::No,
-            Ok(LiveCheck::Open(live)) => OpenElsewhere::Yes { pid: live.pid },
+            Ok(LiveCheck::Open(open)) => OpenElsewhere::Yes {
+                pids: open.iter().map(|live| live.pid).collect(),
+            },
             Ok(LiveCheck::Unknown { .. }) | Err(_) => OpenElsewhere::Unknown,
         }
     }
@@ -631,9 +665,9 @@ impl Adapter for ClaudeAdapter {
         let deletion = blocking(move || {
             match record::live_session(&home, &id) {
                 LiveCheck::NotOpen => {}
-                LiveCheck::Open(live) => {
+                LiveCheck::Open(open) => {
                     return Ok(RecordDeletion::Refused(OpenElsewhere::Yes {
-                        pid: live.pid,
+                        pids: open.iter().map(|live| live.pid).collect(),
                     }));
                 }
                 LiveCheck::Unknown { .. } => {

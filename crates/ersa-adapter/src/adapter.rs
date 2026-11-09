@@ -182,10 +182,38 @@ pub trait Adapter: Send + Sync {
             self.backend()
         )))
     }
+
+    /// How session `backend_session_id`'s conversation ends, as its record
+    /// holds it, which is what decides whether it can be forked
+    /// (FLOW-FORK-SESSION-R03). A session with no record has
+    /// [`ConversationEnd::NoReply`]. `None`, the default, for a backend
+    /// that cannot fork a session.
+    async fn conversation_end(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        _backend_session_id: &str,
+    ) -> Result<Option<ConversationEnd>, AdapterError> {
+        Ok(None)
+    }
+}
+
+/// How a session's conversation ends, read from its record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationEnd {
+    /// With a finished reply: the session can be forked.
+    Finished,
+    /// No reply has finished yet.
+    NoReply,
+    /// The last turn was interrupted, or ended in an error.
+    Interrupted,
+    /// Part way through a turn: one still being written, or one the process
+    /// that was writing it never finished.
+    Unfinished,
 }
 
 /// What [`Adapter::delete_record`] did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordDeletion {
     /// The record is gone, or was already.
     Deleted,
@@ -197,12 +225,13 @@ pub enum RecordDeletion {
 
 /// Whether another process has a session open, as the backend's own
 /// registry of open sessions tells it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenElsewhere {
     /// No other process has it open.
     No,
-    /// Process `pid` has it open, so both would write to one record.
-    Yes { pid: u32 },
+    /// These processes have it open, in order of pid, so writing beside
+    /// them would put two writers on one record. Never empty.
+    Yes { pids: Vec<u32> },
     /// The registry could not be read well enough to tell.
     Unknown,
 }
@@ -474,6 +503,11 @@ pub struct SessionConfig {
     /// backend to choose, as it does for a backend without host-chosen ids.
     #[serde(default)]
     pub backend_session_id: Option<String>,
+    /// For a fork (FLOW-FORK-SESSION): the backend's id for the session it
+    /// starts from a copy of. The new session has an id of its own,
+    /// [`SessionConfig::backend_session_id`] or the one the backend reports.
+    #[serde(default)]
+    pub fork_of: Option<String>,
     /// Backend-specific settings, read only by that backend's adapter. `null`
     /// when there are none.
     pub extra: Value,

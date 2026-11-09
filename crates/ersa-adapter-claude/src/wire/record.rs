@@ -84,8 +84,12 @@ const CLI_MARKUP: &[&str] = &[
     "<bash-stdout>",
     "<bash-stderr>",
     "<task-notification>",
-    "[Request interrupted by user",
+    INTERRUPT_MARKER,
 ];
+
+/// How the CLI's note of an interrupted turn begins; the rest varies
+/// (`[Request interrupted by user for tool use]`).
+const INTERRUPT_MARKER: &str = "[Request interrupted by user";
 
 impl RecordUser {
     /// Whether the CLI wrote this message rather than a person typing a prompt
@@ -114,6 +118,41 @@ impl RecordUser {
             let text = text.trim_start();
             CLI_MARKUP.iter().any(|mark| text.starts_with(mark))
         })
+    }
+
+    /// The first text of the message, as the CLI's markup is matched.
+    fn first_text(&self) -> Option<&str> {
+        match &self.message.content {
+            MessageContent::Text(text) => Some(text.as_str()),
+            MessageContent::Blocks(blocks) => blocks.iter().find_map(|block| match block {
+                ContentBlock::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            }),
+        }
+        .map(str::trim_start)
+    }
+
+    /// Whether this is the CLI's marker that the user interrupted the turn.
+    pub fn is_interrupt_marker(&self) -> bool {
+        self.first_text()
+            .is_some_and(|text| text.starts_with(INTERRUPT_MARKER))
+    }
+
+    /// Whether the CLI wrote this beside the conversation, with no reply to
+    /// follow: a local command or its caveat, a compaction summary. A
+    /// background task's report from the CLI starts a turn, so it is not
+    /// one, and neither is the interrupt marker.
+    pub fn is_aside(&self) -> bool {
+        let starts_a_turn = self
+            .first_text()
+            .is_some_and(|text| text.starts_with("<task-notification>"))
+            || self
+                .extra
+                .get("origin")
+                .and_then(|origin| origin.get("kind"))
+                .and_then(Value::as_str)
+                .is_some_and(|kind| kind != "human");
+        self.is_from_cli() && !starts_a_turn && !self.is_interrupt_marker()
     }
 }
 
