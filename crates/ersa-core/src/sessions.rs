@@ -1372,7 +1372,7 @@ impl SessionManager {
         let adapter = self.adapter(&row.backend).ok_or_else(|| {
             SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
         })?;
-        Ok(ask_open_elsewhere(adapter, transport, &backend_id).await)
+        Ok(ask_open_elsewhere(adapter, transport, &backend_id, ()).await)
     }
 
     /// Marks the session deleting, `running`, and records whether its
@@ -1854,14 +1854,19 @@ pub(crate) fn pids_named(pids: &[u32]) -> String {
 
 /// Asks `adapter` whether another process has session `backend_id` open,
 /// for at most [`OPEN_ELSEWHERE_CHECK`]: a check that panics or hangs could
-/// not tell, so its answer is unknown.
+/// not tell, so its answer is unknown. `held` is kept until the check itself
+/// ends, however long that is after the answer.
 async fn ask_open_elsewhere(
     adapter: Arc<dyn Adapter>,
     transport: Arc<dyn Transport>,
     backend_id: &str,
+    held: impl Send + 'static,
 ) -> OpenElsewhere {
     let id = backend_id.to_string();
-    let check = tokio::spawn(async move { adapter.open_elsewhere(transport, &id).await });
+    let check = tokio::spawn(async move {
+        let _held = held;
+        adapter.open_elsewhere(transport, &id).await
+    });
     match tokio::time::timeout(OPEN_ELSEWHERE_CHECK, check).await {
         Ok(Ok(answer)) => answer,
         Ok(Err(_)) | Err(_) => OpenElsewhere::Unknown,
@@ -1875,7 +1880,7 @@ async fn notice_if_open_elsewhere(
     backend_id: &str,
     consequence: &str,
 ) {
-    let notice = match ask_open_elsewhere(adapter, transport, backend_id).await {
+    let notice = match ask_open_elsewhere(adapter, transport, backend_id, ()).await {
         OpenElsewhere::No => return,
         OpenElsewhere::Yes { pids } => SessionNotice {
             level: NoticeLevel::Warning,
