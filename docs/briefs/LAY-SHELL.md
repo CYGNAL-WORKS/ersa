@@ -79,10 +79,11 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 
 ## Built so far
 
-Of the rail described above, what is built is the tree grouped by project, by date or by none, with sessions newest first and a leading Pinned group, New session at the rail's top, each project heading with New session and trusting the project, group headings that collapse and then count their sessions with the mark in the tone of what they want, the tiles, the arrange button and its menu (Group by Project, Date or None; Show Active, Archived or All; Reset to defaults), and the foot; Sort by, New section, All sessions and grouping by section are still to build. Collapsed groups are kept for each grouping across restarts. The shelf is built: a tile's chevron is the shelf's handle on every tile but the active one's.
+Of the rail described above, what is built is the tree grouped by project, by date or by none, with a leading Pinned group, New session at the rail's top, each project heading with New session and trusting the project, group headings that collapse and then count their sessions with the mark in the tone of what they want, the tiles, the arrange button and its menu (Group by Project, Date or None; Sort by Date created, Last activity or Name; Show Active, Archived or All; Reset to defaults), and the foot; New section, All sessions and grouping by section are still to build. Collapsed groups are kept for each grouping across restarts. The shelf is built: a tile's chevron is the shelf's handle on every tile but the active one's.
 
 ## Changes
 
+- 2026-11-08: from #205 inbox: Built so far follows Sort by. No requirement IDs changed.
 - 2026-11-08: from #267 merge review: Built so far follows the arrange menu and persisted collapsed groups; the tree's notes for nothing to show, and what the rail does while the arrangement is being read or can't be read. No requirement IDs changed.
 - 2026-11-07: from #262 inbox: RAIL.md (Menus) says keyboard focus follows a tile that Pin or Unpin moves to another group, or goes to that group's heading while it is collapsed. No requirement IDs changed.
 - 2026-11-06: from #227 inbox: Built so far follows #158: New session at the rail's top, and collapsing group headings. No requirement IDs changed.
