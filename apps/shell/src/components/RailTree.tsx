@@ -5,7 +5,7 @@ import type { ProjectsView, SessionsView } from "../core/connection";
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import { deleteUnavailable } from "../session/deletion";
 import type { Sending } from "../session/follow";
-import type { ArrangeProblem, GroupBy, Show, SortBy } from "../session/arrangement";
+import { type ArrangeProblem, DEFAULT_ARRANGEMENT, type GroupBy, type Show, type SortBy } from "../session/arrangement";
 import { type Collapsed, type DateKey, collapsedOf, sortValueOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { type Place, arrive, placesOf, regroup, slideFrom } from "../theme/motion";
@@ -201,7 +201,7 @@ export function RailTree(props: RailTreeProps) {
     const target = to !== undefined ? open[openIds.indexOf(to)]?.querySelector<HTMLElement>(".session") : section.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session");
     target?.focus();
   });
-  const { groupBy = "project", sortBy = "created", show = "active", now = new Date() } = props;
+  const { groupBy = "project", sortBy = DEFAULT_ARRANGEMENT.sortBy, show = "active", now = new Date() } = props;
   // A new grouping or filter: where every tile and heading sat before it, taken while the page still shows the old
   // one (this render has not reached it yet), so each slides to its new place once it has (FLOW-ORGANIZE-SESSIONS,
   // step 4). So too when what the sort reads of a session differs from the listing before, as it does when the user
@@ -348,13 +348,13 @@ export function RailTree(props: RailTreeProps) {
                 </GroupToggle>
               </div>
               <GroupTiles id={pinnedTiles} folded={pinned.folded}>
-                <ul className="rail-tiles">{tree.pinned.map(tile)}</ul>
+                <ul className="rail-tiles" ref={movesInPlace}>{tree.pinned.map(tile)}</ul>
               </GroupTiles>
             </div>
           </li>
           {tree.groups.map((group) => {
             const closed = folded(group.key, group.sessions);
-            const tiles = group.sessions.length > 0 && <ul className="rail-tiles">{group.sessions.map(tile)}</ul>;
+            const tiles = group.sessions.length > 0 && <ul className="rail-tiles" ref={movesInPlace}>{group.sessions.map(tile)}</ul>;
             if (group.kind === "date")
               return (
                 <DateGroup key={group.key} name={t(DATE_NAMES[group.key])} slide={headingSlide(group.key)} folded={closed.folded} summary={collapsedOf(group.sessions)} toggle={closed.toggle}>
@@ -369,7 +369,7 @@ export function RailTree(props: RailTreeProps) {
           })}
         </ul>
       )}
-      {looseShown && loose.length > 0 && <ul className="rail-tiles">{loose.map(tile)}</ul>}
+      {looseShown && loose.length > 0 && <ul className="rail-tiles" ref={movesInPlace}>{loose.map(tile)}</ul>}
       {noneShown && (
         <p key={noneShown} className="rail-note" data-slide={`note:${noneShown}`}>
           {noneShown}
@@ -377,6 +377,21 @@ export function RailTree(props: RailTreeProps) {
       )}
     </section>
   );
+}
+
+/**
+ * For a list of tiles, as its ref: a tile React reorders is moved where it is, not taken off the page and put back,
+ * since that would close its open menu, lose its focus and start its shelf's and glyph's animations over while another
+ * session's turn ends. Without `moveBefore`, React inserts as it always does, and the tile still reaches its place.
+ */
+function movesInPlace(list: HTMLUListElement | null): void {
+  if (!list || typeof list.moveBefore !== "function") return;
+  list.insertBefore = <T extends Node>(node: T, before: Node | null): T => {
+    if (node.parentNode === list) list.moveBefore(node, before);
+    else Node.prototype.insertBefore.call(list, node, before);
+    return node;
+  };
+  list.appendChild = <T extends Node>(node: T): T => list.insertBefore(node, null);
 }
 
 /** Each date group's heading (FLOW-ORGANIZE-SESSIONS-R07). */

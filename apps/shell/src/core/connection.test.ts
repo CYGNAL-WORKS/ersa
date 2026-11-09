@@ -114,6 +114,54 @@ describe("connect", () => {
     expect(activity()).toBe("2026-11-01T14:00:00.000Z");
   });
 
+  // verifies: FLOW-ORGANIZE-SESSIONS-R09
+  // verifies: FLOW-ORGANIZE-SESSIONS-R10
+  it("reads the list again when a turn ends, for the title and creation time no notification carries, and not otherwise", async () => {
+    let reads = 0;
+    const titled = { ...session, title: "From the backend", created_at: "2026-10-31T09:00:00.000Z", last_activity_at: "2026-11-01T14:00:00.000Z" };
+    const { client, notify } = fakeClient({ ...answering, "session.list": () => Promise.resolve(reads++ === 0 ? [session] : [titled]) });
+    const seen: CoreView[] = [];
+    connect(client, (v) => seen.push(v));
+    await settle();
+    expect(reads).toBe(1);
+    notify({ method: "session.tile", params: { session_id: "s1", tile: { state: "running", pending: [] } } });
+    await settle();
+    expect(reads).toBe(1);
+    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
+    await settle();
+    expect(reads).toBe(2);
+    const view = seen.at(-1);
+    const listed = view?.phase === "connected" && view.sessions.state === "ready" ? view.sessions.sessions[0] : undefined;
+    expect([listed?.title, listed?.created_at]).toEqual(["From the backend", "2026-10-31T09:00:00.000Z"]);
+    // The same last activity again is no new turn's end.
+    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
+    await settle();
+    expect(reads).toBe(2);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R10
+  it("does not let a list read before a turn's end put back the older last activity", async () => {
+    let answer: (sessions: Session[]) => void = () => {};
+    let reads = 0;
+    const { client, notify } = fakeClient({
+      ...answering,
+      "session.list": () => (reads++ === 1 ? new Promise<Session[]>((resolve) => (answer = resolve)) : Promise.resolve([session])),
+    });
+    const seen: CoreView[] = [];
+    connect(client, (v) => seen.push(v));
+    await settle();
+    const activity = () => {
+      const view = seen.at(-1);
+      return view?.phase === "connected" && view.sessions.state === "ready" ? view.sessions.sessions[0]?.last_activity_at : "unread";
+    };
+    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
+    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T15:00:00.000Z" } });
+    await settle();
+    answer([{ ...session, last_activity_at: "2026-11-01T14:00:00.000Z" }]);
+    await settle();
+    expect(activity()).toBe("2026-11-01T15:00:00.000Z");
+  });
+
   it("keeps each session's tile current, and reads the list again for a session it lacks", async () => {
     let listed = 0;
     const created: Session = { ...session, id: "s2", state: "starting", tile: { state: "starting", pending: [] } };

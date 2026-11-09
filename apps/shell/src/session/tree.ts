@@ -4,7 +4,7 @@
 
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import { newestFirst, timeOf } from "./controls";
-import type { GroupBy, Show, SortBy } from "./arrangement";
+import { DEFAULT_ARRANGEMENT, type GroupBy, type Show, type SortBy } from "./arrangement";
 import { wantTone } from "./tile";
 
 /** A date group's key, also its key among the collapsed groups (PROTO-CORE-API, Settings). */
@@ -49,7 +49,7 @@ export function treeOf(
   projects: readonly Project[],
   workspaces: Readonly<Record<string, Pick<Workspace, "project_id">>>,
   sessions: readonly Session[],
-  { groupBy, sortBy, show, now }: TreeArrangement = { groupBy: "project", sortBy: "created", show: "active", now: new Date() },
+  { groupBy, sortBy, show, now }: TreeArrangement = { ...DEFAULT_ARRANGEMENT, now: new Date() },
 ): Tree {
   const pinned: Session[] = [];
   const loose: Session[] = [];
