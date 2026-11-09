@@ -1,4 +1,4 @@
-import { Bot, ChevronRight, Ellipsis, LoaderCircle } from "lucide-react";
+import { Archive, Bot, ChevronRight, Ellipsis, LoaderCircle } from "lucide-react";
 import {
   type AnimationEvent,
   type CSSProperties,
@@ -19,6 +19,7 @@ import type { Session } from "../protocol/core-api.gen";
 import type { BackendChoices } from "../session/controls";
 import { type TileView, tileOf } from "../session/tile";
 import type { Sending } from "../session/follow";
+import { reducedMotion } from "../theme/motion";
 import { ContextRing } from "./ContextRing";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose, type MenuEntry, type MenuPlace } from "./Menu";
@@ -55,6 +56,24 @@ export interface TileDelete {
   unavailable?: string;
 }
 
+/** Pinning or unpinning a session from its tile (FLOW-ORGANIZE-SESSIONS, step 1). */
+export interface TilePin {
+  /** Whether it is pinned now: the menu offers Unpin if so, else Pin. */
+  pinned: boolean;
+  /** Pins it when unpinned, unpins it when pinned. */
+  onChoose: () => void;
+  /** Why Pin or Unpin can't be used now; given, the menu shows it unavailable with this reason. */
+  unavailable?: string;
+}
+
+/** Archive or Unarchive on the tile's menu (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3). */
+export interface TileArchive {
+  /** Archive (true) or Unarchive (false), whichever the menu offered for the session as listed. */
+  onChoose: (archived: boolean) => void;
+  /** Why it can't be used now; given, the menu shows it unavailable with this reason. */
+  unavailable?: string;
+}
+
 /** For the gallery: show a pointer or keyboard state on one tile without one. */
 export type ForcedTile = { id: string; state: "hover" | "focus" | "pressed" };
 
@@ -73,6 +92,8 @@ export function SessionTile({
   shelf,
   onChevron,
   rename,
+  pin,
+  archive,
   remove,
   initialMenu,
   initialDraft,
@@ -88,6 +109,10 @@ export function SessionTile({
   onChevron?: (id: string) => void;
   /** Rename on the tile's menu and F2; absent, the tile has no menu. */
   rename?: TileRename;
+  /** Pin or Unpin, first on the tile's menu (LAY-SHELL, A tile's menu). */
+  pin?: TilePin;
+  /** Archive or Unarchive on the tile's menu, after Rename; the menu is there only with Rename. */
+  archive?: TileArchive;
   /** Delete on the tile's menu, after a rule. */
   remove?: TileDelete;
   /** For the gallery: the tile's menu shown open, and the title being edited with this text. */
@@ -143,6 +168,25 @@ export function SessionTile({
     unavailable: remove.unavailable,
     onChoose: remove.onAsk,
   };
+  // A session that comes to need the user: its chevron breathes once where it is (DESIGN.md, Motion: status never
+  // moves a tile). Only a change into needing the user does; a tile first drawn needing the user shows it at once.
+  const [breath, setBreath] = useState(false);
+  const [lastMark, setLastMark] = useState(view.mark);
+  const [wasActive, setWasActive] = useState(active);
+  // Made active or left mid-breath, the chevron is drawn by another element, which would start the breath over: it ends.
+  if (active !== wasActive) {
+    setWasActive(active);
+    setBreath(false);
+  }
+  if (view.mark !== lastMark) {
+    setLastMark(view.mark);
+    // With reduced motion on it never breathes, so nothing is left waiting to breathe should motion come back on.
+    setBreath(needsYou && !reducedMotion());
+  }
+  // Once breathed, it is done. A working glyph's breath loops, so it never ends.
+  const breathed = (event: AnimationEvent) => {
+    if (event.animationName === "session-breath") setBreath(false);
+  };
   // The chevron is the shelf's handle on every tile but the active one, whose requests the transcript answers
   // (FLOW-APPROVE-PERMISSION-R26); there it stays a mark that names the want.
   const handle = needsYou && !active;
@@ -156,8 +200,6 @@ export function SessionTile({
         className="session"
         data-force={force}
         data-needs-you={needsYou || undefined}
-        // Names the tile's session, so focus can find the tiles beside it once a session is deleted.
-        data-session-id={session.id}
         aria-current={active || undefined}
         onClick={() => onSelect(session.id)}
         onContextMenu={(event) => {
@@ -212,7 +254,7 @@ export function SessionTile({
             {view.title}
           </span>
         )}
-        <span className="session-mark">{!handle && <Mark view={view} />}</span>
+        <span className="session-mark">{!handle && <Mark view={view} breath={breath} onAnimationEnd={breathed} />}</span>
         {view.ring !== undefined && (
           <span className="session-ring">
             <ContextRing used={view.ring} size="ring-sm" />
@@ -254,6 +296,16 @@ export function SessionTile({
             beingDeleted && deleteItem
               ? [deleteItem]
               : [
+                  ...(pin
+                    ? [
+                        {
+                          kind: "item" as const,
+                          label: pin.pinned ? t("rail.tile.unpinButton") : t("rail.tile.pinButton"),
+                          unavailable: pin.unavailable,
+                          onChoose: pin.onChoose,
+                        },
+                      ]
+                    : []),
                   {
                     kind: "item",
                     label: t("rail.tile.renameButton"),
@@ -261,6 +313,16 @@ export function SessionTile({
                     unavailable: rename.unavailable,
                     onChoose: edit,
                   },
+                  ...(archive
+                    ? [
+                        {
+                          kind: "item" as const,
+                          label: session.archived ? t("rail.tile.unarchiveButton") : t("rail.tile.archiveButton"),
+                          unavailable: archive.unavailable,
+                          onChoose: () => archive.onChoose(!session.archived),
+                        },
+                      ]
+                    : []),
                   // Delete stands apart in its own group, its label in danger (docs/design/RAIL.md, Menus).
                   ...(deleteItem ? [{ kind: "rule" } as const, deleteItem] : []),
                 ]
@@ -283,6 +345,8 @@ export function SessionTile({
           type="button"
           className="session-chevron-button"
           data-tone={tone}
+          data-breath={breath ? "once" : undefined}
+          onAnimationEnd={breathed}
           aria-label={t("rail.shelf.nameLabel", { title: view.title })}
           aria-haspopup="dialog"
           aria-expanded={shelf !== undefined}
@@ -330,8 +394,7 @@ export function TileItem({
   if (open !== wasOpen) {
     setWasOpen(open);
     // With reduced motion on, it goes at once.
-    const still = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    setClosing(open || still ? undefined : last.current);
+    setClosing(open || reducedMotion() ? undefined : last.current);
   }
   const closed = (event: AnimationEvent) => {
     if (event.animationName === "shelf-back") setClosing(undefined);
@@ -417,9 +480,14 @@ export function TileItem({
     <li
       ref={item}
       className="session-item"
+      data-slide={`session:${id}`}
       data-shelf={open || undefined}
       data-tone={shelf?.tone}
       style={layer !== undefined ? ({ anchorName: anchor } as CSSProperties) : undefined}
+      // A slide's transform would take the shelf off its anchor, so the tile that holds one slides by its offset.
+      data-slide-top={layer !== undefined || undefined}
+      // The rail finds a tile by its session, to move focus when one leaves.
+      data-session-id={id}
       onFocus={focusIn}
       onBlur={focusOut}
       onKeyDown={keyDown}
@@ -436,7 +504,7 @@ export function TileItem({
 }
 
 /** The state's mark, named where line two doesn't already name it. */
-function Mark({ view }: { view: TileView }) {
+function Mark({ view, breath, onAnimationEnd }: { view: TileView; breath: boolean; onAnimationEnd: (event: AnimationEvent) => void }) {
   switch (view.mark) {
     case "starting":
       return (
@@ -445,11 +513,12 @@ function Mark({ view }: { view: TileView }) {
         </span>
       );
     case "working":
-      return <span className="glyph session-glyph" data-tone={view.tone} role="img" aria-label={view.markLabel} />;
+      // It breathes for as long as the session works (DESIGN.md, Motion: a working session's glyph).
+      return <span className="glyph session-glyph" data-tone={view.tone} data-breath="loop" role="img" aria-label={view.markLabel} />;
     case "needsYou":
       // The active tile's: a mark, not a control, since the transcript answers its requests.
       return (
-        <span className="session-chevron" data-tone={view.tone} role="img" aria-label={view.markLabel}>
+        <span className="session-chevron" data-tone={view.tone} data-breath={breath ? "once" : undefined} role="img" aria-label={view.markLabel} onAnimationEnd={onAnimationEnd}>
           <Icon icon={ChevronRight} size="icon-sm" />
         </span>
       );
@@ -457,6 +526,13 @@ function Mark({ view }: { view: TileView }) {
     case "disconnected":
     case "error":
       return <span className="glyph session-glyph" data-tone={view.tone} aria-hidden="true" />;
+    // Line two says the state; the archive mark is named, since nothing else says the session is archived.
+    case "archived":
+      return (
+        <span className="session-archived" role="img" aria-label={view.markLabel}>
+          <Icon icon={Archive} size="icon-xs" />
+        </span>
+      );
     default:
       return null;
   }

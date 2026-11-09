@@ -3,6 +3,7 @@ import { t } from "./catalog";
 import "./App.css";
 import { Button } from "./components/Button";
 import type { AttachWhat } from "./components/AttachMenu";
+import { ArchivedNote } from "./components/ArchivedNote";
 import { Composer } from "./components/Composer";
 import { DeleteQuestion } from "./components/DeleteQuestion";
 import { RailFoot } from "./components/RailFoot";
@@ -99,6 +100,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The quit question, while it is open: how many sessions would stop, and whether Quit was chosen.
   const [quitAsk, setQuitAsk] = useState<QuitAsk & { quitting: boolean; failed?: string }>();
   const [renaming, setRenaming] = useState<Record<string, Sending>>({});
+  // Archives and unarchives on their way from a tile, and resumes from the archived note, by session id.
+  const [archiving, setArchiving] = useState<Record<string, Sending>>({});
+  const [resuming, setResuming] = useState<Record<string, Sending>>({});
   // The session whose shelf is open, and its events, followed while it is open (FLOW-APPROVE-PERMISSION).
   const [shelfId, setShelfId] = useState<string>();
   const [shelfView, setShelfView] = useState<SessionView>();
@@ -135,7 +139,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const sessions = sessionsOf(view);
   useEffect(() => {
     if (activeId === undefined && sessions.state === "ready") {
-      const newest = newestFirst(sessions.sessions)[0];
+      // Never an archived one, which the rail does not show.
+      const newest = newestFirst(sessions.sessions.filter((s) => !s.archived))[0];
       if (newest) dispatch({ type: "showNewest", id: newest.id });
     }
   }, [activeId, sessions]);
@@ -261,6 +266,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const allRead = projectList !== undefined && projectList.every((p) => p.id in workspaceReads);
   const unknownWorkspaces =
     allRead && sessions.state === "ready" ? [...new Set(sessions.sessions.map((s) => s.workspace_id).filter((id) => !(id in workspaces)))].sort().join(" ") : "";
+  // The unknown workspaces the last finished read was for: until the read for the current ones answers, they may yet
+  // be placed.
+  const [unknownRead, setUnknownRead] = useState("");
   useEffect(() => {
     // Without a connection nothing has been read on the next one, so its sessions wait to be placed again.
     if (!projectList) {
@@ -268,11 +276,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       return;
     }
     let live = true;
+    const reads: Promise<unknown>[] = [];
     // Each project's read is applied as it answers, so one slow host holds back only its own tiles; a session that
     // fits no project waits for every read, which the Shell gives up on after its request time limit. Merged
     // into what is known (session/workspaces.ts): a read that answers late never drops a workspace.
     for (const p of projectList) {
-      client.call("workspace.list", { project_id: p.id }).then(
+      const answered = client.call("workspace.list", { project_id: p.id }).then(
         (read) => {
           if (!live) return;
           setWorkspaces((known) => mergeWorkspaces(known, projectList, read));
@@ -285,11 +294,15 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           setWorkspaceReads((reads) => ({ ...reads, [p.id]: describeError(error) }));
         },
       );
+      reads.push(answered);
     }
+    void Promise.all(reads).then(() => {
+      if (live) setUnknownRead(unknownWorkspaces);
+    });
     return () => {
       live = false;
     };
-    // unknownWorkspaces is not read here: a change to it is a reason to read again.
+    // A change to unknownWorkspaces is a reason to read again.
   }, [client, projectList, unknownWorkspaces]);
   const projectsVersion = useVersion(projects);
   const sessionsVersion = useVersion(sessions);
@@ -302,9 +315,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // New session shows the screen; leaving it, by choosing a session, leaves nothing behind (FLOW-NEW-SESSION-R03).
   const newSession = (project: Project) => dispatch({ type: "newSession", projectId: project.id });
-  // The projects whose headings the user collapsed, kept while the window is open (LAY-SHELL, Collapsing).
+  // The groups whose headings the user collapsed, by RailTree's groupKey, kept while the window is open (LAY-SHELL, Collapsing).
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
-  const toggleProject = (id: string) =>
+  const toggleGroup = (id: string) =>
     setCollapsed((was) => {
       const next = new Set(was);
       if (!next.delete(id)) next.add(id);
@@ -322,7 +335,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     setStartProgress(undefined);
     const stop = new StartStop(client);
     startStop.current = stop;
-    const outcome = await startSession(client, values, text, stop, sendable(attachments)).finally(() => {
+    // Known before the session is, so the rail puts the new session's tile under its project as it appears (FLOW-NEW-SESSION-R13).
+    const known = (workspace: Workspace) => setWorkspaces((was) => ({ ...was, [workspace.id]: workspace }));
+    const outcome = await startSession(client, values, text, stop, sendable(attachments), known).finally(() => {
       if (startStop.current === stop) startStop.current = undefined;
     });
     if (!outcome.ok && "stopped" in outcome) {
@@ -339,8 +354,6 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     setLastUsed((l) => ({ ...l, [values.project_id]: remembered(values) }));
     // Best effort: a failure only means the screen starts at these values in this window alone.
     client.call("settings.set", { patch: rememberPatch(values) }).catch(() => {});
-    // Known at once, so the rail puts the new session's tile under its project as it appears (FLOW-NEW-SESSION-R13).
-    setWorkspaces((known) => ({ ...known, [outcome.workspace.id]: outcome.workspace }));
     connection.current?.reload("sessions");
     dispatch({ type: "started", id: outcome.session.id, text, attachments, firstSend: outcome.firstSend });
     return true;
@@ -353,12 +366,55 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       // Core answers with the title as the backend will list it.
       const renamed = await client.call("session.set_title", { id, title });
       setRenaming(({ [id]: _, ...rest }) => rest);
-      connection.current?.renamed(id, renamed.title ?? title);
+      connection.current?.changed(id, { title: renamed.title ?? title });
       return true;
     } catch (error) {
       setRenaming((r) => ({ ...r, [id]: { state: "failed", message: describeError(error) } }));
       return false;
     }
+  };
+
+  // Pin and Unpin on a tile (FLOW-ORGANIZE-SESSIONS-R01): Core stores the pin, and the rail moves the tile once Core
+  // has it. A refusal leaves the tile where Core has it and says why beneath it until the next try (R15).
+  const [pinning, setPinning] = useState<Record<string, Sending>>({});
+  const pin = async (id: string, pinned: boolean) => {
+    setPinning((p) => ({ ...p, [id]: { state: "sending" } }));
+    try {
+      const arranged = await client.call("session.arrange", { id, pinned });
+      setPinning(({ [id]: _, ...rest }) => rest);
+      connection.current?.changed(id, { pinned: arranged.pinned });
+    } catch (error) {
+      setPinning((p) => ({ ...p, [id]: { state: "failed", message: describeError(error) } }));
+    }
+  };
+
+  // Archive and Unarchive from a tile (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3): Core stops a live session as it
+  // archives it, and keeps its pin and section either way. The list is read again to show the change; archiving the
+  // active session shows the new-session screen, since its tile has left the rail.
+  const archive = async (id: string, archived: boolean) => {
+    setArchiving((a) => ({ ...a, [id]: { state: "sending" } }));
+    try {
+      await client.call("session.set_archived", { id, archived });
+      setArchiving(({ [id]: _, ...rest }) => rest);
+      if (archived && id === shownId) dispatch({ type: "newSession" });
+      connection.current?.reload("sessions");
+    } catch (error) {
+      setArchiving((a) => ({ ...a, [id]: { state: "failed", message: describeError(error) } }));
+    }
+  };
+
+  // Resume from an archived session's note (step 2): Core clears the archived mark as it accepts the resume, and
+  // leaves the session archived when it refuses, which the note then says (PROTO-CORE-API-R43).
+  const resume = async (id: string) => {
+    setResuming((r) => ({ ...r, [id]: { state: "sending" } }));
+    try {
+      await client.call("session.resume", { id });
+      setResuming(({ [id]: _, ...rest }) => rest);
+    } catch (error) {
+      setResuming((r) => ({ ...r, [id]: { state: "failed", message: describeError(error) } }));
+    }
+    // Read again either way: an accepted resume unarchived the session, and a refused one may have changed nothing.
+    connection.current?.reload("sessions");
   };
 
   // Add project on the new-session screen (FLOW-NEW-SESSION-R17 to R19, R27): the Shell's folder dialog on this computer,
@@ -395,7 +451,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   activeNow.current = activeId;
   useEffect(() => {
     if (!refocus) return;
-    const item = refocus.to && document.querySelector(`.session[data-session-id="${CSS.escape(refocus.to)}"]`);
+    const item = refocus.to && document.querySelector(`[data-session-id="${CSS.escape(refocus.to)}"] .session`);
     (item instanceof HTMLElement ? item : document.querySelector<HTMLElement>(".rail-new-session"))?.focus({ preventScroll: true });
     setRefocus(undefined);
   }, [refocus]);
@@ -432,7 +488,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Deleted: focus goes to the next tile in the rail, else the previous, else New session (docs/design/RAIL.md, The
   // delete question); the active session leaves the new-session screen in its place.
   const deleted = (id: string) => {
-    const items = [...document.querySelectorAll<HTMLElement>(".session[data-session-id]")];
+    const items = [...document.querySelectorAll<HTMLElement>("[data-session-id]")];
     const at = items.findIndex((el) => el.dataset.sessionId === id);
     const beside = at < 0 ? undefined : (items[at + 1] ?? items[at - 1]);
     setDeleteAsk(undefined);
@@ -561,6 +617,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const workspaceErrors: Record<string, string> = {};
   for (const [id, failure] of Object.entries(workspaceReads)) if (failure !== null) workspaceErrors[id] = failure;
   const placing = projectList !== undefined && !allRead;
+  // The projects were read again for a workspace no read had listed, and that read has not answered.
+  const reading = allRead && unknownWorkspaces !== unknownRead;
 
   // The title as last listed, so the header keeps it while the list reloads
   // or Core is away.
@@ -642,14 +700,19 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               workspaces={workspaces}
               workspaceErrors={workspaceErrors}
               placing={placing}
+              reading={reading}
               activeId={shownId}
               onSelect={select}
               onNewSession={newSession}
               collapsed={collapsed}
-              onToggle={toggleProject}
+              onToggle={toggleGroup}
+              onPin={pin}
+              pinning={pinning}
               onRename={rename}
               renaming={renaming}
               onRenameReset={resetRename}
+              onArchive={archive}
+              archiving={archiving}
               onDelete={askDelete}
               offline={view.phase !== "connected"}
               onSetTrust={setTrust}
@@ -694,6 +757,10 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             />
           </ErrorBoundary>
           <ErrorBoundary what="The composer" resetKey={shown.id}>
+            {listed?.archived ? (
+              // An archived session opens read-only: a note with Resume in place of the composer (FLOW-ARCHIVE-DELETE-SESSION-R02).
+              <ArchivedNote onResume={() => void resume(shown.id)} resuming={resuming[shown.id]} />
+            ) : (
             <Composer
               key={shown.id}
               unavailable={away}
@@ -729,6 +796,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                 )
               }
             />
+            )}
           </ErrorBoundary>
         </main>
       ) : hello && screenProjects && showsScreen({ composing, starting, activeId }, view.phase === "connected") ? (

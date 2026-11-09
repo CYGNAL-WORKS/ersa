@@ -45,6 +45,11 @@ describe("a tile's mark and phrase, by state", () => {
     expect(view.titleMuted).toBe(titleMuted);
   });
 
+  it("puts an archive mark, named Archived, in place of the state's mark on an archived session, its title muted", () => {
+    const view = tileOf(session({ state: "ended" }, { archived: true }));
+    expect([view.mark, view.tone, view.markLabel, view.phrase, view.titleMuted]).toEqual(["archived", undefined, "Archived", "Ended", true]);
+  });
+
   it("names the working mark, which has no phrase, for assistive technology", () => {
     expect(tileOf(session({ state: "running" })).markLabel).toBe("Working");
   });

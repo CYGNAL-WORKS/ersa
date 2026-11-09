@@ -37,7 +37,7 @@ export interface FirstSendFailure {
 }
 
 export type StartOutcome =
-  | { ok: true; session: Session; workspace: Workspace; firstSend?: FirstSendFailure }
+  | { ok: true; session: Session; firstSend?: FirstSendFailure }
   | { ok: false; message: string }
   /** Stop was chosen before the message reached the agent: nothing is left, and the message stays with the user. */
   | { ok: false; stopped: true };
@@ -82,6 +82,8 @@ export async function startSession(
   text: string,
   stop?: StartStop,
   attachments: Attachment[] = [],
+  /** Told the session's workspace before the session exists, so the rail can place its tile as it appears (FLOW-NEW-SESSION-R13). */
+  onWorkspace?: (workspace: Workspace) => void,
 ): Promise<StartOutcome> {
   const { backend } = values;
   if (!backend) return { ok: false, message: t("composer.noBackendError") };
@@ -98,6 +100,7 @@ export async function startSession(
       if (!root) return { ok: false, message: "This project has no root workspace in Core." };
       workspace = root;
     }
+    onWorkspace?.(workspace);
     const params: SessionCreateParams = { workspace_id: workspace.id, backend };
     // A value the backend offers no choice of is left out: the backend decides.
     if (values.model) params.model = values.model;
@@ -110,7 +113,7 @@ export async function startSession(
     if (stop?.stopped) throw STOPPED;
     try {
       await client.call("session.send", attachments.length > 0 ? { id: created.id, text, attachments } : { id: created.id, text });
-      return { ok: true, session: created, workspace };
+      return { ok: true, session: created };
     } catch (error) {
       // A stop canceled the message before it reached the agent, which Core answers as an invalid state: take back
       // what was made. Any other failure is judged below, so a session the backend already ran is kept.
@@ -129,7 +132,7 @@ export async function startSession(
       // stopped: its session is kept whatever its state, and the message is said to be unknown, never failed (R15).
       const failure = sendFailure(error);
       if (internal || failure.state === "unknown" || !listed || !NEVER_RAN.includes(listed.state)) {
-        return { ok: true, session: listed ?? created, workspace, firstSend: { sending: failure, giveBack: !internal } };
+        return { ok: true, session: listed ?? created, firstSend: { sending: failure, giveBack: !internal } };
       }
       throw error;
     }

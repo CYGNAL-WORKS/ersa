@@ -1,6 +1,6 @@
 # Review rubric
 
-Every reviewer and the verifier of a pull request review follow this rubric, whether the review runs at merge time or by the author. The severities are ADR 0021's.
+Every reviewer and the verifier of the merge review follow this rubric. The severities are ADR 0021's.
 
 ## Severity
 
@@ -28,6 +28,6 @@ A known defect stays at its severity when it needs a repeat or a slow peer to sh
 
 ## Scope
 
-- A first review reads the whole change against main. A re-review reads only the commits since the last reviewed head, and of a merge of main only its conflict resolution. A mechanism a fix kept because the branch was unsafe without it is reviewed whole.
+- A first review reads the whole change against main. A re-review reads only the commits since the last reviewed head, and of a merge of main only its conflict resolution.
 - Leave style alone. Formatting, naming taste and lint that CI already runs are not findings.
 - A finding the review loop cannot act on, such as a defect on a planning-only path or a contradiction between harness rules, is still reported at its severity; say that it needs the owner.

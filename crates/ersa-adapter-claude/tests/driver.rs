@@ -1,6 +1,7 @@
 //! The driver against stub CLIs built on the fake transport: how it starts the
 //! CLI, the `initialize` handshake, and a full `can_use_tool` round trip
-//! replayed from fixture 11 (PROTO-CLAUDE-CODE-STREAM, Conformance).
+//! replayed from fixture 11 (PROTO-CLAUDE-CODE-STREAM, Conformance), and
+//! questions answered and declined, replayed from the 2.1.316 recordings.
 
 mod common;
 
@@ -10,10 +11,10 @@ use std::time::Duration;
 use common::{RecordingSink, fixture, is_kind};
 use ersa_adapter::fake::FakeTransport;
 use ersa_adapter::{
-    Adapter, AdapterError, Direction, PermissionDecision, ProcessSpec, SessionConfig,
+    Adapter, AdapterError, Direction, PermissionDecision, ProcessSpec, QuestionReply, SessionConfig,
 };
 use ersa_adapter_claude::ClaudeAdapter;
-use ersa_protocol::events::PermissionBehavior;
+use ersa_protocol::events::{Answer, AnswerValue, PermissionBehavior};
 use serde_json::{Value, json};
 
 const WAIT: Duration = Duration::from_secs(5);
@@ -29,6 +30,7 @@ fn config() -> SessionConfig {
         effort: None,
         project_trusted: false,
         project_path: String::new(),
+        backend_session_id: None,
         extra: Value::Null,
     }
 }
@@ -1119,4 +1121,210 @@ fn text(words: &str) -> ersa_adapter::OutgoingMessage {
         text: words.into(),
         attachments: Vec::new(),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Questions (PROTO-CLAUDE-CODE-STREAM, Questions), against stubs of the
+// 2.1.316 recordings: the CLI asks three questions (Red or Blue; any of
+// Apple, Pear, Plum; Ann or Bob).
+
+fn answer(id: &str, value: AnswerValue, own_words: bool) -> Answer {
+    Answer {
+        id: id.into(),
+        value,
+        own_words,
+    }
+}
+
+/// What the recording's host answered: "Blue", "Apple, Pear", and own words.
+fn recorded_answers() -> Vec<Answer> {
+    vec![
+        answer("0", AnswerValue::One("1".into()), false),
+        // Chosen out of order: the CLI still gets them in the options' order.
+        answer("1", AnswerValue::Many(vec!["1".into(), "0".into()]), false),
+        answer(
+            "2",
+            AnswerValue::One("Carol, from my own words".into()),
+            true,
+        ),
+    ]
+}
+
+/// Plays `name`'s recording against the driver: a stub CLI that answers
+/// `initialize`, takes the prompt, asks its question, and waits for an
+/// answer equal to the recorded one before finishing the turn. `reply` is
+/// how the test answers. Returns what the driver wrote and the recording's
+/// host lines.
+async fn question_round_trip(name: &str, reply: QuestionReply) -> (Vec<String>, Vec<String>) {
+    let fixture = fixture(name);
+    let out = fixture.stdout.clone();
+    let sent = fixture.sent();
+    let ask = out
+        .iter()
+        .position(|l| parse(l)["request"]["subtype"] == "can_use_tool")
+        .unwrap();
+    let request_id = parse(&out[ask])["request_id"].as_str().unwrap().to_string();
+    let prompt = parse(&sent[1])["message"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // JSON objects are unordered, so the answer is compared as JSON.
+    let recorded_answer = parse(&sent[2]);
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(expect("initialize", is_initialize))
+        .then_stdout([&out[0]])
+        .wait_for_stdin(expect("the recorded prompt", |v| v["type"] == "user"))
+        .then_stdout(&out[1..=ask])
+        .wait_for_stdin(expect("the recorded answer", move |v| {
+            *v == recorded_answer
+        }))
+        .then_stdout(&out[ask + 1..])
+        .hold_open();
+    let sink = Arc::new(RecordingSink::new());
+    let session = adapter()
+        .start(Arc::new(transport.clone()), config(), sink.clone())
+        .await
+        .expect("start");
+    session.send_user(&prompt).await.expect("send");
+    sink.wait_for_line(WAIT, |l| is_kind(l, "control_request/can_use_tool"))
+        .await;
+    // A question is not a permission request: deciding it is refused.
+    assert!(matches!(
+        session.decide_permission(&request_id, allow()).await,
+        Err(AdapterError::UnknownRequest(_))
+    ));
+    session
+        .answer_question(&request_id, reply.clone())
+        .await
+        .expect("answer");
+    sink.wait_for_line(WAIT, |l| is_kind(l, "result")).await;
+    // Answered once; a second answer is refused.
+    assert!(matches!(
+        session.answer_question(&request_id, reply).await,
+        Err(AdapterError::UnknownRequest(_))
+    ));
+    session.stop().await.expect("stop");
+    sink.wait_for_exit(WAIT).await;
+    assert_eq!(transport.stub_failures(), Vec::<String>::new());
+    (transport.stdin_lines(), sent)
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R29
+// verifies: PROTO-CLAUDE-CODE-STREAM-R07
+#[tokio::test]
+async fn an_answer_is_an_allow_with_the_answers_keyed_by_question_text() {
+    let (written, sent) = question_round_trip(
+        "2.1.316/07-question-answer",
+        QuestionReply::Answers(recorded_answers()),
+    )
+    .await;
+    // Initialize and the prompt as recorded, byte for byte.
+    assert_eq!(written[..2], sent[..2]);
+    let answer = parse(&written[2]);
+    assert_eq!(answer, parse(&sent[2]));
+    // Spelled out: the request's input, plus the chosen label, the chosen
+    // labels joined by ", " in the options' order, and the own words.
+    let response = &answer["response"];
+    assert_eq!(response["subtype"], "success");
+    assert_eq!(
+        response["request_id"],
+        "0b943641-f720-4e34-be39-211ee791e85a"
+    );
+    assert_eq!(response["response"]["behavior"], "allow");
+    assert_eq!(
+        response["response"]["updatedInput"]["answers"],
+        json!({
+            "Which color do you want?": "Blue",
+            "Which fruits do you want?": "Apple, Pear",
+            "Which name do you want?": "Carol, from my own words",
+        })
+    );
+    assert_eq!(written.len(), 3);
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R29
+#[tokio::test]
+async fn a_declined_question_is_a_deny_with_the_brief_s_message() {
+    let (written, sent) =
+        question_round_trip("2.1.316/09-question-deny", QuestionReply::Declined).await;
+    // Exactly what the recorded session wrote, byte for byte.
+    assert_eq!(written, sent);
+    let response = &parse(&written[2])["response"];
+    assert_eq!(
+        response["request_id"],
+        "d7df0a3d-44a7-4570-a8fe-eb171fd6e8c8"
+    );
+    assert_eq!(
+        response["response"],
+        json!({ "behavior": "deny", "message": "The user declined to answer." })
+    );
+}
+
+/// A stub that asks fixture 07's question and then waits.
+async fn asked_question() -> (FakeTransport, Box<dyn ersa_adapter::AdapterSession>, String) {
+    let out = fixture("2.1.316/07-question-answer").stdout;
+    let request_id = parse(&out[3])["request_id"].as_str().unwrap().to_string();
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(expect("initialize", is_initialize))
+        .then_stdout([out[0].clone(), out[3].clone()])
+        .hold_open();
+    let sink = Arc::new(RecordingSink::new());
+    let session = adapter()
+        .start(Arc::new(transport.clone()), config(), sink.clone())
+        .await
+        .expect("start");
+    sink.wait_for_line(WAIT, |l| is_kind(l, "control_request/can_use_tool"))
+        .await;
+    (transport, session, request_id)
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R29
+#[tokio::test]
+async fn answers_that_do_not_fit_the_question_are_refused_before_anything_is_written() {
+    let (transport, session, request_id) = asked_question().await;
+    let mut missing = recorded_answers();
+    missing.pop();
+    let mut bad_option = recorded_answers();
+    bad_option[0] = answer("0", AnswerValue::One("7".into()), false);
+    let mut list_for_one = recorded_answers();
+    list_for_one[0] = answer("0", AnswerValue::Many(vec!["0".into()]), false);
+    for answers in [missing, bad_option, list_for_one] {
+        assert!(matches!(
+            session
+                .answer_question(&request_id, QuestionReply::Answers(answers))
+                .await,
+            Err(AdapterError::Protocol(_))
+        ));
+    }
+    // Only `initialize` was written, and the question can still be answered.
+    assert_eq!(transport.stdin_lines().len(), 1);
+    session
+        .answer_question(&request_id, QuestionReply::Declined)
+        .await
+        .expect("still pending");
+    session.stop().await.expect("stop");
+}
+
+#[tokio::test]
+async fn a_permission_request_is_not_a_question() {
+    let out = fixture("11-stream-permission-prompt-tool-stdio").stdout;
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(expect("initialize", is_initialize))
+        .then_stdout([out[0].clone(), out[4].clone()])
+        .hold_open();
+    let sink = Arc::new(RecordingSink::new());
+    let session = adapter()
+        .start(Arc::new(transport.clone()), config(), sink.clone())
+        .await
+        .expect("start");
+    sink.wait_for_line(WAIT, |l| is_kind(l, "control_request/can_use_tool"))
+        .await;
+    assert!(matches!(
+        session
+            .answer_question(PERMISSION_ID, QuestionReply::Declined)
+            .await,
+        Err(AdapterError::UnknownRequest(_))
+    ));
+    assert_eq!(transport.stdin_lines().len(), 1);
+    session.stop().await.expect("stop");
 }

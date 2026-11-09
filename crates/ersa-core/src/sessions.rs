@@ -46,8 +46,8 @@ use std::time::Duration;
 
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, OpenElsewhere,
-    PermissionDecision, ProcessExit, RawLine, RecordDeletion, RecordEvent, RecordSummary,
-    SessionConfig, Transport,
+    PermissionDecision, ProcessExit, QuestionReply, RawLine, RecordDeletion, RecordEvent,
+    RecordSummary, SessionConfig, Transport,
 };
 use ersa_protocol::core_api::rpc::Notification;
 use ersa_protocol::core_api::{
@@ -401,7 +401,14 @@ struct Hub {
 /// (ADR 0017), not Ersa's to store.
 #[derive(Debug, Clone)]
 struct Presented {
+    /// The record's title, a rename Core sent, or the latest title the
+    /// backend announced on its live stream, whichever came last: until
+    /// the record holds a title, the announced one is the session's
+    /// (PROTO-CLAUDE-CODE-STREAM-R36), kept in memory only.
     title: Option<String>,
+    /// How many titles the live stream has announced, so a rename can tell
+    /// whether the backend's own word on the new title is already shown.
+    announcements: u64,
     /// RFC 3339: from the record when it has said, else when Core first
     /// started the session's backend, else [`UNKNOWN_TIME`].
     created_at: String,
@@ -559,6 +566,7 @@ impl Handle {
             row: Mutex::new(row),
             presented: Mutex::new(Presented {
                 title: None,
+                announcements: 0,
                 created_at,
             }),
             op: tokio::sync::Mutex::new(()),
@@ -1084,18 +1092,35 @@ impl SessionManager {
             )
         };
         if let Some(live) = handle.live() {
+            // A session still starting takes the rename once its backend is
+            // ready, which for Claude Code is once the CLI has answered
+            // `initialize` (PROTO-CLAUDE-CODE-STREAM-R36,
+            // PROTO-CORE-API-R51): its id was chosen and stored before it
+            // started, so there is a session to name already.
             let session = live.wait_ready().await?;
-            // Read once ready: the backend names the session as it starts.
+            // Read once ready: a backend without host-chosen ids names the
+            // session as it starts.
             let backend_id = lock(&handle.row)
                 .backend_session_id
                 .clone()
                 .ok_or_else(unnamed)?;
-            let title = title.to_string();
+            let announced_before = lock(&handle.presented).announcements;
+            let requested = title.to_string();
             // A backend that is stopping refuses (not running) while it may
             // still be writing its record, so a refusal never falls back to
             // writing the record beside it: the user renames again once the
             // session has ended.
-            bounded(async move { session.rename(&backend_id, &title).await }).await?;
+            bounded(async move { session.rename(&backend_id, &requested).await }).await?;
+            // The backend announces the name it took as it takes it, and
+            // that name, which it may have made unique, is the one shown
+            // once the announcement is projected. Until then, the title the
+            // user gave; never in place of an announcement already shown.
+            let mut presented = lock(&handle.presented);
+            if presented.announcements == announced_before {
+                presented.title = Some(title.to_string());
+            }
+            drop(presented);
+            return Ok(handle.describe());
         } else {
             let row = lock(&handle.row).clone();
             let backend_id = row.backend_session_id.ok_or_else(unnamed)?;
@@ -1434,6 +1459,22 @@ impl SessionManager {
         let session = live.wait_ready().await?;
         let request_id = request_id.to_string();
         bounded(async move { session.decide_permission(&request_id, decision).await }).await
+    }
+
+    /// Answers the question `request_id` the session's backend is waiting on,
+    /// with the user's answers or their declining it (PROTO-CORE-API-R33).
+    /// The `question.answered` event follows from the line the adapter
+    /// writes, as `permission.decided` does from a decision.
+    pub async fn answer_question(
+        &self,
+        id: &str,
+        request_id: &str,
+        reply: QuestionReply,
+    ) -> Result<(), SessionError> {
+        let live = self.live(id)?;
+        let session = live.wait_ready().await?;
+        let request_id = request_id.to_string();
+        bounded(async move { session.answer_question(&request_id, reply).await }).await
     }
 
     /// Raw lines `from..=to` of the session's in-memory raw log, at most
@@ -2252,13 +2293,14 @@ async fn run_pipeline(pipeline: Pipeline) {
                 *lock(&handle.ending) = Some((fact.clone(), ts.clone()));
             }
         }
-        let (events, tile, turn, announced) = {
+        let (events, tile, turn, announced, retitled) = {
             let mut hub = lock(&handle.hub);
             let Some(view) = hub.view.as_mut() else {
                 // Never: a live session's view is open from its start.
                 tracing::error!(session = %handle.id, "a live session has no view; its events are lost");
                 continue;
             };
+            let title_before = view.announced_title().map(|(count, _)| count);
             let mut events = Vec::new();
             for item in batch {
                 match item {
@@ -2271,9 +2313,23 @@ async fn run_pipeline(pipeline: Pipeline) {
                 }
             }
             let announced = view.backend_session_id().map(String::from);
+            // Any announcement in this batch, the same title again included:
+            // the latest is the session's.
+            let retitled = view
+                .announced_title()
+                .filter(|(count, _)| title_before != Some(*count))
+                .map(|(_, title)| title.to_string());
             let (tile, turn) = (view.tile().clone(), view.turn());
-            (events, tile, turn, announced)
+            (events, tile, turn, announced, retitled)
         };
+
+        // A title the backend announced is the session's from now on, until
+        // a newer one or its record says otherwise (PROTO-CLAUDE-CODE-STREAM-R36).
+        if let Some(title) = retitled {
+            let mut presented = lock(&handle.presented);
+            presented.title = Some(title);
+            presented.announcements += 1;
+        }
 
         // The backend's own id finds the session's record later; it is the
         // one thing about the session's history Ersa keeps. Stored before

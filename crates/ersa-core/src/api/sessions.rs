@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use ersa_adapter::{BackendChoices, Direction, PermissionDecision, SessionConfig};
+use ersa_adapter::{BackendChoices, Direction, PermissionDecision, QuestionReply, SessionConfig};
 use ersa_protocol::core_api::{
     AnswerQuestionParams, ArrangeParams, Attachment, AttachmentKind, Choice,
     DecidePermissionParams, Empty, IdParams, InspectParams, Inspected, RawDirection, RawLogEntry,
@@ -106,12 +106,18 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         .await?
         .is_some_and(|p| p.trusted);
 
+    // A backend that starts a session under an id Ersa chooses gets one
+    // now: stored with the row before the backend starts, so the session can
+    // be renamed, and its record found, from the moment it exists
+    // (PROTO-CLAUDE-CODE-STREAM-R35). Any other backend names it as it
+    // starts.
+    let backend_session_id = adapter.new_session_id();
     let session = SessionRow {
         id: persistence::new_id("s"),
         workspace_id: workspace.id,
         host_id: project.host_id,
         backend: params.backend,
-        backend_session_id: None,
+        backend_session_id: backend_session_id.clone(),
         mode: params.mode,
         cwd: workspace.path.clone(),
         // Only the model and effort named; one left out is the backend's to
@@ -140,6 +146,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         // What the user answered the trust question for; a backend that
         // keeps its own trust record is told of it (ADR 0018).
         project_path: project.path.clone(),
+        backend_session_id,
         extra: Value::Null,
     };
     Ok(core
@@ -441,13 +448,21 @@ pub(super) async fn answer_question(
     core: &Core,
     params: AnswerQuestionParams,
 ) -> Result<Session, ApiError> {
-    let session = find(core, &params.id).await?;
-    // No adapter projects `question.asked` yet, so no question can be
-    // pending.
-    Err(ApiError::invalid_state(format!(
-        "the {} adapter does not support questions yet",
-        session.backend
-    )))
+    find(core, &params.id).await?;
+    // Declining says the user gave no answers, so it carries none.
+    let reply = match (params.declined.unwrap_or(false), params.answers.is_empty()) {
+        (true, true) => QuestionReply::Declined,
+        (true, false) => {
+            return Err(ApiError::invalid_params(
+                "a declined question carries no answers",
+            ));
+        }
+        (false, _) => QuestionReply::Answers(params.answers),
+    };
+    core.sessions
+        .answer_question(&params.id, &params.request_id, reply)
+        .await?;
+    find(core, &params.id).await
 }
 
 /// `text` as one line: each run of spacing (a line break and a tab

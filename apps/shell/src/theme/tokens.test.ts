@@ -55,7 +55,10 @@ const scaled = (text: string) =>
 // the font files, not the interface.
 const FONT_FILES = join("theme", "fonts.css");
 
-const raw = (line: string) => RAW.flatMap(({ pattern }) => [...line.matchAll(pattern)].map((m) => m[0]));
+// A keyframe's selector, such as `50% {`, says when in its animation a step falls, not a size: the animation's
+// duration is the token.
+const KEYFRAME = /^\s*\d*\.?\d+%(\s*,\s*\d*\.?\d+%)*\s*\{\s*$/;
+const raw = (line: string) => (KEYFRAME.test(line) ? [] : RAW.flatMap(({ pattern }) => [...line.matchAll(pattern)].map((m) => m[0])));
 const flagged = (text: string) => [...raw(text), ...scaled(text)];
 
 // A var() naming a property nothing declares falls back silently, so a token
@@ -113,6 +116,12 @@ describe("the raw-value check", () => {
     expect(flagged("  font-weight: normal;")).toEqual(["font-weight: normal"]);
     expect(flagged("  font-weight: var(--type-heading-weight);")).toEqual([]);
     expect(flagged("  transition: opacity 160ms;")).toEqual(["160ms"]);
+  });
+
+  it("leaves a keyframe's place in its animation alone", () => {
+    expect(flagged("  50% {")).toEqual([]);
+    expect(flagged("  0%, 100% {")).toEqual([]);
+    expect(flagged("  50% { width: 22%; }")).toEqual(["50%", "22%"]);
   });
 
   it("catches a stacking order that is not a token", () => {
@@ -198,6 +207,10 @@ describe("generated tokens", () => {
     for (const [name, value] of Object.entries(tokens.stack)) {
       expect(generated).toContain(`--stack-${name}: ${value};`);
     }
+  });
+
+  it("give opacities as bare numbers", () => {
+    expect(css({ ...tokens, opacity: { breath: 0.4 } })).toContain("--opacity-breath: 0.4;");
   });
 
   it("build materials and glows from color roles, not values", () => {

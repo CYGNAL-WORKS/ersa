@@ -62,6 +62,19 @@ describe("starting a session from the new-session screen", () => {
     expect(outcome).toMatchObject({ ok: true, session: { id: "s1" } });
   });
 
+  // verifies: FLOW-NEW-SESSION-R13
+  it("says which workspace the session will be in before the session exists", async () => {
+    const { client, methods } = fakeClient(working);
+    let called: string[] = [];
+    let told: string | undefined;
+    await startSession(client, values("isolated"), "Fix the build", undefined, [], (workspace) => {
+      told = workspace.id;
+      called = methods();
+    });
+    expect(told).toBe("w-new");
+    expect(called).toEqual(["workspace.create"]);
+  });
+
   // verifies: FLOW-NEW-SESSION-R21
   it("creates the workspace from the chosen base branch", async () => {
     const { client, calls } = fakeClient(working);
@@ -132,7 +145,6 @@ describe("starting a session from the new-session screen", () => {
     expect(outcome).toMatchObject({
       ok: true,
       session: { id: "s1", state: "starting" },
-      workspace: { id: "w-new" },
       firstSend: { sending: { state: "failed", message: "the session is still starting; try again shortly" }, giveBack: true },
     });
     expect(methods()).not.toContain("session.stop");

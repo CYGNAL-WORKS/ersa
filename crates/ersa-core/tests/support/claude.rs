@@ -7,8 +7,8 @@ use std::sync::Arc;
 use ersa_adapter::fake::FakeTransport;
 use ersa_adapter::recording::Recording;
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, Projector, SessionConfig, Transport,
-    async_trait,
+    Adapter, AdapterError, AdapterSession, AdapterSink, OpenElsewhere, Projector, RecordEvent,
+    RecordSummary, SessionConfig, Transport, async_trait,
 };
 use ersa_adapter_claude::ClaudeAdapter;
 use ersa_core::replay::{Pace, Replay};
@@ -20,7 +20,8 @@ use super::{TestCore, tempdir, test_config, unique_endpoint};
 pub const FIXTURE: &str = "11-stream-permission-prompt-tool-stdio";
 
 /// The Claude adapter, made to start its CLI on a given transport instead of
-/// the one Core hands it.
+/// the one Core hands it. Everything else is the adapter's own, its session
+/// records read from its Claude home.
 pub struct OnTransport {
     pub adapter: ClaudeAdapter,
     pub transport: Arc<dyn Transport>,
@@ -54,6 +55,69 @@ impl Adapter for OnTransport {
     fn projector(&self) -> Box<dyn Projector> {
         self.adapter.projector()
     }
+
+    fn new_session_id(&self) -> Option<String> {
+        self.adapter.new_session_id()
+    }
+
+    async fn read_record(
+        &self,
+        transport: Arc<dyn Transport>,
+        cwd: &str,
+        backend_session_id: &str,
+    ) -> Result<Arc<Vec<RecordEvent>>, AdapterError> {
+        self.adapter
+            .read_record(transport, cwd, backend_session_id)
+            .await
+    }
+
+    async fn record_version(
+        &self,
+        transport: Arc<dyn Transport>,
+        cwd: &str,
+        backend_session_id: &str,
+    ) -> Result<Option<String>, AdapterError> {
+        self.adapter
+            .record_version(transport, cwd, backend_session_id)
+            .await
+    }
+
+    fn forget_record(&self, cwd: &str, backend_session_id: &str) {
+        self.adapter.forget_record(cwd, backend_session_id)
+    }
+
+    async fn summarize_record(
+        &self,
+        transport: Arc<dyn Transport>,
+        cwd: &str,
+        backend_session_id: &str,
+    ) -> Result<Option<RecordSummary>, AdapterError> {
+        self.adapter
+            .summarize_record(transport, cwd, backend_session_id)
+            .await
+    }
+
+    async fn rename_record(
+        &self,
+        transport: Arc<dyn Transport>,
+        cwd: &str,
+        backend_session_id: &str,
+        title: &str,
+    ) -> Result<(), AdapterError> {
+        self.adapter
+            .rename_record(transport, cwd, backend_session_id, title)
+            .await
+    }
+
+    async fn open_elsewhere(
+        &self,
+        transport: Arc<dyn Transport>,
+        backend_session_id: &str,
+    ) -> OpenElsewhere {
+        self.adapter
+            .open_elsewhere(transport, backend_session_id)
+            .await
+    }
 }
 
 /// The Claude adapter with a Claude home that does not exist, so nothing a
@@ -65,11 +129,17 @@ pub fn isolated_claude() -> ClaudeAdapter {
 }
 
 pub fn fixture_dir() -> PathBuf {
+    fixtures_of("2.1.302")
+}
+
+/// The recorded fixtures of Claude Code `version`.
+pub fn fixtures_of(version: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)
         .unwrap()
-        .join("docs/briefs/protocol/fixtures/claude-code/2.1.302")
+        .join("docs/briefs/protocol/fixtures/claude-code")
+        .join(version)
 }
 
 /// Fixture 11 as a recording.
@@ -115,6 +185,13 @@ pub fn parse(line: &str) -> Value {
 /// A stub CLI that answers each of Ersa's lines with the recording's next
 /// stdout lines: `initialize`, then the prompt, then the permission answer.
 pub fn stub(stdout: &[String]) -> FakeTransport {
+    stub_asking_at(stdout, 4)
+}
+
+/// A stub CLI for a recording whose `can_use_tool` request is stdout line
+/// `ask`: it answers `initialize`, takes the prompt, asks, and finishes the
+/// turn once it has an answer.
+pub fn stub_asking_at(stdout: &[String], ask: usize) -> FakeTransport {
     let is = |kind: &'static str| {
         move |line: &str| {
             let v = parse(line);
@@ -134,8 +211,8 @@ pub fn stub(stdout: &[String]) -> FakeTransport {
         .wait_for_stdin(is("initialize"))
         .then_stdout([&stdout[0]])
         .wait_for_stdin(is("user"))
-        .then_stdout(&stdout[1..=4])
+        .then_stdout(&stdout[1..=ask])
         .wait_for_stdin(is("answer"))
-        .then_stdout(&stdout[5..])
+        .then_stdout(&stdout[ask + 1..])
         .hold_open()
 }
