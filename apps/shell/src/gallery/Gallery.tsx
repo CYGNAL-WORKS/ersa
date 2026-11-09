@@ -242,6 +242,17 @@ const sessionsPage: Parameters<typeof SessionsPage>[0] = {
   onArchive: () => {},
   onDelete: () => {},
 };
+/** The marks the other rows don't show. */
+const pageMarks: SessionsView = {
+  state: "ready",
+  sessions: [
+    session("m1", "Asking a question", "2026-11-01T09:00:00Z", { state: "waiting_user", pending: [{ kind: "question", request_id: "q1" }] }),
+    session("m2", "Starting up", "2026-11-01T08:00:00Z", { state: "starting", pending: [] }),
+    session("m3", "Lost its connection", "2026-11-01T07:00:00Z", { state: "disconnected", pending: [] }),
+    { ...session("m4", "Being deleted", "2026-11-01T06:00:00Z", { state: "ended", pending: [] }), deleting: "running" },
+    { ...session("m5", "Could not be deleted", "2026-11-01T05:00:00Z", { state: "ended", pending: [] }), deleting: "failed" },
+  ],
+};
 const pageArchived: SessionsView = { state: "ready", sessions: pageSessions.map((s) => ({ ...s, archived: true })) };
 
 /** The tree grouped by date, on 7 November 2026: ersa's and runner's sessions, made across the last fortnight. */
@@ -843,10 +854,17 @@ const entries: Entry[] = [
       ["Archived", <SessionsPage {...sessionsPage} sessions={pageArchived} initialTab="archived" />],
       ["Pointer over a row", <SessionsPage {...sessionsPage} force={{ id: "r2", state: "hover" }} />],
       ["Keyboard focus on a row", <SessionsPage {...sessionsPage} force={{ id: "r2", state: "focus" }} />],
-      ["Search open", <SessionsPage {...sessionsPage} initialSearch="tidy" />],
+      ["Pressed row", <SessionsPage {...sessionsPage} force={{ id: "r2", state: "pressed" }} />],
+      ["Every other mark", <SessionsPage {...sessionsPage} sessions={pageMarks} />],
+      ["A long project name", <SessionsPage {...sessionsPage} projects={treeProjects.map((p) => ({ ...p, name: "a-project-whose-name-runs-on-far-too-long" }))} />],
+      ["A tab, pointer over it", <SessionsPage {...sessionsPage} forceTab={{ tab: "archived", state: "hover" }} />],
+      ["A tab, pressed", <SessionsPage {...sessionsPage} forceTab={{ tab: "archived", state: "pressed" }} />],
+      ["A tab, keyboard focus", <SessionsPage {...sessionsPage} forceTab={{ tab: "active", state: "focus" }} />],
+      ["Search open", <SessionsPage {...sessionsPage} initialSearch="tidy" forceSearch />],
       ["A search that matches nothing", <SessionsPage {...sessionsPage} initialSearch="nothing like it" />],
       ["A row's menu, open", room(<SessionsPage {...sessionsPage} initialTileMenu="r2" />)],
       ["Renaming on a row", <SessionsPage {...sessionsPage} initialTileDraft={{ id: "r2", draft: "Tidy the gallery, renamed" }} />],
+      ["Rename refused", <SessionsPage {...sessionsPage} initialTileDraft={{ id: "r2", draft: "Tidy the gallery, renamed" }} renaming={{ r2: { state: "failed", message: "session.set_title: the backend refused the title" } }} />],
       ["Archive refused", <SessionsPage {...sessionsPage} archiving={{ r2: { state: "failed", message: "session.set_archived: the session is being deleted" } }} />],
       ["Loading", <SessionsPage {...sessionsPage} sessions={{ state: "loading" }} />],
       ["Could not be read", <SessionsPage {...sessionsPage} sessions={{ state: "error", message: "session.list: the database is locked" }} />],

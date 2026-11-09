@@ -46,6 +46,8 @@ export function SessionsPage({
   initialTab = "active",
   initialSearch,
   force,
+  forceTab,
+  forceSearch,
   initialTileMenu,
   initialTileDraft,
   ...handlers
@@ -67,6 +69,8 @@ export function SessionsPage({
   initialTab?: SessionsTab;
   initialSearch?: string;
   force?: ForcedTile;
+  forceTab?: { tab: SessionsTab; state: "hover" | "focus" | "pressed" };
+  forceSearch?: boolean;
   initialTileMenu?: string;
   initialTileDraft?: { id: string; draft: string };
 }) {
@@ -79,7 +83,8 @@ export function SessionsPage({
   const tabsId = useId();
 
   const page = useRef<HTMLElement>(null);
-  const leaving = useLeavingFocus(page, (root) => root.querySelector<HTMLElement>(".sessions-page-new"));
+  // New session is unavailable while Ersa can't reach Core, when every row goes at once: the chosen tab takes focus then.
+  const leaving = useLeavingFocus(page, (root) => root.querySelector<HTMLElement>(".sessions-page-new:not(:disabled)") ?? root.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]'));
 
   // The field takes focus as the user opens it, and the search button as Escape closes it. Moved after the render
   // that swaps one for the other.
@@ -125,6 +130,7 @@ export function SessionsPage({
                 role="tab"
                 id={`${tabsId}-${each}`}
                 className="sessions-page-tab"
+                data-force={forceTab?.tab === each ? forceTab.state : undefined}
                 aria-selected={each === tab}
                 aria-controls={`${tabsId}-panel`}
                 // The chosen tab is the one stop in Tab order; the arrow keys move between them.
@@ -140,6 +146,7 @@ export function SessionsPage({
               <input
                 ref={field}
                 className="sessions-page-search"
+                data-force={forceSearch ? "focus" : undefined}
                 type="search"
                 aria-label={t("rail.sessionsPage.searchLabel")}
                 value={search}
@@ -244,8 +251,8 @@ function SessionRow({
               <Mark view={view} />
             </span>
           )}
-          {project !== undefined && <span>{project}</span>}
-          {host !== undefined && <span>{host}</span>}
+          {project !== undefined && <span className="sessions-page-fact">{project}</span>}
+          {host !== undefined && <span className="sessions-page-fact">{host}</span>}
           <span className="sessions-page-time">{time}</span>
         </span>
       </SessionRoot>

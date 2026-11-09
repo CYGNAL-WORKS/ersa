@@ -166,6 +166,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The unseen sessions (LAY-SHELL, Unseen), worked out afresh from each list Core reports and each change of the
   // active session. Kept in memory only: nothing survives the window closing.
   const shownId = composing ? undefined : activeId;
+  // As it is when an archive answers, which may be after the user chose another session.
+  const shownNow = useRef(shownId);
+  shownNow.current = shownId;
   const [unseen, setUnseen] = useState(noneUnseen);
   useEffect(() => {
     if (sessions.state === "ready") setUnseen((prev) => unseenAfter(prev, sessions.sessions, shownId));
@@ -424,7 +427,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     try {
       await client.call("session.set_archived", { id, archived });
       setArchiving(({ [id]: _, ...rest }) => rest);
-      if (archived && id === shownId) dispatch({ type: "activeLeft" });
+      if (archived && id === shownNow.current) dispatch({ type: "activeLeft" });
       connection.current?.reload("sessions");
     } catch (error) {
       setArchiving((a) => ({ ...a, [id]: { state: "failed", message: describeError(error) } }));
@@ -474,14 +477,15 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const [deleteAsk, setDeleteAsk] = useState<{ id: string; title: string; backend: string; phase: DeletePhase; run?: Deletion; fromPage?: boolean }>();
   // The tile focus goes to once the question closes, by its session's id; New session when none is left. Moved in an
   // effect, after the new-session screen a deleted active session leaves behind has taken focus as it opened.
-  const [refocus, setRefocus] = useState<{ to?: string; fromPage?: boolean }>();
+  const [refocus, setRefocus] = useState<{ to?: string; fromPage?: boolean; composer?: boolean }>();
   // The active session as it is when a deletion ends, which may be after the user chose another.
   const activeNow = useRef(activeId);
   activeNow.current = activeId;
   useEffect(() => {
     if (!refocus) return;
     const item = refocus.to && deletionList(refocus.fromPage)?.querySelector(`[data-session-id="${CSS.escape(refocus.to)}"] .session`);
-    (item instanceof HTMLElement ? item : document.querySelector<HTMLElement>(refocus.fromPage ? ".sessions-page-new" : ".rail-new-session"))?.focus({ preventScroll: true });
+    const composer = refocus.composer ? document.querySelector<HTMLElement>("main:not([hidden]) .composer-words") : null;
+    (composer ?? (item instanceof HTMLElement ? item : document.querySelector<HTMLElement>(refocus.fromPage ? ".sessions-page-new" : ".rail-new-session")))?.focus({ preventScroll: true });
     setRefocus(undefined);
   }, [refocus]);
   // The question as last drawn: a deletion that ends speaks only for the question still showing it.
@@ -659,6 +663,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const shown = !composing && session && session.id === activeId ? session : undefined;
   const firstSendHere = firstSend && firstSend.id === shown?.id ? firstSend : undefined;
 
+  // A file dropped while the sessions page shows reaches no composer behind it.
+  const dragDrop = sessionsPage ? undefined : shell?.onDragDrop;
+
   // The projects as last read, so a screen with a message being written stays while Core is away; sending then
   // fails with the reason, and the message stays in the composer.
   const knownProjects = useRef<Project[] | undefined>(undefined);
@@ -786,9 +793,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           </ErrorBoundary>
         </div>
       </nav>
-      {sessionsPage ? (
-        // The page stands in for everything the stage shows: the composer, the session controls and the header are
-        // gone, so nothing typed reaches the active session, which stays active (FLOW-ORGANIZE-SESSIONS-R20).
+      {sessionsPage && (
+        // The page stands over the stage: the composer, the session controls and the header are hidden and out of reach,
+        // so nothing typed reaches the active session, which stays active (FLOW-ORGANIZE-SESSIONS-R20).
         <main className="stage" inert={behind}>
           <ErrorBoundary what={t("rail.sessionsPage.boundaryName")} resetKey={sessionsVersion}>
             <SessionsPage
@@ -800,8 +807,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               backends={backends}
               onOpen={(id) => {
                 select(id);
-                // An archived session opens without a composer to take focus, and the row that had it is gone.
-                if (sessions.state === "ready" && sessions.sessions.find((s) => s.id === id)?.archived) setRefocus({ to: id });
+                // The row that had focus is gone. A composer kept behind the page doesn't take it again as one drawn
+                // afresh does, and an archived session has none: its tile does.
+                setRefocus({ to: id, composer: true });
               }}
               onNewSession={() => dispatch({ type: "newSession" })}
               onPin={pin}
@@ -816,8 +824,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             />
           </ErrorBoundary>
         </main>
-      ) : shown ? (
-        <main className="stage" inert={behind}>
+      )}
+      {shown ? (
+        <main className="stage" hidden={sessionsPage} inert={behind || sessionsPage}>
           {/* Tries again on each new event, and keeps the composer out of it. */}
           <ErrorBoundary what="This session" resetKey={`${shown.id}:${shown.transcript.lastSeq}`}>
             <Transcript
@@ -851,7 +860,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               initialAttachments={firstSendHere?.attachments}
               onAttach={attach && ((what) => attach(what, listed?.workspace_id))}
               onRead={read && ((paths) => read(paths, listed?.workspace_id))}
-              dragDrop={shell?.onDragDrop}
+              dragDrop={dragDrop}
               workspace={listed?.workspace_id}
               onSend={(text, attachments) => follower.current?.send(text, sendable(attachments)) ?? Promise.resolve(false)}
               // Stop, from sending until the turn ends: cancels the message on its way, or interrupts the turn (FLOW-SEND-MESSAGE-R03).
@@ -879,7 +888,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           </ErrorBoundary>
         </main>
       ) : hello && screenProjects && showsScreen({ composing, starting, activeId }, view.phase === "connected") ? (
-        <main className="stage" inert={behind}>
+        <main className="stage" hidden={sessionsPage} inert={behind || sessionsPage}>
           <ErrorBoundary what="The new-session screen" resetKey={composing?.projectId ?? ""}>
             <NewSessionScreen
               // Drawn afresh on each New session, so its composer takes focus (FLOW-NEW-SESSION-R01).
@@ -893,7 +902,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onStart={start}
               onAttach={attach}
               onRead={read}
-              dragDrop={shell?.onDragDrop}
+              dragDrop={dragDrop}
               rootWorkspaces={rootWorkspaces}
               starting={starting?.state === "sending" ? { state: "sending", progress: startProgress } : starting}
               onChooseFolder={chooseFolder}
@@ -906,7 +915,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           </ErrorBoundary>
         </main>
       ) : (
-        <main className="stage stage-empty" inert={behind}>No session open. Start one from a project in the rail.</main>
+        <main className="stage stage-empty" hidden={sessionsPage} inert={behind || sessionsPage}>No session open. Start one from a project in the rail.</main>
       )}
       {deleteAsk && deleteAsk.phase.kind !== "deleted" && (
         <DeleteQuestion

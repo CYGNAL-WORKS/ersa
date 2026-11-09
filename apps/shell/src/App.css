@@ -39,10 +39,18 @@
 }
 
 .stage {
+  grid-column: 2;
+  grid-row: 1;
   display: grid;
   grid-template-rows: 1fr auto;
   min-width: 0;
   min-height: 0;
+}
+
+/* Behind the sessions page: still laid out, so what is written in its composer and where its transcript was scrolled
+   are there to come back to, but neither seen, reached nor read. */
+.stage[hidden] {
+  visibility: hidden;
 }
 
 .stage-empty {
