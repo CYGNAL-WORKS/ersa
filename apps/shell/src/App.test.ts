@@ -1056,6 +1056,30 @@ describe("archiving a session from its tile, and an archived session read-only",
     expect(document.activeElement).toBe(tileNamed(next));
   });
 
+  it("moves focus past tiles folded away in a collapsed group when a tile is archived", async () => {
+    const three = (marks: { [id: string]: boolean } = {}) => [
+      ...titled(marks),
+      { ...session("s3", "gamma", "2026-11-03T09:00:00Z"), title: "Read the logs", archived: marks.s3 ?? false },
+    ];
+    const list = { current: three() };
+    await open(list, {
+      "session.set_archived": (params: { id: string; archived: boolean }) => {
+        list.current = three({ [params.id]: params.archived });
+        return list.current.find((s) => s.id === params.id);
+      },
+    });
+    // Write the notes sits between the two, folded away with beta.
+    fireEvent.click(tileNamed("Read the logs") as HTMLElement);
+    fireEvent.click(within(rail()).getByRole("button", { name: /^beta/ }));
+    await settle();
+    expect(within(rail()).getByRole("button", { name: /^beta/ }).getAttribute("aria-expanded")).toBe("false");
+    within(rail()).getByRole("button", { name: "More for Fix the build" }).focus();
+    chooseArchive("Fix the build", /^Archive/);
+    await settle();
+    expect(tileNamed("Fix the build")).toBeUndefined();
+    expect(document.activeElement).toBe(tileNamed("Read the logs"));
+  });
+
   it("shows the new-session screen when the active session is archived", async () => {
     const list = { current: titled() };
     await open(list, {
