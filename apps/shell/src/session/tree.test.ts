@@ -173,7 +173,6 @@ describe("the rail's tree as the user arranges it", () => {
   });
 });
 
-// LAY-SHELL, Collapsing: a layout brief, so no requirement IDs.
 describe("the tiles' order within a group", () => {
   const projects = [project("ersa"), project("engine")];
   const workspaces = { w1: { project_id: "ersa" }, w2: { project_id: "engine" } };
@@ -254,6 +253,7 @@ describe("the tiles' order within a group", () => {
   });
 });
 
+// LAY-SHELL, Collapsing: a layout brief, so no requirement IDs.
 describe("what a collapsed heading says", () => {
   const waiting = (id: string, kinds: ("permission" | "question" | "elicitation")[]): Session => ({
     ...session(id, "w", "2026-11-01T09:00:00.000Z"),
