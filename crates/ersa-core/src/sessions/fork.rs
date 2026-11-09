@@ -24,7 +24,7 @@ pub struct ForkStart {
     /// Keeps the original's `forking` flag raised until the fork's backend
     /// is ready, by when the CLI has read the record it copies.
     pub hold: Arc<ForkHold>,
-    /// The name to give it in the backend, a titled original's (R06). The
+    /// The name to give it in the backend, a titled original's (R07). The
     /// backend keeps it, as it keeps any name a session is given.
     pub name: Option<String>,
 }
