@@ -368,3 +368,75 @@ async fn a_session_stopped_before_its_first_message_keeps_its_id_and_has_no_reco
         .await;
     assert_eq!(kind(&error), "invalid_state", "{error:#}");
 }
+
+// verifies: FLOW-FORK-SESSION-R01
+// verifies: PROTO-CLAUDE-CODE-STREAM-R28
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversation() {
+    let stdout = recorded();
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(is("initialize"))
+        .then_stdout([&stdout[0]])
+        .hold_open();
+    let home = tempdir();
+    let core = claude_core(&transport, home.path()).await;
+    let mut client = core.client().await;
+    let original = create(&core, &mut client).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    initialize_sent(&transport).await;
+    client
+        .result("session.stop", json!({ "id": original }))
+        .await;
+    let original_backend_id = chosen_id(&transport);
+    let cwd = transport.spawned()[0].cwd.clone().unwrap();
+    let record = write_record(home.path(), &cwd, &original_backend_id);
+    let before = std::fs::read(&record).unwrap();
+
+    let fork = client
+        .result("session.fork", json!({ "id": original }))
+        .await;
+    let id = fork["id"].as_str().unwrap().to_string();
+
+    // A session of its own in the same place, from a copy of the original.
+    let spawned = transport.spawned()[1].clone();
+    assert_eq!(spawned.cwd.as_deref(), Some(cwd.as_str()));
+    let at = |flag: &str| spawned.args.iter().position(|a| a == flag);
+    let resume = at("--resume").expect("--resume");
+    assert_eq!(spawned.args[resume + 1], original_backend_id);
+    assert!(at("--fork-session").is_some(), "{:?}", spawned.args);
+    let chosen = spawned.args[at("--session-id").expect("--session-id") + 1].clone();
+    assert_ne!(chosen, original_backend_id);
+
+    // Ready for its first message, which the CLI will not report a session
+    // before: no `starting` until then.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let list = client.result("session.list", json!({})).await;
+        let row = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == id)
+            .cloned()
+            .unwrap();
+        if row["state"] == "idle" {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{row:#}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    // The conversation shows from the original's record, and that record
+    // is as it was.
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    let events = client.events_until("assistant.text").await;
+    assert!(
+        events.iter().any(|e| e["event"]["type"] == "user.message"),
+        "{events:#?}"
+    );
+    assert_eq!(std::fs::read(&record).unwrap(), before);
+}

@@ -442,6 +442,8 @@ async fn the_claim_holds_off_other_requests_until_the_delete_ends() {
         ("session.send", json!({ "id": id, "text": "hello" })),
         ("session.delete", json!({ "id": other, "token": shown })),
         ("session.remove", json!({ "id": other })),
+        ("session.fork", json!({ "id": id })),
+        ("session.fork", json!({ "id": other })),
         (
             "session.create",
             json!({ "workspace_id": workspace["id"], "backend": fake::BACKEND }),
@@ -484,8 +486,11 @@ async fn refused_with_nothing_deleted_when_another_process_has_the_session_open(
     let (workspace, folder) = isolated(&mut client, &project).await;
     let id = idle_session(&mut client, &workspace).await;
 
-    for answer in [OpenElsewhere::Yes { pid: 4242 }, OpenElsewhere::Unknown] {
-        *fake.open_elsewhere.lock().unwrap() = answer;
+    for answer in [
+        OpenElsewhere::Yes { pids: vec![4242] },
+        OpenElsewhere::Unknown,
+    ] {
+        *fake.open_elsewhere.lock().unwrap() = answer.clone();
         let shown = token(&mut client, &workspace).await;
         let error = client
             .error("session.delete", json!({ "id": id, "token": shown }))
@@ -615,7 +620,7 @@ async fn a_record_opened_elsewhere_part_way_fails_the_delete_until_tried_again()
     let (project, repo) = project(&mut client, core.dir.path()).await;
     let (workspace, folder) = isolated(&mut client, &project).await;
     let id = idle_session(&mut client, &workspace).await;
-    *fake.delete_refusal.lock().unwrap() = Some(OpenElsewhere::Yes { pid: 777 });
+    *fake.delete_refusal.lock().unwrap() = Some(OpenElsewhere::Yes { pids: vec![777] });
 
     let shown = token(&mut client, &workspace).await;
     let error = client

@@ -34,9 +34,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, ImageLimits,
-    OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit, Projected, Projector, RawLine,
-    RecordDeletion, RecordEvent, RecordSummary, SessionConfig, Transport, async_trait,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
+    ImageLimits, OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit, Projected,
+    Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary, SessionConfig, Transport,
+    async_trait,
 };
 use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::{
@@ -151,6 +152,9 @@ pub struct FakeAdapter {
     /// When set, what deleting a record answers instead of deleting it: the
     /// registry saying so at the moment of deletion.
     pub delete_refusal: Arc<Mutex<Option<OpenElsewhere>>>,
+    /// How the fake says every session's conversation ends; `None` is a
+    /// backend that cannot fork.
+    pub conversation_end: Arc<Mutex<Option<ConversationEnd>>>,
     /// A backend that takes a stop and never exits.
     stop_hangs: bool,
 }
@@ -167,6 +171,7 @@ impl FakeAdapter {
             open_elsewhere: Arc::new(Mutex::new(OpenElsewhere::No)),
             open_check_gate: Arc::default(),
             delete_refusal: Arc::default(),
+            conversation_end: Arc::new(Mutex::new(Some(ConversationEnd::Finished))),
             stop_hangs: false,
         }
     }
@@ -345,7 +350,7 @@ impl Adapter for FakeAdapter {
             .lock()
             .unwrap()
             .push((backend_session_id.to_string(), renames));
-        *self.open_elsewhere.lock().unwrap()
+        self.open_elsewhere.lock().unwrap().clone()
     }
 
     /// Deletes the record, as Claude Code's adapter deletes its file; one
@@ -356,12 +361,21 @@ impl Adapter for FakeAdapter {
         _cwd: &str,
         backend_session_id: &str,
     ) -> Result<RecordDeletion, AdapterError> {
-        if let Some(refused) = *self.delete_refusal.lock().unwrap() {
+        if let Some(refused) = self.delete_refusal.lock().unwrap().clone() {
             return Ok(RecordDeletion::Refused(refused));
         }
         self.records.lock().unwrap().remove(backend_session_id);
         self.stats.record_deletes.fetch_add(1, Ordering::SeqCst);
         Ok(RecordDeletion::Deleted)
+    }
+
+    async fn conversation_end(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        _backend_session_id: &str,
+    ) -> Result<Option<ConversationEnd>, AdapterError> {
+        Ok(*self.conversation_end.lock().unwrap())
     }
 
     /// Titled by its latest rename, else its last prompt, as Claude Code
