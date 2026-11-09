@@ -7,7 +7,7 @@ import type { Sending } from "../session/follow";
 import type { ArrangeProblem, GroupBy, Show } from "../session/arrangement";
 import { type Collapsed, type DateKey, collapsedOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { type Place, arrive, placesOf, slideFrom } from "../theme/motion";
+import { type Place, arrive, placesOf, regroup, slideFrom } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileArchive, type TilePin, type TileRename } from "./SessionTile";
@@ -208,7 +208,7 @@ export function RailTree(props: RailTreeProps) {
   useLayoutEffect(() => {
     const from = regroupFrom.current;
     regroupFrom.current = undefined;
-    if (from && root.current) slideFrom(root.current, from);
+    if (from && root.current) regroup(root.current, from);
   });
   const listed = projects.state === "ready" ? projects.projects : [];
   const all = sessions.state === "ready" ? sessions.sessions : [];
@@ -217,8 +217,9 @@ export function RailTree(props: RailTreeProps) {
   // so it does not sit at the end and then move. When the projects could not be read, every session sits at the
   // end. Grouped otherwise, no session waits on its project.
   const looseShown = groupBy !== "project" || projects.state === "error" || (projects.state === "ready" && !placing);
-  // Nothing the filter shows (FLOW-ORGANIZE-SESSIONS, Nothing to show; LAY-SHELL, Loading, empty and failed). With
-  // no sessions at all, project headings say enough where there are any, and with no projects their own note does.
+  // Nothing the filter shows (FLOW-ORGANIZE-SESSIONS, Nothing to show; LAY-SHELL, Loading, empty and failed). Showing
+  // active with no sessions at all, project headings say enough where there are any, and with no projects their own
+  // note does. Showing all, it waits for the projects, so the note is not drawn beneath Loading and then jumps up.
   const nothing = sessions.state === "ready" && tree.pinned.length === 0 && tree.groups.every((g) => g.sessions.length === 0) && tree.loose.length === 0;
   const blank = projects.state === "ready" && listed.length > 0 && tree.groups.length === 0;
   const noneShown = !nothing
@@ -227,7 +228,7 @@ export function RailTree(props: RailTreeProps) {
       ? t("rail.tree.noArchivedEmpty")
       : show === "active" && (all.length > 0 || blank)
         ? t("rail.tree.noActiveEmpty")
-        : show === "all"
+        : show === "all" && projects.state !== "loading"
           ? t("rail.tree.noSessionsEmpty")
           : undefined;
   // A new session whose workspace is being read waits too, so it slides in once, at its place. Tiles already drawn stay.
