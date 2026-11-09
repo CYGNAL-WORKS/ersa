@@ -4,7 +4,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
 import { type DeletePhase, whatGoes } from "../session/deletion";
 import { DeleteQuestion } from "./DeleteQuestion";
@@ -152,6 +152,45 @@ describe("the delete question's buttons", () => {
     expect(fireEvent.mouseDown(button("Delete"))).toBe(true);
     fireEvent.keyDown(dialog, { key: "Escape" });
     expect(calls).toEqual(["cancel"]);
+  });
+
+  describe("when what it says changes its height", () => {
+    const props = { title: "Fix the build", backend: "Claude Code", onConfirm: () => {}, onTryAgain: () => {}, onCancel: () => {} };
+    const asked = { kind: "asking", goes: whatGoes(isolated, clean), changed: false } as const;
+    let height = 171;
+    function growing() {
+      height = 171;
+      const animate = vi.fn(() => ({ cancel: () => {} }) as Animation);
+      HTMLElement.prototype.animate = animate as unknown as typeof HTMLElement.prototype.animate;
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => ({ height }) as DOMRect);
+      vi.spyOn(window, "getComputedStyle").mockImplementation(
+        () => ({ getPropertyValue: (name: string) => (name === "--motion-settle" ? "260ms" : "ease") }) as CSSStyleDeclaration,
+      );
+      return animate;
+    }
+    afterEach(() => {
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+      delete (HTMLElement.prototype as { animate?: unknown }).animate;
+    });
+
+    it("eases to the new height over motion-settle and takes no ease as it opens", () => {
+      const animate = growing();
+      const { rerender } = render(createElement(DeleteQuestion, { ...props, phase: { kind: "reading" } }));
+      expect(animate).not.toHaveBeenCalled();
+      height = 242;
+      rerender(createElement(DeleteQuestion, { ...props, phase: asked }));
+      expect(animate).toHaveBeenCalledWith([{ height: "171px" }, { height: "242px" }], { duration: 260, easing: "ease" });
+    });
+
+    it("appears at once with reduced motion on", () => {
+      const animate = growing();
+      vi.stubGlobal("matchMedia", () => ({ matches: true }));
+      const { rerender } = render(createElement(DeleteQuestion, { ...props, phase: { kind: "reading" } }));
+      height = 242;
+      rerender(createElement(DeleteQuestion, { ...props, phase: asked }));
+      expect(animate).not.toHaveBeenCalled();
+    });
   });
 
   it("can't be confirmed while it reads what would be lost", () => {

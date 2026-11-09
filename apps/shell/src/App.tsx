@@ -488,7 +488,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Deleted: focus goes to the next tile in the rail, else the previous, else New session (docs/design/RAIL.md, The
   // delete question); the active session leaves the new-session screen in its place.
   const deleted = (id: string) => {
-    const items = [...document.querySelectorAll<HTMLElement>("[data-session-id]")];
+    // A tile folded away in a collapsed group can't take focus, so it is never the one beside this one.
+    const items = [...document.querySelectorAll<HTMLElement>("[data-session-id]")].filter((el) => !el.closest(".rail-group-tiles[inert]"));
     const at = items.findIndex((el) => el.dataset.sessionId === id);
     const beside = at < 0 ? undefined : (items[at + 1] ?? items[at - 1]);
     setDeleteAsk(undefined);

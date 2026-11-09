@@ -175,6 +175,28 @@ describe("Delete on a tile", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("moves focus past tiles folded away in a collapsed group, to New session when none is left", async () => {
+    const projects = ["alpha", "beta"].map((id) => ({ id, host_id: "local", path: `D:/code/${id}`, name: id, vcs: "git", trusted: true }));
+    const beta: Workspace = { id: "w-beta", project_id: "beta", kind: "isolated", path: "D:/ws/beta-1", vcs_ref: "ersa/beta", state: "ready" };
+    let rows = [listed[0]!, session("s4", "In the other project", "2026-11-04T09:00:00Z", { state: "idle", pending: [] }, "w-beta")];
+    await open({
+      "project.list": () => projects,
+      "workspace.list": () => [...workspaces, beta],
+      "session.list": () => rows,
+      "session.delete": (params: { id: string }) => {
+        rows = rows.filter((s) => s.id !== params.id);
+        return { id: params.id, workspace_deleted: true, branch_kept: false };
+      },
+    });
+    fireEvent.click(within(rail()).getByRole("button", { name: /^beta/ }));
+    fireEvent.click(deleteItem("Fix the build"));
+    await settle();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete and lose them" }));
+    await settle();
+    await settle();
+    expect(document.activeElement?.classList.contains("rail-new-session")).toBe(true);
+  });
+
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R07
   it("shows a failed deletion on its tile, whose menu holds Delete… alone, which asks again with what is left", async () => {
     const core = await open({
