@@ -10,18 +10,23 @@ use super::*;
 pub struct Beginning {
     /// The title to show until the record gives one.
     pub title: Option<String>,
-    /// The title a fork's backend announces as it starts, which it copied
-    /// from the original (fixture 2.1.316/21-fork-into-worktree-renamed).
-    /// That is not the fork's title, so it is not shown.
-    pub copied_title: Option<String>,
     /// The conversation it starts from, a fork's. The backend writes a
     /// fork's record only with its first message (fixture
     /// 2.1.316/15-fork-named-no-message), so until then this is the only
     /// place the copied conversation can be read from.
     pub record: Arc<Vec<RecordEvent>>,
-    /// For a fork: keeps the original's `forking` flag raised until the
-    /// fork's backend is ready, by when the CLI has read the record it copies.
-    pub fork_hold: Option<Arc<ForkHold>>,
+    /// For a fork: what is left to do once its backend is ready.
+    pub fork: Option<ForkStart>,
+}
+
+/// What a fork's start still has to do.
+pub struct ForkStart {
+    /// Keeps the original's `forking` flag raised until the fork's backend
+    /// is ready, by when the CLI has read the record it copies.
+    pub hold: Arc<ForkHold>,
+    /// The name to give it in the backend, a titled original's (R06). The
+    /// backend keeps it, as it keeps any name a session is given.
+    pub name: Option<String>,
 }
 
 /// How a fork's title ends.
@@ -144,15 +149,17 @@ impl SessionManager {
         self.refuse_fork_if_busy(id)?;
         let handle = self.handle(id)?;
         refuse_if_turn_running(&handle)?;
-        let copied_title = handle.describe().title;
+        let title = handle.describe().title.as_deref().map(fork_title);
         Ok(Forkable {
             backend_id,
             adapter,
             beginning: Beginning {
-                title: copied_title.as_deref().map(fork_title),
-                copied_title,
+                fork: Some(ForkStart {
+                    hold: held,
+                    name: title.clone(),
+                }),
+                title,
                 record,
-                fork_hold: Some(held),
             },
         })
     }

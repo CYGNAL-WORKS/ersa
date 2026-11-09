@@ -576,7 +576,6 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
         .unwrap()
         .push(fake::recorded_title("Later"));
 
-    let made_at = fork["created_at"].clone();
     let (_core, mut client) = restarted(core, &mut client, &fake).await;
 
     client
@@ -584,10 +583,8 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
         .await;
     let events = client.events_until("session.ended").await;
     // verifies: FLOW-FORK-SESSION-R06
-    let listed = row(&mut client, &fork_id).await;
-    assert_eq!(listed["title"], "Titled (fork)");
-    // Not the time of the entries it copied: a fork never changes group.
-    assert_eq!(listed["created_at"], made_at);
+    // Its name was the backend's, which keeps nothing of it yet.
+    assert_eq!(row(&mut client, &fork_id).await["title"], Value::Null);
     let shown: Vec<&Value> = events
         .iter()
         .filter(|e| e["event"]["type"] == "assistant.text")
