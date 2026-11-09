@@ -26,6 +26,14 @@ describe("the sessions page on the stage", () => {
     expect(stage(refused, { type: "select", id: "s2" }).firstSend).toBeUndefined();
   });
 
+  it("clears that refusal otherwise: with no page open, or with the new-session screen behind the page", () => {
+    const firstSend = { id: "s1", text: "hello", sending: { state: "failed" as const, message: "busy" } };
+    const noPage = { ...run([{ type: "showNewest", id: "s1" }]), firstSend };
+    expect(stage(noPage, { type: "select", id: "s1" }).firstSend).toBeUndefined();
+    const composing = { ...run([{ type: "showNewest", id: "s1" }, { type: "newSession" }, { type: "allSessions" }]), firstSend };
+    expect(stage(composing, { type: "select", id: "s1" }).firstSend).toBeUndefined();
+  });
+
   it("gives way to New session", () => {
     const composing = stage(onPage, { type: "newSession" });
     expect(composing.sessionsPage).toBe(false);
