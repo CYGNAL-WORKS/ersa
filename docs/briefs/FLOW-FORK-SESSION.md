@@ -21,7 +21,7 @@ The user chooses **Fork** in a tile's menu (`LAY-SHELL`, The rail).
 
 1. On `LAY-SHELL`, the user opens a session's tile menu. Fork is available when the session's conversation ends with a finished reply: one has finished, no reply is running, and the last turn was not interrupted.
 2. The user chooses Fork. A new tile appears in the session's group and becomes the active session; its transcript holds the conversation up to that reply, and the composer is ready.
-3. The fork runs in the same workspace as the original, with the original's backend, model, effort and permission mode, in the original's section, not pinned. Its title is what the backend gives it.
+3. The fork runs in the same workspace as the original, with the original's backend, model, effort and permission mode, in the original's section, not pinned. Its title is what the backend gives it: the original's title, unmarked, until the fork's own record gives one, and none for a fork of an untitled session. It can be renamed before its first message.
 4. The original session keeps its state: a running original keeps running.
 
 ## Variations and errors
@@ -48,9 +48,10 @@ The user chooses **Fork** in a tile's menu (`LAY-SHELL`, The rail).
 
 ## Open questions
 
-- What a fork is named, and whether it can be renamed before its first message. The owner expects it named as Claude Code names one, likely the original's name marked as a fork. The CLI reports a fork's new id only in `system/init`, so a rename before the first message needs that id some other way, such as `--session-id` with `--fork-session`, which is not yet tried. Both are decided when forking is built.
+- Whether Ersa should mark a fork's name. Claude Code's `--fork-session` copy keeps the original's title unmarked, so today a fork and its original read the same.
 
 ## Changes
 
+- 2026-11-08: from #272 inbox: a fork shows the original's title, unmarked, until its own record gives one, and can be renamed before its first message; the open question narrows to whether Ersa should mark the name. No requirement IDs changed.
 - 2026-11-07: open question on how a fork is named. No requirement IDs changed.
 - 2026-11-05: created from the owner's decisions of 2026-11-05: Fork starts a new session from the last finished reply, unavailable with the reason while a reply runs or before one has finished. R01 to R04 added.
