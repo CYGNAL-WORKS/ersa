@@ -82,7 +82,7 @@ impl SessionManager {
                  has finished"
             )));
         }
-        let held = ForkRead(Arc::clone(&handle.forking));
+        let held = Arc::new(ForkRead(Arc::clone(&handle.forking)));
         let reads = ForkReads {
             id: id.to_string(),
             backend: row.backend,
@@ -92,10 +92,7 @@ impl SessionManager {
             adapter: Arc::clone(&adapter),
             transport,
         };
-        let reading = tokio::spawn(async move {
-            let _held = held;
-            read_for_fork(reads).await
-        });
+        let reading = tokio::spawn(async move { read_for_fork(reads, held).await });
         let record = match tokio::time::timeout(ADAPTER_CALL, reading).await {
             Ok(Ok(record)) => record?,
             Ok(Err(e)) => return Err(SessionError::Internal(format!("the adapter failed: {e}"))),
@@ -106,8 +103,11 @@ impl SessionManager {
             }
         };
 
-        // Those reads can take seconds, and a message sent meanwhile starts
-        // a turn the fork would copy part of.
+        // Those reads can take seconds. The session may have been removed
+        // or deleted meanwhile, and a message sent meanwhile starts a turn
+        // the fork would copy part of.
+        let handle = self.handle(id)?;
+        self.refuse_if_deleting(&handle)?;
         refuse_if_turn_running(&handle)?;
         Ok(Forkable {
             backend_id,
@@ -140,7 +140,10 @@ fn refuse_if_turn_running(handle: &Handle) -> Result<(), SessionError> {
 /// How the record ends, then who has it open, then the conversation the fork
 /// begins with. A record that can't be read can't be said to end with a
 /// finished reply, so that too is a refusal (FLOW-FORK-SESSION-R03).
-async fn read_for_fork(reads: ForkReads) -> Result<Arc<Vec<RecordEvent>>, SessionError> {
+async fn read_for_fork(
+    reads: ForkReads,
+    held: Arc<ForkRead>,
+) -> Result<Arc<Vec<RecordEvent>>, SessionError> {
     let ForkReads {
         id,
         backend,
@@ -178,8 +181,13 @@ async fn read_for_fork(reads: ForkReads) -> Result<Arc<Vec<RecordEvent>>, Sessio
     // The registry can't tell Core's own process from another, so it is
     // counted out, and the message can't say which is which; a registry that
     // cannot say does not refuse (PROTO-CORE-API, `session.fork`).
-    if let OpenElsewhere::Yes { pids } =
-        ask_open_elsewhere(Arc::clone(&adapter), Arc::clone(&transport), &backend_id).await
+    if let OpenElsewhere::Yes { pids } = ask_open_elsewhere(
+        Arc::clone(&adapter),
+        Arc::clone(&transport),
+        &backend_id,
+        held,
+    )
+    .await
         && pids.len() > own
     {
         let whose = if own > 0 {
