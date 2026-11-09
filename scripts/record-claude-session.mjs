@@ -2,7 +2,7 @@
 // Records a Claude Code session the way Ersa runs one, as a protocol fixture
 // pair: the live stream and the CLI's own session record for the same run.
 //
-//   node scripts/record-claude-session.mjs <name> [--keep] [--cwd <dir>] [--resume <session id> | --session-id] "<message 1>" ["<message 2>" ...]
+//   node scripts/record-claude-session.mjs <name> [--keep] [--cwd <dir>] [--resume <session id> [--fork-session [--cut-original <lines>]]] [--session-id] "<message 1>" ["<message 2>" ...]
 //
 // A message of the form `control:<json>` is sent as a host control request
 // instead, with `<json>` as its `request` object, and the recorder waits for
@@ -15,6 +15,13 @@
 // (PROTO-CLAUDE-CODE-STREAM, Invocation), and `$SESSION_ID` is that id from
 // the start, so a control request can name the session before its first
 // message.
+//
+// With --fork-session, the CLI forks the session --resume names, as Ersa forks
+// one (PROTO-CLAUDE-CODE-STREAM, Invocation), and the meta file gains
+// `fork_original`: the original's record, line count and SHA-256, before and
+// after the run. --session-id may join it, to name the fork. --cut-original
+// first cuts the original's record to its first <lines> lines, which is what
+// a process killed part way through a turn leaves.
 //
 // A message of the form `content:<json>` is sent as a user message whose
 // content blocks are `<json>`, an array, as a message with attachments goes
@@ -63,7 +70,7 @@
 // `initialize` exchange alone. The folder is deleted afterwards.
 
 import { spawn, spawnSync } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir, userInfo } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
@@ -166,9 +173,11 @@ const trust = flag("--trust");
 const givenCwd = option("--cwd");
 const resume = option("--resume");
 const chooseId = flag("--session-id");
+const fork = flag("--fork-session");
+const cutOriginal = option("--cut-original");
 const [name, ...messages] = argv;
-if (!name || (messages.length === 0) !== trust || !/^[a-z0-9-]+$/.test(name) || (chooseId && resume)) {
-  console.error('usage: node scripts/record-claude-session.mjs <name> [--cwd <dir>] [--resume <id> | --session-id] "<message>" [...]');
+if (!name || (messages.length === 0) !== trust || !/^[a-z0-9-]+$/.test(name) || (chooseId && resume && !fork) || (fork && !resume) || (cutOriginal !== undefined && !fork)) {
+  console.error('usage: node scripts/record-claude-session.mjs <name> [--cwd <dir>] [--resume <id> [--fork-session [--cut-original <lines>]]] [--session-id] "<message>" [...]');
   console.error("       node scripts/record-claude-session.mjs <name> --trust");
   process.exit(1);
 }
@@ -218,7 +227,24 @@ function encodeCwd(path) {
 
 // The id a new session starts under when the recorder chooses it.
 const chosenId = chooseId ? randomUUID() : null;
-const args = [...ERSA_ARGS, ...(resume ? ["--resume", resume] : []), ...(chosenId ? ["--session-id", chosenId] : [])];
+const args = [
+  ...ERSA_ARGS,
+  ...(resume ? ["--resume", resume] : []),
+  ...(fork ? ["--fork-session"] : []),
+  ...(chosenId ? ["--session-id", chosenId] : []),
+];
+
+// The original's record, as a fork must leave it.
+const originalPath = fork ? join(homedir(), ".claude", "projects", encodeCwd(cwd), `${resume}.jsonl`) : null;
+if (cutOriginal !== undefined) {
+  const lines = readFileSync(originalPath, "utf8").split("\n").filter((l) => l.trim());
+  writeFileSync(originalPath, lines.slice(0, Number(cutOriginal)).join("\n") + "\n");
+}
+function recordState(path) {
+  const text = readFileSync(path, "utf8");
+  return { lines: text.split("\n").filter((l) => l.trim()).length, sha256: createHash("sha256").update(text).digest("hex") };
+}
+const originalBefore = originalPath ? recordState(originalPath) : null;
 // Removals first, then Ersa's own entrypoint.
 const env = { ...process.env };
 for (const key of ENV_REMOVED) delete env[key];
@@ -384,8 +410,11 @@ let recordLines = null;
 let recordPath = null;
 // The id names a file this script reads and deletes, so it must be one.
 const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-if (init && typeof init.cwd === "string" && SESSION_ID_RE.test(init.session_id ?? "")) {
-  recordPath = join(homedir(), ".claude", "projects", encodeCwd(init.cwd), `${init.session_id}.jsonl`);
+// A run that sends no message has no `init`; a chosen id still names its record.
+const recordId = init?.session_id ?? chosenId;
+const recordCwd = typeof init?.cwd === "string" ? init.cwd : cwd;
+if (SESSION_ID_RE.test(recordId ?? "")) {
+  recordPath = join(homedir(), ".claude", "projects", encodeCwd(recordCwd), `${recordId}.jsonl`);
   if (existsSync(recordPath)) recordLines = readFileSync(recordPath, "utf8");
 }
 
@@ -405,6 +434,9 @@ writeFileSync(
       scratch_config_dir: trust,
       cwd_was_scratch_git_repo: givenCwd === undefined,
       session_id: init?.session_id ?? null,
+      ...(originalBefore && {
+        fork_original: { session_id: resume, cut_to_lines: cutOriginal === undefined ? null : Number(cutOriginal), before: originalBefore, after: recordState(originalPath) },
+      }),
       session_record: recordLines === null ? null : `record/${stem}.jsonl`,
       session_record_verbatim_entries: [...READ_ENTRIES],
       exit_code: exit.code,
