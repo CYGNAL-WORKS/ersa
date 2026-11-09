@@ -850,7 +850,7 @@ const entries: Entry[] = [
       ["Archive refused", <SessionsPage {...sessionsPage} archiving={{ r2: { state: "failed", message: "session.set_archived: the session is being deleted" } }} />],
       ["Loading", <SessionsPage {...sessionsPage} sessions={{ state: "loading" }} />],
       ["Could not be read", <SessionsPage {...sessionsPage} sessions={{ state: "error", message: "session.list: the database is locked" }} />],
-      ["While Ersa can't reach Core", <SessionsPage {...sessionsPage} sessions={{ state: "unavailable" }} newSessionDisabled offline />],
+      ["While Ersa can't reach Core", <SessionsPage {...sessionsPage} sessions={{ state: "unavailable" }} offline />],
       ["No active sessions", <SessionsPage {...sessionsPage} sessions={{ state: "ready", sessions: [] }} />],
       ["No archived sessions", <SessionsPage {...sessionsPage} sessions={{ state: "ready", sessions: [] }} initialTab="archived" />],
     ],

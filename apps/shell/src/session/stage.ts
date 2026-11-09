@@ -1,5 +1,5 @@
-// What the stage shows and how it changes: the active session's transcript, or the new-session screen while the user
-// has chosen New session or has no session (LAY-SHELL, FLOW-NEW-SESSION). Kept free of React so the tests drive each
+// What the stage shows and how it changes: the active session's transcript, the new-session screen while the user
+// has chosen New session or has no session (LAY-SHELL, FLOW-NEW-SESSION), or the sessions page over either. Kept free of React so the tests drive each
 // transition; the window holds it with `useReducer`.
 
 import type { Attached } from "./attachments";
