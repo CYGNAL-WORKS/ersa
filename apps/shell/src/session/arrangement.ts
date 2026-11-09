@@ -27,6 +27,9 @@ export interface RailArrangement {
   collapsed: Partial<Record<GroupBy, readonly string[]>>;
 }
 
+/** The choices the arrange menu names: the arrangement but for what is collapsed. */
+export type ArrangeChoices = Pick<RailArrangement, "groupBy" | "sortBy" | "show">;
+
 /** What Reset to defaults returns to (R14), and what settings that hold nothing of the rail read as. */
 export const DEFAULT_ARRANGEMENT: RailArrangement = { groupBy: "project", sortBy: "created", show: "active", collapsed: {} };
 
