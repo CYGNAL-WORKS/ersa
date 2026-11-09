@@ -155,6 +155,8 @@ pub struct FakeAdapter {
     /// How the fake says every session's conversation ends; `None` is a
     /// backend that cannot fork.
     pub conversation_end: Arc<Mutex<Option<ConversationEnd>>>,
+    /// Reading how a conversation ends fails, as an unreadable record does.
+    pub conversation_end_fails: Arc<std::sync::atomic::AtomicBool>,
     /// A backend that takes a stop and never exits.
     stop_hangs: bool,
 }
@@ -172,6 +174,7 @@ impl FakeAdapter {
             open_check_gate: Arc::default(),
             delete_refusal: Arc::default(),
             conversation_end: Arc::new(Mutex::new(Some(ConversationEnd::Finished))),
+            conversation_end_fails: Arc::default(),
             stop_hangs: false,
         }
     }
@@ -375,6 +378,9 @@ impl Adapter for FakeAdapter {
         _cwd: &str,
         _backend_session_id: &str,
     ) -> Result<Option<ConversationEnd>, AdapterError> {
+        if self.conversation_end_fails.load(Ordering::SeqCst) {
+            return Err(AdapterError::Protocol("the record is unreadable".into()));
+        }
         Ok(*self.conversation_end.lock().unwrap())
     }
 

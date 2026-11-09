@@ -67,7 +67,7 @@ use crate::raw_log::RawLog;
 mod fork;
 mod send;
 
-pub use fork::Beginning;
+pub use fork::{Beginning, Forkable};
 pub use send::Pacer;
 
 /// How many events may wait for one subscriber before it counts as unable
@@ -215,6 +215,10 @@ fn busy(workspace_id: &str) -> SessionError {
 
 /// One session, live or not.
 struct Handle {
+    /// Raised while a fork of this session reads its record: at most one
+    /// such read is ever stuck on a disk that hangs, however often the user
+    /// tries again.
+    forking: Arc<AtomicBool>,
     id: String,
     backend: String,
     /// The session's row as last written.
@@ -563,6 +567,7 @@ impl Handle {
     /// record says.
     fn new(row: SessionRow, created_at: String) -> Self {
         Handle {
+            forking: Arc::default(),
             id: row.id.clone(),
             backend: row.backend.clone(),
             row: Mutex::new(row),
@@ -1837,9 +1842,6 @@ fn is_rfc3339(text: &str) -> bool {
 ///
 /// Notices are not part of the record, so one reaches the clients reading
 /// the session now; with none reading, there is nobody to tell.
-/// Asks `adapter` whether another process has session `backend_id` open,
-/// for at most [`OPEN_ELSEWHERE_CHECK`]: a check that panics or hangs could
-/// not tell, so its answer is unknown.
 /// The processes a registry named, as a message says them: `pid 7`, or
 /// `pids 7, 9`.
 pub(crate) fn pids_named(pids: &[u32]) -> String {
@@ -1850,6 +1852,9 @@ pub(crate) fn pids_named(pids: &[u32]) -> String {
     }
 }
 
+/// Asks `adapter` whether another process has session `backend_id` open,
+/// for at most [`OPEN_ELSEWHERE_CHECK`]: a check that panics or hangs could
+/// not tell, so its answer is unknown.
 async fn ask_open_elsewhere(
     adapter: Arc<dyn Adapter>,
     transport: Arc<dyn Transport>,
