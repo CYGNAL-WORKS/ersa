@@ -3,6 +3,41 @@ import { type StageAction, type StageState, initialStage, showsScreen, stage } f
 
 const run = (actions: StageAction[], from: StageState = initialStage) => actions.reduce(stage, from);
 
+describe("the sessions page on the stage", () => {
+  const onPage = run([{ type: "showNewest", id: "s1" }, { type: "allSessions" }]);
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R20
+  it("shows over the active session, which stays active", () => {
+    expect(onPage.sessionsPage).toBe(true);
+    expect(onPage.activeId).toBe("s1");
+    expect(onPage.composing).toBeUndefined();
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R18
+  it("gives way when a session is chosen, which becomes the active one", () => {
+    const chosen = stage(onPage, { type: "select", id: "s2" });
+    expect(chosen.sessionsPage).toBe(false);
+    expect(chosen.activeId).toBe("s2");
+  });
+
+  it("gives way to New session", () => {
+    const composing = stage(onPage, { type: "newSession" });
+    expect(composing.sessionsPage).toBe(false);
+    expect(composing.composing).toBeDefined();
+  });
+
+  it("stays when the active session is archived or deleted from it, with the new-session screen behind it", () => {
+    const left = stage(onPage, { type: "activeLeft" });
+    expect(left.sessionsPage).toBe(true);
+    expect(left.composing).toBeDefined();
+  });
+
+  it("waits for a start under way, which finishes on the screen it began on", () => {
+    const sending = run([{ type: "newSession", projectId: "p1" }, { type: "sending" }]);
+    expect(stage(sending, { type: "allSessions" }).sessionsPage).toBeFalsy();
+  });
+});
+
 describe("the stage", () => {
   // verifies: FLOW-NEW-SESSION-R01
   it("draws the screen afresh on each New session, so its composer takes focus each time", () => {

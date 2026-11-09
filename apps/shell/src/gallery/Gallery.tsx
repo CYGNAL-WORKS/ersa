@@ -20,12 +20,13 @@ import { QuitQuestion } from "../components/QuitQuestion";
 import { RailFoot } from "../components/RailFoot";
 import { Menu, type MenuEntry } from "../components/Menu";
 import { RailTop } from "../components/RailTop";
+import { SessionsPage } from "../components/SessionsPage";
 import { PINNED_KEY, RailTree } from "../components/RailTree";
 import { SessionControls } from "../components/SessionControls";
 import { Shelf } from "../components/Shelf";
 import { SessionTitle } from "../components/SessionTitle";
 import { Transcript } from "../components/Transcript";
-import type { CoreView } from "../core/connection";
+import type { CoreView, SessionsView } from "../core/connection";
 import type { Envelope, Event } from "../protocol/agent-events.gen";
 import type { CoreHelloResult, Project, Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
 import type { Answer } from "../session/answers";
@@ -216,8 +217,34 @@ const archivedPair: Parameters<typeof RailTree>[0] = {
   show: "all",
 };
 
-/** The tree grouped by date, on 7 November 2026: ersa's and runner's sessions, made across the last fortnight. */
 const galleryNow = new Date(2026, 10, 7, 15);
+
+/** The sessions page's rows, on 7 November 2026: each kind of mark, a remote host's, and every kind of time. */
+const minutesBefore = (minutes: number) => new Date(galleryNow.getTime() - minutes * 60_000).toISOString();
+const pageSessions: Session[] = [
+  session("r1", "Fix the flaky reconnect test", "2026-11-01T09:00:00Z", { state: "waiting_user", pending: [{ kind: "permission", request_id: "r1" }] }),
+  session("r2", "Tidy the gallery", "2026-11-01T08:00:00Z", { state: "running", pending: [] }),
+  session("r3", "A title long enough that the row has to cut it with an ellipsis before it reaches the project and the time", "2026-11-01T07:00:00Z", { state: "idle", pending: [] }),
+  { ...session("r4", "Port the runner", "2026-11-01T06:00:00Z", { state: "error", pending: [] }), workspace_id: "w-dev", host_id: "devbox" },
+  session("r5", "Write the release notes", "2026-11-01T05:00:00Z", { state: "ended", pending: [] }),
+].map((s, i) => ({ ...s, last_activity_at: minutesBefore([0, 5, 180, 60 * 24, 60 * 24 * 6][i] ?? 0) }));
+const sessionsPage: Parameters<typeof SessionsPage>[0] = {
+  sessions: { state: "ready", sessions: pageSessions },
+  projects: treeProjects,
+  workspaces: treeWorkspaces,
+  localHost: "local",
+  hostNames: { local: "WORKSTATION", devbox: "devbox" },
+  now: galleryNow,
+  onOpen: () => {},
+  onNewSession: () => {},
+  onRename: async () => true,
+  onPin: () => {},
+  onArchive: () => {},
+  onDelete: () => {},
+};
+const pageArchived: SessionsView = { state: "ready", sessions: pageSessions.map((s) => ({ ...s, archived: true })) };
+
+/** The tree grouped by date, on 7 November 2026: ersa's and runner's sessions, made across the last fortnight. */
 const daysAgo = (days: number, hour: number) => new Date(2026, 10, 7 - days, hour).toISOString();
 const datedTree: Parameters<typeof RailTree>[0] = {
   ...tree,
@@ -230,7 +257,7 @@ const datedTree: Parameters<typeof RailTree>[0] = {
 };
 
 /** The rail's top row as the window draws it, with the arrange button beside New session. */
-const arrange = { arrangement: { groupBy: "project", show: "active" }, onGroupBy: () => {}, onShow: () => {}, onReset: () => {} } as const;
+const arrange = { arrangement: { groupBy: "project", show: "active" }, onGroupBy: () => {}, onShow: () => {}, onReset: () => {}, onAllSessions: () => {} } as const;
 
 /** One project, for the states of a heading and its tiles. */
 const ersaOnly: Parameters<typeof RailTree>[0] = {
@@ -806,6 +833,26 @@ const entries: Entry[] = [
           renaming={{ p2: { state: "failed", message: "Claude Code has no record of this session any more." } }}
         />,
       ],
+    ],
+  },
+  {
+    name: "SessionsPage",
+    wide: true,
+    states: [
+      ["Active", <SessionsPage {...sessionsPage} />],
+      ["Archived", <SessionsPage {...sessionsPage} sessions={pageArchived} initialTab="archived" />],
+      ["Pointer over a row", <SessionsPage {...sessionsPage} force={{ id: "r2", state: "hover" }} />],
+      ["Keyboard focus on a row", <SessionsPage {...sessionsPage} force={{ id: "r2", state: "focus" }} />],
+      ["Search open", <SessionsPage {...sessionsPage} initialSearch="tidy" />],
+      ["A search that matches nothing", <SessionsPage {...sessionsPage} initialSearch="nothing like it" />],
+      ["A row's menu, open", room(<SessionsPage {...sessionsPage} initialTileMenu="r2" />)],
+      ["Renaming on a row", <SessionsPage {...sessionsPage} initialTileDraft={{ id: "r2", draft: "Tidy the gallery, renamed" }} />],
+      ["Archive refused", <SessionsPage {...sessionsPage} archiving={{ r2: { state: "failed", message: "session.set_archived: the session is being deleted" } }} />],
+      ["Loading", <SessionsPage {...sessionsPage} sessions={{ state: "loading" }} />],
+      ["Could not be read", <SessionsPage {...sessionsPage} sessions={{ state: "error", message: "session.list: the database is locked" }} />],
+      ["While Ersa can't reach Core", <SessionsPage {...sessionsPage} sessions={{ state: "unavailable" }} newSessionDisabled offline />],
+      ["No active sessions", <SessionsPage {...sessionsPage} sessions={{ state: "ready", sessions: [] }} />],
+      ["No archived sessions", <SessionsPage {...sessionsPage} sessions={{ state: "ready", sessions: [] }} initialTab="archived" />],
     ],
   },
   {
