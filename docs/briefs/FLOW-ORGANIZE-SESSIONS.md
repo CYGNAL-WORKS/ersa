@@ -51,8 +51,8 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 - **FLOW-ORGANIZE-SESSIONS-R06**: Ersa shall refuse a section name that is blank, longer than 80 characters, or that another section already has, ignoring case.
 - **FLOW-ORGANIZE-SESSIONS-R07**: When grouping by date, Ersa shall put each session in Today, Yesterday, Previous 7 days or Older by the local date it was created.
 - **FLOW-ORGANIZE-SESSIONS-R08**: When grouping by project, Ersa shall group as `LAY-SHELL` (The rail) gives; when grouping by none, Ersa shall show one list with no headings after the Pinned group.
-- **FLOW-ORGANIZE-SESSIONS-R09**: Ersa shall sort the tiles within each group by the chosen sort: date created newest first; last activity newest first, taking a session's creation for its last activity until it has one; or name in the user's locale order, with untitled sessions last; ties fall back to date created, newest first.
-- **FLOW-ORGANIZE-SESSIONS-R10**: When sorting by last activity, Ersa shall move a tile only when Core reports a new last activity for its session, which Core sets when a turn ends.
+- **FLOW-ORGANIZE-SESSIONS-R09**: Ersa shall sort the tiles within each group by the chosen sort: date created newest first; last activity newest first, taking a session's creation for its last activity until it has one; or name in the user's locale order, with untitled sessions last; ties fall back to date created, newest first. The order holds whenever what it sorts by changes, so a tile moves when its name changes while sorting by name, whether the user renamed it or its backend titled it later.
+- **FLOW-ORGANIZE-SESSIONS-R10**: When sorting by last activity, Ersa shall move a tile only when Core reports a new last activity for its session, which Core sets when a turn ends, or a corrected date created for a session with no last activity yet.
 - **FLOW-ORGANIZE-SESSIONS-R11**: When showing Active, Ersa shall leave archived sessions out of the rail; showing Archived, only archived sessions; showing All, both, each archived tile marked as archived.
 - **FLOW-ORGANIZE-SESSIONS-R12**: When the user collapses or expands a group, Ersa shall keep that for the grouping in use, so the same group in another grouping is unaffected.
 - **FLOW-ORGANIZE-SESSIONS-R13**: Pins, sections and their membership, the grouping, the sort, the filter and the collapsed groups shall survive a restart of Ersa and of Core.
@@ -77,6 +77,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 
 ## Changes
 
+- 2026-11-08: from #205 inbox: the order follows a name that changes while sorting by name (R09), and Core correcting the date created of a session with no activity yet can move its tile (R09 and R10 reworded, their IDs unchanged).
 - 2026-11-08: from #267 inbox: the date groups' bounds: Previous 7 days is 2 to 7 calendar days back, and a session created in the future is in Today. No requirement IDs changed.
 - 2026-11-07: from #255 inbox: a section's name follows a title's rules for spacing and control characters (PROTO-CORE-API-R60, R61). No requirement IDs changed.
 - 2026-11-07: owner's decision: Rename is available on every session, a starting one included (PROTO-CORE-API-R51). No requirement IDs changed.
