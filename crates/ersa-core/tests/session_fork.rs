@@ -594,7 +594,7 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
         .result("session.subscribe", json!({ "id": fork_id, "from_seq": 0 }))
         .await;
     let events = client.events_until("session.ended").await;
-    // verifies: FLOW-FORK-SESSION-R07
+    // verifies: FLOW-FORK-SESSION-R08
     // Its name was the backend's, which keeps nothing of it yet.
     assert_eq!(row(&mut client, &fork_id).await["title"], Value::Null);
     let shown: Vec<&Value> = events
@@ -611,7 +611,7 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
 }
 
 /// A fork whose first message never came, its original since deleted.
-// verifies: FLOW-FORK-SESSION-R07
+// verifies: FLOW-FORK-SESSION-R08
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_with_a_record_of_its_own_shows_its_title_and_date() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -877,7 +877,7 @@ async fn the_original_cannot_be_deleted_until_its_forks_backend_is_ready() {
     );
 }
 
-// verifies: FLOW-FORK-SESSION-R07
+// verifies: FLOW-FORK-SESSION-R08
 #[tokio::test(flavor = "multi_thread")]
 async fn a_long_title_is_shortened_to_fit_with_its_mark() {
     let fake = Arc::new(FakeAdapter::with_chosen_ids());
@@ -898,7 +898,7 @@ async fn a_long_title_is_shortened_to_fit_with_its_mark() {
     assert_eq!(fake.stats.rename_titles.lock().unwrap()[1], got);
 }
 
-// verifies: FLOW-FORK-SESSION-R07
+// verifies: FLOW-FORK-SESSION-R08
 #[tokio::test(flavor = "multi_thread")]
 async fn a_refused_name_leaves_the_mark_until_the_forks_record_gives_the_copied_title() {
     let fake = Arc::new(FakeAdapter::with_chosen_ids());
@@ -942,7 +942,7 @@ async fn a_refused_name_leaves_the_mark_until_the_forks_record_gives_the_copied_
     }
 }
 
-// verifies: FLOW-FORK-SESSION-R07
+// verifies: FLOW-FORK-SESSION-R08
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_of_an_untitled_session_has_no_title() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -955,7 +955,7 @@ async fn a_fork_of_an_untitled_session_has_no_title() {
     assert_eq!(fork["title"], Value::Null);
 }
 
-// verifies: FLOW-FORK-SESSION-R07
+// verifies: FLOW-FORK-SESSION-R08
 #[tokio::test(flavor = "multi_thread")]
 async fn an_untitled_originals_later_title_is_not_its_forks() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -977,7 +977,7 @@ async fn an_untitled_originals_later_title_is_not_its_forks() {
     assert_eq!(row(&mut client, &fork_id).await["title"], Value::Null);
 }
 
-// verifies: FLOW-FORK-SESSION-R07
+// verifies: FLOW-FORK-SESSION-R08
 #[tokio::test(flavor = "multi_thread")]
 async fn a_rename_while_a_fork_starts_comes_after_the_name_core_gives_it() {
     let fake = Arc::new(FakeAdapter::with_chosen_ids());
