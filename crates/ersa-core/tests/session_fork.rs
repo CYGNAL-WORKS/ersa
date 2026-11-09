@@ -635,6 +635,11 @@ async fn a_fork_before_its_first_message_is_told_so_when_forked() {
         )
         .await;
     client.events_until("session.started").await;
+    // The fake reports itself running once started; a real CLI waits idle.
+    client
+        .result("session.send", json!({ "id": fork["id"], "text": "idle" }))
+        .await;
+    wait_for_state(&mut client, fork["id"].as_str().unwrap(), "idle").await;
     *fake.conversation_end.lock().unwrap() = Some(ConversationEnd::NoReply);
     let message = refused(&mut client, fork["id"].as_str().unwrap()).await;
     assert!(message.contains("no message of its own"), "{message}");
