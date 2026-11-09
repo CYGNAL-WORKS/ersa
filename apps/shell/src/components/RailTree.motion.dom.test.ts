@@ -4,6 +4,8 @@
 // room. A design rule, so no requirement IDs. jsdom runs no CSS animation: these check what the stylesheet animates
 // (the marks) and what the rail asks the page to animate (the slides); the gallery checks the stylesheet itself.
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, cleanup, render } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -318,15 +320,16 @@ describe("a new session's tile", () => {
       expect(slid.find((s) => s.slide === "session:b")?.keyframes).toEqual([{ transform: "translateY(-10px)" }, { transform: "none" }]);
     });
 
-    it("slides a project's heading with its More menu open by transform, as it has no offset to slide by", () => {
+    it("slides a project's heading with its More menu open by its offset, so the menu stays on its anchor", () => {
       const second: Project = { ...project, id: "q", path: "D:/q", name: "q" };
       const more: Partial<Parameters<typeof RailTree>[0]> = { projects: { state: "ready", projects: [project, second] }, workspaces: { w: { project_id: "p" }, x: { project_id: "q" } }, initialMenu: "q", onSetTrust: () => {} };
       const below = session("c", "Below", "2026-11-06T07:00:00Z", undefined, "x");
       const { container, rerender } = render(rail([newer, below], undefined, more));
       expect(container.querySelector("[data-open] .menu")).not.toBeNull();
       rerender(rail([older, newer, below], undefined, more));
-      expect(slid.find((s) => s.keyframes.some((k) => "top" in k))).toBeUndefined();
-      expect(slid.filter((s) => s.slide?.includes("q")).map((s) => s.keyframes)).toEqual([[{ transform: "translateY(-10px)" }, { transform: "none" }]]);
+      expect(slid.filter((s) => s.slide?.includes("q")).map((s) => s.keyframes)).toEqual([[{ top: "-10px" }, { top: "0" }]]);
+      // `top` moves only what is positioned.
+      expect(readFileSync(join(import.meta.dirname, "RailTree.css"), "utf8")).toMatch(/\.rail-heading:has\(\.menu\) \{\s*position: relative;/);
     });
 
     it("slides untitled tiles when a corrected date created swaps their tie under Name", () => {
