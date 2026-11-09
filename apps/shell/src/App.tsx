@@ -893,6 +893,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             <NewSessionScreen
               // Drawn afresh on each New session, so its composer takes focus (FLOW-NEW-SESSION-R01).
               key={composing?.key ?? 0}
+              covered={sessionsPage}
               hosts={[hello.host]}
               localHostId={hello.host.id}
               projects={screenProjects}

@@ -46,6 +46,8 @@ interface NewSessionScreenProps {
   onRead?: (paths: readonly string[], workspace: string | undefined) => Promise<Attached[]>;
   /** Hears drags from the file manager over the window, for the composer's box (FLOW-SEND-MESSAGE-R08). */
   dragDrop?: ShellControl["onDragDrop"];
+  /** The sessions page stands over the screen, which stays as it is behind it. */
+  covered?: boolean;
   /** Each project's root workspace, by project id: the workspace a session in the project folder runs in. */
   rootWorkspaces?: Readonly<Record<string, string>>;
   starting?: Sending;
@@ -211,8 +213,9 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
 
   // Ctrl+O chooses Add project from anywhere on the screen (FLOW-NEW-SESSION-R27). The listener is added once and
   // calls the latest `addProject` through a ref.
-  const shortcut = useRef(addProject);
-  shortcut.current = addProject;
+  const shortcut = useRef<() => unknown>(addProject);
+  // Behind the sessions page the screen is out of reach, and its question could not be seen or answered.
+  shortcut.current = props.covered ? () => {} : addProject;
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.ctrlKey && !event.altKey && !event.shiftKey && !event.metaKey && event.key.toLowerCase() === "o") {
