@@ -173,7 +173,7 @@ Either side may send `{"type":"control_cancel_request","request_id":"..."}` to w
 
 ### Other control requests the adapter uses
 
-`interrupt`, `set_permission_mode`, `set_model`, `get_context_usage`, `get_session_cost`, and `mcp_message` (for `sdkMcpServers`). Shapes per the SDK types; fixtures to be recorded as each is implemented. `set_model` takes a model's `value` and answers the resolved id, and `set_permission_mode` takes `mode` and is followed at once by a `system/status` line carrying `permissionMode`; the next `system/init` reports both (`stream-controls-2026-11-09.txt`). `apply_flag_settings` with `effortLevel` changes the effort from the next turn, which the record's next `assistant` entry shows (`record-reports-2026-11-09.txt`). Before the first turn the `initialize` response's `current_permission_mode` says the mode.
+`interrupt`, `set_permission_mode`, `set_model`, `get_context_usage`, `get_session_cost`, and `mcp_message` (for `sdkMcpServers`). Shapes per the SDK types; fixtures to be recorded as each is implemented. `set_model` takes a model's `value` and answers the resolved id, and `set_permission_mode` takes `mode` and is followed at once by a `system/status` line carrying `permissionMode`; the next `system/init` reports both (`stream-controls-2026-11-09.txt`). `apply_flag_settings` with `effortLevel`, sent between turns, changes the effort from the next turn, which the record's next `assistant` entry shows (`record-reports-2026-11-09.txt`). Before the first turn the `initialize` response's `current_permission_mode` says the mode.
 
 ## Sequencing
 
@@ -259,7 +259,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R43**: When a user message is written to the CLI during a turn, the adapter shall project its `user.message` at the start of the turn the CLI runs for it, at that turn's `system/init`, in the order written, and shall not join it to the running turn.
 - **PROTO-CLAUDE-CODE-STREAM-R44**: While a user message written to the CLI has not started its turn, the adapter shall report the session as working, including between one turn's `result` and the next `system/init`.
 - **PROTO-CLAUDE-CODE-STREAM-R47**: When listing sessions, the adapter shall report a session's model and effort from the latest `assistant` entry in the tail it reads and its permission mode from the latest `user` entry there that carries one.
-- **PROTO-CLAUDE-CODE-STREAM-R46**: The adapter shall report how many messages a live session's CLI holds as the `enqueue` entries in its record that no `dequeue` entry has followed.
+- **PROTO-CLAUDE-CODE-STREAM-R46**: The adapter shall report how many messages a live session's CLI holds as the `enqueue` entries in its record written since that CLI process started, less the `dequeue` entries written since then, reading them when Core hands a message over during a turn and when a turn starts.
 
 ## Out of scope
 
@@ -270,14 +270,14 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 - Whether `system/session_title_changed` becomes an event of its own rather than a passthrough.
 - Exact shapes of `get_context_usage`, `get_session_cost`, and `mcp_message` responses (to be recorded).
-- Whether `set_model` and `set_permission_mode` apply when sent during a turn; recorded between turns only.
+- Whether `set_model`, `set_permission_mode` and `apply_flag_settings` apply when sent during a turn; recorded between turns only.
 - Whether `permissions.allow` already applies in the session that first attests trust: the CLI logs that it re-applies project settings after recording trust, but its stderr warning is printed before `initialize` is read, and checking needs a tool call. The opt-in live test checks the next session only.
 - What the CLI keys its trust record to for a folder outside any git repository: assumed to be the folder itself, but fixture 03-workspace-trust was recorded in a git repository.
 - Whether Ersa can read the CLI's trust record instead of keeping its own answer: `~/.claude.json` holds a `hasTrustDialogAccepted` per project, which is the CLI's internal configuration with no supported reader.
 
 ## Changes
 
-- 2026-11-09: owner's decisions from the audit against Claude Desktop and the backend rule, on what `stream-controls-2026-11-09.txt` shows: the models come from `initialize` (R39); a live session's model and permission mode come from the CLI (R40) and change through it (R41); last activity comes from the record's tail (R42); a message written during a turn waits in the CLI and opens its own turn (R43, R44). The open question on a note when trust is revoked is closed by FLOW-NEW-SESSION-R31.
+- 2026-11-09: owner's decisions from the audit against Claude Desktop and the backend rule, on what `stream-controls-2026-11-09.txt` shows: the models come from `initialize` (R39); a live session's model and permission mode come from the CLI (R40) and change through it (R41); last activity comes from the record's tail (R42); a message written during a turn waits in the CLI and opens its own turn (R43, R44); the record says how many wait (R46) and what a session's model, effort and permission mode are (R47); effort changes through `apply_flag_settings` (R41). The open question on a note when trust is revoked is closed by FLOW-NEW-SESSION-R31.
 - 2026-11-08: from #266 inbox: the question fixtures 07 to 09 are committed and say how they were recorded; Questions says how an answer the rules leave open reads back, and that answers differing for questions sharing a text are refused. No requirement IDs changed.
 - 2026-11-07: from #260 inbox: a rename before the first message is now recorded (fixture 2.1.316/09-session-id-rename); `system/session_title_changed` announces only the user's name, never a generated title, and may carry a suffix that makes the name unique, and the announced name is the session's title. No requirement IDs changed.
 - 2026-11-07: from #252 inbox: Core stops its own process before deleting a session, since the registry can't tell it apart, so the record is deleted only when no process has it open: PROTO-CLAUDE-CODE-STREAM-R32 retired for R37. The registry's answer names every process that has the session open, for `session.fork`'s count.
