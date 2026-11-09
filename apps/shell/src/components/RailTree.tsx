@@ -199,11 +199,12 @@ export function RailTree(props: RailTreeProps) {
     target?.focus();
   });
   const { groupBy = "project", sortBy = "created", show = "active", now = new Date() } = props;
-  // A new grouping, sort or filter: where every tile and heading sat before it, taken while the page still shows the
-  // old one (this render has not reached it yet), so each slides to its new place once it has
-  // (FLOW-ORGANIZE-SESSIONS, step 4). So too when what the sort reads of a session changes between two listings, as a
-  // turn's end does while sorted by last activity (DESIGN.md, Motion); a tile's state is no part of it (R10).
-  const arranged = `${groupBy}/${sortBy}/${show}`;
+  // A new grouping or filter: where every tile and heading sat before it, taken while the page still shows the old
+  // one (this render has not reached it yet), so each slides to its new place once it has (FLOW-ORGANIZE-SESSIONS,
+  // step 4). So too when what the sort reads of a session differs from the listing before, as it does when the user
+  // chooses another sort or a turn ends while sorted by last activity (DESIGN.md, Motion); a tile's state is no part
+  // of it (R10).
+  const arranged = `${groupBy}/${show}`;
   const lastArranged = useRef(arranged);
   const sortValues = sessions.state === "ready" ? new Map(sessions.sessions.map((s) => [s.id, sortValueOf(s, sortBy)])) : undefined;
   const lastSortValues = useRef(sortValues);

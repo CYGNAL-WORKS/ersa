@@ -193,10 +193,10 @@ describe("the tiles' order within a group", () => {
   it("sorts by last activity, newest first, taking a session's creation until it has one", () => {
     const sessions = [
       made("worked", 8, { last_activity_at: "2026-11-01T14:00:00.000Z" }),
-      made("fresh", 12),
+      made("fresh", 13, { created_at: "2026-11-01T13:45:00.000Z" }),
       made("stale", 13, { last_activity_at: "2026-11-01T13:30:00.000Z" }),
     ];
-    expect(ids(arranged(sessions, "last_activity").loose)).toEqual(["worked", "stale", "fresh"]);
+    expect(ids(arranged(sessions, "last_activity").loose)).toEqual(["worked", "fresh", "stale"]);
   });
 
   // verifies: FLOW-ORGANIZE-SESSIONS-R09
