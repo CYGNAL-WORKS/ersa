@@ -38,6 +38,7 @@
   --size-measure: 720px;
   --size-menu: 360px;
   --size-list-max: 224px;
+  --size-row-title-min: 120px;
   --size-bubble-max: 80%;
   --size-attachment-image: 224px;
   --size-card-max: 224px;
@@ -53,7 +54,6 @@
   --size-icon-xs: 12px;
   --size-shelf: 320px;
   --size-dialog: 360px;
-  --size-row-title-min: 120px;
   --stack-menu: 10;
   --stack-shelf: 20;
   --stack-dialog: 30;
