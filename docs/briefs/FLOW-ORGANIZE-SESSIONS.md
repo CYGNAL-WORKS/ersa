@@ -57,7 +57,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 - **FLOW-ORGANIZE-SESSIONS-R12**: When the user collapses or expands a group, Ersa shall keep that for the grouping in use, so the same group in another grouping is unaffected.
 - **FLOW-ORGANIZE-SESSIONS-R13**: Pins, sections and their membership, the grouping, the sort, the filter and the collapsed groups shall survive a restart of Ersa and of Core.
 - **FLOW-ORGANIZE-SESSIONS-R14**: When the user chooses Reset to defaults, Ersa shall group by project, sort by date created, show active sessions and expand every group, and shall keep pins and sections.
-- **FLOW-ORGANIZE-SESSIONS-R16**: When the user chooses All sessions, Ersa shall show the sessions page in the transcript area, listing every session that is archived or not according to its tab (Active first), whatever the rail's grouping, filter and collapsed groups, newest first by last activity, taking a session's creation for its last activity until it has one.
+- **FLOW-ORGANIZE-SESSIONS-R16**: When the user chooses All sessions, Ersa shall show the sessions page in the transcript area, listing every session that is archived or not according to its tab (Active first), whatever the rail's grouping, filter and collapsed groups, newest first by last activity, taking a session's creation for its last activity until it has one. While a first message is on its way, choosing All sessions shall do nothing, since a start finishes on the screen it began on (FLOW-NEW-SESSION-R08).
 - **FLOW-ORGANIZE-SESSIONS-R17**: While the user types in the sessions page's search field, Ersa shall list only the sessions whose title contains the text, ignoring case.
 - **FLOW-ORGANIZE-SESSIONS-R18**: When the user chooses a session on the sessions page, Ersa shall make it the active session and show its transcript in place of the page.
 - **FLOW-ORGANIZE-SESSIONS-R19**: While the sessions are being read, or when they cannot be read, the sessions page shall say so, with the reason when they cannot be read, and shall not say there are no sessions.
@@ -78,6 +78,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 ## Changes
 
 - 2026-11-08: from #205 inbox: the order follows a name that changes while sorting by name (R09), and Core correcting the date created of a session with no activity yet can move its tile (R09 and R10 reworded, their IDs unchanged).
+- 2026-11-08: from #208 inbox: All sessions does nothing while a first message is on its way (R16 reworded, its ID unchanged).
 - 2026-11-08: from #267 inbox: the date groups' bounds: Previous 7 days is 2 to 7 calendar days back, and a session created in the future is in Today. No requirement IDs changed.
 - 2026-11-07: from #255 inbox: a section's name follows a title's rules for spacing and control characters (PROTO-CORE-API-R60, R61). No requirement IDs changed.
 - 2026-11-07: owner's decision: Rename is available on every session, a starting one included (PROTO-CORE-API-R51). No requirement IDs changed.

@@ -127,12 +127,16 @@ const DAY = 24 * 60 * 60 * 1000;
  */
 export function dateGroupOf(createdAt: string, now: Date): DateKey {
   const created = new Date(createdAt);
-  // Calendar days apart in local time; rounded, since a day across a daylight-saving change is 23 or 25 hours.
-  const days = Math.round((localMidnight(now) - localMidnight(created)) / DAY);
+  const days = calendarDaysApart(now, created);
   if (Number.isNaN(days)) return "older";
   if (days <= 0) return "today";
   if (days === 1) return "yesterday";
   return days <= 7 ? "previous_7_days" : "older";
+}
+
+/** Calendar days from `earlier` to `later` in local time; rounded, since a day across a daylight-saving change is 23 or 25 hours. */
+export function calendarDaysApart(later: Date, earlier: Date): number {
+  return Math.round((localMidnight(later) - localMidnight(earlier)) / DAY);
 }
 
 function localMidnight(at: Date): number {

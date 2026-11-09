@@ -1,9 +1,8 @@
-import { type CSSProperties, type FocusEvent, type ReactNode, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, Ellipsis, Pin, Plus, ShieldAlert } from "lucide-react";
 import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
-import { deleteUnavailable } from "../session/deletion";
 import type { Sending } from "../session/follow";
 import { type ArrangeProblem, DEFAULT_ARRANGEMENT, type GroupBy, type Show, type SortBy } from "../session/arrangement";
 import { type Collapsed, type DateKey, collapsedOf, sortValueOf, treeOf } from "../session/tree";
@@ -11,11 +10,13 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { type Place, arrive, placesOf, regroup, slideFrom } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
-import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileArchive, type TileDelete, type TilePin, type TileRename } from "./SessionTile";
+import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem } from "./SessionTile";
+import { type TileActions, type TileHandlers, tileActions } from "./TileMenu";
+import { useLeavingFocus } from "./useLeavingFocus";
 import { TrustQuestion } from "./TrustQuestion";
 import "./RailTree.css";
 
-interface RailTreeProps {
+interface RailTreeProps extends TileHandlers {
   projects: ProjectsView;
   sessions: SessionsView;
   /** Every known workspace, by id: a session sits under its workspace's project. */
@@ -62,24 +63,6 @@ interface RailTreeProps {
   onToggle?: (key: string) => void;
   /** The arrangement could not be read, so the rail shows the defaults, or a change to it could not be saved, so it was undone (R15). */
   arrangeProblem?: ArrangeProblem;
-  /** Pins or unpins a session from its tile (FLOW-ORGANIZE-SESSIONS-R01). */
-  onPin?: (id: string, pinned: boolean) => void;
-  /** Pins and unpins on their way, and why the last was refused, by session id (R15). */
-  pinning?: Readonly<Record<string, Sending>>;
-  /** Renames a session through its backend from its tile; resolves true once Core has (FLOW-ORGANIZE-SESSIONS-R02). */
-  onRename?: (id: string, title: string) => Promise<boolean>;
-  /** Renames on their way, and why the last was refused, by session id. */
-  renaming?: Readonly<Record<string, Sending>>;
-  /** Editing a tile's title starts or ends: its earlier refusal goes. */
-  onRenameReset?: (id: string) => void;
-  /** Asks before deleting a session (FLOW-ARCHIVE-DELETE-SESSION, step 4). */
-  onDelete?: (id: string) => void;
-  /** Archives a session from its tile, or unarchives an archived one (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3). */
-  onArchive?: (id: string, archived: boolean) => void;
-  /** Archives and unarchives on their way, and why the last was refused, by session id. */
-  archiving?: Readonly<Record<string, Sending>>;
-  /** Ersa can't reach Core, so nothing can be renamed, archived or deleted now. */
-  offline?: boolean;
   /** For the gallery: a pointer or keyboard state on one tile or one heading, the menu open, the trust question asked. */
   force?: ForcedTile;
   forceHeading?: { id: string; state: "hover" | "focus" | "pressed" };
@@ -102,22 +85,12 @@ const headingSlide = (key: string) => `heading:${key}`;
  */
 export function RailTree(props: RailTreeProps) {
   const { projects, sessions, workspaces, placing, reading, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
-  const { onRename, renaming, onRenameReset, onArchive, archiving, onDelete, offline, onPin, pinning, initialTileMenu, initialTileDraft, arrangeProblem } = props;
-  // Rename on a tile: unavailable only while Ersa can't reach Core. A session its backend has not named yet, such as one
-  // still starting, is refused by Core, and the field says why.
-  const renameOf = (s: Session): TileRename | undefined =>
-    onRename && {
-      onSave: (title) => onRename(s.id, title),
-      renaming: renaming?.[s.id],
-      onReset: () => onRenameReset?.(s.id),
-      unavailable: offline ? t("rail.tile.offlineReason") : undefined,
-    };
+  const { archiving, pinning, initialTileMenu, initialTileDraft, arrangeProblem } = props;
   const root = useRef<HTMLElement>(null);
   // The pin on its way: where every tile and heading sat when it was chosen, and whether focus was in the rail then.
   // One at a time: while it is saved, Pin and Unpin are unavailable on every tile, so each move is measured from the
   // rail as the last one left it.
   const pending = useRef<{ id: string; places: Map<string, Place>; focused: boolean }>(undefined);
-  const saving = Object.values(pinning ?? {}).some((p) => p.state === "sending");
   useLayoutEffect(() => {
     const pin = pending.current;
     const el = root.current;
@@ -157,50 +130,20 @@ export function RailTree(props: RailTreeProps) {
     for (const item of items) arriving.current.delete(item.dataset.sessionId ?? "");
     arrive(el, items);
   });
-  // Pin and Unpin: unavailable while Ersa can't reach Core, or while Core stores a pin.
-  const pinOf = (s: Session): TilePin | undefined =>
-    onPin && {
-      pinned: s.pinned,
-      onChoose: () => {
-        const el = root.current;
-        // Only a choice made with focus in the rail (in the tile's menu) has focus to give back.
-        if (el) pending.current = { id: s.id, places: placesOf(el), focused: el.contains(document.activeElement) };
-        onPin(s.id, !s.pinned);
-      },
-      unavailable: offline ? t("rail.tile.offlineReason") : saving ? t("rail.tile.savingProgress") : undefined,
+  // Pin and Unpin first measure the rail, so each tile slides from where it sat once Core has the pin.
+  const actionsOf = (s: Session): TileActions => {
+    const actions = tileActions(s, props);
+    const { pin } = actions;
+    if (!pin) return actions;
+    const onChoose = () => {
+      const el = root.current;
+      // Only a choice made with focus in the rail (in the tile's menu) has focus to give back.
+      if (el) pending.current = { id: s.id, places: placesOf(el), focused: el.contains(document.activeElement) };
+      pin.onChoose();
     };
-  const archiveOf = (s: Session): TileArchive | undefined =>
-    onArchive && { onChoose: (archived) => onArchive(s.id, archived), unavailable: offline ? t("rail.tile.offlineReason") : undefined };
-  // A tile that leaves the rail while keyboard focus is in it, as one archived from its menu does, hands focus to the
-  // next tile, else the previous one, else New session (docs/design/RAIL.md, the rule after a deletion), unless the
-  // user has put focus somewhere else meanwhile. The tiles drawn last time give the order.
-  const drawn = useRef<string[]>([]);
-  const focusedTile = useRef<string | undefined>(undefined);
-  const trackFocus = (event: FocusEvent) => {
-    focusedTile.current = (event.target as Element).closest<HTMLElement>("[data-session-id]")?.dataset.sessionId;
+    return { ...actions, pin: { ...pin, onChoose } };
   };
-  useLayoutEffect(() => {
-    const section = root.current;
-    if (!section) return;
-    const items = [...section.querySelectorAll<HTMLElement>("[data-session-id]")];
-    const ids = items.map((el) => el.dataset.sessionId ?? "");
-    const before = drawn.current;
-    drawn.current = ids;
-    const gone = focusedTile.current;
-    if (gone === undefined || ids.includes(gone)) return;
-    focusedTile.current = undefined;
-    const now = document.activeElement;
-    if (now !== null && now !== document.body) return;
-    // A tile folded away can't take focus, so it is never the one beside this one.
-    const open = items.filter((el) => !foldedAway(el));
-    const openIds = open.map((el) => el.dataset.sessionId ?? "");
-    const at = before.indexOf(gone);
-    const after = before.slice(at + 1).find((id) => openIds.includes(id));
-    const earlier = before.slice(0, Math.max(at, 0)).reverse().find((id) => openIds.includes(id));
-    const to = after ?? earlier;
-    const target = to !== undefined ? open[openIds.indexOf(to)]?.querySelector<HTMLElement>(".session") : section.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session");
-    target?.focus();
-  });
+  const leaving = useLeavingFocus(root, (section) => section.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session"));
   const { groupBy = DEFAULT_ARRANGEMENT.groupBy, sortBy = DEFAULT_ARRANGEMENT.sortBy, show = DEFAULT_ARRANGEMENT.show, now = new Date() } = props;
   // A new grouping or filter: where every tile and heading sat before it, taken while the page still shows the old
   // one (this render has not reached it yet), so each slides to its new place once it has (FLOW-ORGANIZE-SESSIONS,
@@ -225,9 +168,6 @@ export function RailTree(props: RailTreeProps) {
     moves.current = undefined;
     if (move && root.current) move.slide(root.current, move.from);
   });
-  // Delete on a tile: unavailable while the session is busy, or while Ersa can't reach Core.
-  const removeOf = (s: Session): TileDelete | undefined =>
-    onDelete && { onAsk: () => onDelete(s.id), unavailable: deleteUnavailable(s, offline ?? false) };
   const listed = projects.state === "ready" ? projects.projects : [];
   const all = sessions.state === "ready" ? sessions.sessions : [];
   const tree = treeOf(listed, workspaces, all, { groupBy, sortBy, show, now });
@@ -266,8 +206,6 @@ export function RailTree(props: RailTreeProps) {
   };
   const tile = (s: Session) => {
     const open = shelf?.id === s.id ? shelf : undefined;
-    const pinFailed = pinning?.[s.id];
-    const archive = archiving?.[s.id];
     return (
       <TileItem key={s.id} id={s.id} shelf={open} onClose={onCloseShelf}>
         {(shelfDomId) => (
@@ -283,22 +221,12 @@ export function RailTree(props: RailTreeProps) {
               onSelect={onSelect}
               shelf={open && { tone: open.tone, domId: shelfDomId }}
               onChevron={onChevron}
-              rename={renameOf(s)}
-              pin={pinOf(s)}
-              archive={archiveOf(s)}
-              remove={removeOf(s)}
+              {...actionsOf(s)}
               initialMenu={initialTileMenu === s.id}
               initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
             />
-            {/* A refused archive or unarchive says why beneath the tile, which stays as it was. */}
-            {archive?.state === "failed" && (
-              <Problem lead={s.archived ? t("rail.tile.unarchiveError") : t("rail.tile.archiveError")} reason={archive.message} />
-            )}
           </ErrorBoundary>
-          {/* Core refused a pin: the tile stays where Core has it, and this says why (FLOW-ORGANIZE-SESSIONS-R15). */}
-          {pinFailed?.state === "failed" && (
-            <Problem lead={s.pinned ? t("rail.tile.unpinError") : t("rail.tile.pinError")} reason={pinFailed.message} />
-          )}
+          <Refusals session={s} pinning={pinning} archiving={archiving} />
           </>
         )}
       </TileItem>
@@ -313,13 +241,7 @@ export function RailTree(props: RailTreeProps) {
   const pinned = folded(PINNED_KEY, tree.pinned);
   const pinnedEmpty = tree.pinned.length === 0;
   return (
-    <section ref={root} className="rail-tree" aria-label={t("rail.tree.label")}
-      onFocus={trackFocus}
-      // Focus put outside the rail is the user's: a tile leaving later takes nothing back.
-      onBlur={(event) => {
-        if (event.relatedTarget !== null && !root.current?.contains(event.relatedTarget)) focusedTile.current = undefined;
-      }}
-    >
+    <section ref={root} className="rail-tree" aria-label={t("rail.tree.label")} {...leaving}>
       {projects.state === "loading" && <p className="rail-note">{t("rail.tree.loadingProgress")}</p>}
       {projects.state === "error" && <Problem lead={t("rail.tree.projectsError")} reason={projects.message} />}
       {sessions.state === "error" && <Problem lead={t("rail.tree.sessionsError")} reason={sessions.message} />}
@@ -423,12 +345,32 @@ function DateGroup({ name, slide, folded, summary, toggle, children }: { name: s
 }
 
 /** A note that something could not be read or done: what, after the danger glyph, and why beneath it. */
-function Problem({ lead, reason }: { lead: string; reason: string }) {
+export function Problem({ lead, reason }: { lead: string; reason: string }) {
   return (
     <div className="rail-note" role="alert">
       <p className="problem">{lead}</p>
       <p className="rail-note-detail rail-note-reason">{reason}</p>
     </div>
+  );
+}
+
+/** Why Core refused a session's pin, archive or unarchive, beneath its tile or row, which stays as Core has it (R15). */
+export function Refusals({
+  session,
+  pinning,
+  archiving,
+}: {
+  session: Session;
+  pinning?: Readonly<Record<string, Sending>>;
+  archiving?: Readonly<Record<string, Sending>>;
+}) {
+  const pin = pinning?.[session.id];
+  const archive = archiving?.[session.id];
+  return (
+    <>
+      {archive?.state === "failed" && <Problem lead={session.archived ? t("rail.tile.unarchiveError") : t("rail.tile.archiveError")} reason={archive.message} />}
+      {pin?.state === "failed" && <Problem lead={session.pinned ? t("rail.tile.unpinError") : t("rail.tile.pinError")} reason={pin.message} />}
+    </>
   );
 }
 
@@ -635,11 +577,6 @@ function GroupToggle({
       </button>
     </h3>
   );
-}
-
-/** Whether a tile is folded away in a collapsed group, where it takes no focus. */
-export function foldedAway(tile: Element): boolean {
-  return tile.closest(".rail-group-tiles[inert]") !== null;
 }
 
 /** A group's tiles, which slide closed and open in this frame; folded away, they take no focus and are not read. */
