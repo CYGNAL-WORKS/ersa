@@ -132,9 +132,10 @@ describe("the rail's tree", () => {
     expect(render({ ...none, show: "all" })).toContain("No sessions.</p>");
     expect(render({ ...none, groupBy: "date" })).toContain("No active sessions.</p>");
     expect(render({ ...none, groupBy: "none", show: "all" })).toContain("No sessions.</p>");
-    // Headings stand in for the note, and with no projects their own note does.
+    // Headings stand in for the note.
     expect(render(none)).not.toContain("sessions.</p>");
-    expect(render({ ...none, projects: { state: "ready", projects: [] }, show: "all" })).not.toContain("No sessions.</p>");
+    // Showing all reads as showing archived does, with no projects too.
+    expect(render({ ...none, projects: { state: "ready", projects: [] }, show: "all" })).toContain("No sessions.</p>");
     expect(render({ arrangeProblem: { kind: "read", message: "Core is away" } })).toContain("Ersa can&#x27;t read how you arranged the rail.");
     expect(render({ arrangeProblem: { kind: "save", message: "disk full" } })).toContain("disk full");
   });

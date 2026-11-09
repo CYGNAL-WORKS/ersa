@@ -227,7 +227,7 @@ export function RailTree(props: RailTreeProps) {
       ? t("rail.tree.noArchivedEmpty")
       : show === "active" && (all.length > 0 || blank)
         ? t("rail.tree.noActiveEmpty")
-        : show === "all" && blank
+        : show === "all"
           ? t("rail.tree.noSessionsEmpty")
           : undefined;
   // A new session whose workspace is being read waits too, so it slides in once, at its place. Tiles already drawn stay.
