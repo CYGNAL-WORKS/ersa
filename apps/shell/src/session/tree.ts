@@ -3,6 +3,7 @@
 // component only draws this.
 
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
+import { newestFirst, timeOf } from "./controls";
 import type { GroupBy, Show, SortBy } from "./arrangement";
 import { wantTone } from "./tile";
 
@@ -30,8 +31,7 @@ export interface Tree {
 /** How the tree is arranged: the grouping, the sort and the filter of the rail's arrangement, and today, for date groups. */
 export interface TreeArrangement {
   groupBy: GroupBy;
-  /** Date created, unless given. */
-  sortBy?: SortBy;
+  sortBy: SortBy;
   show: Show;
   /** Now, whose local date the date groups count from. */
   now: Date;
@@ -49,7 +49,7 @@ export function treeOf(
   projects: readonly Project[],
   workspaces: Readonly<Record<string, Pick<Workspace, "project_id">>>,
   sessions: readonly Session[],
-  { groupBy, sortBy = "created", show, now }: TreeArrangement = { groupBy: "project", show: "active", now: new Date() },
+  { groupBy, sortBy, show, now }: TreeArrangement = { groupBy: "project", sortBy: "created", show: "active", now: new Date() },
 ): Tree {
   const pinned: Session[] = [];
   const loose: Session[] = [];
@@ -81,9 +81,6 @@ export function treeOf(
   return { pinned, groups, loose };
 }
 
-/** A time Core sent, as a number to compare. Core may pass on a backend's time with a fraction of any length, so the text alone does not order them. */
-const time = (at: string): number => Date.parse(at) || 0;
-
 // The user's locale, as the webview reports it (R09).
 const names = new Intl.Collator();
 
@@ -98,22 +95,21 @@ function byName(a: Session, b: Session): number {
   return names.compare(a.title, b.title);
 }
 
-const ORDERS: Record<SortBy, (a: Session, b: Session) => number> = {
-  created: () => 0,
-  last_activity: (a, b) => time(lastActivityOf(b)) - time(lastActivityOf(a)),
-  name: byName,
+/** Each sort: what it reads of a session, and how it compares two; a tie keeps the order it is given (R09). */
+const SORTS: Record<SortBy, { read: (s: Session) => string | undefined; compare: (a: Session, b: Session) => number }> = {
+  created: { read: (s) => s.created_at, compare: () => 0 },
+  last_activity: { read: lastActivityOf, compare: (a, b) => timeOf(lastActivityOf(b)) - timeOf(lastActivityOf(a)) },
+  name: { read: (s) => s.title, compare: byName },
 };
 
-/** The sessions in the chosen sort, ties by date created, newest first (R09). */
+/** The sessions in the chosen sort, ties by date created, newest first (R09), since a sort keeps the order of equals. */
 function sortedBy(sessions: readonly Session[], sortBy: SortBy): Session[] {
-  const order = ORDERS[sortBy];
-  return sessions.slice().sort((a, b) => order(a, b) || time(b.created_at) - time(a.created_at));
+  return newestFirst(sessions).sort(SORTS[sortBy].compare);
 }
 
 /** What the chosen sort reads of a session: while it holds, the tile keeps its place (R10). */
 export function sortValueOf(session: Session, sortBy: SortBy): string | undefined {
-  if (sortBy === "name") return session.title;
-  return sortBy === "last_activity" ? lastActivityOf(session) : session.created_at;
+  return SORTS[sortBy].read(session);
 }
 
 /** Whether the filter shows the session (R11): showing All, an archived one too, its tile marked as archived. */

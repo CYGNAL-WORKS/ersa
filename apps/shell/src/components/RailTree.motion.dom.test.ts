@@ -285,13 +285,21 @@ describe("a new session's tile", () => {
       expect(slid).toEqual([]);
     });
 
-    it("keeps keyboard focus on a tile that moves", () => {
-      const { container, rerender } = render(sorted([older, newer], "last_activity"));
-      const tile = container.querySelector<HTMLElement>('[data-session-id="a"] .session');
+    it("keeps keyboard focus on a tile another session's move makes React put back in the page", () => {
+      const first = session("x", "First", "2026-11-06T09:00:00Z");
+      const second = session("y", "Second", "2026-11-06T08:00:00Z");
+      const third = session("z", "Third", "2026-11-06T07:00:00Z");
+      const { container, rerender } = render(sorted([first, second, third], "last_activity"));
+      const order = () => [...container.querySelectorAll<HTMLElement>("[data-session-id]")].map((el) => el.dataset.sessionId);
+      expect(order()).toEqual(["x", "y", "z"]);
+      const tile = container.querySelector<HTMLElement>('[data-session-id="x"] .session');
       tile?.focus();
-      rerender(sorted([ended, newer], "last_activity"));
+      const item = container.querySelector('[data-session-id="x"]');
+      // z comes first, so React keeps z's element where it is and moves x's and y's after it.
+      rerender(sorted([first, second, { ...third, last_activity_at: "2026-11-06T10:00:00Z" }], "last_activity"));
+      expect(order()).toEqual(["z", "x", "y"]);
+      expect(container.querySelector('[data-session-id="x"]')).toBe(item);
       expect(document.activeElement).toBe(tile);
-      expect([...container.querySelectorAll<HTMLElement>("[data-session-id]")].map((el) => el.dataset.sessionId)).toEqual(["a", "b"]);
     });
 
     it("takes the new places at once with reduced motion on", () => {
