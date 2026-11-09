@@ -9,7 +9,7 @@ import { Menu, type MenuClose, type MenuEntry, type MenuPlace } from "./Menu";
 import { useTitleDraft } from "./SessionTitle";
 
 /** Renaming a session on its tile or row (FLOW-ORGANIZE-SESSIONS, step 2). */
-export interface TileRename {
+interface TileRename {
   /** Renames the session through its backend; resolves true once Core has (FLOW-ORGANIZE-SESSIONS-R02). */
   onSave: (title: string) => Promise<boolean>;
   /** A rename on its way, or why the last was refused. */
@@ -21,7 +21,7 @@ export interface TileRename {
 }
 
 /** Delete on the menu (FLOW-ARCHIVE-DELETE-SESSION, step 4): it asks first. */
-export interface TileDelete {
+interface TileDelete {
   /** Opens the delete question. */
   onAsk: () => void;
   /** Why Delete can't be used now; given, the menu shows it unavailable with this reason. */
@@ -29,7 +29,7 @@ export interface TileDelete {
 }
 
 /** Pinning or unpinning a session (FLOW-ORGANIZE-SESSIONS, step 1). */
-export interface TilePin {
+interface TilePin {
   /** Whether it is pinned now: the menu offers Unpin if so, else Pin. */
   pinned: boolean;
   /** Pins it when unpinned, unpins it when pinned. */
@@ -39,7 +39,7 @@ export interface TilePin {
 }
 
 /** Archive or Unarchive on the menu (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3). */
-export interface TileArchive {
+interface TileArchive {
   /** Archive (true) or Unarchive (false), whichever the menu offered for the session as listed. */
   onChoose: (archived: boolean) => void;
   /** Why it can't be used now; given, the menu shows it unavailable with this reason. */
@@ -68,6 +68,8 @@ export interface TileHandlers {
   pinning?: Readonly<Record<string, Sending>>;
   /** Archives a session, or unarchives an archived one (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3). */
   onArchive?: (id: string, archived: boolean) => void;
+  /** Archives and unarchives on their way, and why the last was refused. */
+  archiving?: Readonly<Record<string, Sending>>;
   /** Asks before deleting a session (FLOW-ARCHIVE-DELETE-SESSION, step 4). */
   onDelete?: (id: string) => void;
   /** Ersa can't reach Core, so nothing can be renamed, pinned, archived or deleted now. */

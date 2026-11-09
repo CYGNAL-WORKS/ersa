@@ -63,6 +63,18 @@ describe("when a row says its session was last active", () => {
     expect(lastActive(at(new Date(2026, 10, 6, 22, 0, 0)), midnight)).toBe("Yesterday");
   });
 
+  it("counts yesterday across a daylight-saving change in a zone whose midnight falls mid-day in UTC", () => {
+    const zone = process.env.TZ;
+    process.env.TZ = "Pacific/Auckland";
+    try {
+      // New Zealand's clocks go forward on 27 September 2026, so that day's midnight and the next's round alike in UTC.
+      expect(lastActive(at(new Date(2026, 8, 27, 14, 0, 0)), new Date(2026, 8, 28, 10, 0, 0))).toBe("Yesterday");
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
+  });
+
   it("reads a time ahead of this machine's clock as now, and says nothing of one it can't read", () => {
     expect(lastActive(at(new Date(2026, 10, 7, 15, 5, 0)), now)).toBe("Just now");
     expect(lastActive({ created_at: "not a date" }, now)).toBe("");
