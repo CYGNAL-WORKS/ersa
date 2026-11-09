@@ -344,7 +344,7 @@ async fn only_one_fork_of_a_session_reads_its_record_at_a_time() {
 
     let mut second = core.client().await;
     let message = refused(&mut second, &id).await;
-    assert!(message.contains("still reading its record"), "{message}");
+    assert!(message.contains("has not finished starting"), "{message}");
 
     drop(held);
     let response = client.response(pending).await;
@@ -390,7 +390,7 @@ async fn a_registry_check_that_hangs_holds_back_the_next_fork_until_it_ends() {
     client.result("session.fork", json!({ "id": id })).await;
     // but its check is still running, so another try starts no second one.
     let message = refused(&mut client, &id).await;
-    assert!(message.contains("still reading its record"), "{message}");
+    assert!(message.contains("has not finished starting"), "{message}");
 
     drop(held);
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
@@ -402,4 +402,100 @@ async fn a_registry_check_that_hangs_holds_back_the_next_fork_until_it_ends() {
         assert!(tokio::time::Instant::now() < deadline, "{response}");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_read_of_the_record_that_hangs_holds_back_the_next_fork() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    let gate = Arc::clone(&fake.read_gate);
+    let held = gate.lock().await;
+    let pending = client.request("session.fork", json!({ "id": id })).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let mut second = core.client().await;
+    let message = refused(&mut second, &id).await;
+    assert!(message.contains("has not finished starting"), "{message}");
+
+    drop(held);
+    let response = client.response(pending).await;
+    assert!(response["result"]["id"].is_string(), "{response}");
+}
+
+// verifies: FLOW-FORK-SESSION-R03
+#[tokio::test(flavor = "multi_thread")]
+async fn the_original_takes_no_message_until_its_forks_backend_is_ready() {
+    let fake = Arc::new(FakeAdapter::slow_start(Duration::from_millis(500)));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+
+    let fork = client.result("session.fork", json!({ "id": id })).await;
+    let error = client
+        .error("session.send", json!({ "id": id, "text": "work" }))
+        .await;
+    assert_eq!(kind(&error), "invalid_state", "{error:#}");
+    assert!(
+        error["message"].as_str().unwrap().contains("being forked"),
+        "{error:#}"
+    );
+
+    wait_for_state(&mut client, fork["id"].as_str().unwrap(), "idle").await;
+    client
+        .result("session.send", json!({ "id": id, "text": "idle" }))
+        .await;
+}
+
+// verifies: FLOW-FORK-SESSION-R01
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restart() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    let backend_id = fake.records.lock().unwrap().keys().next().unwrap().clone();
+    let keep = |text: &str, reply: &str| {
+        fake.records
+            .lock()
+            .unwrap()
+            .get_mut(&backend_id)
+            .unwrap()
+            .push(fake::recorded_reply(text, reply));
+    };
+    keep("reply-1", "the reply");
+    let fork = client.result("session.fork", json!({ "id": id })).await;
+    let fork_id = fork["id"].as_str().unwrap().to_string();
+    // The fork's backend wrote no record, as the CLI writes none yet.
+    let own: Vec<String> = fake
+        .records
+        .lock()
+        .unwrap()
+        .keys()
+        .filter(|k| **k != backend_id)
+        .cloned()
+        .collect();
+    for key in own {
+        fake.records.lock().unwrap().remove(&key);
+    }
+    // The original goes on without it.
+    keep("reply-2", "after the fork");
+
+    client.result("core.shutdown", json!({})).await;
+    let TestCore { dir, task, .. } = core;
+    task.await.unwrap().unwrap();
+    let again: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(Arc::clone(
+        &fake.records,
+    )))];
+    let core = start_with_adapters(dir, |_| {}, again).await;
+    let mut client = core.client().await;
+
+    client
+        .result("session.subscribe", json!({ "id": fork_id, "from_seq": 0 }))
+        .await;
+    let events = client.events_until("assistant.text").await;
+    let shown: Vec<&Value> = events
+        .iter()
+        .filter(|e| e["event"]["type"] == "assistant.text")
+        .collect();
+    assert_eq!(shown.len(), 1, "{events:#?}");
+    assert_eq!(shown[0]["event"]["text"], "the reply");
 }

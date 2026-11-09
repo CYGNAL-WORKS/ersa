@@ -39,7 +39,7 @@ pub const PROJECTOR_VERSION: u32 = 6;
 
 /// The `model` the CLI gives the messages it writes itself rather than
 /// receiving from the API.
-const SYNTHETIC_MODEL: &str = "<synthetic>";
+pub(crate) const SYNTHETIC_MODEL: &str = "<synthetic>";
 
 /// Projects one Claude Code session's raw log. Make a fresh one per pass.
 #[derive(Debug, Default)]

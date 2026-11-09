@@ -15,6 +15,9 @@ pub struct Beginning {
     /// 2.1.316/15-fork-named-no-message), so until then this is the only
     /// place the copied conversation can be read from.
     pub record: Arc<Vec<RecordEvent>>,
+    /// Keeps the original's `forking` flag raised until the fork's backend
+    /// is ready, by when the CLI has read the record it copies.
+    pub hold: Option<Arc<ForkHold>>,
 }
 
 /// A session that can be forked, as [`SessionManager::prepare_fork`] found it.
@@ -26,10 +29,10 @@ pub struct Forkable {
     pub beginning: Beginning,
 }
 
-/// Lowers a session's `forking` flag when dropped.
-struct ForkRead(Arc<AtomicBool>);
+/// Lowers a session's `forking` flag when the last holder lets go.
+pub struct ForkHold(Arc<AtomicBool>);
 
-impl Drop for ForkRead {
+impl Drop for ForkHold {
     fn drop(&mut self) {
         self.0.store(false, Ordering::SeqCst);
     }
@@ -48,6 +51,15 @@ struct ForkReads {
 }
 
 impl SessionManager {
+    /// Refuses a fork of a session a delete has hold of, or whose workspace
+    /// one has.
+    pub fn refuse_fork_if_busy(&self, id: &str) -> Result<(), SessionError> {
+        let handle = self.handle(id)?;
+        self.refuse_if_deleting(&handle)?;
+        let workspace_id = lock(&handle.row).workspace_id.clone();
+        self.refuse_if_claimed(&workspace_id)
+    }
+
     /// Refuses a fork of session `id` unless its conversation, as its record
     /// holds it, ends with a finished reply and nothing else is writing it
     /// (FLOW-FORK-SESSION-R03), each case with its own message.
@@ -55,7 +67,9 @@ impl SessionManager {
     /// The slow reads run in one task, and the session's `forking` flag stays
     /// raised until that task ends, even after this request has given up on
     /// it: a disk that hangs then holds one stuck read per session, not one
-    /// per try.
+    /// per try. It stays raised until the fork's backend is ready too, and
+    /// `session.send` refuses meanwhile, since a turn begun before the CLI has
+    /// read the record would be copied part way (fixture 2.1.316/18).
     pub async fn prepare_fork(
         &self,
         id: &str,
@@ -78,11 +92,12 @@ impl SessionManager {
 
         if handle.forking.swap(true, Ordering::SeqCst) {
             return Err(SessionError::InvalidState(format!(
-                "an earlier fork of session {id} is still reading its record; try again once it \
-                 has finished"
+                "an earlier fork of session {id} has not finished starting; try again once it \
+                 has"
             )));
         }
-        let held = Arc::new(ForkRead(Arc::clone(&handle.forking)));
+        let held = Arc::new(ForkHold(Arc::clone(&handle.forking)));
+        let for_reads = Arc::clone(&held);
         let reads = ForkReads {
             id: id.to_string(),
             backend: row.backend,
@@ -92,7 +107,7 @@ impl SessionManager {
             adapter: Arc::clone(&adapter),
             transport,
         };
-        let reading = tokio::spawn(async move { read_for_fork(reads, held).await });
+        let reading = tokio::spawn(async move { read_for_fork(reads, for_reads).await });
         let record = match tokio::time::timeout(ADAPTER_CALL, reading).await {
             Ok(Ok(record)) => record?,
             Ok(Err(e)) => return Err(SessionError::Internal(format!("the adapter failed: {e}"))),
@@ -115,6 +130,7 @@ impl SessionManager {
             beginning: Beginning {
                 title: handle.describe().title,
                 record,
+                hold: Some(held),
             },
         })
     }
@@ -142,7 +158,7 @@ fn refuse_if_turn_running(handle: &Handle) -> Result<(), SessionError> {
 /// finished reply, so that too is a refusal (FLOW-FORK-SESSION-R03).
 async fn read_for_fork(
     reads: ForkReads,
-    held: Arc<ForkRead>,
+    held: Arc<ForkHold>,
 ) -> Result<Arc<Vec<RecordEvent>>, SessionError> {
     let ForkReads {
         id,
@@ -185,7 +201,7 @@ async fn read_for_fork(
         Arc::clone(&adapter),
         Arc::clone(&transport),
         &backend_id,
-        held,
+        Arc::clone(&held),
     )
     .await
         && pids.len() > own

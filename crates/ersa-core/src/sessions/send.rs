@@ -149,6 +149,13 @@ impl SessionManager {
             // through, so a delete that claimed the workspace since the check
             // above is seen here, or sees this send.
             self.refuse_if_deleting(&handle)?;
+            // Under this lock, and a fork checks `sending` after raising
+            // this, so one of the two always sees the other.
+            if handle.forking.load(Ordering::SeqCst) {
+                return Err(SessionError::InvalidState(
+                    "this session is being forked; send the message again in a moment".into(),
+                ));
+            }
             if sending.is_some() {
                 return Err(SessionError::InvalidState(
                     "a message is already being sent to this session; wait for its answer".into(),

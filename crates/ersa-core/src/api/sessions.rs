@@ -162,6 +162,8 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         pinned: false,
         section_id: None,
         last_activity_at: None,
+        forked_from: None,
+        forked_through: None,
     };
     let config = SessionConfig {
         cwd: workspace.path,
@@ -192,6 +194,9 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
 /// conversation of `params.id`, in its workspace and with its backend,
 /// model, effort, permission mode and section, not pinned or archived.
 pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiError> {
+    // Said first: a delete's claim turns the workspace away from `ready`, and
+    // its `busy` is the answer that says why.
+    core.sessions.refuse_fork_if_busy(&params.id)?;
     let original = core.sessions.row(&params.id)?;
     let (workspace, project) = ready_workspace(core, &original.workspace_id).await?;
     let Starting {
@@ -232,6 +237,12 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         pinned: false,
         section_id: original.section_id,
         last_activity_at: None,
+        forked_from: Some(backend_id.clone()),
+        forked_through: beginning
+            .record
+            .iter()
+            .rev()
+            .find_map(|event| event.message_id.clone()),
     };
     let config = SessionConfig {
         cwd: workspace.path,

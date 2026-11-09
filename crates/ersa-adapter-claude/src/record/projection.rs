@@ -26,7 +26,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::BACKEND;
-use crate::projector::{kind_of, reply_events, tool_result_events};
+use crate::projector::{SYNTHETIC_MODEL, kind_of, reply_events, tool_result_events};
 use crate::wire::{LocalCommandOutput, MessageContent, RecordEntry, RecordUser};
 
 /// The longest record line read as an entry. A tool result can run to
@@ -171,7 +171,7 @@ pub fn conversation_end_from<R: BufRead + Seek>(
 fn entry_end(value: &Value, local_output_follows: bool) -> Option<ConversationEnd> {
     match RecordEntry::deserialize(value) {
         Ok(RecordEntry::Assistant(reply)) => {
-            if reply.message.model == "<synthetic>" {
+            if reply.message.model == SYNTHETIC_MODEL {
                 // The CLI's stand-in for a reply: "No response requested."
                 // after a turn cut short, or an API error's text.
                 return Some(ConversationEnd::Interrupted);

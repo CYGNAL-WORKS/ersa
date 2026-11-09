@@ -79,16 +79,16 @@ const COMMAND_MARKUP: &[&str] = &["<command-name>", "<command-message>", "<comma
 /// command and its output, a shell command typed with `!`, a background task's
 /// report, an interrupt. Its own fixed markers, never translated.
 const CLI_MARKUP: &[&str] = &[
-    "<command-name>",
-    "<command-message>",
-    "<command-args>",
     "<local-command-",
     "<bash-input>",
     "<bash-stdout>",
     "<bash-stderr>",
-    "<task-notification>",
+    TASK_REPORT_MARKER,
     INTERRUPT_MARKER,
 ];
+
+/// How a background task's report begins.
+const TASK_REPORT_MARKER: &str = "<task-notification>";
 
 /// How the CLI's note of an interrupted turn begins; the rest varies
 /// (`[Request interrupted by user for tool use]`).
@@ -105,8 +105,12 @@ impl RecordUser {
         if self.has_non_human_origin() {
             return true;
         }
-        self.first_text()
-            .is_some_and(|text| CLI_MARKUP.iter().any(|mark| text.starts_with(mark)))
+        self.first_text().is_some_and(|text| {
+            COMMAND_MARKUP
+                .iter()
+                .chain(CLI_MARKUP)
+                .any(|mark| text.starts_with(mark))
+        })
     }
 
     fn has_non_human_origin(&self) -> bool {
@@ -152,7 +156,7 @@ impl RecordUser {
         let starts_a_turn = self.has_non_human_origin()
             || self
                 .first_text()
-                .is_some_and(|text| text.starts_with("<task-notification>"));
+                .is_some_and(|text| text.starts_with(TASK_REPORT_MARKER));
         self.is_from_cli()
             && !starts_a_turn
             && !self.is_interrupt_marker()
