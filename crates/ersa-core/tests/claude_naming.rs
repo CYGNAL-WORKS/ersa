@@ -370,7 +370,7 @@ async fn a_session_stopped_before_its_first_message_keeps_its_id_and_has_no_reco
 }
 
 // verifies: FLOW-FORK-SESSION-R01
-// verifies: PROTO-CLAUDE-CODE-STREAM-R28
+// verifies: PROTO-CLAUDE-CODE-STREAM-R38
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversation() {
     let stdout = recorded();
