@@ -1,7 +1,7 @@
 import { SlidersHorizontal } from "lucide-react";
 import { type CSSProperties, useCallback, useId, useRef, useState } from "react";
 import { t } from "../catalog";
-import { GROUP_BYS, type GroupBy, type RailArrangement, SHOWS, SORT_BYS, type Show, type SortBy } from "../session/arrangement";
+import { type ArrangeChoices, GROUP_BYS, type GroupBy, SHOWS, SORT_BYS, type Show, type SortBy } from "../session/arrangement";
 import { IconButton } from "./Icon";
 import { Menu, type MenuClose, type MenuEntry } from "./Menu";
 
@@ -34,7 +34,7 @@ export interface ArrangeActions {
  * choice and its submenu marking it, then Reset to defaults apart. New section and All sessions go in the group with
  * Reset, as they are built.
  */
-export function arrangeEntries(arrangement: Pick<RailArrangement, "groupBy" | "sortBy" | "show">, actions: ArrangeActions): MenuEntry[] {
+export function arrangeEntries(arrangement: ArrangeChoices, actions: ArrangeActions): MenuEntry[] {
   return [
     {
       kind: "submenu",
@@ -70,7 +70,7 @@ export function ArrangeButton({
   initialSubmenu,
   ...actions
 }: ArrangeActions & {
-  arrangement: Pick<RailArrangement, "groupBy" | "sortBy" | "show">;
+  arrangement: ArrangeChoices;
   /** Ersa has not connected to Core, or has not read the arrangement yet. */
   disabled?: boolean;
   /** For the gallery: the menu open, taking no focus, and one of its submenus open by index. */
