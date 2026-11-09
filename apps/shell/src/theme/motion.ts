@@ -19,16 +19,16 @@ function topOf(el: HTMLElement): number {
   return top;
 }
 
-/** Where a marked element sat, and the element, which fades out from there if the change takes it away. */
+/** Where a marked element sat, and the element, to fade out from there if the change takes it away: none if folded out of sight. */
 export interface Place {
   top: number;
-  el: HTMLElement;
+  el: HTMLElement | undefined;
 }
 
 /** Where each element marked `data-slide` under `root` sits now, by its mark: taken before the rail changes. */
 export function placesOf(root: HTMLElement): Map<string, Place> {
   const places = new Map<string, Place>();
-  for (const el of root.querySelectorAll<HTMLElement>("[data-slide]")) places.set(el.dataset.slide ?? "", { top: topOf(el), el });
+  for (const el of root.querySelectorAll<HTMLElement>("[data-slide]")) places.set(el.dataset.slide ?? "", { top: topOf(el), el: el.closest("[inert]") ? undefined : el });
   return places;
 }
 
@@ -47,7 +47,8 @@ const ARRIVE: Move = { duration: "--motion-slow", easing: "--motion-ease-out", e
 
 /**
  * Fades out an element React has just removed, where it sat: put back under `root`, out of the layout (the rail's
- * stylesheet places `data-leaving`), out of reach, and with its marks gone so nothing takes it for what is on the page.
+ * stylesheet places `data-leaving`), out of reach, and with its marks gone so nothing takes it for what is on the page
+ * and it never fades twice. Bare copies of the ancestors it left with go with it, so it looks as it did among them.
  */
 function fadeOut(root: HTMLElement, el: HTMLElement, top: number, timing: KeyframeAnimationOptions): void {
   if (typeof el.animate !== "function") return;
@@ -55,13 +56,19 @@ function fadeOut(root: HTMLElement, el: HTMLElement, top: number, timing: Keyfra
     delete marked.dataset.slide;
     delete marked.dataset.sessionId;
   }
-  el.inert = true;
-  el.setAttribute("aria-hidden", "true");
-  el.dataset.leaving = "";
-  el.style.top = `${top - topOf(root)}px`;
-  root.append(el);
-  const remove = () => el.remove();
-  el.animate([{ opacity: 1 }, { opacity: 0 }], timing).finished.then(remove, remove);
+  let ghost = el;
+  for (let up = el.parentElement; up; up = up.parentElement) {
+    const frame = up.cloneNode(false) as HTMLElement;
+    frame.append(ghost);
+    ghost = frame;
+  }
+  ghost.inert = true;
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.dataset.leaving = "";
+  ghost.style.top = `${top - topOf(root)}px`;
+  root.append(ghost);
+  const remove = () => ghost.remove();
+  ghost.animate([{ opacity: 1 }, { opacity: 0 }], timing).finished.then(remove, remove);
 }
 
 /**
@@ -123,7 +130,8 @@ function slide(root: HTMLElement, before: ReadonlyMap<string, Place>, move: Move
     const keyframes = el.hasAttribute("data-slide-top") ? [{ top: `${by}px` }, { top: "0" }] : [{ transform: `translateY(${by}px)` }, { transform: "none" }];
     slides.push(el.animate(keyframes, { duration, easing }));
   }
-  for (const [mark, place] of before) if (!marks.has(mark) && !place.el.isConnected) fadeOut(root, place.el, place.top, { duration, easing });
+  // An element that has faded already has lost its mark, should a slide taken earlier come round to it again.
+  for (const [mark, { el, top }] of before) if (el && !marks.has(mark) && !el.isConnected && el.dataset.slide === mark) fadeOut(root, el, top, { duration, easing });
   if (slides.length === 0) return;
   // A later slide takes over the mark; this one clears it only if it is still its own.
   const mark = String(performance.now());
