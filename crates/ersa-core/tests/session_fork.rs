@@ -295,3 +295,60 @@ async fn a_fork_of_a_session_core_does_not_know_is_not_found() {
         .await;
     assert_eq!(kind(&error), "not_found", "{error:#}");
 }
+
+// verifies: FLOW-FORK-SESSION-R03
+#[tokio::test(flavor = "multi_thread")]
+async fn a_record_that_cannot_be_read_refuses_the_fork() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    fake.conversation_end_fails
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let message = refused(&mut client, &id).await;
+    assert!(message.contains("could not be read"), "{message}");
+}
+
+// verifies: FLOW-FORK-SESSION-R03
+#[tokio::test(flavor = "multi_thread")]
+async fn a_turn_that_starts_during_the_forks_reads_refuses_it() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    let gate = Arc::clone(&fake.open_check_gate);
+    let held = gate.lock().await;
+    let pending = client.request("session.fork", json!({ "id": id })).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let mut second = core.client().await;
+    second
+        .result("session.send", json!({ "id": id, "text": "work" }))
+        .await;
+    wait_for_state(&mut second, &id, "running").await;
+
+    drop(held);
+    let response = client.response(pending).await;
+    assert_eq!(kind(&response["error"]), "invalid_state", "{response}");
+    let message = response["error"]["message"].as_str().unwrap();
+    assert!(message.contains("a turn is running"), "{message}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn only_one_fork_of_a_session_reads_its_record_at_a_time() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    let gate = Arc::clone(&fake.open_check_gate);
+    let held = gate.lock().await;
+    let pending = client.request("session.fork", json!({ "id": id })).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let mut second = core.client().await;
+    let message = refused(&mut second, &id).await;
+    assert!(message.contains("still reading its record"), "{message}");
+
+    drop(held);
+    let response = client.response(pending).await;
+    assert!(response["result"]["id"].is_string(), "{response}");
+    // Finished, the next one may go.
+    second.result("session.fork", json!({ "id": id })).await;
+}
