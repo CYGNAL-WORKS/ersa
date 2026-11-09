@@ -149,3 +149,21 @@ describe("the context ring near full (LAY-SHELL, Context)", () => {
     expect(contextUsed({ state: "idle", pending: [] })).toBeUndefined();
   });
 });
+
+describe("a tile while its session is being deleted (LAY-SHELL, Being deleted)", () => {
+  it("says so over the archive mark", () => {
+    expect(tileOf(session({ state: "idle" }, { archived: true, deleting: "failed" }))).toMatchObject({ mark: "error", phrase: "Couldn't delete", titleMuted: false });
+    expect(tileOf(session({ state: "idle" }, { archived: true, deleting: "running" }))).toMatchObject({ mark: "starting", phrase: "Deleting", titleMuted: false });
+  });
+
+  it("reads Deleting with the starting arc, muted, over a want or any state", () => {
+    const view = tileOf(session({ state: "waiting_user", pending: [permission] }, { deleting: "running" }));
+    expect(view).toMatchObject({ mark: "starting", tone: "muted", phrase: "Deleting", titleMuted: false });
+  });
+
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R07
+  it("reads Couldn't delete with the error mark once the deletion failed", () => {
+    const view = tileOf(session({ state: "idle" }, { deleting: "failed" }));
+    expect(view).toMatchObject({ mark: "error", tone: "danger", phrase: "Couldn't delete", titleMuted: false });
+  });
+});

@@ -22,7 +22,7 @@ import type { Sending } from "../session/follow";
 import { reducedMotion } from "../theme/motion";
 import { ContextRing } from "./ContextRing";
 import { Icon, IconButton } from "./Icon";
-import { Menu, type MenuClose, type MenuPlace } from "./Menu";
+import { Menu, type MenuClose, type MenuEntry, type MenuPlace } from "./Menu";
 import { useTitleDraft } from "./SessionTitle";
 import "./SessionTile.css";
 
@@ -45,6 +45,14 @@ export interface TileRename {
   /** Editing starts or ends: an earlier refusal is no longer the user's concern. */
   onReset: () => void;
   /** Why Rename can't be used now; given, the menu shows it unavailable with this reason, and F2 does nothing. */
+  unavailable?: string;
+}
+
+/** Delete on the tile's menu (FLOW-ARCHIVE-DELETE-SESSION, step 4): it asks first. */
+export interface TileDelete {
+  /** Opens the delete question. */
+  onAsk: () => void;
+  /** Why Delete can't be used now; given, the menu shows it unavailable with this reason. */
   unavailable?: string;
 }
 
@@ -86,6 +94,7 @@ export function SessionTile({
   rename,
   pin,
   archive,
+  remove,
   initialMenu,
   initialDraft,
 }: {
@@ -104,6 +113,8 @@ export function SessionTile({
   pin?: TilePin;
   /** Archive or Unarchive on the tile's menu, after Rename; the menu is there only with Rename. */
   archive?: TileArchive;
+  /** Delete on the tile's menu, after a rule. */
+  remove?: TileDelete;
   /** For the gallery: the tile's menu shown open, and the title being edited with this text. */
   initialMenu?: boolean;
   initialDraft?: string;
@@ -149,6 +160,14 @@ export function SessionTile({
     field.current?.select();
   }, [editing, initialDraft]);
   const needsYou = view.mark === "needsYou";
+  const beingDeleted = session.deleting !== undefined;
+  const deleteItem: MenuEntry | undefined = remove && {
+    kind: "item",
+    label: t("rail.tile.deleteButton"),
+    danger: true,
+    unavailable: remove.unavailable,
+    onChoose: remove.onAsk,
+  };
   // A session that comes to need the user: its chevron breathes once where it is (DESIGN.md, Motion: status never
   // moves a tile). Only a change into needing the user does; a tile first drawn needing the user shows it at once.
   const [breath, setBreath] = useState(false);
@@ -196,7 +215,7 @@ export function SessionTile({
         }}
         onKeyDown={(event) => {
           if (!rename) return;
-          if (event.key === "F2") {
+          if (event.key === "F2" && !beingDeleted) {
             event.preventDefault();
             edit();
           } else if (event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) {
@@ -272,35 +291,42 @@ export function SessionTile({
       {rename && (
         <Menu
           label={t("rail.tile.moreLabel", { title: view.title })}
-          entries={[
-            ...(pin
-              ? [
+          entries={
+            // A session being deleted, or whose deletion failed, holds Delete… alone (LAY-SHELL, Being deleted).
+            beingDeleted && deleteItem
+              ? [deleteItem]
+              : [
+                  ...(pin
+                    ? [
+                        {
+                          kind: "item" as const,
+                          label: pin.pinned ? t("rail.tile.unpinButton") : t("rail.tile.pinButton"),
+                          unavailable: pin.unavailable,
+                          onChoose: pin.onChoose,
+                        },
+                      ]
+                    : []),
                   {
-                    kind: "item" as const,
-                    label: pin.pinned ? t("rail.tile.unpinButton") : t("rail.tile.pinButton"),
-                    unavailable: pin.unavailable,
-                    onChoose: pin.onChoose,
+                    kind: "item",
+                    label: t("rail.tile.renameButton"),
+                    keyHint: t("rail.tile.renameKey"),
+                    unavailable: rename.unavailable,
+                    onChoose: edit,
                   },
+                  ...(archive
+                    ? [
+                        {
+                          kind: "item" as const,
+                          label: session.archived ? t("rail.tile.unarchiveButton") : t("rail.tile.archiveButton"),
+                          unavailable: archive.unavailable,
+                          onChoose: () => archive.onChoose(!session.archived),
+                        },
+                      ]
+                    : []),
+                  // Delete stands apart in its own group, its label in danger (docs/design/RAIL.md, Menus).
+                  ...(deleteItem ? [{ kind: "rule" } as const, deleteItem] : []),
                 ]
-              : []),
-            {
-              kind: "item",
-              label: t("rail.tile.renameButton"),
-              keyHint: t("rail.tile.renameKey"),
-              unavailable: rename.unavailable,
-              onChoose: edit,
-            },
-            ...(archive
-              ? [
-                  {
-                    kind: "item" as const,
-                    label: session.archived ? t("rail.tile.unarchiveButton") : t("rail.tile.archiveButton"),
-                    unavailable: archive.unavailable,
-                    onChoose: () => archive.onChoose(!session.archived),
-                  },
-                ]
-              : []),
-          ]}
+          }
           open={menu.open}
           place={menu.place}
           focus={menu.focus}
@@ -482,7 +508,7 @@ function Mark({ view, breath, onAnimationEnd }: { view: TileView; breath: boolea
   switch (view.mark) {
     case "starting":
       return (
-        <span className="session-arc" aria-hidden="true">
+        <span className="session-arc" data-tone={view.tone} aria-hidden="true">
           <Icon icon={LoaderCircle} size="icon-xs" />
         </span>
       );

@@ -218,6 +218,11 @@
   animation: session-turn var(--motion-loop-ring) var(--motion-linear) infinite;
 }
 
+/* Being deleted: the same arc in ink-muted (docs/design/RAIL.md, A tile). */
+.session-arc[data-tone="muted"] {
+  color: var(--color-ink-muted);
+}
+
 @keyframes session-turn {
   to {
     transform: rotate(1turn);

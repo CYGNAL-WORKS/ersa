@@ -11,6 +11,7 @@ import { ContextRing } from "../components/ContextRing";
 import { ArchivedNote } from "../components/ArchivedNote";
 import { AttachmentChip } from "../components/AttachmentChip";
 import { Composer } from "../components/Composer";
+import { DeleteQuestion } from "../components/DeleteQuestion";
 import type { Attached } from "../session/attachments";
 import { ErrorBoundary } from "../components/ErrorBoundary";
 import { Icon, IconButton } from "../components/Icon";
@@ -26,9 +27,10 @@ import { SessionTitle } from "../components/SessionTitle";
 import { Transcript } from "../components/Transcript";
 import type { CoreView } from "../core/connection";
 import type { Envelope, Event } from "../protocol/agent-events.gen";
-import type { CoreHelloResult, Project, Session } from "../protocol/core-api.gen";
+import type { CoreHelloResult, Project, Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
 import type { Answer } from "../session/answers";
 import { type BackendChoices, type Choice, branchesMatching } from "../session/controls";
+import { type DeletePhase, whatGoes } from "../session/deletion";
 import type { SessionView } from "../session/follow";
 import { type ShelfShows, shelfTone } from "../session/shelf";
 import { tileOf } from "../session/tile";
@@ -201,6 +203,7 @@ const tree: Parameters<typeof RailTree>[0] = {
   },
   onPin: (id, pinned) => (document.body.dataset.railCall = `pin ${id} ${pinned}`),
   onArchive: (id, archived) => (document.body.dataset.railCall = `archive ${id} ${archived}`),
+  onDelete: (id) => (document.body.dataset.railCall = `delete ${id}`),
   localHost: "local",
   hostNames: { local: "WORKSTATION", devbox: "devbox" },
 };
@@ -238,6 +241,9 @@ const ersaOnly: Parameters<typeof RailTree>[0] = {
 const strangerOnly: Parameters<typeof RailTree>[0] = { ...tree, projects: { state: "ready", projects: [projects[3]!] }, sessions: { state: "ready", sessions: [] } };
 /** A resting tile above each forced one, so the two read apart in the screenshot. */
 const pairOnly: Parameters<typeof RailTree>[0] = { ...ersaOnly, sessions: { state: "ready", sessions: pointerPair }, activeId: undefined };
+/** One session being deleted and one whose deletion failed. */
+// Core stops a session before it deletes anything, so both are stopped.
+const beingDeleted: Session[] = pointerPair.map((s, i) => ({ ...s, tile: { ...s.tile, state: "idle" }, deleting: i === 0 ? "running" : "failed" }));
 /** ersa's sessions with a question in place of its permission request, for a collapsed heading in the accent. */
 const askingOnly: Parameters<typeof RailTree>[0] = {
   ...ersaOnly,
@@ -623,6 +629,22 @@ const shelfStates: [string, ShelfShows, more?: ShelfMore][] = [
   ["Risen to fit a short window", { state: "permission", request: shelfRequest }, { short: true }],
 ];
 
+/** The delete question's states (docs/design/RAIL.md, The delete question), from what `workspace.changes` answers. */
+const deleteWorkspace: Workspace = { id: "w1", project_id: "p1", kind: "isolated", path: "C:\\Users\\me\\.ersa\\workspaces\\ersa-7", vcs_ref: "ersa/fix-reconnect", state: "ready" };
+const deleteRoot: Workspace = { ...deleteWorkspace, kind: "root", path: "C:\\Users\\me\\ersa", vcs_ref: "" };
+const counted = (changes: Partial<WorkspaceChanges>, workspace = deleteWorkspace) =>
+  whatGoes(workspace, { uncommitted: 0, ignored: 0, unshared: 0, stranded: 0, sessions: 1, unrecorded: false, token: "t", ...changes });
+const deleteStates: [string, Exclude<DeletePhase, { kind: "deleted" }>][] = [
+  ["Folder and branch go, with work lost", { kind: "asking", changed: false, goes: counted({ uncommitted: 3, ignored: 12, unshared: 1, stranded: 1 }) }],
+  ["Branch kept, nothing lost", { kind: "asking", changed: false, goes: counted({ unshared: 4 }) }],
+  ["Files stay", { kind: "asking", changed: false, goes: whatGoes(deleteRoot, undefined) }],
+  ["Git lost the workspace's record", { kind: "asking", changed: false, goes: counted({ uncommitted: 2, unshared: 1, unrecorded: true }) }],
+  ["Asked again", { kind: "asking", changed: true, goes: counted({ uncommitted: 4 }) }],
+  ["Reading what would be lost", { kind: "reading" }],
+  ["Deleting", { kind: "deleting", goes: counted({ uncommitted: 3 }) }],
+  ["Deletion failed", { kind: "failed", reason: "The folder is in use by another program: C:\\Users\\me\\.ersa\\workspaces\\ersa-7" }],
+];
+
 /** Throws while rendering, as a component given data it cannot read would. */
 function Unreadable(): never {
   throw new Error("Cannot read properties of undefined (reading 'toFixed')");
@@ -685,6 +707,14 @@ const entries: Entry[] = [
     ],
   },
   {
+    name: "DeleteQuestion",
+    wide: true,
+    states: deleteStates.map(([label, phase]) => [
+      label,
+      <DeleteQuestion title="Fix the flaky reconnect test" backend="Claude Code" phase={phase} onConfirm={() => {}} onTryAgain={() => {}} onCancel={() => {}} inline />,
+    ]),
+  },
+  {
     name: "RailTree",
     rail: true,
     states: [
@@ -744,8 +774,12 @@ const entries: Entry[] = [
       ["Needs you, pointer over it", <RailTree {...ersaOnly} force={{ id: "s1", state: "hover" }} />],
       // s1 is the active session and waits on a permission request: its chevron stays a mark, and More sits before it.
       ["Active, needs you, pointer over it", <RailTree {...ersaOnly} activeId="s1" force={{ id: "s1", state: "hover" }} />],
+      // p2 is working, so Delete is unavailable with its reason; p1 is idle, so it can be deleted.
       ["Tile menu, open", room(<RailTree {...pairOnly} initialTileMenu="p2" />)],
-      // Renaming and archiving go through Core, so while Ersa can't reach it both are unavailable, with the reason.
+      ["Tile menu, Delete available", room(<RailTree {...pairOnly} initialTileMenu="p1" />)],
+      // LAY-SHELL, Being deleted: Deleting while Core works on it, and Couldn't delete, whose menu holds Delete… alone.
+      ["Being deleted, and a deletion that failed", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: beingDeleted }} initialTileMenu="p2" />)],
+      // Renaming, archiving and deleting go through Core, so while Ersa can't reach it all are unavailable, with the reason.
       ["Tile menu, offline", room(<RailTree {...pairOnly} initialTileMenu="p2" offline />)],
       ["An archived tile", <RailTree {...archivedPair} />],
       ["An archived tile, pointer over it", <RailTree {...archivedPair} force={{ id: "a1", state: "hover" }} />],

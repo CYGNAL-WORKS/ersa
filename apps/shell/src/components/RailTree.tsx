@@ -3,6 +3,7 @@ import { ChevronDown, Ellipsis, Pin, Plus, ShieldAlert } from "lucide-react";
 import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
+import { deleteUnavailable } from "../session/deletion";
 import type { Sending } from "../session/follow";
 import type { ArrangeProblem, GroupBy, Show } from "../session/arrangement";
 import { type Collapsed, type DateKey, collapsedOf, treeOf } from "../session/tree";
@@ -10,7 +11,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
 import { type Place, arrive, placesOf, regroup, slideFrom } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
-import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileArchive, type TilePin, type TileRename } from "./SessionTile";
+import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileArchive, type TileDelete, type TilePin, type TileRename } from "./SessionTile";
 import { TrustQuestion } from "./TrustQuestion";
 import "./RailTree.css";
 
@@ -70,11 +71,13 @@ interface RailTreeProps {
   renaming?: Readonly<Record<string, Sending>>;
   /** Editing a tile's title starts or ends: its earlier refusal goes. */
   onRenameReset?: (id: string) => void;
+  /** Asks before deleting a session (FLOW-ARCHIVE-DELETE-SESSION, step 4). */
+  onDelete?: (id: string) => void;
   /** Archives a session from its tile, or unarchives an archived one (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3). */
   onArchive?: (id: string, archived: boolean) => void;
   /** Archives and unarchives on their way, and why the last was refused, by session id. */
   archiving?: Readonly<Record<string, Sending>>;
-  /** Ersa can't reach Core, so nothing can be renamed or archived now. */
+  /** Ersa can't reach Core, so nothing can be renamed, archived or deleted now. */
   offline?: boolean;
   /** For the gallery: a pointer or keyboard state on one tile or one heading, the menu open, the trust question asked. */
   force?: ForcedTile;
@@ -98,7 +101,7 @@ const headingSlide = (key: string) => `heading:${key}`;
  */
 export function RailTree(props: RailTreeProps) {
   const { projects, sessions, workspaces, placing, reading, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
-  const { onRename, renaming, onRenameReset, onArchive, archiving, offline, onPin, pinning, initialTileMenu, initialTileDraft, arrangeProblem } = props;
+  const { onRename, renaming, onRenameReset, onArchive, archiving, onDelete, offline, onPin, pinning, initialTileMenu, initialTileDraft, arrangeProblem } = props;
   // Rename on a tile: unavailable only while Ersa can't reach Core. A session its backend has not named yet, such as one
   // still starting, is refused by Core, and the field says why.
   const renameOf = (s: Session): TileRename | undefined =>
@@ -210,6 +213,9 @@ export function RailTree(props: RailTreeProps) {
     regroupFrom.current = undefined;
     if (from && root.current) regroup(root.current, from);
   });
+  // Delete on a tile: unavailable while the session is busy, or while Ersa can't reach Core.
+  const removeOf = (s: Session): TileDelete | undefined =>
+    onDelete && { onAsk: () => onDelete(s.id), unavailable: deleteUnavailable(s, offline ?? false) };
   const listed = projects.state === "ready" ? projects.projects : [];
   const all = sessions.state === "ready" ? sessions.sessions : [];
   const tree = treeOf(listed, workspaces, all, { groupBy, show, now });
@@ -268,6 +274,7 @@ export function RailTree(props: RailTreeProps) {
               rename={renameOf(s)}
               pin={pinOf(s)}
               archive={archiveOf(s)}
+              remove={removeOf(s)}
               initialMenu={initialTileMenu === s.id}
               initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
             />
