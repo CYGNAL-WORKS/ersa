@@ -21,7 +21,7 @@ The user chooses **Fork** in a tile's menu (`LAY-SHELL`, The rail).
 
 1. On `LAY-SHELL`, the user opens a session's tile menu. Fork is available when the session's conversation ends with a finished reply: one has finished, no reply is running, and the last turn was not interrupted.
 2. The user chooses Fork. A new tile appears where the rail's arrangement puts it and becomes the active session; its transcript holds the conversation up to that reply, and the composer is ready.
-3. A fork of a session in an isolated workspace runs in a new isolated workspace of its own, on a new branch that starts from the commit the original's workspace has checked out; uncommitted changes stay with the original. A fork of a session in a root workspace runs in that root workspace. Either way it has the original's backend, model, effort and permission mode, in the original's section, not pinned. Its title is the original's followed by ` (fork)`, and none for a fork of an untitled session. It can be renamed before its first message.
+3. A fork of a session in an isolated workspace runs in a new isolated workspace of its own, on a new branch that starts from the commit the original's workspace has checked out; uncommitted changes stay with the original. A fork of a session in a root workspace runs in that root workspace. Either way it has the original's backend, model, effort and permission mode, in the original's section, not pinned. Its title is the original's followed by ` (fork)`, and none for a fork of an untitled session. It can be renamed before its first message while it runs.
 4. The original session keeps its state: a running original keeps running.
 
 ## Variations and errors
@@ -33,6 +33,8 @@ The user chooses **Fork** in a tile's menu (`LAY-SHELL`, The rail).
 - **The backend can't fork** (the backend, or the version installed, has no way to): Fork is unavailable and says so.
 - **The fork fails to start**: Ersa says so with the backend's reason, as a failed start does (FLOW-NEW-SESSION), and the original is unchanged. The fork's tile stays, showing why, until the user deletes it, which removes a workspace and branch made for it.
 - **The new workspace can't be made**: Ersa says so with the reason, no fork is made, and the original is unchanged.
+- **The backend refuses the fork's name**: the fork shows the marked title until it has its own record, then the title the backend copied from the original, until the user renames it.
+- **Ersa restarts before a fork's first message**: the fork has no title, since the backend keeps no record of it until then.
 - **A root workspace**: the fork and the original share files, as two sessions in one workspace always do; deleting either keeps the workspace, as deleting a session always keeps a root workspace (FLOW-ARCHIVE-DELETE-SESSION).
 
 ## Requirements
@@ -42,7 +44,8 @@ The user chooses **Fork** in a tile's menu (`LAY-SHELL`, The rail).
 - **FLOW-FORK-SESSION-R03**: Unless the session's conversation, as its record holds it, ends with a finished reply and no process has the session open elsewhere, Ersa shall offer Fork as unavailable with the reason, and Core shall refuse `session.fork` with `invalid_state`.
 - **FLOW-FORK-SESSION-R04**: When a fork has started, Ersa shall make it the active session.
 - **FLOW-FORK-SESSION-R05**: A fork of a session in an isolated workspace shall run in a new isolated workspace on a new branch starting from the commit the original's workspace has checked out, and a fork of a session in a root workspace shall run in that root workspace; either way it shall have the original's backend, model, effort, permission mode and section, and shall not be pinned or archived.
-- **FLOW-FORK-SESSION-R06**: A fork's title shall be the original's, shortened to fit the title limit, followed by ` (fork)`, and a fork of an untitled session shall have no title until its backend gives one.
+- ~~**FLOW-FORK-SESSION-R06**~~: retired 2026-11-09 (Ersa stores no title for a fork, so the title is the backend's), replaced by R07.
+- **FLOW-FORK-SESSION-R07**: Ersa shall name a titled original's fork in its backend with the original's title, shortened to fit the title limit, followed by ` (fork)`; it shall store no title for a fork, and shall show its backend's title once the backend has announced one or the fork's record gives one. A fork of an untitled session shall have no title until its backend gives one.
 
 ## Out of scope
 
@@ -55,6 +58,7 @@ The user chooses **Fork** in a tile's menu (`LAY-SHELL`, The rail).
 
 ## Changes
 
+- 2026-11-09: from #272 inbox, owner's decision: Ersa names a fork in its backend and stores no title for it, so the two cases where the backend's title is not the marked one are variations. R06 retired for R07.
 - 2026-11-08: owner's decision: a fork does what Claude Desktop's does (`claude-desktop/fork-2026-11-08.txt`). A fork of a session in an isolated workspace gets its own workspace and branch, and a fork's title is marked ` (fork)`. FLOW-FORK-SESSION-R02 retired for R05; R06 added.
 - 2026-11-08: from #272 inbox: a fork shows the original's title, unmarked, until its own record gives one, and can be renamed before its first message; the open question narrows to whether Ersa should mark the name. No requirement IDs changed.
 - 2026-11-07: open question on how a fork is named. No requirement IDs changed.
