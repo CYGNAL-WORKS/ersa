@@ -4,9 +4,10 @@ import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
-import { type Collapsed, collapsedOf, treeOf } from "../session/tree";
+import type { ArrangeProblem, GroupBy, Show } from "../session/arrangement";
+import { type Collapsed, type DateKey, collapsedOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { arrive, placesOf, slideFrom } from "../theme/motion";
+import { type Place, arrive, placesOf, regroup, slideFrom } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem, type TileArchive, type TilePin, type TileRename } from "./SessionTile";
@@ -48,10 +49,17 @@ interface RailTreeProps {
   onChevron?: (id: string) => void;
   /** The user closed a session's shelf: Escape, or a choice or focus outside it and its tile (R06, R07). */
   onCloseShelf?: (id: string) => void;
-  /** The groups the user collapsed, by `groupKey` (LAY-SHELL, Collapsing); every other one is expanded. */
+  /** How the rail groups and which sessions it shows (FLOW-ORGANIZE-SESSIONS); by project, showing active ones, unless given. */
+  groupBy?: GroupBy;
+  show?: Show;
+  /** Now, whose local date the date groups count from. */
+  now?: Date;
+  /** The groups the user collapsed in the grouping in use, by key (LAY-SHELL, Collapsing); every other one is expanded. */
   collapsed?: ReadonlySet<string>;
-  /** The user collapsed or expanded a group's heading, named by its `groupKey`. */
+  /** The user collapsed or expanded a group's heading, named by its key. */
   onToggle?: (key: string) => void;
+  /** The arrangement could not be read, so the rail shows the defaults, or a change to it could not be saved, so it was undone (R15). */
+  arrangeProblem?: ArrangeProblem;
   /** Pins or unpins a session from its tile (FLOW-ORGANIZE-SESSIONS-R01). */
   onPin?: (id: string, pinned: boolean) => void;
   /** Pins and unpins on their way, and why the last was refused, by session id (R15). */
@@ -78,8 +86,11 @@ interface RailTreeProps {
   initialTileDraft?: { id: string; draft: string };
 }
 
-/** A group's key in `collapsed`: the Pinned group's, or a project's by its id. Kept apart, so no project id can be taken for the Pinned group. */
-export const groupKey = { pinned: "pinned", project: (id: string) => `project:${id}` };
+/** The Pinned group's key in `collapsed` (PROTO-CORE-API, Settings); every other group's is its `Group.key`. */
+export const PINNED_KEY = "pinned";
+
+/** A heading's mark for the slide when the rail regroups: apart from the tiles' `session:` marks. */
+const headingSlide = (key: string) => `heading:${key}`;
 
 /**
  * The rail's tree (LAY-SHELL, The rail): the Pinned group, absent while nothing pinned is shown, then each project's
@@ -87,7 +98,7 @@ export const groupKey = { pinned: "pinned", project: (id: string) => `project:${
  */
 export function RailTree(props: RailTreeProps) {
   const { projects, sessions, workspaces, placing, reading, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
-  const { onRename, renaming, onRenameReset, onArchive, archiving, offline, onPin, pinning, initialTileMenu, initialTileDraft } = props;
+  const { onRename, renaming, onRenameReset, onArchive, archiving, offline, onPin, pinning, initialTileMenu, initialTileDraft, arrangeProblem } = props;
   // Rename on a tile: unavailable only while Ersa can't reach Core. A session its backend has not named yet, such as one
   // still starting, is refused by Core, and the field says why.
   const renameOf = (s: Session): TileRename | undefined =>
@@ -101,7 +112,7 @@ export function RailTree(props: RailTreeProps) {
   // The pin on its way: where every tile and heading sat when it was chosen, and whether focus was in the rail then.
   // One at a time: while it is saved, Pin and Unpin are unavailable on every tile, so each move is measured from the
   // rail as the last one left it.
-  const pending = useRef<{ id: string; places: Map<string, number>; focused: boolean }>(undefined);
+  const pending = useRef<{ id: string; places: Map<string, Place>; focused: boolean }>(undefined);
   const saving = Object.values(pinning ?? {}).some((p) => p.state === "sending");
   useLayoutEffect(() => {
     const pin = pending.current;
@@ -183,11 +194,43 @@ export function RailTree(props: RailTreeProps) {
     const target = to !== undefined ? items[ids.indexOf(to)]?.querySelector<HTMLElement>(".session") : section.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session");
     target?.focus();
   });
+  const { groupBy = "project", show = "active", now = new Date() } = props;
+  // A new grouping or filter: where every tile and heading sat before it, taken while the page still shows the old
+  // one (this render has not reached it yet), so each slides to its new place once it has (FLOW-ORGANIZE-SESSIONS,
+  // step 4).
+  const arranged = `${groupBy}/${show}`;
+  const lastArranged = useRef(arranged);
+  const regroupFrom = useRef<Map<string, Place>>(undefined);
+  if (lastArranged.current !== arranged) {
+    lastArranged.current = arranged;
+    if (root.current) regroupFrom.current = placesOf(root.current);
+  }
+  useLayoutEffect(() => {
+    const from = regroupFrom.current;
+    regroupFrom.current = undefined;
+    if (from && root.current) regroup(root.current, from);
+  });
   const listed = projects.state === "ready" ? projects.projects : [];
-  const tree = treeOf(listed, workspaces, sessions.state === "ready" ? sessions.sessions : []);
-  // A session waits to be placed while the projects or their workspaces are still being read, so it does not
-  // sit at the end and then move. When the projects could not be read, every session sits at the end.
-  const looseShown = projects.state === "error" || (projects.state === "ready" && !placing);
+  const all = sessions.state === "ready" ? sessions.sessions : [];
+  const tree = treeOf(listed, workspaces, all, { groupBy, show, now });
+  // Grouped by project, a session waits to be placed while the projects or their workspaces are still being read,
+  // so it does not sit at the end and then move. When the projects could not be read, every session sits at the
+  // end. Grouped otherwise, no session waits on its project.
+  const looseShown = groupBy !== "project" || projects.state === "error" || (projects.state === "ready" && !placing);
+  // Nothing the filter shows (FLOW-ORGANIZE-SESSIONS, Nothing to show; LAY-SHELL, Loading, empty and failed). Showing
+  // active with no sessions at all, project headings say enough where there are any, and with no projects their own
+  // note does. Showing all, it waits for the projects, so the note is not drawn beneath Loading and then jumps up.
+  const nothing = sessions.state === "ready" && tree.pinned.length === 0 && tree.groups.every((g) => g.sessions.length === 0) && tree.loose.length === 0;
+  const blank = projects.state === "ready" && listed.length > 0 && tree.groups.length === 0;
+  const noneShown = !nothing
+    ? undefined
+    : show === "archived"
+      ? t("rail.tree.noArchivedEmpty")
+      : show === "active" && (all.length > 0 || blank)
+        ? t("rail.tree.noActiveEmpty")
+        : show === "all" && projects.state !== "loading"
+          ? t("rail.tree.noSessionsEmpty")
+          : undefined;
   // A new session whose workspace is being read waits too, so it slides in once, at its place. Tiles already drawn stay.
   const isNew = (s: Session) => seen.current !== undefined && (!seen.current.has(s.id) || arriving.current.has(s.id));
   const loose = tree.loose.filter((s) => !(reading && workspaces[s.workspace_id] === undefined && isNew(s)));
@@ -243,7 +286,7 @@ export function RailTree(props: RailTreeProps) {
     );
   };
   // The Pinned group leads the rail, and is absent while nothing pinned is shown (LAY-SHELL, Groups).
-  const pinned = folded(groupKey.pinned, tree.pinned);
+  const pinned = folded(PINNED_KEY, tree.pinned);
   const pinnedEmpty = tree.pinned.length === 0;
   return (
     <section ref={root} className="rail-tree" aria-label={t("rail.tree.label")}
@@ -262,13 +305,17 @@ export function RailTree(props: RailTreeProps) {
           <span className="rail-note-detail">{t("rail.tree.noProjectsHint")}</span>
         </p>
       )}
-      {(tree.pinned.length > 0 || tree.projects.length > 0) && (
+      {arrangeProblem && (
+        <Problem lead={arrangeProblem.kind === "read" ? t("rail.tree.arrangeReadError") : t("rail.tree.arrangeSaveError")} reason={arrangeProblem.message} />
+      )}
+      {/* Drawn once the sessions are read even with nothing in it, so the Pinned group's frame is there to open. */}
+      {(sessions.state === "ready" || tree.groups.length > 0) && (
         <ul className="rail-projects">
           {/* Always drawn, so it can open and fade in as the first session is pinned and close and fade out as the
               last is unpinned (DESIGN.md: nothing pops in). Empty, it is closed, out of reach and not read. */}
           <li className="rail-pinned" data-empty={pinnedEmpty || undefined} inert={pinnedEmpty || undefined} aria-hidden={pinnedEmpty || undefined}>
             <div className="rail-project" data-collapsed={pinned.folded || undefined}>
-              <div className="rail-heading" data-slide={groupKey.pinned}>
+              <div className="rail-heading" data-slide={headingSlide(PINNED_KEY)}>
                 <GroupToggle
                   folded={pinned.folded}
                   controls={pinnedTiles}
@@ -286,18 +333,53 @@ export function RailTree(props: RailTreeProps) {
               </GroupTiles>
             </div>
           </li>
-          {tree.projects.map(({ project, sessions }) => {
-            const closed = folded(groupKey.project(project.id), sessions);
+          {tree.groups.map((group) => {
+            const closed = folded(group.key, group.sessions);
+            const tiles = group.sessions.length > 0 && <ul className="rail-tiles">{group.sessions.map(tile)}</ul>;
+            if (group.kind === "date")
+              return (
+                <DateGroup key={group.key} name={t(DATE_NAMES[group.key])} slide={headingSlide(group.key)} folded={closed.folded} summary={collapsedOf(group.sessions)} toggle={closed.toggle}>
+                  {tiles}
+                </DateGroup>
+              );
             return (
-              <ProjectGroup key={project.id} project={project} {...props} folded={closed.folded} summary={collapsedOf(sessions)} toggle={closed.toggle}>
-                {sessions.length > 0 && <ul className="rail-tiles">{sessions.map(tile)}</ul>}
+              <ProjectGroup key={group.key} project={group.project} {...props} folded={closed.folded} summary={collapsedOf(group.sessions)} toggle={closed.toggle}>
+                {tiles}
               </ProjectGroup>
             );
           })}
         </ul>
       )}
       {looseShown && loose.length > 0 && <ul className="rail-tiles">{loose.map(tile)}</ul>}
+      {noneShown && (
+        <p key={noneShown} className="rail-note" data-slide={`note:${noneShown}`}>
+          {noneShown}
+        </p>
+      )}
     </section>
+  );
+}
+
+/** Each date group's heading (FLOW-ORGANIZE-SESSIONS-R07). */
+const DATE_NAMES = {
+  today: "rail.group.todayHeading",
+  yesterday: "rail.group.yesterdayHeading",
+  previous_7_days: "rail.group.previous7DaysHeading",
+  older: "rail.group.olderHeading",
+} as const satisfies Record<DateKey, string>;
+
+/** A date group: its heading, with no actions (docs/design/RAIL.md, A group heading), and its tiles. */
+function DateGroup({ name, slide, folded, summary, toggle, children }: { name: string; slide: string; folded: boolean; summary: Collapsed; toggle: () => void; children: ReactNode }) {
+  const tilesId = useId();
+  return (
+    <li className="rail-project" data-collapsed={folded || undefined}>
+      <div className="rail-heading" data-slide={slide}>
+        <GroupToggle folded={folded} controls={tilesId} summary={summary} toggle={toggle} name={name} />
+      </div>
+      <GroupTiles id={tilesId} folded={folded}>
+        {children}
+      </GroupTiles>
+    </li>
   );
 }
 
@@ -371,7 +453,7 @@ function ProjectGroup({
   const nameLabel = { project: project.name };
   return (
     <li className="rail-project" data-collapsed={folded || undefined}>
-      <div className="rail-heading" data-slide={groupKey.project(project.id)} data-force={forced} data-open={menu ? true : undefined}>
+      <div className="rail-heading" data-slide={headingSlide(project.id)} data-force={forced} data-open={menu ? true : undefined}>
         <GroupToggle
           folded={folded}
           controls={children ? tilesId : undefined}
