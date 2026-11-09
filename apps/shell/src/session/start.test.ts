@@ -286,14 +286,15 @@ describe("opening the new-session screen", () => {
   // verifies: FLOW-NEW-SESSION-R03
   it("only reads: the host's backends and the remembered values", async () => {
     const { client, methods } = fakeClient({ "backend.list": () => [], "settings.get": () => rememberPatch(values("root")) });
-    const choices = await readChoices(client, "local");
+    // The window reads the settings once and shares them with the rail.
+    const choices = await readChoices(client, "local", client.call("settings.get"));
     expect(methods().sort()).toEqual(["backend.list", "settings.get"]);
     expect(choices).toEqual({ backends: [], lastUsed: { p1: values("root") } });
   });
 
   it("offers no backend when they could not be read, and starts at the defaults without remembered values", async () => {
     const { client } = fakeClient({});
-    expect(await readChoices(client, "local")).toEqual({ backends: [], lastUsed: {} });
+    expect(await readChoices(client, "local", client.call("settings.get"))).toEqual({ backends: [], lastUsed: {} });
   });
 });
 

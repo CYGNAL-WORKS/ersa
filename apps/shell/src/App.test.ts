@@ -3,8 +3,9 @@
 
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createElement } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { mergePatch } from "./session/arrangement";
 import type { Attachment, CoreClient, CoreEvent, Method } from "./core/client";
 import type { DragDrop, ShellControl } from "./core/shell";
 import type { BackendInfo, CoreHelloResult, Project, Session, Workspace } from "./protocol/core-api.gen";
@@ -48,13 +49,19 @@ function fakeCore(more: Answers = {}, { reattach = false } = {}) {
   let onEvent: (event: CoreEvent) => void = () => {};
   let attaches = 0;
   const calls: { method: Method; params: unknown }[] = [];
+  let settings: unknown = {};
   const answers: Answers = {
     "core.status": () => ({ sessions_running: 0, sessions_waiting: 0, uptime_s: 1, db_path: "x" }),
     "project.list": () => projects,
     "session.list": () => sessions,
     "workspace.list": (params: { project_id: string }) => [root(params.project_id)],
     "backend.list": () => [],
-    "settings.get": () => ({}),
+    // Settings as Core keeps them: each patch merged in, and read back on the next connection.
+    "settings.get": () => settings,
+    "settings.set": (params: { patch: unknown }) => {
+      settings = mergePatch(settings, params.patch);
+      return {};
+    },
     ...more,
   };
   const client: CoreClient = {
@@ -658,6 +665,177 @@ describe("the rail's New session and collapsing", () => {
     fireEvent.click(toggle("beta"));
     expect(toggle("beta").getAttribute("aria-expanded")).toBe("true");
     expect(toggle("beta").closest(".rail-project")?.hasAttribute("data-collapsed")).toBe(false);
+  });
+});
+
+// FLOW-ORGANIZE-SESSIONS (steps 4, 6 to 8; Nothing to show): the arrange menu, kept in Core's settings.
+describe("arranging the rail", () => {
+  const rail = () => screen.getByRole("navigation", { name: "Rail" });
+  const toggle = (name: string) => within(rail()).getByRole("button", { name: new RegExp(`^${name}`) });
+  const headings = () => [...rail().querySelectorAll(".rail-heading-name")].filter((h) => !h.closest("[inert]")).map((h) => h.textContent);
+  const tiles = () => [...rail().querySelectorAll<HTMLElement>("[data-session-id]")].map((el) => el.dataset.sessionId);
+  const sets = (core: ReturnType<typeof fakeCore>) => core.calls.filter((c) => c.method === "settings.set").map((c) => (c.params as { patch: unknown }).patch);
+  // Opens the arrange menu, then a submenu, and chooses one of its options.
+  const choose = (submenu: string, option: string) => {
+    fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: new RegExp(`^${submenu}`) }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: option }));
+  };
+  const reset = () => {
+    fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reset to defaults" }));
+  };
+  async function open(more: Parameters<typeof fakeCore>[0] = {}) {
+    const core = fakeCore(more, { reattach: true });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    return core;
+  }
+  async function reconnect(core: ReturnType<typeof fakeCore>) {
+    core.drop();
+    await act(() => new Promise((r) => setTimeout(r, 700)));
+    await settle();
+    await settle();
+  }
+  // Today is 2 November 2026, local time, so s2 was made today and s1 yesterday.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 2, 15));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R13
+  it("groups as chosen in the arrange menu, which names the choice, and still does after Ersa reconnects to Core", async () => {
+    const core = await open({ "session.list": () => [session("s1", "alpha", new Date(2026, 10, 1, 9).toISOString()), session("s2", "beta", new Date(2026, 10, 2, 9).toISOString())] });
+    expect(headings()).toEqual(["alpha", "beta", "gamma"]);
+    fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
+    expect(screen.getByRole("menuitem", { name: /^Group by/ }).textContent).toContain("Project");
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Group by/ }));
+    expect(screen.getByRole("menuitemradio", { name: "Project" }).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Date" }));
+    expect(headings()).toEqual(["Today", "Yesterday"]);
+    expect(tiles()).toEqual(["s2", "s1"]);
+    expect(sets(core)).toEqual([{ rail: { group_by: "date" } }]);
+
+    await reconnect(core);
+    expect(headings()).toEqual(["Today", "Yesterday"]);
+    choose("Group by", "None");
+    expect(headings()).toEqual([]);
+    expect(tiles()).toEqual(["s2", "s1"]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R12
+  it("keeps a collapsed group to the grouping it was collapsed in", async () => {
+    const core = await open();
+    fireEvent.click(toggle("alpha"));
+    choose("Group by", "Date");
+    expect(toggle("Yesterday").getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(toggle("Today"));
+    choose("Group by", "Project");
+    expect(toggle("alpha").getAttribute("aria-expanded")).toBe("false");
+    expect(toggle("beta").getAttribute("aria-expanded")).toBe("true");
+    choose("Group by", "Date");
+    expect(toggle("Today").getAttribute("aria-expanded")).toBe("false");
+    expect(sets(core)).toContainEqual({ rail: { collapsed: { project: ["alpha"] } } });
+    expect(sets(core)).toContainEqual({ rail: { collapsed: { date: ["today"] } } });
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R14
+  it("resets the grouping, the filter and every collapsed group, and keeps the pins", async () => {
+    const pinned = { ...session("s1", "alpha", "2026-11-01T09:00:00Z"), pinned: true };
+    const core = await open({ "session.list": () => [pinned, session("s2", "beta", "2026-11-02T09:00:00Z")] });
+    fireEvent.click(toggle("beta"));
+    choose("Show", "All");
+    choose("Group by", "None");
+    reset();
+    await settle();
+    expect(sets(core).at(-1)).toEqual({ rail: { group_by: null, sort_by: null, show: null, collapsed: null } });
+    expect(headings()).toEqual(["Pinned", "alpha", "beta", "gamma"]);
+    expect(toggle("beta").getAttribute("aria-expanded")).toBe("true");
+    expect(tiles()).toEqual(["s1", "s2"]);
+    fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
+    expect(screen.getByRole("menuitem", { name: /^Show/ }).textContent).toContain("Active");
+    expect(core.calls.map((c) => c.method)).not.toContain("session.arrange");
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R11
+  it("shows active, archived or all sessions, never closing the active session, and says when there are no active ones", async () => {
+    const gone = { ...session("s1", "alpha", "2026-11-01T09:00:00Z"), archived: true };
+    const listed = [gone, session("s2", "beta", "2026-11-02T09:00:00Z")];
+    await open({ "session.list": () => listed });
+    expect(tiles()).toEqual(["s2"]);
+    expect(screen.getByRole("region", { name: /transcript/i })).toBeTruthy();
+    choose("Show", "Archived");
+    expect(tiles()).toEqual(["s1"]);
+    // The active session stays active, though its tile left the rail.
+    expect(screen.queryByRole("region", { name: "New session" })).toBeNull();
+    choose("Show", "All");
+    // Each under its project: alpha's first, as Core lists the projects.
+    expect(tiles()).toEqual(["s1", "s2"]);
+    expect(rail().querySelector('[data-session-id="s1"] [aria-label="Archived"]')).not.toBeNull();
+
+    cleanup();
+
+    // Every session archived: showing active ones, the rail says there are none, beside the projects' headings.
+    await open({ "session.list": () => listed.map((s) => ({ ...s, archived: true })) });
+    expect(within(rail()).getByText("No active sessions.")).toBeTruthy();
+    expect(headings()).toEqual(["alpha", "beta", "gamma"]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R21
+  it.each([
+    ["active", "Archived", [{ rail: { show: "archived" } }, { rail: { show: "active" } }]],
+    ["archived", "All", [{ rail: { show: "archived" } }, { rail: { show: "all" } }]],
+  ] as const)("goes by what is shown when a session has started: from %s, %s chosen while it starts", async (from, chosen, expected) => {
+    let created = () => {};
+    const gate = new Promise<void>((resolve) => (created = resolve));
+    const core = await open({
+      "backend.list": () => [claude],
+      "branch.list": () => [{ name: "main", default: true }],
+      "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", vcs_ref: "ersa/new" }),
+      "session.create": async (params: { workspace_id: string }) => {
+        await gate;
+        return { ...session("s-new", "beta", "2026-11-02T14:00:00Z"), workspace_id: params.workspace_id };
+      },
+      "session.send": () => ({ turn: 1 }),
+    });
+    if (from === "archived") choose("Show", "Archived");
+    fireEvent.click(within(rail()).getByRole("button", { name: "New session" }));
+    fireEvent.change(words(), { target: { value: "Fix the build" } });
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    await settle();
+    expect(methods(core)).toContain("session.create");
+    choose("Show", chosen);
+    await settle();
+    created();
+    await settle();
+    await settle();
+    expect(sets(core).filter((p) => JSON.stringify(p).includes("show"))).toEqual(expected);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R21
+  it("switches to showing active sessions when a session starts while it shows archived ones only", async () => {
+    const core = await open({
+      "backend.list": () => [claude],
+      "branch.list": () => [{ name: "main", default: true }],
+      "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", vcs_ref: "ersa/new" }),
+      "session.create": (params: { workspace_id: string }) => ({ ...session("s-new", "beta", "2026-11-02T14:00:00Z"), workspace_id: params.workspace_id }),
+      "session.send": () => ({ turn: 1 }),
+    });
+    choose("Show", "Archived");
+    fireEvent.click(within(rail()).getByRole("button", { name: "New session" }));
+    fireEvent.change(words(), { target: { value: "Fix the build" } });
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    await settle();
+    expect(methods(core)).toContain("session.create");
+    expect(sets(core).filter((p) => JSON.stringify(p).includes("show"))).toEqual([{ rail: { show: "archived" } }, { rail: { show: "active" } }]);
+    fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
+    expect(screen.getByRole("menuitem", { name: /^Show/ }).textContent).toContain("Active");
   });
 });
 

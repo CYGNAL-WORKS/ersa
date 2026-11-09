@@ -29,6 +29,7 @@ import { type DeletePhase, Deletion } from "./session/deletion";
 import { type Attached, attached, sendable, unreadable } from "./session/attachments";
 import { type Follower, type SendProgress, type SessionView, type Sending, follow, progressOf } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
+import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangement } from "./session/arrangement";
 import { StartStop, readChoices, rememberPatch, remembered, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
 
@@ -103,6 +104,18 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Archives and unarchives on their way from a tile, and resumes from the archived note, by session id.
   const [archiving, setArchiving] = useState<Record<string, Sending>>({});
   const [resuming, setResuming] = useState<Record<string, Sending>>({});
+  // How the rail is arranged (FLOW-ORGANIZE-SESSIONS): kept in Core's settings and read on each connection.
+  const saveArrangement = useCallback((patch: object) => client.call("settings.set", { patch }), [client]);
+  const {
+    arrangement,
+    reading: arranging,
+    problem: arrangeProblem,
+    change: arrange,
+    read: readArrangement,
+    readFailed: arrangementUnread,
+  } = useRailArrangement(saveArrangement, describeError);
+  // Today, moved on at local midnight, so the date groups move with the passing of days alone (R07).
+  const today = useLocalDay();
   // The session whose shelf is open, and its events, followed while it is open (FLOW-APPROVE-PERMISSION).
   const [shelfId, setShelfId] = useState<string>();
   const [shelfView, setShelfView] = useState<SessionView>();
@@ -231,7 +244,13 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   useEffect(() => {
     if (link === undefined || hostId === undefined) return;
     let live = true;
-    readChoices(client, hostId).then((choices) => {
+    // Read once and shared: the new-session screen's remembered values, and the rail's arrangement (R13).
+    const settings = client.call("settings.get");
+    settings.then(
+      (read) => live && readArrangement(read),
+      (error) => live && arrangementUnread(describeError(error)),
+    );
+    readChoices(client, hostId, settings).then((choices) => {
       if (!live) return;
       // A host whose backends could not be read offers none; the screen says no backend is available.
       setBackends((b) => ({ ...b, [hostId]: choices.backends }));
@@ -240,7 +259,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     return () => {
       live = false;
     };
-  }, [client, link, hostId]);
+  }, [client, link, hostId, readArrangement, arrangementUnread]);
 
   // Each host's name, by id, read on each new connection: the rail names a project's host when it is not this
   // machine. Best effort: a host not listed, or a read that failed or has not answered, is named by its id.
@@ -315,14 +334,13 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // New session shows the screen; leaving it, by choosing a session, leaves nothing behind (FLOW-NEW-SESSION-R03).
   const newSession = (project: Project) => dispatch({ type: "newSession", projectId: project.id });
-  // The groups whose headings the user collapsed, by RailTree's groupKey, kept while the window is open (LAY-SHELL, Collapsing).
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
-  const toggleGroup = (id: string) =>
-    setCollapsed((was) => {
-      const next = new Set(was);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
+  // A group heading collapsed or expanded: kept in Core for the grouping in use alone (FLOW-ORGANIZE-SESSIONS-R12).
+  const collapsed = new Set(arrangement.collapsed[arrangement.groupBy]);
+  const toggleGroup = (key: string) => {
+    const next = new Set(collapsed);
+    if (!next.delete(key)) next.add(key);
+    arrange(collapsePatch(arrangement.groupBy, [...next]));
+  };
   const select = (id: string) => dispatch({ type: "select", id });
 
   // The first message starts the session; on a failure the screen says why and the composer keeps the message
@@ -330,6 +348,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Stop on the new-session screen reaches the start under way (FLOW-SEND-MESSAGE-R03).
   const startStop = useRef<StartStop>(undefined);
   const [startProgress, setStartProgress] = useState<SendProgress>();
+  const showing = useRef(arrangement.show);
+  showing.current = arrangement.show;
   const start = async (text: string, values: SessionValues, attachments: readonly Attached[]) => {
     dispatch({ type: "sending" });
     setStartProgress(undefined);
@@ -351,6 +371,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       connection.current?.reload("sessions");
       return false;
     }
+    // Showing archived sessions only, the rail switches to active ones, so the new tile is in view (FLOW-ORGANIZE-SESSIONS-R21).
+    // As it is now, not as it was when the start began: the user can change it while the session starts.
+    if (showing.current === "archived") arrange(choicePatch({ show: "active" }));
     setLastUsed((l) => ({ ...l, [values.project_id]: remembered(values) }));
     // Best effort: a failure only means the screen starts at these values in this window alone.
     client.call("settings.set", { patch: rememberPatch(values) }).catch(() => {});
@@ -692,12 +715,28 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     <div className="app">
       <nav className="rail" aria-label="Rail" inert={behind}>
         {/* Unavailable until Ersa has connected (LAY-SHELL, The foot). */}
-        <RailTop onNewSession={() => dispatch({ type: "newSession" })} disabled={view.phase !== "connected"} />
+        <RailTop
+          onNewSession={() => dispatch({ type: "newSession" })}
+          disabled={view.phase !== "connected"}
+          arrange={{
+            arrangement,
+            reading: arranging,
+            // Changing what is shown never closes the active session, even when its tile leaves the rail.
+            onGroupBy: (groupBy) => arrange(choicePatch({ groupBy })),
+            onShow: (show) => arrange(choicePatch({ show })),
+            onReset: () => arrange(RESET_PATCH),
+          }}
+        />
         <div className="rail-body">
           <ErrorBoundary what={t("rail.tree.boundaryName")} resetKey={`${projectsVersion}:${sessionsVersion}`}>
             <RailTree
-              projects={projects}
-              sessions={railSessions}
+              // Grouped as the user arranged it once that is read, so the tree never draws one way and then regroups.
+              projects={arranging && projects.state === "ready" ? { state: "loading" } : projects}
+              groupBy={arrangement.groupBy}
+              show={arrangement.show}
+              now={today}
+              arrangeProblem={arrangeProblem}
+              sessions={arranging && railSessions.state === "ready" ? { state: "loading" } : railSessions}
               workspaces={workspaces}
               workspaceErrors={workspaceErrors}
               placing={placing}
