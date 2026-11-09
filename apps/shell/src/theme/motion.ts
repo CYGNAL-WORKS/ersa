@@ -171,9 +171,9 @@ function slide(root: HTMLElement, before: ReadonlyMap<string, Place>, move: Move
     }
     const by = from.top - topOf(el);
     if (by === 0) continue;
-    // An element marked `data-slide-top`, or holding an open menu, has something placed by anchor, which a transform
-    // would take off its anchor.
-    const keyframes = el.hasAttribute("data-slide-top") || el.querySelector(".menu") ? [{ top: `${by}px` }, { top: "0" }] : [{ transform: `translateY(${by}px)` }, { transform: "none" }];
+    // A tile marked `data-slide-top`, or holding an open menu, has something placed by anchor, which a transform would
+    // take off its anchor. A project's heading stays on a transform: `top` moves only what is positioned, and it is not.
+    const keyframes = el.hasAttribute("data-slide-top") || (el.matches(".session-item") && el.querySelector(".menu")) ? [{ top: `${by}px` }, { top: "0" }] : [{ transform: `translateY(${by}px)` }, { transform: "none" }];
     slides.push(el.animate(keyframes, { duration, easing }));
   }
   if (move.leaves) for (const [mark, { el, top }] of before) if (el && !marks.has(mark)) fadeOut(root, el, top, { duration, easing });
