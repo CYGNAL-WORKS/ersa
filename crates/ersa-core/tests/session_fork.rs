@@ -87,6 +87,18 @@ async fn without_a_record_of_its_own(fake: &FakeAdapter, original_backend_id: &s
         .retain(|id, _| id == original_backend_id);
 }
 
+/// Waits for the fake to have been sent `count` renames.
+async fn renames_reach(fake: &FakeAdapter, count: usize) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while fake.stats.rename_titles.lock().unwrap().len() < count {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fork was not named"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 /// Core started again over the same folder and records.
 async fn restarted(core: TestCore, client: &mut Client, fake: &FakeAdapter) -> (TestCore, Client) {
     client.result("core.shutdown", json!({})).await;
@@ -868,7 +880,7 @@ async fn the_original_cannot_be_deleted_until_its_forks_backend_is_ready() {
 // verifies: FLOW-FORK-SESSION-R07
 #[tokio::test(flavor = "multi_thread")]
 async fn a_long_title_is_shortened_to_fit_with_its_mark() {
-    let fake = Arc::new(FakeAdapter::new(1));
+    let fake = Arc::new(FakeAdapter::with_chosen_ids());
     let (core, mut client) = start(&fake).await;
     let id = idle(&core, &mut client, json!({})).await;
     let title = "t".repeat(200);
@@ -881,6 +893,53 @@ async fn a_long_title_is_shortened_to_fit_with_its_mark() {
     let got = fork["title"].as_str().unwrap();
     assert_eq!(got.chars().count(), 200);
     assert_eq!(got, format!("{} (fork)", "t".repeat(193)));
+    // The same name goes to the backend.
+    renames_reach(&fake, 2).await;
+    assert_eq!(fake.stats.rename_titles.lock().unwrap()[1], got);
+}
+
+// verifies: FLOW-FORK-SESSION-R07
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refused_name_leaves_the_mark_until_the_forks_record_gives_the_copied_title() {
+    let fake = Arc::new(FakeAdapter::with_chosen_ids());
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    client
+        .result("session.set_title", json!({ "id": id, "title": "Orig" }))
+        .await;
+    fake.stats
+        .rename_refused
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+
+    let fork_id = forked(&mut client, &id).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    renames_reach(&fake, 2).await;
+    // The fork works, and is still marked.
+    settle(&mut client, &fork_id).await;
+    assert_eq!(row(&mut client, &fork_id).await["title"], "Orig (fork)");
+
+    // Its record gives the title the backend copied, seen as it ends.
+    let config = fake.stats.configs.lock().unwrap()[1].clone();
+    fake.records
+        .lock()
+        .unwrap()
+        .get_mut(config.backend_session_id.as_deref().unwrap())
+        .unwrap()
+        .push(fake::recorded_title("Orig"));
+    client
+        .result("session.stop", json!({ "id": fork_id }))
+        .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while row(&mut client, &fork_id).await["title"] != "Orig" {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the record's title never showed"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 // verifies: FLOW-FORK-SESSION-R07
@@ -934,14 +993,7 @@ async fn a_rename_while_a_fork_starts_comes_after_the_name_core_gives_it() {
         .as_str()
         .unwrap()
         .to_string();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while titles().len() < 2 {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the fork was not named"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    renames_reach(&fake, 2).await;
     let mut renaming = core.client().await;
     let (asked, title) = (fork_id.clone(), json!("Mine"));
     let renamed = tokio::spawn(async move {
