@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Project, Session } from "../protocol/core-api.gen";
-import { collapsedOf, treeOf } from "./tree";
+import { type Tree, collapsedOf, dateGroupOf, treeOf } from "./tree";
 
 const project = (id: string): Project => ({ id, host_id: "local", path: `D:\\${id}`, name: id, vcs: "git", trusted: true });
 const session = (id: string, workspace_id: string, created_at: string): Session => ({
@@ -16,6 +16,7 @@ const session = (id: string, workspace_id: string, created_at: string): Session 
   tile: { state: "idle", pending: [] },
 });
 const ids = (sessions: Session[]) => sessions.map((s) => s.id);
+const byGroup = (tree: Tree) => tree.groups.map((g) => [g.key, ids(g.sessions)]);
 
 describe("the rail's tree", () => {
   const projects = [project("ersa"), project("engine"), project("notes")];
@@ -29,10 +30,10 @@ describe("the rail's tree", () => {
   ];
 
   // verifies: FLOW-NEW-SESSION-R13
-  // FLOW-ORGANIZE-SESSIONS-R08 is cited once grouping by none is built and tested too: these cover grouping by project.
+  // verifies: FLOW-ORGANIZE-SESSIONS-R08
   it("puts each session under its own project, across its workspaces, newest first", () => {
     const tree = treeOf(projects, workspaces, sessions);
-    expect(tree.projects.map(({ project, sessions }) => [project.id, ids(sessions)])).toEqual([
+    expect(byGroup(tree)).toEqual([
       ["ersa", ["new", "mid", "old"]],
       ["engine", ["engine"]],
       ["notes", []],
@@ -40,10 +41,10 @@ describe("the rail's tree", () => {
     expect(tree.loose).toEqual([]);
   });
 
-  it("leaves archived sessions out, as the rail shows active sessions until it can show archived ones", () => {
+  it("leaves archived sessions out while showing active sessions, its default", () => {
     const archived = sessions.map((s) => (s.id === "mid" || s.id === "engine" ? { ...s, archived: true } : s));
     const tree = treeOf(projects, workspaces, [...archived, { ...session("lost", "w-gone", "2026-11-01T13:00:00.000Z"), archived: true }]);
-    expect(tree.projects.map(({ project, sessions }) => [project.id, ids(sessions)])).toEqual([
+    expect(byGroup(tree)).toEqual([
       ["ersa", ["new", "old"]],
       ["engine", []],
       ["notes", []],
@@ -53,11 +54,11 @@ describe("the rail's tree", () => {
 
   it("keeps the projects in the order Core lists them, whatever their sessions", () => {
     const reversed = [...projects].reverse();
-    expect(treeOf(reversed, workspaces, sessions).projects.map(({ project }) => project.id)).toEqual(["notes", "engine", "ersa"]);
+    expect(treeOf(reversed, workspaces, sessions).groups.map((g) => g.key)).toEqual(["notes", "engine", "ersa"]);
   });
 
   it("keeps a project with no sessions, and every project before the sessions are read", () => {
-    expect(treeOf(projects, workspaces, []).projects.map(({ project, sessions }) => [project.id, sessions.length])).toEqual([
+    expect(treeOf(projects, workspaces, []).groups.map((g) => [g.key, g.sessions.length])).toEqual([
       ["ersa", 0],
       ["engine", 0],
       ["notes", 0],
@@ -72,7 +73,7 @@ describe("the rail's tree", () => {
       session("orphan", "w-other", "2026-11-01T13:00:00.000Z"),
     ]);
     expect(ids(tree.loose)).toEqual(["orphan", "unknown"]);
-    expect(tree.projects.flatMap(({ sessions }) => ids(sessions))).not.toContain("unknown");
+    expect(tree.groups.flatMap((g) => ids(g.sessions))).not.toContain("unknown");
   });
 
   // verifies: FLOW-ORGANIZE-SESSIONS-R01
@@ -86,14 +87,14 @@ describe("the rail's tree", () => {
       pin(session("unknown", "w-gone", "2026-11-01T08:00:00.000Z")),
     ]);
     expect(ids(tree.pinned)).toEqual(["mid", "old", "unknown"]);
-    expect(tree.projects.map(({ project, sessions }) => [project.id, ids(sessions)])).toEqual([
+    expect(byGroup(tree)).toEqual([
       ["ersa", ["new"]],
       ["engine", ["engine"]],
       ["notes", []],
     ]);
     expect(tree.loose).toEqual([]);
     // Pinning changes neither its project nor its section: unpinned, a session is back under its project.
-    expect(treeOf(projects, workspaces, sessions).projects[0]?.sessions.map((s) => s.id)).toEqual(["new", "mid", "old"]);
+    expect(treeOf(projects, workspaces, sessions).groups[0]?.sessions.map((s) => s.id)).toEqual(["new", "mid", "old"]);
   });
 
   it("has no pinned sessions while none is pinned", () => {
@@ -102,8 +103,73 @@ describe("the rail's tree", () => {
 
   it("puts every session at the end when no project could be read", () => {
     const tree = treeOf([], workspaces, sessions);
-    expect(tree.projects).toEqual([]);
+    expect(tree.groups).toEqual([]);
     expect(ids(tree.loose)).toEqual(["engine", "new", "mid", "old"]);
+  });
+});
+
+describe("the rail's tree as the user arranges it", () => {
+  const projects = [project("ersa"), project("engine")];
+  const workspaces = { "w-ersa": { project_id: "ersa" }, "w-engine": { project_id: "engine" } };
+  // Local times, so the tests hold in any time zone: today is 7 November 2026, a little after midnight.
+  const now = new Date(2026, 10, 7, 0, 30);
+  const at = (day: number, hour = 12) => new Date(2026, 10, day, hour).toISOString();
+  const archived = (s: Session): Session => ({ ...s, archived: true });
+  const pinned = (s: Session): Session => ({ ...s, pinned: true });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R07
+  it("groups by the local date each session was created: Today, Yesterday, Previous 7 days and Older, only those with sessions", () => {
+    const sessions = [
+      session("just-now", "w-ersa", new Date(2026, 10, 7, 0, 5).toISOString()),
+      session("late-last-night", "w-engine", new Date(2026, 10, 6, 23, 55).toISOString()),
+      // Work moves no session: only the day it was created counts.
+      { ...session("two-days", "w-ersa", at(5)), last_activity_at: now.toISOString() },
+      session("seven-days", "w-gone", at(0, 1)),
+      { ...session("eight-days", "w-ersa", new Date(2026, 9, 30, 23, 0).toISOString()), last_activity_at: now.toISOString() },
+    ];
+    const tree = treeOf(projects, workspaces, sessions, { groupBy: "date", show: "active", now });
+    expect(byGroup(tree)).toEqual([
+      ["today", ["just-now"]],
+      ["yesterday", ["late-last-night"]],
+      ["previous_7_days", ["two-days", "seven-days"]],
+      ["older", ["eight-days"]],
+    ]);
+    expect(tree.groups.every((g) => g.kind === "date")).toBe(true);
+    expect(tree.loose).toEqual([]);
+    // Only the groups with sessions are there.
+    expect(byGroup(treeOf(projects, workspaces, [sessions[0]!, sessions[4]!], { groupBy: "date", show: "active", now }))).toEqual([
+      ["today", ["just-now"]],
+      ["older", ["eight-days"]],
+    ]);
+  });
+
+  it("puts a session created later than now in Today, and one it can't date in Older", () => {
+    expect(dateGroupOf(new Date(2026, 10, 9).toISOString(), now)).toBe("today");
+    expect(dateGroupOf("not a date", now)).toBe("older");
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R08
+  it("grouped by none, shows one list with no headings after the Pinned group", () => {
+    const sessions = [session("a", "w-ersa", at(1)), pinned(session("p", "w-engine", at(2))), session("b", "w-gone", at(3)), session("c", "w-engine", at(4))];
+    const tree = treeOf(projects, workspaces, sessions, { groupBy: "none", show: "active", now });
+    expect(ids(tree.pinned)).toEqual(["p"]);
+    expect(tree.groups).toEqual([]);
+    expect(ids(tree.loose)).toEqual(["c", "b", "a"]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R11
+  it("shows active sessions only, archived sessions only, or both, the Pinned group included", () => {
+    const sessions = [
+      session("live", "w-ersa", at(1)),
+      archived(session("gone", "w-ersa", at(2))),
+      pinned(archived(session("pinned-gone", "w-engine", at(3)))),
+      pinned(session("pinned-live", "w-engine", at(4))),
+    ];
+    const arranged = (show: "active" | "archived" | "all") => treeOf(projects, workspaces, sessions, { groupBy: "project", show, now });
+    expect([ids(arranged("active").pinned), byGroup(arranged("active"))]).toEqual([["pinned-live"], [["ersa", ["live"]], ["engine", []]]]);
+    // Showing archived or all, only projects with sessions shown have a heading (LAY-SHELL, Projects).
+    expect([ids(arranged("archived").pinned), byGroup(arranged("archived"))]).toEqual([["pinned-gone"], [["ersa", ["gone"]]]]);
+    expect([ids(arranged("all").pinned), byGroup(arranged("all"))]).toEqual([["pinned-live", "pinned-gone"], [["ersa", ["gone", "live"]]]]);
   });
 });
 

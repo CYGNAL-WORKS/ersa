@@ -17,5 +17,8 @@ export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],
     environment: "node",
+    // Not UTC, which CI's runners default to: there a date read in UTC instead of local time would go unnoticed
+    // (FLOW-ORGANIZE-SESSIONS-R07).
+    env: { TZ: "America/New_York" },
   },
 });
