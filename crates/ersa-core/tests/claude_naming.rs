@@ -469,7 +469,7 @@ async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversat
     assert_eq!(std::fs::read(&record).unwrap(), before);
 
     // Named in the CLI as the fork it is, under the id it was started with.
-    // verifies: FLOW-FORK-SESSION-R07
+    // verifies: FLOW-FORK-SESSION-R08
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     loop {
         let rename = transport
