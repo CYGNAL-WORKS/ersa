@@ -19,6 +19,7 @@ import type { Session } from "../protocol/core-api.gen";
 import type { BackendChoices } from "../session/controls";
 import { type TileView, tileOf } from "../session/tile";
 import type { Sending } from "../session/follow";
+import { reducedMotion } from "../theme/motion";
 import { ContextRing } from "./ContextRing";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose, type MenuPlace } from "./Menu";
@@ -148,6 +149,25 @@ export function SessionTile({
     field.current?.select();
   }, [editing, initialDraft]);
   const needsYou = view.mark === "needsYou";
+  // A session that comes to need the user: its chevron breathes once where it is (DESIGN.md, Motion: status never
+  // moves a tile). Only a change into needing the user does; a tile first drawn needing the user shows it at once.
+  const [breath, setBreath] = useState(false);
+  const [lastMark, setLastMark] = useState(view.mark);
+  const [wasActive, setWasActive] = useState(active);
+  // Made active or left mid-breath, the chevron is drawn by another element, which would start the breath over: it ends.
+  if (active !== wasActive) {
+    setWasActive(active);
+    setBreath(false);
+  }
+  if (view.mark !== lastMark) {
+    setLastMark(view.mark);
+    // With reduced motion on it never breathes, so nothing is left waiting to breathe should motion come back on.
+    setBreath(needsYou && !reducedMotion());
+  }
+  // Once breathed, it is done. A working glyph's breath loops, so it never ends.
+  const breathed = (event: AnimationEvent) => {
+    if (event.animationName === "session-breath") setBreath(false);
+  };
   // The chevron is the shelf's handle on every tile but the active one, whose requests the transcript answers
   // (FLOW-APPROVE-PERMISSION-R26); there it stays a mark that names the want.
   const handle = needsYou && !active;
@@ -215,7 +235,7 @@ export function SessionTile({
             {view.title}
           </span>
         )}
-        <span className="session-mark">{!handle && <Mark view={view} />}</span>
+        <span className="session-mark">{!handle && <Mark view={view} breath={breath} onAnimationEnd={breathed} />}</span>
         {view.ring !== undefined && (
           <span className="session-ring">
             <ContextRing used={view.ring} size="ring-sm" />
@@ -299,6 +319,8 @@ export function SessionTile({
           type="button"
           className="session-chevron-button"
           data-tone={tone}
+          data-breath={breath ? "once" : undefined}
+          onAnimationEnd={breathed}
           aria-label={t("rail.shelf.nameLabel", { title: view.title })}
           aria-haspopup="dialog"
           aria-expanded={shelf !== undefined}
@@ -346,8 +368,7 @@ export function TileItem({
   if (open !== wasOpen) {
     setWasOpen(open);
     // With reduced motion on, it goes at once.
-    const still = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    setClosing(open || still ? undefined : last.current);
+    setClosing(open || reducedMotion() ? undefined : last.current);
   }
   const closed = (event: AnimationEvent) => {
     if (event.animationName === "shelf-back") setClosing(undefined);
@@ -437,6 +458,8 @@ export function TileItem({
       data-shelf={open || undefined}
       data-tone={shelf?.tone}
       style={layer !== undefined ? ({ anchorName: anchor } as CSSProperties) : undefined}
+      // A slide's transform would take the shelf off its anchor, so the tile that holds one slides by its offset.
+      data-slide-top={layer !== undefined || undefined}
       // The rail finds a tile by its session, to move focus when one leaves.
       data-session-id={id}
       onFocus={focusIn}
@@ -455,7 +478,7 @@ export function TileItem({
 }
 
 /** The state's mark, named where line two doesn't already name it. */
-function Mark({ view }: { view: TileView }) {
+function Mark({ view, breath, onAnimationEnd }: { view: TileView; breath: boolean; onAnimationEnd: (event: AnimationEvent) => void }) {
   switch (view.mark) {
     case "starting":
       return (
@@ -464,11 +487,12 @@ function Mark({ view }: { view: TileView }) {
         </span>
       );
     case "working":
-      return <span className="glyph session-glyph" data-tone={view.tone} role="img" aria-label={view.markLabel} />;
+      // It breathes for as long as the session works (DESIGN.md, Motion: a working session's glyph).
+      return <span className="glyph session-glyph" data-tone={view.tone} data-breath="loop" role="img" aria-label={view.markLabel} />;
     case "needsYou":
       // The active tile's: a mark, not a control, since the transcript answers its requests.
       return (
-        <span className="session-chevron" data-tone={view.tone} role="img" aria-label={view.markLabel}>
+        <span className="session-chevron" data-tone={view.tone} data-breath={breath ? "once" : undefined} role="img" aria-label={view.markLabel} onAnimationEnd={onAnimationEnd}>
           <Icon icon={ChevronRight} size="icon-sm" />
         </span>
       );

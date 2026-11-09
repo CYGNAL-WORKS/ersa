@@ -68,7 +68,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 ### Question
 
 - `question.asked`: `request_id`, `questions` (array of `{ id, text, header (optional short label), options (optional array of { id, label, description (optional) }), multi_select (boolean), takes_text (boolean: the user may answer in their own words beside the options) }`). Each question's `id` is unique within the request.
-- `question.answered`: `request_id`, `answers` (array of `{ id, value, own_words (boolean) }`, one per question, where `value` is the user's own words when `own_words` is true, and otherwise a single option id, or an array of option ids for multi-select; empty when the user declined or the backend withdrew the question), `declined` (boolean: the user chose not to answer), `answered_by` one of `user`, `timeout`, `backend` (the backend withdrew the question, after an interrupt say).
+- `question.answered`: `request_id`, `answers` (array of `{ id, value, own_words (boolean) }`, at most one per question, a question the backend's answer did not cover having none, where `value` is the user's own words when `own_words` is true, and otherwise a single option id, or an array of option ids for multi-select; empty when the user declined or the backend withdrew the question), `declined` (boolean: the user chose not to answer), `answered_by` one of `user`, `timeout`, `backend` (the backend withdrew the question, after an interrupt say).
 
 ### Usage
 
@@ -151,10 +151,12 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - Whether subagent trees get their own `session_id` or stay nested under `parent_tool_use_id`.
 - How history shows a permission decision read from the session record, which keeps no permission prompt or request id, and which turn boundaries history shows without the turn ends the record omits. Claude Code records the decision on the tool result with `decision`, `source` (such as `config` or `user_temporary`), `reasonType`, and `grantScope`; `permission.decided` needs a request id, so no event carries it yet.
 - How record and live input merge once resume exists. Today a live view starts empty and a record view is only for sessions Core does not run, so a message cannot yet reach one view from both. Resume must settle: a live line whose message the record already yielded yields no event, which PROTO-AGENT-EVENTS-R02 will need an exception for; matching the user's prompt, live only as Ersa's host line and without a message id, to its record entry; and partial `assistant.text` events, which carry no message id, of a message still streaming when its record entry was read.
+- How the transcript shows a question once. Claude Code's question tool also projects, live and from the record, to `tool.requested` and `tool.result` (R18 rules out only `permission.requested`), and the record keeps no `question.asked`, so history has only the tool events; the interface work that shows a question in the transcript settles whether those tool events show beside the question card, live and in history.
 - Whether a Claude Code record entry with a `peer` origin maps to `user.message` origin `peer_session`, and how its `peer` is filled.
 
 ## Changes
 
+- 2026-11-08: from #266 inbox: `question.answered` holds at most one answer per question; an open question on showing a question once, since its tool events still project. No requirement IDs changed.
 - 2026-11-07: a backend's brief may name user entries it writes that project only to `backend.passthrough` (PROTO-CLAUDE-CODE-STREAM-R34). No requirement IDs changed.
 - 2026-11-05: `question.answered` gains `declined`, recorded on Claude Code 2.1.316 (PROTO-CLAUDE-CODE-STREAM, Questions); R19 reworded to project a deny as declined.
 - 2026-11-05: for FLOW-APPROVE-PERMISSION: Claude Code's question tool projects to `question.asked` in the adapter, which answers the open question on where questions come from; `question.asked` gains optional `header`, option `description`, and `takes_text`; an answer gains `own_words`, the user's own words moving to `value` with it; `answered_by` gains `backend` for a withdrawn question. A shape change, so `v` is bumped. PROTO-AGENT-EVENTS-R18 and R19 added.

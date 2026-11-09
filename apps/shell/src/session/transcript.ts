@@ -13,7 +13,7 @@ import type {
 } from "../protocol/agent-events.gen";
 
 /** The event schema version this Interface renders (PROTO-AGENT-EVENTS, Versioning). */
-export const EVENT_VERSION: Envelope["v"] = 4;
+export const EVENT_VERSION: Envelope["v"] = 5;
 
 /** What came with a user's message, as the event carries it (PROTO-AGENT-EVENTS, user.message). */
 export type MessageAttachment = NonNullable<Extract<Envelope["event"], { type: "user.message" }>["attachments"]>[number];

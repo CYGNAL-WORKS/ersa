@@ -767,6 +767,9 @@ pub struct AnswerQuestionParams {
     pub id: String,
     pub request_id: String,
     pub answers: Vec<Answer>,
+    /// True, with no answers, when the user chose not to answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declined: Option<bool>,
 }
 
 /// `session.set_title` params.
