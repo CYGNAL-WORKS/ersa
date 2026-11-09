@@ -88,6 +88,8 @@ size:
   menu: 360px
   # The height past which a chip's list scrolls: eight options of `control`.
   list-max: 224px
+  # The least a sessions-page row's title keeps beside a long project name.
+  row-title-min: 120px
   # The widest a user's message bubble grows, as a share of the reading column.
   bubble-max: 80%
   # The largest an attached image shows in the transcript, either way; it keeps its proportions.
