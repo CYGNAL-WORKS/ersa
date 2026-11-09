@@ -153,8 +153,9 @@ pub trait Adapter: Send + Sync {
 
     /// Whether a process other than Ersa's has session `backend_session_id`
     /// open on the transport's host, asked before Core resumes the session
-    /// or writes to its record (PROTO-AGENT-EVENTS-R14). The answer only
-    /// informs the user: Core goes ahead whatever it is. The default, for a
+    /// or writes to its record (PROTO-AGENT-EVENTS-R14), which it does
+    /// whatever the answer, telling the user, and before it forks the
+    /// session, which it refuses when the answer is yes. The default, for a
     /// backend that keeps no registry of open sessions: not open.
     async fn open_elsewhere(
         &self,

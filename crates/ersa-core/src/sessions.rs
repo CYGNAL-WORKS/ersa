@@ -95,8 +95,8 @@ const START_WAIT: Duration = Duration::from_secs(120);
 const ADAPTER_CALL: Duration = Duration::from_secs(30);
 
 /// How long asking an adapter whether another process has a session open
-/// may take. The answer only informs the user, so a registry that hangs
-/// makes it unknown rather than holding up what was asked for.
+/// may take. A registry that hangs makes the answer unknown rather than
+/// holding up what was asked for.
 const OPEN_ELSEWHERE_CHECK: Duration = Duration::from_secs(5);
 
 /// How many events a replay sends before it looks again for whether the
@@ -215,9 +215,10 @@ fn busy(workspace_id: &str) -> SessionError {
 
 /// One session, live or not.
 struct Handle {
-    /// Raised while a fork of this session reads its record: at most one
-    /// such read is ever stuck on a disk that hangs, however often the user
-    /// tries again.
+    /// Raised from when a fork of this session starts reading its record
+    /// until the fork's backend is ready. While it is, at most one such read
+    /// is stuck on a disk that hangs, however often the user tries again, and
+    /// `session.send` refuses: the CLI has yet to copy the record.
     forking: Arc<AtomicBool>,
     id: String,
     backend: String,
@@ -1727,8 +1728,24 @@ impl SessionManager {
                 })
             }
         };
-        // Read from its original, a fork's conversation stops where it did.
+        // Read from its original, a fork's conversation stops where it did,
+        // and is gone with that record.
         let record = match &row.forked_through {
+            Some(last) if source != row.backend_session_id && record.is_empty() => {
+                Arc::new(vec![RecordEvent {
+                    message_id: Some(last.clone()),
+                    ts: Some(now_rfc3339()),
+                    backend_version: None,
+                    event: Event::Error(ErrorEvent {
+                        code: ErrorCode::Transport,
+                        message: "this fork's conversation was in the session it was forked \
+                                  from, and that session's record is gone"
+                            .into(),
+                        recoverable: false,
+                        action: None,
+                    }),
+                }])
+            }
             Some(last) if source != row.backend_session_id => up_to(record, last),
             _ => record,
         };
@@ -1849,14 +1866,6 @@ fn is_rfc3339(text: &str) -> bool {
     rest == "Z"
 }
 
-/// Asks the adapter whether a process other than this Core's has the
-/// session open, before Core resumes it or writes to its record, and when
-/// one has, or the adapter cannot tell, adds a `session.notice` saying so to
-/// the session's open view (PROTO-AGENT-EVENTS-R14). It never stops what
-/// follows. `consequence` says what the other process does meanwhile.
-///
-/// Notices are not part of the record, so one reaches the clients reading
-/// the session now; with none reading, there is nobody to tell.
 /// Whose record holds session `row`'s conversation: its own, or for a fork
 /// the backend has not written a record for yet (it does with the first
 /// message), its original's. A record that can't be looked at counts as its
@@ -1920,6 +1929,14 @@ async fn ask_open_elsewhere(
     }
 }
 
+/// Asks the adapter whether a process other than this Core's has the
+/// session open, before Core resumes it or writes to its record, and when
+/// one has, or the adapter cannot tell, adds a `session.notice` saying so to
+/// the session's open view (PROTO-AGENT-EVENTS-R14). It never stops what
+/// follows. `consequence` says what the other process does meanwhile.
+///
+/// Notices are not part of the record, so one reaches the clients reading
+/// the session now; with none reading, there is nobody to tell.
 async fn notice_if_open_elsewhere(
     handle: &Handle,
     adapter: Arc<dyn Adapter>,

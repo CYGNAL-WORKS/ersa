@@ -41,8 +41,8 @@ pub struct SessionRow {
     /// `insert_session` leaves it to the column's default.
     pub deleting: Option<Deleting>,
     /// Whether the user pinned the session, and the section they put it in
-    /// (ADR 0026). A new session is neither, so `insert_session` leaves both
-    /// to the columns' defaults.
+    /// (ADR 0026). A new session is not pinned, so `insert_session` leaves that
+    /// to the column's default; a fork starts in its original's section.
     pub pinned: bool,
     pub section_id: Option<String>,
     /// RFC 3339: when the session's latest turn ended, `None` until one has
@@ -70,8 +70,8 @@ impl Store {
                 .execute(
                     "INSERT INTO sessions
                      (id, workspace_id, host_id, backend, backend_session_id, mode,
-                      model, effort, permission_mode, forked_from, forked_through)
-                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
+                      model, effort, permission_mode, section_id, forked_from, forked_through)
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
                  WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ?2 AND state = 'ready')",
                     params![
                         session.id,
@@ -83,6 +83,7 @@ impl Store {
                         session.model,
                         session.effort,
                         session.permission_mode,
+                        session.section_id,
                         session.forked_from,
                         session.forked_through,
                     ],
