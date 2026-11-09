@@ -1002,7 +1002,7 @@ async fn a_running_session_is_renamed_through_its_backend() {
     assert_eq!(renamed["title"], "Renamed");
     assert_eq!(session_row(&mut client, &id).await["title"], "Renamed");
     // The running backend took it; nothing was written beside it.
-    assert_eq!(stats.rename_titles.lock().unwrap().len(), 1);
+    assert_eq!(stats.live_renames.load(Ordering::SeqCst), 1);
     assert_eq!(stats.record_renames.load(Ordering::SeqCst), 0);
     let raw = client.result("session.raw_log", json!({ "id": id })).await;
     assert!(
@@ -1039,7 +1039,7 @@ async fn a_stopped_session_is_renamed_in_its_record_which_a_later_core_reads() {
     assert_eq!(renamed["title"], "Renamed");
     assert_eq!(session_row(&mut client, &id).await["title"], "Renamed");
     assert_eq!(stats.record_renames.load(Ordering::SeqCst), 1);
-    assert_eq!(stats.rename_titles.lock().unwrap().len(), 0);
+    assert_eq!(stats.live_renames.load(Ordering::SeqCst), 0);
     // The title is in the record, not in the conversation.
     let events = all_events(&mut client, &id).await;
     assert!(
@@ -1192,7 +1192,7 @@ async fn a_blank_long_or_multi_line_title_is_refused() {
             .await;
         assert_eq!(error["code"], -32602, "{title:?}: {error:#}");
     }
-    assert_eq!(stats.rename_titles.lock().unwrap().len(), 0);
+    assert_eq!(stats.live_renames.load(Ordering::SeqCst), 0);
     // As long as the backend's own list shows, and trimmed.
     let longest = "é".repeat(200);
     let renamed = client

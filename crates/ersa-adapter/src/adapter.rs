@@ -477,6 +477,16 @@ impl Projected {
     }
 }
 
+/// What a fork starts from (FLOW-FORK-SESSION).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ForkOf {
+    /// The backend's id for the session it starts from a copy of.
+    pub original: String,
+    /// The name the backend gives it as it starts, if any.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 /// How Core wants a session started.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SessionConfig {
@@ -504,11 +514,11 @@ pub struct SessionConfig {
     /// backend to choose, as it does for a backend without host-chosen ids.
     #[serde(default)]
     pub backend_session_id: Option<String>,
-    /// For a fork (FLOW-FORK-SESSION): the backend's id for the session it
-    /// starts from a copy of. The new session has an id of its own,
-    /// [`SessionConfig::backend_session_id`] or the one the backend reports.
+    /// For a fork: what it starts from. The new session has an id of its
+    /// own, [`SessionConfig::backend_session_id`] or the one the backend
+    /// reports.
     #[serde(default)]
-    pub fork_of: Option<String>,
+    pub fork_of: Option<ForkOf>,
     /// Backend-specific settings, read only by that backend's adapter. `null`
     /// when there are none.
     pub extra: Value,
