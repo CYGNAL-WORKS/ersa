@@ -35,12 +35,15 @@ export interface TileView {
 // The cost reads in dollars to the cent, in the locale the catalog is in.
 const dollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 
+/** A session's title as Ersa shows it. */
+export const titleOf = (session: Pick<Session, "title">) => session.title || t("rail.tile.untitledLabel");
+
 /** What a session's tile shows. `backends` gives each host's backends, to name a session's backend by its own name. */
 export function tileOf(session: Session, backends: Readonly<Record<string, readonly BackendChoices[]>> = {}): TileView {
   const { tile } = session;
   const cost = tile.cost_usd_total;
   const base = {
-    title: session.title || t("rail.tile.untitledLabel"),
+    title: titleOf(session),
     backend: backends[session.host_id]?.find((b) => b.name === session.backend)?.label ?? session.backend,
     cost: cost !== undefined && Number.isFinite(cost) ? dollars.format(cost) : undefined,
     ring: contextUsed(tile),
