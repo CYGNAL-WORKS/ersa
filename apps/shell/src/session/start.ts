@@ -20,11 +20,11 @@ export interface Choices {
  * Reads what the new-session screen offers for `hostId`. Only reads: opening the screen creates nothing
  * (FLOW-NEW-SESSION-R03). Remembered values that cannot be read leave the screen at the defaults.
  */
-export async function readChoices(client: Pick<CoreClient, "call">, hostId: string): Promise<Choices> {
-  const [backends, settings] = await Promise.allSettled([client.call("backend.list", { host_id: hostId }), client.call("settings.get")]);
+export async function readChoices(client: Pick<CoreClient, "call">, hostId: string, settings: Promise<unknown>): Promise<Choices> {
+  const [backends, read] = await Promise.allSettled([client.call("backend.list", { host_id: hostId }), settings]);
   return {
     backends: backends.status === "fulfilled" ? backends.value : [],
-    lastUsed: settings.status === "fulfilled" ? lastUsedFrom(settings.value) : {},
+    lastUsed: read.status === "fulfilled" ? lastUsedFrom(read.value) : {},
   };
 }
 

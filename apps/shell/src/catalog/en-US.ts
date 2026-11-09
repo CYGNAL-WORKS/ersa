@@ -17,6 +17,21 @@ export const enUS = {
     top: {
       newSessionButton: "New session",
     },
+    // The arrange button and its menu (LAY-SHELL, The arrange button; FLOW-ORGANIZE-SESSIONS, step 4). An option
+    // names the current choice before its submenu's chevron too.
+    arrange: {
+      // The arrange button's name and its menu's, for assistive technology and as its tooltip.
+      label: "Arrange sessions",
+      groupByButton: "Group by",
+      showButton: "Show",
+      resetButton: "Reset to defaults",
+      groupByProjectButton: "Project",
+      groupByDateButton: "Date",
+      groupByNoneButton: "None",
+      showActiveButton: "Active",
+      showArchivedButton: "Archived",
+      showAllButton: "All",
+    },
     // The rail's tree (docs/design/RAIL.md, The rail): its name and its notes.
     tree: {
       // The tree's name for assistive technology.
@@ -27,12 +42,23 @@ export const enUS = {
       noProjectsHint: "Choose a folder in New session to start.",
       projectsError: "Ersa can't read your projects.",
       sessionsError: "Ersa can't read your sessions.",
+      // The arrangement could not be read, so the rail is arranged by the defaults; or a change could not be saved and was undone.
+      arrangeReadError: "Ersa can't read how you arranged the rail.",
+      arrangeSaveError: "Ersa couldn't save that change to the rail.",
+      // Nothing the arrange menu's Show lets through (FLOW-ORGANIZE-SESSIONS, Nothing to show).
+      noActiveEmpty: "No active sessions.",
+      noArchivedEmpty: "No archived sessions.",
+      noSessionsEmpty: "No sessions.",
       // Names the tree when it fails to draw: "The projects and sessions could not be shown:".
       boundaryName: "The projects and sessions",
     },
-    // The Pinned group's heading (docs/design/RAIL.md, A group heading).
+    // The Pinned group's heading and the date groups' (docs/design/RAIL.md, A group heading).
     group: {
       pinnedHeading: "Pinned",
+      todayHeading: "Today",
+      yesterdayHeading: "Yesterday",
+      previous7DaysHeading: "Previous 7 days",
+      olderHeading: "Older",
     },
     // A project heading (docs/design/RAIL.md, A project heading) and its More menu.
     heading: {

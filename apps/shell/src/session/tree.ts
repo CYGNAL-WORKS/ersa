@@ -1,47 +1,110 @@
-// The rail's tree, decided from Core's projects, workspaces and sessions (LAY-SHELL, The rail): the pinned sessions,
-// each project with its sessions beneath it, and the sessions whose project the window can't tell. The component only
-// draws this.
+// The rail's tree, decided from Core's projects, workspaces and sessions and the rail's arrangement (LAY-SHELL, The
+// rail; FLOW-ORGANIZE-SESSIONS): the pinned sessions, the groups with headings, and the sessions under none. The
+// component only draws this.
 
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import { newestFirst } from "./controls";
+import type { GroupBy, Show } from "./arrangement";
 import { wantTone } from "./tile";
 
+/** A date group's key, also its key among the collapsed groups (PROTO-CORE-API, Settings). */
+export type DateKey = "today" | "yesterday" | "previous_7_days" | "older";
+export const DATE_KEYS: readonly DateKey[] = ["today", "yesterday", "previous_7_days", "older"];
+
+/** A group with a heading, after the Pinned group: a project, or a date group. Its `key` is its collapsed-group key. */
+export type Group =
+  | { kind: "project"; key: string; project: Project; sessions: Session[] }
+  | { kind: "date"; key: DateKey; sessions: Session[] };
+
 export interface Tree {
-  /** The pinned sessions, newest first: they lead the rail in the Pinned group and appear nowhere else (FLOW-ORGANIZE-SESSIONS-R01). */
+  /** The pinned sessions shown, newest first: they lead the rail in the Pinned group and appear nowhere else (FLOW-ORGANIZE-SESSIONS-R01). */
   pinned: Session[];
-  /** Every project, in the order Core lists them, each with its sessions newest first; a project may have none. */
-  projects: { project: Project; sessions: Session[] }[];
-  /** The sessions whose project the window can't tell, newest first: they sit at the end, under no heading. */
+  /** The groups with headings, in order, each with its sessions newest first. Grouped by project, a project may have none. */
+  groups: Group[];
+  /**
+   * The sessions under no heading, newest first: grouped by project, those whose project the window can't tell, at
+   * the end; grouped by none, every session not pinned (R08).
+   */
   loose: Session[];
 }
 
+/** How the tree is arranged: the grouping and the filter of the rail's arrangement, and today, for date groups. */
+export interface TreeArrangement {
+  groupBy: GroupBy;
+  show: Show;
+  /** Now, whose local date the date groups count from. */
+  now: Date;
+}
+
 /**
- * The tree. Archived sessions are left out: the rail shows active sessions, its default (FLOW-ARCHIVE-DELETE-SESSION,
- * step 1), until the arrange menu's Show can ask for archived ones. A pinned session is in the Pinned group, wherever
- * it belongs. Any other belongs to the project of its workspace; one whose workspace is not known, or whose
- * workspace's project is not listed, is loose, so a session is never missing from the rail. Pinning changes neither:
- * unpinned, a session is back where it belongs.
+ * The tree. The filter leaves out what it does not show, pinned sessions too (R11). A pinned session is in the
+ * Pinned group, wherever it belongs. Grouped by project, any other belongs to the project of its workspace; one whose
+ * workspace is not known, or whose workspace's project is not listed, is loose, so a session is never missing from
+ * the rail. While showing active sessions every project has its group, empty or not; otherwise only projects with
+ * sessions shown (LAY-SHELL, Projects). Grouped by date, each is in its date group (R07), and only groups with
+ * sessions are there. Pinning changes none of this: unpinned, a session is back where it belongs.
  */
 export function treeOf(
   projects: readonly Project[],
   workspaces: Readonly<Record<string, Pick<Workspace, "project_id">>>,
   sessions: readonly Session[],
+  { groupBy, show, now }: TreeArrangement = { groupBy: "project", show: "active", now: new Date() },
 ): Tree {
-  const byProject = new Map<string, Session[]>(projects.map((p) => [p.id, []]));
   const pinned: Session[] = [];
   const loose: Session[] = [];
+  const byProject = new Map<string, Session[]>(projects.map((p) => [p.id, []]));
+  const byDate = new Map<DateKey, Session[]>(DATE_KEYS.map((k) => [k, []]));
   for (const s of newestFirst(sessions)) {
-    if (s.archived) continue;
+    if (!shows(show, s)) continue;
     if (s.pinned) {
       pinned.push(s);
       continue;
     }
-    const projectId = workspaces[s.workspace_id]?.project_id;
+    if (groupBy === "date") {
+      byDate.get(dateGroupOf(s.created_at, now))?.push(s);
+      continue;
+    }
+    const projectId = groupBy === "project" ? workspaces[s.workspace_id]?.project_id : undefined;
     const group = projectId === undefined ? undefined : byProject.get(projectId);
     if (group) group.push(s);
     else loose.push(s);
   }
-  return { pinned, projects: projects.map((project) => ({ project, sessions: byProject.get(project.id) ?? [] })), loose };
+  const groups: Group[] =
+    groupBy === "project"
+      ? projects
+          .map((project) => ({ kind: "project" as const, key: project.id, project, sessions: byProject.get(project.id) ?? [] }))
+          .filter((g) => show === "active" || g.sessions.length > 0)
+      : groupBy === "date"
+        ? DATE_KEYS.map((key) => ({ kind: "date" as const, key, sessions: byDate.get(key) ?? [] })).filter((g) => g.sessions.length > 0)
+        : [];
+  return { pinned, groups, loose };
+}
+
+/** Whether the filter shows the session (R11): showing All, an archived one too, its tile marked as archived. */
+function shows(show: Show, session: Session): boolean {
+  // A session from an older Core may carry no archived mark: it is not archived.
+  return show === "all" || (show === "archived") === (session.archived === true);
+}
+
+const DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * The date group of a session created at `createdAt`, by its local date against today's (R07): Today, Yesterday,
+ * Previous 7 days for the six days before those, else Older. By creation, so a session never changes group as it
+ * works; one created later than now, by a clock set wrong, is Today.
+ */
+export function dateGroupOf(createdAt: string, now: Date): DateKey {
+  const created = new Date(createdAt);
+  // Calendar days apart in local time; rounded, since a day across a daylight-saving change is 23 or 25 hours.
+  const days = Math.round((localMidnight(now) - localMidnight(created)) / DAY);
+  if (Number.isNaN(days)) return "older";
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  return days <= 7 ? "previous_7_days" : "older";
+}
+
+function localMidnight(at: Date): number {
+  return new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime();
 }
 
 /** What a collapsed group heading says of the sessions it holds (LAY-SHELL, Collapsing). */

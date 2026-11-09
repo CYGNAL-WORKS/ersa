@@ -55,32 +55,74 @@ function topOf(el: HTMLElement): number {
   return top;
 }
 
+/** Where a marked element sat, and the element, to fade out from there if the change takes it away: none if folded out of sight. */
+export interface Place {
+  top: number;
+  el: HTMLElement | undefined;
+}
+
 /** Where each element marked `data-slide` under `root` sits now, by its mark: taken before the rail changes. */
-export function placesOf(root: HTMLElement): Map<string, number> {
-  const places = new Map<string, number>();
-  for (const el of root.querySelectorAll<HTMLElement>("[data-slide]")) places.set(el.dataset.slide ?? "", topOf(el));
+export function placesOf(root: HTMLElement): Map<string, Place> {
+  const places = new Map<string, Place>();
+  for (const el of root.querySelectorAll<HTMLElement>("[data-slide]")) places.set(el.dataset.slide ?? "", { top: topOf(el), el: el.closest("[inert]") ? undefined : el });
   return places;
 }
 
-/** A move's duration and easing, named by their motion tokens, and whether an element with no earlier place slides in. */
+/** A move's duration and easing, named by their motion tokens, how an element with no earlier place comes in, and whether one that has gone fades out. */
 interface Move {
   duration: `--motion-${string}`;
   easing: `--motion-${string}`;
-  enters: boolean;
+  enters: "fade" | "slide";
+  leaves: boolean;
 }
 
 /** How a tile moves when the user reorders the rail (DESIGN.md, Motion: "each tile slides to its new position"). */
-const SETTLE: Move = { duration: "--motion-settle", easing: "--motion-ease-in-out", enters: false };
+const SETTLE: Move = { duration: "--motion-settle", easing: "--motion-ease-in-out", enters: "fade", leaves: false };
+
+/** How the rail regroups: as a reorder, with what the new grouping or filter takes away fading out (DESIGN.md: nothing pops in). */
+const REGROUP: Move = { ...SETTLE, leaves: true };
 
 /** How a new session's tile slides in, and the others make room (DESIGN.md, Motion: "A new session's tile"). */
-const ARRIVE: Move = { duration: "--motion-slow", easing: "--motion-ease-out", enters: true };
+const ARRIVE: Move = { duration: "--motion-slow", easing: "--motion-ease-out", enters: "slide", leaves: false };
+
+/**
+ * Fades out an element React has just removed, where it sat: put back under `root`, out of the layout (the rail's
+ * stylesheet places `data-leaving`), out of reach, and with its marks gone so nothing takes it for what is on the page.
+ * Bare copies of the ancestors it left with go with it, so it looks as it did among them.
+ */
+function fadeOut(root: HTMLElement, el: HTMLElement, top: number, timing: KeyframeAnimationOptions): void {
+  if (typeof el.animate !== "function") return;
+  for (const marked of [el, ...el.querySelectorAll<HTMLElement>("[data-slide], [data-session-id]")]) {
+    delete marked.dataset.slide;
+    delete marked.dataset.sessionId;
+  }
+  let ghost = el;
+  for (let up = el.parentElement; up; up = up.parentElement) {
+    const frame = up.cloneNode(false) as HTMLElement;
+    frame.append(ghost);
+    ghost = frame;
+  }
+  ghost.inert = true;
+  ghost.setAttribute("aria-hidden", "true");
+  ghost.dataset.leaving = "";
+  ghost.style.top = `${top - topOf(root)}px`;
+  root.append(ghost);
+  const remove = () => ghost.remove();
+  ghost.animate([{ opacity: 1 }, { opacity: 0 }], timing).finished.then(remove, remove);
+}
 
 /**
  * Slides each element marked `data-slide` from where `before` had it to where it is now, over `motion-settle` with
- * `motion-ease-in-out` (DESIGN.md, Motion: "each tile slides to its new position"). One that is new appears in place.
+ * `motion-ease-in-out` (DESIGN.md, Motion: "each tile slides to its new position"). One that is new fades in where it
+ * is. `before` may be old by now, as a pin's is while it saves, so one that has gone is left gone.
  */
-export function slideFrom(root: HTMLElement, before: ReadonlyMap<string, number>): void {
+export function slideFrom(root: HTMLElement, before: ReadonlyMap<string, Place>): void {
   slide(root, before, SETTLE);
+}
+
+/** As `slideFrom`, for `before` taken just now, as the rail regroups: one that has gone fades out where it was. */
+export function regroup(root: HTMLElement, before: ReadonlyMap<string, Place>): void {
+  slide(root, before, REGROUP);
 }
 
 /**
@@ -104,33 +146,36 @@ export function arrive(root: HTMLElement, arriving: readonly HTMLElement[]): voi
 
 /**
  * Slides each element marked `data-slide` from where `before` had it to where it is now, over `move`; one `before`
- * has no place for slides in from above when `move` enters, else appears in place. While they slide, `root` carries
+ * has no place for comes in as `move` enters, and one no longer there fades out if `move` leaves. While they slide, `root` carries
  * `data-sliding`, so its stylesheet can let a tile show outside the frame it moved into.
  */
-function slide(root: HTMLElement, before: ReadonlyMap<string, number>, move: Move): void {
+function slide(root: HTMLElement, before: ReadonlyMap<string, Place>, move: Move): void {
   if (reducedMotion()) return;
   const style = getComputedStyle(root);
   const duration = milliseconds(style.getPropertyValue(move.duration));
   const easing = style.getPropertyValue(move.easing).trim();
   if (!duration || !easing) return;
   const slides: Animation[] = [];
+  const marks = new Set<string>();
   for (const el of root.querySelectorAll<HTMLElement>("[data-slide]")) {
-    if (typeof el.animate !== "function") continue;
     const mark = el.dataset.slide ?? "";
+    marks.add(mark);
+    if (typeof el.animate !== "function") continue;
     const from = before.get(mark);
     if (from === undefined) {
-      if (move.enters) {
+      if (move.enters === "slide") {
         const keyframes = [{ opacity: 0, transform: `translateY(${-el.offsetHeight}px)` }, { opacity: 1, transform: "none" }];
         slides.push(el.animate(keyframes, { duration, easing }));
-      }
+      } else el.animate([{ opacity: 0 }, { opacity: 1 }], { duration, easing });
       continue;
     }
-    const by = from - topOf(el);
+    const by = from.top - topOf(el);
     if (by === 0) continue;
     // An element marked `data-slide-top` holds something placed by anchor, which a transform would take off its anchor.
     const keyframes = el.hasAttribute("data-slide-top") ? [{ top: `${by}px` }, { top: "0" }] : [{ transform: `translateY(${by}px)` }, { transform: "none" }];
     slides.push(el.animate(keyframes, { duration, easing }));
   }
+  if (move.leaves) for (const [mark, { el, top }] of before) if (el && !marks.has(mark)) fadeOut(root, el, top, { duration, easing });
   if (slides.length === 0) return;
   // A later slide takes over the mark; this one clears it only if it is still its own.
   const mark = String(performance.now());

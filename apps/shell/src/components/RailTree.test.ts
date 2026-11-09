@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { Project, Session } from "../protocol/core-api.gen";
-import { groupKey, RailTree } from "./RailTree";
+import { RailTree } from "./RailTree";
 
 // What the tree draws from the grouping (session/tree.test.ts covers the grouping, and FLOW-NEW-SESSION-R13 there).
 // LAY-SHELL is a layout brief with no requirement IDs.
@@ -87,12 +87,12 @@ describe("the rail's tree", () => {
   it("counts a collapsed heading's sessions, and collapsed and not trusted, gives its words to the shield and a tooltip", () => {
     const sessions = { state: "ready" as const, sessions: [session("a", "w-ersa", "One"), session("b", "w-ersa", "Two")] };
     const workspaces = { "w-ersa": { project_id: "ersa" } };
-    const trusted = render({ sessions, workspaces, collapsed: new Set([groupKey.project("ersa")]) });
+    const trusted = render({ sessions, workspaces, collapsed: new Set(["ersa"]) });
     expect(trusted).toContain('aria-expanded="false"');
     expect(trusted).toContain('<span class="rail-heading-count">2 sessions</span>');
     expect(trusted).not.toContain("rail-heading-shield");
 
-    const untrusted = render({ projects: { state: "ready", projects: [project("ersa", { trusted: false })] }, sessions, workspaces, collapsed: new Set([groupKey.project("ersa")]) });
+    const untrusted = render({ projects: { state: "ready", projects: [project("ersa", { trusted: false })] }, sessions, workspaces, collapsed: new Set(["ersa"]) });
     // The shield, named for assistive technology, then the same count every collapsed heading shows.
     expect(untrusted).toMatch(/<span class="rail-heading-shield" style="[^"]*" role="img" aria-label="Not trusted">/);
     expect(untrusted).toContain('<span class="rail-heading-count">2 sessions</span>');
@@ -123,5 +123,21 @@ describe("the rail's tree", () => {
   it("is empty when Ersa can't reach the sessions, and loading while it first connects", () => {
     expect(render({ projects: { state: "unavailable" }, sessions: { state: "unavailable" } })).not.toContain("<p");
     expect(render({ projects: { state: "loading" }, sessions: { state: "loading" } })).toContain("Loading…");
+  });
+
+  it("says when nothing archived is there to show, and why the arrangement could not be read or saved", () => {
+    expect(render({ show: "archived", sessions: { state: "ready", sessions: [session("s1", "w", "Fix")] } })).toContain("No archived sessions.");
+    // With projects but no sessions and no headings to show, the tree is never left blank.
+    const none: Parameters<typeof render>[0] = { projects: { state: "ready", projects: [project("ersa")] }, sessions: { state: "ready", sessions: [] } };
+    expect(render({ ...none, show: "all" })).toContain("No sessions.</p>");
+    expect(render({ ...none, groupBy: "date" })).toContain("No active sessions.</p>");
+    expect(render({ ...none, groupBy: "none", show: "all" })).toContain("No sessions.</p>");
+    // Headings stand in for the note.
+    expect(render(none)).not.toContain("sessions.</p>");
+    expect(render({ ...none, projects: { state: "loading" }, show: "all" })).not.toContain("No sessions.</p>");
+    // Showing all reads as showing archived does, with no projects too.
+    expect(render({ ...none, projects: { state: "ready", projects: [] }, show: "all" })).toContain("No sessions.</p>");
+    expect(render({ arrangeProblem: { kind: "read", message: "Core is away" } })).toContain("Ersa can&#x27;t read how you arranged the rail.");
+    expect(render({ arrangeProblem: { kind: "save", message: "disk full" } })).toContain("disk full");
   });
 });
