@@ -15,6 +15,7 @@ import { SessionsPage } from "./components/SessionsPage";
 import { noneUnseen, unseenAfter } from "./session/unseen";
 import { RailTop } from "./components/RailTop";
 import { RailTree } from "./components/RailTree";
+import { foldedAway } from "./components/useLeavingFocus";
 import { Shelf } from "./components/Shelf";
 import { Transcript } from "./components/Transcript";
 import { type CoreClient, describeError } from "./core/client";
@@ -518,7 +519,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const deleted = (id: string) => {
     // A tile folded away in a collapsed group can't take focus, so it is never the one beside this one.
     const fromPage = askNow.current?.fromPage;
-    const items = [...(deletionList(fromPage)?.querySelectorAll<HTMLElement>("[data-session-id]") ?? [])].filter((el) => !el.closest(".rail-group-tiles[inert]"));
+    const items = [...(deletionList(fromPage)?.querySelectorAll<HTMLElement>("[data-session-id]") ?? [])].filter((el) => !foldedAway(el));
     const at = items.findIndex((el) => el.dataset.sessionId === id);
     const beside = at < 0 ? undefined : (items[at + 1] ?? items[at - 1]);
     setDeleteAsk(undefined);
