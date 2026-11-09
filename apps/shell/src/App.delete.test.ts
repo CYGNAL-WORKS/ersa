@@ -182,6 +182,7 @@ describe("Delete on a tile", () => {
     await open({
       "project.list": () => projects,
       "workspace.list": () => [...workspaces, beta],
+      "settings.set": () => ({}),
       "session.list": () => rows,
       "session.delete": (params: { id: string }) => {
         rows = rows.filter((s) => s.id !== params.id);
