@@ -400,6 +400,15 @@ async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversat
     let id = fork["id"].as_str().unwrap().to_string();
 
     // A session of its own in the same place, from a copy of the original.
+    // `session.fork` answers once the row exists; the CLI starts after it.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while transport.spawned().len() < 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fork's CLI never started"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     let spawned = transport.spawned()[1].clone();
     assert_eq!(spawned.cwd.as_deref(), Some(cwd.as_str()));
     let at = |flag: &str| spawned.args.iter().position(|a| a == flag);
