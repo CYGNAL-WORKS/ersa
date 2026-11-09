@@ -11,7 +11,7 @@ adrs: [0011, 0017, 0031]
 
 ## Intent
 
-The user closes the window, or quits, or the machine restarts, and reopens Ersa. Every project, workspace, and session is where it was, apart from a session whose backend has no adapter in this build (PROTO-CORE-API-R66). Closing the window alone never stops a session, because Core runs on its own; reopening reattaches.
+The user closes the window, or quits, or the machine restarts, and reopens Ersa. Every project, workspace, and session is where it was, apart from a dormant session (PROTO-CORE-API-R66). Closing the window alone never stops a session, because Core runs on its own; reopening reattaches.
 
 A session's history is the backend's own session record (ADR 0017), so its transcript after a quit or crash is whatever the backend recorded, including turns taken outside Ersa. Details only the live stream carries (text as it arrived, permission prompts, turn ends, cost) are not in it. Resuming starts the backend again with the session's backend id, and the session continues in the same record. A session that was mid-task shows it was interrupted and offers to continue.
 
