@@ -25,7 +25,7 @@ Ersa lists, for a project, every session in the backend's record, including sess
 
 ## Changes
 
-- 2026-11-09: a session whose backend has no adapter in this build is hidden until the adapter is back (ADR 0031).
+- 2026-11-09: a session whose backend has no adapter in this build is dormant until the adapter is back (ADR 0031).
 - 2026-11-01: rewritten for ADR 0017: history is the backend's session record; sessions started elsewhere are listed and resumable; resume by backend id, shown so the user can resume elsewhere; retention is the backend's; live-elsewhere check. Open questions on resume semantics and on which record is replayed answered.
 - 2026-10-31: window close no longer stops sessions; transcript from raw log.
 - 2026-10-31: created as draft.
