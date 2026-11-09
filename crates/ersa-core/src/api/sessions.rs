@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use ersa_adapter::{BackendChoices, Direction, PermissionDecision, SessionConfig};
+use ersa_adapter::{BackendChoices, Direction, PermissionDecision, QuestionReply, SessionConfig};
 use ersa_protocol::core_api::{
     AnswerQuestionParams, ArrangeParams, Attachment, AttachmentKind, Choice,
     DecidePermissionParams, Empty, IdParams, InspectParams, Inspected, RawDirection, RawLogEntry,
@@ -448,13 +448,21 @@ pub(super) async fn answer_question(
     core: &Core,
     params: AnswerQuestionParams,
 ) -> Result<Session, ApiError> {
-    let session = find(core, &params.id).await?;
-    // No adapter projects `question.asked` yet, so no question can be
-    // pending.
-    Err(ApiError::invalid_state(format!(
-        "the {} adapter does not support questions yet",
-        session.backend
-    )))
+    find(core, &params.id).await?;
+    // Declining says the user gave no answers, so it carries none.
+    let reply = match (params.declined.unwrap_or(false), params.answers.is_empty()) {
+        (true, true) => QuestionReply::Declined,
+        (true, false) => {
+            return Err(ApiError::invalid_params(
+                "a declined question carries no answers",
+            ));
+        }
+        (false, _) => QuestionReply::Answers(params.answers),
+    };
+    core.sessions
+        .answer_question(&params.id, &params.request_id, reply)
+        .await?;
+    find(core, &params.id).await
 }
 
 /// `text` as one line: each run of spacing (a line break and a tab

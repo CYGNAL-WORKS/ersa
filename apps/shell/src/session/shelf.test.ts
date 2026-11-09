@@ -22,7 +22,7 @@ const permission = (request_id: string, more: Partial<Extract<Event, { type: "pe
 const question = (request_id: string): Event => ({
   type: "question.asked",
   request_id,
-  questions: [{ id: "q1", text: "Which branch?", multi_select: false }],
+  questions: [{ id: "q1", text: "Which branch?", multi_select: false, takes_text: false }],
 });
 
 const envelope = (event: Event, seq: number, session_id = "s1"): Envelope => ({

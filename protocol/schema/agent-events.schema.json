@@ -12,7 +12,7 @@
       "properties": {
         "v": {
           "description": "Event schema version. Bumped when any event's meaning or shape changes, including the lifecycle events Core emits itself.",
-          "const": 4
+          "const": 5
         },
         "session_id": { "type": "string", "minLength": 1 },
         "seq": {
@@ -361,10 +361,11 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "text", "multi_select"],
+            "required": ["id", "text", "multi_select", "takes_text"],
             "properties": {
-              "id": { "type": "string" },
+              "id": { "type": "string", "description": "Unique within the request." },
               "text": { "type": "string" },
+              "header": { "type": "string", "description": "A short label for the question." },
               "options": {
                 "type": "array",
                 "items": {
@@ -373,11 +374,16 @@
                   "required": ["id", "label"],
                   "properties": {
                     "id": { "type": "string" },
-                    "label": { "type": "string" }
+                    "label": { "type": "string" },
+                    "description": { "type": "string" }
                   }
                 }
               },
-              "multi_select": { "type": "boolean" }
+              "multi_select": { "type": "boolean" },
+              "takes_text": {
+                "description": "The user may answer in their own words beside the options.",
+                "type": "boolean"
+              }
             }
           }
         }
@@ -386,7 +392,7 @@
     "question.answered": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "request_id", "answers", "answered_by"],
+      "required": ["type", "request_id", "answers", "declined", "answered_by"],
       "properties": {
         "type": { "const": "question.answered" },
         "request_id": { "type": "string" },
@@ -395,20 +401,29 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "value"],
+            "required": ["id", "value", "own_words"],
             "properties": {
-              "id": { "type": "string" },
+              "id": { "type": "string", "description": "The id of the question this answers." },
               "value": {
-                "description": "Free text or one option id, or several option ids for a multi-select question.",
+                "description": "The user's own words when own_words is true; otherwise one option id, or several option ids for a multi-select question.",
                 "oneOf": [
                   { "type": "string" },
                   { "type": "array", "items": { "type": "string" } }
                 ]
-              }
+              },
+              "own_words": { "type": "boolean" }
             }
-          }
+          },
+          "description": "One per question; empty when the user declined or the backend withdrew the question."
         },
-        "answered_by": { "enum": ["user", "timeout"] }
+        "declined": {
+          "description": "The user chose not to answer.",
+          "type": "boolean"
+        },
+        "answered_by": {
+          "description": "backend: the backend withdrew the question, after an interrupt say.",
+          "enum": ["user", "timeout", "backend"]
+        }
       }
     },
 

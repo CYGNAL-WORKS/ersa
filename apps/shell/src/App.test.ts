@@ -396,6 +396,74 @@ describe("the tree App draws in the rail", () => {
     const tree = screen.getByRole("region", { name: "Projects and sessions" });
     expect(tree.querySelectorAll(":scope > .rail-tiles")).toHaveLength(0);
   });
+
+  // A session made by another window: its workspace is read before its tile is drawn, so it never sits at the end
+  // first. A tile already at the end stays where it is meanwhile.
+  async function unknownAtFirst(lists: boolean) {
+    const made = { ...root("alpha"), id: "w-new", kind: "isolated" as const };
+    const stranded = { ...session("lost", "alpha", "2026-11-01T09:00:00Z"), workspace_id: "w-lost" };
+    const fresh = { ...session("fresh", "alpha", "2026-11-08T09:00:00Z"), workspace_id: "w-new" };
+    const later: (() => void)[] = [];
+    let listed = [stranded];
+    let holding = false;
+    const core = fakeCore({
+      "session.list": () => listed,
+      "workspace.list": (params: { project_id: string }) => {
+        if (!holding) return [root(params.project_id)];
+        const answer = [root(params.project_id), ...(lists && params.project_id === "alpha" ? [made] : [])];
+        return new Promise((resolve) => later.push(() => resolve(answer)));
+      },
+    });
+    render(createElement(App, { client: core.client }));
+    for (let turn = 0; turn < 20 && !document.querySelector('[data-session-id="lost"]'); turn++) await settle();
+    await settle();
+    const tile = document.querySelector('[data-session-id="lost"]');
+    expect(tile).not.toBeNull();
+    holding = true;
+    listed = [stranded, fresh];
+    core.emit({ kind: "notification", method: "session.tile", params: { session_id: "fresh", tile: { state: "idle", pending: [] } } } as CoreEvent);
+    for (let turn = 0; turn < 20 && later.length < projects.length; turn++) await settle();
+    const tree = screen.getByRole("region", { name: "Projects and sessions" });
+    expect(later).toHaveLength(projects.length);
+    expect(tree.querySelector('[data-session-id="fresh"]')).toBeNull();
+    expect(tree.querySelector('[data-session-id="lost"]')).toBe(tile);
+    await act(async () => later.forEach((answer) => answer()));
+    await settle();
+    await settle();
+    return tree;
+  }
+
+  it("holds a new session's tile back until the read for its workspace answers, then draws it under its project", async () => {
+    const tree = await unknownAtFirst(true);
+    expect(headings()[0]).toEqual(["alpha", 1]);
+    expect(tree.querySelector('.rail-project [data-session-id="fresh"]')).not.toBeNull();
+  });
+
+  // verifies: FLOW-NEW-SESSION-R13
+  it("puts a session it starts under its project as soon as Core lists it, while the first message is still on its way", async () => {
+    const made = { ...session("s-new", "alpha", "2026-11-03T09:00:00Z"), workspace_id: "w-new", state: "idle" as const };
+    let created = false;
+    const core = await screenWith([project("alpha")], undefined, {
+      "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", vcs_ref: "ersa/new" }),
+      "session.create": () => ((created = true), made),
+      "session.list": () => (created ? [made] : []),
+      "session.send": () => new Promise(() => {}),
+    });
+    fireEvent.change(words(), { target: { value: "Fix it" } });
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    await settle();
+    core.emit({ kind: "notification", method: "session.tile", params: { session_id: "s-new", tile: { state: "idle", pending: [] } } } as CoreEvent);
+    await settle();
+    await settle();
+    const tree = screen.getByRole("region", { name: "Projects and sessions" });
+    expect(tree.querySelector('.rail-project [data-session-id="s-new"]')).not.toBeNull();
+  });
+
+  it("draws a session no read lists at the end, once the reads have answered", async () => {
+    const tree = await unknownAtFirst(false);
+    expect(tree.querySelector(':scope > .rail-tiles [data-session-id="fresh"]')).not.toBeNull();
+  });
 });
 
 // A new workspace's base branch (FLOW-NEW-SESSION-R21, R28, R29): App reads the project's branches with `branch.list` and

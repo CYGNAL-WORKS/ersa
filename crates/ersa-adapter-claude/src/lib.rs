@@ -2,7 +2,8 @@
 //! mode, passing every behaviour-affecting flag explicitly, and provides the
 //! projection from the raw log of that conversation to Ersa events. Permission
 //! requests arrive over the CLI's stdio control channel as `can_use_tool`
-//! requests, which this adapter answers (ADR 0014).
+//! requests, which this adapter answers (ADR 0014); so do the agent's
+//! questions to the user, through the CLI's question tool.
 //!
 //! The wire protocol it speaks is described in
 //! `docs/briefs/PROTO-CLAUDE-CODE-STREAM.md`, with recorded fixtures under
@@ -21,6 +22,7 @@ mod attachments;
 mod driver;
 mod platform;
 mod projector;
+mod questions;
 pub mod record;
 mod suggestions;
 pub mod wire;
