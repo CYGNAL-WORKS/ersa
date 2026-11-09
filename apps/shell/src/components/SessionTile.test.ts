@@ -79,7 +79,7 @@ describe("a session's tile", () => {
     );
     expect(html.match(/class="shelf"/g)).toHaveLength(1);
     // The open tile names its own anchor, and the shelf's layer is placed by it.
-    const open = html.match(/<li class="session-item" data-shelf="true" data-tone="caution" style="anchor-name:(--[^"]+)">.*?<\/li>/);
+    const open = html.match(/<li class="session-item" data-slide="session:a" data-shelf="true" data-tone="caution" style="anchor-name:(--[^"]+)"[^>]*>.*?<\/li>/);
     expect(open?.[0]).toContain('aria-label="Request from a"');
     expect(open?.[0]).toContain(`<div class="shelf-layer" style="position-anchor:${open?.[1]}">`);
     // A question's tile is the accent, until its shelf shows something in the caution tone.
@@ -110,7 +110,7 @@ describe("a session's tile", () => {
   });
 
   it("draws each mark in the tone the mapping gives", () => {
-    expect(draw({ state: "running" })).toContain('<span class="glyph session-glyph" data-tone="accent" role="img" aria-label="Working">');
+    expect(draw({ state: "running" })).toContain('<span class="glyph session-glyph" data-tone="accent" data-breath="loop" role="img" aria-label="Working">');
     expect(draw({ state: "disconnected" })).toContain('<span class="glyph session-glyph" data-tone="faint" aria-hidden="true">');
     expect(draw({ state: "error" })).toContain('<span class="glyph session-glyph" data-tone="danger" aria-hidden="true">');
   });

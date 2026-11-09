@@ -15,15 +15,17 @@ use std::collections::{HashMap, HashSet};
 
 use ersa_adapter::{Direction, Projected, Projector, RawLine};
 use ersa_protocol::events::{
-    AssistantText, AssistantThinking, BackendPassthrough, DecidedBy, ErrorAction, ErrorCode,
-    ErrorEvent, Event, LifecycleState, MessageOrigin, NoticeCode, NoticeLevel, PermissionBehavior,
-    PermissionDecided, PermissionDeniedUnanswered, PermissionFlags, PermissionReason,
-    PermissionRequested, PermissionSuggestion, RateLimit, SessionNotice, SessionStarted,
-    SessionState, ToolRequested, ToolResult, ToolResultContent, TurnCompleted, TurnOutcome,
-    TurnStarted, TurnTrigger, UsageUpdated, UserMessage,
+    AnsweredBy, AssistantText, AssistantThinking, BackendPassthrough, DecidedBy, ErrorAction,
+    ErrorCode, ErrorEvent, Event, LifecycleState, MessageOrigin, NoticeCode, NoticeLevel,
+    PermissionBehavior, PermissionDecided, PermissionDeniedUnanswered, PermissionFlags,
+    PermissionReason, PermissionRequested, PermissionSuggestion, Question, QuestionAnswered,
+    QuestionAsked, RateLimit, SessionNotice, SessionStarted, SessionState, ToolRequested,
+    ToolResult, ToolResultContent, TurnCompleted, TurnOutcome, TurnStarted, TurnTrigger,
+    UsageUpdated, UserMessage,
 };
 use serde_json::Value;
 
+use crate::questions::{self, QUESTION_TOOL};
 use crate::suggestions;
 use crate::wire::{
     ApiMessage, AssistantMessage, CliMessage, CliResponse, ContentBlock, Delta, InitializeResponse,
@@ -33,7 +35,7 @@ use crate::{BACKEND, MAX_TESTED_VERSION};
 
 /// The version of this projection. Bump it whenever the events produced for
 /// some raw log would change, so Core re-projects cached sessions.
-pub const PROJECTOR_VERSION: u32 = 5;
+pub const PROJECTOR_VERSION: u32 = 6;
 
 /// The `model` the CLI gives the messages it writes itself rather than
 /// receiving from the API.
@@ -49,7 +51,8 @@ pub struct ClaudeProjector {
     turn_open: bool,
     /// `request_id`s of the host's `initialize` requests not yet answered.
     initialize_ids: HashSet<String>,
-    /// Pending `can_use_tool` requests, by `request_id`.
+    /// Pending `can_use_tool` requests, permission requests and questions
+    /// alike, by `request_id`.
     permissions: HashMap<String, PendingPrompt>,
     /// How many content blocks the `assistant` lines of each message id have
     /// carried so far, which gives the next block's index in its message.
@@ -68,6 +71,11 @@ pub struct ClaudeProjector {
     /// of the current turn, by message id, for `turn_output_tokens`
     /// (PROTO-AGENT-EVENTS-R17).
     output_tokens: HashMap<String, u64>,
+    /// The title of the latest `system/session_title_changed`: the name the
+    /// user gave the session, which the CLI announces after each change to
+    /// it, never for a title it generated (PROTO-CLAUDE-CODE-STREAM-R36),
+    /// after how many such lines.
+    announced_title: Option<(u64, String)>,
 }
 
 /// A `can_use_tool` request the CLI is waiting on.
@@ -75,9 +83,20 @@ pub struct ClaudeProjector {
 struct PendingPrompt {
     /// The raw line it arrived on, to settle leftovers in arrival order.
     raw: u64,
-    /// The suggestions its `permission.requested` offered, to map an answer's
+    asks: Asks,
+}
+
+/// What a pending `can_use_tool` request asks the user.
+#[derive(Debug)]
+enum Asks {
+    /// Whether a tool may run. Holds the suggestions its
+    /// `permission.requested` offered, to map an answer's
     /// `updatedPermissions` back to indices.
-    offered: Vec<(usize, PermissionSuggestion)>,
+    Permission(Vec<(usize, PermissionSuggestion)>),
+    /// A question (PROTO-CLAUDE-CODE-STREAM, Questions). Holds the questions
+    /// its `question.asked` carried, to read the answer's texts and labels
+    /// back as ids.
+    Question(Vec<Question>),
 }
 
 #[derive(Debug)]
@@ -116,6 +135,12 @@ impl Projector for ClaudeProjector {
             _ => Vec::new(),
         }
     }
+
+    fn announced_title(&self) -> Option<(u64, &str)> {
+        self.announced_title
+            .as_ref()
+            .map(|(count, title)| (*count, title.as_str()))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +164,14 @@ impl ClaudeProjector {
             }
             (Some("result"), _, _) => return self.result(line, value, drifted),
             (Some("system"), Some("init"), _) => return self.init(line, value, drifted),
+            // The session's name, kept for Core to show until the record
+            // holds it; the line itself stays a passthrough, as it is below.
+            (Some("system"), Some("session_title_changed"), _) => {
+                if let Some(title) = field("/title") {
+                    let count = self.announced_title.as_ref().map_or(0, |(n, _)| *n);
+                    self.announced_title = Some((count + 1, title.to_string()));
+                }
+            }
             _ => {}
         }
 
@@ -177,22 +210,13 @@ impl ClaudeProjector {
                 self.control_response(line, answer.response, value)
             }
             CliMessage::ControlCancelRequest(cancel) => {
-                if self.permissions.remove(&cancel.request_id).is_none() {
+                let Some(prompt) = self.permissions.remove(&cancel.request_id) else {
                     return vec![passthrough(line, value)];
-                }
+                };
                 // The CLI withdrew a prompt it was waiting on (after an
                 // interrupt, say): the tool will not run, and nobody asked
                 // the user, so the backend decided.
-                let mut out = vec![at(
-                    line,
-                    Event::PermissionDecided(PermissionDecided {
-                        request_id: cancel.request_id,
-                        behavior: PermissionBehavior::Deny,
-                        decided_by: DecidedBy::Backend,
-                        message: None,
-                        applied_suggestions: None,
-                    }),
-                )];
+                let mut out = vec![at(line, withdrawn(cancel.request_id, &prompt.asks))];
                 out.extend(self.running_unless_waiting(line));
                 out
             }
@@ -509,7 +533,7 @@ impl ClaudeProjector {
     }
 
     /// Prompts still pending when a turn ends without the CLI withdrawing
-    /// them: the turn is over, so they are moot. Each is decided `deny` by the
+    /// them: the turn is over, so they are moot. Each is settled by the
     /// backend, in the order they arrived, so the shelf drops it and a late
     /// answer is not mistaken for a pending one.
     fn settle_prompts(&mut self, line: &RawLine) -> Vec<Projected> {
@@ -517,18 +541,7 @@ impl ClaudeProjector {
         leftover.sort_by_key(|(_, prompt)| prompt.raw);
         leftover
             .into_iter()
-            .map(|(request_id, _)| {
-                at(
-                    line,
-                    Event::PermissionDecided(PermissionDecided {
-                        request_id,
-                        behavior: PermissionBehavior::Deny,
-                        decided_by: DecidedBy::Backend,
-                        message: None,
-                        applied_suggestions: None,
-                    }),
-                )
-            })
+            .map(|(request_id, prompt)| at(line, withdrawn(request_id, &prompt.asks)))
             .collect()
     }
 
@@ -571,6 +584,11 @@ impl ClaudeProjector {
         });
         let tool_name = tool_name.unwrap_or_else(|| "unknown".into());
         let input = input.unwrap_or_default();
+        // The CLI asks the user a question through a tool of its own; that
+        // request is a question, never a permission request (R18).
+        if tool_name == QUESTION_TOOL {
+            return self.question_asked(line, request_id, &input, defect, value);
+        }
         let cli_suggestions = ask["permission_suggestions"]
             .as_array()
             .cloned()
@@ -609,13 +627,61 @@ impl ClaudeProjector {
             request_id,
             PendingPrompt {
                 raw: line.index,
-                offered,
+                asks: Asks::Permission(offered),
             },
         );
 
         let mut out: Vec<Projected> = defect.iter().cloned().collect();
         out.extend(self.ensure_turn(line));
         out.push(at(line, Event::PermissionRequested(event)));
+        out.push(state(line, LifecycleState::WaitingUser));
+        if defect.is_some() {
+            out.push(passthrough(line, value));
+        }
+        out
+    }
+
+    /// A `can_use_tool` request for the CLI's question tool: one
+    /// `question.asked`, and the session waits on the user (R18).
+    fn question_asked(
+        &mut self,
+        line: &RawLine,
+        request_id: String,
+        input: &serde_json::Map<String, Value>,
+        mut defect: Option<Projected>,
+        value: Value,
+    ) -> Vec<Projected> {
+        let (asked, malformed) = questions::asked(input);
+        // A question the CLI waits on reaches the user even when its shape
+        // has drifted, since they can still decline it; the error says what
+        // was missing and the passthrough keeps the line.
+        if defect.is_none() && (asked.is_empty() || malformed > 0) {
+            defect = Some(protocol_error(
+                line,
+                format!(
+                    "raw line {}: {QUESTION_TOOL} request {request_id} has {} question(s), \
+                     {malformed} of them without text",
+                    line.index,
+                    asked.len()
+                ),
+            ));
+        }
+        self.permissions.insert(
+            request_id.clone(),
+            PendingPrompt {
+                raw: line.index,
+                asks: Asks::Question(asked.clone()),
+            },
+        );
+        let mut out: Vec<Projected> = defect.iter().cloned().collect();
+        out.extend(self.ensure_turn(line));
+        out.push(at(
+            line,
+            Event::QuestionAsked(QuestionAsked {
+                request_id,
+                questions: asked,
+            }),
+        ));
         out.push(state(line, LifecycleState::WaitingUser));
         if defect.is_some() {
             out.push(passthrough(line, value));
@@ -761,22 +827,47 @@ impl ClaudeProjector {
         out
     }
 
-    /// The host's `control_response`: the user's answer to a permission request.
+    /// The host's `control_response`: the user's answer to a permission
+    /// request or a question.
     fn host_answer(&mut self, line: &RawLine, value: Value) -> Vec<Projected> {
         let request_id = value
             .pointer("/response/request_id")
             .and_then(Value::as_str);
-        let Some((request_id, PendingPrompt { offered, .. })) =
+        let Some((request_id, PendingPrompt { asks, .. })) =
             request_id.and_then(|id| Some((id.to_string(), self.permissions.remove(id)?)))
         else {
-            // An answer to something other than a pending permission request.
+            // An answer to something other than a pending prompt.
             return vec![passthrough(line, value)];
         };
         let decision = value.pointer("/response/response");
         let field = |name: &str| decision.and_then(|d| d.get(name));
-        let behavior = match field("behavior").and_then(Value::as_str) {
-            Some("allow") => PermissionBehavior::Allow,
-            _ => PermissionBehavior::Deny,
+        let allowed = field("behavior").and_then(Value::as_str) == Some("allow");
+        let offered = match asks {
+            Asks::Permission(offered) => offered,
+            Asks::Question(asked) => {
+                // An allow carries the answers keyed by question text; a deny
+                // is the user declining (R19).
+                let answers = match field("updatedInput").and_then(|input| input.get("answers")) {
+                    Some(Value::Object(answers)) if allowed => questions::from_cli(&asked, answers),
+                    _ => Vec::new(),
+                };
+                let mut out = vec![at(
+                    line,
+                    Event::QuestionAnswered(QuestionAnswered {
+                        request_id,
+                        answers,
+                        declined: !allowed,
+                        answered_by: AnsweredBy::User,
+                    }),
+                )];
+                out.extend(self.running_unless_waiting(line));
+                return out;
+            }
+        };
+        let behavior = if allowed {
+            PermissionBehavior::Allow
+        } else {
+            PermissionBehavior::Deny
         };
         // Which offered suggestions the answer applied, as indices into the
         // event's `suggestions`.
@@ -921,6 +1012,27 @@ pub(crate) fn tool_result_events(content: MessageContent) -> Vec<Event> {
 // Helpers
 
 /// An event that came from `line` alone.
+/// How a prompt the user never answered ends when the backend drops it (a
+/// `control_cancel_request`, or the turn ending): a permission request is
+/// denied by the backend, and a question answered by it with no answers.
+fn withdrawn(request_id: String, asks: &Asks) -> Event {
+    match asks {
+        Asks::Permission(_) => Event::PermissionDecided(PermissionDecided {
+            request_id,
+            behavior: PermissionBehavior::Deny,
+            decided_by: DecidedBy::Backend,
+            message: None,
+            applied_suggestions: None,
+        }),
+        Asks::Question(_) => Event::QuestionAnswered(QuestionAnswered {
+            request_id,
+            answers: Vec::new(),
+            declined: false,
+            answered_by: AnsweredBy::Backend,
+        }),
+    }
+}
+
 fn at(line: &RawLine, event: Event) -> Projected {
     Projected::from_line(line, event)
 }

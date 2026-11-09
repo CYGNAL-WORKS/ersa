@@ -30,6 +30,10 @@ export const enUS = {
       // Names the tree when it fails to draw: "The projects and sessions could not be shown:".
       boundaryName: "The projects and sessions",
     },
+    // The Pinned group's heading (docs/design/RAIL.md, A group heading).
+    group: {
+      pinnedHeading: "Pinned",
+    },
     // A project heading (docs/design/RAIL.md, A project heading) and its More menu.
     heading: {
       newSessionLabel: "New session in {project}",
@@ -62,13 +66,26 @@ export const enUS = {
       untitledLabel: "Untitled session",
       // The tile's More button and its menu (docs/design/RAIL.md, A tile: More).
       moreLabel: "More for {title}",
+      pinButton: "Pin",
+      unpinButton: "Unpin",
+      // Pin or Unpin while Core stores the last choice.
+      savingProgress: "Saving…",
+      // Followed by Core's reason, beneath the tile.
+      pinError: "Ersa can't pin this session.",
+      unpinError: "Ersa can't unpin this session.",
       renameButton: "Rename",
       // The key that does the same as Rename, at the item's trailing edge.
       renameKey: "F2",
-      // Why an item in the menu is unavailable while Ersa can't reach Core, which renaming and deleting go through.
+      // Why an item that goes through Core, such as Rename, Pin, Archive or Delete, is unavailable.
       offlineReason: "Available once Ersa reaches your sessions",
       // In the tile's menu, apart in its own group. It asks first, so it ends in an ellipsis.
       deleteButton: "Delete…",
+      // Archive or Unarchive, by whether the session is archived (FLOW-ARCHIVE-DELETE-SESSION).
+      archiveButton: "Archive",
+      unarchiveButton: "Unarchive",
+      // Beneath the tile, before Core's reason, when Core refuses.
+      archiveError: "Ersa can't archive this session.",
+      unarchiveError: "Ersa can't unarchive this session.",
       // The field the title becomes while it is renamed on the tile.
       titleLabel: "Session title",
       // Names a tile when it fails to draw: "This session could not be shown:".
@@ -83,6 +100,8 @@ export const enUS = {
       // A session Ersa is deleting, and one whose deletion failed (LAY-SHELL, Being deleted).
       deletingStatus: "Deleting",
       deleteFailedStatus: "Couldn't delete",
+      // Heard, not shown: the archive mark's name, on an archived session's tile.
+      archivedStatus: "Archived",
       // What a session that needs the user wants, in the tone of its chevron.
       permissionWant: "Needs permission",
       questionWant: "Has a question",
@@ -165,6 +184,14 @@ export const enUS = {
   // (FLOW-NEW-SESSION-R23). That Ersa can't reach the sessions is said in the rail foot's words.
   composer: {
     name: "Composer",
+    // In place of the box for an archived session, which opens read-only (FLOW-ARCHIVE-DELETE-SESSION, step 2).
+    archived: {
+      note: "This session is archived. Resume it to send a message.",
+      resumeButton: "Resume",
+      resumingProgress: "Resuming…",
+      // Before Core's reason, when Core refuses the resume.
+      resumeError: "Ersa can't resume this session.",
+    },
     messageLabel: "Message",
     writePlaceholder: "Write to the agent",
     attachButton: "Attach",

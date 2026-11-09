@@ -2825,6 +2825,10 @@
         },
         "answers": {
           "$ref": "agent-events.schema.json#/$defs/question.answered/properties/answers"
+        },
+        "declined": {
+          "type": "boolean",
+          "description": "True, with no answers, when the user chose not to answer."
         }
       }
     },

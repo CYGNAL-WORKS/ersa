@@ -33,7 +33,7 @@ export interface Envelope {
   /**
    * Event schema version. Bumped when any event's meaning or shape changes, including the lifecycle events Core emits itself.
    */
-  v: 4;
+  v: 5;
   session_id: string;
   /**
    * Gap-free and increasing within a session; assigned by Core.
@@ -216,26 +216,52 @@ export interface QuestionAsked {
   type: "question.asked";
   request_id: string;
   questions: {
+    /**
+     * Unique within the request.
+     */
     id: string;
     text: string;
+    /**
+     * A short label for the question.
+     */
+    header?: string;
     options?: {
       id: string;
       label: string;
+      description?: string;
     }[];
     multi_select: boolean;
+    /**
+     * The user may answer in their own words beside the options.
+     */
+    takes_text: boolean;
   }[];
 }
 export interface QuestionAnswered {
   type: "question.answered";
   request_id: string;
+  /**
+   * One per question; empty when the user declined or the backend withdrew the question.
+   */
   answers: {
+    /**
+     * The id of the question this answers.
+     */
     id: string;
     /**
-     * Free text or one option id, or several option ids for a multi-select question.
+     * The user's own words when own_words is true; otherwise one option id, or several option ids for a multi-select question.
      */
     value: string | string[];
+    own_words: boolean;
   }[];
-  answered_by: "user" | "timeout";
+  /**
+   * The user chose not to answer.
+   */
+  declined: boolean;
+  /**
+   * backend: the backend withdrew the question, after an interrupt say.
+   */
+  answered_by: "user" | "timeout" | "backend";
 }
 /**
  * Any field absent means no new information; the Interface keeps the last known value per field.

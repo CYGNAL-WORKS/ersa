@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use ersa_protocol::core_api::Choice;
-use ersa_protocol::events::{Event, PermissionBehavior};
+use ersa_protocol::events::{Answer, Event, PermissionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -71,6 +71,17 @@ pub trait Adapter: Send + Sync {
     /// A fresh projector for one session's live stream. Core makes one each
     /// time it starts the backend and feeds it every raw line from the first.
     fn projector(&self) -> Box<dyn Projector>;
+
+    /// An id for a new session, for a backend that starts a session under an
+    /// id its host chooses: Core stores it as the session's backend session
+    /// id before it starts the backend, and passes it in
+    /// [`SessionConfig::backend_session_id`], so the session can be named,
+    /// renamed and found from the moment it starts. `None`, the default, for
+    /// a backend that names its sessions itself, announcing the id once it
+    /// has started.
+    fn new_session_id(&self) -> Option<String> {
+        None
+    }
 
     /// The events of a session's history, projected from the backend's own
     /// session record (ADR 0017): the session the backend knows as
@@ -317,6 +328,18 @@ pub trait AdapterSession: Send + Sync {
         decision: PermissionDecision,
     ) -> Result<(), AdapterError>;
 
+    /// Answers the backend's pending question `request_id`, the id carried
+    /// by its `question.asked` event, with the user's answers or their
+    /// declining it. The default: the backend asks no questions, so none can
+    /// be pending.
+    async fn answer_question(
+        &self,
+        request_id: &str,
+        _reply: QuestionReply,
+    ) -> Result<(), AdapterError> {
+        Err(AdapterError::UnknownRequest(request_id.to_string()))
+    }
+
     /// Asks the backend to stop the current turn. The session stays alive.
     async fn interrupt(&self) -> Result<(), AdapterError>;
 
@@ -383,6 +406,17 @@ pub trait Projector: Send {
     /// Payloads only: Core wraps each in an envelope, assigning `seq` and
     /// taking `ts` from `line`.
     fn project(&mut self, line: &RawLine) -> Vec<Projected>;
+
+    /// The latest title the backend announced on the live stream for the
+    /// session, from the lines projected so far: a name the user gave it,
+    /// which its record may not hold yet, with how many announcements there
+    /// have been, so that one repeating the last title still counts as one.
+    /// Core shows it as the session's title, in memory only, as it does any
+    /// detail only the live stream carries. `None`, the default, before any
+    /// announcement, and for a backend that makes none.
+    fn announced_title(&self) -> Option<(u64, &str)> {
+        None
+    }
 }
 
 /// One event a projector produced, with the backend's id for the message it
@@ -435,6 +469,11 @@ pub struct SessionConfig {
     /// user answered the trust question for. Empty when unknown.
     #[serde(default)]
     pub project_path: String,
+    /// For a new session, the id the backend starts it under: the one Core
+    /// took from [`Adapter::new_session_id`] and stored. `None` leaves the
+    /// backend to choose, as it does for a backend without host-chosen ids.
+    #[serde(default)]
+    pub backend_session_id: Option<String>,
     /// Backend-specific settings, read only by that backend's adapter. `null`
     /// when there are none.
     pub extra: Value,
@@ -458,6 +497,16 @@ pub struct PermissionDecision {
     pub apply_suggestions: Vec<u32>,
 }
 
+/// The user's reply to a question, mirroring the parameters of
+/// `session.answer_question` in `PROTO-CORE-API`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum QuestionReply {
+    /// One answer per question, in `question.answered`'s shape.
+    Answers(Vec<Answer>),
+    /// The user chose not to answer.
+    Declined,
+}
+
 /// Why an adapter call failed.
 #[derive(Debug)]
 pub enum AdapterError {
@@ -468,7 +517,8 @@ pub enum AdapterError {
     Protocol(String),
     /// The session's backend process is no longer running.
     NotRunning,
-    /// `decide_permission` named a request the backend is not waiting on.
+    /// `decide_permission` or `answer_question` named a request the backend
+    /// is not waiting on, or one of the other kind.
     UnknownRequest(String),
 }
 

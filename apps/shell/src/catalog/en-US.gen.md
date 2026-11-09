@@ -36,6 +36,10 @@ Ersa can't read your sessions.
 
 The projects and sessions
 
+### `rail.group.pinnedHeading`
+
+Pinned
+
 ### `rail.heading.newSessionLabel`
 
 New session in {project}
@@ -114,6 +118,26 @@ Untitled session
 
 More for {title}
 
+### `rail.tile.pinButton`
+
+Pin
+
+### `rail.tile.unpinButton`
+
+Unpin
+
+### `rail.tile.savingProgress`
+
+Saving…
+
+### `rail.tile.pinError`
+
+Ersa can't pin this session.
+
+### `rail.tile.unpinError`
+
+Ersa can't unpin this session.
+
 ### `rail.tile.renameButton`
 
 Rename
@@ -129,6 +153,22 @@ Available once Ersa reaches your sessions
 ### `rail.tile.deleteButton`
 
 Delete…
+
+### `rail.tile.archiveButton`
+
+Archive
+
+### `rail.tile.unarchiveButton`
+
+Unarchive
+
+### `rail.tile.archiveError`
+
+Ersa can't archive this session.
+
+### `rail.tile.unarchiveError`
+
+Ersa can't unarchive this session.
 
 ### `rail.tile.titleLabel`
 
@@ -169,6 +209,10 @@ Deleting
 ### `rail.tile.deleteFailedStatus`
 
 Couldn't delete
+
+### `rail.tile.archivedStatus`
+
+Archived
 
 ### `rail.tile.permissionWant`
 
@@ -379,6 +423,22 @@ Attached image
 ### `composer.name`
 
 Composer
+
+### `composer.archived.note`
+
+This session is archived. Resume it to send a message.
+
+### `composer.archived.resumeButton`
+
+Resume
+
+### `composer.archived.resumingProgress`
+
+Resuming…
+
+### `composer.archived.resumeError`
+
+Ersa can't resume this session.
 
 ### `composer.messageLabel`
 

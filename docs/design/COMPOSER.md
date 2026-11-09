@@ -37,6 +37,10 @@ One line above the box, `size-control` high at least, showing one message at a t
 
 A refused message's line is announced to assistive technology as an alert. When the box becomes unavailable, keyboard focus returns to the words once it is available again. **Unavailable**, the box is `canvas`, the words and their placeholder read `ink-faint`, and attach and send read `ink-faint` with no fill and do not change under the pointer.
 
+## The archived note
+
+An archived session shows a note where the composer sits, at its measure: one row on `canvas` with a `line` edge at `hairline`, `radius-md`, padded `space-sm`. From the leading edge: an archive icon at `size-icon-sm` in `ink-muted`, the words in `ui` and `ink-muted`, then Resume, the primary button, at the trailing edge. While Core answers, Resume reads "Resuming…" and is unavailable. A refused Resume says why above the note, where the status line sits, as a refused message does.
+
 ## Attachments
 
 Attachments sit in the box above the words, across its full width, wrapping, `space-sm` apart, padded `space-xs` at the top and sides.
