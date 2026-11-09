@@ -85,7 +85,7 @@ fn finished() -> (String, &'static str) {
 }
 
 // verifies: FLOW-FORK-SESSION-R01
-// verifies: PROTO-CLAUDE-CODE-STREAM-R28
+// verifies: PROTO-CLAUDE-CODE-STREAM-R38
 #[test]
 fn the_recorded_fork_has_a_new_id_and_leaves_the_original_record_as_it_was() {
     for name in [
@@ -110,7 +110,7 @@ fn the_recorded_fork_has_a_new_id_and_leaves_the_original_record_as_it_was() {
     assert_eq!(messages(&copy)[..original.len()], original[..]);
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R28
+// verifies: PROTO-CLAUDE-CODE-STREAM-R38
 #[test]
 fn a_chosen_id_names_the_fork_and_the_cli_writes_nothing_before_its_first_message() {
     let named = meta("16-fork-named-before-first-message");
@@ -167,7 +167,7 @@ fn the_cli_copies_the_originals_title_as_it_stands() {
     assert_eq!(title["customTitle"], "Titled original");
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R28
+// verifies: PROTO-CLAUDE-CODE-STREAM-R38
 #[test]
 fn fork_args_name_the_original_and_ask_for_a_fork() {
     let config = SessionConfig {
@@ -190,7 +190,7 @@ fn a_fork_of_something_that_is_no_session_id_never_reaches_the_command_line() {
     assert!(matches!(fork_args(&config), Err(AdapterError::Protocol(_))));
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R28
+// verifies: PROTO-CLAUDE-CODE-STREAM-R38
 #[tokio::test(flavor = "multi_thread")]
 async fn the_adapter_forks_in_the_stored_path_under_the_id_core_chose() {
     let stdout = fixture("2.1.316/16-fork-named-before-first-message").stdout;

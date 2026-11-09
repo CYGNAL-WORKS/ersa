@@ -1,0 +1,15 @@
+Claude Desktop's fork, observed 2026-11-08, with Claude Code 2.1.316.
+
+A session in its own worktree, idle after one finished reply, forked from its menu in Claude Desktop's Code tab.
+
+                 Original        Fork
+  Title          T               T (fork)
+  Folder         its worktree    a different worktree
+  Branch         claude/a        claude/b, a new branch at the same commit
+  Model, effort  as chosen       the same
+
+The original had no commits of its own, so this does not show whether the new branch starts from the original's tip or from what it started from. Claude Desktop's own description of a fork says the tip, and that uncommitted edits stay behind.
+
+claude -p --resume <id> --fork-session, run from a worktree of the same repository and from an unrelated folder, each found the original's record and answered from its conversation, under a new session id.
+
+Not observed: Fork during a reply, Fork on an archived session, and renaming a titled original's fork over its copied title.

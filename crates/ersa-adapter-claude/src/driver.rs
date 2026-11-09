@@ -327,7 +327,7 @@ pub fn resume_args(config: &SessionConfig) -> Result<Vec<String>, AdapterError> 
 /// The arguments that fork an earlier session, after [`invocation_args`]:
 /// `--resume` with the original's id, and `--fork-session`, so the CLI copies
 /// its conversation into a new record and leaves the original's as it was
-/// (fixtures 2.1.316/13 to 19, PROTO-CLAUDE-CODE-STREAM-R28). None unless
+/// (fixtures 2.1.316/13 to 19, PROTO-CLAUDE-CODE-STREAM-R38). None unless
 /// `fork_of` is set. Like a resume id, it must be a session id.
 pub fn fork_args(config: &SessionConfig) -> Result<Vec<String>, AdapterError> {
     let Some(id) = &config.fork_of else {

@@ -218,7 +218,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         .unwrap_or_else(|| BackendChoices::default_of(&adapter.choices().permission_modes));
     // Chosen and stored before the backend starts, as for a new session, so
     // a fork can be renamed before its first message. A backend without
-    // host-chosen ids names it when it starts instead (R28).
+    // host-chosen ids names it when it starts instead (R38).
     let backend_session_id = adapter.new_session_id();
     let fork = SessionRow {
         id: persistence::new_id("s"),
@@ -227,7 +227,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         backend: original.backend,
         backend_session_id: backend_session_id.clone(),
         mode: original.mode,
-        // The stored path, never the one the backend reports (R28).
+        // The stored path, never the one the backend reports (R38).
         cwd: workspace.path.clone(),
         model: original.model.clone(),
         effort: original.effort.clone(),
