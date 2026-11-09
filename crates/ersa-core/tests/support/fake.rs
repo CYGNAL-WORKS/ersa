@@ -60,11 +60,11 @@ pub struct Stats {
     pub stops: AtomicUsize,
     /// The configuration of every session started, in order.
     pub configs: Mutex<Vec<SessionConfig>>,
-    /// Renames written to a record.
     /// The title of every rename a running backend was sent, in order, as
     /// it arrives; held there while a test has `rename_gate`.
     pub rename_titles: Mutex<Vec<String>>,
     pub rename_gate: tokio::sync::Mutex<()>,
+    /// Renames written to a record.
     pub record_renames: AtomicUsize,
     /// For every time Core asked whether another process has a session
     /// open: the backend's id for it, and how many record renames had
