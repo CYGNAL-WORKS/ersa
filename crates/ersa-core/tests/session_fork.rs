@@ -352,3 +352,54 @@ async fn only_one_fork_of_a_session_reads_its_record_at_a_time() {
     // Finished, the next one may go.
     second.result("session.fork", json!({ "id": id })).await;
 }
+
+// verifies: FLOW-FORK-SESSION-R03
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_removed_during_the_forks_reads_is_not_forked() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    let gate = Arc::clone(&fake.open_check_gate);
+    let held = gate.lock().await;
+    let pending = client.request("session.fork", json!({ "id": id })).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let mut second = core.client().await;
+    second.result("session.stop", json!({ "id": id })).await;
+    second.result("session.remove", json!({ "id": id })).await;
+
+    drop(held);
+    let response = client.response(pending).await;
+    assert_eq!(kind(&response["error"]), "not_found", "{response}");
+    assert_eq!(
+        fake.stats.starts.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "no fork started"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_registry_check_that_hangs_holds_back_the_next_fork_until_it_ends() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    let gate = Arc::clone(&fake.open_check_gate);
+    let held = gate.lock().await;
+
+    // The registry doesn't answer in time, which doesn't refuse the fork,
+    client.result("session.fork", json!({ "id": id })).await;
+    // but its check is still running, so another try starts no second one.
+    let message = refused(&mut client, &id).await;
+    assert!(message.contains("still reading its record"), "{message}");
+
+    drop(held);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let response = client.call("session.fork", json!({ "id": id })).await;
+        if response["result"]["id"].is_string() {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{response}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
