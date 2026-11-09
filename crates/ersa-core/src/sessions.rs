@@ -67,7 +67,7 @@ use crate::raw_log::RawLog;
 mod fork;
 mod send;
 
-pub use fork::{Beginning, Forkable};
+pub use fork::{Beginning, ForkHold, Forkable};
 pub use send::Pacer;
 
 /// How many events may wait for one subscriber before it counts as unable
@@ -739,12 +739,16 @@ impl SessionManager {
             }
             if let Some(adapter) = self.adapters.get(&handle.backend) {
                 let row = lock(&handle.row).clone();
-                if let (Some(backend_id), Some(transport)) =
-                    (row.backend_session_id, transport_for(&row.host_id))
-                {
+                if let (true, Some(transport)) = (
+                    row.backend_session_id.is_some(),
+                    transport_for(&row.host_id),
+                ) {
                     let (handle, adapter) = (Arc::clone(&handle), Arc::clone(adapter));
                     summaries.spawn(async move {
-                        apply_summary(&handle, adapter, transport, row.cwd, backend_id).await;
+                        let at = Arc::clone(&transport);
+                        if let Some(id) = record_id(Arc::clone(&adapter), at, &row).await {
+                            apply_summary(&handle, adapter, transport, row.cwd, id).await;
+                        }
                     });
                 }
             }
@@ -893,6 +897,7 @@ impl SessionManager {
         }
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&handle.presented).title = begin.title;
+        let hold = begin.hold;
         // A new session has no record yet: the backend has not been told
         // anything, so its events are the live stream's from the start. A
         // fork starts from the conversation it copies.
@@ -916,6 +921,7 @@ impl SessionManager {
                     transport,
                     config,
                     backend_version,
+                    hold,
                 );
                 return Ok(handle.describe());
             }
@@ -933,6 +939,7 @@ impl SessionManager {
         transport: Arc<dyn Transport>,
         config: SessionConfig,
         backend_version: String,
+        hold: Option<Arc<ForkHold>>,
     ) {
         let (fed_tx, fed_rx) = mpsc::unbounded_channel();
         let sink = Arc::new(CoreSink::new(&handle.id, Arc::clone(&self.app_log), fed_tx));
@@ -962,6 +969,7 @@ impl SessionManager {
             transport,
             config,
             backend_version,
+            hold,
             started: started_tx,
             finished: finished_tx,
             pipeline,
@@ -1619,7 +1627,11 @@ impl SessionManager {
                 row.id, row.backend
             )));
         };
-        let record = match &row.backend_session_id {
+        let source = match transport_for(&row.host_id) {
+            Some(transport) => record_id(Arc::clone(&adapter), transport, &row).await,
+            None => row.backend_session_id.clone(),
+        };
+        let record = match &source {
             // The backend never announced the session, so it has no record.
             None => Arc::default(),
             Some(backend_id) => {
@@ -1715,10 +1727,13 @@ impl SessionManager {
                 })
             }
         };
+        // Read from its original, a fork's conversation stops where it did.
+        let record = match &row.forked_through {
+            Some(last) if source != row.backend_session_id => up_to(record, last),
+            _ => record,
+        };
         // Turns taken elsewhere may have changed its title too.
-        if let (Some(backend_id), Some(transport)) =
-            (row.backend_session_id.clone(), transport_for(&row.host_id))
-        {
+        if let (Some(backend_id), Some(transport)) = (source, transport_for(&row.host_id)) {
             apply_summary(handle, adapter, transport, row.cwd.clone(), backend_id).await;
         }
         let (mut view, mut events) = View::open(&row.id, &row.backend, None, &record);
@@ -1842,6 +1857,38 @@ fn is_rfc3339(text: &str) -> bool {
 ///
 /// Notices are not part of the record, so one reaches the clients reading
 /// the session now; with none reading, there is nobody to tell.
+/// Whose record holds session `row`'s conversation: its own, or for a fork
+/// the backend has not written a record for yet (it does with the first
+/// message), its original's. A record that can't be looked at counts as its
+/// own, which then says what is wrong with it.
+async fn record_id(
+    adapter: Arc<dyn Adapter>,
+    transport: Arc<dyn Transport>,
+    row: &SessionRow,
+) -> Option<String> {
+    let own = row.backend_session_id.clone()?;
+    let Some(original) = &row.forked_from else {
+        return Some(own);
+    };
+    let version = adapter.record_version(transport, &row.cwd, &own);
+    match tokio::time::timeout(RECORD_READ, version).await {
+        Ok(Ok(None)) => Some(original.clone()),
+        _ => Some(own),
+    }
+}
+
+/// The events of `record` up to and including those of message `last`, all
+/// of them when it holds no such message.
+fn up_to(record: Arc<Vec<RecordEvent>>, last: &str) -> Arc<Vec<RecordEvent>> {
+    match record
+        .iter()
+        .rposition(|event| event.message_id.as_deref() == Some(last))
+    {
+        Some(at) => Arc::new(record[..=at].to_vec()),
+        None => record,
+    }
+}
+
 /// The processes a registry named, as a message says them: `pid 7`, or
 /// `pids 7, 9`.
 pub(crate) fn pids_named(pids: &[u32]) -> String {
@@ -1916,15 +1963,15 @@ async fn notice_if_open_elsewhere(
 /// write halfway would leave half a line in the backend's stdin, which the
 /// next line would be glued onto. A call still stuck when the request gives
 /// up finishes, or fails, when the session is stopped.
-async fn bounded<T: Send + 'static>(
-    call: impl std::future::Future<Output = Result<T, AdapterError>> + Send + 'static,
-) -> Result<T, SessionError> {
+async fn bounded(
+    call: impl std::future::Future<Output = Result<(), AdapterError>> + Send + 'static,
+) -> Result<(), SessionError> {
     match tokio::time::timeout(ADAPTER_CALL, tokio::spawn(call)).await {
         Ok(Ok(result)) => result.map_err(SessionError::Adapter),
         Ok(Err(e)) => Err(SessionError::Internal(format!("the adapter failed: {e}"))),
         Err(_) => Err(SessionError::Adapter(AdapterError::Io(io::Error::new(
             io::ErrorKind::TimedOut,
-            format!("the backend did not answer within {ADAPTER_CALL:?}"),
+            format!("the backend did not take the line within {ADAPTER_CALL:?}"),
         )))),
     }
 }
@@ -2170,6 +2217,8 @@ struct SessionTask {
     transport: Arc<dyn Transport>,
     config: SessionConfig,
     backend_version: String,
+    /// A fork's hold on its original, let go once the start is over.
+    hold: Option<Arc<ForkHold>>,
     started: watch::Sender<Started>,
     finished: watch::Sender<bool>,
     pipeline: tokio::task::JoinHandle<()>,
@@ -2183,6 +2232,7 @@ async fn run_session(task: SessionTask) {
         transport,
         config,
         backend_version,
+        hold,
         started,
         finished,
         pipeline,
@@ -2215,6 +2265,7 @@ async fn run_session(task: SessionTask) {
             None
         }
     };
+    drop(hold);
     let mut pipeline = pipeline;
     let mut pipeline_done = false;
     match outcome {
@@ -2911,6 +2962,8 @@ mod tests {
             pinned: false,
             section_id: None,
             last_activity_at: None,
+            forked_from: None,
+            forked_through: None,
         };
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&manager.sessions).insert(handle.id.clone(), handle);

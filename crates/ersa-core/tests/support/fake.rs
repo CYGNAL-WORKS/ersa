@@ -157,6 +157,8 @@ pub struct FakeAdapter {
     pub conversation_end: Arc<Mutex<Option<ConversationEnd>>>,
     /// Reading how a conversation ends fails, as an unreadable record does.
     pub conversation_end_fails: Arc<std::sync::atomic::AtomicBool>,
+    /// Held by a test to hold every record read until it lets go.
+    pub read_gate: Arc<tokio::sync::Mutex<()>>,
     /// A backend that takes a stop and never exits.
     stop_hangs: bool,
 }
@@ -175,6 +177,7 @@ impl FakeAdapter {
             delete_refusal: Arc::default(),
             conversation_end: Arc::new(Mutex::new(Some(ConversationEnd::Finished))),
             conversation_end_fails: Arc::default(),
+            read_gate: Arc::default(),
             stop_hangs: false,
         }
     }
@@ -304,6 +307,7 @@ impl Adapter for FakeAdapter {
         _cwd: &str,
         backend_session_id: &str,
     ) -> Result<Arc<Vec<RecordEvent>>, AdapterError> {
+        drop(self.read_gate.lock().await);
         // A title is not part of the conversation, as Claude Code's
         // projection leaves its `custom-title` entries out.
         Ok(Arc::new(

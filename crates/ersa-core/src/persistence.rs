@@ -41,6 +41,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("persistence/0006_session_archived.sql"),
     include_str!("persistence/0007_session_deleting.sql"),
     include_str!("persistence/0008_session_arrangement.sql"),
+    include_str!("persistence/0009_session_fork.sql"),
 ];
 
 /// The id of the local host's row, which always exists.
