@@ -368,7 +368,8 @@ describe("the tree App draws in the rail", () => {
   /** Each project heading's name with how many tiles sit beneath it, in the rail's order. */
   function headings(): [string, number][] {
     const tree = screen.getByRole("region", { name: "Projects and sessions" });
-    return [...tree.querySelectorAll(".rail-project")].map((group) => [
+    // The Pinned group, empty, is drawn closed and hidden from everyone, so it is not one of the headings shown.
+    return [...tree.querySelectorAll(".rail-project:not([data-empty] > *)")].map((group) => [
       group.querySelector(".rail-heading-name")?.textContent ?? "",
       group.querySelectorAll(".session").length,
     ]);
@@ -387,6 +388,74 @@ describe("the tree App draws in the rail", () => {
     // Every session is placed, so none sits at the end under no heading.
     const tree = screen.getByRole("region", { name: "Projects and sessions" });
     expect(tree.querySelectorAll(":scope > .rail-tiles")).toHaveLength(0);
+  });
+
+  // A session made by another window: its workspace is read before its tile is drawn, so it never sits at the end
+  // first. A tile already at the end stays where it is meanwhile.
+  async function unknownAtFirst(lists: boolean) {
+    const made = { ...root("alpha"), id: "w-new", kind: "isolated" as const };
+    const stranded = { ...session("lost", "alpha", "2026-11-01T09:00:00Z"), workspace_id: "w-lost" };
+    const fresh = { ...session("fresh", "alpha", "2026-11-08T09:00:00Z"), workspace_id: "w-new" };
+    const later: (() => void)[] = [];
+    let listed = [stranded];
+    let holding = false;
+    const core = fakeCore({
+      "session.list": () => listed,
+      "workspace.list": (params: { project_id: string }) => {
+        if (!holding) return [root(params.project_id)];
+        const answer = [root(params.project_id), ...(lists && params.project_id === "alpha" ? [made] : [])];
+        return new Promise((resolve) => later.push(() => resolve(answer)));
+      },
+    });
+    render(createElement(App, { client: core.client }));
+    for (let turn = 0; turn < 20 && !document.querySelector('[data-session-id="lost"]'); turn++) await settle();
+    await settle();
+    const tile = document.querySelector('[data-session-id="lost"]');
+    expect(tile).not.toBeNull();
+    holding = true;
+    listed = [stranded, fresh];
+    core.emit({ kind: "notification", method: "session.tile", params: { session_id: "fresh", tile: { state: "idle", pending: [] } } } as CoreEvent);
+    for (let turn = 0; turn < 20 && later.length < projects.length; turn++) await settle();
+    const tree = screen.getByRole("region", { name: "Projects and sessions" });
+    expect(later).toHaveLength(projects.length);
+    expect(tree.querySelector('[data-session-id="fresh"]')).toBeNull();
+    expect(tree.querySelector('[data-session-id="lost"]')).toBe(tile);
+    await act(async () => later.forEach((answer) => answer()));
+    await settle();
+    await settle();
+    return tree;
+  }
+
+  it("holds a new session's tile back until the read for its workspace answers, then draws it under its project", async () => {
+    const tree = await unknownAtFirst(true);
+    expect(headings()[0]).toEqual(["alpha", 1]);
+    expect(tree.querySelector('.rail-project [data-session-id="fresh"]')).not.toBeNull();
+  });
+
+  // verifies: FLOW-NEW-SESSION-R13
+  it("puts a session it starts under its project as soon as Core lists it, while the first message is still on its way", async () => {
+    const made = { ...session("s-new", "alpha", "2026-11-03T09:00:00Z"), workspace_id: "w-new", state: "idle" as const };
+    let created = false;
+    const core = await screenWith([project("alpha")], undefined, {
+      "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", vcs_ref: "ersa/new" }),
+      "session.create": () => ((created = true), made),
+      "session.list": () => (created ? [made] : []),
+      "session.send": () => new Promise(() => {}),
+    });
+    fireEvent.change(words(), { target: { value: "Fix it" } });
+    fireEvent.keyDown(words(), { key: "Enter" });
+    await settle();
+    await settle();
+    core.emit({ kind: "notification", method: "session.tile", params: { session_id: "s-new", tile: { state: "idle", pending: [] } } } as CoreEvent);
+    await settle();
+    await settle();
+    const tree = screen.getByRole("region", { name: "Projects and sessions" });
+    expect(tree.querySelector('.rail-project [data-session-id="s-new"]')).not.toBeNull();
+  });
+
+  it("draws a session no read lists at the end, once the reads have answered", async () => {
+    const tree = await unknownAtFirst(false);
+    expect(tree.querySelector(':scope > .rail-tiles [data-session-id="fresh"]')).not.toBeNull();
   });
 });
 
@@ -668,8 +737,8 @@ describe("a tile's menu, and renaming on the tile", () => {
       // The key may send its own contextmenu event after the keydown: the menu stays at the tile, on its first item.
       fireEvent.contextMenu(tile("Fix the build"), { clientX: 0, clientY: 0 });
       expect(menu()?.getAttribute("data-place")).toBe("below");
-      // From the keyboard, focus goes to the first item.
-      expect(document.activeElement?.textContent).toMatch(/^Rename/);
+      // From the keyboard, focus goes to the first item, Pin (LAY-SHELL, A tile's menu).
+      expect(document.activeElement?.textContent).toBe("Pin");
       fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
       expect(document.activeElement).toBe(tile("Fix the build"));
     }
@@ -711,6 +780,381 @@ describe("a tile's menu, and renaming on the tile", () => {
     expect(field()?.value).toBe("Fix it");
     const reason = document.getElementById(field()?.getAttribute("aria-errormessage") ?? "");
     expect(reason?.textContent).toContain("has not named this session yet");
+  });
+});
+
+// Archiving and unarchiving (FLOW-ARCHIVE-DELETE-SESSION, steps 1 to 3), against a fake Core whose list changes as
+// Core's would.
+describe("archiving a session from its tile, and an archived session read-only", () => {
+  const rail = () => screen.getByRole("navigation", { name: "Rail" });
+  const titled = (archived: { [id: string]: boolean } = {}) =>
+    sessions.map((s, i) => ({ ...s, title: i === 0 ? "Fix the build" : "Write the notes", archived: archived[s.id] ?? false }));
+  const tileNamed = (title: string) => [...rail().querySelectorAll<HTMLElement>(".session")].find((el) => el.textContent?.includes(title));
+  const callsOf = (core: ReturnType<typeof fakeCore>, method: Method) => core.calls.filter((c) => c.method === method).map((c) => c.params);
+  const composerBox = () => screen.queryByRole("textbox", { name: "Message" });
+  async function open(list: { current: Session[] }, more: Parameters<typeof fakeCore>[0] = {}) {
+    const core = fakeCore({ "session.list": () => list.current, ...more });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    return core;
+  }
+  function chooseArchive(title: string, item: RegExp) {
+    fireEvent.click(within(rail()).getByRole("button", { name: `More for ${title}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: item }));
+  }
+
+  it("archives through session.set_archived, and the tile leaves the rail once Core lists it archived", async () => {
+    const list = { current: titled() };
+    const core = await open(list, {
+      "session.set_archived": (params: { id: string; archived: boolean }) => {
+        list.current = titled({ [params.id]: params.archived });
+        return list.current.find((s) => s.id === params.id);
+      },
+    });
+    // The newest, Write the notes, is active; Fix the build is not.
+    chooseArchive("Fix the build", /^Archive/);
+    await settle();
+    expect(callsOf(core, "session.set_archived")).toEqual([{ id: "s1", archived: true }]);
+    expect(tileNamed("Fix the build")).toBeUndefined();
+    expect(tileNamed("Write the notes")).toBeTruthy();
+  });
+
+  it.each([
+    // The rail reads Fix the build (alpha), Write the notes (beta), Read the logs (gamma). From the middle the next tile
+    // takes focus; from the last, with no next, the previous does.
+    ["Write the notes", "Read the logs"],
+    ["Read the logs", "Write the notes"],
+  ])("moves keyboard focus from %s, archived from its menu, to %s", async (archived, next) => {
+    const three = (marks: { [id: string]: boolean } = {}) => [
+      ...titled(marks),
+      { ...session("s3", "gamma", "2026-11-03T09:00:00Z"), title: "Read the logs", archived: marks.s3 ?? false },
+    ];
+    const list = { current: three() };
+    await open(list, {
+      "session.set_archived": (params: { id: string; archived: boolean }) => {
+        list.current = three({ [params.id]: params.archived });
+        return list.current.find((s) => s.id === params.id);
+      },
+    });
+    // Fix the build is active, so the stage stays on it.
+    fireEvent.click(tileNamed("Fix the build") as HTMLElement);
+    await settle();
+    const more = within(rail()).getByRole("button", { name: `More for ${archived}` });
+    more.focus();
+    chooseArchive(archived, /^Archive/);
+    expect(document.activeElement).toBe(more);
+    await settle();
+    expect(tileNamed(archived)).toBeUndefined();
+    expect(document.activeElement).toBe(tileNamed(next));
+  });
+
+  it("shows the new-session screen when the active session is archived", async () => {
+    const list = { current: titled() };
+    await open(list, {
+      "session.set_archived": (params: { id: string; archived: boolean }) => {
+        list.current = titled({ [params.id]: params.archived });
+        return list.current.find((s) => s.id === params.id);
+      },
+    });
+    expect(composerBox()).toBeTruthy();
+    chooseArchive("Write the notes", /^Archive/);
+    await settle();
+    expect(tileNamed("Write the notes")).toBeUndefined();
+    // The new-session screen's session controls name a project chip; a session's are read-only and name no host list.
+    expect(screen.getByRole("button", { name: /^Project:/ })).toBeTruthy();
+    expect(screen.queryByText("This session is archived. Resume it to send a message.")).toBeNull();
+  });
+
+  it("keeps the tile and says why when Core refuses to archive", async () => {
+    const list = { current: titled() };
+    await open(list, {
+      "session.set_archived": () => {
+        throw { kind: "rpc", error: { code: -32010, message: "session.set_archived: the session is being deleted" } };
+      },
+    });
+    chooseArchive("Fix the build", /^Archive/);
+    await settle();
+    expect(tileNamed("Fix the build")).toBeTruthy();
+    const alert = within(rail()).getByRole("alert");
+    expect(alert.textContent).toContain("Ersa can't archive this session.");
+    expect(alert.textContent).toContain("being deleted");
+  });
+
+  it("opens with the newest session that is not archived", async () => {
+    await open({ current: titled({ s2: true }) });
+    expect(tileNamed("Write the notes")).toBeUndefined();
+    expect(screen.getByRole("heading", { name: "Fix the build" })).toBeTruthy();
+  });
+
+  /** The active session, Write the notes, archived elsewhere: a new session's tile makes App read the list again. */
+  async function archivedWhileOpen(more: Parameters<typeof fakeCore>[0] = {}) {
+    const list = { current: titled() };
+    const core = await open(list, more);
+    list.current = titled({ s2: true });
+    core.emit({ kind: "notification", method: "session.tile", params: { session_id: "s9", tile: { state: "idle", pending: [] } } } as CoreEvent);
+    await settle();
+    return { core, list };
+  }
+
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R02
+  it("shows an archived session's transcript with a note and Resume in place of the composer", async () => {
+    await archivedWhileOpen();
+    expect(screen.getByRole("heading", { name: "Write the notes" })).toBeTruthy();
+    expect(composerBox()).toBeNull();
+    expect(screen.getByText("This session is archived. Resume it to send a message.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+  });
+
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R02
+  it("leaves the session archived and says why when Core refuses the resume", async () => {
+    const { core } = await archivedWhileOpen({
+      "session.resume": () => {
+        throw { kind: "rpc", error: { code: -32010, message: "session.resume: resuming a session arrives with milestone M1" } };
+      },
+    });
+    const resume = screen.getByRole("button", { name: "Resume" });
+    resume.focus();
+    fireEvent.click(resume);
+    // Unavailable while Core answers, but never disabled, which would drop keyboard focus.
+    expect(resume.getAttribute("aria-disabled")).toBe("true");
+    expect(resume.hasAttribute("disabled")).toBe(false);
+    // Pressing it again meanwhile sends nothing more.
+    fireEvent.click(resume);
+    await settle();
+    expect(callsOf(core, "session.resume")).toEqual([{ id: "s2" }]);
+    // Focus comes back to Resume once it can be pressed again.
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Resume" }));
+    const alert = screen.getAllByRole("alert").find((a) => a.classList.contains("archived-problem"));
+    expect(alert?.textContent).toContain("Ersa can't resume this session.");
+    expect(alert?.textContent).toContain("milestone M1");
+    expect(composerBox()).toBeNull();
+    expect(screen.getByRole("button", { name: "Resume" })).toBeTruthy();
+  });
+
+  // verifies: FLOW-ARCHIVE-DELETE-SESSION-R03
+  it("brings the composer back once Core accepts the resume and lists the session unarchived, sending nothing else", async () => {
+    const holder: { list?: { current: Session[] } } = {};
+    const { core, list } = await archivedWhileOpen({
+      "session.resume": () => {
+        // Core clears the mark as it accepts the resume.
+        if (holder.list) holder.list.current = titled();
+        return {};
+      },
+    });
+    holder.list = list;
+    fireEvent.click(screen.getByRole("button", { name: "Resume" }));
+    await settle();
+    await settle();
+    expect(composerBox()).toBeTruthy();
+    // The pin and the section stay: neither session.set_archived nor session.arrange was sent.
+    expect(callsOf(core, "session.set_archived")).toEqual([]);
+    expect(callsOf(core, "session.arrange")).toEqual([]);
+  });
+});
+
+// FLOW-ORGANIZE-SESSIONS (step 1; Variations and errors: Saving fails); docs/design/RAIL.md (A group heading).
+describe("pinning a session from its tile", () => {
+  const rail = () => screen.getByRole("navigation", { name: "Rail" });
+  const more = (title: string) => within(rail()).getByRole("button", { name: `More for ${title}` });
+  // The group a tile is in, by its heading's name; a tile is found by its title.
+  const groupOf = (title: string) =>
+    [...rail().querySelectorAll<HTMLElement>(".session")]
+      .find((el) => el.textContent?.includes(title))
+      ?.closest(".rail-project")
+      ?.querySelector(".rail-heading-name")?.textContent;
+  const arranges = (core: ReturnType<typeof fakeCore>) => core.calls.filter((c) => c.method === "session.arrange").map((c) => c.params);
+  // Core keeps the pins: session.arrange changes what session.list answers, as it does.
+  async function open(refuse?: string) {
+    let listed = sessions.map((s, i) => ({ ...s, title: i === 0 ? "Fix the build" : "Write the notes" }));
+    const core = fakeCore({
+      "session.list": () => listed,
+      "session.arrange": (params: { id: string; pinned: boolean }) => {
+        if (refuse) throw { kind: "rpc", error: { code: -32010, message: refuse } };
+        listed = listed.map((s) => (s.id === params.id ? { ...s, pinned: params.pinned } : s));
+        return listed.find((s) => s.id === params.id);
+      },
+    });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    return core;
+  }
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R01
+  it("moves a pinned tile to a leading Pinned group, and Unpin returns it to its project", async () => {
+    const core = await open();
+    // Nothing pinned: no Pinned group.
+    expect(within(rail()).queryByRole("button", { name: /^Pinned/ })).toBeNull();
+    expect(groupOf("Fix the build")).toBe("alpha");
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    expect(arranges(core)).toEqual([{ id: "s1", pinned: true }]);
+    expect(groupOf("Fix the build")).toBe("Pinned");
+    // It leads the rail, before every project, and its project keeps its heading.
+    const headings = [...rail().querySelectorAll(".rail-heading-name")].map((el) => el.textContent);
+    expect(headings).toEqual(["Pinned", "alpha", "beta", "gamma"]);
+    expect(groupOf("Write the notes")).toBe("beta");
+
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unpin" }));
+    await settle();
+    await settle();
+    expect(arranges(core)).toEqual([
+      { id: "s1", pinned: true },
+      { id: "s1", pinned: false },
+    ]);
+    expect(groupOf("Fix the build")).toBe("alpha");
+    expect(within(rail()).queryByRole("button", { name: /^Pinned/ })).toBeNull();
+  });
+
+  it("gives keyboard focus to the moved tile, or to the Pinned heading while that group is collapsed", async () => {
+    await open();
+    const tileOf = (title: string) => [...rail().querySelectorAll<HTMLElement>(".session")].find((el) => el.textContent?.includes(title));
+    tileOf("Fix the build")?.focus();
+    fireEvent.keyDown(tileOf("Fix the build") as HTMLElement, { key: "F10", shiftKey: true });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    expect(groupOf("Fix the build")).toBe("Pinned");
+    expect(document.activeElement).toBe(tileOf("Fix the build"));
+
+    const pinned = within(rail()).getByRole("button", { name: /^Pinned/ });
+    fireEvent.click(pinned);
+    tileOf("Write the notes")?.focus();
+    fireEvent.keyDown(tileOf("Write the notes") as HTMLElement, { key: "F10", shiftKey: true });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    expect(groupOf("Write the notes")).toBe("Pinned");
+    expect(document.activeElement).toBe(within(rail()).getByRole("button", { name: /^Pinned/ }));
+  });
+
+  it("slides each moved tile and heading from where it was over motion-settle with motion-ease-in-out", async () => {
+    await open();
+    // jsdom lays nothing out: each slid element sits at its order on the page, and the motion tokens are set here.
+    document.documentElement.style.setProperty("--motion-settle", "240ms");
+    document.documentElement.style.setProperty("--motion-ease-in-out", "ease-in-out");
+    const order = () => [...document.querySelectorAll<HTMLElement>("[data-slide]")];
+    const rect = vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function (this: HTMLElement) {
+      return order().indexOf(this) * 10;
+    });
+    const slid: { slide: string | undefined; keyframes: Keyframe[]; options: KeyframeAnimationOptions }[] = [];
+    HTMLElement.prototype.animate = function (this: HTMLElement, keyframes: Keyframe[], options: KeyframeAnimationOptions) {
+      slid.push({ slide: this.dataset.slide, keyframes, options });
+      return {} as Animation;
+    } as never;
+    try {
+      const before = order().map((el) => el.dataset.slide);
+      fireEvent.click(more("Write the notes"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+      await settle();
+      await settle();
+      const after = order().map((el) => el.dataset.slide);
+      // Every element that had a place and moved slides from it; the Pinned heading is new, so it appears in place.
+      const moved = after.filter((key) => key !== "pinned" && before.indexOf(key) !== after.indexOf(key));
+      expect(moved).toContain("session:s2");
+      expect(slid.map((s) => s.slide).sort()).toEqual([...moved].sort());
+      const tile = slid.find((s) => s.slide === "session:s2");
+      expect(tile?.keyframes).toEqual([{ transform: `translateY(${(before.indexOf("session:s2") - after.indexOf("session:s2")) * 10}px)` }, { transform: "none" }]);
+      expect(tile?.options).toEqual({ duration: 240, easing: "ease-in-out" });
+    } finally {
+      rect.mockRestore();
+      delete (HTMLElement.prototype as { animate?: unknown }).animate;
+      document.documentElement.removeAttribute("style");
+    }
+  });
+
+  it("slides nothing when Core refuses the pin, or when the user asked for reduced motion", async () => {
+    const animate = vi.fn(() => ({}) as Animation);
+    HTMLElement.prototype.animate = animate as never;
+    document.documentElement.style.setProperty("--motion-settle", "240ms");
+    document.documentElement.style.setProperty("--motion-ease-in-out", "ease-in-out");
+    const position = vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function (this: HTMLElement) {
+      // Each element sits at its order among every element on the page, so a note added above a tile moves it.
+      return [...document.querySelectorAll("*")].indexOf(this) * 10;
+    });
+    const reduce = (on: boolean) => vi.stubGlobal("matchMedia", (query: string) => ({ matches: on && query.includes("reduce") }) as MediaQueryList);
+    try {
+      reduce(true);
+      await open();
+      fireEvent.click(more("Write the notes"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+      await settle();
+      await settle();
+      expect(groupOf("Write the notes")).toBe("Pinned");
+      expect(animate).not.toHaveBeenCalled();
+      cleanup();
+
+      reduce(false);
+      await open("session.arrange: the session is being deleted");
+      fireEvent.click(more("Write the notes"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+      await settle();
+      await settle();
+      expect(within(rail()).getByRole("alert").textContent).toContain("the session is being deleted");
+      expect(animate).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      position.mockRestore();
+      delete (HTMLElement.prototype as { animate?: unknown }).animate;
+      document.documentElement.removeAttribute("style");
+    }
+  });
+
+  it("makes Pin and Unpin unavailable on every tile while a pin is saved", async () => {
+    let answer: () => void = () => {};
+    const core = fakeCore({
+      "session.list": () => sessions.map((s, i) => ({ ...s, title: i === 0 ? "Fix the build" : "Write the notes" })),
+      "session.arrange": (params: { id: string; pinned: boolean }) =>
+        new Promise((resolve) => (answer = () => resolve({ ...sessions[0], title: "Fix the build", pinned: params.pinned }))),
+    });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    fireEvent.click(more("Write the notes"));
+    const item = screen.getByRole("menuitem", { name: /^Pin/ });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    expect(item.textContent).toContain("Saving…");
+    await act(async () => answer());
+  });
+
+  it("collapses the Pinned group like any group", async () => {
+    await open();
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    const pinned = within(rail()).getByRole("button", { name: /^Pinned/ });
+    fireEvent.click(pinned);
+    expect(pinned.getAttribute("aria-expanded")).toBe("false");
+    expect(pinned.textContent).toContain("1 session");
+    expect(document.getElementById(pinned.getAttribute("aria-controls") ?? "")?.hasAttribute("inert")).toBe(true);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R15
+  it("leaves the tile where Core has it and says why when Core refuses the pin", async () => {
+    const core = await open("session.arrange: the session is being deleted");
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    await settle();
+    await settle();
+    expect(arranges(core)).toEqual([{ id: "s1", pinned: true }]);
+    expect(groupOf("Fix the build")).toBe("alpha");
+    expect(within(rail()).queryByRole("button", { name: /^Pinned/ })).toBeNull();
+    const alert = within(rail()).getByRole("alert");
+    expect(alert.textContent).toContain("Ersa can't pin this session.");
+    expect(alert.textContent).toContain("the session is being deleted");
+    // Trying again takes the old reason away.
+    fireEvent.click(more("Fix the build"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
+    expect(within(rail()).queryByRole("alert")).toBeNull();
+    await settle();
   });
 });
 

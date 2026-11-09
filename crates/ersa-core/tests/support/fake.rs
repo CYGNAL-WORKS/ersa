@@ -685,8 +685,10 @@ impl Projector for FakeProjector {
                 questions: vec![Question {
                     id: "q".into(),
                     text: "Which one?".into(),
+                    header: None,
                     options: None,
                     multi_select: false,
+                    takes_text: true,
                 }],
             })],
             (Direction::Host, Some("decide")) => {

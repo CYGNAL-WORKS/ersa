@@ -470,12 +470,15 @@ fn params_examples() -> Vec<(Method, Value)> {
                     Answer {
                         id: "a".into(),
                         value: AnswerValue::One("yes".into()),
+                        own_words: true,
                     },
                     Answer {
                         id: "b".into(),
                         value: AnswerValue::Many(vec!["x".into(), "y".into()]),
+                        own_words: false,
                     },
                 ],
+                declined: Some(false),
             }),
         ),
         (

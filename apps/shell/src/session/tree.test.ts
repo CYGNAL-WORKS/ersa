@@ -40,6 +40,17 @@ describe("the rail's tree", () => {
     expect(tree.loose).toEqual([]);
   });
 
+  it("leaves archived sessions out, as the rail shows active sessions until it can show archived ones", () => {
+    const archived = sessions.map((s) => (s.id === "mid" || s.id === "engine" ? { ...s, archived: true } : s));
+    const tree = treeOf(projects, workspaces, [...archived, { ...session("lost", "w-gone", "2026-11-01T13:00:00.000Z"), archived: true }]);
+    expect(tree.projects.map(({ project, sessions }) => [project.id, ids(sessions)])).toEqual([
+      ["ersa", ["new", "old"]],
+      ["engine", []],
+      ["notes", []],
+    ]);
+    expect(tree.loose).toEqual([]);
+  });
+
   it("keeps the projects in the order Core lists them, whatever their sessions", () => {
     const reversed = [...projects].reverse();
     expect(treeOf(reversed, workspaces, sessions).projects.map(({ project }) => project.id)).toEqual(["notes", "engine", "ersa"]);
@@ -62,6 +73,31 @@ describe("the rail's tree", () => {
     ]);
     expect(ids(tree.loose)).toEqual(["orphan", "unknown"]);
     expect(tree.projects.flatMap(({ sessions }) => ids(sessions))).not.toContain("unknown");
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R01
+  it("leads with the pinned sessions, newest first, and shows them under neither their project nor the end", () => {
+    const pin = (s: Session): Session => ({ ...s, pinned: true });
+    const tree = treeOf(projects, workspaces, [
+      pin(sessions[0]!),
+      sessions[1]!,
+      sessions[2]!,
+      pin(sessions[3]!),
+      pin(session("unknown", "w-gone", "2026-11-01T08:00:00.000Z")),
+    ]);
+    expect(ids(tree.pinned)).toEqual(["mid", "old", "unknown"]);
+    expect(tree.projects.map(({ project, sessions }) => [project.id, ids(sessions)])).toEqual([
+      ["ersa", ["new"]],
+      ["engine", ["engine"]],
+      ["notes", []],
+    ]);
+    expect(tree.loose).toEqual([]);
+    // Pinning changes neither its project nor its section: unpinned, a session is back under its project.
+    expect(treeOf(projects, workspaces, sessions).projects[0]?.sessions.map((s) => s.id)).toEqual(["new", "mid", "old"]);
+  });
+
+  it("has no pinned sessions while none is pinned", () => {
+    expect(treeOf(projects, workspaces, sessions).pinned).toEqual([]);
   });
 
   it("puts every session at the end when no project could be read", () => {

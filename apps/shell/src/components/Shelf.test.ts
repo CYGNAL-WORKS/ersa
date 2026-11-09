@@ -151,7 +151,7 @@ describe("the shelf", () => {
   });
 
   it("is the accent for a question, and shows what it asks", () => {
-    const html = draw({ state: "question", requestId: "r3", questions: [{ id: "q1", text: "Which branch?", multi_select: false }] });
+    const html = draw({ state: "question", requestId: "r3", questions: [{ id: "q1", text: "Which branch?", multi_select: false, takes_text: false }] });
     expect(html).toContain('data-tone="accent"');
     expect(text(html)).toBe("Question Which branch?");
   });

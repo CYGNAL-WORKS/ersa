@@ -50,10 +50,11 @@ export interface Connection {
   /** Reads the list again, if connected; Core does not announce new projects or sessions. */
   reload(list: "projects" | "sessions"): void;
   /**
-   * Shows session `id` under the title Core answered a rename with, at once, and reads the list again: a read
-   * already in flight may answer with the title from before, and is followed by another.
+   * Shows session `id` with the fields Core answered a change to it with (a rename's title, an arrangement), at once,
+   * and reads the list again: a read already in flight may answer with the session from before, and is followed by
+   * another.
    */
-  renamed(id: string, title: string): void;
+  changed(id: string, fields: Partial<Session>): void;
   /** After this, neither `update` nor `onNotification` is called again. */
   stop(): void;
 }
@@ -75,7 +76,7 @@ export function connect(
   let timer: ReturnType<typeof setTimeout> | undefined;
   // The current attach's way to read each list again; nothing until connected.
   let reload: (list: "projects" | "sessions") => void = () => {};
-  let renamed: (id: string, title: string) => void = () => {};
+  let changed: (id: string, fields: Partial<Session>) => void = () => {};
 
   const set = (view: CoreView) => {
     if (stopped) return;
@@ -214,12 +215,12 @@ export function connect(
         listProjects();
         listSessions();
         reload = (list) => (list === "projects" ? listProjects() : listSessions());
-        renamed = (id, title) => {
+        changed = (id, fields) => {
           patch((view) =>
             view.sessions.state === "ready"
               ? {
                   ...view,
-                  sessions: { state: "ready", sessions: view.sessions.sessions.map((s) => (s.id === id ? { ...s, title } : s)) },
+                  sessions: { state: "ready", sessions: view.sessions.sessions.map((s) => (s.id === id ? { ...s, ...fields } : s)) },
                 }
               : view,
           );
@@ -241,7 +242,7 @@ export function connect(
 
   return {
     reload: (list) => reload(list),
-    renamed: (id, title) => renamed(id, title),
+    changed: (id, fields) => changed(id, fields),
     stop: () => {
       stopped = true;
       clearTimeout(timer);
