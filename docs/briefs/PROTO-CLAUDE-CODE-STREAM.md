@@ -102,7 +102,7 @@ The record omits text deltas (`stream_event`), permission prompts, `result` (tur
 
 ### Listing
 
-The sessions of a directory are the record files under its encoded path. To list them the adapter reads the head and the tail of each file, never the whole file. Each session's title is its latest `custom-title`, else its latest `ai-title`, else its last prompt, else its first prompt. The last prompt is the latest `last-prompt` entry, else the last prompt entry in the tail; a prompt is a `user` entry the person wrote, never one the CLI wrote (`PROTO-AGENT-EVENTS`, projection rules). A title is one line, cut at 200 characters. In print mode `/rename <title>`, sent as a user message, writes a `custom-title` entry, and no `ai-title` appears (2.1.316 fixture `01-session-resume`), so an Ersa session the user has not renamed lists under its last prompt. A session's last activity is the `timestamp` of the latest `user` or `assistant` entry in the tail.
+The sessions of a directory are the record files under its encoded path. To list them the adapter reads the head and the tail of each file, never the whole file. Each session's title is its latest `custom-title`, else its latest `ai-title`, else its last prompt, else its first prompt. The last prompt is the latest `last-prompt` entry, else the last prompt entry in the tail; a prompt is a `user` entry the person wrote, never one the CLI wrote (`PROTO-AGENT-EVENTS`, projection rules). A title is one line, cut at 200 characters. In print mode `/rename <title>`, sent as a user message, writes a `custom-title` entry, and no `ai-title` appears (2.1.316 fixture `01-session-resume`), so an Ersa session the user has not renamed lists under its last prompt. A session's last activity is the `timestamp` of the latest `user` or `assistant` entry in the tail. Its model and effort are those of the latest `assistant` entry in the tail (`message.model`, `effort`), and its permission mode that of the latest `user` entry that carries `permissionMode` (`record-reports-2026-11-09.txt`). A relaunch passes those.
 
 ### Renaming
 
@@ -258,6 +258,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R42**: When listing sessions, the adapter shall report as last activity the `timestamp` of the latest `user` or `assistant` entry in the tail it reads.
 - **PROTO-CLAUDE-CODE-STREAM-R43**: When a user message is written to the CLI during a turn, the adapter shall project its `user.message` at the start of the turn the CLI runs for it, at that turn's `system/init`, in the order written, and shall not join it to the running turn.
 - **PROTO-CLAUDE-CODE-STREAM-R44**: While a user message written to the CLI has not started its turn, the adapter shall report the session as working, including between one turn's `result` and the next `system/init`.
+- **PROTO-CLAUDE-CODE-STREAM-R47**: When listing sessions, the adapter shall report a session's model and effort from the latest `assistant` entry in the tail it reads and its permission mode from the latest `user` entry there that carries one.
 - **PROTO-CLAUDE-CODE-STREAM-R46**: The adapter shall report how many messages a live session's CLI holds as the `enqueue` entries in its record that no `dequeue` entry has followed.
 
 ## Out of scope
