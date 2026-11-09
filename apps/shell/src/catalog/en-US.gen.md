@@ -16,6 +16,10 @@ Arrange sessions
 
 Group by
 
+### `rail.arrange.sortByButton`
+
+Sort by
+
 ### `rail.arrange.showButton`
 
 Show
@@ -35,6 +39,18 @@ Date
 ### `rail.arrange.groupByNoneButton`
 
 None
+
+### `rail.arrange.sortByCreatedButton`
+
+Date created
+
+### `rail.arrange.sortByLastActivityButton`
+
+Last activity
+
+### `rail.arrange.sortByNameButton`
+
+Name
 
 ### `rail.arrange.showActiveButton`
 

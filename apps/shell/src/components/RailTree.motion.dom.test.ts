@@ -116,6 +116,8 @@ describe("a new session's tile", () => {
     reduced = false;
     document.documentElement.style.setProperty("--motion-slow", "400ms");
     document.documentElement.style.setProperty("--motion-ease-out", "ease-out");
+    document.documentElement.style.setProperty("--motion-settle", "260ms");
+    document.documentElement.style.setProperty("--motion-ease-in-out", "ease-in-out");
     window.matchMedia = ((query: string) => ({ matches: reduced && query.includes("reduce") })) as never;
     // jsdom lays nothing out: each tile shown sits at its order among the tiles shown, 10 apart and 10 high.
     const shown = () => [...document.querySelectorAll<HTMLElement>("[data-slide]")].filter((el) => el.style.display !== "none");
@@ -229,6 +231,75 @@ describe("a new session's tile", () => {
     rerender(rail([older, { ...newer, archived: true }]));
     rerender(rail([older, newer]));
     expect(slid).toEqual([]);
+  });
+
+  describe("when a tile changes place in the sort", () => {
+    const settle = { duration: 260, easing: "ease-in-out" };
+    const sorted = (sessions: Session[], sortBy: "created" | "last_activity" | "name") => rail(sessions, undefined, { sortBy });
+    const ended = { ...older, last_activity_at: "2026-11-06T10:00:00Z" };
+    // The tiles swap: the project's heading is first, then the two tiles, each 10 high.
+    const swapped = [
+      { slide: "session:a", keyframes: [{ transform: "translateY(10px)" }, { transform: "none" }], options: settle },
+      { slide: "session:b", keyframes: [{ transform: "translateY(-10px)" }, { transform: "none" }], options: settle },
+    ];
+
+    // verifies: FLOW-ORGANIZE-SESSIONS-R10
+    it("slides each tile over motion-settle when a turn ends while sorted by last activity", () => {
+      const { rerender } = render(sorted([older, newer], "last_activity"));
+      rerender(sorted([ended, newer], "last_activity"));
+      expect(slid).toEqual(swapped);
+    });
+
+    // verifies: FLOW-ORGANIZE-SESSIONS-R10
+    it("moves nothing as a session works, or when a turn ends under another sort", () => {
+      const { container, rerender } = render(sorted([older, newer], "last_activity"));
+      const order = () => [...container.querySelectorAll<HTMLElement>("[data-session-id]")].map((el) => el.dataset.sessionId);
+      rerender(sorted([{ ...older, state: "running", last_event_seq: 9, tile: working }, newer], "last_activity"));
+      expect(order()).toEqual(["b", "a"]);
+      expect(slid).toEqual([]);
+      const { rerender: again } = render(sorted([older, newer], "created"));
+      again(sorted([ended, newer], "created"));
+      expect(slid).toEqual([]);
+    });
+
+    it("slides each tile when the user chooses another sort", () => {
+      const { rerender } = render(sorted([older, newer], "last_activity"));
+      expect(slid).toEqual([]);
+      rerender(sorted([older, newer], "name"));
+      expect(slid).toEqual(swapped);
+    });
+
+    it("slides a tile a new title moves while sorted by name", () => {
+      const { rerender } = render(sorted([older, newer], "name"));
+      rerender(sorted([older, { ...newer, title: "Ask" }], "name"));
+      expect(slid).toEqual([
+        { slide: "session:b", keyframes: [{ transform: "translateY(10px)" }, { transform: "none" }], options: settle },
+        { slide: "session:a", keyframes: [{ transform: "translateY(-10px)" }, { transform: "none" }], options: settle },
+      ]);
+    });
+
+    it("draws tiles coming back after Core was lost in place", () => {
+      const { rerender } = render(sorted([older, newer], "last_activity"));
+      rerender(rail([], undefined, { sortBy: "last_activity", sessions: { state: "loading" } }));
+      rerender(sorted([ended, newer], "last_activity"));
+      expect(slid).toEqual([]);
+    });
+
+    it("keeps keyboard focus on a tile that moves", () => {
+      const { container, rerender } = render(sorted([older, newer], "last_activity"));
+      const tile = container.querySelector<HTMLElement>('[data-session-id="a"] .session');
+      tile?.focus();
+      rerender(sorted([ended, newer], "last_activity"));
+      expect(document.activeElement).toBe(tile);
+      expect([...container.querySelectorAll<HTMLElement>("[data-session-id]")].map((el) => el.dataset.sessionId)).toEqual(["a", "b"]);
+    });
+
+    it("takes the new places at once with reduced motion on", () => {
+      reduced = true;
+      const { rerender } = render(sorted([older, newer], "last_activity"));
+      rerender(sorted([ended, newer], "last_activity"));
+      expect(slid).toEqual([]);
+    });
   });
 
   it("appears in place with reduced motion on", () => {

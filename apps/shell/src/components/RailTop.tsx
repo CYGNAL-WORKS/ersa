@@ -18,7 +18,7 @@ export function RailTop({
 }: {
   /** The arrange button: the arrangement its menu names, and what its items do. */
   arrange: ArrangeActions & {
-    arrangement: Pick<RailArrangement, "groupBy" | "show">;
+    arrangement: Pick<RailArrangement, "groupBy" | "sortBy" | "show">;
     /** The arrangement has not been read yet. */
     reading?: boolean;
     /** For the gallery: the menu open, with a submenu open by index. */

@@ -174,6 +174,86 @@ describe("the rail's tree as the user arranges it", () => {
 });
 
 // LAY-SHELL, Collapsing: a layout brief, so no requirement IDs.
+describe("the tiles' order within a group", () => {
+  const projects = [project("ersa"), project("engine")];
+  const workspaces = { w1: { project_id: "ersa" }, w2: { project_id: "engine" } };
+  const made = (id: string, hour: number, more: Partial<Session> = {}, workspace = "w1"): Session => ({
+    ...session(id, workspace, `2026-11-01T${String(hour).padStart(2, "0")}:00:00.000Z`),
+    ...more,
+  });
+  const arranged = (sessions: Session[], sortBy: "created" | "last_activity" | "name", groupBy: "project" | "date" | "none" = "none") =>
+    treeOf(projects, workspaces, sessions, { groupBy, sortBy, show: "active", now: new Date("2026-11-01T15:00:00.000Z") });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R09
+  it("sorts by date created, newest first", () => {
+    expect(ids(arranged([made("a", 9), made("c", 11), made("b", 10)], "created").loose)).toEqual(["c", "b", "a"]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R09
+  it("sorts by last activity, newest first, taking a session's creation until it has one", () => {
+    const sessions = [
+      made("worked", 8, { last_activity_at: "2026-11-01T14:00:00.000Z" }),
+      made("fresh", 12),
+      made("stale", 13, { last_activity_at: "2026-11-01T13:30:00.000Z" }),
+    ];
+    expect(ids(arranged(sessions, "last_activity").loose)).toEqual(["worked", "stale", "fresh"]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R09
+  it("orders times, not their text, when a backend's time has no fraction", () => {
+    // As text "12:00:00Z" sorts after "12:00:00.500Z", though it is earlier.
+    const plain = { ...made("plain", 12), created_at: "2026-11-01T12:00:00Z" };
+    const fraction = { ...made("fraction", 12), created_at: "2026-11-01T12:00:00.500Z" };
+    expect(ids(arranged([plain, fraction], "created").loose)).toEqual(["fraction", "plain"]);
+    expect(ids(arranged([plain, fraction], "last_activity").loose)).toEqual(["fraction", "plain"]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R09
+  it("sorts by name in locale order, ignoring case, with untitled sessions last", () => {
+    const sessions = [made("zebra", 9, { title: "Zebra" }), made("none", 13), made("blank", 12, { title: "" }), made("eclair", 10, { title: "\u00c9clair" }), made("apple", 11, { title: "apple" })];
+    expect(ids(arranged(sessions, "name").loose)).toEqual(["apple", "eclair", "zebra", "none", "blank"]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R09
+  it("breaks a tie by date created, newest first, in every sort", () => {
+    const at = "2026-11-01T14:00:00.000Z";
+    expect(ids(arranged([made("old", 8, { last_activity_at: at }), made("new", 9, { last_activity_at: at })], "last_activity").loose)).toEqual(["new", "old"]);
+    expect(ids(arranged([made("old", 8, { title: "Same" }), made("new", 9, { title: "Same" })], "name").loose)).toEqual(["new", "old"]);
+    expect(ids(arranged([made("old", 8), made("new", 9)], "name").loose)).toEqual(["new", "old"]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R09
+  it("sorts within each group, the Pinned group too, and leaves the groups' order alone", () => {
+    const sessions = [
+      made("e-b", 9, { title: "B" }, "w2"),
+      made("e-a", 8, { title: "A" }, "w2"),
+      made("r-b", 11, { title: "B" }),
+      made("r-a", 10, { title: "A" }),
+      made("p-b", 13, { title: "B", pinned: true }),
+      made("p-a", 12, { title: "A", pinned: true }),
+    ];
+    const tree = arranged(sessions, "name", "project");
+    expect(ids(tree.pinned)).toEqual(["p-a", "p-b"]);
+    expect(byGroup(tree)).toEqual([
+      ["ersa", ["r-a", "r-b"]],
+      ["engine", ["e-a", "e-b"]],
+    ]);
+    expect(byGroup(arranged(sessions.filter((s) => !s.pinned), "name", "date"))).toEqual([["today", ["r-a", "e-a", "r-b", "e-b"]]]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R10
+  it("keeps a tile's place through everything but a new last activity", () => {
+    const quiet = made("quiet", 9, { last_activity_at: "2026-11-01T14:00:00.000Z" });
+    const busy = made("busy", 10, { last_activity_at: "2026-11-01T13:00:00.000Z" });
+    const before = ids(arranged([quiet, busy], "last_activity").loose);
+    expect(before).toEqual(["quiet", "busy"]);
+    const streaming: Session = { ...busy, state: "running", last_event_seq: 40, tile: { state: "running", pending: [{ kind: "permission", request_id: "r" }], cost_usd_total: 1 } };
+    expect(ids(arranged([quiet, streaming], "last_activity").loose)).toEqual(before);
+    const ended = { ...streaming, state: "idle" as const, last_activity_at: "2026-11-01T14:30:00.000Z" };
+    expect(ids(arranged([quiet, ended], "last_activity").loose)).toEqual(["busy", "quiet"]);
+  });
+});
+
 describe("what a collapsed heading says", () => {
   const waiting = (id: string, kinds: ("permission" | "question" | "elicitation")[]): Session => ({
     ...session(id, "w", "2026-11-01T09:00:00.000Z"),

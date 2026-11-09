@@ -723,6 +723,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             reading: arranging,
             // Changing what is shown never closes the active session, even when its tile leaves the rail.
             onGroupBy: (groupBy) => arrange(choicePatch({ groupBy })),
+            onSortBy: (sortBy) => arrange(choicePatch({ sortBy })),
             onShow: (show) => arrange(choicePatch({ show })),
             onReset: () => arrange(RESET_PATCH),
           }}
@@ -733,6 +734,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               // Grouped as the user arranged it once that is read, so the tree never draws one way and then regroups.
               projects={arranging && projects.state === "ready" ? { state: "loading" } : projects}
               groupBy={arrangement.groupBy}
+              sortBy={arrangement.sortBy}
               show={arrangement.show}
               now={today}
               arrangeProblem={arrangeProblem}
