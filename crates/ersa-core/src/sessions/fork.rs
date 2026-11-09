@@ -46,6 +46,9 @@ struct ForkReads {
     cwd: String,
     /// How many processes in the registry can be Core's own.
     own: usize,
+    /// Whether this is itself a fork, which has no record of its own until
+    /// its first message.
+    is_fork: bool,
     adapter: Arc<dyn Adapter>,
     transport: Arc<dyn Transport>,
 }
@@ -104,16 +107,17 @@ impl SessionManager {
             backend_id: backend_id.clone(),
             cwd: row.cwd,
             own: usize::from(handle.live().is_some()),
+            is_fork: row.forked_from.is_some(),
             adapter: Arc::clone(&adapter),
             transport,
         };
         let reading = tokio::spawn(async move { read_for_fork(reads, for_reads).await });
-        let record = match tokio::time::timeout(ADAPTER_CALL, reading).await {
+        let record = match tokio::time::timeout(RECORD_READ, reading).await {
             Ok(Ok(record)) => record?,
             Ok(Err(e)) => return Err(SessionError::Internal(format!("the adapter failed: {e}"))),
             Err(_) => {
                 return Err(SessionError::InvalidState(format!(
-                    "the record of session {id} could not be read within {ADAPTER_CALL:?}"
+                    "the record of session {id} could not be read within {RECORD_READ:?}"
                 )));
             }
         };
@@ -166,6 +170,7 @@ async fn read_for_fork(
         backend_id,
         cwd,
         own,
+        is_fork,
         adapter,
         transport,
     } = reads;
@@ -179,6 +184,10 @@ async fn read_for_fork(
     let refused = match end {
         Some(ConversationEnd::Finished) => None,
         None => Some(format!("the {backend} backend cannot fork a session")),
+        Some(ConversationEnd::NoReply) if is_fork => Some(format!(
+            "session {id} is a fork with no message of its own yet; it can be forked after its \
+             first reply"
+        )),
         Some(ConversationEnd::NoReply) => Some(format!(
             "no reply has finished in session {id} yet; it can be forked after the first one"
         )),
@@ -207,12 +216,12 @@ async fn read_for_fork(
         && pids.len() > own
     {
         let whose = if own > 0 {
-            "more processes than Ersa's own"
+            "more processes than Ersa's own have"
         } else {
-            "another process"
+            "another process has"
         };
         return Err(SessionError::InvalidState(format!(
-            "{whose} ({}) has session {id} open; close it there to fork it",
+            "{whose} session {id} open ({}); close it there to fork it",
             pids_named(&pids)
         )));
     }

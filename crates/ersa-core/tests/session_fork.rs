@@ -510,6 +510,15 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
             .push(fake::recorded_reply(text, reply));
     };
     keep("reply-1", "the reply");
+    let section = client
+        .result("section.create", json!({ "name": "Work" }))
+        .await;
+    client
+        .result(
+            "session.arrange",
+            json!({ "id": id, "section_id": section["id"] }),
+        )
+        .await;
     let fork = client.result("session.fork", json!({ "id": id })).await;
     let fork_id = fork["id"].as_str().unwrap().to_string();
     // The fork's backend wrote no record, as the CLI writes none yet: the
@@ -555,6 +564,80 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
         .collect();
     assert_eq!(shown.len(), 1, "{events:#?}");
     assert_eq!(shown[0]["event"]["text"], "the reply");
+    // verifies: FLOW-FORK-SESSION-R02
+    assert_eq!(
+        row(&mut client, &fork_id).await["section_id"],
+        section["id"]
+    );
+}
+
+/// A fork whose first message never came, its original since deleted.
+// verifies: FLOW-FORK-SESSION-R01
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_whose_conversation_is_gone_says_so() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    let backend_id = fake.records.lock().unwrap().keys().next().unwrap().clone();
+    fake.records
+        .lock()
+        .unwrap()
+        .get_mut(&backend_id)
+        .unwrap()
+        .push(fake::recorded_reply("reply-1", "the reply"));
+    let fork = client.result("session.fork", json!({ "id": id })).await;
+    let fork_id = fork["id"].as_str().unwrap().to_string();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while fake.records.lock().unwrap().len() < 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fork never started"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // Neither record is left: the fork's was never written, the original's
+    // went with its delete.
+    fake.records.lock().unwrap().clear();
+
+    client.result("core.shutdown", json!({})).await;
+    let TestCore { dir, task, .. } = core;
+    task.await.unwrap().unwrap();
+    let again: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(Arc::clone(
+        &fake.records,
+    )))];
+    let core = start_with_adapters(dir, |_| {}, again).await;
+    let mut client = core.client().await;
+
+    client
+        .result("session.subscribe", json!({ "id": fork_id, "from_seq": 0 }))
+        .await;
+    let events = client.events_until("session.ended").await;
+    let said = events
+        .iter()
+        .find(|e| e["event"]["type"] == "error")
+        .unwrap_or_else(|| panic!("no error in {events:#?}"));
+    let message = said["event"]["message"].as_str().unwrap();
+    assert!(message.contains("record is gone"), "{message}");
+}
+
+// verifies: FLOW-FORK-SESSION-R03
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_before_its_first_message_is_told_so_when_forked() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    let fork = forked(&mut client, &id).await;
+    // Its backend names it as it starts.
+    client
+        .result(
+            "session.subscribe",
+            json!({ "id": fork["id"], "from_seq": 0 }),
+        )
+        .await;
+    client.events_until("session.started").await;
+    *fake.conversation_end.lock().unwrap() = Some(ConversationEnd::NoReply);
+    let message = refused(&mut client, fork["id"].as_str().unwrap()).await;
+    assert!(message.contains("no message of its own"), "{message}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
