@@ -1,5 +1,5 @@
-// What the stage shows and how it changes: the active session's transcript, or the new-session screen while the user
-// has chosen New session or has no session (LAY-SHELL, FLOW-NEW-SESSION). Kept free of React so the tests drive each
+// What the stage shows and how it changes: the active session's transcript, the new-session screen while the user
+// has chosen New session or has no session (LAY-SHELL, FLOW-NEW-SESSION), or the sessions page over either. Kept free of React so the tests drive each
 // transition; the window holds it with `useReducer`.
 
 import type { Attached } from "./attachments";
@@ -28,10 +28,18 @@ export interface StageState {
   firstSend?: { id: string; text?: string; attachments?: Attached[]; sending: Exclude<Sending, { state: "sending" }> };
   /** The last `composing.key` given. */
   keys: number;
+  /**
+   * The sessions page shows in place of the transcript or the new-session screen (FLOW-ORGANIZE-SESSIONS, step 9). The
+   * rest of this state stands behind it: the active session stays active (R20).
+   */
+  sessionsPage?: boolean;
 }
 
 export type StageAction =
   | { type: "newSession"; projectId?: string }
+  | { type: "allSessions" }
+  /** The active session was archived or deleted: the new-session screen takes its place, behind the sessions page if it shows. */
+  | { type: "activeLeft" }
   | { type: "select"; id: string }
   /** With no session chosen, the newest: a reopened window shows the session that was running when it closed. */
   | { type: "showNewest"; id: string }
@@ -58,16 +66,32 @@ export function showsScreen(state: Pick<StageState, "composing" | "starting" | "
   return state.composing !== undefined || state.starting !== undefined || (connected && state.activeId === undefined);
 }
 
+/** The new-session screen, drawn afresh. */
+const compose = (state: StageState, projectId?: string): StageState => ({ ...state, composing: { projectId, key: state.keys + 1 }, keys: state.keys + 1, starting: undefined });
+
 export function stage(state: StageState, action: StageAction): StageState {
   switch (action.type) {
     case "newSession":
       // A start under way finishes on the screen it began on (its failure or its session belongs there).
       if (isStarting(state)) return state;
-      return { ...state, composing: { projectId: action.projectId, key: state.keys + 1 }, keys: state.keys + 1, starting: undefined };
+      return { ...compose(state, action.projectId), sessionsPage: false };
+    case "activeLeft":
+      return isStarting(state) ? state : compose(state);
+    case "allSessions":
+      // Likewise: the screen with a start under way stays until it finishes.
+      return isStarting(state) ? state : { ...state, sessionsPage: true };
     case "select":
       // Leaving the screen leaves nothing behind: nothing was created (FLOW-NEW-SESSION-R03).
       if (isStarting(state)) return state;
-      return { ...state, activeId: action.id, composing: undefined, starting: undefined, firstSend: undefined };
+      // Back to the same session from the sessions page, its composer is as it was: a first message's refusal stays.
+      return {
+        ...state,
+        activeId: action.id,
+        composing: undefined,
+        starting: undefined,
+        firstSend: state.sessionsPage && !state.composing && action.id === state.activeId ? state.firstSend : undefined,
+        sessionsPage: false,
+      };
     case "showNewest":
       // Not while a start is on its way or has just failed: the newest session may be the one being started, and
       // the screen, its failure and the message in it stay until the user acts (FLOW-NEW-SESSION-R08).
