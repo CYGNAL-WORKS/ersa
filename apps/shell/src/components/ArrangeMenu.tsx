@@ -29,6 +29,16 @@ export interface ArrangeActions {
   onReset: () => void;
 }
 
+/** A choice's submenu entry: it names the current choice, and its submenu marks it. */
+function choice<C>(label: string, values: readonly C[], chosen: C, name: (value: C) => string, choose: (value: C) => void): MenuEntry {
+  return {
+    kind: "submenu",
+    label,
+    current: name(chosen),
+    entries: values.map((value) => ({ kind: "item", label: name(value), checked: value === chosen, onChoose: () => choose(value) })),
+  };
+}
+
 /**
  * The arrange menu's items (LAY-SHELL, The arrange button): Group by ▸, Sort by ▸ and Show ▸, each naming its current
  * choice and its submenu marking it, then Reset to defaults apart. New section and All sessions go in the group with
@@ -36,24 +46,9 @@ export interface ArrangeActions {
  */
 export function arrangeEntries(arrangement: ArrangeChoices, actions: ArrangeActions): MenuEntry[] {
   return [
-    {
-      kind: "submenu",
-      label: t("rail.arrange.groupByButton"),
-      current: t(GROUP_BY_NAMES[arrangement.groupBy]),
-      entries: GROUP_BYS.map((g) => ({ kind: "item", label: t(GROUP_BY_NAMES[g]), checked: g === arrangement.groupBy, onChoose: () => actions.onGroupBy(g) })),
-    },
-    {
-      kind: "submenu",
-      label: t("rail.arrange.sortByButton"),
-      current: t(SORT_BY_NAMES[arrangement.sortBy]),
-      entries: SORT_BYS.map((s) => ({ kind: "item", label: t(SORT_BY_NAMES[s]), checked: s === arrangement.sortBy, onChoose: () => actions.onSortBy(s) })),
-    },
-    {
-      kind: "submenu",
-      label: t("rail.arrange.showButton"),
-      current: t(SHOW_NAMES[arrangement.show]),
-      entries: SHOWS.map((s) => ({ kind: "item", label: t(SHOW_NAMES[s]), checked: s === arrangement.show, onChoose: () => actions.onShow(s) })),
-    },
+    choice(t("rail.arrange.groupByButton"), GROUP_BYS, arrangement.groupBy, (g) => t(GROUP_BY_NAMES[g]), actions.onGroupBy),
+    choice(t("rail.arrange.sortByButton"), SORT_BYS, arrangement.sortBy, (s) => t(SORT_BY_NAMES[s]), actions.onSortBy),
+    choice(t("rail.arrange.showButton"), SHOWS, arrangement.show, (s) => t(SHOW_NAMES[s]), actions.onShow),
     { kind: "rule" },
     { kind: "item", label: t("rail.arrange.resetButton"), onChoose: actions.onReset },
   ];

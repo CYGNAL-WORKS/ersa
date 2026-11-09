@@ -278,6 +278,33 @@ describe("a new session's tile", () => {
       ]);
     });
 
+    // verifies: FLOW-ORGANIZE-SESSIONS-R10
+    it("slides a tile with no last activity yet when Core corrects its date created", () => {
+      const { rerender } = render(sorted([older, newer], "last_activity"));
+      rerender(sorted([{ ...older, created_at: "2026-11-06T10:00:00Z" }, newer], "last_activity"));
+      expect(slid).toEqual(swapped);
+    });
+
+    it("moves a tile already on the page where it is, so its menu, focus and animations hold", () => {
+      const insert = Node.prototype.insertBefore;
+      const moved: (string | undefined)[] = [];
+      const put = vi.spyOn(Node.prototype, "insertBefore");
+      Element.prototype.moveBefore = function (this: Element, node: Node, before: Node | null) {
+        moved.push((node as HTMLElement).dataset.sessionId);
+        insert.call(this, node, before);
+      } as never;
+      try {
+        const third = session("z", "Third", "2026-11-06T07:00:00Z");
+        const { rerender } = render(sorted([newer, older, third], "last_activity"));
+        put.mockClear();
+        rerender(sorted([newer, older, { ...third, last_activity_at: "2026-11-06T10:00:00Z" }], "last_activity"));
+        expect(moved).toEqual(["b", "a"]);
+        expect(put.mock.calls.filter(([node]) => (node as HTMLElement).dataset?.sessionId !== undefined)).toEqual([]);
+      } finally {
+        delete (Element.prototype as { moveBefore?: unknown }).moveBefore;
+      }
+    });
+
     it("draws tiles coming back after Core was lost in place", () => {
       const { rerender } = render(sorted([older, newer], "last_activity"));
       rerender(rail([], undefined, { sortBy: "last_activity", sessions: { state: "loading" } }));
