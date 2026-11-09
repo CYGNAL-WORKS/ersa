@@ -13,15 +13,16 @@ use ersa_protocol::core_api::{
     DecidePermissionParams, Empty, IdParams, InspectParams, Inspected, Project, RawDirection,
     RawLogEntry, RawLogParams, Session, SessionCreateParams, SessionSendParams, SessionSendResult,
     SetArchivedParams, SetModeParams, SetTitleParams, SubscribeParams, SubscribeResult, Workspace,
-    WorkspaceState,
+    WorkspaceCreateParams, WorkspaceKind, WorkspaceState,
 };
 use serde_json::Value;
 
-use super::{ApiError, Peer};
+use super::{ApiError, Peer, handlers};
 use crate::attachments::{self, InspectError};
 use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
-use crate::sessions::Forkable;
+use crate::sessions::{Forkable, MAX_TITLE_CHARS};
 use crate::state::Core;
+use crate::workspace;
 
 /// The most raw lines one `session.raw_log` call returns, and the most bytes
 /// of line text (one line always comes back, however long). A client pages
@@ -29,10 +30,6 @@ use crate::state::Core;
 /// The log is held in memory, from when Core started the session's backend.
 pub const RAW_LOG_LIMIT: usize = 1000;
 pub const RAW_LOG_BYTES: usize = 8 * 1024 * 1024;
-
-/// The longest title `session.set_title` takes: as much as Claude Code's
-/// own session list shows.
-pub const MAX_TITLE_CHARS: usize = 200;
 
 pub(super) async fn list(core: &Core, _: Empty) -> Result<Vec<Session>, ApiError> {
     Ok(core.sessions.list())
@@ -164,6 +161,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         last_activity_at: None,
         forked_from: None,
         forked_through: None,
+        forked_at: None,
     };
     let config = SessionConfig {
         cwd: workspace.path,
@@ -191,18 +189,22 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
 }
 
 /// `session.fork` (FLOW-FORK-SESSION): a new session from a copy of the
-/// conversation of `params.id`, in its workspace and with its backend,
-/// model, effort, permission mode and section, not pinned or archived.
+/// conversation of `params.id`, with its backend, model, effort, permission
+/// mode and section, not pinned or archived. An original in an isolated
+/// workspace forks into a new one, on a new branch from the commit it has
+/// checked out; one in a root workspace shares it (R05).
 pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiError> {
     // Said first: a delete's claim turns the workspace away from `ready`, and
     // its `busy` is the answer that says why.
     core.sessions.refuse_fork_if_busy(&params.id)?;
     let original = core.sessions.row(&params.id)?;
-    let (workspace, project) = ready_workspace(core, &original.workspace_id).await?;
+    let (original_workspace, project) = ready_workspace(core, &original.workspace_id).await?;
     let Starting {
         transport,
         backend_version,
     } = starting(core, &project, &original.backend).await?;
+    // Every refusal comes before the workspace is made. Holding `hold`
+    // keeps the original from being sent to or deleted meanwhile.
     let Forkable {
         backend_id,
         adapter,
@@ -211,19 +213,25 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         .sessions
         .prepare_fork(&params.id, Arc::clone(&transport))
         .await?;
+    let made_for_it = original_workspace.kind == WorkspaceKind::Isolated;
+    let workspace = if made_for_it {
+        new_workspace_at_head(core, &project, &original_workspace).await?
+    } else {
+        original_workspace
+    };
     let trusted = trusted_now(core, &project).await?;
+
     let permission_mode = original
         .permission_mode
         .clone()
         .unwrap_or_else(|| BackendChoices::default_of(&adapter.choices().permission_modes));
     // Chosen and stored before the backend starts, as for a new session, so
-    // a fork can be renamed before its first message. A backend without
-    // host-chosen ids names it when it starts instead (R38).
+    // a fork can be renamed before its first message (R38).
     let backend_session_id = adapter.new_session_id();
     let fork = SessionRow {
         id: persistence::new_id("s"),
-        workspace_id: workspace.id,
-        host_id: project.host_id,
+        workspace_id: workspace.id.clone(),
+        host_id: project.host_id.clone(),
         backend: original.backend,
         backend_session_id: backend_session_id.clone(),
         mode: original.mode,
@@ -243,22 +251,78 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
             .iter()
             .rev()
             .find_map(|event| event.message_id.clone()),
+        forked_at: Some(persistence::now_rfc3339()),
     };
     let config = SessionConfig {
-        cwd: workspace.path,
+        cwd: workspace.path.clone(),
         permission_mode,
         model: original.model,
         effort: original.effort,
         project_trusted: trusted,
-        project_path: project.path,
+        project_path: project.path.clone(),
         backend_session_id,
         fork_of: Some(backend_id),
         extra: Value::Null,
     };
-    Ok(core
+    let created = core
         .sessions
         .create_with(fork, beginning, adapter, transport, config, backend_version)
-        .await?)
+        .await;
+    if created.is_err() && made_for_it {
+        discard_workspace(core, &project, &workspace).await;
+    }
+    Ok(created?)
+}
+
+/// A new isolated workspace on a new branch at the commit `from` has checked
+/// out, made as `workspace.create` makes one; uncommitted changes stay behind.
+async fn new_workspace_at_head(
+    core: &Core,
+    project: &Project,
+    from: &Workspace,
+) -> Result<Workspace, ApiError> {
+    let git = core
+        .transport_for(&project.host_id)
+        .ok_or_else(|| handlers::unreachable_host(&project.host_id))?;
+    let head = workspace::git_resolve_commit(git.as_ref(), &from.path, "HEAD")
+        .await?
+        .ok_or_else(|| {
+            ApiError::invalid_state(format!("workspace {} has no commit to start from", from.id))
+        })?;
+    handlers::workspace_create(
+        core,
+        WorkspaceCreateParams {
+            project_id: project.id.clone(),
+            name: None,
+            base: Some(head),
+        },
+    )
+    .await
+}
+
+/// Removes a workspace made for a fork that then wasn't created, as far as it
+/// can: what can't be removed stays listed for the user to remove.
+async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace) {
+    let Some(git) = core.transport_for(&project.host_id) else {
+        return;
+    };
+    let deleted = workspace::git_worktree_delete(
+        git.as_ref(),
+        &project.path,
+        &workspace.path,
+        &workspace.vcs_ref,
+    )
+    .await;
+    match deleted {
+        Ok(_) => {
+            if let Err(e) = core.store.delete_workspace(workspace.id.clone()).await {
+                tracing::warn!(workspace = %workspace.id, error = %e, "could not forget a fork's workspace");
+            }
+        }
+        Err(e) => {
+            tracing::warn!(workspace = %workspace.id, error = %e, "could not remove a fork's workspace");
+        }
+    }
 }
 
 /// Refuses a `field` value that is not one of `offered`; absent is the

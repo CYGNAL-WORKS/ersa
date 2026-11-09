@@ -11,7 +11,7 @@ use ersa_adapter::{ConversationEnd, OpenElsewhere};
 use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter};
-use support::{Client, TestCore, kind, start_with_adapters, tempdir, workspace};
+use support::{Client, TestCore, git, git_repo, kind, start_with_adapters, tempdir, workspace};
 
 async fn start(fake: &Arc<FakeAdapter>) -> (TestCore, Client) {
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
@@ -150,7 +150,8 @@ async fn a_fork_copies_the_originals_setup_and_conversation_and_leaves_it_as_it_
     let fork = client.result("session.fork", json!({ "id": id })).await;
 
     assert_ne!(fork["id"], before["id"]);
-    assert_eq!(fork["workspace_id"], before["workspace_id"]);
+    // `workspace` makes an isolated workspace, so the fork gets its own.
+    assert_ne!(fork["workspace_id"], before["workspace_id"]);
     assert_eq!(fork["backend"], before["backend"]);
     assert_eq!(fork["model"], "model-b");
     assert_eq!(fork["effort"], "low");
@@ -158,7 +159,7 @@ async fn a_fork_copies_the_originals_setup_and_conversation_and_leaves_it_as_it_
     assert_eq!(fork["section_id"], section["id"]);
     assert_eq!(fork["pinned"], false);
     assert_eq!(fork["archived"], false);
-    assert_eq!(fork["title"], "Original");
+    assert_eq!(fork["title"], "Original (fork)");
 
     let fork_id = fork["id"].as_str().unwrap().to_string();
     // The backend's session comes from a copy of the original's, in its
@@ -172,7 +173,7 @@ async fn a_fork_copies_the_originals_setup_and_conversation_and_leaves_it_as_it_
     let config = fake.stats.configs.lock().unwrap()[1].clone();
     assert_eq!(config.fork_of.as_deref(), Some(backend_id.as_str()));
     let first = fake.stats.configs.lock().unwrap()[0].clone();
-    assert_eq!(config.cwd, first.cwd);
+    assert_ne!(config.cwd, first.cwd);
     assert_eq!(config.model.as_deref(), Some("model-b"));
     assert_eq!(config.effort.as_deref(), Some("low"));
     assert_eq!(config.permission_mode, "auto");
@@ -510,6 +511,15 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
             .push(fake::recorded_reply(text, reply));
     };
     keep("reply-1", "the reply");
+    client
+        .result("session.set_title", json!({ "id": id, "title": "Titled" }))
+        .await;
+    fake.records
+        .lock()
+        .unwrap()
+        .get_mut(&backend_id)
+        .unwrap()
+        .push(fake::recorded_title("Titled"));
     let section = client
         .result("section.create", json!({ "name": "Work" }))
         .await;
@@ -545,6 +555,7 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
     // The original goes on without it.
     keep("reply-2", "after the fork");
 
+    let made_at = fork["created_at"].clone();
     client.result("core.shutdown", json!({})).await;
     let TestCore { dir, task, .. } = core;
     task.await.unwrap().unwrap();
@@ -558,6 +569,11 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
         .result("session.subscribe", json!({ "id": fork_id, "from_seq": 0 }))
         .await;
     let events = client.events_until("session.ended").await;
+    // verifies: FLOW-FORK-SESSION-R06
+    let listed = row(&mut client, &fork_id).await;
+    assert_eq!(listed["title"], "Titled (fork)");
+    // Not the time of the entries it copied: a fork never changes group.
+    assert_eq!(listed["created_at"], made_at);
     let shown: Vec<&Value> = events
         .iter()
         .filter(|e| e["event"]["type"] == "assistant.text")
@@ -661,4 +677,212 @@ async fn a_read_that_outlives_its_request_still_holds_back_the_next_fork() {
 
     drop(held);
     forked(&mut client, &id).await;
+}
+
+/// A git repository at `dir/repo` added as a project, with an isolated
+/// workspace on a commit of its own; returns the project and the workspace.
+async fn isolated_workspace(client: &mut Client, dir: &std::path::Path) -> (Value, Value) {
+    let repo = dir.join("repo");
+    git_repo(&repo);
+    let project = client
+        .result(
+            "project.add",
+            json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false }),
+        )
+        .await;
+    let workspace = client
+        .result("workspace.create", json!({ "project_id": project["id"] }))
+        .await;
+    (project, workspace)
+}
+
+/// A git repository at `dir/repo` added as a project; returns its root
+/// workspace.
+async fn root_workspace(client: &mut Client, dir: &std::path::Path) -> Value {
+    let repo = dir.join("repo");
+    git_repo(&repo);
+    let project = client
+        .result(
+            "project.add",
+            json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false }),
+        )
+        .await;
+    let workspaces = client
+        .result("workspace.list", json!({ "project_id": project["id"] }))
+        .await;
+    workspaces
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["kind"] == "root")
+        .cloned()
+        .expect("a root workspace")
+}
+
+/// A started, idle session in `workspace`.
+async fn idle_in(client: &mut Client, workspace: &Value) -> String {
+    let session = client
+        .result(
+            "session.create",
+            json!({ "workspace_id": workspace["id"], "backend": fake::BACKEND }),
+        )
+        .await;
+    let id = session["id"].as_str().unwrap().to_string();
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.started").await;
+    client
+        .result("session.send", json!({ "id": id, "text": "idle" }))
+        .await;
+    wait_for_state(client, &id, "idle").await;
+    id
+}
+
+/// The commit a folder has checked out.
+fn head_of(folder: &std::path::Path) -> String {
+    git(folder, &["rev-parse", "HEAD"])
+}
+
+// verifies: FLOW-FORK-SESSION-R05
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_of_an_isolated_session_gets_its_own_workspace_and_branch_at_its_commit() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let (project, workspace) = isolated_workspace(&mut client, core.dir.path()).await;
+    let folder = std::path::PathBuf::from(workspace["path"].as_str().unwrap());
+    // A commit only the original's branch has, and an edit not committed.
+    std::fs::write(folder.join("committed.txt"), "committed\n").unwrap();
+    git(&folder, &["add", "committed.txt"]);
+    git(
+        &folder,
+        &["commit", "--quiet", "-m", "On the original's branch"],
+    );
+    std::fs::write(folder.join("uncommitted.txt"), "uncommitted\n").unwrap();
+    let id = idle_in(&mut client, &workspace).await;
+
+    let fork = forked(&mut client, &id).await;
+
+    assert_ne!(fork["workspace_id"], workspace["id"]);
+    let workspaces = client
+        .result("workspace.list", json!({ "project_id": project["id"] }))
+        .await;
+    let made = workspaces
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == fork["workspace_id"])
+        .cloned()
+        .expect("the fork's workspace is listed");
+    assert_eq!(made["kind"], "isolated");
+    assert_eq!(made["state"], "ready");
+    assert_ne!(made["vcs_ref"], workspace["vcs_ref"]);
+    let made_folder = std::path::PathBuf::from(made["path"].as_str().unwrap());
+    assert_eq!(head_of(&made_folder), head_of(&folder));
+    assert!(made_folder.join("committed.txt").exists());
+    assert!(!made_folder.join("uncommitted.txt").exists());
+    assert!(folder.join("uncommitted.txt").exists());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while fake.stats.configs.lock().unwrap().len() < 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fork never started"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        fake.stats.configs.lock().unwrap()[1].cwd,
+        made["path"].as_str().unwrap()
+    );
+}
+
+// verifies: FLOW-FORK-SESSION-R05
+#[tokio::test(flavor = "multi_thread")]
+async fn a_workspace_that_cannot_be_made_leaves_no_fork() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let (project, workspace) = isolated_workspace(&mut client, core.dir.path()).await;
+    let id = idle_in(&mut client, &workspace).await;
+    client.result("session.stop", json!({ "id": id })).await;
+    // Its folder gone, nothing says what commit to start from.
+    let folder = workspace["path"].as_str().unwrap();
+    std::fs::remove_dir_all(folder).unwrap();
+
+    let error = client.error("session.fork", json!({ "id": id })).await;
+
+    assert_ne!(kind(&error), "invalid_state", "{error:#}");
+    let sessions = client.result("session.list", json!({})).await;
+    assert_eq!(sessions.as_array().unwrap().len(), 1);
+    let workspaces = client
+        .result("workspace.list", json!({ "project_id": project["id"] }))
+        .await;
+    assert_eq!(workspaces.as_array().unwrap().len(), 2, "{workspaces:#}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_original_cannot_be_deleted_until_its_forks_backend_is_ready() {
+    let fake = Arc::new(FakeAdapter::slow_start(Duration::from_millis(500)));
+    let (core, mut client) = start(&fake).await;
+    let root = root_workspace(&mut client, core.dir.path()).await;
+    let id = idle_in(&mut client, &root).await;
+
+    client.result("session.fork", json!({ "id": id })).await;
+    let error = client.error("session.delete", json!({ "id": id })).await;
+
+    assert_eq!(kind(&error), "invalid_state", "{error:#}");
+    assert!(
+        error["message"].as_str().unwrap().contains("being forked"),
+        "{error:#}"
+    );
+}
+
+// verifies: FLOW-FORK-SESSION-R06
+#[tokio::test(flavor = "multi_thread")]
+async fn a_long_title_is_shortened_to_fit_with_its_mark() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    let title = "t".repeat(200);
+    client
+        .result("session.set_title", json!({ "id": id, "title": title }))
+        .await;
+
+    let fork = forked(&mut client, &id).await;
+
+    let got = fork["title"].as_str().unwrap();
+    assert_eq!(got.chars().count(), 200);
+    assert_eq!(got, format!("{} (fork)", "t".repeat(193)));
+}
+
+// verifies: FLOW-FORK-SESSION-R06
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_of_an_untitled_session_has_no_title() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    assert_eq!(row(&mut client, &id).await["title"], Value::Null);
+
+    let fork = forked(&mut client, &id).await;
+
+    assert_eq!(fork["title"], Value::Null);
+}
+
+// verifies: FLOW-FORK-SESSION-R05
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_of_a_root_session_shares_its_workspace() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let root = root_workspace(&mut client, core.dir.path()).await;
+    let id = idle_in(&mut client, &root).await;
+
+    let fork = forked(&mut client, &id).await;
+
+    assert_eq!(fork["workspace_id"], root["id"]);
+    let workspaces = client
+        .result(
+            "workspace.list",
+            json!({ "project_id": root["project_id"] }),
+        )
+        .await;
+    assert_eq!(workspaces.as_array().unwrap().len(), 1, "{workspaces:#}");
 }

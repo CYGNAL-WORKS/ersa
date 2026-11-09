@@ -15,9 +15,28 @@ pub struct Beginning {
     /// 2.1.316/15-fork-named-no-message), so until then this is the only
     /// place the copied conversation can be read from.
     pub record: Arc<Vec<RecordEvent>>,
+    /// For a fork: what is left to do once its backend is ready.
+    pub fork: Option<ForkStart>,
+}
+
+/// What a fork's start still has to do.
+pub struct ForkStart {
     /// Keeps the original's `forking` flag raised until the fork's backend
     /// is ready, by when the CLI has read the record it copies.
-    pub hold: Option<Arc<ForkHold>>,
+    pub hold: Arc<ForkHold>,
+    /// The name to give it in the backend, a titled original's (R06).
+    pub name: Option<String>,
+}
+
+/// How a fork's title ends.
+const FORK_MARK: &str = " (fork)";
+
+/// A fork's title: the original's, shortened so the whole fits the limit on a
+/// title, then marked (FLOW-FORK-SESSION-R06).
+pub(super) fn fork_title(original: &str) -> String {
+    let room = MAX_TITLE_CHARS - FORK_MARK.chars().count();
+    let kept: String = original.chars().take(room).collect();
+    format!("{}{FORK_MARK}", kept.trim_end())
 }
 
 /// A session that can be forked, as [`SessionManager::prepare_fork`] found it.
@@ -70,9 +89,10 @@ impl SessionManager {
     /// The slow reads run in one task, and the session's `forking` flag stays
     /// raised until that task ends, even after this request has given up on
     /// it: a disk that hangs then holds one stuck read per session, not one
-    /// per try. It stays raised until the fork's backend is ready too, and
+    /// per try. It stays raised until the fork's backend is ready too:
     /// `session.send` refuses meanwhile, since a turn begun before the CLI has
-    /// read the record would be copied part way (fixture 2.1.316/18).
+    /// read the record would be copied part way (fixture 2.1.316/18), and so
+    /// does `session.delete`, whose record the CLI is about to read.
     pub async fn prepare_fork(
         &self,
         id: &str,
@@ -131,10 +151,16 @@ impl SessionManager {
         Ok(Forkable {
             backend_id,
             adapter,
-            beginning: Beginning {
-                title: handle.describe().title,
-                record,
-                hold: Some(held),
+            beginning: {
+                let title = handle.describe().title.as_deref().map(fork_title);
+                Beginning {
+                    fork: Some(ForkStart {
+                        hold: held,
+                        name: title.clone(),
+                    }),
+                    title,
+                    record,
+                }
             },
         })
     }

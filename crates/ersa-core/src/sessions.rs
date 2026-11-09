@@ -67,7 +67,11 @@ use crate::raw_log::RawLog;
 mod fork;
 mod send;
 
-pub use fork::{Beginning, ForkHold, Forkable};
+/// The longest title `session.set_title` takes: as much as Claude Code's
+/// own session list shows.
+pub const MAX_TITLE_CHARS: usize = 200;
+
+pub use fork::{Beginning, ForkHold, ForkStart, Forkable};
 pub use send::Pacer;
 
 /// How many events may wait for one subscriber before it counts as unable
@@ -564,9 +568,11 @@ fn not_running() -> SessionError {
 }
 
 impl Handle {
-    /// A session first known to have begun at `created_at`, until its
+    /// A session first known to have begun at `created_at` (a fork, when it
+    /// was made), until its
     /// record says.
     fn new(row: SessionRow, created_at: String) -> Self {
+        let created_at = row.forked_at.clone().unwrap_or(created_at);
         Handle {
             forking: Arc::default(),
             id: row.id.clone(),
@@ -898,7 +904,7 @@ impl SessionManager {
         }
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&handle.presented).title = begin.title;
-        let hold = begin.hold;
+        let fork = begin.fork;
         // A new session has no record yet: the backend has not been told
         // anything, so its events are the live stream's from the start. A
         // fork starts from the conversation it copies.
@@ -922,7 +928,7 @@ impl SessionManager {
                     transport,
                     config,
                     backend_version,
-                    hold,
+                    fork,
                 );
                 return Ok(handle.describe());
             }
@@ -940,7 +946,7 @@ impl SessionManager {
         transport: Arc<dyn Transport>,
         config: SessionConfig,
         backend_version: String,
-        hold: Option<Arc<ForkHold>>,
+        fork: Option<ForkStart>,
     ) {
         let (fed_tx, fed_rx) = mpsc::unbounded_channel();
         let sink = Arc::new(CoreSink::new(&handle.id, Arc::clone(&self.app_log), fed_tx));
@@ -970,7 +976,7 @@ impl SessionManager {
             transport,
             config,
             backend_version,
-            hold,
+            fork,
             started: started_tx,
             finished: finished_tx,
             pipeline,
@@ -1310,6 +1316,12 @@ impl SessionManager {
         // A pending permission or question is a turn waiting on the user,
         // whatever state the backend last reported.
         let waiting = !session.tile.pending.is_empty();
+        // The fork's CLI has yet to read the record a delete would take.
+        if handle.forking.load(Ordering::SeqCst) {
+            return Err(SessionError::InvalidState(format!(
+                "session {id} is being forked; delete it once the fork has started"
+            )));
+        }
         if (handle.live().is_some() && (working || waiting)) || session.sending.is_some() {
             return Err(SessionError::InvalidState(format!(
                 "session {id} is starting or working; stop it before deleting it"
@@ -1792,6 +1804,7 @@ async fn apply_summary(
     backend_id: String,
 ) {
     let removed = Arc::clone(&handle.removed);
+    let backend_id_read = backend_id.clone();
     let start = move || {
         tokio::spawn(async move {
             let read = adapter.summarize_record(transport, &cwd, &backend_id);
@@ -1804,13 +1817,26 @@ async fn apply_summary(
     // so a joiner simply reads again.
     match read_once(&handle.summary_read, SUMMARY_READ, start, async |_| false).await {
         Some(Ok(Some(summary))) => {
+            let (of_original, forked_at) = {
+                let row = lock(&handle.row);
+                (
+                    row.forked_from.as_deref() == Some(backend_id_read.as_str()),
+                    row.forked_at.clone(),
+                )
+            };
+            let title = if of_original {
+                summary.title.as_deref().map(fork::fork_title)
+            } else {
+                summary.title
+            };
             let mut presented = lock(&handle.presented);
-            if summary.title.is_some() {
-                presented.title = summary.title;
+            if title.is_some() {
+                presented.title = title;
             }
-            // The record's wrapper is the backend's and changes between
+            // The entries a fork copies keep the original's times, and the
+            // record's wrapper is the backend's and changes between
             // versions: a time that is not RFC 3339 is not used.
-            match summary.created_at {
+            match forked_at.or(summary.created_at) {
                 Some(at) if is_rfc3339(&at) => presented.created_at = at,
                 Some(at) => {
                     tracing::warn!(session = %handle.id, created_at = %at, "the session record's first time is not RFC 3339; not used");
@@ -2234,8 +2260,9 @@ struct SessionTask {
     transport: Arc<dyn Transport>,
     config: SessionConfig,
     backend_version: String,
-    /// A fork's hold on its original, let go once the start is over.
-    hold: Option<Arc<ForkHold>>,
+    /// A fork's hold on its original, let go once the start is over, and its
+    /// name.
+    fork: Option<ForkStart>,
     started: watch::Sender<Started>,
     finished: watch::Sender<bool>,
     pipeline: tokio::task::JoinHandle<()>,
@@ -2249,7 +2276,7 @@ async fn run_session(task: SessionTask) {
         transport,
         config,
         backend_version,
-        hold,
+        fork,
         started,
         finished,
         pipeline,
@@ -2263,7 +2290,9 @@ async fn run_session(task: SessionTask) {
     // still leaves the fact startup repairs from.
     sink.app_log.flushed().await;
 
-    let is_fork = config.fork_of.is_some();
+    let is_fork = fork.is_some();
+    let (hold, name) = fork.map_or((None, None), |fork| (Some(fork.hold), fork.name));
+    let chosen_id = config.backend_session_id.clone();
     let mut cancel = live.cancel.subscribe();
     let as_sink: Arc<dyn AdapterSink> = sink.clone();
     // The start runs in a task of its own, so an adapter that panics fails
@@ -2295,6 +2324,17 @@ async fn run_session(task: SessionTask) {
                 sink.record_fact(LifecycleFact::ForkReady);
             }
             started.send_replace(Started::Ready(Arc::clone(&session)));
+            // Named as the fork's, not as the title it copied. A name the
+            // backend refuses leaves the fork as it is (PROTO-CORE-API,
+            // `session.fork`), so this doesn't hold anything up.
+            if let (Some(name), Some(backend_id)) = (name, chosen_id) {
+                let (session, id) = (Arc::clone(&session), handle.id.clone());
+                tokio::spawn(async move {
+                    if let Err(e) = session.rename(&backend_id, &name).await {
+                        tracing::warn!(session = %id, error = %e, "the backend did not take the fork's name");
+                    }
+                });
+            }
             sink.start_finished(Ok(()));
             // A stop that arrived as the start completed saw nothing to stop.
             if *cancel.borrow() {
@@ -2981,6 +3021,7 @@ mod tests {
             last_activity_at: None,
             forked_from: None,
             forked_through: None,
+            forked_at: None,
         };
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&manager.sessions).insert(handle.id.clone(), handle);

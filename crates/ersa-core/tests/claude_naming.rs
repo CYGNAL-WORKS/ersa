@@ -393,13 +393,23 @@ async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversat
     let cwd = transport.spawned()[0].cwd.clone().unwrap();
     let record = write_record(home.path(), &cwd, &original_backend_id);
     let before = std::fs::read(&record).unwrap();
+    // Reading the stopped session takes its title from the record.
+    client
+        .result(
+            "session.subscribe",
+            json!({ "id": original, "from_seq": 0 }),
+        )
+        .await;
+    client.events_until("session.ended").await;
+    assert_eq!(listed_title(&mut client, &original).await, NAMED);
 
     let fork = client
         .result("session.fork", json!({ "id": original }))
         .await;
     let id = fork["id"].as_str().unwrap().to_string();
+    assert_eq!(fork["title"], format!("{NAMED} (fork)"));
 
-    // A session of its own in the same place, from a copy of the original.
+    // A session of its own, from a copy of the original.
     // `session.fork` answers once the row exists; the CLI starts after it.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while transport.spawned().len() < 2 {
@@ -410,7 +420,10 @@ async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversat
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     let spawned = transport.spawned()[1].clone();
-    assert_eq!(spawned.cwd.as_deref(), Some(cwd.as_str()));
+    // The original runs in an isolated workspace, so the fork has its own.
+    let fork_cwd = spawned.cwd.clone().expect("a working directory");
+    assert_ne!(fork_cwd, cwd);
+    assert!(Path::new(&fork_cwd).is_dir(), "{fork_cwd}");
     let at = |flag: &str| spawned.args.iter().position(|a| a == flag);
     let resume = at("--resume").expect("--resume");
     assert_eq!(spawned.args[resume + 1], original_backend_id);
@@ -448,4 +461,25 @@ async fn a_fork_is_ready_before_its_first_message_and_shows_the_copied_conversat
         "{events:#?}"
     );
     assert_eq!(std::fs::read(&record).unwrap(), before);
+
+    // Named in the CLI as the fork it is, under the id it was started with.
+    // verifies: FLOW-FORK-SESSION-R06
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let rename = transport
+            .stdin_lines()
+            .iter()
+            .map(|l| parse(l))
+            .find(|l| l["request"]["subtype"] == "rename_session");
+        if let Some(rename) = rename {
+            assert_eq!(rename["request"]["title"], format!("{NAMED} (fork)"));
+            assert_eq!(rename["request"]["session_id"], chosen.as_str());
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fork was not named"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
