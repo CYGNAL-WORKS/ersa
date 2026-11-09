@@ -4,6 +4,7 @@
 
 import { t } from "../catalog";
 import type { Session } from "../protocol/core-api.gen";
+import { titleOf } from "./tile";
 import { calendarDaysApart } from "./tree";
 
 export type SessionsTab = "active" | "archived";
@@ -24,7 +25,7 @@ export function pageRows<S extends Listed>(sessions: readonly S[], tab: Sessions
   const wanted = search.toLowerCase();
   return sessions
     .filter((s) => s.archived === (tab === "archived"))
-    .filter((s) => (s.title || t("rail.tile.untitledLabel")).toLowerCase().includes(wanted))
+    .filter((s) => titleOf(s).toLowerCase().includes(wanted))
     .sort((a, b) => millis(timeOf(b)) - millis(timeOf(a)));
 }
 

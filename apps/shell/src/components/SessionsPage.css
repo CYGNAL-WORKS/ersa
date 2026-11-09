@@ -74,17 +74,20 @@
     color var(--motion-quick) var(--motion-ease-out);
 }
 
-.sessions-page-tab:hover {
+.sessions-page-tab:hover,
+.sessions-page-tab[data-force="hover"] {
   background: var(--material-hover);
 }
 
 .sessions-page-tab[aria-selected="true"],
-.sessions-page-tab:active {
+.sessions-page-tab:active,
+.sessions-page-tab[data-force="pressed"] {
   color: var(--color-ink);
   background: var(--material-pressed);
 }
 
-.sessions-page-tab:focus-visible {
+.sessions-page-tab:focus-visible,
+.sessions-page-tab[data-force="focus"] {
   outline: none;
   border-color: var(--color-ink);
 }
@@ -101,6 +104,7 @@
   border: var(--line-hairline) solid var(--color-line);
   border-radius: var(--radius-md);
   transition: border-color var(--motion-quick) var(--motion-ease-out);
+  animation: sessions-page-in var(--motion-quick) var(--motion-ease-out);
 }
 
 /* Escape clears it; the browser's own clear button is outside the tokens and the icon set. */
@@ -108,7 +112,8 @@
   display: none;
 }
 
-.sessions-page-search:focus {
+.sessions-page-search:focus,
+.sessions-page-search[data-force="focus"] {
   outline: none;
   border-color: var(--color-accent);
 }
@@ -130,20 +135,22 @@
 
 /* Room at the trailing edge for the tile's More button, so showing it moves nothing. */
 .sessions-page-row > .session {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(var(--size-row-title-min), 1fr) minmax(0, max-content);
   padding-block: var(--space-md);
   padding-inline: var(--space-sm) calc(var(--space-sm) + var(--size-control-sm) + var(--space-sm));
   font-size: var(--type-ui-size);
   line-height: var(--type-ui-leading);
 }
 
-/* A row's first column is its title's, where a tile's is its backend icon's. */
+/* A row's first column is its title's, where a tile's is its backend icon's. The field's edge and padding sit outside
+   the text, so the title doesn't move as it becomes editable. */
 .sessions-page-row .session-title-field {
   grid-column: 1;
+  margin-inline-start: calc(-1 * (var(--space-xs) + var(--line-hairline)));
 }
 
 /* Keyboard focus takes the pointer's fill as well as the ink edge `.session` gives it. */
-.sessions-page-row > .session:focus-visible,
+.sessions-page-row > .session:focus-visible:not(:active),
 .sessions-page-row > .session[data-force="focus"] {
   background: var(--material-hover);
 }
@@ -165,6 +172,7 @@
 .sessions-page-facts {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-sm);
   min-width: 0;
   color: var(--color-ink-muted);
@@ -175,16 +183,25 @@
 
 .sessions-page-mark {
   display: flex;
+  flex: none;
   align-items: center;
 }
 
+.sessions-page-fact {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .sessions-page-time {
+  flex: none;
   font-variant-numeric: tabular-nums;
 }
 
 /* With reduced motion on, the page appears at once. */
 @media (prefers-reduced-motion: reduce) {
-  .sessions-page {
+  .sessions-page,
+  .sessions-page-search {
     animation: none;
   }
 
