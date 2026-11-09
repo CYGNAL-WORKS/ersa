@@ -1,0 +1,1 @@
+Claude Code 2.1.316, observed 2026-11-09. A new session (`--session-id`) and a fork (`--resume`, `--fork-session`, `--name`) were each started with Ersa's invocation, sent `initialize` and no user message, and closed. Neither left a session record under the projects folder; the seven runs in the same folder that sent a message each left one.

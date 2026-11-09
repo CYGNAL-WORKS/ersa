@@ -58,7 +58,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **FLOW-ORGANIZE-SESSIONS-R12**: When the user collapses or expands a group, Ersa shall keep that for the grouping in use, so the same group in another grouping is unaffected.
 - **FLOW-ORGANIZE-SESSIONS-R13**: Pins, sections and their membership, the grouping, the sort, the filter and the collapsed groups shall survive a restart of Ersa and of Core.
 - **FLOW-ORGANIZE-SESSIONS-R14**: When the user chooses Reset to defaults, Ersa shall group by project, sort by date created, show active sessions and expand every group, and shall keep pins and sections.
-- **FLOW-ORGANIZE-SESSIONS-R16**: When the user chooses View all, Ersa shall show the sessions page in the transcript area, listing every session that is archived or not according to its tab (Active first), whatever the rail's grouping, filter and collapsed groups, newest first by last activity, taking a session's creation for its last activity until it has one. While a first message is on its way, choosing View all shall do nothing, since a start finishes on the screen it began on (FLOW-NEW-SESSION-R08).
+- **FLOW-ORGANIZE-SESSIONS-R16**: When the user opens the sessions page from the arrange menu, Ersa shall show the sessions page in the transcript area, listing every session that is archived or not according to its tab (Active first), whatever the rail's grouping, filter and collapsed groups, newest first by last activity, taking a session's creation for its last activity until it has one. While a first message is on its way, choosing it shall do nothing, since a start finishes on the screen it began on (FLOW-NEW-SESSION-R08).
 - **FLOW-ORGANIZE-SESSIONS-R17**: While the user types in the sessions page's search field, Ersa shall list only the sessions whose title contains the text, ignoring case.
 - **FLOW-ORGANIZE-SESSIONS-R18**: When the user chooses a session on the sessions page, Ersa shall make it the active session and show its transcript in place of the page.
 - **FLOW-ORGANIZE-SESSIONS-R19**: While the sessions are being read, or when they cannot be read, the sessions page shall say so, with the reason when they cannot be read, and shall not say there are no sessions.
@@ -67,8 +67,9 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **FLOW-ORGANIZE-SESSIONS-R15**: When Core refuses or fails a change to the arrangement, Ersa shall show the rail as Core has it and say why.
 - **FLOW-ORGANIZE-SESSIONS-R22**: When the user moves a pinned session to a section, Ersa shall unpin it in the same change; moving it to "No section" shall keep the pin.
 - **FLOW-ORGANIZE-SESSIONS-R23**: Ersa shall refuse a section name that is blank or longer than 200 characters; a new section named exactly as another shall be that section, and renaming a section to exactly another's name shall be refused; names that differ only in case shall be different sections.
-- **FLOW-ORGANIZE-SESSIONS-R24**: A tile's menu shall offer Mark as unread on a session that is not unseen and Mark as read on one that is.
+- **FLOW-ORGANIZE-SESSIONS-R24**: A tile's menu shall offer Mark as unread on a session that is not unseen and Mark as read on one that is; Mark as unread shall be unavailable, with the reason, on the active session.
 - **FLOW-ORGANIZE-SESSIONS-R25**: Whether a session is unseen, by Ersa's mark or the user's, shall survive a restart of Ersa and of Core.
+- **FLOW-ORGANIZE-SESSIONS-R26**: The arrange menu's item that opens the sessions page shall read View all.
 
 ## Out of scope
 
@@ -82,7 +83,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 
 ## Changes
 
-- 2026-11-09: owner's decisions from the audit against Claude Desktop: moving a pinned session to a section unpins it (R22); a section's name follows Desktop's limits (R06 retired for R23); Mark as unread, and an unseen mark that survives restarts (R24, R25); the menu item is View all, as in Desktop (R16 reworded); last activity counts work done outside Ersa (R10 reworded, ADR 0031).
+- 2026-11-09: owner's decisions from the audit against Claude Desktop: moving a pinned session to a section unpins it (R22); a section's name follows Desktop's limits (R06 retired for R23); Mark as unread, and an unseen mark that survives restarts (R24, R25); the menu item is View all, as in the web app (R26, and R16 reworded to name no label); last activity counts work done outside Ersa (R10 reworded, ADR 0031).
 - 2026-11-08: from #208 inbox: All sessions does nothing while a first message is on its way (R16 reworded, its ID unchanged).
 - 2026-11-08: from #267 inbox: the date groups' bounds: Previous 7 days is 2 to 7 calendar days back, and a session created in the future is in Today. No requirement IDs changed.
 - 2026-11-07: from #255 inbox: a section's name follows a title's rules for spacing and control characters (PROTO-CORE-API-R60, R61). No requirement IDs changed.

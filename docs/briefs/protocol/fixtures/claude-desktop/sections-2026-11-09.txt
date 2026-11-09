@@ -10,6 +10,6 @@ Sections, created through Desktop's own sidebar tool in the Code tab:
 
 Not observed: the same cases typed into the app's own field, and renaming a section to a name another section has.
 
-Tool descriptions, 2026-11-09: moving a pinned session into a group unpins it, and moving it to Ungrouped keeps the pin.
+Tool descriptions, 2026-11-09: moving a pinned session into a group unpins it, and moving it to Ungrouped keeps the pin. A session that is still working (mid-turn, or with live background work) is not archived, and the call says so.
 
 claude.ai/code (the web app, which may differ from Desktop), a session's row menu: Open in, Pin, Mark as unread, Rename, Share, Copy link, Move to section, Archive, Delete. The sidebar's Group and sort menu: Group by, Sort by, Show, New section, Reset to defaults, View all.

@@ -46,7 +46,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 
 ### User
 
-- `user.message`: `text`, `origin` one of `human`, `peer_session`, `system`; `peer` (optional: `{ session_id, name }`); `attachments` (optional: in the order sent, each `{ kind: image, media_type, data }` with base64 `data`, or `{ kind: file | folder, path }` with the path as the agent was given it, relative to the workspace; PROTO-CORE-API, Turns and attachments). Projected from a user message in the session record, or emitted by Core when it sends one.
+- `user.message`: `text`, `origin` one of `human`, `peer_session`, `system`; `peer` (optional: `{ session_id, name }`); `attachments` (optional: in the order sent, each `{ kind: image, media_type, data }` with base64 `data`, or `{ kind: file | folder, path }` with the path as the agent was given it, relative to the workspace; PROTO-CORE-API, Turns and attachments). Projected from a user message in the session record, or emitted by Core when it sends one; a message written during a turn is emitted when its own turn starts (PROTO-CLAUDE-CODE-STREAM-R43).
 
 ### Assistant
 
@@ -156,6 +156,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 ## Changes
 
+- 2026-11-09: `user.message` for a message written during a turn is emitted when its own turn starts (PROTO-CLAUDE-CODE-STREAM-R43). No requirement IDs changed.
 - 2026-11-08: from #266 inbox: `question.answered` holds at most one answer per question; an open question on showing a question once, since its tool events still project. No requirement IDs changed.
 - 2026-11-07: a backend's brief may name user entries it writes that project only to `backend.passthrough` (PROTO-CLAUDE-CODE-STREAM-R34). No requirement IDs changed.
 - 2026-11-05: `question.answered` gains `declined`, recorded on Claude Code 2.1.316 (PROTO-CLAUDE-CODE-STREAM, Questions); R19 reworded to project a deny as declined.
