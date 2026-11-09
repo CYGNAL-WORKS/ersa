@@ -1,4 +1,4 @@
-// How the user has the rail arranged (FLOW-ORGANIZE-SESSIONS, steps 4, 6 and 7): its grouping, what it shows, and
+// How the user has the rail arranged (FLOW-ORGANIZE-SESSIONS, steps 4, 6 and 7): its grouping, its sort, what it shows, and
 // the groups collapsed in each grouping. Core keeps it in the user's settings under `rail` (PROTO-CORE-API,
 // Settings), so it survives a restart of Ersa and of Core (R13); the window only reads it and sends changes as merge
 // patches. Pins and sections are the sessions' own and live in Core's records, not here.
@@ -7,14 +7,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 /** How the rail groups the sessions after the Pinned group. Grouping by section comes with sections. */
 export type GroupBy = "project" | "date" | "none";
+/** How the tiles are sorted within each group (FLOW-ORGANIZE-SESSIONS-R09), named as `rail.sort_by` names it. */
+export type SortBy = "created" | "last_activity" | "name";
 /** Which sessions the rail shows (FLOW-ORGANIZE-SESSIONS-R11). */
 export type Show = "active" | "archived" | "all";
 
 export const GROUP_BYS: readonly GroupBy[] = ["project", "date", "none"];
+export const SORT_BYS: readonly SortBy[] = ["created", "last_activity", "name"];
 export const SHOWS: readonly Show[] = ["active", "archived", "all"];
 
 export interface RailArrangement {
   groupBy: GroupBy;
+  sortBy: SortBy;
   show: Show;
   /**
    * The keys of the groups collapsed in each grouping (R12): `pinned`, a project's id, or a date group's key. A
@@ -24,14 +28,16 @@ export interface RailArrangement {
 }
 
 /** What Reset to defaults returns to (R14), and what settings that hold nothing of the rail read as. */
-export const DEFAULT_ARRANGEMENT: RailArrangement = { groupBy: "project", show: "active", collapsed: {} };
+export const DEFAULT_ARRANGEMENT: RailArrangement = { groupBy: "project", sortBy: "created", show: "active", collapsed: {} };
 
 /** A JSON merge patch (RFC 7386), as `settings.set` takes it. */
 export type Patch = { rail: Record<string, unknown> };
 
-/** The patch that chooses a grouping or a filter. */
-export function choicePatch(choice: { groupBy: GroupBy } | { show: Show }): Patch {
-  return { rail: "groupBy" in choice ? { group_by: choice.groupBy } : { show: choice.show } };
+/** The patch that chooses a grouping, a sort or a filter. */
+export function choicePatch(choice: { groupBy: GroupBy } | { sortBy: SortBy } | { show: Show }): Patch {
+  if ("groupBy" in choice) return { rail: { group_by: choice.groupBy } };
+  if ("sortBy" in choice) return { rail: { sort_by: choice.sortBy } };
+  return { rail: { show: choice.show } };
 }
 
 /** The patch that keeps `keys` as the groups collapsed in `groupBy`; an array replaces the one Core has. */
@@ -40,8 +46,8 @@ export function collapsePatch(groupBy: GroupBy, keys: readonly string[]): Patch 
 }
 
 /**
- * Reset to defaults (R14): each `rail.*` key sent as null, which removes it, so each reads as its default. The sort
- * is reset too, though Sort by is not in the menu yet. Pins and sections are not settings, so they stay.
+ * Reset to defaults (R14): each `rail.*` key sent as null, which removes it, so each reads as its default. Pins and
+ * sections are not settings, so they stay.
  */
 export const RESET_PATCH: Patch = { rail: { group_by: null, sort_by: null, show: null, collapsed: null } };
 
@@ -49,6 +55,7 @@ export const RESET_PATCH: Patch = { rail: { group_by: null, sort_by: null, show:
 export function arrangementOf(settings: unknown): RailArrangement {
   const rail = objectOr(objectOr(settings)?.rail);
   const groupBy = GROUP_BYS.find((g) => g === rail?.group_by) ?? DEFAULT_ARRANGEMENT.groupBy;
+  const sortBy = SORT_BYS.find((s) => s === rail?.sort_by) ?? DEFAULT_ARRANGEMENT.sortBy;
   const show = SHOWS.find((s) => s === rail?.show) ?? DEFAULT_ARRANGEMENT.show;
   const stored = objectOr(rail?.collapsed);
   const collapsed: RailArrangement["collapsed"] = {};
@@ -56,7 +63,7 @@ export function arrangementOf(settings: unknown): RailArrangement {
     const keys = stored?.[g];
     if (Array.isArray(keys)) collapsed[g] = keys.filter((k): k is string => typeof k === "string");
   }
-  return { groupBy, show, collapsed };
+  return { groupBy, sortBy, show, collapsed };
 }
 
 /** `target` with `patch` merged in, as RFC 7386 gives: objects merge key by key, null removes, anything else replaces. */

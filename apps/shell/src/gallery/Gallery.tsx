@@ -230,7 +230,7 @@ const datedTree: Parameters<typeof RailTree>[0] = {
 };
 
 /** The rail's top row as the window draws it, with the arrange button beside New session. */
-const arrange = { arrangement: { groupBy: "project", show: "active" }, onGroupBy: () => {}, onShow: () => {}, onReset: () => {} } as const;
+const arrange = { arrangement: { groupBy: "project", sortBy: "created", show: "active" }, onGroupBy: () => {}, onSortBy: () => {}, onShow: () => {}, onReset: () => {} } as const;
 
 /** One project, for the states of a heading and its tiles. */
 const ersaOnly: Parameters<typeof RailTree>[0] = {
@@ -679,8 +679,9 @@ const entries: Entry[] = [
       ["Arrange menu, open", room(<RailTop onNewSession={() => {}} arrange={{ ...arrange, initialOpen: true }} />)],
       [
         "Arrange menu, Group by open",
-        room(<RailTop onNewSession={() => {}} arrange={{ ...arrange, arrangement: { groupBy: "date", show: "all" }, initialOpen: true, initialSubmenu: 0 }} />),
+        room(<RailTop onNewSession={() => {}} arrange={{ ...arrange, arrangement: { groupBy: "date", sortBy: "created", show: "all" }, initialOpen: true, initialSubmenu: 0 }} />),
       ],
+      ["Arrange menu, Sort by open", room(<RailTop onNewSession={() => {}} arrange={{ ...arrange, arrangement: { groupBy: "project", sortBy: "name", show: "active" }, initialOpen: true, initialSubmenu: 1 }} />)],
     ],
   },
   {
@@ -787,6 +788,7 @@ const entries: Entry[] = [
       ["Grouped by date", <RailTree {...datedTree} />],
       ["Grouped by date, collapsed", <RailTree {...datedTree} collapsed={new Set(["yesterday"])} />],
       ["Grouped by none", <RailTree {...pinnedTree} groupBy="none" />],
+      ["Sorted by name", <RailTree {...pinnedTree} groupBy="none" sortBy="name" />],
       ["No active sessions", <RailTree {...tree} sessions={{ state: "ready", sessions: treeSessions.map((s) => ({ ...s, archived: true })) }} />],
       ["No archived sessions", <RailTree {...tree} show="archived" />],
       ["Arrangement not saved", <RailTree {...ersaOnly} arrangeProblem={{ kind: "save", message: "settings.set: the database is locked" }} />],
