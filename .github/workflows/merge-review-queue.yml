@@ -1,0 +1,34 @@
+# The "Merge review" check on the merge queue's temporary merge commit. Docket
+# sets the status of that name on pull request heads only, so without this the
+# queue would wait on it until it timed out once the ruleset requires it.
+# A workflow of its own, triggered only by the queue: a job skipped by an `if`
+# in ci.yml would report a passing "Merge review" check on every pull request.
+name: Merge review (queue)
+
+on:
+  merge_group:
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: read
+
+jobs:
+  merge-review:
+    name: Merge review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+
+      - name: The pull request's head passed its merge review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUEUE_REF: ${{ github.event.merge_group.head_ref }}
+        run: node scripts/queue-merge-review.mjs
