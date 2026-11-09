@@ -1,7 +1,8 @@
 import { LoaderCircle } from "lucide-react";
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef } from "react";
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef } from "react";
 import { t } from "../catalog";
 import { type DeletePhase, type WhatGoes, losesWork } from "../session/deletion";
+import { milliseconds, reducedMotion } from "../theme/motion";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
 import "./DeleteQuestion.css";
@@ -57,6 +58,32 @@ export function DeleteQuestion({ title, backend, phase, onConfirm, onTryAgain, o
     return () => document.removeEventListener("mousedown", away, true);
   }, [inline]);
 
+  // What arrives late, the counts or a failure's reason, changes the question's height. It eases to the new height
+  // over motion-settle and stays centered, so nothing pops in (DESIGN.md); its body gives way, so the title and the
+  // buttons stay whole while it does.
+  const height = useRef<number>(undefined);
+  const easing = useRef<Animation>(undefined);
+  useLayoutEffect(() => {
+    const el = root.current;
+    if (inline || !el) return;
+    // An ease still running starts the next from where it has got to, and the new height is measured without it.
+    const from = easing.current ? el.getBoundingClientRect().height : height.current;
+    easing.current?.cancel();
+    easing.current = undefined;
+    const to = el.getBoundingClientRect().height;
+    height.current = to;
+    if (from === undefined || from === to || typeof el.animate !== "function" || reducedMotion()) return;
+    const style = getComputedStyle(el);
+    const duration = milliseconds(style.getPropertyValue("--motion-settle"));
+    const curve = style.getPropertyValue("--motion-ease-out").trim();
+    if (!duration || !curve) return;
+    const animation = el.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration, easing: curve });
+    easing.current = animation;
+    animation.onfinish = () => {
+      if (easing.current === animation) easing.current = undefined;
+    };
+  }, [inline, phase]);
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
       event.stopPropagation();
@@ -107,20 +134,22 @@ export function DeleteQuestion({ title, backend, phase, onConfirm, onTryAgain, o
       <h2 className="delete-question-title" id={`${id}-title`}>
         {t("rail.delete.title", { title })}
       </h2>
-      <div className="delete-question-detail" id={`${id}-detail`}>
-        {phase.kind === "asking" && phase.changed && <p>{t("rail.delete.changedDetail")}</p>}
-        <p>{t("rail.delete.conversationDetail", { backend })}</p>
-        {goes && <Goes goes={goes} />}
-        {phase.kind === "reading" && <p role="status">{t("rail.delete.readingProgress")}</p>}
-      </div>
-      {goes && <Loss goes={goes} />}
-      {goes?.kind === "folderGoes" && goes.branchKept && <p className="delete-question-kept">{t("rail.delete.branchKeptDetail")}</p>}
-      {failed && (
-        <div className="delete-question-failed" role="alert">
-          <p className="problem">{t("rail.delete.failedError")}</p>
-          <p className="delete-question-reason">{phase.reason}</p>
+      <div className="delete-question-body">
+        <div className="delete-question-detail" id={`${id}-detail`}>
+          {phase.kind === "asking" && phase.changed && <p>{t("rail.delete.changedDetail")}</p>}
+          <p>{t("rail.delete.conversationDetail", { backend })}</p>
+          {goes && <Goes goes={goes} />}
+          {phase.kind === "reading" && <p role="status">{t("rail.delete.readingProgress")}</p>}
         </div>
-      )}
+        {goes && <Loss goes={goes} />}
+        {goes?.kind === "folderGoes" && goes.branchKept && <p className="delete-question-kept">{t("rail.delete.branchKeptDetail")}</p>}
+        {failed && (
+          <div className="delete-question-failed" role="alert">
+            <p className="problem">{t("rail.delete.failedError")}</p>
+            <p className="delete-question-reason">{phase.reason}</p>
+          </div>
+        )}
+      </div>
       <div className="delete-question-actions">
         <Button ref={cancel} onClick={onCancel} disabled={deleting}>
           {t("rail.delete.cancelButton")}

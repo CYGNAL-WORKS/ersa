@@ -45,12 +45,28 @@
 }
 
 .delete-question-title {
+  flex: none;
   margin: 0;
   font-family: var(--type-heading-family);
   font-size: var(--type-heading-size);
   font-weight: var(--type-heading-weight);
   line-height: var(--type-heading-leading);
   overflow-wrap: anywhere;
+}
+
+/* All that can change its height. While the question eases to a new height this gives way, and its words are clipped
+   as they arrive, so the title and the buttons stay whole. */
+.delete-question-body {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  gap: var(--space-sm);
+  min-height: 0;
+  overflow: clip;
+}
+
+.delete-question-body > * {
+  flex: none;
 }
 
 /* What goes with it: ui in ink-muted. */
@@ -97,6 +113,7 @@
 }
 
 .delete-question-actions {
+  flex: none;
   display: flex;
   justify-content: flex-end;
   gap: var(--space-sm);
