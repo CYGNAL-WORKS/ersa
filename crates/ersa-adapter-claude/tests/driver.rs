@@ -137,7 +137,7 @@ async fn starts_the_cli_with_every_flag_explicit() {
 /// `--model` and `--effort` are passed when the session names them and left
 /// out otherwise, so the CLI's own defaults apply
 /// (PROTO-CLAUDE-CODE-STREAM, Invocation).
-// verifies: PROTO-CORE-API-R16
+// verifies: PROTO-CORE-API-R65
 #[test]
 fn model_and_effort_are_passed_only_when_named() {
     let mut named = config();
@@ -159,7 +159,7 @@ fn model_and_effort_are_passed_only_when_named() {
 /// What `backend.list` offers for Claude Code: the brief's model aliases,
 /// effort levels and permission modes, each list with one default, and
 /// never `bypassPermissions`.
-// verifies: PROTO-CORE-API-R16
+// verifies: PROTO-CORE-API-R65
 #[test]
 fn the_choices_are_the_briefs_with_one_default_each() {
     let choices = adapter().choices();

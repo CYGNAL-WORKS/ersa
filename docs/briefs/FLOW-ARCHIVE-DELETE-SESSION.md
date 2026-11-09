@@ -4,7 +4,7 @@ type: flow
 title: Archive or delete a session
 status: ready
 references: [LAY-SHELL, PROTO-CORE-API, FLOW-ORGANIZE-SESSIONS]
-adrs: [0017, 0026]
+adrs: [0017, 0026, 0031]
 ---
 
 # Archive or delete a session
@@ -19,7 +19,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 
 ## Steps
 
-1. The user chooses **Archive**. Ersa stops the session, as Stop does, and marks it archived. Its tile leaves the rail unless the rail shows archived sessions (FLOW-ORGANIZE-SESSIONS). Its record and workspace stay.
+1. The user chooses **Archive**, which is unavailable, saying to stop the session first, while the session is starting, working or waiting on the user. Ersa stops the session, as Stop does, and marks it archived. Its tile leaves the rail unless the rail shows archived sessions (FLOW-ORGANIZE-SESSIONS). Its record and workspace stay.
 2. The user opens an archived session (showing Archived or All). Its transcript reads as usual; in place of the composer is a note that it is archived, with **Resume**. Resume unarchives it and resumes it (FLOW-RESUME-SESSION).
 3. The user chooses **Unarchive**. The session is no longer archived and returns to its group, stopped; the next message resumes it.
 4. The user chooses **Delete…**, which is unavailable, saying to stop the session first, while the session is starting, working or waiting on the user. Ersa asks first. The question names the session, says its conversation is deleted for good, in the backend's own tools too, and says what else goes with it:
@@ -36,7 +36,6 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 - **Ersa stops part way through a delete** (a crash, a restart): when it starts again, a delete the user had confirmed shows as failed and offers Try again; one stopped before the confirmation was checked deleted and marked nothing.
 - **The session can't be stopped**: Ersa says so and deletes nothing.
 - **Another session leaves the shared workspace** between the question and the confirmation, so deleting this one would now delete the files: Ersa asks again.
-- **Archive while the session needs the user**: the pending requests are withdrawn with the stop, as when the session is stopped.
 - **The active session** archived or deleted by the user in this window: the transcript area shows the new-session screen. A shown session that becomes archived otherwise, as when it is archived in another window, stays shown with the archived note, as an archived session opened on purpose does.
 - **At launch**, the window opens the newest session that is not archived, since the rail hides archived ones.
 - **A session started elsewhere** (FLOW-RESUME-SESSION) is archived and deleted the same way, and deleting it deletes it from the backend's own tools too.
@@ -54,18 +53,16 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 - **FLOW-ARCHIVE-DELETE-SESSION-R08**: When what a deletion would lose has changed in any way since the user was asked, Ersa shall ask again before deleting.
 - **FLOW-ARCHIVE-DELETE-SESSION-R09**: When the user confirms a delete, Ersa shall delete the session's record from its backend, so that neither the rail, after a restart or when Ersa lists the backend's sessions, nor the backend's own tools list it again.
 - **FLOW-ARCHIVE-DELETE-SESSION-R10**: When `workspace.changes` reports `unrecorded`, the delete question shall say that commits made on a detached checkout can't be counted and may be lost with the folder, in place of a count of them.
+- **FLOW-ARCHIVE-DELETE-SESSION-R11**: While the session is starting, working or waiting on the user, Ersa shall offer Archive as unavailable with the reason, as Claude Desktop does, and Core shall refuse `session.set_archived` with `archived: true`.
 
 ## Out of scope
 
 - Undoing a delete.
 - Reclaiming workspaces whose sessions are long gone.
 
-## Open questions
-
-- Whether archiving a session that is working should ask first.
-
 ## Changes
 
+- 2026-11-09: owner's decision from the audit against Claude Desktop: Archive is unavailable while the session is starting, working or waiting on the user, which closes the open question on asking first. R11 added.
 - 2026-11-07: from #261 inbox: the active session goes to the new-session screen only when the user archives or deletes it in this window, and launch opens the newest session that is not archived; COMPOSER.md draws the archived note and RAIL.md an archived tile's line two, a refused Archive or Unarchive, and focus when a tile leaves the rail. No requirement IDs changed.
 - 2026-11-07: from #252 inbox: a delete refused because the session is open in another process leaves the session stopped. No requirement IDs added or retired.
 - 2026-11-07: from #244 inbox: when git has lost a workspace's record, the delete question says commits made on a detached checkout can't be counted (R10).

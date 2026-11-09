@@ -195,7 +195,7 @@ describe("stop, while a message is on its way or the agent works", () => {
     expect(button().getAttribute("aria-disabled")).toBe("true");
   });
 
-  // verifies: FLOW-SEND-MESSAGE-R04
+  // was FLOW-SEND-MESSAGE-R04, which R18 replaces once a message can wait
   it("does not send with Enter while the agent works, and keeps what is written for when the turn ends", async () => {
     const sent: string[] = [];
     const { rerender } = render(draw({ working: true, onStop: () => {}, onSend: async (text) => (sent.push(text), true) }));

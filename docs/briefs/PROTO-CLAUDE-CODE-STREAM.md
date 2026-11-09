@@ -34,7 +34,7 @@ claude --input-format stream-json --output-format stream-json --verbose
 - `--setting-sources user,project,local` loads the user's, the project's and the local settings, and without `--strict-mcp-config` the user's MCP configuration loads too, so hooks, instructions and MCP servers apply as they do in the terminal. The workspace's always-allow rules (`permissions.allow`) apply only once the CLI's own trust record marks the workspace trusted. For a trusted project the adapter asks for that through the CLI's own mechanism: the `initialize` request carries `workspaceTrust { accepted: true, directory }`, where `directory` is the project's root, which Core passes with the session, and the CLI writes its own record, keyed by the repository's git root, so every linked worktree of the project shares it (fixture 2.1.316/03-workspace-trust). The response's `workspace_trust_recorded` says whether it was recorded; anything but `true` is a warning in Core's log and the session starts regardless. From the next session on the rules apply without the CLI's stderr warning. An untrusted project's session never carries `workspaceTrust`. Ersa writes nothing to the CLI's configuration. Two consequences follow from the record being the CLI's: revoking trust in Ersa stops the attestation but leaves the CLI's record, so the repository stays trusted for terminal sessions; and a project added at a subfolder of a repository trusts that whole repository. This is for a trusted project only (ADR 0028): the CLI's own folder-trust prompt never appears in headless mode, so a session of an untrusted project loads the user's own settings and none of the workspace's configuration (its settings files and its MCP configuration). Fixtures 00 to 11 were recorded with `--setting-sources ""` and `--strict-mcp-config`, which isolate a session; Ersa no longer passes them.
 - `--await-initialize` makes the CLI read the host's `initialize` control request during startup instead of racing it; the Agent SDK passes it. Fixtures 09 and 11 were recorded without it and still worked, so it is belt and braces, to be verified by a fixture.
 - `--permission-mode` must be stated; the shelf flow depends on it.
-- `--model` and `--effort` are passed when the session names them (`session.create`'s `model` and `effort`, PROTO-CORE-API) and left out otherwise, so the CLI's own defaults apply. For `backend.list` the adapter lists what it knows the CLI accepts: the model aliases `fable`, `opus`, `sonnet` and `haiku` with `opus` marked as the default and `medium` as the default effort (what 2.1.316 sessions started without `--model` or `--effort` ran with, per the session-record fixtures; the CLI's own choice can differ when the user's settings or `ANTHROPIC_MODEL` say otherwise, which is why a session given no value reports none); the effort levels `low`, `medium`, `high`, `xhigh` and `max`; and the permission modes `default`, `acceptEdits`, `plan` and `auto`. `bypassPermissions` is not offered.
+- `--model` and `--effort` are passed when the session names them (`session.create`'s `model` and `effort`, PROTO-CORE-API) and left out otherwise, so the CLI's own defaults apply. For `backend.list` the adapter starts the CLI on the host, sends `initialize` and no message, reads `models` from the response (`value`, `displayName`, `resolvedModel`, `supportedEffortLevels`) and closes stdin; such a process writes no session record (`stream-controls-2026-11-09.txt`). The entry whose `value` is `default` is the default model, and choosing it passes no `--model`. The CLI marks no default effort and reports no session's effort, so a session given none reports none. The effort labels (`low`, `medium`, `high`, `xhigh` and `max`) and the permission modes (`default`, `acceptEdits`, `plan` and `auto`) are what the adapter knows the CLI accepts. `bypassPermissions` is not offered.
 - `--permission-prompt-tool stdio` makes permission prompts arrive on the control channel (fixture 11). Without it, or without `initialize`, prompts are auto-denied (fixtures 05, 08, 09).
 - `--include-partial-messages` adds `stream_event` lines for token-level streaming (fixture 02). Ersa passes it, so replies stream.
 - `--replay-user-messages` echoes each stdin user message back on stdout as a `user` message (fixture 07). Ersa does not pass it: Core emits `user.message` when it sends one, and the session record keeps the message.
@@ -102,7 +102,7 @@ The record omits text deltas (`stream_event`), permission prompts, `result` (tur
 
 ### Listing
 
-The sessions of a directory are the record files under its encoded path. To list them the adapter reads the head and the tail of each file, never the whole file. Each session's title is its latest `custom-title`, else its latest `ai-title`, else its last prompt, else its first prompt. The last prompt is the latest `last-prompt` entry, else the last prompt entry in the tail; a prompt is a `user` entry the person wrote, never one the CLI wrote (`PROTO-AGENT-EVENTS`, projection rules). A title is one line, cut at 200 characters. In print mode `/rename <title>`, sent as a user message, writes a `custom-title` entry, and no `ai-title` appears (2.1.316 fixture `01-session-resume`), so an Ersa session the user has not renamed lists under its last prompt.
+The sessions of a directory are the record files under its encoded path. To list them the adapter reads the head and the tail of each file, never the whole file. Each session's title is its latest `custom-title`, else its latest `ai-title`, else its last prompt, else its first prompt. The last prompt is the latest `last-prompt` entry, else the last prompt entry in the tail; a prompt is a `user` entry the person wrote, never one the CLI wrote (`PROTO-AGENT-EVENTS`, projection rules). A title is one line, cut at 200 characters. In print mode `/rename <title>`, sent as a user message, writes a `custom-title` entry, and no `ai-title` appears (2.1.316 fixture `01-session-resume`), so an Ersa session the user has not renamed lists under its last prompt. A session's last activity is the `timestamp` of the latest `user` or `assistant` entry in the tail.
 
 ### Renaming
 
@@ -173,7 +173,7 @@ Either side may send `{"type":"control_cancel_request","request_id":"..."}` to w
 
 ### Other control requests the adapter uses
 
-`interrupt`, `set_permission_mode`, `set_model`, `get_context_usage`, `get_session_cost`, and `mcp_message` (for `sdkMcpServers`). Shapes per the SDK types; fixtures to be recorded as each is implemented.
+`interrupt`, `set_permission_mode`, `set_model`, `get_context_usage`, `get_session_cost`, and `mcp_message` (for `sdkMcpServers`). Shapes per the SDK types; fixtures to be recorded as each is implemented. `set_model` takes a model's `value` and answers the resolved id, and `set_permission_mode` takes `mode` and is followed at once by a `system/status` line carrying `permissionMode`; the next `system/init` reports both (`stream-controls-2026-11-09.txt`). Before the first turn the `initialize` response's `current_permission_mode` says the mode.
 
 ## Sequencing
 
@@ -195,7 +195,7 @@ sequenceDiagram
   H->>C: next user message (or close stdin to end)
 ```
 
-- One turn runs at a time; the next user message is sent after `result`.
+- One turn runs at a time. A user message written during a turn waits in the CLI and runs as the next turn, opened by its own `system/init` after `result`; `interrupt` ends only the running turn, and the waiting message then runs (`stream-controls-2026-11-09.txt`).
 - A `can_use_tool` request must be answered before the turn continues; an unanswered request stalls the turn.
 - Closing stdin after `result` ends the process cleanly with exit 0 (fixtures 07 to 11).
 
@@ -252,6 +252,12 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R35**: When starting a new session, the adapter shall pass `--session-id` with an id Core chose and stored as the session's backend session id.
 - **PROTO-CLAUDE-CODE-STREAM-R36**: When renaming a starting session, the adapter shall hold a rename until the CLI has answered `initialize` and then send `rename_session`, and shall report the latest `system/session_title_changed` as the session's title until its record holds one.
 - **PROTO-CLAUDE-CODE-STREAM-R37**: The adapter shall delete a session's record only when the live-session registry shows no process with the session open, and shall refuse when the registry cannot say.
+- **PROTO-CLAUDE-CODE-STREAM-R39**: For `backend.list`, the adapter shall read the models from the `initialize` response of a CLI it started on the host with no user message, and that process shall leave no session record.
+- **PROTO-CLAUDE-CODE-STREAM-R40**: The adapter shall report a live session's model from each `system/init`, and its permission mode from each `system/init`, from a `system/status` line carrying `permissionMode`, and from the `initialize` response before the first turn.
+- **PROTO-CLAUDE-CODE-STREAM-R41**: The adapter shall change a live session's model with `set_model` and its permission mode with `set_permission_mode`.
+- **PROTO-CLAUDE-CODE-STREAM-R42**: When listing sessions, the adapter shall report as last activity the `timestamp` of the latest `user` or `assistant` entry in the tail it reads.
+- **PROTO-CLAUDE-CODE-STREAM-R43**: When a user message is written to the CLI during a turn, the adapter shall project its `user.message` at the start of the turn the CLI runs for it, at that turn's `system/init`, in the order written, and shall not join it to the running turn.
+- **PROTO-CLAUDE-CODE-STREAM-R44**: While a user message written to the CLI has not started its turn, the adapter shall report the session as working, including between one turn's `result` and the next `system/init`.
 
 ## Out of scope
 
@@ -261,14 +267,16 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 ## Open questions
 
 - Whether `system/session_title_changed` becomes an event of its own rather than a passthrough.
-- Exact shapes of `interrupt`, `set_model`, `get_context_usage`, `get_session_cost`, and `mcp_message` responses (to be recorded).
-- A workspace's settings can change the permission mode the CLI runs in; how the effective mode `system/init` reports reaches the Interface, so the user sees the mode a session really has.
+- Exact shapes of `get_context_usage`, `get_session_cost`, and `mcp_message` responses (to be recorded).
+- Whether `set_model` and `set_permission_mode` apply when sent during a turn; recorded between turns only.
+- How a running session's effort changes: `set_effort` is not a control request, and `apply_flag_settings` with `effortLevel` answers success with no effect the CLI reports.
 - Whether `permissions.allow` already applies in the session that first attests trust: the CLI logs that it re-applies project settings after recording trust, but its stderr warning is printed before `initialize` is read, and checking needs a tool call. The opt-in live test checks the next session only.
 - What the CLI keys its trust record to for a folder outside any git repository: assumed to be the folder itself, but fixture 03-workspace-trust was recorded in a git repository.
-- Whether revoking a project's trust in Ersa, or adding a project at a subfolder, needs a user-facing note, given that the CLI's record covers the whole repository and outlives Ersa's answer (owner).
+- Whether Ersa can read the CLI's trust record instead of keeping its own answer: `~/.claude.json` holds a `hasTrustDialogAccepted` per project, which is the CLI's internal configuration with no supported reader.
 
 ## Changes
 
+- 2026-11-09: owner's decisions from the audit against Claude Desktop and the backend rule, on what `stream-controls-2026-11-09.txt` shows: the models come from `initialize` (R39); a live session's model and permission mode come from the CLI (R40) and change through it (R41); last activity comes from the record's tail (R42); a message written during a turn waits in the CLI and opens its own turn (R43, R44). The open question on a note when trust is revoked is closed by FLOW-NEW-SESSION-R31.
 - 2026-11-08: from #266 inbox: the question fixtures 07 to 09 are committed and say how they were recorded; Questions says how an answer the rules leave open reads back, and that answers differing for questions sharing a text are refused. No requirement IDs changed.
 - 2026-11-07: from #260 inbox: a rename before the first message is now recorded (fixture 2.1.316/09-session-id-rename); `system/session_title_changed` announces only the user's name, never a generated title, and may carry a suffix that makes the name unique, and the announced name is the session's title. No requirement IDs changed.
 - 2026-11-07: from #252 inbox: Core stops its own process before deleting a session, since the registry can't tell it apart, so the record is deleted only when no process has it open: PROTO-CLAUDE-CODE-STREAM-R32 retired for R37. The registry's answer names every process that has the session open, for `session.fork`'s count.
