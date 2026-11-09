@@ -18,6 +18,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, Read, Seek, SeekFrom};
 
+use ersa_adapter::ConversationEnd;
 use ersa_protocol::events::{
     AssistantText, BackendPassthrough, ErrorCode, ErrorEvent, Event, MessageOrigin, UserMessage,
 };
@@ -64,7 +65,150 @@ pub fn project_record_from<R: BufRead + Seek>(
     reader: &mut R,
     limit: u64,
 ) -> io::Result<Vec<RecordEvent>> {
+    let lines = scan_lines(reader, limit)?.lines;
+    let entries: Vec<&Value> = lines
+        .iter()
+        .filter_map(|line| match line {
+            Line::Entry { chain, .. } => Some(chain),
+            Line::Failed(_) => None,
+        })
+        .collect();
+    let Conversation { chain, problem } = conversation(&entries);
+
+    let mut projector = RecordProjector::default();
+    let mut out = Vec::new();
+    if let Some(problem) = problem {
+        out.push(RecordEvent {
+            message_id: None,
+            ts: None,
+            backend_version: None,
+            event: protocol_error(problem),
+        });
+    }
+    let mut projected_ids = HashSet::new();
+    for line in lines {
+        match line {
+            Line::Failed(events) => out.extend(events),
+            Line::Entry {
+                offset,
+                len,
+                chain: fields,
+            } => {
+                // An entry written twice (a resume can repeat one) counts once.
+                let repeated =
+                    uuid(&fields).is_some_and(|id| !projected_ids.insert(id.to_string()));
+                if !on_conversation(&chain, &fields) || repeated {
+                    continue;
+                }
+                if let Some(value) = entry_at(reader, offset, len)? {
+                    out.extend(projector.project(value));
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// How the conversation in the first `limit` bytes of `reader` ends
+/// (FLOW-FORK-SESSION-R03), looking back from its last entry along its chain.
+///
+/// A finished reply is an assistant entry the model wrote that ended its
+/// turn. What the CLI writes beside a conversation (a local command, a
+/// caveat, a compaction summary) is passed over, since no reply follows it.
+/// Anything else after the last finished reply says the conversation has
+/// moved on since, and the entry nearest the end says how: fixtures
+/// 2.1.316/17 and 18 record what `--fork-session` makes of such a record, a
+/// made-up tool result and a made-up "No response requested." reply in the
+/// copy. A last line left half written counts as a turn being written. With
+/// no finished reply anywhere there has been none yet.
+pub fn conversation_end_from<R: BufRead + Seek>(
+    reader: &mut R,
+    limit: u64,
+) -> io::Result<ConversationEnd> {
+    let Scan { lines, torn } = scan_lines(reader, limit)?;
+    let entries: Vec<&Value> = lines
+        .iter()
+        .filter_map(|line| match line {
+            Line::Entry { chain, .. } => Some(chain),
+            Line::Failed(_) => None,
+        })
+        .collect();
+    let Conversation { chain, .. } = conversation(&entries);
+
+    let unreadable_end = matches!(lines.last(), Some(Line::Failed(_)));
+    let mut nearest_end = (torn || unreadable_end).then_some(ConversationEnd::Unfinished);
+    for line in lines.iter().rev() {
+        let Line::Entry {
+            offset,
+            len,
+            chain: fields,
+        } = line
+        else {
+            continue;
+        };
+        let kind = fields.get("type").and_then(Value::as_str);
+        if !matches!(kind, Some("user" | "assistant")) || !on_conversation(&chain, fields) {
+            continue;
+        }
+        let Some(value) = entry_at(reader, *offset, *len)? else {
+            continue;
+        };
+        match entry_end(&value) {
+            Some(ConversationEnd::Finished) => {
+                return Ok(nearest_end.unwrap_or(ConversationEnd::Finished));
+            }
+            Some(end) => {
+                nearest_end.get_or_insert(end);
+            }
+            None => {}
+        }
+    }
+    Ok(ConversationEnd::NoReply)
+}
+
+/// What one `user` or `assistant` entry says of how the conversation ends;
+/// `None` for one the CLI wrote beside the conversation.
+fn entry_end(value: &Value) -> Option<ConversationEnd> {
+    match RecordEntry::deserialize(value) {
+        Ok(RecordEntry::Assistant(reply)) => {
+            if reply.message.model == "<synthetic>" {
+                // The CLI's stand-in for a reply: "No response requested."
+                // after a turn cut short, or an API error's text.
+                return Some(ConversationEnd::Interrupted);
+            }
+            let ended_its_turn = matches!(
+                reply.message.stop_reason.as_deref(),
+                Some("end_turn" | "stop_sequence" | "max_tokens" | "refusal")
+            );
+            Some(if ended_its_turn {
+                ConversationEnd::Finished
+            } else {
+                ConversationEnd::Unfinished
+            })
+        }
+        Ok(RecordEntry::User(user)) if user.is_interrupt_marker() => {
+            Some(ConversationEnd::Interrupted)
+        }
+        Ok(RecordEntry::User(user)) if user.is_aside() => None,
+        // A prompt or a tool result waits for a reply; so does an entry
+        // whose shape has drifted, for all Ersa can tell.
+        _ => Some(ConversationEnd::Unfinished),
+    }
+}
+
+/// A record's lines, read once.
+struct Scan {
+    lines: Vec<Line>,
+    /// The last line stops part way through an entry: the CLI is writing
+    /// it, or died writing it.
+    torn: bool,
+}
+
+/// The first pass over a record: where each entry lies and what its chain
+/// needs. See [`project_record_from`].
+fn scan_lines<R: BufRead + Seek>(reader: &mut R, limit: u64) -> io::Result<Scan> {
     let mut lines = Vec::new();
+    let mut torn = false;
     let mut offset = 0u64;
     while offset < limit {
         let start = offset;
@@ -97,6 +241,8 @@ pub fn project_record_from<R: BufRead + Seek>(
                     &String::from_utf8_lossy(&bytes),
                     format!("a record entry is longer than {MAX_ENTRY_BYTES} bytes"),
                 )));
+            } else {
+                torn = true;
             }
             continue;
         }
@@ -115,72 +261,41 @@ pub fn project_record_from<R: BufRead + Seek>(
                 format!("a record entry is not JSON: {e}"),
             ))),
             // The last line, still being written: left for the next read.
-            Err(_) => {}
+            Err(_) => torn = true,
         }
     }
+    Ok(Scan { lines, torn })
+}
 
-    let entries: Vec<&Value> = lines
-        .iter()
-        .filter_map(|line| match line {
-            Line::Entry { chain, .. } => Some(chain),
-            Line::Failed(_) => None,
-        })
-        .collect();
-    let Conversation { chain, problem } = conversation(&entries);
-
-    let mut projector = RecordProjector::default();
-    let mut out = Vec::new();
-    if let Some(problem) = problem {
-        out.push(RecordEvent {
-            message_id: None,
-            ts: None,
-            backend_version: None,
-            event: protocol_error(problem),
-        });
+/// Whether an entry is part of the conversation: one on another branch, or
+/// a subagent's, is not (PROTO-CLAUDE-CODE-STREAM-R20). Entries without an
+/// id (titles) are let through; they yield nothing.
+fn on_conversation(chain: &Option<HashSet<String>>, fields: &Value) -> bool {
+    match (chain, uuid(fields)) {
+        (Some(chain), Some(id)) => chain.contains(id),
+        // In file order, still only the main thread's entries.
+        (None, _) => is_main_thread(fields),
+        (Some(_), None) => true,
     }
-    let mut projected_ids = HashSet::new();
-    for line in lines {
-        match line {
-            Line::Failed(events) => out.extend(events),
-            Line::Entry {
-                offset,
-                len,
-                chain: fields,
-            } => {
-                // An entry on another branch, or a subagent's, is not part of
-                // the conversation (PROTO-CLAUDE-CODE-STREAM-R20). Entries
-                // without an id (titles) are let through; they yield nothing.
-                let off_branch = match (&chain, uuid(&fields)) {
-                    (Some(chain), Some(id)) => !chain.contains(id),
-                    // In file order, still only the main thread's entries.
-                    (None, _) => !is_main_thread(&fields),
-                    (Some(_), None) => false,
-                };
-                // An entry written twice (a resume can repeat one) counts once.
-                let repeated =
-                    uuid(&fields).is_some_and(|id| !projected_ids.insert(id.to_string()));
-                if off_branch || repeated {
-                    continue;
-                }
-                // Read whole again only now, one entry at a time. It parsed in
-                // the first pass, so it parses here.
-                reader.seek(SeekFrom::Start(offset))?;
-                let mut bytes = vec![0; len];
-                // A file cut short since the first pass (rewritten by
-                // something other than the CLI) loses the entry, not the read.
-                if let Err(e) = reader.read_exact(&mut bytes) {
-                    if e.kind() == io::ErrorKind::UnexpectedEof {
-                        continue;
-                    }
-                    return Err(e);
-                }
-                if let Ok(value) = serde_json::from_str::<Value>(&String::from_utf8_lossy(&bytes)) {
-                    out.extend(projector.project(value));
-                }
-            }
+}
+
+/// An entry read whole again, one at a time. It parsed in the first pass, so
+/// it parses here; a file cut short since (rewritten by something other than
+/// the CLI) loses the entry, not the read.
+fn entry_at<R: BufRead + Seek>(
+    reader: &mut R,
+    offset: u64,
+    len: usize,
+) -> io::Result<Option<Value>> {
+    reader.seek(SeekFrom::Start(offset))?;
+    let mut bytes = vec![0; len];
+    if let Err(e) = reader.read_exact(&mut bytes) {
+        if e.kind() == io::ErrorKind::UnexpectedEof {
+            return Ok(None);
         }
+        return Err(e);
     }
-    Ok(out)
+    Ok(serde_json::from_str(&String::from_utf8_lossy(&bytes)).ok())
 }
 
 /// Skips the rest of a line too long to read, up to `limit` bytes, and

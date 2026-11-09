@@ -23,9 +23,10 @@ const MAX_REGISTRY_FILE: u64 = 64 * 1024;
 pub enum LiveCheck {
     /// No running process has it open.
     NotOpen,
-    /// A running process has it open. Resuming it too would interleave both
-    /// transcripts in one record, so Ersa says so.
-    Open(LiveSession),
+    /// These running processes have it open, in order of pid; never empty.
+    /// Resuming it too would interleave both transcripts in one record, so
+    /// Ersa says so.
+    Open(Vec<LiveSession>),
     /// No readable file names it, but these could not be read (a file of a
     /// shape this version does not know, say, or something that is not a
     /// file), so one of them may. Ersa says it could not tell, rather than
@@ -77,6 +78,7 @@ pub fn live_session(claude_home: &Path, session_id: &str) -> LiveCheck {
         }
     };
     let mut unreadable = Vec::new();
+    let mut open = Vec::new();
     for entry in entries {
         let Ok(entry) = entry else {
             unreadable.push(dir.clone());
@@ -123,12 +125,17 @@ pub fn live_session(claude_home: &Path, session_id: &str) -> LiveCheck {
             continue;
         };
         if platform::is_running(pid) {
-            return LiveCheck::Open(LiveSession {
+            open.push(LiveSession {
                 pid,
                 cwd: file.cwd,
                 entrypoint: file.entrypoint,
             });
         }
+    }
+    // Every process that has it, since `session.fork` counts them.
+    if !open.is_empty() {
+        open.sort_by_key(|live| live.pid);
+        return LiveCheck::Open(open);
     }
     if unreadable.is_empty() {
         LiveCheck::NotOpen
