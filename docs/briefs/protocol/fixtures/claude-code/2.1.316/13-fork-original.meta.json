@@ -1,0 +1,107 @@
+{
+  "recorded_at": "2026-11-09T00:07:00.305Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--session-id",
+    "67e5f4e2-f63e-48f6-a938-1c8f53780b27"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "67e5f4e2-f63e-48f6-a938-1c8f53780b27",
+  "session_record": "record/13-fork-original.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 3741,
+  "stderr": "",
+  "stdout_lines": 28,
+  "stdout_timing_ms": [
+    931,
+    1092,
+    1100,
+    2004,
+    2005,
+    2005,
+    2606,
+    2607,
+    2607,
+    2607,
+    2607,
+    2607,
+    2612,
+    2617,
+    2642,
+    2646,
+    2646,
+    2649,
+    2668,
+    2681,
+    3181,
+    3181,
+    3181,
+    3182,
+    3182,
+    3184,
+    3184,
+    3192
+  ],
+  "sent": [
+    {
+      "t": 8,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 931,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Read README.md with the Read tool, then reply with the single word: done\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Read README.md with the Read tool, then reply with the single word: done",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}

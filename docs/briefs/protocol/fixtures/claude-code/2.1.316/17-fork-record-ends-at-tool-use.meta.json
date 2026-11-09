@@ -1,0 +1,104 @@
+{
+  "recorded_at": "2026-11-09T00:10:07.219Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--resume",
+    "67e5f4e2-f63e-48f6-a938-1c8f53780b27",
+    "--fork-session"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": false,
+  "session_id": "ef88bd83-9303-4605-92d6-ddcc2cb5e621",
+  "fork_original": {
+    "session_id": "67e5f4e2-f63e-48f6-a938-1c8f53780b27",
+    "cut_to_lines": 26,
+    "before": {
+      "lines": 26,
+      "sha256": "f5e93468d7c320b61b6b7ba420c00e0faed2acbeea6558493a9ee26264ca0c30"
+    },
+    "after": {
+      "lines": 26,
+      "sha256": "f5e93468d7c320b61b6b7ba420c00e0faed2acbeea6558493a9ee26264ca0c30"
+    }
+  },
+  "session_record": "record/17-fork-record-ends-at-tool-use.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 2066,
+  "stderr": "",
+  "stdout_lines": 12,
+  "stdout_timing_ms": [
+    681,
+    973,
+    976,
+    1455,
+    1455,
+    1455,
+    1483,
+    1483,
+    1485,
+    1485,
+    1486,
+    1500
+  ],
+  "sent": [
+    {
+      "t": 7,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 682,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with the single word: cut\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Reply with the single word: cut",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}
