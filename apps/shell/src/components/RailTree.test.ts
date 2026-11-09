@@ -128,7 +128,7 @@ describe("the rail's tree", () => {
   it("says when nothing archived is there to show, and why the arrangement could not be read or saved", () => {
     expect(render({ show: "archived", sessions: { state: "ready", sessions: [session("s1", "w", "Fix")] } })).toContain("No archived sessions.");
     // With projects but no sessions and no headings to show, the tree is never left blank.
-    const none = { projects: { state: "ready", projects: [project("ersa")] }, sessions: { state: "ready", sessions: [] } } as const;
+    const none: Parameters<typeof render>[0] = { projects: { state: "ready", projects: [project("ersa")] }, sessions: { state: "ready", sessions: [] } };
     expect(render({ ...none, show: "all" })).toContain("No sessions.</p>");
     expect(render({ ...none, groupBy: "date" })).toContain("No active sessions.</p>");
     expect(render({ ...none, groupBy: "none", show: "all" })).toContain("No sessions.</p>");

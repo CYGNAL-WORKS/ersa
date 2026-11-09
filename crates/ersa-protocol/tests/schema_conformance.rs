@@ -135,17 +135,21 @@ fn examples() -> Vec<Event> {
             questions: vec![Question {
                 id: "which".into(),
                 text: "Which database?".into(),
+                header: Some("Database".into()),
                 options: Some(vec![
                     QuestionOption {
                         id: "sqlite".into(),
                         label: "SQLite".into(),
+                        description: Some("Embedded".into()),
                     },
                     QuestionOption {
                         id: "pg".into(),
                         label: "Postgres".into(),
+                        description: None,
                     },
                 ]),
                 multi_select: true,
+                takes_text: true,
             }],
         }),
         Event::QuestionAnswered(QuestionAnswered {
@@ -154,12 +158,15 @@ fn examples() -> Vec<Event> {
                 Answer {
                     id: "which".into(),
                     value: AnswerValue::Many(vec!["sqlite".into()]),
+                    own_words: false,
                 },
                 Answer {
                     id: "why".into(),
                     value: AnswerValue::One("It is embedded".into()),
+                    own_words: true,
                 },
             ],
+            declined: false,
             answered_by: AnsweredBy::User,
         }),
         Event::UsageUpdated(UsageUpdated {
@@ -326,6 +333,33 @@ fn the_open_elsewhere_notices_validate_with_and_without_a_pid() {
     let mut unknown = wire[1].clone();
     unknown["code"] = json!("session_open_somewhere");
     assert!(validate_event(&unknown).is_err());
+}
+
+// verifies: PROTO-AGENT-EVENTS-R09
+#[test]
+fn a_declined_and_a_withdrawn_question_validate_with_no_answers() {
+    let ends = [(true, AnsweredBy::User), (false, AnsweredBy::Backend)];
+    let wire = ends.map(|(declined, answered_by)| {
+        let payload = serde_json::to_value(Event::QuestionAnswered(QuestionAnswered {
+            request_id: "q-1".into(),
+            answers: Vec::new(),
+            declined,
+            answered_by,
+        }))
+        .expect("serialize");
+        validate_event(&payload).unwrap_or_else(|e| panic!("{e}\n{payload}"));
+        payload
+    });
+    assert_eq!(wire[0]["declined"], true);
+    assert_eq!(wire[0]["answered_by"], "user");
+    assert_eq!(wire[1]["declined"], false);
+    assert_eq!(wire[1]["answered_by"], "backend");
+    assert_eq!(wire[1]["answers"], json!([]));
+
+    // `declined` is required, so a reader never has to guess it.
+    let mut without = wire[0].clone();
+    without.as_object_mut().unwrap().remove("declined");
+    assert!(validate_event(&without).is_err());
 }
 
 #[test]

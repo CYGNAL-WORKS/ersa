@@ -283,6 +283,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const allRead = projectList !== undefined && projectList.every((p) => p.id in workspaceReads);
   const unknownWorkspaces =
     allRead && sessions.state === "ready" ? [...new Set(sessions.sessions.map((s) => s.workspace_id).filter((id) => !(id in workspaces)))].sort().join(" ") : "";
+  // The unknown workspaces the last finished read was for: until the read for the current ones answers, they may yet
+  // be placed.
+  const [unknownRead, setUnknownRead] = useState("");
   useEffect(() => {
     // Without a connection nothing has been read on the next one, so its sessions wait to be placed again.
     if (!projectList) {
@@ -290,11 +293,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       return;
     }
     let live = true;
+    const reads: Promise<unknown>[] = [];
     // Each project's read is applied as it answers, so one slow host holds back only its own tiles; a session that
     // fits no project waits for every read, which the Shell gives up on after its request time limit. Merged
     // into what is known (session/workspaces.ts): a read that answers late never drops a workspace.
     for (const p of projectList) {
-      client.call("workspace.list", { project_id: p.id }).then(
+      const answered = client.call("workspace.list", { project_id: p.id }).then(
         (read) => {
           if (!live) return;
           setWorkspaces((known) => mergeWorkspaces(known, projectList, read));
@@ -307,11 +311,15 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           setWorkspaceReads((reads) => ({ ...reads, [p.id]: describeError(error) }));
         },
       );
+      reads.push(answered);
     }
+    void Promise.all(reads).then(() => {
+      if (live) setUnknownRead(unknownWorkspaces);
+    });
     return () => {
       live = false;
     };
-    // unknownWorkspaces is not read here: a change to it is a reason to read again.
+    // A change to unknownWorkspaces is a reason to read again.
   }, [client, projectList, unknownWorkspaces]);
   const projectsVersion = useVersion(projects);
   const sessionsVersion = useVersion(sessions);
@@ -345,7 +353,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     setStartProgress(undefined);
     const stop = new StartStop(client);
     startStop.current = stop;
-    const outcome = await startSession(client, values, text, stop, sendable(attachments)).finally(() => {
+    // Known before the session is, so the rail puts the new session's tile under its project as it appears (FLOW-NEW-SESSION-R13).
+    const known = (workspace: Workspace) => setWorkspaces((was) => ({ ...was, [workspace.id]: workspace }));
+    const outcome = await startSession(client, values, text, stop, sendable(attachments), known).finally(() => {
       if (startStop.current === stop) startStop.current = undefined;
     });
     if (!outcome.ok && "stopped" in outcome) {
@@ -365,8 +375,6 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     setLastUsed((l) => ({ ...l, [values.project_id]: remembered(values) }));
     // Best effort: a failure only means the screen starts at these values in this window alone.
     client.call("settings.set", { patch: rememberPatch(values) }).catch(() => {});
-    // Known at once, so the rail puts the new session's tile under its project as it appears (FLOW-NEW-SESSION-R13).
-    setWorkspaces((known) => ({ ...known, [outcome.workspace.id]: outcome.workspace }));
     connection.current?.reload("sessions");
     dispatch({ type: "started", id: outcome.session.id, text, attachments, firstSend: outcome.firstSend });
     return true;
@@ -554,6 +562,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const workspaceErrors: Record<string, string> = {};
   for (const [id, failure] of Object.entries(workspaceReads)) if (failure !== null) workspaceErrors[id] = failure;
   const placing = projectList !== undefined && !allRead;
+  // The projects were read again for a workspace no read had listed, and that read has not answered.
+  const reading = allRead && unknownWorkspaces !== unknownRead;
 
   // The title as last listed, so the header keeps it while the list reloads
   // or Core is away.
@@ -651,6 +661,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               workspaces={workspaces}
               workspaceErrors={workspaceErrors}
               placing={placing}
+              reading={reading}
               activeId={shownId}
               onSelect={select}
               onNewSession={newSession}
