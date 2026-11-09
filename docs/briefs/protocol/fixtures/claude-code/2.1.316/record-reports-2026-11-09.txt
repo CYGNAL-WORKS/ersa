@@ -1,0 +1,12 @@
+What Claude Code 2.1.316's session record reports, read 2026-11-09 from records of the runs in `stream-controls-2026-11-09.txt` and from the fixtures under `record/`. It corrects that file's last bullet: effort is reported, in the record, and `apply_flag_settings` does change it.
+
+Effort:
+- Every `assistant` entry carries `effort` and `perTurnEffort`, including runs that passed no `--effort` (`medium`).
+- After `apply_flag_settings` with `effortLevel: low` between turns, the next `assistant` entry had `effort` and `perTurnEffort` `low`.
+
+Model and permission mode:
+- `assistant` entries carry `message.model`; `user` entries carry `permissionMode`.
+
+Queue:
+- `queue-operation` entries record `operation` (`enqueue` or `dequeue`) and a `timestamp`, and no message content.
+- A message written while the agent is idle has its `enqueue` and `dequeue` at the same moment. A message written during a turn had its `enqueue` when written and its `dequeue` when the turn before it ended.
