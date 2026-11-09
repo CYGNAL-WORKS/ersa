@@ -77,7 +77,7 @@ pub struct Stats {
 const CUSTOM_TITLE: &str = "custom-title";
 
 /// A title the user gave the session, as the fake's record keeps it.
-fn recorded_title(title: &str) -> RecordEvent {
+pub fn recorded_title(title: &str) -> RecordEvent {
     RecordEvent {
         message_id: None,
         ts: None,
