@@ -19,8 +19,7 @@ import { QuitQuestion } from "../components/QuitQuestion";
 import { RailFoot } from "../components/RailFoot";
 import { Menu, type MenuEntry } from "../components/Menu";
 import { RailTop } from "../components/RailTop";
-import { groupKey, RailTree } from "../components/RailTree";
-import { SessionTile, TileItem } from "../components/SessionTile";
+import { PINNED_KEY, RailTree } from "../components/RailTree";
 import { SessionControls } from "../components/SessionControls";
 import { Shelf } from "../components/Shelf";
 import { SessionTitle } from "../components/SessionTitle";
@@ -205,36 +204,30 @@ const tree: Parameters<typeof RailTree>[0] = {
   localHost: "local",
   hostNames: { local: "WORKSTATION", devbox: "devbox" },
 };
-/**
- * An archived session's tile above a resting one, as the rail draws them once it can show archived sessions
- * (docs/design/RAIL.md, An archived tile): the rail's tree leaves archived sessions out until then.
- */
-function ArchivedTiles({ menu, force }: { menu?: boolean; force?: "hover" | "focus" | "pressed" }) {
-  const archived = { ...pointerPair[0]!, id: "a1", title: "Retire the old protocol notes", archived: true };
-  const tiles = [archived, pointerPair[1]!];
-  return (
-    <section className="rail-tree">
-      <ul className="rail-tiles">
-        {tiles.map((s) => (
-          <TileItem key={s.id} id={s.id}>
-            {() => (
-              <SessionTile
-                session={s}
-                active={false}
-                unseen={false}
-                force={s.id === "a1" ? force : undefined}
-                onSelect={() => {}}
-                rename={{ onSave: async () => true, onReset: () => {} }}
-                archive={{ onChoose: () => {} }}
-                initialMenu={menu && s.id === "a1"}
-              />
-            )}
-          </TileItem>
-        ))}
-      </ul>
-    </section>
-  );
-}
+/** An archived session's tile above a resting one, as the rail shows them showing all sessions (docs/design/RAIL.md, An archived tile). */
+const archivedPair: Parameters<typeof RailTree>[0] = {
+  ...tree,
+  projects: { state: "ready", projects: [projects[0]!] },
+  sessions: { state: "ready", sessions: [{ ...pointerPair[0]!, id: "a1", title: "Retire the old protocol notes", archived: true }, pointerPair[1]!] },
+  activeId: undefined,
+  show: "all",
+};
+
+/** The tree grouped by date, on 7 November 2026: ersa's and runner's sessions, made across the last fortnight. */
+const galleryNow = new Date(2026, 10, 7, 15);
+const daysAgo = (days: number, hour: number) => new Date(2026, 10, 7 - days, hour).toISOString();
+const datedTree: Parameters<typeof RailTree>[0] = {
+  ...tree,
+  groupBy: "date",
+  now: galleryNow,
+  sessions: {
+    state: "ready",
+    sessions: treeSessions.map((s, i) => ({ ...s, created_at: daysAgo([0, 1, 3, 0, 12][i] ?? 0, 9 - i) })),
+  },
+};
+
+/** The rail's top row as the window draws it, with the arrange button beside New session. */
+const arrange = { arrangement: { groupBy: "project", show: "active" }, onGroupBy: () => {}, onShow: () => {}, onReset: () => {} } as const;
 
 /** One project, for the states of a heading and its tiles. */
 const ersaOnly: Parameters<typeof RailTree>[0] = {
@@ -255,7 +248,7 @@ const askingOnly: Parameters<typeof RailTree>[0] = {
       .map((s) => (s.tile.pending.length > 0 ? { ...s, tile: { ...s.tile, pending: [{ kind: "question" as const, request_id: "q1" }] } } : s)),
   },
 };
-const folded = (...ids: string[]) => new Set(ids.map(groupKey.project));
+const folded = (...ids: string[]) => new Set(ids);
 /** The tree with s1 and s4 pinned: they lead it in the Pinned group, apart from ersa and runner. */
 const pinnedTree: Parameters<typeof RailTree>[0] = {
   ...tree,
@@ -656,11 +649,16 @@ const entries: Entry[] = [
     name: "RailTop",
     rail: true,
     states: [
-      ["At rest", <RailTop onNewSession={() => {}} />],
-      ["Pointer over it", <RailTop onNewSession={() => {}} force="hover" />],
-      ["Pressed", <RailTop onNewSession={() => {}} force="pressed" />],
-      ["Keyboard focus", <RailTop onNewSession={() => {}} force="focus" />],
-      ["Before Ersa connects", <RailTop onNewSession={() => {}} disabled />],
+      ["At rest", <RailTop onNewSession={() => {}} arrange={arrange} />],
+      ["Pointer over it", <RailTop onNewSession={() => {}} arrange={arrange} force="hover" />],
+      ["Pressed", <RailTop onNewSession={() => {}} arrange={arrange} force="pressed" />],
+      ["Keyboard focus", <RailTop onNewSession={() => {}} arrange={arrange} force="focus" />],
+      ["Before Ersa connects", <RailTop onNewSession={() => {}} arrange={arrange} disabled />],
+      ["Arrange menu, open", room(<RailTop onNewSession={() => {}} arrange={{ ...arrange, initialOpen: true }} />)],
+      [
+        "Arrange menu, Group by open",
+        room(<RailTop onNewSession={() => {}} arrange={{ ...arrange, arrangement: { groupBy: "date", show: "all" }, initialOpen: true, initialSubmenu: 0 }} />),
+      ],
     ],
   },
   {
@@ -713,7 +711,7 @@ const entries: Entry[] = [
       ["Collapsed, keyboard focus", <RailTree {...ersaOnly} collapsed={folded("p1")} forceHeading={{ id: "p1", state: "focus" }} />],
       ["Pinned", <RailTree {...pinnedTree} />],
       // The Pinned group holds s1, which waits on a permission request, so its count leads with the caution mark.
-      ["Pinned, collapsed", <RailTree {...pinnedTree} collapsed={new Set([groupKey.pinned])} />],
+      ["Pinned, collapsed", <RailTree {...pinnedTree} collapsed={new Set([PINNED_KEY])} />],
       ["A session with no project", <RailTree {...ersaOnly} sessions={{ state: "ready", sessions: treeSessions }} />],
       ["Projects not read", <RailTree {...tree} projects={{ state: "error", message: "the database is locked" }} />],
       ["Sessions not read", <RailTree {...tree} sessions={{ state: "error", message: "the database is locked" }} />],
@@ -749,9 +747,15 @@ const entries: Entry[] = [
       ["Tile menu, open", room(<RailTree {...pairOnly} initialTileMenu="p2" />)],
       // Renaming and archiving go through Core, so while Ersa can't reach it both are unavailable, with the reason.
       ["Tile menu, offline", room(<RailTree {...pairOnly} initialTileMenu="p2" offline />)],
-      ["An archived tile", <ArchivedTiles />],
-      ["An archived tile, pointer over it", <ArchivedTiles force="hover" />],
-      ["Tile menu, archived", room(<ArchivedTiles menu />)],
+      ["An archived tile", <RailTree {...archivedPair} />],
+      ["An archived tile, pointer over it", <RailTree {...archivedPair} force={{ id: "a1", state: "hover" }} />],
+      ["Tile menu, archived", room(<RailTree {...archivedPair} initialTileMenu="a1" />)],
+      ["Grouped by date", <RailTree {...datedTree} />],
+      ["Grouped by date, collapsed", <RailTree {...datedTree} collapsed={new Set(["yesterday"])} />],
+      ["Grouped by none", <RailTree {...pinnedTree} groupBy="none" />],
+      ["No active sessions", <RailTree {...tree} sessions={{ state: "ready", sessions: treeSessions.map((s) => ({ ...s, archived: true })) }} />],
+      ["No archived sessions", <RailTree {...tree} show="archived" />],
+      ["Arrangement not saved", <RailTree {...ersaOnly} arrangeProblem={{ kind: "save", message: "settings.set: the database is locked" }} />],
       [
         "Archive refused",
         <RailTree {...pairOnly} archiving={{ p2: { state: "failed", message: "session.set_archived: the session is being deleted" } }} />,
