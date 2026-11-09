@@ -84,8 +84,6 @@ fn finished() -> (String, &'static str) {
     )
 }
 
-// verifies: FLOW-FORK-SESSION-R01
-// verifies: PROTO-CLAUDE-CODE-STREAM-R38
 #[test]
 fn the_recorded_fork_has_a_new_id_and_leaves_the_original_record_as_it_was() {
     for name in [
@@ -110,7 +108,6 @@ fn the_recorded_fork_has_a_new_id_and_leaves_the_original_record_as_it_was() {
     assert_eq!(messages(&copy)[..original.len()], original[..]);
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R38
 #[test]
 fn a_chosen_id_names_the_fork_and_the_cli_writes_nothing_before_its_first_message() {
     let named = meta("16-fork-named-before-first-message");
@@ -430,7 +427,6 @@ fn a_fork_is_not_also_a_resume() {
     assert!(matches!(fork_args(&config), Err(AdapterError::Protocol(_))));
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R38
 #[test]
 fn a_fork_started_in_another_folder_finds_the_original_and_leaves_it_as_it_was() {
     let meta = meta("21-fork-into-worktree-renamed");
@@ -453,7 +449,6 @@ fn a_fork_started_in_another_folder_finds_the_original_and_leaves_it_as_it_was()
     assert_eq!(messages(&copy)[..original.len()], original[..]);
 }
 
-// verifies: FLOW-FORK-SESSION-R06
 #[test]
 fn a_fork_is_renamed_over_the_title_it_copied() {
     let copy = record("21-fork-into-worktree-renamed");

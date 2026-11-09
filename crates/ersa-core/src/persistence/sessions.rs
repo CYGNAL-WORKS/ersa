@@ -56,12 +56,15 @@ pub struct SessionRow {
     /// For a fork: RFC 3339, when it was made. The entries it copies keep
     /// the original's times, so its record can't say.
     pub forked_at: Option<String>,
+    /// For a fork: its title until its own record gives one
+    /// (FLOW-FORK-SESSION-R06).
+    pub forked_title: Option<String>,
 }
 
 const SESSION_COLUMNS: &str = "s.id, s.workspace_id, s.host_id, s.backend, s.backend_session_id, \
      s.mode, w.path, s.model, s.effort, s.permission_mode, s.archived, s.deleting, \
      s.pinned, s.section_id, s.last_activity_at, s.forked_from, s.forked_through, \
-     s.forked_at";
+     s.forked_at, s.forked_title";
 
 impl Store {
     /// Records a new session, but only while its workspace is `ready`, in
@@ -75,8 +78,8 @@ impl Store {
                     "INSERT INTO sessions
                      (id, workspace_id, host_id, backend, backend_session_id, mode,
                       model, effort, permission_mode, section_id, forked_from, forked_through,
-                      forked_at)
-                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13
+                      forked_at, forked_title)
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
                  WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ?2 AND state = 'ready')",
                     params![
                         session.id,
@@ -92,6 +95,7 @@ impl Store {
                         session.forked_from,
                         session.forked_through,
                         session.forked_at,
+                        session.forked_title,
                     ],
                 )
                 .map_err(|e| conflict(e, "the workspace changed meanwhile"))?;
@@ -372,5 +376,6 @@ fn session_row(row: &Row) -> rusqlite::Result<SessionRow> {
         forked_from: row.get(15)?,
         forked_through: row.get(16)?,
         forked_at: row.get(17)?,
+        forked_title: row.get(18)?,
     })
 }
