@@ -310,7 +310,7 @@ async fn a_record_that_cannot_be_read_refuses_the_fork() {
 
 // verifies: FLOW-FORK-SESSION-R03
 #[tokio::test(flavor = "multi_thread")]
-async fn a_turn_that_starts_during_the_forks_reads_refuses_it() {
+async fn a_message_sent_during_the_forks_reads_is_refused() {
     let fake = Arc::new(FakeAdapter::new(1));
     let (core, mut client) = start(&fake).await;
     let id = idle(&core, &mut client, json!({})).await;
@@ -320,16 +320,18 @@ async fn a_turn_that_starts_during_the_forks_reads_refuses_it() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let mut second = core.client().await;
-    second
-        .result("session.send", json!({ "id": id, "text": "work" }))
+    let error = second
+        .error("session.send", json!({ "id": id, "text": "work" }))
         .await;
-    wait_for_state(&mut second, &id, "running").await;
+    assert_eq!(kind(&error), "invalid_state", "{error:#}");
+    assert!(
+        error["message"].as_str().unwrap().contains("being forked"),
+        "{error:#}"
+    );
 
     drop(held);
     let response = client.response(pending).await;
-    assert_eq!(kind(&response["error"]), "invalid_state", "{response}");
-    let message = response["error"]["message"].as_str().unwrap();
-    assert!(message.contains("a turn is running"), "{message}");
+    assert!(response["result"]["id"].is_string(), "{response}");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -440,10 +442,19 @@ async fn the_original_takes_no_message_until_its_forks_backend_is_ready() {
         "{error:#}"
     );
 
-    wait_for_state(&mut client, fork["id"].as_str().unwrap(), "idle").await;
-    client
-        .result("session.send", json!({ "id": id, "text": "idle" }))
-        .await;
+    // Let go once the fork's backend is ready.
+    assert!(fork["id"].is_string());
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let response = client
+            .call("session.send", json!({ "id": id, "text": "idle" }))
+            .await;
+        if response.get("error").is_none() {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{response:#}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 // verifies: FLOW-FORK-SESSION-R01
@@ -464,7 +475,16 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
     keep("reply-1", "the reply");
     let fork = client.result("session.fork", json!({ "id": id })).await;
     let fork_id = fork["id"].as_str().unwrap().to_string();
-    // The fork's backend wrote no record, as the CLI writes none yet.
+    // The fork's backend wrote no record, as the CLI writes none yet: the
+    // fake makes one as it starts, so that goes once it has.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while fake.records.lock().unwrap().len() < 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fork never started"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     let own: Vec<String> = fake
         .records
         .lock()

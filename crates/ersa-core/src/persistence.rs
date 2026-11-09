@@ -755,6 +755,9 @@ mod tests {
                 "pinned",
                 "section_id",
                 "last_activity_at",
+                // Migration 9's.
+                "forked_from",
+                "forked_through",
             ]
         );
     }
