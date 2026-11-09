@@ -65,10 +65,47 @@ async fn idle(core: &TestCore, client: &mut Client, extra: Value) -> String {
     id
 }
 
-async fn refused(client: &mut Client, id: &str) -> String {
+/// The refusal of a fork asked for now.
+async fn refused_now(client: &mut Client, id: &str) -> String {
     let error = client.error("session.fork", json!({ "id": id })).await;
     assert_eq!(kind(&error), "invalid_state", "{error:#}");
     error["message"].as_str().unwrap().to_string()
+}
+
+/// How long a fork answers that an earlier one has not finished starting.
+const STILL_STARTING: Duration = Duration::from_secs(10);
+
+/// The refusal of a fork, once any earlier fork has finished starting.
+async fn refused(client: &mut Client, id: &str) -> String {
+    let deadline = tokio::time::Instant::now() + STILL_STARTING;
+    loop {
+        let message = refused_now(client, id).await;
+        if !message.contains("has not finished starting") {
+            return message;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{message}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// A fork, once any earlier fork has finished starting.
+async fn forked(client: &mut Client, id: &str) -> Value {
+    let deadline = tokio::time::Instant::now() + STILL_STARTING;
+    loop {
+        let response = client.call("session.fork", json!({ "id": id })).await;
+        if response.get("error").is_none() {
+            return response["result"].clone();
+        }
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("has not finished starting"),
+            "{response:#}"
+        );
+        assert!(tokio::time::Instant::now() < deadline, "{response:#}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 // verifies: FLOW-FORK-SESSION-R01
@@ -260,7 +297,7 @@ async fn a_fork_counts_the_registrys_processes_against_cores_own() {
 
     // Live: one process in the registry can be Core's own.
     *fake.open_elsewhere.lock().unwrap() = OpenElsewhere::Yes { pids: vec![4242] };
-    client.result("session.fork", json!({ "id": id })).await;
+    forked(&mut client, &id).await;
 
     // Two can't both be.
     *fake.open_elsewhere.lock().unwrap() = OpenElsewhere::Yes {
@@ -274,7 +311,7 @@ async fn a_fork_counts_the_registrys_processes_against_cores_own() {
 
     // A registry that cannot say does not refuse.
     *fake.open_elsewhere.lock().unwrap() = OpenElsewhere::Unknown;
-    client.result("session.fork", json!({ "id": id })).await;
+    forked(&mut client, &id).await;
 
     // Stopped: Core runs none, so any process is another's.
     client.result("session.stop", json!({ "id": id })).await;
@@ -282,7 +319,7 @@ async fn a_fork_counts_the_registrys_processes_against_cores_own() {
     let message = refused(&mut client, &id).await;
     assert!(message.contains("4242"), "{message}");
     *fake.open_elsewhere.lock().unwrap() = OpenElsewhere::No;
-    client.result("session.fork", json!({ "id": id })).await;
+    forked(&mut client, &id).await;
 }
 
 // verifies: FLOW-FORK-SESSION-R03
@@ -345,14 +382,14 @@ async fn only_one_fork_of_a_session_reads_its_record_at_a_time() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let mut second = core.client().await;
-    let message = refused(&mut second, &id).await;
+    let message = refused_now(&mut second, &id).await;
     assert!(message.contains("has not finished starting"), "{message}");
 
     drop(held);
     let response = client.response(pending).await;
     assert!(response["result"]["id"].is_string(), "{response}");
     // Finished, the next one may go.
-    second.result("session.fork", json!({ "id": id })).await;
+    forked(&mut second, &id).await;
 }
 
 // verifies: FLOW-FORK-SESSION-R03
@@ -391,7 +428,7 @@ async fn a_registry_check_that_hangs_holds_back_the_next_fork_until_it_ends() {
     // The registry doesn't answer in time, which doesn't refuse the fork,
     client.result("session.fork", json!({ "id": id })).await;
     // but its check is still running, so another try starts no second one.
-    let message = refused(&mut client, &id).await;
+    let message = refused_now(&mut client, &id).await;
     assert!(message.contains("has not finished starting"), "{message}");
 
     drop(held);
@@ -417,7 +454,7 @@ async fn a_read_of_the_record_that_hangs_holds_back_the_next_fork() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let mut second = core.client().await;
-    let message = refused(&mut second, &id).await;
+    let message = refused_now(&mut second, &id).await;
     assert!(message.contains("has not finished starting"), "{message}");
 
     drop(held);
