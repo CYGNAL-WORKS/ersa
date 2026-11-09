@@ -5,8 +5,8 @@ import type { ProjectsView, SessionsView } from "../core/connection";
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import { deleteUnavailable } from "../session/deletion";
 import type { Sending } from "../session/follow";
-import type { ArrangeProblem, GroupBy, Show } from "../session/arrangement";
-import { type Collapsed, type DateKey, collapsedOf, treeOf } from "../session/tree";
+import type { ArrangeProblem, GroupBy, Show, SortBy } from "../session/arrangement";
+import { type Collapsed, type DateKey, collapsedOf, sortValueOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { type Place, arrive, placesOf, regroup, slideFrom } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
@@ -50,8 +50,9 @@ interface RailTreeProps {
   onChevron?: (id: string) => void;
   /** The user closed a session's shelf: Escape, or a choice or focus outside it and its tile (R06, R07). */
   onCloseShelf?: (id: string) => void;
-  /** How the rail groups and which sessions it shows (FLOW-ORGANIZE-SESSIONS); by project, showing active ones, unless given. */
+  /** How the rail groups and sorts and which sessions it shows (FLOW-ORGANIZE-SESSIONS); by project, by date created, showing active ones, unless given. */
   groupBy?: GroupBy;
+  sortBy?: SortBy;
   show?: Show;
   /** Now, whose local date the date groups count from. */
   now?: Date;
@@ -197,28 +198,35 @@ export function RailTree(props: RailTreeProps) {
     const target = to !== undefined ? items[ids.indexOf(to)]?.querySelector<HTMLElement>(".session") : section.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session");
     target?.focus();
   });
-  const { groupBy = "project", show = "active", now = new Date() } = props;
-  // A new grouping or filter: where every tile and heading sat before it, taken while the page still shows the old
-  // one (this render has not reached it yet), so each slides to its new place once it has (FLOW-ORGANIZE-SESSIONS,
-  // step 4).
-  const arranged = `${groupBy}/${show}`;
+  const { groupBy = "project", sortBy = "created", show = "active", now = new Date() } = props;
+  // A new grouping, sort or filter: where every tile and heading sat before it, taken while the page still shows the
+  // old one (this render has not reached it yet), so each slides to its new place once it has
+  // (FLOW-ORGANIZE-SESSIONS, step 4). So too when what the sort reads of a session changes between two listings, as a
+  // turn's end does while sorted by last activity (DESIGN.md, Motion); a tile's state is no part of it (R10).
+  const arranged = `${groupBy}/${sortBy}/${show}`;
   const lastArranged = useRef(arranged);
-  const regroupFrom = useRef<Map<string, Place>>(undefined);
+  const sortValues = sessions.state === "ready" ? new Map(sessions.sessions.map((s) => [s.id, sortValueOf(s, sortBy)])) : undefined;
+  const lastSortValues = useRef(sortValues);
+  const wereSorted = lastSortValues.current;
+  lastSortValues.current = sortValues;
+  const moves = useRef<{ from: Map<string, Place>; slide: typeof regroup }>(undefined);
   if (lastArranged.current !== arranged) {
     lastArranged.current = arranged;
-    if (root.current) regroupFrom.current = placesOf(root.current);
+    if (root.current) moves.current = { from: placesOf(root.current), slide: regroup };
+  } else if (root.current && wereSorted && sortValues && [...sortValues].some(([id, value]) => wereSorted.has(id) && wereSorted.get(id) !== value)) {
+    moves.current = { from: placesOf(root.current), slide: slideFrom };
   }
   useLayoutEffect(() => {
-    const from = regroupFrom.current;
-    regroupFrom.current = undefined;
-    if (from && root.current) regroup(root.current, from);
+    const move = moves.current;
+    moves.current = undefined;
+    if (move && root.current) move.slide(root.current, move.from);
   });
   // Delete on a tile: unavailable while the session is busy, or while Ersa can't reach Core.
   const removeOf = (s: Session): TileDelete | undefined =>
     onDelete && { onAsk: () => onDelete(s.id), unavailable: deleteUnavailable(s, offline ?? false) };
   const listed = projects.state === "ready" ? projects.projects : [];
   const all = sessions.state === "ready" ? sessions.sessions : [];
-  const tree = treeOf(listed, workspaces, all, { groupBy, show, now });
+  const tree = treeOf(listed, workspaces, all, { groupBy, sortBy, show, now });
   // Grouped by project, a session waits to be placed while the projects or their workspaces are still being read,
   // so it does not sit at the end and then move. When the projects could not be read, every session sits at the
   // end. Grouped otherwise, no session waits on its project.

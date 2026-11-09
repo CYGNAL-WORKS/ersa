@@ -1,7 +1,7 @@
 import { SlidersHorizontal } from "lucide-react";
 import { type CSSProperties, useCallback, useId, useRef, useState } from "react";
 import { t } from "../catalog";
-import { GROUP_BYS, type GroupBy, type RailArrangement, SHOWS, type Show } from "../session/arrangement";
+import { GROUP_BYS, type GroupBy, type RailArrangement, SHOWS, SORT_BYS, type Show, type SortBy } from "../session/arrangement";
 import { IconButton } from "./Icon";
 import { Menu, type MenuClose, type MenuEntry } from "./Menu";
 
@@ -10,6 +10,11 @@ const GROUP_BY_NAMES = {
   date: "rail.arrange.groupByDateButton",
   none: "rail.arrange.groupByNoneButton",
 } as const satisfies Record<GroupBy, string>;
+const SORT_BY_NAMES = {
+  created: "rail.arrange.sortByCreatedButton",
+  last_activity: "rail.arrange.sortByLastActivityButton",
+  name: "rail.arrange.sortByNameButton",
+} as const satisfies Record<SortBy, string>;
 const SHOW_NAMES = {
   active: "rail.arrange.showActiveButton",
   archived: "rail.arrange.showArchivedButton",
@@ -19,22 +24,29 @@ const SHOW_NAMES = {
 /** What the arrange menu's items do: each sends its change to Core (FLOW-ORGANIZE-SESSIONS, steps 4 and 7). */
 export interface ArrangeActions {
   onGroupBy: (groupBy: GroupBy) => void;
+  onSortBy: (sortBy: SortBy) => void;
   onShow: (show: Show) => void;
   onReset: () => void;
 }
 
 /**
- * The arrange menu's items (LAY-SHELL, The arrange button): Group by ▸ and Show ▸, each naming its current choice and
- * its submenu marking it, then Reset to defaults apart. Sort by ▸ goes after Group by, and New section and All
- * sessions in the group with Reset, as they are built.
+ * The arrange menu's items (LAY-SHELL, The arrange button): Group by ▸, Sort by ▸ and Show ▸, each naming its current
+ * choice and its submenu marking it, then Reset to defaults apart. New section and All sessions go in the group with
+ * Reset, as they are built.
  */
-export function arrangeEntries(arrangement: Pick<RailArrangement, "groupBy" | "show">, actions: ArrangeActions): MenuEntry[] {
+export function arrangeEntries(arrangement: Pick<RailArrangement, "groupBy" | "sortBy" | "show">, actions: ArrangeActions): MenuEntry[] {
   return [
     {
       kind: "submenu",
       label: t("rail.arrange.groupByButton"),
       current: t(GROUP_BY_NAMES[arrangement.groupBy]),
       entries: GROUP_BYS.map((g) => ({ kind: "item", label: t(GROUP_BY_NAMES[g]), checked: g === arrangement.groupBy, onChoose: () => actions.onGroupBy(g) })),
+    },
+    {
+      kind: "submenu",
+      label: t("rail.arrange.sortByButton"),
+      current: t(SORT_BY_NAMES[arrangement.sortBy]),
+      entries: SORT_BYS.map((s) => ({ kind: "item", label: t(SORT_BY_NAMES[s]), checked: s === arrangement.sortBy, onChoose: () => actions.onSortBy(s) })),
     },
     {
       kind: "submenu",
@@ -58,7 +70,7 @@ export function ArrangeButton({
   initialSubmenu,
   ...actions
 }: ArrangeActions & {
-  arrangement: Pick<RailArrangement, "groupBy" | "show">;
+  arrangement: Pick<RailArrangement, "groupBy" | "sortBy" | "show">;
   /** Ersa has not connected to Core, or has not read the arrangement yet. */
   disabled?: boolean;
   /** For the gallery: the menu open, taking no focus, and one of its submenus open by index. */

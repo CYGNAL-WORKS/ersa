@@ -155,6 +155,7 @@ export function connect(
         if (event.method === "session.tile") {
           const session_id = event.params.session_id;
           const tile = checkTile(event.params.tile);
+          const last_activity_at = event.params.last_activity_at;
           const known =
             current.phase === "connected" &&
             current.sessions.state === "ready" &&
@@ -171,7 +172,12 @@ export function connect(
                     ...view,
                     sessions: {
                       state: "ready",
-                      sessions: view.sessions.sessions.map((s) => (s.id === session_id ? { ...s, tile } : s)),
+                      // Every tile carries the last activity once a turn has ended, and that is how the rail
+                      // hears of a new one (FLOW-ORGANIZE-SESSIONS-R10). Core never clears it, so one that
+                      // comes without keeps what was listed.
+                      sessions: view.sessions.sessions.map((s) =>
+                        s.id === session_id ? { ...s, tile, last_activity_at: last_activity_at ?? s.last_activity_at } : s,
+                      ),
                     },
                   }
                 : view,
