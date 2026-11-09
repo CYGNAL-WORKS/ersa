@@ -1278,7 +1278,7 @@ async fn a_session_nobody_reads_lets_its_view_go_and_reopens_under_a_new_identit
 
 /// The model, effort and permission mode a session names reach its
 /// backend, and `session.list` reports them, also after Core restarts.
-// verifies: PROTO-CORE-API-R16
+// verifies: PROTO-CORE-API-R65
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_starts_with_the_model_effort_and_permission_mode_it_names() {
     let (core, stats) = start_fake(FakeAdapter::new(1)).await;
@@ -1330,7 +1330,7 @@ async fn a_session_starts_with_the_model_effort_and_permission_mode_it_names() {
 /// also after Core restarts: the backend chooses it, and Core does not know
 /// what it chose. A permission mode is always stated, so one left out is the
 /// backend's default, and reported as the mode the session started with.
-// verifies: PROTO-CORE-API-R16
+// verifies: PROTO-CORE-API-R65
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_that_names_none_leaves_them_to_its_backend() {
     let (core, stats) = start_fake(FakeAdapter::new(1)).await;

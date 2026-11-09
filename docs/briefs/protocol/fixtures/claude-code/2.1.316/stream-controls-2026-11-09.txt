@@ -1,0 +1,18 @@
+Claude Code 2.1.316 on the stream, observed 2026-11-09 with Ersa's invocation and Haiku. A summary of what was seen; a ticket that relies on one of these records it as a fixture.
+
+Before the first message (initialize only, no user message):
+- The initialize response carries `models`, each with `value`, `resolvedModel`, `displayName`, `description`, `supportsEffort` and `supportedEffortLevels` (null for a model without effort levels). The first entry's value is `default`, displayed "Default (recommended)". The list includes the aliases `opus`, `fable`, `sonnet`, `haiku` and full model ids. No effort is marked as the default.
+- It carries `current_permission_mode`.
+
+Naming a fork at launch:
+- `--resume <id> --fork-session --name "<title>"` announced `system/session_title_changed` with the title before the initialize response, with no user message sent.
+- The name was then written as the fork's `custom-title` entry when its first message created the record, under the fork's new session id.
+
+A message sent while a turn runs:
+- A second stdin user message, sent during the first turn, waited. When the first turn's `result` arrived, a new `system/init` followed and the second message ran as the next turn.
+- `interrupt` during the first turn ended only that turn (`result` with `error_during_execution`, `terminal_reason` `aborted_streaming`); the queued message then ran as the next turn. The interrupt's response was `{ "still_queued": [] }`, even with a message queued.
+
+Changing a session between turns:
+- `set_model` with a model value answered `{ "model": "<resolved id>" }`; the next `system/init` reported the new model. A value of `default` was taken too.
+- `set_permission_mode` with `mode` answered `{ "mode": "<mode>" }`, and a `system/status` line carrying `permissionMode` followed at once; the next `system/init` reported the new mode.
+- `set_effort` is not a control request: "Unsupported control request subtype". `apply_flag_settings` with `effortLevel` answered success, but neither `system/init` nor anything else reports a session's effort (`system/init` carries only `per_turn_effort_active`), so its effect was not seen.

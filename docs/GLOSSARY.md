@@ -60,14 +60,14 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Pinned session**: a session the user has pinned, so it leads the rail in the Pinned group whatever the grouping. Pinning changes neither its project nor its section.
 - **Arrangement**: how the user has organized their sessions: which are pinned, in which section, and archived, and how the rail groups, sorts and filters them and which groups are collapsed. Set from a tile's menu and the arrange menu, and kept across restarts.
 - **Tile menu**: the menu of actions on one session, opened from its tile's More button, a right-click or the context-menu key.
-- **Unseen session**: a session that went idle after working while it was not the active session, until the user makes it active.
+- **Unseen session**: a session that went idle after working while it was not the active session, or that the user marked as unread, until the user makes it active or marks it as read.
 - **Foot**: the bottom of the rail. Empty unless Ersa can't reach Core.
 - **Shelf**: the panel that pulls out from a tile when the session needs the user (a permission request or a question), answerable without changing the active session. The chevron on the tile is its handle. *Not: drawer, flyout.*
 - **Context ring**: the circular gauge showing the share of its context window a session has used, on its tile and in the session controls.
 - **Transcript**: the main area rendering the active session's projection as a document with cards. *Not: chat history, chat log.*
 - **Composer**: the input area beneath the transcript where the user writes to the agent. *Not: chat box, input box, prompt box.*
 - **Session controls**: the row of chips beneath the composer naming where and how a session runs: host, project, workspace, backend, model, effort and permission mode, with the context ring. Set before the first message; shown during the session.
-- **Sessions page**: what the transcript area shows after All sessions: every session in one list, active or archived, with search. Choosing one opens it.
+- **Sessions page**: what the transcript area shows after View all: every session in one list, active or archived, with search. Choosing one opens it.
 - **New-session screen**: what the transcript area shows while no session is active: the composer and the session controls, ready for the first message, which starts the session.
 - **Workbench**: the right-hand area holding panes.
 - **Pane**: a purpose-built area in the workbench: Files, Diff, Terminal, Browser, Developer.
