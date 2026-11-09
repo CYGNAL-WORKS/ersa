@@ -146,6 +146,7 @@
    the text, so the title doesn't move as it becomes editable. */
 .sessions-page-row .session-title-field {
   grid-column: 1;
+  height: calc(var(--type-ui-size) * var(--type-ui-leading));
   margin-inline-start: calc(-1 * (var(--space-xs) + var(--line-hairline)));
 }
 

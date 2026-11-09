@@ -4,9 +4,12 @@
 
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createElement } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { Attachment, CoreClient, Method } from "./core/client";
+import type { ShellControl } from "./core/shell";
 import type { CoreHelloResult, Session, Workspace } from "./protocol/core-api.gen";
 
 afterEach(cleanup);
@@ -81,9 +84,24 @@ const titles = () => [...(page()?.querySelectorAll(".sessions-page-title") ?? []
 const row = (title: string) => [...(page()?.querySelectorAll<HTMLElement>(".sessions-page-row") ?? [])].find((el) => el.textContent?.includes(title));
 const open = (title: string) => row(title)?.querySelector<HTMLElement>(".session") as HTMLElement;
 
-async function start(more: Parameters<typeof fakeCore>[0] = {}) {
+function fakeShell() {
+  const stopped = vi.fn();
+  return {
+    stopped,
+    onQuitRequested: () => () => {},
+    quitHeard: async () => {},
+    show: async () => false,
+    hide: async () => {},
+    quit: async () => {},
+    pickFolder: vi.fn(async () => null),
+    pickFiles: async () => [] as string[],
+    onDragDrop: () => stopped,
+  } satisfies ShellControl & { stopped: unknown };
+}
+
+async function start(more: Parameters<typeof fakeCore>[0] = {}, shell?: ShellControl) {
   const core = fakeCore(more);
-  render(createElement(App, { client: core.client }));
+  render(createElement(App, { client: core.client, shell }));
   await settle();
   await settle();
   return core;
@@ -210,6 +228,41 @@ describe("the sessions page", () => {
     expect(within(row("Went wrong") as HTMLElement).getByRole("img", { name: "Error" })).toBeTruthy();
     expect(row("Went wrong")?.querySelector(".sessions-page-facts")?.textContent).toContain("devbox");
     expect(row("Needs an answer")?.querySelector(".sessions-page-facts")?.textContent).not.toContain("local");
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R20
+  it("really hides what stands behind the page, whose own display would otherwise show it", async () => {
+    const style = document.createElement("style");
+    style.textContent = readFileSync(join(import.meta.dirname, "App.css"), "utf8");
+    document.head.append(style);
+    try {
+      await start();
+      await allSessions();
+      expect(getComputedStyle(document.querySelector("main[hidden]") as Element).visibility).toBe("hidden");
+    } finally {
+      style.remove();
+    }
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R20
+  it("takes no Ctrl+O for the new-session screen behind the page", async () => {
+    const shell = fakeShell();
+    await start({ "session.list": () => [] }, shell);
+    await allSessions();
+    fireEvent.keyDown(document, { key: "o", ctrlKey: true });
+    await settle();
+    expect(shell.pickFolder).not.toHaveBeenCalled();
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R20
+  it("stops taking dropped files for the composer behind the page", async () => {
+    const shell = fakeShell();
+    await start({}, shell);
+    await settle();
+    // Moving from the new-session screen to the session as the window opens stops one listener already.
+    const before = shell.stopped.mock.calls.length;
+    await allSessions();
+    expect(shell.stopped.mock.calls.length).toBeGreaterThan(before);
   });
 
   // verifies: FLOW-ORGANIZE-SESSIONS-R20
