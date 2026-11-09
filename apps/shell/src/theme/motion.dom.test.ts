@@ -64,6 +64,56 @@ describe("what the rail does as it regroups", () => {
     expect(el.isConnected).toBe(false);
   });
 
+  it("keeps a heading among bare copies of the ancestors it left with, so it looks as it did", () => {
+    const root = rail();
+    const group = document.createElement("div");
+    group.className = "rail-project";
+    group.dataset.collapsed = "true";
+    root.append(group);
+    const { el, runs } = marked(group, "heading:p1");
+    const before = placesOf(root);
+    group.remove();
+    // The ancestors' copies are drawn; the outermost carries the fade.
+    (HTMLElement.prototype as unknown as { animate: unknown }).animate = () => ({ finished: new Promise(() => {}) });
+    slideFrom(root, before);
+    delete (HTMLElement.prototype as unknown as { animate?: unknown }).animate;
+    const ghost = el.parentElement as HTMLElement;
+    expect(ghost.parentElement).toBe(root);
+    expect(ghost).not.toBe(group);
+    expect(ghost.className).toBe("rail-project");
+    expect(ghost.dataset.collapsed).toBe("true");
+    expect(ghost.dataset.leaving).toBe("");
+    expect(ghost.inert).toBe(true);
+    expect(runs).toEqual([]);
+  });
+
+  it("does not fade what was folded out of sight", () => {
+    const root = rail();
+    const frame = document.createElement("div");
+    frame.setAttribute("inert", "");
+    root.append(frame);
+    const { el, runs } = marked(frame, "session:s1");
+    const before = placesOf(root);
+    el.remove();
+    slideFrom(root, before);
+    expect(el.isConnected).toBe(false);
+    expect(runs).toEqual([]);
+  });
+
+  it("fades what has gone only once, when an earlier slide comes round to it again", async () => {
+    const root = rail();
+    const { el, runs } = marked(root, "session:s1");
+    const before = placesOf(root);
+    el.remove();
+    slideFrom(root, before);
+    runs[0]!.finish();
+    await Promise.resolve();
+    await Promise.resolve();
+    slideFrom(root, before);
+    expect(el.isConnected).toBe(false);
+    expect(runs).toHaveLength(1);
+  });
+
   it("does neither with reduced motion on", () => {
     vi.stubGlobal("matchMedia", () => ({ matches: true }));
     const root = rail();
