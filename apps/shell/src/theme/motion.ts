@@ -12,6 +12,42 @@ export function milliseconds(time: string): number {
   return time.trim().endsWith("ms") ? value : value * 1000;
 }
 
+/**
+ * Eases an element's height as what it holds changes, over `motion-settle` with `motion-ease-out`. Keep one per
+ * element, and call it from a layout effect, before the page is painted.
+ */
+export class HeightEase {
+  private height: number | undefined;
+  private running: Animation | undefined;
+
+  /** Nothing in it changed: a running ease goes on; otherwise its height is the one to ease from next. */
+  hold(el: HTMLElement): void {
+    if (!this.running) this.height = el.getBoundingClientRect().height;
+  }
+
+  /** What it holds changed: eases to the new height, or, when `eases` is false, takes it at once. */
+  change(el: HTMLElement, eases = true): void {
+    // An ease still running starts the next from where it has got to, and the new height is measured without it.
+    const from = this.running ? el.getBoundingClientRect().height : this.height;
+    this.running?.cancel();
+    this.running = undefined;
+    const to = el.getBoundingClientRect().height;
+    this.height = to;
+    if (!eases || from === undefined || from === to || typeof el.animate !== "function" || reducedMotion()) return;
+    const style = getComputedStyle(el);
+    const duration = milliseconds(style.getPropertyValue("--motion-settle"));
+    const curve = style.getPropertyValue("--motion-ease-out").trim();
+    if (!duration || !curve) return;
+    const animation = el.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration, easing: curve });
+    this.running = animation;
+    animation.onfinish = () => {
+      if (this.running !== animation) return;
+      this.running = undefined;
+      this.height = el.getBoundingClientRect().height;
+    };
+  }
+}
+
 /** Where an element's layout puts it on the page: a running slide by transform is left out, one by `top` is counted. */
 function topOf(el: HTMLElement): number {
   let top = 0;

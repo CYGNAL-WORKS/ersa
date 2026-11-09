@@ -2,7 +2,7 @@ import { LoaderCircle } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef } from "react";
 import { t } from "../catalog";
 import { type DeletePhase, type WhatGoes, losesWork } from "../session/deletion";
-import { milliseconds, reducedMotion } from "../theme/motion";
+import { HeightEase } from "../theme/motion";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
 import "./DeleteQuestion.css";
@@ -59,30 +59,12 @@ export function DeleteQuestion({ title, backend, phase, onConfirm, onTryAgain, o
   }, [inline]);
 
   // What arrives late, the counts or a failure's reason, changes the question's height. It eases to the new height
-  // over motion-settle and stays centered, so nothing pops in (DESIGN.md); its body gives way, so the title and the
-  // buttons stay whole while it does.
-  const height = useRef<number>(undefined);
-  const easing = useRef<Animation>(undefined);
+  // over motion-settle and stays centered, so nothing pops in (DESIGN.md); its body takes up the difference, so the title
+  // stays at its top and the buttons at its foot, growing or shrinking.
+  const ease = useRef(new HeightEase()).current;
   useLayoutEffect(() => {
-    const el = root.current;
-    if (inline || !el) return;
-    // An ease still running starts the next from where it has got to, and the new height is measured without it.
-    const from = easing.current ? el.getBoundingClientRect().height : height.current;
-    easing.current?.cancel();
-    easing.current = undefined;
-    const to = el.getBoundingClientRect().height;
-    height.current = to;
-    if (from === undefined || from === to || typeof el.animate !== "function" || reducedMotion()) return;
-    const style = getComputedStyle(el);
-    const duration = milliseconds(style.getPropertyValue("--motion-settle"));
-    const curve = style.getPropertyValue("--motion-ease-out").trim();
-    if (!duration || !curve) return;
-    const animation = el.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration, easing: curve });
-    easing.current = animation;
-    animation.onfinish = () => {
-      if (easing.current === animation) easing.current = undefined;
-    };
-  }, [inline, phase]);
+    if (!inline && root.current) ease.change(root.current);
+  }, [ease, inline, phase]);
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {

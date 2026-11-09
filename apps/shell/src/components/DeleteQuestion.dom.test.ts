@@ -3,6 +3,8 @@
 // question): its words from a `workspace.changes` answer, its buttons in each phase, and where focus goes.
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
@@ -157,14 +159,29 @@ describe("the delete question's buttons", () => {
   describe("when what it says changes its height", () => {
     const props = { title: "Fix the build", backend: "Claude Code", onConfirm: () => {}, onTryAgain: () => {}, onCancel: () => {} };
     const asked = { kind: "asking", goes: whatGoes(isolated, clean), changed: false } as const;
+    // A mistyped token reads as nothing, as it does on the page.
+    const tokens: Record<string, string> = { "--motion-settle": "260ms", "--motion-ease-out": "cubic-bezier(0, 0, 0.2, 1)", "--motion-ease-in-out": "wrong" };
     let height = 171;
+    // The height it would have once a running ease is cancelled.
+    let natural = 171;
+    let cancelled = 0;
     function growing() {
       height = 171;
-      const animate = vi.fn(() => ({ cancel: () => {} }) as Animation);
+      natural = 171;
+      cancelled = 0;
+      const animate = vi.fn(
+        () =>
+          ({
+            cancel: () => {
+              cancelled += 1;
+              height = natural;
+            },
+          }) as Animation,
+      );
       HTMLElement.prototype.animate = animate as unknown as typeof HTMLElement.prototype.animate;
       vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(() => ({ height }) as DOMRect);
       vi.spyOn(window, "getComputedStyle").mockImplementation(
-        () => ({ getPropertyValue: (name: string) => (name === "--motion-settle" ? "260ms" : "ease") }) as CSSStyleDeclaration,
+        () => ({ getPropertyValue: (name: string) => tokens[name] ?? "" }) as CSSStyleDeclaration,
       );
       return animate;
     }
@@ -180,7 +197,26 @@ describe("the delete question's buttons", () => {
       expect(animate).not.toHaveBeenCalled();
       height = 242;
       rerender(createElement(DeleteQuestion, { ...props, phase: asked }));
-      expect(animate).toHaveBeenCalledWith([{ height: "171px" }, { height: "242px" }], { duration: 260, easing: "ease" });
+      expect(animate).toHaveBeenCalledWith([{ height: "171px" }, { height: "242px" }], { duration: 260, easing: "cubic-bezier(0, 0, 0.2, 1)" });
+    });
+
+    it("starts a second change from where a running ease has got to, and cancels that ease", () => {
+      const animate = growing();
+      const { rerender } = render(createElement(DeleteQuestion, { ...props, phase: { kind: "reading" } }));
+      height = 242;
+      rerender(createElement(DeleteQuestion, { ...props, phase: asked }));
+      // Part way through, the failure's reason arrives.
+      height = 200;
+      natural = 300;
+      rerender(createElement(DeleteQuestion, { ...props, phase: { kind: "failed", reason: "The folder is in use." } }));
+      expect(cancelled).toBe(1);
+      expect(animate).toHaveBeenLastCalledWith([{ height: "200px" }, { height: "300px" }], expect.anything());
+    });
+
+    it("holds the buttons at its foot whether it grows or shrinks: its body both grows and gives way", () => {
+      const body = /\.delete-question-body \{([^}]*)\}/.exec(readFileSync(join(import.meta.dirname, "DeleteQuestion.css"), "utf8"))?.[1] ?? "";
+      expect(body).toContain("flex: 1 1 auto;");
+      expect(body).toContain("min-height: 0;");
     });
 
     it("appears at once with reduced motion on", () => {

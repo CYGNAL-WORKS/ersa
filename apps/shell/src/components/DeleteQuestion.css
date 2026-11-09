@@ -54,12 +54,12 @@
   overflow-wrap: anywhere;
 }
 
-/* All that can change its height. While the question eases to a new height this gives way, and its words are clipped
-   as they arrive, so the title and the buttons stay whole. */
+/* All that can change its height. While the question eases to a new height this takes up the difference, clipping
+   its words as they arrive, so the buttons stay at the foot whether it grows or shrinks. */
 .delete-question-body {
   display: flex;
   flex-direction: column;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   gap: var(--space-sm);
   min-height: 0;
   overflow: clip;
