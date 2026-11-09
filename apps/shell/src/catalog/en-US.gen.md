@@ -4,6 +4,66 @@
 
 ## `rail`
 
+### `rail.sessionsPage.sessionsHeading`
+
+Sessions
+
+### `rail.sessionsPage.tabsLabel`
+
+Which sessions to list
+
+### `rail.sessionsPage.activeTabButton`
+
+Active
+
+### `rail.sessionsPage.archivedTabButton`
+
+Archived
+
+### `rail.sessionsPage.searchLabel`
+
+Search sessions
+
+### `rail.sessionsPage.noMatchEmpty`
+
+No sessions match your search.
+
+### `rail.sessionsPage.unavailableReason`
+
+Ersa isn't connected to your sessions.
+
+### `rail.sessionsPage.justNowLabel`
+
+Just now
+
+### `rail.sessionsPage.minutesAgoLabel`
+
+#### `one`
+
+{count} minute ago
+
+#### `other`
+
+{count} minutes ago
+
+### `rail.sessionsPage.hoursAgoLabel`
+
+#### `one`
+
+{count} hour ago
+
+#### `other`
+
+{count} hours ago
+
+### `rail.sessionsPage.yesterdayLabel`
+
+Yesterday
+
+### `rail.sessionsPage.boundaryName`
+
+The sessions page
+
 ### `rail.top.newSessionButton`
 
 New session
@@ -27,6 +87,10 @@ Show
 ### `rail.arrange.resetButton`
 
 Reset to defaults
+
+### `rail.arrange.allSessionsButton`
+
+All sessions
 
 ### `rail.arrange.groupByProjectButton`
 
