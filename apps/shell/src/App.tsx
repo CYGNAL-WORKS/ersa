@@ -84,7 +84,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
   const connection = useRef<Connection | null>(null);
 
-  // What the stage shows: the active session, or the new-session screen (session/stage.ts); and what the window
+  // What the stage shows: the active session, the new-session screen or the sessions page (session/stage.ts); and what the window
   // knows of the active session.
   const [{ activeId, composing, starting, firstSend, sessionsPage }, dispatch] = useReducer(stage, initialStage);
   const [session, setSession] = useState<SessionView>();
@@ -797,9 +797,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               localHost={hello?.host.id}
               hostNames={hostNames}
               backends={backends}
-              onOpen={select}
+              onOpen={(id) => {
+                select(id);
+                // An archived session opens without a composer to take focus, and the row that had it is gone.
+                if (sessions.state === "ready" && sessions.sessions.find((s) => s.id === id)?.archived) setRefocus({ to: id });
+              }}
               onNewSession={() => dispatch({ type: "newSession" })}
-              newSessionDisabled={view.phase !== "connected"}
               onPin={pin}
               pinning={pinning}
               onRename={rename}

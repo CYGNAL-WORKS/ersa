@@ -62,8 +62,6 @@ interface RailTreeProps extends TileHandlers {
   onToggle?: (key: string) => void;
   /** The arrangement could not be read, so the rail shows the defaults, or a change to it could not be saved, so it was undone (R15). */
   arrangeProblem?: ArrangeProblem;
-  /** Archives and unarchives on their way, and why the last was refused, by session id. */
-  archiving?: Readonly<Record<string, Sending>>;
   /** For the gallery: a pointer or keyboard state on one tile or one heading, the menu open, the trust question asked. */
   force?: ForcedTile;
   forceHeading?: { id: string; state: "hover" | "focus" | "pressed" };

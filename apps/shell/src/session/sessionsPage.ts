@@ -4,6 +4,7 @@
 
 import { t } from "../catalog";
 import type { Session } from "../protocol/core-api.gen";
+import { calendarDaysApart } from "./tree";
 
 export type SessionsTab = "active" | "archived";
 
@@ -32,9 +33,6 @@ const HOUR = 60 * MINUTE;
 // The date reads in the locale the catalog is in, in the user's own time zone.
 const date = new Intl.DateTimeFormat("en-US", { dateStyle: "medium" });
 
-/** The local day `date` falls on, as a whole number, so two days' difference counts calendar days whatever the hour. */
-const dayOf = (d: Date) => Math.round(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / (24 * HOUR));
-
 /** When a row's session was last active, as the page words it: "Just now", "5 minutes ago", "Yesterday", then a date. */
 export function lastActive(session: Pick<Session, "created_at" | "last_activity_at">, now: Date): string {
   const when = new Date(timeOf(session));
@@ -43,7 +41,7 @@ export function lastActive(session: Pick<Session, "created_at" | "last_activity_
   // A time ahead of this machine's clock reads as now.
   if (since < MINUTE) return t("rail.sessionsPage.justNowLabel");
   if (since < HOUR) return t("rail.sessionsPage.minutesAgoLabel", { count: Math.floor(since / MINUTE) });
-  const days = dayOf(now) - dayOf(when);
+  const days = calendarDaysApart(now, when);
   if (days === 0) return t("rail.sessionsPage.hoursAgoLabel", { count: Math.floor(since / HOUR) });
   if (days === 1) return t("rail.sessionsPage.yesterdayLabel");
   return date.format(when);

@@ -103,6 +103,11 @@
   transition: border-color var(--motion-quick) var(--motion-ease-out);
 }
 
+/* Escape clears it; the browser's own clear button is outside the tokens and the icon set. */
+.sessions-page-search::-webkit-search-cancel-button {
+  display: none;
+}
+
 .sessions-page-search:focus {
   outline: none;
   border-color: var(--color-accent);
@@ -130,6 +135,17 @@
   padding-inline: var(--space-sm) calc(var(--space-sm) + var(--size-control-sm) + var(--space-sm));
   font-size: var(--type-ui-size);
   line-height: var(--type-ui-leading);
+}
+
+/* A row's first column is its title's, where a tile's is its backend icon's. */
+.sessions-page-row .session-title-field {
+  grid-column: 1;
+}
+
+/* Keyboard focus takes the pointer's fill as well as the ink edge `.session` gives it. */
+.sessions-page-row > .session:focus-visible,
+.sessions-page-row > .session[data-force="focus"] {
+  background: var(--material-hover);
 }
 
 .sessions-page-row > .session-more.icon-button {

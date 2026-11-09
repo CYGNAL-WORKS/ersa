@@ -53,8 +53,7 @@ function fakeCore(more: Partial<Record<Method, (params: never) => unknown>> = {}
     "session.list": () => list,
     "workspace.list": () => workspaces,
     "backend.list": () => [],
-    // The rail is filtered and folded: none of it reaches the page.
-    "settings.get": () => ({ "rail.show": "archived", "rail.group_by": "none" }),
+    "settings.get": () => ({}),
     "session.subscribe": () => ({ view: "v1", last_seq: 0 }),
     "session.unsubscribe": () => ({}),
     "session.set_archived": (params: { id: string; archived: boolean }) => {
@@ -99,7 +98,9 @@ async function allSessions() {
 describe("the sessions page", () => {
   // verifies: FLOW-ORGANIZE-SESSIONS-R16
   it("opens from the arrange menu listing every session for its tab, Active first, whatever the rail's arrangement", async () => {
-    await start();
+    // The rail shows archived sessions only, with its one group folded: none of that reaches the page.
+    await start({ "settings.get": () => ({ rail: { show: "archived", group_by: "project", collapsed: { project: ["alpha"] } } }) });
+    expect([...rail().querySelectorAll(".session")].map((el) => el.textContent)).toEqual([expect.stringContaining("Retire the protocol")]);
     await allSessions();
     expect(screen.getByRole("heading", { name: "Sessions" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Active" }).getAttribute("aria-selected")).toBe("true");
@@ -196,6 +197,20 @@ describe("the sessions page", () => {
     expect(names(row("Fix the build") as HTMLElement, "Fix the build")).toEqual(["Pin", "RenameF2", "Archive", "Delete…"]);
   });
 
+  it("shows the mark a tile shows, named, and the host when it is not this machine", async () => {
+    await start({
+      "session.list": () => [
+        session("n", "Needs an answer", "2026-11-01T09:00:00Z", { tile: { state: "waiting_user", pending: [{ kind: "permission", request_id: "r1" }] } }),
+        session("e", "Went wrong", "2026-11-01T08:00:00Z", { tile: { state: "error", pending: [] }, host_id: "devbox" }),
+      ],
+    });
+    await allSessions();
+    expect(within(row("Needs an answer") as HTMLElement).getByRole("img", { name: "Needs permission" })).toBeTruthy();
+    expect(within(row("Went wrong") as HTMLElement).getByRole("img", { name: "Error" })).toBeTruthy();
+    expect(row("Went wrong")?.querySelector(".sessions-page-facts")?.textContent).toContain("devbox");
+    expect(row("Needs an answer")?.querySelector(".sessions-page-facts")?.textContent).not.toContain("local");
+  });
+
   it("stays when the active session is archived from its row, the row moving to Archived and focus to the next row", async () => {
     const core = await start();
     await allSessions();
@@ -210,6 +225,17 @@ describe("the sessions page", () => {
     expect(page()).not.toBeNull();
     expect(titles()).toEqual(["Write the notes", "Fix the build"]);
     expect(document.activeElement).toBe(open("Fix the build"));
+  });
+
+  it("puts focus somewhere when an archived row opens, having no composer to take it", async () => {
+    await start();
+    await allSessions();
+    fireEvent.click(screen.getByRole("tab", { name: "Archived" }));
+    open("Retire the protocol").focus();
+    fireEvent.click(open("Retire the protocol"));
+    await settle();
+    expect(page()).toBeNull();
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   it("gives focus back to the row when the delete question opened from it is canceled", async () => {

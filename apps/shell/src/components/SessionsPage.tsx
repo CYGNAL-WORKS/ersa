@@ -3,7 +3,6 @@ import { type KeyboardEvent, useEffect, useId, useLayoutEffect, useRef, useState
 import { t } from "../catalog";
 import type { SessionsView } from "../core/connection";
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
-import type { Sending } from "../session/follow";
 import { type SessionsTab, lastActive, pageRows } from "../session/sessionsPage";
 import { tileOf } from "../session/tile";
 import { Button } from "./Button";
@@ -43,8 +42,6 @@ export function SessionsPage({
   backends,
   onOpen,
   onNewSession,
-  newSessionDisabled,
-  archiving,
   now: fixedNow,
   initialTab = "active",
   initialSearch,
@@ -65,10 +62,6 @@ export function SessionsPage({
   /** Opens a session: it becomes the active session and the page gives way (R18). */
   onOpen: (id: string) => void;
   onNewSession: () => void;
-  /** Ersa has not connected to Core yet. */
-  newSessionDisabled?: boolean;
-  /** Archives and unarchives on their way, and why the last was refused, by session id. */
-  archiving?: Readonly<Record<string, Sending>>;
   /** For the gallery: a fixed now, a chosen tab, the search open with this text, a row's state, its menu, its title being edited. */
   now?: Date;
   initialTab?: SessionsTab;
@@ -170,7 +163,7 @@ export function SessionsPage({
                 }}
               />
             )}
-            <Button className="sessions-page-new" onClick={onNewSession} disabled={newSessionDisabled}>
+            <Button className="sessions-page-new" onClick={onNewSession} disabled={handlers.offline}>
               <Icon icon={Plus} />
               {t("rail.top.newSessionButton")}
             </Button>
@@ -203,7 +196,7 @@ export function SessionsPage({
                       initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
                     />
                   </ErrorBoundary>
-                  <Refusals session={s} pinning={handlers.pinning} archiving={archiving} />
+                  <Refusals session={s} pinning={handlers.pinning} archiving={handlers.archiving} />
                 </li>
               ))}
             </ul>
@@ -242,7 +235,7 @@ function SessionRow({
   const { root, editing, rootHandlers, titleField, moreAndMenu } = useTileMenu({ session, title: view.title, actions, initialMenu, initialDraft });
   return (
     <>
-      <SessionRoot ref={root} editing={editing} className="session sessions-page-open" data-force={force} onClick={() => onOpen(session.id)} {...rootHandlers}>
+      <SessionRoot ref={root} editing={editing} className="session" data-force={force} onClick={() => onOpen(session.id)} {...rootHandlers}>
         {editing ? titleField : <span className="sessions-page-title">{view.title}</span>}
         <span className="sessions-page-facts">
           {view.mark && (
@@ -251,8 +244,8 @@ function SessionRow({
               <Mark view={view} />
             </span>
           )}
-          {project !== undefined && <span className="sessions-page-fact">{project}</span>}
-          {host !== undefined && <span className="sessions-page-fact">{host}</span>}
+          {project !== undefined && <span>{project}</span>}
+          {host !== undefined && <span>{host}</span>}
           <span className="sessions-page-time">{time}</span>
         </span>
       </SessionRoot>
