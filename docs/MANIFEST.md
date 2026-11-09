@@ -54,6 +54,4 @@ Empty.
 
 ## Problems
 
-- PROTO-CORE-API: `session.decide_permission` appears twice under "Sessions"
-- PROTO-CORE-API: `session.answer_question` appears twice under "Sessions"
-- PROTO-CORE-API: `session.set_title` appears twice under "Sessions"
+None.
