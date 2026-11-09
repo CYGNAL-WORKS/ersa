@@ -83,7 +83,15 @@ export function stage(state: StageState, action: StageAction): StageState {
     case "select":
       // Leaving the screen leaves nothing behind: nothing was created (FLOW-NEW-SESSION-R03).
       if (isStarting(state)) return state;
-      return { ...state, activeId: action.id, composing: undefined, starting: undefined, firstSend: undefined, sessionsPage: false };
+      // Back to the same session from the sessions page, its composer is as it was: a first message's refusal stays.
+      return {
+        ...state,
+        activeId: action.id,
+        composing: undefined,
+        starting: undefined,
+        firstSend: state.sessionsPage && !state.composing && action.id === state.activeId ? state.firstSend : undefined,
+        sessionsPage: false,
+      };
     case "showNewest":
       // Not while a start is on its way or has just failed: the newest session may be the one being started, and
       // the screen, its failure and the message in it stay until the user acts (FLOW-NEW-SESSION-R08).

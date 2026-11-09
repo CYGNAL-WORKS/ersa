@@ -178,7 +178,8 @@ describe("the sessions page", () => {
     await allSessions();
     expect(screen.queryByRole("textbox", { name: /message/i })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Tidy the docs" })).toBeNull();
-    expect(document.querySelector(".session-controls")).toBeNull();
+    expect(document.querySelector("main:not([hidden]) .session-controls")).toBeNull();
+    expect(document.querySelector("main[hidden]")?.hasAttribute("inert")).toBe(true);
     const highlighted = rail().querySelector('.session[aria-current="true"]');
     expect(highlighted?.textContent).toContain("Tidy the docs");
   });
@@ -209,6 +210,32 @@ describe("the sessions page", () => {
     expect(within(row("Went wrong") as HTMLElement).getByRole("img", { name: "Error" })).toBeTruthy();
     expect(row("Went wrong")?.querySelector(".sessions-page-facts")?.textContent).toContain("devbox");
     expect(row("Needs an answer")?.querySelector(".sessions-page-facts")?.textContent).not.toContain("local");
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R20
+  it("keeps a message being written, and gives it focus, when the same session is chosen again", async () => {
+    await start();
+    fireEvent.change(screen.getByRole("textbox", { name: /message/i }), { target: { value: "half a thought" } });
+    await allSessions();
+    fireEvent.click(open("Tidy the docs"));
+    await settle();
+    const box = screen.getByRole<HTMLTextAreaElement>("textbox", { name: /message/i });
+    expect(box.value).toBe("half a thought");
+    expect(document.activeElement).toBe(box);
+  });
+
+  it("leaves a session opened meanwhile alone when an archive from its row answers late", async () => {
+    let answer: (value: object) => void = () => {};
+    await start({ "session.set_archived": () => new Promise((resolve) => (answer = resolve)) });
+    await allSessions();
+    fireEvent.click(within(row("Tidy the docs") as HTMLElement).getByRole("button", { name: "More for Tidy the docs" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
+    await settle();
+    fireEvent.click(open("Fix the build"));
+    await settle();
+    await act(async () => answer({}));
+    await settle();
+    expect(screen.getByRole("heading", { name: "Fix the build" })).toBeTruthy();
   });
 
   it("stays when the active session is archived from its row, the row moving to Archived and focus to the next row", async () => {

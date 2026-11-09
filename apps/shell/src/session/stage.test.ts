@@ -20,6 +20,12 @@ describe("the sessions page on the stage", () => {
     expect(chosen.activeId).toBe("s2");
   });
 
+  it("keeps a first message's refusal when the same session is chosen again, and not when another is", () => {
+    const refused = { ...onPage, firstSend: { id: "s1", text: "hello", sending: { state: "failed" as const, message: "busy" } } };
+    expect(stage(refused, { type: "select", id: "s1" }).firstSend?.text).toBe("hello");
+    expect(stage(refused, { type: "select", id: "s2" }).firstSend).toBeUndefined();
+  });
+
   it("gives way to New session", () => {
     const composing = stage(onPage, { type: "newSession" });
     expect(composing.sessionsPage).toBe(false);
@@ -32,6 +38,7 @@ describe("the sessions page on the stage", () => {
     expect(left.composing).toBeDefined();
   });
 
+  // verifies: FLOW-ORGANIZE-SESSIONS-R16
   it("waits for a start under way, which finishes on the screen it began on", () => {
     const sending = run([{ type: "newSession", projectId: "p1" }, { type: "sending" }]);
     expect(stage(sending, { type: "allSessions" }).sessionsPage).toBeFalsy();
