@@ -548,11 +548,29 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
     client
         .result("session.subscribe", json!({ "id": fork_id, "from_seq": 0 }))
         .await;
-    let events = client.events_until("assistant.text").await;
+    let events = client.events_until("session.ended").await;
     let shown: Vec<&Value> = events
         .iter()
         .filter(|e| e["event"]["type"] == "assistant.text")
         .collect();
     assert_eq!(shown.len(), 1, "{events:#?}");
     assert_eq!(shown[0]["event"]["text"], "the reply");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_read_that_outlives_its_request_still_holds_back_the_next_fork() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let id = idle(&core, &mut client, json!({})).await;
+    let gate = Arc::clone(&fake.read_gate);
+    let held = gate.lock().await;
+
+    // The request gives up on the read, which goes on.
+    let message = refused_now(&mut client, &id).await;
+    assert!(message.contains("could not be read within"), "{message}");
+    let message = refused_now(&mut client, &id).await;
+    assert!(message.contains("has not finished starting"), "{message}");
+
+    drop(held);
+    forked(&mut client, &id).await;
 }
