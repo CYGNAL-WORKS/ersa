@@ -151,6 +151,11 @@ describe("the context ring near full (LAY-SHELL, Context)", () => {
 });
 
 describe("a tile while its session is being deleted (LAY-SHELL, Being deleted)", () => {
+  it("says so over the archive mark", () => {
+    expect(tileOf(session({ state: "idle" }, { archived: true, deleting: "failed" }))).toMatchObject({ mark: "error", phrase: "Couldn't delete", titleMuted: false });
+    expect(tileOf(session({ state: "idle" }, { archived: true, deleting: "running" }))).toMatchObject({ mark: "starting", phrase: "Deleting", titleMuted: false });
+  });
+
   it("reads Deleting with the starting arc, muted, over a want or any state", () => {
     const view = tileOf(session({ state: "waiting_user", pending: [permission] }, { deleting: "running" }));
     expect(view).toMatchObject({ mark: "starting", tone: "muted", phrase: "Deleting", titleMuted: false });

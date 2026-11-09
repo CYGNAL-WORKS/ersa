@@ -546,7 +546,7 @@ function Root({
   editing,
   ref,
   ...rest
-}: HTMLAttributes<HTMLElement> & { editing: boolean; ref: Ref<HTMLElement>; "data-force"?: string; "data-needs-you"?: boolean; "data-session-id"?: string }) {
+}: HTMLAttributes<HTMLElement> & { editing: boolean; ref: Ref<HTMLElement>; "data-force"?: string; "data-needs-you"?: boolean }) {
   if (editing) {
     // The box only holds the field: choosing, the menu and its keys belong to the tile when it is a button again.
     const { onClick: _click, onContextMenu: _menu, onKeyDown: _key, ...box } = rest;
