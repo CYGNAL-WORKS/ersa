@@ -4,7 +4,7 @@ type: protocol
 title: Core request/response API
 status: ready
 references: [PROTO-AGENT-EVENTS]
-adrs: [0011, 0017, 0028, 0026]
+adrs: [0011, 0017, 0028, 0026, 0031]
 ---
 
 # Core request/response API
@@ -187,7 +187,7 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 - **PROTO-CORE-API-R57**: When `session.delete` records that a workspace's files go, it shall set the workspace's state to `error` in the same transaction, before step 5 touches the folder.
 - **PROTO-CORE-API-R55**: `session.delete` shall remove the workspace's row only when its folder is gone and no other session's row refers to it, a session marked deleting included, and shall report `workspace_deleted` true exactly when this delete deleted the folder.
 - **PROTO-CORE-API-R43**: When Core refuses `session.resume` for an archived session, it shall leave the session archived.
-- **PROTO-CORE-API-R34**: What `session.arrange` and `session.set_archived` set shall persist across a restart of Core, and `session.list` shall report them.
+- **PROTO-CORE-API-R34**: What `session.arrange` and `session.set_archived` set shall persist across a restart of Core, and `session.list` shall report them for each session it lists.
 - **PROTO-CORE-API-R35**: `session.delete` shall delete the session's isolated workspace only when no other session uses it and, for an isolated workspace, the token it was given matches what would be lost now; shall delete the workspace's branch only when no commit on it is held by no other local branch or remote-tracking branch; shall never change a root workspace; and shall be refused while the session is starting or a turn is running.
 - **PROTO-CORE-API-R36**: `session.delete` shall delete the session's record from its backend before removing the session, so that `session.list` does not list it again, including after Core restarts.
 - **PROTO-CORE-API-R37**: Core shall set a session's `last_activity_at` when one of its turns ends, and at no other time.
@@ -201,6 +201,10 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 - **PROTO-CORE-API-R62**: `session.fork` shall refuse with `invalid_state` while a turn runs in the original, before the backend has named the session, when the record's conversation does not end with a finished reply, when the live-session registry shows more processes with the session open than the one Core runs for it, and when the backend cannot fork.
 - **PROTO-CORE-API-R63**: `session.answer_question` shall refuse with `invalid_state` answers that miss or repeat a question, answer a question it did not ask, name an option the question did not offer or choose one twice, give a list to a single-choice question, or differ for questions the backend can't tell apart.
 - **PROTO-CORE-API-R64**: `session.arrange` shall change only the fields given, and shall answer `not_found` for a section that does not exist, changing nothing.
+- **PROTO-CORE-API-R65**: `backend.list`, and the backends `host.list` reports for a host, shall hold exactly one entry for each registered adapter, in the order the adapters were registered.
+- **PROTO-CORE-API-R66**: When a session's backend has no registered adapter, Core shall leave the session out of `session.list` and answer `not_found` for its id.
+- **PROTO-CORE-API-R67**: Core shall keep what it stores about a session R66 leaves out, and shall list the session again, with its arrangement, once Core starts with that adapter registered.
+- **PROTO-CORE-API-R68**: A session R66 leaves out shall still count as using its workspace, for `workspace.changes` and for the refusals of `workspace.remove` and `project.remove`.
 
 ## Out of scope
 
@@ -217,6 +221,7 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 
 ## Changes
 
+- 2026-11-09: the registered adapters are the only backends Core lists, and a session whose backend has none is hidden until it is back (ADR 0031). PROTO-CORE-API-R65 to R68 added; R34 reworded, meaning unchanged for every session Core can list today.
 - 2026-11-08: planning pass: what Core already does is named here: limits, list order, time format, what a character is, `not_found`, refusals of an answer and of `project.add`, `workspace.create`'s `name`, nested settings keys, and what a delete's claim refuses. The `api_version` bump Versioning promised has shipped. PROTO-CORE-API-R63 and R64 give shipped rules IDs, and R62 gives `session.fork`'s refusals one for the ticket that builds it; no requirement retired.
 - 2026-11-08: from #267 inbox: `rail.collapsed` loses `no_project`, since sessions without a project have no heading to collapse (LAY-SHELL). No requirement IDs changed.
 - 2026-11-08: from #266 inbox: `session.answer_question` names the answers it refuses with `invalid_state`. No requirement IDs changed.
