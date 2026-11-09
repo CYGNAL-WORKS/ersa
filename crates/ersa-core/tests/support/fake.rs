@@ -62,6 +62,10 @@ pub struct Stats {
     pub configs: Mutex<Vec<SessionConfig>>,
     /// Renames sent to a running backend, and renames written to a record.
     pub live_renames: AtomicUsize,
+    /// The title of every rename a running backend was sent, in order, as
+    /// it arrives; held there while a test has `rename_gate`.
+    pub rename_titles: Mutex<Vec<String>>,
+    pub rename_gate: tokio::sync::Mutex<()>,
     pub record_renames: AtomicUsize,
     /// For every time Core asked whether another process has a session
     /// open: the backend's id for it, and how many record renames had
@@ -161,6 +165,8 @@ pub struct FakeAdapter {
     pub read_gate: Arc<tokio::sync::Mutex<()>>,
     /// A backend that takes a stop and never exits.
     stop_hangs: bool,
+    /// A backend whose sessions take the id Core chose for them.
+    chosen_ids: bool,
 }
 
 impl FakeAdapter {
@@ -179,6 +185,15 @@ impl FakeAdapter {
             conversation_end_fails: Arc::default(),
             read_gate: Arc::default(),
             stop_hangs: false,
+            chosen_ids: false,
+        }
+    }
+
+    /// An adapter whose sessions take the id Core chose, as Claude Code's do.
+    pub fn with_chosen_ids() -> Self {
+        FakeAdapter {
+            chosen_ids: true,
+            ..FakeAdapter::new(1)
         }
     }
 
@@ -229,6 +244,11 @@ impl Adapter for FakeAdapter {
         BACKEND
     }
 
+    fn new_session_id(&self) -> Option<String> {
+        self.chosen_ids
+            .then(|| format!("fake-{}", NEXT_SESSION.fetch_add(1, Ordering::SeqCst)))
+    }
+
     /// Two of each, with a default marked in each list as Claude Code's are.
     fn choices(&self) -> BackendChoices {
         let list = |ids: [&str; 2], default: &str| -> Vec<Choice> {
@@ -267,8 +287,11 @@ impl Adapter for FakeAdapter {
             sink.process_exited(Ok(ProcessExit { code: Some(1) }));
             return Err(AdapterError::Protocol("the fake refused to start".into()));
         }
-        // Announces its own id for the session, as Claude Code's `init` does.
-        let session_id = format!("fake-{}", NEXT_SESSION.fetch_add(1, Ordering::SeqCst));
+        // Announces its id for the session, as Claude Code's `init` does.
+        let session_id = config
+            .backend_session_id
+            .clone()
+            .unwrap_or_else(|| format!("fake-{}", NEXT_SESSION.fetch_add(1, Ordering::SeqCst)));
         self.records
             .lock()
             .unwrap()
@@ -583,6 +606,12 @@ impl AdapterSession for FakeSession {
             backend_session_id, self.session_id,
             "renamed the wrong session"
         );
+        self.stats
+            .rename_titles
+            .lock()
+            .unwrap()
+            .push(title.to_string());
+        drop(self.stats.rename_gate.lock().await);
         self.sink.record(
             Direction::Host,
             json!({ "t": "rename", "title": title }).to_string(),

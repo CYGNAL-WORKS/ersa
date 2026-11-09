@@ -8,5 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-08 PROTO-CORE-API: `session.list` says a session's `created_at` is the time of the first entry in its record, but a fork's copied entries keep the original's times, so a fork would list as old as the original and sort among its older sessions. Meanwhile a fork's `created_at` is when it was made, kept with its row, once its own record exists too. Decide: name that exception in the brief, or follow the record.
 
 ## Resolved recently (optional, trimmed in planning passes)
