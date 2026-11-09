@@ -11,6 +11,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { type FolderChoice, NewSessionScreen } from "./components/NewSessionScreen";
 import { QuitQuestion } from "./components/QuitQuestion";
 import { SessionControls } from "./components/SessionControls";
+import { SessionsPage } from "./components/SessionsPage";
 import { noneUnseen, unseenAfter } from "./session/unseen";
 import { RailTop } from "./components/RailTop";
 import { RailTree } from "./components/RailTree";
@@ -66,6 +67,9 @@ function sessionsOf(view: CoreView): SessionsView {
   }
 }
 
+/** The list a deletion was asked from: the sessions page's rows, or the rail's tiles. */
+const deletionList = (fromPage: boolean | undefined) => document.querySelector(fromPage ? ".sessions-page" : ".rail-tree");
+
 /** A number that changes whenever `value` is a new object: a key that resets an error boundary on new data. */
 function useVersion(value: unknown): string {
   const seen = useRef({ value, version: 0 });
@@ -82,7 +86,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // What the stage shows: the active session, or the new-session screen (session/stage.ts); and what the window
   // knows of the active session.
-  const [{ activeId, composing, starting, firstSend }, dispatch] = useReducer(stage, initialStage);
+  const [{ activeId, composing, starting, firstSend, sessionsPage }, dispatch] = useReducer(stage, initialStage);
   const [session, setSession] = useState<SessionView>();
   const follower = useRef<Follower | null>(null);
 
@@ -413,13 +417,13 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // Archive and Unarchive from a tile (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3): Core stops a live session as it
   // archives it, and keeps its pin and section either way. The list is read again to show the change; archiving the
-  // active session shows the new-session screen, since its tile has left the rail.
+  // active session shows the new-session screen, since its tile has left the rail; behind the sessions page, if it shows.
   const archive = async (id: string, archived: boolean) => {
     setArchiving((a) => ({ ...a, [id]: { state: "sending" } }));
     try {
       await client.call("session.set_archived", { id, archived });
       setArchiving(({ [id]: _, ...rest }) => rest);
-      if (archived && id === shownId) dispatch({ type: "newSession" });
+      if (archived && id === shownId) dispatch({ type: "activeLeft" });
       connection.current?.reload("sessions");
     } catch (error) {
       setArchiving((a) => ({ ...a, [id]: { state: "failed", message: describeError(error) } }));
@@ -465,30 +469,31 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // The delete question, while it is open (FLOW-ARCHIVE-DELETE-SESSION, steps 4 to 6): the session, as its tile
   // names it, where the question stands, and the round trips behind it.
-  const [deleteAsk, setDeleteAsk] = useState<{ id: string; title: string; backend: string; phase: DeletePhase; run?: Deletion }>();
+  // `fromPage`: asked from a row on the sessions page, so focus comes back there rather than to the rail.
+  const [deleteAsk, setDeleteAsk] = useState<{ id: string; title: string; backend: string; phase: DeletePhase; run?: Deletion; fromPage?: boolean }>();
   // The tile focus goes to once the question closes, by its session's id; New session when none is left. Moved in an
   // effect, after the new-session screen a deleted active session leaves behind has taken focus as it opened.
-  const [refocus, setRefocus] = useState<{ to?: string }>();
+  const [refocus, setRefocus] = useState<{ to?: string; fromPage?: boolean }>();
   // The active session as it is when a deletion ends, which may be after the user chose another.
   const activeNow = useRef(activeId);
   activeNow.current = activeId;
   useEffect(() => {
     if (!refocus) return;
-    const item = refocus.to && document.querySelector(`[data-session-id="${CSS.escape(refocus.to)}"] .session`);
-    (item instanceof HTMLElement ? item : document.querySelector<HTMLElement>(".rail-new-session"))?.focus({ preventScroll: true });
+    const item = refocus.to && deletionList(refocus.fromPage)?.querySelector(`[data-session-id="${CSS.escape(refocus.to)}"] .session`);
+    (item instanceof HTMLElement ? item : document.querySelector<HTMLElement>(refocus.fromPage ? ".sessions-page-new" : ".rail-new-session"))?.focus({ preventScroll: true });
     setRefocus(undefined);
   }, [refocus]);
   // The question as last drawn: a deletion that ends speaks only for the question still showing it.
   const askNow = useRef(deleteAsk);
   askNow.current = deleteAsk;
-  const askDelete = (id: string) => {
+  const askDelete = (id: string, fromPage?: boolean) => {
     // One deletion at a time: while one runs, its question stays until it ends.
     if (askNow.current?.phase.kind === "deleting") return;
     const listed = sessions.state === "ready" ? sessions.sessions.find((s) => s.id === id) : undefined;
     if (!listed) return;
     const tile = tileOf(listed, backends);
     const workspace = workspaces[listed.workspace_id];
-    const ask = { id, title: tile.title, backend: tile.backend };
+    const ask = { id, title: tile.title, backend: tile.backend, fromPage };
     // The rail places a session only once its workspace is read, so this is rare: Try again asks once it is.
     if (!workspace) {
       setDeleteAsk({ ...ask, phase: { kind: "failed", reason: t("rail.delete.workspaceUnknownError") } });
@@ -512,12 +517,13 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // delete question); the active session leaves the new-session screen in its place.
   const deleted = (id: string) => {
     // A tile folded away in a collapsed group can't take focus, so it is never the one beside this one.
-    const items = [...document.querySelectorAll<HTMLElement>("[data-session-id]")].filter((el) => !el.closest(".rail-group-tiles[inert]"));
+    const fromPage = askNow.current?.fromPage;
+    const items = [...(deletionList(fromPage)?.querySelectorAll<HTMLElement>("[data-session-id]") ?? [])].filter((el) => !el.closest(".rail-group-tiles[inert]"));
     const at = items.findIndex((el) => el.dataset.sessionId === id);
     const beside = at < 0 ? undefined : (items[at + 1] ?? items[at - 1]);
     setDeleteAsk(undefined);
-    setRefocus({ to: beside?.dataset.sessionId });
-    if (id === activeNow.current) dispatch({ type: "newSession" });
+    setRefocus({ to: beside?.dataset.sessionId, fromPage });
+    if (id === activeNow.current) dispatch({ type: "activeLeft" });
     connection.current?.reload("sessions");
   };
   // While the user's own deletion runs, its tile reads Deleting at once (LAY-SHELL, Being deleted): Core marks the
@@ -536,8 +542,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Cancel leaves everything as it was, and focus goes back to the tile.
   const cancelDelete = () => {
     const id = deleteAsk?.id;
+    const fromPage = deleteAsk?.fromPage;
     setDeleteAsk(undefined);
-    setRefocus({ to: id });
+    setRefocus({ to: id, fromPage });
   };
 
   // A refusal goes; a rename still on its way stays, so its answer is shown.
@@ -725,6 +732,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
             onGroupBy: (groupBy) => arrange(choicePatch({ groupBy })),
             onShow: (show) => arrange(choicePatch({ show })),
             onReset: () => arrange(RESET_PATCH),
+            onAllSessions: () => dispatch({ type: "allSessions" }),
           }}
         />
         <div className="rail-body">
@@ -777,7 +785,34 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           </ErrorBoundary>
         </div>
       </nav>
-      {shown ? (
+      {sessionsPage ? (
+        // The page stands in for everything the stage shows: the composer, the session controls and the header are
+        // gone, so nothing typed reaches the active session, which stays active (FLOW-ORGANIZE-SESSIONS-R20).
+        <main className="stage" inert={behind}>
+          <ErrorBoundary what={t("rail.sessionsPage.boundaryName")} resetKey={sessionsVersion}>
+            <SessionsPage
+              sessions={railSessions}
+              projects={projectList}
+              workspaces={workspaces}
+              localHost={hello?.host.id}
+              hostNames={hostNames}
+              backends={backends}
+              onOpen={select}
+              onNewSession={() => dispatch({ type: "newSession" })}
+              newSessionDisabled={view.phase !== "connected"}
+              onPin={pin}
+              pinning={pinning}
+              onRename={rename}
+              renaming={renaming}
+              onRenameReset={resetRename}
+              onArchive={archive}
+              archiving={archiving}
+              onDelete={(id) => askDelete(id, true)}
+              offline={view.phase !== "connected"}
+            />
+          </ErrorBoundary>
+        </main>
+      ) : shown ? (
         <main className="stage" inert={behind}>
           {/* Tries again on each new event, and keeps the composer out of it. */}
           <ErrorBoundary what="This session" resetKey={`${shown.id}:${shown.transcript.lastSeq}`}>
@@ -875,7 +910,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           backend={deleteAsk.backend}
           phase={deleteAsk.phase}
           onConfirm={() => void deleteAsk.run?.confirm()}
-          onTryAgain={() => (deleteAsk.run ? void deleteAsk.run.start() : askDelete(deleteAsk.id))}
+          onTryAgain={() => (deleteAsk.run ? void deleteAsk.run.start() : askDelete(deleteAsk.id, deleteAsk.fromPage))}
           onCancel={cancelDelete}
         />
       )}

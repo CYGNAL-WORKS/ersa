@@ -13,6 +13,23 @@ import type { Section } from "./lookup";
 
 export const enUS = {
   rail: {
+    // The sessions page (LAY-SHELL, The sessions page). A row's time reads "Just now", "5 minutes ago", "Yesterday", then a date.
+    sessionsPage: {
+      sessionsHeading: "Sessions",
+      tabsLabel: "Which sessions to list",
+      activeTabButton: "Active",
+      archivedTabButton: "Archived",
+      searchLabel: "Search sessions",
+      noMatchEmpty: "No sessions match your search.",
+      // Why the sessions can't be read while Ersa can't reach them.
+      unavailableReason: "Ersa isn't connected to your sessions.",
+      justNowLabel: "Just now",
+      minutesAgoLabel: { one: "{count} minute ago", other: "{count} minutes ago" },
+      hoursAgoLabel: { one: "{count} hour ago", other: "{count} hours ago" },
+      yesterdayLabel: "Yesterday",
+      // Names the page when it fails to draw: "The sessions page could not be shown:".
+      boundaryName: "The sessions page",
+    },
     // The rail's top row.
     top: {
       newSessionButton: "New session",
@@ -25,6 +42,7 @@ export const enUS = {
       groupByButton: "Group by",
       showButton: "Show",
       resetButton: "Reset to defaults",
+      allSessionsButton: "All sessions",
       groupByProjectButton: "Project",
       groupByDateButton: "Date",
       groupByNoneButton: "None",

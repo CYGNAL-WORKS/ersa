@@ -1,0 +1,179 @@
+/* The sessions page (docs/design/RAIL.md, The sessions page). A row is a tile's menu and field on a layout of its
+   own: `.session` and `.session-item` carry its states and its More button (SessionTile.css). */
+
+.sessions-page {
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-xxl) var(--space-lg) var(--space-lg);
+  animation: sessions-page-in var(--motion-settle) var(--motion-ease-out);
+}
+
+@keyframes sessions-page-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.sessions-page-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  max-width: var(--size-measure);
+  margin-inline: auto;
+}
+
+.sessions-page-heading {
+  margin: 0;
+  color: var(--color-ink);
+  font-family: var(--type-heading-family);
+  font-size: var(--type-heading-size);
+  font-weight: var(--type-heading-weight);
+  line-height: var(--type-heading-leading);
+}
+
+.sessions-page-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+.sessions-page-tabs,
+.sessions-page-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.sessions-page-actions {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.sessions-page-new {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.sessions-page-tab {
+  box-sizing: border-box;
+  height: var(--size-control);
+  padding-inline: var(--space-sm);
+  color: var(--color-ink-muted);
+  font: inherit;
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+  background: transparent;
+  border: var(--line-hairline) solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background var(--motion-quick) var(--motion-ease-out),
+    color var(--motion-quick) var(--motion-ease-out);
+}
+
+.sessions-page-tab:hover {
+  background: var(--material-hover);
+}
+
+.sessions-page-tab[aria-selected="true"],
+.sessions-page-tab:active {
+  color: var(--color-ink);
+  background: var(--material-pressed);
+}
+
+.sessions-page-tab:focus-visible {
+  outline: none;
+  border-color: var(--color-ink);
+}
+
+.sessions-page-search {
+  box-sizing: border-box;
+  min-width: 0;
+  height: var(--size-control);
+  padding-inline: var(--space-sm);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: var(--type-ui-size);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+  transition: border-color var(--motion-quick) var(--motion-ease-out);
+}
+
+.sessions-page-search:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.sessions-page-rows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sessions-page-row {
+  display: grid;
+  min-width: 0;
+}
+
+.sessions-page-row + .sessions-page-row {
+  border-top: var(--line-hairline) solid var(--color-line);
+}
+
+/* Room at the trailing edge for the tile's More button, so showing it moves nothing. */
+.sessions-page-row > .session {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-block: var(--space-md);
+  padding-inline: var(--space-sm) calc(var(--space-sm) + var(--size-control-sm) + var(--space-sm));
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+}
+
+.sessions-page-row > .session-more.icon-button {
+  align-self: center;
+  margin-block: 0;
+  margin-inline-end: var(--space-sm);
+}
+
+.sessions-page-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessions-page-facts {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  white-space: nowrap;
+}
+
+.sessions-page-mark {
+  display: flex;
+  align-items: center;
+}
+
+.sessions-page-time {
+  font-variant-numeric: tabular-nums;
+}
+
+/* With reduced motion on, the page appears at once. */
+@media (prefers-reduced-motion: reduce) {
+  .sessions-page {
+    animation: none;
+  }
+
+  .sessions-page-tab,
+  .sessions-page-search {
+    transition: none;
+  }
+}
