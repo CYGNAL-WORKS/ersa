@@ -16,12 +16,12 @@ Ersa drives each backend through an adapter. The owner wants adapters to behave 
 
 ## Decision
 
-Option 2. The registered adapters are the only backends Core knows, and Core names none of them. Each adapter says how its backend is detected and recognizes its own recordings.
+Option 2. The registered adapters are the only backends Core knows, and Core names none of them. Each adapter says how its backend is detected and what limits it sets, recognizes its own recordings, and renders packs into its backend's native configuration.
 
-A session whose backend has no registered adapter is tied to that adapter and cannot work without it, so Ersa hides it rather than deletes it: Core does not load it, keeps what it stores about it, and shows it again once the adapter is back.
+A session whose backend has no registered adapter is tied to that adapter and cannot work without it, so it goes dormant rather than being deleted: Core does not load it, keeps what it stores about it, and shows it again once the adapter is back.
 
 ## Consequences
 
-Adding a backend means one new crate and one registration, with no change to Core or the Interface, and a machine check holds that true. The order of registration decides the default backend. A workspace or project that holds a hidden session cannot be removed, because removal never cascades and going ahead would lose the session for good.
+Adding a backend means one new crate and one registration, with no change to Core or the Interface, and a machine check holds that true. The order of registration decides the default backend. A workspace or project that holds a dormant session cannot be removed, because removal never cascades and going ahead would lose the session for good.
 
 Revisit this if third parties need to ship adapters without rebuilding Ersa.
