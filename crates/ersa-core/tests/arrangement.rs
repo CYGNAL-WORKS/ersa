@@ -201,7 +201,7 @@ async fn arranging_into_a_missing_section_is_not_found_and_changes_nothing() {
 /// that is then blank, longer than 80 characters, or another section's,
 /// ignoring case; `section.rename` likewise. A refusal changes nothing.
 // was FLOW-ORGANIZE-SESSIONS-R06; R23 replaces it, unbuilt
-// was PROTO-CORE-API-R61; R70 replaces it, unbuilt
+// was PROTO-CORE-API-R61; R76 replaces it, unbuilt
 #[tokio::test(flavor = "multi_thread")]
 async fn section_names_are_trimmed_and_blank_long_or_taken_ones_refused() {
     let (core, mut client) = start().await;
@@ -354,7 +354,7 @@ async fn removing_a_section_leaves_its_sessions_in_no_section() {
 /// `last_activity_at` is the time a session's latest turn ended: absent
 /// until one has, set as each ends (whatever its outcome), and left alone
 /// while a turn runs and a reply streams, and by anything else.
-// was PROTO-CORE-API-R37; R69 replaces it, unbuilt
+// was PROTO-CORE-API-R37; R75 replaces it, unbuilt
 #[tokio::test(flavor = "multi_thread")]
 async fn last_activity_changes_only_when_a_turn_ends() {
     let (core, mut client) = start().await;
