@@ -52,6 +52,10 @@ impl Adapter for OnTransport {
         self.adapter.tested_versions()
     }
 
+    fn title_rules(&self) -> ersa_adapter::TitleRules {
+        self.adapter.title_rules()
+    }
+
     fn projector(&self) -> Box<dyn Projector> {
         self.adapter.projector()
     }

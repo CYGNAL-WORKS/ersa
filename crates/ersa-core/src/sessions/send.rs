@@ -281,11 +281,7 @@ impl SessionManager {
             sending.work = Some(Arc::clone(&work));
         }
         let row = lock(&handle.row).clone();
-        let images = self
-            .adapters
-            .get(&row.backend)
-            .map(|adapter| adapter.image_limits())
-            .unwrap_or_default();
+        let images = self.adapter_of(&row.backend)?.image_limits();
         // One job per session in its scratch folder at a time, even one a
         // send gave up on that has not noticed yet. Waited for here, never
         // on a thread: a job stuck on a file system that hangs then holds

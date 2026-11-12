@@ -35,6 +35,7 @@ use std::time::SystemTime;
 use ersa_adapter::ConversationEnd;
 use ersa_protocol::events::{Event, MessageAttachment, UserMessage};
 
+pub(crate) use listing::MAX_TITLE_CHARS;
 pub use listing::{SessionList, SessionSummary, list_sessions, summarize_session};
 pub use projection::{RecordEvent, conversation_end_from, project_record, project_record_from};
 pub use registry::{LiveCheck, LiveSession, live_session};
