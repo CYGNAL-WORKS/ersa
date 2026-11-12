@@ -20,6 +20,13 @@ Tests:
 
 A known defect stays at its severity when it needs a repeat or a slow peer to show: a leak or a stall that needs a repeat still happens in use. A shape already fixed elsewhere in the code is not low here.
 
+## What the backend owns
+
+Ersa abstracts what the backend CLIs do into one common shape; it never adds to or duplicates their concepts. If the backend owns it, Ersa asks the backend.
+
+- A change that keeps its own copy of something a backend owns, or adds to a concept a backend owns, is medium at least. Report it even when a brief asks for it, and say that it needs the owner.
+- A concept no backend has, such as a workspace or the user's arrangement of sessions (ADR 0026), is outside this rule.
+
 ## What counts as verified
 
 - Confirm a finding by reproducing it with a test or a probe in your own detached worktree, or by citing the line that shows it. Reasoning alone neither confirms nor dismisses.
