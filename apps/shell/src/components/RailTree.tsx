@@ -4,8 +4,8 @@ import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
 import type { Sending } from "../session/follow";
-import type { ArrangeProblem, GroupBy, Show } from "../session/arrangement";
-import { type Collapsed, type DateKey, collapsedOf, treeOf } from "../session/tree";
+import { type ArrangeProblem, DEFAULT_ARRANGEMENT, type GroupBy, type Show, type SortBy } from "../session/arrangement";
+import { type Collapsed, type DateKey, collapsedOf, sortValueOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { type Place, arrive, placesOf, regroup, slideFrom } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
@@ -51,8 +51,9 @@ interface RailTreeProps extends TileHandlers {
   onChevron?: (id: string) => void;
   /** The user closed a session's shelf: Escape, or a choice or focus outside it and its tile (R06, R07). */
   onCloseShelf?: (id: string) => void;
-  /** How the rail groups and which sessions it shows (FLOW-ORGANIZE-SESSIONS); by project, showing active ones, unless given. */
+  /** How the rail groups and sorts and which sessions it shows (FLOW-ORGANIZE-SESSIONS); by project, by date created, showing active ones, unless given. */
   groupBy?: GroupBy;
+  sortBy?: SortBy;
   show?: Show;
   /** Now, whose local date the date groups count from. */
   now?: Date;
@@ -143,25 +144,33 @@ export function RailTree(props: RailTreeProps) {
     return { ...actions, pin: { ...pin, onChoose } };
   };
   const leaving = useLeavingFocus(root, (section) => section.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session"));
-  const { groupBy = "project", show = "active", now = new Date() } = props;
+  const { groupBy = DEFAULT_ARRANGEMENT.groupBy, sortBy = DEFAULT_ARRANGEMENT.sortBy, show = DEFAULT_ARRANGEMENT.show, now = new Date() } = props;
   // A new grouping or filter: where every tile and heading sat before it, taken while the page still shows the old
   // one (this render has not reached it yet), so each slides to its new place once it has (FLOW-ORGANIZE-SESSIONS,
-  // step 4).
+  // step 4). So too when what the sort reads of a session differs from the listing before, as it does when the user
+  // chooses another sort or a turn ends while sorted by last activity (DESIGN.md, Motion); a tile's state is no part
+  // of it (R10).
   const arranged = `${groupBy}/${show}`;
   const lastArranged = useRef(arranged);
-  const regroupFrom = useRef<Map<string, Place>>(undefined);
+  const sortValues = sessions.state === "ready" ? new Map(sessions.sessions.map((s) => [s.id, sortValueOf(s, sortBy)])) : undefined;
+  const lastSortValues = useRef(sortValues);
+  const wereSorted = lastSortValues.current;
+  lastSortValues.current = sortValues;
+  const moves = useRef<{ from: Map<string, Place>; slide: typeof regroup }>(undefined);
   if (lastArranged.current !== arranged) {
     lastArranged.current = arranged;
-    if (root.current) regroupFrom.current = placesOf(root.current);
+    if (root.current) moves.current = { from: placesOf(root.current), slide: regroup };
+  } else if (root.current && wereSorted && sortValues && [...sortValues].some(([id, value]) => wereSorted.has(id) && wereSorted.get(id) !== value)) {
+    moves.current = { from: placesOf(root.current), slide: slideFrom };
   }
   useLayoutEffect(() => {
-    const from = regroupFrom.current;
-    regroupFrom.current = undefined;
-    if (from && root.current) regroup(root.current, from);
+    const move = moves.current;
+    moves.current = undefined;
+    if (move && root.current) move.slide(root.current, move.from);
   });
   const listed = projects.state === "ready" ? projects.projects : [];
   const all = sessions.state === "ready" ? sessions.sessions : [];
-  const tree = treeOf(listed, workspaces, all, { groupBy, show, now });
+  const tree = treeOf(listed, workspaces, all, { groupBy, sortBy, show, now });
   // Grouped by project, a session waits to be placed while the projects or their workspaces are still being read,
   // so it does not sit at the end and then move. When the projects could not be read, every session sits at the
   // end. Grouped otherwise, no session waits on its project.
@@ -223,6 +232,11 @@ export function RailTree(props: RailTreeProps) {
       </TileItem>
     );
   };
+  const tiles = (shown: readonly Session[]) => (
+    <ul className="rail-tiles" ref={movesInPlace}>
+      {shown.map(tile)}
+    </ul>
+  );
   // The Pinned group leads the rail, and is absent while nothing pinned is shown (LAY-SHELL, Groups).
   const pinned = folded(PINNED_KEY, tree.pinned);
   const pinnedEmpty = tree.pinned.length === 0;
@@ -261,28 +275,28 @@ export function RailTree(props: RailTreeProps) {
                 </GroupToggle>
               </div>
               <GroupTiles id={pinnedTiles} folded={pinned.folded}>
-                <ul className="rail-tiles">{tree.pinned.map(tile)}</ul>
+                {tiles(tree.pinned)}
               </GroupTiles>
             </div>
           </li>
           {tree.groups.map((group) => {
             const closed = folded(group.key, group.sessions);
-            const tiles = group.sessions.length > 0 && <ul className="rail-tiles">{group.sessions.map(tile)}</ul>;
+            const held = group.sessions.length > 0 && tiles(group.sessions);
             if (group.kind === "date")
               return (
                 <DateGroup key={group.key} name={t(DATE_NAMES[group.key])} slide={headingSlide(group.key)} folded={closed.folded} summary={collapsedOf(group.sessions)} toggle={closed.toggle}>
-                  {tiles}
+                  {held}
                 </DateGroup>
               );
             return (
               <ProjectGroup key={group.key} project={group.project} {...props} folded={closed.folded} summary={collapsedOf(group.sessions)} toggle={closed.toggle}>
-                {tiles}
+                {held}
               </ProjectGroup>
             );
           })}
         </ul>
       )}
-      {looseShown && loose.length > 0 && <ul className="rail-tiles">{loose.map(tile)}</ul>}
+      {looseShown && loose.length > 0 && tiles(loose)}
       {noneShown && (
         <p key={noneShown} className="rail-note" data-slide={`note:${noneShown}`}>
           {noneShown}
@@ -290,6 +304,21 @@ export function RailTree(props: RailTreeProps) {
       )}
     </section>
   );
+}
+
+/**
+ * For a list of tiles, as its ref: a tile React reorders is moved where it is, not taken off the page and put back,
+ * since that would close its open menu, lose its focus and start its shelf's and glyph's animations over while another
+ * session's turn ends. Without `moveBefore`, React inserts as it always does, and the tile still reaches its place.
+ */
+function movesInPlace(list: HTMLUListElement | null): void {
+  if (!list || typeof list.moveBefore !== "function") return;
+  list.insertBefore = <T extends Node>(node: T, before: Node | null): T => {
+    if (node.parentNode === list) list.moveBefore(node, before);
+    else Node.prototype.insertBefore.call(list, node, before);
+    return node;
+  };
+  list.appendChild = <T extends Node>(node: T): T => list.insertBefore(node, null);
 }
 
 /** Each date group's heading (FLOW-ORGANIZE-SESSIONS-R07). */
