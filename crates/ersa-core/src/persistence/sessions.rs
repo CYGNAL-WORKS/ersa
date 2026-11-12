@@ -41,18 +41,23 @@ pub struct SessionRow {
     /// `insert_session` leaves it to the column's default.
     pub deleting: Option<Deleting>,
     /// Whether the user pinned the session, and the section they put it in
-    /// (ADR 0026). A new session is neither, so `insert_session` leaves both
-    /// to the columns' defaults.
+    /// (ADR 0026). A new session is not pinned, so `insert_session` leaves that
+    /// to the column's default; a fork starts in its original's section.
     pub pinned: bool,
     pub section_id: Option<String>,
     /// RFC 3339: when the session's latest turn ended, `None` until one has
     /// (PROTO-CORE-API-R37).
     pub last_activity_at: Option<String>,
+    /// For a fork: the backend's id for the session it copies, whose record
+    /// holds the fork's conversation until the backend writes one of its own,
+    /// and the last message of that conversation.
+    pub forked_from: Option<String>,
+    pub forked_through: Option<String>,
 }
 
 const SESSION_COLUMNS: &str = "s.id, s.workspace_id, s.host_id, s.backend, s.backend_session_id, \
      s.mode, w.path, s.model, s.effort, s.permission_mode, s.archived, s.deleting, \
-     s.pinned, s.section_id, s.last_activity_at";
+     s.pinned, s.section_id, s.last_activity_at, s.forked_from, s.forked_through";
 
 impl Store {
     /// Records a new session, but only while its workspace is `ready`, in
@@ -65,8 +70,8 @@ impl Store {
                 .execute(
                     "INSERT INTO sessions
                      (id, workspace_id, host_id, backend, backend_session_id, mode,
-                      model, effort, permission_mode)
-                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+                      model, effort, permission_mode, section_id, forked_from, forked_through)
+                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12
                  WHERE EXISTS (SELECT 1 FROM workspaces WHERE id = ?2 AND state = 'ready')",
                     params![
                         session.id,
@@ -78,6 +83,9 @@ impl Store {
                         session.model,
                         session.effort,
                         session.permission_mode,
+                        session.section_id,
+                        session.forked_from,
+                        session.forked_through,
                     ],
                 )
                 .map_err(|e| conflict(e, "the workspace changed meanwhile"))?;
@@ -130,6 +138,19 @@ impl Store {
             conn.execute(
                 "UPDATE sessions SET backend_session_id = ?2 WHERE id = ?1",
                 params![id, backend_session_id],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    /// Forgets which session a fork was copied from, once it has a record of
+    /// its own (FLOW-FORK-SESSION-R09).
+    pub async fn clear_fork_link(&self, id: String) -> Result<()> {
+        self.call(move |conn| {
+            conn.execute(
+                "UPDATE sessions SET forked_from = NULL, forked_through = NULL WHERE id = ?1",
+                params![id],
             )?;
             Ok(())
         })
@@ -355,5 +376,7 @@ fn session_row(row: &Row) -> rusqlite::Result<SessionRow> {
         pinned: row.get(12)?,
         section_id: row.get(13)?,
         last_activity_at: row.get(14)?,
+        forked_from: row.get(15)?,
+        forked_through: row.get(16)?,
     })
 }

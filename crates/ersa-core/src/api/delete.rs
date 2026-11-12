@@ -184,8 +184,9 @@ async fn files_taken(core: &Core, workspace: &Workspace) -> bool {
 /// The refusal for a session another process has open, or may have.
 fn open_elsewhere(id: &str, answer: OpenElsewhere) -> ApiError {
     match answer {
-        OpenElsewhere::Yes { pid } => ApiError::invalid_state(format!(
-            "another process (pid {pid}) has session {id} open; close it there, then delete it"
+        OpenElsewhere::Yes { pids } => ApiError::invalid_state(format!(
+            "another process ({}) has session {id} open; close it there, then delete it",
+            crate::sessions::pids_named(&pids)
         )),
         OpenElsewhere::Unknown | OpenElsewhere::No => ApiError::invalid_state(format!(
             "Ersa could not tell whether another process has session {id} open, \

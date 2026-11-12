@@ -417,17 +417,22 @@ pub fn normalized(path: &Path) -> String {
     path.components().collect::<PathBuf>().display().to_string()
 }
 
-/// A git repository at `dir/repo` added as a project, with one workspace;
-/// returns the workspace's id.
-pub async fn workspace(client: &mut Client, dir: &Path) -> String {
+/// A git repository at `dir/repo` added as a project.
+pub async fn project(client: &mut Client, dir: &Path) -> Value {
     let repo = dir.join("repo");
     git_repo(&repo);
-    let project = client
+    client
         .result(
             "project.add",
             json!({ "host_id": "local", "path": repo.display().to_string(), "trusted": false }),
         )
-        .await;
+        .await
+}
+
+/// A git repository at `dir/repo` added as a project, with one workspace;
+/// returns the workspace's id.
+pub async fn workspace(client: &mut Client, dir: &Path) -> String {
+    let project = project(client, dir).await;
     let workspace = client
         .result("workspace.create", json!({ "project_id": project["id"] }))
         .await;
