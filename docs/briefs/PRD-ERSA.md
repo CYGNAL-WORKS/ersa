@@ -26,6 +26,7 @@ Alongside those, the everyday problem that started this: with ten sessions open 
 - A game developer whose projects live in Perforce, who gets none of the isolation or workflow the vendor apps give git users.
 - A developer or team who wants their own tools available to every agent session, and who wants the option of switching or mixing vendors, including local inference, without changing tools.
 - A team lead who wants to share a curated set of agents, skills, and tools with the team without a git tutorial.
+- A designer, artist or other non-technical member of a game team who directs agents beside the programmers, and should never need to know git, a terminal or a CLI's vocabulary to do it.
 
 ## Solution
 
@@ -37,6 +38,8 @@ Ersa exposes its own tool server to every session, so agents can message other s
 
 ## Principles
 
+- **A wrapper that extends.** Ersa wraps the vendor CLIs and adds what they lack; it never rebuilds what they already do.
+- **Plain for everyone.** Agentic game development is the target, and non-technical people work in Ersa beside programmers. What a person needs to do never asks them to understand the machinery underneath.
 - **The user's existing tools, the user's existing auth.** Ersa drives CLIs the user already has. It never asks for or stores a model API key.
 - **Structured events, never console scraping.** Every backend is driven through a machine-readable protocol. If a backend has none, it is not supported.
 - **Many sessions, one glance.** Anything that needs the user is visible and actionable from the rail without opening the session.
@@ -95,6 +98,7 @@ Verified by review at this level; testable requirements live in the flow and pro
 
 ## Changes
 
+- 2026-11-12: owner's direction: Ersa is a wrapper around the vendor CLIs that extends them, aimed at agentic game development, with designers, artists and other non-technical people among its users. Two principles and one user added. No requirement IDs changed.
 - 2026-11-05: the rail lists projects and their sessions; workspaces are not a level in it (LAY-SHELL). No requirement IDs changed.
 - 2026-11-02: the "Beautiful and calm" principle follows ADR 0019's visual direction, and ADR 0019 joins the front matter. No requirement IDs changed.
 - 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
