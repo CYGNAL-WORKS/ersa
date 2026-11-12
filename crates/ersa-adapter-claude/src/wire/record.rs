@@ -72,20 +72,27 @@ pub struct RecordUser {
     pub extra: Extra,
 }
 
+/// How a slash command's echo begins.
+const COMMAND_MARKUP: &[&str] = &["<command-name>", "<command-message>", "<command-args>"];
+
 /// How the CLI marks up text it writes into the conversation itself: a slash
 /// command and its output, a shell command typed with `!`, a background task's
 /// report, an interrupt. Its own fixed markers, never translated.
 const CLI_MARKUP: &[&str] = &[
-    "<command-name>",
-    "<command-message>",
-    "<command-args>",
     "<local-command-",
     "<bash-input>",
     "<bash-stdout>",
     "<bash-stderr>",
-    "<task-notification>",
-    "[Request interrupted by user",
+    TASK_REPORT_MARKER,
+    INTERRUPT_MARKER,
 ];
+
+/// How a background task's report begins.
+const TASK_REPORT_MARKER: &str = "<task-notification>";
+
+/// How the CLI's note of an interrupted turn begins; the rest varies
+/// (`[Request interrupted by user for tool use]`).
+const INTERRUPT_MARKER: &str = "[Request interrupted by user";
 
 impl RecordUser {
     /// Whether the CLI wrote this message rather than a person typing a prompt
@@ -95,25 +102,65 @@ impl RecordUser {
         if self.is_meta == Some(true) || self.is_compact_summary == Some(true) {
             return true;
         }
-        let origin = self
-            .extra
-            .get("origin")
-            .and_then(|origin| origin.get("kind"))
-            .and_then(Value::as_str);
-        if origin.is_some_and(|kind| kind != "human") {
+        if self.has_non_human_origin() {
             return true;
         }
-        let text = match &self.message.content {
+        self.first_text().is_some_and(|text| {
+            COMMAND_MARKUP
+                .iter()
+                .chain(CLI_MARKUP)
+                .any(|mark| text.starts_with(mark))
+        })
+    }
+
+    fn has_non_human_origin(&self) -> bool {
+        self.extra
+            .get("origin")
+            .and_then(|origin| origin.get("kind"))
+            .and_then(Value::as_str)
+            .is_some_and(|kind| kind != "human")
+    }
+
+    /// The first text of the message, as the CLI's markup is matched.
+    fn first_text(&self) -> Option<&str> {
+        match &self.message.content {
             MessageContent::Text(text) => Some(text.as_str()),
             MessageContent::Blocks(blocks) => blocks.iter().find_map(|block| match block {
                 ContentBlock::Text { text, .. } => Some(text.as_str()),
                 _ => None,
             }),
-        };
-        text.is_some_and(|text| {
-            let text = text.trim_start();
-            CLI_MARKUP.iter().any(|mark| text.starts_with(mark))
-        })
+        }
+        .map(str::trim_start)
+    }
+
+    /// Whether this is the CLI's marker that the user interrupted the turn.
+    pub fn is_interrupt_marker(&self) -> bool {
+        self.first_text()
+            .is_some_and(|text| text.starts_with(INTERRUPT_MARKER))
+    }
+
+    /// Whether this is the echo of a slash command the user ran. A local
+    /// command's echo has its output after it; any other command, a skill
+    /// say, goes on to a reply (fixture 2.1.316/03-local-command).
+    pub fn is_command_echo(&self) -> bool {
+        self.first_text()
+            .is_some_and(|text| COMMAND_MARKUP.iter().any(|mark| text.starts_with(mark)))
+    }
+
+    /// Whether the CLI wrote this beside the conversation, with no reply to
+    /// follow: a local command's caveat or output, a compaction summary. A
+    /// background task's report starts a turn, so it is not one, and neither
+    /// is the interrupt marker or a command's echo, which the caller judges
+    /// by what follows it.
+    pub fn is_aside(&self) -> bool {
+        let starts_a_turn = self.has_non_human_origin()
+            || self
+                .first_text()
+                .is_some_and(|text| text.starts_with(TASK_REPORT_MARKER));
+        self.is_from_cli()
+            && !starts_a_turn
+            && !self.is_interrupt_marker()
+            && !self.is_command_echo()
     }
 }
 

@@ -109,6 +109,17 @@ impl Adapter for OnTransport {
             .await
     }
 
+    async fn conversation_end(
+        &self,
+        transport: Arc<dyn Transport>,
+        cwd: &str,
+        backend_session_id: &str,
+    ) -> Result<Option<ersa_adapter::ConversationEnd>, AdapterError> {
+        self.adapter
+            .conversation_end(transport, cwd, backend_session_id)
+            .await
+    }
+
     async fn open_elsewhere(
         &self,
         transport: Arc<dyn Transport>,

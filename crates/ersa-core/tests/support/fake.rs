@@ -34,9 +34,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ersa_adapter::{
-    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, ImageLimits,
-    OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit, Projected, Projector, RawLine,
-    RecordDeletion, RecordEvent, RecordSummary, SessionConfig, Transport, async_trait,
+    Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
+    ImageLimits, OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit, Projected,
+    Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary, SessionConfig, Transport,
+    async_trait,
 };
 use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::{
@@ -59,8 +60,9 @@ pub struct Stats {
     pub stops: AtomicUsize,
     /// The configuration of every session started, in order.
     pub configs: Mutex<Vec<SessionConfig>>,
-    /// Renames sent to a running backend, and renames written to a record.
+    /// Renames sent to a running backend.
     pub live_renames: AtomicUsize,
+    /// Renames written to a record.
     pub record_renames: AtomicUsize,
     /// For every time Core asked whether another process has a session
     /// open: the backend's id for it, and how many record renames had
@@ -76,7 +78,7 @@ pub struct Stats {
 const CUSTOM_TITLE: &str = "custom-title";
 
 /// A title the user gave the session, as the fake's record keeps it.
-fn recorded_title(title: &str) -> RecordEvent {
+pub fn recorded_title(title: &str) -> RecordEvent {
     RecordEvent {
         message_id: None,
         ts: None,
@@ -151,6 +153,13 @@ pub struct FakeAdapter {
     /// When set, what deleting a record answers instead of deleting it: the
     /// registry saying so at the moment of deletion.
     pub delete_refusal: Arc<Mutex<Option<OpenElsewhere>>>,
+    /// How the fake says every session's conversation ends; `None` is a
+    /// backend that cannot fork.
+    pub conversation_end: Arc<Mutex<Option<ConversationEnd>>>,
+    /// Reading how a conversation ends fails, as an unreadable record does.
+    pub conversation_end_fails: Arc<std::sync::atomic::AtomicBool>,
+    /// Held by a test to hold every record read until it lets go.
+    pub read_gate: Arc<tokio::sync::Mutex<()>>,
     /// A backend that takes a stop and never exits.
     stop_hangs: bool,
 }
@@ -167,6 +176,9 @@ impl FakeAdapter {
             open_elsewhere: Arc::new(Mutex::new(OpenElsewhere::No)),
             open_check_gate: Arc::default(),
             delete_refusal: Arc::default(),
+            conversation_end: Arc::new(Mutex::new(Some(ConversationEnd::Finished))),
+            conversation_end_fails: Arc::default(),
+            read_gate: Arc::default(),
             stop_hangs: false,
         }
     }
@@ -296,6 +308,7 @@ impl Adapter for FakeAdapter {
         _cwd: &str,
         backend_session_id: &str,
     ) -> Result<Arc<Vec<RecordEvent>>, AdapterError> {
+        drop(self.read_gate.lock().await);
         // A title is not part of the conversation, as Claude Code's
         // projection leaves its `custom-title` entries out.
         Ok(Arc::new(
@@ -345,7 +358,7 @@ impl Adapter for FakeAdapter {
             .lock()
             .unwrap()
             .push((backend_session_id.to_string(), renames));
-        *self.open_elsewhere.lock().unwrap()
+        self.open_elsewhere.lock().unwrap().clone()
     }
 
     /// Deletes the record, as Claude Code's adapter deletes its file; one
@@ -356,7 +369,7 @@ impl Adapter for FakeAdapter {
         _cwd: &str,
         backend_session_id: &str,
     ) -> Result<RecordDeletion, AdapterError> {
-        if let Some(refused) = *self.delete_refusal.lock().unwrap() {
+        if let Some(refused) = self.delete_refusal.lock().unwrap().clone() {
             return Ok(RecordDeletion::Refused(refused));
         }
         self.records.lock().unwrap().remove(backend_session_id);
@@ -364,8 +377,30 @@ impl Adapter for FakeAdapter {
         Ok(RecordDeletion::Deleted)
     }
 
+    async fn conversation_end(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        _backend_session_id: &str,
+    ) -> Result<Option<ConversationEnd>, AdapterError> {
+        if self.conversation_end_fails.load(Ordering::SeqCst) {
+            return Err(AdapterError::Protocol("the record is unreadable".into()));
+        }
+        Ok(*self.conversation_end.lock().unwrap())
+    }
+
     /// Titled by its latest rename, else its last prompt, as Claude Code
     /// titles a print-mode session, and begun at its first entry.
+    async fn record_version(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        backend_session_id: &str,
+    ) -> Result<Option<String>, AdapterError> {
+        let records = self.records.lock().unwrap();
+        Ok(records.get(backend_session_id).map(|r| r.len().to_string()))
+    }
+
     async fn summarize_record(
         &self,
         _transport: Arc<dyn Transport>,

@@ -275,6 +275,11 @@ impl View {
                 self.backend_version.clone_from(backend_version);
                 vec![state(LifecycleState::Starting, None)]
             }
+            // Only from `starting`, so a turn already reported is left alone.
+            LifecycleFact::ForkReady if self.state == LifecycleState::Starting => {
+                vec![state(LifecycleState::Idle, None)]
+            }
+            LifecycleFact::ForkReady => Vec::new(),
             LifecycleFact::ProcessExited {
                 code,
                 stopped_by_user,
