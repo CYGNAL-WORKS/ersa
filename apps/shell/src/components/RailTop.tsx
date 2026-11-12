@@ -2,7 +2,7 @@ import { Plus } from "lucide-react";
 import { t } from "../catalog";
 import { type ArrangeActions, ArrangeButton } from "./ArrangeMenu";
 import { Button } from "./Button";
-import type { RailArrangement } from "../session/arrangement";
+import type { ArrangeChoices } from "../session/arrangement";
 import { Icon } from "./Icon";
 import "./RailTop.css";
 
@@ -18,7 +18,7 @@ export function RailTop({
 }: {
   /** The arrange button: the arrangement its menu names, and what its items do. */
   arrange: ArrangeActions & {
-    arrangement: Pick<RailArrangement, "groupBy" | "show">;
+    arrangement: ArrangeChoices;
     /** The arrangement has not been read yet. */
     reading?: boolean;
     /** For the gallery: the menu open, with a submenu open by index. */

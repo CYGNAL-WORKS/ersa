@@ -118,6 +118,11 @@
     color var(--motion-quick) var(--motion-ease-out);
 }
 
+/* A heading that holds an open menu slides by its offset, not a transform, so the menu stays on its anchor. */
+.rail-heading:has(.menu) {
+  position: relative;
+}
+
 /* The heading holds its menu, so the pointer over the open menu is not over the heading. */
 .rail-heading:hover:not(:has(.menu:hover)),
 .rail-heading[data-force="hover"] {
