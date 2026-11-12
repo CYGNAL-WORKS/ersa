@@ -205,6 +205,7 @@ fn result_examples() -> Vec<(Method, Value)> {
         (Method::SessionList, to_value(&vec![session()])),
         (Method::SessionCreate, to_value(&session())),
         (Method::SessionSetArchived, to_value(&session())),
+        (Method::SessionFork, to_value(&session())),
         (Method::SessionArrange, to_value(&session())),
         (Method::SectionList, to_value(&vec![section()])),
         (Method::SectionCreate, to_value(&section())),
@@ -487,6 +488,10 @@ fn params_examples() -> Vec<(Method, Value)> {
                 id: "s-1".into(),
                 title: "t".into(),
             }),
+        ),
+        (
+            Method::SessionFork,
+            to_value(&IdParams { id: "s-1".into() }),
         ),
         (
             Method::SessionSetArchived,

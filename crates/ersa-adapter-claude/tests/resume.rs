@@ -27,6 +27,7 @@ fn config(extra: Value) -> SessionConfig {
         project_trusted: false,
         project_path: String::new(),
         backend_session_id: None,
+        fork_of: None,
         extra,
     }
 }
@@ -197,11 +198,11 @@ fn a_running_process_with_the_session_open_is_reported() {
     // This test process stands in for a running CLI.
     let pid = std::process::id();
     let home = registry_with(pid, SESSION_ID);
-    let LiveCheck::Open(live) = live_session(home.path(), SESSION_ID) else {
+    let LiveCheck::Open(open) = live_session(home.path(), SESSION_ID) else {
         panic!("not reported");
     };
-    assert_eq!(live.pid, pid);
-    assert_eq!(live.entrypoint.as_deref(), Some("cli"));
+    assert_eq!(open[0].pid, pid);
+    assert_eq!(open[0].entrypoint.as_deref(), Some("cli"));
     // Another session is not.
     assert_eq!(
         live_session(home.path(), "0989e382-5a8f-4fdf-9738-bf02b1f049e1"),
@@ -311,7 +312,7 @@ async fn the_adapter_answers_core_from_the_registry() {
         async move { adapter.open_elsewhere(transport, SESSION_ID).await }
     };
     let open = registry_with(pid, SESSION_ID);
-    assert_eq!(ask(&open).await, OpenElsewhere::Yes { pid });
+    assert_eq!(ask(&open).await, OpenElsewhere::Yes { pids: vec![pid] });
 
     let free = registry_with(DEAD_PID, SESSION_ID);
     assert_eq!(ask(&free).await, OpenElsewhere::No);

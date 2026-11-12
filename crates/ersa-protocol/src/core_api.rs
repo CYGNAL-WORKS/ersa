@@ -89,6 +89,7 @@ methods! {
     SessionSetArchived => "session.set_archived",
     SessionArrange => "session.arrange",
     SessionDelete => "session.delete",
+    SessionFork => "session.fork",
     SessionSend => "session.send",
     SessionInterrupt => "session.interrupt",
     AttachmentInspect => "attachment.inspect",

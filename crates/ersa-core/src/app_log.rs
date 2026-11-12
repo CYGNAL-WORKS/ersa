@@ -63,6 +63,9 @@ pub enum LifecycleFact {
         #[serde(default)]
         backend_version: String,
     },
+    /// A fork's backend is ready for its first message. It has no turn to
+    /// report one, as the CLI reports a session only once a turn opens.
+    ForkReady,
     /// The backend process ended.
     ProcessExited {
         /// The exit code; absent when there was none (killed) or the
@@ -100,7 +103,10 @@ fn is_false(value: &bool) -> bool {
 impl LifecycleFact {
     /// Whether the fact ends the session's backend process.
     pub fn ends(&self) -> bool {
-        !matches!(self, LifecycleFact::ProcessStarted { .. })
+        !matches!(
+            self,
+            LifecycleFact::ProcessStarted { .. } | LifecycleFact::ForkReady
+        )
     }
 }
 
