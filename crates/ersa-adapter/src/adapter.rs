@@ -293,7 +293,7 @@ impl BackendChoices {
 
 /// The version number in a version command's line: its first word, when
 /// that starts with a digit. Claude Code prints `2.1.302 (Claude Code)`.
-pub fn first_word_version(line: &str) -> Option<String> {
+fn first_word_version(line: &str) -> Option<String> {
     let word = line.split_whitespace().next()?;
     word.starts_with(|c: char| c.is_ascii_digit())
         .then(|| word.to_string())
