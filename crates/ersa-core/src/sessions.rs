@@ -728,6 +728,23 @@ impl SessionManager {
         self.app_log
             .retain_only(rows.iter().map(|row| row.id.clone()).collect());
         for mut row in rows {
+            let known = facts.get(&row.id);
+            // How the session last ended. One a previous Core left running
+            // ended with that Core: said now, whether or not its adapter is
+            // registered, so a dormant session's end is not dated to
+            // whenever its adapter is back.
+            let ending = match known.map(|f| &f.last) {
+                Some(Some(last)) if !last.fact.ends() => {
+                    let ts = now_rfc3339();
+                    let fact = LifecycleFact::CoreRestarted;
+                    self.app_log.write(&row.id, &ts, &fact);
+                    Some((fact, ts))
+                }
+                Some(Some(last)) => Some((last.fact.clone(), last.ts.clone())),
+                // Its last fact could not be read: how it ended is unknown,
+                // and nothing is made up for it.
+                Some(None) | None => None,
+            };
             // A session whose backend has no registered adapter is dormant
             // (PROTO-CORE-API-R66, R67): not loaded, so absent from every
             // list and `not_found` by id, while its row and its facts stay
@@ -742,23 +759,9 @@ impl SessionManager {
                 let default = BackendChoices::default_of(&adapter.choices().permission_modes);
                 row.permission_mode = (!default.is_empty()).then_some(default);
             }
-            let known = facts.get(&row.id);
             let started = known.map_or(UNKNOWN_TIME.to_string(), |f| f.first.ts.clone());
             let handle = Arc::new(Handle::new(row, started));
-            match known.map(|f| &f.last) {
-                Some(Some(last)) if !last.fact.ends() => {
-                    let ts = now_rfc3339();
-                    let fact = LifecycleFact::CoreRestarted;
-                    self.app_log.write(&handle.id, &ts, &fact);
-                    *lock(&handle.ending) = Some((fact, ts));
-                }
-                Some(Some(last)) => {
-                    *lock(&handle.ending) = Some((last.fact.clone(), last.ts.clone()));
-                }
-                // Its last fact could not be read: how it ended is unknown,
-                // and nothing is made up for it.
-                Some(None) | None => {}
-            }
+            *lock(&handle.ending) = ending;
             let row = lock(&handle.row).clone();
             if let (true, Some(transport)) = (
                 row.backend_session_id.is_some(),
@@ -805,7 +808,7 @@ impl SessionManager {
     /// loaded session has one, since a session without one stays dormant
     /// (see [`SessionManager::recover`]); a session created for a backend
     /// with none is refused here.
-    fn adapter_of(&self, backend: &str) -> Result<Arc<dyn Adapter>, SessionError> {
+    pub fn adapter_of(&self, backend: &str) -> Result<Arc<dyn Adapter>, SessionError> {
         self.adapter(backend).ok_or_else(|| {
             SessionError::BackendMissing(format!("no adapter for backend {backend}"))
         })
@@ -3309,5 +3312,86 @@ mod tests {
         ] {
             assert!(!is_rfc3339(bad), "{bad}");
         }
+    }
+
+    /// A dormant session's facts outlive the log's rotation, and one a
+    /// crashed Core left running is ended at the first restart, adapter or
+    /// not, so its end is dated then.
+    // verifies: PROTO-CORE-API-R67
+    #[tokio::test]
+    async fn a_dormant_sessions_facts_are_kept_through_rotation() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(&dir.path().join("ersa.db")).unwrap();
+        store.ensure_local_host("pc".into()).await.unwrap();
+        let project = ersa_protocol::core_api::Project {
+            id: "p".into(),
+            host_id: persistence::LOCAL_HOST_ID.into(),
+            path: "C:/work".into(),
+            name: "work".into(),
+            vcs: ersa_protocol::core_api::Vcs::None,
+            trusted: false,
+        };
+        let workspace = store
+            .insert_project(project, "c:/work".into())
+            .await
+            .unwrap();
+        store
+            .insert_session(SessionRow {
+                id: "s-dormant".into(),
+                workspace_id: workspace.id,
+                host_id: persistence::LOCAL_HOST_ID.into(),
+                backend: "gone".into(),
+                backend_session_id: None,
+                mode: None,
+                cwd: "C:/work".into(),
+                model: None,
+                effort: None,
+                permission_mode: None,
+                archived: false,
+                deleting: None,
+                pinned: false,
+                section_id: None,
+                last_activity_at: None,
+                forked_from: None,
+                forked_through: None,
+            })
+            .await
+            .unwrap();
+        // A previous Core started its backend, then died.
+        let (log, _) = AppLog::open(dir.path()).unwrap();
+        let started = LifecycleFact::ProcessStarted {
+            backend: "gone".into(),
+            backend_version: "1.0".into(),
+        };
+        log.write("s-dormant", "2026-01-01T00:00:00.000Z", &started);
+        log.flushed().await;
+        drop(log);
+
+        // This Core has no adapter for it.
+        let (log, facts) = AppLog::open(dir.path()).unwrap();
+        let log = Arc::new(log);
+        let manager = SessionManager::new(store, Vec::new(), Arc::clone(&log));
+        manager.recover(&facts, |_| None).await.unwrap();
+        assert!(manager.list().is_empty());
+        // Enough facts about another session to rotate the log twice over.
+        let filler = LifecycleFact::StartFailed {
+            message: "x".repeat(1024),
+            code: None,
+            stopped_by_user: false,
+        };
+        for _ in 0..(crate::app_log::ROTATE_BYTES as usize / 1024) * 2 + 10 {
+            log.write("s-other", "2026-01-02T00:00:00.000Z", &filler);
+        }
+        log.flushed().await;
+        drop(manager);
+        drop(log);
+
+        let (_, facts) = AppLog::open(dir.path()).unwrap();
+        let kept = &facts["s-dormant"];
+        assert_eq!(kept.first.ts, "2026-01-01T00:00:00.000Z");
+        assert_eq!(
+            kept.last.as_ref().unwrap().fact,
+            LifecycleFact::CoreRestarted
+        );
     }
 }

@@ -107,12 +107,7 @@ async fn trusted_now(core: &Core, project: &Project) -> Result<bool, ApiError> {
 
 pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<Session, ApiError> {
     let (workspace, project) = ready_workspace(core, &params.workspace_id).await?;
-    let Some(adapter) = core.sessions.adapter(&params.backend) else {
-        return Err(ApiError::new(
-            ersa_protocol::core_api::ErrorKind::BackendMissing,
-            format!("Ersa has no adapter for backend {}", params.backend),
-        ));
-    };
+    let adapter = core.sessions.adapter_of(&params.backend)?;
     // Only what `backend.list` offers: anything else would reach the
     // backend's command line.
     let choices = adapter.choices();
@@ -653,14 +648,9 @@ pub(super) fn one_line(text: &str) -> Option<String> {
 /// ends of a line, and its line breaks kept, without blank lines at either
 /// end. `None` when it holds a control character other than spacing.
 fn spaced_lines(text: &str) -> Option<String> {
-    if text.chars().any(|c| c.is_control() && !c.is_whitespace()) {
-        return None;
-    }
-    // `\r` is spacing, so a CRLF line ends as an LF one does.
-    let lines: Vec<String> = text
-        .split('\n')
-        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
-        .collect();
+    // Each line as `one_line` takes it; `\r` is spacing, so a CRLF line
+    // ends as an LF one does.
+    let lines = text.split('\n').map(one_line).collect::<Option<Vec<_>>>()?;
     Some(lines.join("\n").trim().to_string())
 }
 

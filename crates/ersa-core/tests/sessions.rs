@@ -1142,7 +1142,6 @@ async fn a_session_its_backend_never_named_cannot_be_renamed() {
     assert_eq!(kind(&error), "not_found");
 }
 
-// verifies: PROTO-CORE-API-R70
 #[tokio::test(flavor = "multi_thread")]
 async fn a_blank_long_or_multi_line_title_is_refused() {
     let (core, stats) = start_fake(FakeAdapter::new(1)).await;
