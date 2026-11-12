@@ -19,8 +19,11 @@ How the Copilot adapter uses the official Copilot Rust SDK and maps its session,
 - Mapping Copilot's permission and tool vocabulary onto Ersa's without flattening either.
 - Whether the CLI supports an equivalent of system-prompt additions for modes.
 - Which SDK event field is the message id on which history and live events are merged.
+- How the adapter runs through the transport (ARCH-CORE-R04): the SDK speaks framed JSON-RPC and takes byte streams or starts the CLI itself, while the transport carries lines.
+- How the adapter detects the CLI on a host: the SDK resolves its own CLI, and its version flag is not documented.
 
 ## Changes
 
+- 2026-11-09: open questions added on running through the transport and on detecting the CLI.
 - 2026-11-01: history and listing through the SDK (`list_sessions`, `resume_session`, `Session::get_events`), Copilot CLI sessions only, per ADR 0017; the raw-log open question replaced.
 - 2026-10-31: replaces PROTO-COPILOT-RPC; wire protocol delegated to the official SDK per ADR 0009.
