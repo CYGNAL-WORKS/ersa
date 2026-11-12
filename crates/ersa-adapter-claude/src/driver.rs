@@ -21,11 +21,12 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
+use ersa_adapter::recording::Recording;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
     ImageLimits, LineReader, LineWriter, OpenElsewhere, OutgoingMessage, PermissionDecision,
     Process, ProcessExit, ProcessSpec, Projector, QuestionReply, RecordDeletion, RecordEvent,
-    RecordSummary, SessionConfig, Transport, async_trait,
+    RecordSummary, SessionConfig, TitleRules, Transport, async_trait,
 };
 use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::PermissionBehavior;
@@ -292,13 +293,16 @@ fn program(config: &SessionConfig) -> String {
         .and_then(Value::as_str)
         .filter(|path| !path.is_empty())
         .map(String::from);
-    let from_env = || {
-        std::env::var("ERSA_CLAUDE")
-            .ok()
-            .filter(|path| !path.is_empty())
-    };
-    configured
-        .or_else(from_env)
+    configured.unwrap_or_else(host_program)
+}
+
+/// Which `claude` to run where no session names one, as for the version
+/// check that detects the CLI: the `ERSA_CLAUDE` environment variable, else
+/// whatever `claude` the host finds. An empty value counts as unset.
+fn host_program() -> String {
+    std::env::var("ERSA_CLAUDE")
+        .ok()
+        .filter(|path| !path.is_empty())
         .unwrap_or_else(|| "claude".into())
 }
 
@@ -392,6 +396,42 @@ impl Adapter for ClaudeAdapter {
 
     fn tested_versions(&self) -> Option<(&'static str, &'static str)> {
         Some((crate::MIN_TESTED_VERSION, crate::MAX_TESTED_VERSION))
+    }
+
+    /// `claude --version`, through the same lookup a session's CLI is found
+    /// by, so detection checks the CLI sessions will run. It prints
+    /// `2.1.302 (Claude Code)`, read by the default rule.
+    fn version_command(&self) -> ProcessSpec {
+        ProcessSpec {
+            program: host_program(),
+            args: vec!["--version".into()],
+            ..ProcessSpec::default()
+        }
+    }
+
+    /// One line of at most 200 characters: what the CLI's own session list
+    /// shows (PROTO-CLAUDE-CODE-STREAM, Listing).
+    fn title_rules(&self) -> TitleRules {
+        TitleRules {
+            max_chars: record::MAX_TITLE_CHARS,
+            one_line: true,
+        }
+    }
+
+    /// A Claude Code recording notes the CLI's version as
+    /// `claude_code_version` (scripts/record-claude.mjs); without it the
+    /// recording is not one this adapter can say it made, since replaying it
+    /// would report a made-up version.
+    fn recording_version(&self, recording: &Recording) -> Result<String, String> {
+        recording.meta["claude_code_version"]
+            .as_str()
+            .map(str::trim)
+            .filter(|version| !version.is_empty())
+            .map(String::from)
+            .ok_or_else(|| {
+                "its notes do not say which Claude Code version made it (`claude_code_version`)"
+                    .to_string()
+            })
     }
 
     /// The CLI takes PNG, JPEG, GIF and WebP images of up to 5 MB each

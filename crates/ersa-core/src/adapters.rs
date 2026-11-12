@@ -1,34 +1,20 @@
 //! Adapter registry: which backends are installed on which hosts, their
 //! versions and capabilities, and how to start them. The adapters themselves
-//! live in their own crates, such as `ersa-adapter-claude`.
+//! live in their own crates, such as `ersa-adapter-claude`, and the
+//! `ersa-core` binary registers them: the registered adapters are the only
+//! backends Core knows, and it names none of them (ADR 0031).
 //!
-//! So far this detects backends by asking each for its version through the
-//! host's transport.
+//! So far this detects backends by running each adapter's version command
+//! through the host's transport.
 
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_adapter::{Adapter, BackendChoices, ProcessSpec, Transport};
+use ersa_adapter::{Adapter, BackendChoices, Transport};
 use ersa_protocol::core_api::{BackendInfo, BackendState, BackendStatus, TestedRange};
 
 use crate::transport::{self, RunError};
-
-/// A backend Core knows how to drive.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct KnownBackend {
-    /// The name on the wire, such as `claude-code`.
-    pub name: &'static str,
-    /// The executable the host resolves.
-    pub program: &'static str,
-}
-
-/// Every backend Core knows. The range of versions each was tested with is
-/// its adapter's ([`Adapter::tested_versions`]), so there is one source.
-pub const KNOWN_BACKENDS: &[KnownBackend] = &[KnownBackend {
-    name: "claude-code",
-    program: "claude",
-}];
 
 /// How long a backend may take to print its version. Claude Code is a large
 /// executable, and the first start after boot reads all of it from disk.
@@ -37,24 +23,23 @@ const VERSION_TIMEOUT: Duration = Duration::from_secs(20);
 /// What detection found for one backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Detected {
-    pub backend: KnownBackend,
+    /// The backend's name on the wire, such as `claude-code`.
+    pub name: String,
     pub version: Option<String>,
     pub state: BackendState,
     /// The oldest and newest versions its adapter was tested with; empty
-    /// when no adapter for it is registered.
+    /// when the adapter does not say.
     pub tested: (String, String),
-    /// What a session of it can start with, from its adapter; none when no
-    /// adapter for it is registered.
+    /// What a session of it can start with, from its adapter.
     pub choices: BackendChoices,
-    /// Its display name, from its adapter; its name when no adapter for it
-    /// is registered.
+    /// Its display name, from its adapter.
     pub label: String,
 }
 
 impl Detected {
     pub fn status(&self) -> BackendStatus {
         BackendStatus {
-            name: self.backend.name.to_string(),
+            name: self.name.clone(),
             version: self.version.clone(),
             status: self.state,
         }
@@ -62,7 +47,7 @@ impl Detected {
 
     pub fn info(&self) -> BackendInfo {
         BackendInfo {
-            name: self.backend.name.to_string(),
+            name: self.name.clone(),
             label: self.label.clone(),
             version: self.version.clone(),
             status: self.state,
@@ -77,104 +62,74 @@ impl Detected {
     }
 }
 
-/// Detects every known backend on the host behind `transport`, running
-/// `<program> --version` for each. `program_override` replaces each backend's
-/// program, which tests use to point at a binary that does not exist.
-/// `adapter_for` names the adapter registered for a backend, whose
-/// environment the check runs with, so it sees the CLI configured as the
-/// backend's sessions see it.
+/// Detects every registered adapter's backend on the host behind
+/// `transport`, in the order the adapters were registered
+/// (PROTO-CORE-API-R65), running each one's version command with its
+/// environment, so the check sees the CLI configured as the backend's
+/// sessions see it. `program_override` replaces each command's program,
+/// which tests use to point at a binary that does not exist.
 pub async fn detect(
     transport: &dyn Transport,
     program_override: Option<&str>,
-    adapter_for: impl Fn(&str) -> Option<Arc<dyn Adapter>>,
+    adapters: &[Arc<dyn Adapter>],
 ) -> Vec<Detected> {
     let mut found = Vec::new();
-    for backend in KNOWN_BACKENDS {
-        let mut spec = ProcessSpec {
-            program: program_override.unwrap_or(backend.program).to_string(),
-            args: vec!["--version".to_string()],
-            ..ProcessSpec::default()
-        };
-        let adapter = adapter_for(backend.name);
-        if let Some(adapter) = &adapter {
-            adapter.set_environment(&mut spec);
+    for adapter in adapters {
+        let mut spec = adapter.version_command();
+        if let Some(program) = program_override {
+            spec.program = program.to_string();
         }
-        let choices = adapter.as_ref().map(|a| a.choices()).unwrap_or_default();
-        let label = adapter
-            .as_ref()
-            .map_or(backend.name, |a| a.label())
-            .to_string();
-        let tested = adapter
-            .and_then(|a| a.tested_versions())
-            .map(|(min, max)| (min.to_string(), max.to_string()))
-            .unwrap_or_default();
-        let (version, state) = match version_of(transport, spec).await {
-            Ok(Some(version)) => (Some(version), BackendState::Available),
-            Ok(None) => (None, BackendState::Error),
+        adapter.set_environment(&mut spec);
+        let (version, state) = match transport::run(transport, spec, VERSION_TIMEOUT).await {
+            // A command that exited with an error, or printed nothing the
+            // adapter can read, found a backend that does not work.
+            Ok(output) => match output
+                .exit
+                .success()
+                .then(|| adapter.read_version(&output.stdout))
+                .flatten()
+            {
+                Some(version) => (Some(version), BackendState::Available),
+                None => (None, BackendState::Error),
+            },
             Err(RunError::Spawn(e)) if e.kind() == io::ErrorKind::NotFound => {
                 (None, BackendState::Missing)
             }
             Err(e) => {
-                tracing::warn!(backend = backend.name, error = %e, "backend detection failed");
+                tracing::warn!(backend = adapter.backend(), error = %e, "backend detection failed");
                 (None, BackendState::Error)
             }
         };
         found.push(Detected {
-            backend: backend.clone(),
+            name: adapter.backend().to_string(),
             version,
             state,
-            tested,
-            choices,
-            label,
+            tested: adapter
+                .tested_versions()
+                .map(|(min, max)| (min.to_string(), max.to_string()))
+                .unwrap_or_default(),
+            choices: adapter.choices(),
+            label: adapter.label().to_string(),
         });
     }
     found
 }
 
-/// The version the `--version` command `spec` prints, or `None` when it ran
-/// but exited with an error or printed nothing usable.
-async fn version_of(
-    transport: &dyn Transport,
-    spec: ProcessSpec,
-) -> Result<Option<String>, RunError> {
-    let output = transport::run(transport, spec, VERSION_TIMEOUT).await?;
-    if !output.exit.success() {
-        return Ok(None);
-    }
-    Ok(output.stdout.first().and_then(|line| parse_version(line)))
-}
-
-/// The version number from a `--version` line: its first word when that
-/// starts with a digit. Claude Code prints `2.1.302 (Claude Code)`.
-fn parse_version(line: &str) -> Option<String> {
-    let word = line.split_whitespace().next()?;
-    word.starts_with(|c: char| c.is_ascii_digit())
-        .then(|| word.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn versions_are_read_from_the_first_word() {
-        assert_eq!(
-            parse_version("2.1.302 (Claude Code)").as_deref(),
-            Some("2.1.302")
-        );
-        assert_eq!(parse_version("  1.0.0").as_deref(), Some("1.0.0"));
-        assert_eq!(parse_version("Claude Code 2.1"), None);
-        assert_eq!(parse_version(""), None);
-    }
+    use ersa_adapter::ProcessSpec;
 
     #[tokio::test]
     async fn a_missing_program_is_reported_missing() {
+        let claude: Arc<dyn Adapter> = Arc::new(ersa_adapter_claude::ClaudeAdapter::new());
         let found = detect(
             &ersa_adapter::LocalTransport,
             Some("ersa-no-such-program-xyz"),
-            |_| None,
+            &[claude],
         )
         .await;
+        assert_eq!(found.len(), 1);
         assert!(found.iter().all(|d| d.state == BackendState::Missing));
     }
 
@@ -183,10 +138,7 @@ mod tests {
     async fn the_version_check_runs_with_the_adapters_environment() {
         let transport = ersa_adapter::fake::FakeTransport::new(["2.1.316 (Claude Code)"]);
         let claude: Arc<dyn Adapter> = Arc::new(ersa_adapter_claude::ClaudeAdapter::new());
-        let found = detect(&transport, None, |backend| {
-            (backend == claude.backend()).then(|| claude.clone())
-        })
-        .await;
+        let found = detect(&transport, None, std::slice::from_ref(&claude)).await;
         assert_eq!(found[0].version.as_deref(), Some("2.1.316"));
         // The tested range and the choices are the adapter's own.
         let info = found[0].info();

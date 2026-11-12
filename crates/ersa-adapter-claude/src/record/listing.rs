@@ -18,8 +18,9 @@ use crate::wire::{ContentBlock, MessageContent, RecordEntry, RecordUser};
 const CHUNK: u64 = 64 * 1024;
 
 /// The longest title, in characters, its ellipsis included; a prompt can be
-/// pages long.
-const MAX_TITLE_CHARS: usize = 200;
+/// pages long. It is also the longest a session can be renamed to, which the
+/// adapter states as its title rules.
+pub(crate) const MAX_TITLE_CHARS: usize = 200;
 
 /// A directory's sessions, and what could not be read, so a caller can say
 /// that some sessions are missing rather than show a shorter list as whole.
