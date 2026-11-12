@@ -67,7 +67,8 @@ Fixing findings:
 - Fix each with the smallest change that removes the defect, with a test where one is cheap. Fix low ones when trivial and list the rest as follow-ups in the pull request.
 - A fix that needs a new mechanism (a cache, a background task, a protocol field, a state machine or reducer) becomes its own ticket unless the branch is unsafe to merge without it: new mechanisms bring their own defects. So does a reshape the review names that is larger than the ticket. A gap the brief does not cover gets an inbox line when your code depends on it, and is a follow-up otherwise.
 - A finding on a planning-only path, or one that contradicts a harness rule, is the owner's: report it and stop rather than spend a round on it.
-- After the third round (`round` in the state), keep fixing while each round finds new defects you can fix within the ticket. Stop and report to the owner in plain English when a finding needs a decision `CLAUDE.md` leaves to the owner, or a round finds again a defect you already fixed.
+- A finding marked as a follow-up goes in the pull request's follow-ups; it takes no round.
+- After the fifth round (`round` in the state), keep fixing while each round finds new defects you can fix within the ticket. Stop and report to the owner in plain English when a finding needs a decision `CLAUDE.md` leaves to the owner, or a round finds again a defect you already fixed.
 
 Pushing:
 
