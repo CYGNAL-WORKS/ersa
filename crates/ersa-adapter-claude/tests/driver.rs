@@ -31,6 +31,7 @@ fn config() -> SessionConfig {
         project_trusted: false,
         project_path: String::new(),
         backend_session_id: None,
+        fork_of: None,
         extra: Value::Null,
     }
 }

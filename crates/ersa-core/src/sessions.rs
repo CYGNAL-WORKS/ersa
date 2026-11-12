@@ -64,8 +64,14 @@ use crate::persistence::{self, SessionRow, Store, now_rfc3339};
 use crate::projection::View;
 use crate::raw_log::RawLog;
 
+mod fork;
 mod send;
 
+/// The longest title `session.set_title` takes: as much as Claude Code's
+/// own session list shows.
+pub const MAX_TITLE_CHARS: usize = 200;
+
+pub use fork::{Beginning, ForkHold, Forkable};
 pub use send::Pacer;
 
 /// How many events may wait for one subscriber before it counts as unable
@@ -93,8 +99,8 @@ const START_WAIT: Duration = Duration::from_secs(120);
 const ADAPTER_CALL: Duration = Duration::from_secs(30);
 
 /// How long asking an adapter whether another process has a session open
-/// may take. The answer only informs the user, so a registry that hangs
-/// makes it unknown rather than holding up what was asked for.
+/// may take. A registry that hangs makes the answer unknown rather than
+/// holding up what was asked for.
 const OPEN_ELSEWHERE_CHECK: Duration = Duration::from_secs(5);
 
 /// How many events a replay sends before it looks again for whether the
@@ -213,6 +219,11 @@ fn busy(workspace_id: &str) -> SessionError {
 
 /// One session, live or not.
 struct Handle {
+    /// Raised from when a fork of this session starts reading its record
+    /// until the fork's backend is ready. While it is, at most one such read
+    /// is stuck on a disk that hangs, however often the user tries again, and
+    /// `session.send` refuses: the CLI has yet to copy the record.
+    forking: Arc<AtomicBool>,
     id: String,
     backend: String,
     /// The session's row as last written.
@@ -561,6 +572,7 @@ impl Handle {
     /// record says.
     fn new(row: SessionRow, created_at: String) -> Self {
         Handle {
+            forking: Arc::default(),
             id: row.id.clone(),
             backend: row.backend.clone(),
             row: Mutex::new(row),
@@ -732,12 +744,14 @@ impl SessionManager {
             }
             if let Some(adapter) = self.adapters.get(&handle.backend) {
                 let row = lock(&handle.row).clone();
-                if let (Some(backend_id), Some(transport)) =
-                    (row.backend_session_id, transport_for(&row.host_id))
-                {
+                if let (true, Some(transport)) = (
+                    row.backend_session_id.is_some(),
+                    transport_for(&row.host_id),
+                ) {
                     let (handle, adapter) = (Arc::clone(&handle), Arc::clone(adapter));
+                    let store = self.store.clone();
                     summaries.spawn(async move {
-                        apply_summary(&handle, adapter, transport, row.cwd, backend_id).await;
+                        read_summary(&store, &handle, adapter, transport, row).await;
                     });
                 }
             }
@@ -846,18 +860,25 @@ impl SessionManager {
         let adapter = self.adapters.get(&row.backend).cloned().ok_or_else(|| {
             SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
         })?;
-        self.create_with(row, None, adapter, transport, config, backend_version)
-            .await
+        self.create_with(
+            row,
+            Beginning::default(),
+            adapter,
+            transport,
+            config,
+            backend_version,
+        )
+        .await
     }
 
     /// [`SessionManager::create`] with a given adapter rather than the
-    /// registered one for the session's backend, and a title to show until
-    /// the record gives one: the replay server's, which feeds a recording in
-    /// place of a backend.
+    /// registered one for the session's backend, and what the session
+    /// `begin`s with: the replay server's, which feeds a recording in place
+    /// of a backend, and a fork's.
     pub async fn create_with(
         &self,
         row: SessionRow,
-        title: Option<String>,
+        begin: Beginning,
         adapter: Arc<dyn Adapter>,
         transport: Arc<dyn Transport>,
         config: SessionConfig,
@@ -878,11 +899,17 @@ impl SessionManager {
             return Err(busy);
         }
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
-        lock(&handle.presented).title = title;
+        lock(&handle.presented).title = begin.title;
+        let fork_hold = begin.fork_hold;
         // A new session has no record yet: the backend has not been told
-        // anything, so its events are the live stream's from the start.
-        let (view, events) =
-            View::open(&handle.id, &handle.backend, Some(adapter.projector()), &[]);
+        // anything, so its events are the live stream's from the start. A
+        // fork starts from the conversation it copies.
+        let (view, events) = View::open(
+            &handle.id,
+            &handle.backend,
+            Some(adapter.projector()),
+            &begin.record,
+        );
         lock(&handle.hub).install(&handle.id, view, &events);
         {
             // Registered and launched under the lock `stop_all` takes, so a
@@ -897,6 +924,7 @@ impl SessionManager {
                     transport,
                     config,
                     backend_version,
+                    fork_hold,
                 );
                 return Ok(handle.describe());
             }
@@ -914,6 +942,7 @@ impl SessionManager {
         transport: Arc<dyn Transport>,
         config: SessionConfig,
         backend_version: String,
+        fork_hold: Option<Arc<ForkHold>>,
     ) {
         let (fed_tx, fed_rx) = mpsc::unbounded_channel();
         let sink = Arc::new(CoreSink::new(&handle.id, Arc::clone(&self.app_log), fed_tx));
@@ -937,12 +966,14 @@ impl SessionManager {
             tiles: self.tiles.clone(),
         }));
         tokio::spawn(run_session(SessionTask {
+            store: self.store.clone(),
             handle,
             live,
             adapter,
             transport,
             config,
             backend_version,
+            fork_hold,
             started: started_tx,
             finished: finished_tx,
             pipeline,
@@ -1282,6 +1313,12 @@ impl SessionManager {
         // A pending permission or question is a turn waiting on the user,
         // whatever state the backend last reported.
         let waiting = !session.tile.pending.is_empty();
+        // The fork's CLI has yet to read the record a delete would take.
+        if handle.forking.load(Ordering::SeqCst) {
+            return Err(SessionError::InvalidState(format!(
+                "session {id} is being forked; delete it once the fork has started"
+            )));
+        }
         if (handle.live().is_some() && (working || waiting)) || session.sending.is_some() {
             return Err(SessionError::InvalidState(format!(
                 "session {id} is starting or working; stop it before deleting it"
@@ -1353,7 +1390,7 @@ impl SessionManager {
         let adapter = self.adapter(&row.backend).ok_or_else(|| {
             SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
         })?;
-        Ok(ask_open_elsewhere(adapter, transport, &backend_id).await)
+        Ok(ask_open_elsewhere(adapter, transport, &backend_id, ()).await)
     }
 
     /// Marks the session deleting, `running`, and records whether its
@@ -1600,7 +1637,13 @@ impl SessionManager {
                 row.id, row.backend
             )));
         };
-        let record = match &row.backend_session_id {
+        let source = match transport_for(&row.host_id) {
+            Some(transport) => {
+                record_id(&self.store, handle, Arc::clone(&adapter), transport, &row).await
+            }
+            None => row.backend_session_id.clone(),
+        };
+        let record = match &source {
             // The backend never announced the session, so it has no record.
             None => Arc::default(),
             Some(backend_id) => {
@@ -1696,10 +1739,29 @@ impl SessionManager {
                 })
             }
         };
+        // Read from its original, a fork's conversation stops where it did,
+        // and is gone with that record.
+        let record = match &row.forked_through {
+            Some(last) if source != row.backend_session_id && record.is_empty() => {
+                Arc::new(vec![RecordEvent {
+                    message_id: Some(last.clone()),
+                    ts: Some(now_rfc3339()),
+                    backend_version: None,
+                    event: Event::Error(ErrorEvent {
+                        code: ErrorCode::Transport,
+                        message: "this fork's conversation was in the session it was forked \
+                                  from, and that session's record is gone"
+                            .into(),
+                        recoverable: false,
+                        action: None,
+                    }),
+                }])
+            }
+            Some(last) if source != row.backend_session_id => up_to(record, last),
+            _ => record,
+        };
         // Turns taken elsewhere may have changed its title too.
-        if let (Some(backend_id), Some(transport)) =
-            (row.backend_session_id.clone(), transport_for(&row.host_id))
-        {
+        if let (Some(backend_id), Some(transport)) = (source, transport_for(&row.host_id)) {
             apply_summary(handle, adapter, transport, row.cwd.clone(), backend_id).await;
         }
         let (mut view, mut events) = View::open(&row.id, &row.backend, None, &record);
@@ -1741,6 +1803,12 @@ async fn apply_summary(
     backend_id: String,
 ) {
     let removed = Arc::clone(&handle.removed);
+    // A fork with no record of its own was given its original's to read for
+    // the conversation. What that record says of its title and first time is
+    // the original's, and changes with it.
+    if lock(&handle.row).forked_from.as_deref() == Some(backend_id.as_str()) {
+        return;
+    }
     let start = move || {
         tokio::spawn(async move {
             let read = adapter.summarize_record(transport, &cwd, &backend_id);
@@ -1815,6 +1883,100 @@ fn is_rfc3339(text: &str) -> bool {
     rest == "Z"
 }
 
+/// Reads session `row`'s title and creation time from the record that
+/// holds its conversation ([`record_id`]).
+async fn read_summary(
+    store: &Store,
+    handle: &Handle,
+    adapter: Arc<dyn Adapter>,
+    transport: Arc<dyn Transport>,
+    row: SessionRow,
+) {
+    let read = Arc::clone(&transport);
+    if let Some(id) = record_id(store, handle, Arc::clone(&adapter), read, &row).await {
+        apply_summary(handle, adapter, transport, row.cwd, id).await;
+    }
+}
+
+/// Whose record holds session `row`'s conversation: its own, or for a fork
+/// the backend has not written a record for yet (it does with the first
+/// message), its original's. A record that can't be looked at counts as its
+/// own, which then says what is wrong with it. A fork found to have a record
+/// has no more use for its original's, so the link goes (FLOW-FORK-SESSION-R09).
+async fn record_id(
+    store: &Store,
+    handle: &Handle,
+    adapter: Arc<dyn Adapter>,
+    transport: Arc<dyn Transport>,
+    row: &SessionRow,
+) -> Option<String> {
+    let own = row.backend_session_id.clone()?;
+    let Some(original) = &row.forked_from else {
+        return Some(own);
+    };
+    let version = adapter.record_version(transport, &row.cwd, &own);
+    match tokio::time::timeout(RECORD_READ, version).await {
+        Ok(Ok(None)) => Some(original.clone()),
+        Ok(Ok(Some(_))) => {
+            match store.clear_fork_link(handle.id.clone()).await {
+                Ok(()) => {
+                    let mut row = lock(&handle.row);
+                    row.forked_from = None;
+                    row.forked_through = None;
+                }
+                Err(e) => {
+                    tracing::warn!(session = %handle.id, error = %e, "could not forget the session a fork was copied from");
+                }
+            }
+            Some(own)
+        }
+        _ => Some(own),
+    }
+}
+
+/// The events of `record` up to and including those of message `last`, all
+/// of them when it holds no such message.
+fn up_to(record: Arc<Vec<RecordEvent>>, last: &str) -> Arc<Vec<RecordEvent>> {
+    match record
+        .iter()
+        .rposition(|event| event.message_id.as_deref() == Some(last))
+    {
+        Some(at) => Arc::new(record[..=at].to_vec()),
+        None => record,
+    }
+}
+
+/// The processes a registry named, as a message says them: `pid 7`, or
+/// `pids 7, 9`.
+pub(crate) fn pids_named(pids: &[u32]) -> String {
+    let list: Vec<String> = pids.iter().map(u32::to_string).collect();
+    match list.len() {
+        1 => format!("pid {}", list[0]),
+        _ => format!("pids {}", list.join(", ")),
+    }
+}
+
+/// Asks `adapter` whether another process has session `backend_id` open,
+/// for at most [`OPEN_ELSEWHERE_CHECK`]: a check that panics or hangs could
+/// not tell, so its answer is unknown. `held` is kept until the check itself
+/// ends, however long that is after the answer.
+async fn ask_open_elsewhere(
+    adapter: Arc<dyn Adapter>,
+    transport: Arc<dyn Transport>,
+    backend_id: &str,
+    held: impl Send + 'static,
+) -> OpenElsewhere {
+    let id = backend_id.to_string();
+    let check = tokio::spawn(async move {
+        let _held = held;
+        adapter.open_elsewhere(transport, &id).await
+    });
+    match tokio::time::timeout(OPEN_ELSEWHERE_CHECK, check).await {
+        Ok(Ok(answer)) => answer,
+        Ok(Err(_)) | Err(_) => OpenElsewhere::Unknown,
+    }
+}
+
 /// Asks the adapter whether a process other than this Core's has the
 /// session open, before Core resumes it or writes to its record, and when
 /// one has, or the adapter cannot tell, adds a `session.notice` saying so to
@@ -1823,22 +1985,6 @@ fn is_rfc3339(text: &str) -> bool {
 ///
 /// Notices are not part of the record, so one reaches the clients reading
 /// the session now; with none reading, there is nobody to tell.
-/// Asks `adapter` whether another process has session `backend_id` open,
-/// for at most [`OPEN_ELSEWHERE_CHECK`]: a check that panics or hangs could
-/// not tell, so its answer is unknown.
-async fn ask_open_elsewhere(
-    adapter: Arc<dyn Adapter>,
-    transport: Arc<dyn Transport>,
-    backend_id: &str,
-) -> OpenElsewhere {
-    let id = backend_id.to_string();
-    let check = tokio::spawn(async move { adapter.open_elsewhere(transport, &id).await });
-    match tokio::time::timeout(OPEN_ELSEWHERE_CHECK, check).await {
-        Ok(Ok(answer)) => answer,
-        Ok(Err(_)) | Err(_) => OpenElsewhere::Unknown,
-    }
-}
-
 async fn notice_if_open_elsewhere(
     handle: &Handle,
     adapter: Arc<dyn Adapter>,
@@ -1846,15 +1992,16 @@ async fn notice_if_open_elsewhere(
     backend_id: &str,
     consequence: &str,
 ) {
-    let notice = match ask_open_elsewhere(adapter, transport, backend_id).await {
+    let notice = match ask_open_elsewhere(adapter, transport, backend_id, ()).await {
         OpenElsewhere::No => return,
-        OpenElsewhere::Yes { pid } => SessionNotice {
+        OpenElsewhere::Yes { pids } => SessionNotice {
             level: NoticeLevel::Warning,
             code: NoticeCode::SessionOpenElsewhere,
             message: format!(
-                "Another process (pid {pid}) has this session open, and {consequence}."
+                "Another process ({}) has this session open, and {consequence}.",
+                pids_named(&pids)
             ),
-            pid: Some(pid),
+            pid: pids.first().copied(),
         },
         OpenElsewhere::Unknown => SessionNotice {
             level: NoticeLevel::Info,
@@ -2129,12 +2276,15 @@ impl AdapterSink for CoreSink {
 // -- The session task ----------------------------------------------------------
 
 struct SessionTask {
+    store: Store,
     handle: Arc<Handle>,
     live: Arc<Live>,
     adapter: Arc<dyn Adapter>,
     transport: Arc<dyn Transport>,
     config: SessionConfig,
     backend_version: String,
+    /// A fork's hold on its original, let go once the start is over.
+    fork_hold: Option<Arc<ForkHold>>,
     started: watch::Sender<Started>,
     finished: watch::Sender<bool>,
     pipeline: tokio::task::JoinHandle<()>,
@@ -2142,12 +2292,14 @@ struct SessionTask {
 
 async fn run_session(task: SessionTask) {
     let SessionTask {
+        store,
         handle,
         live,
         adapter,
         transport,
         config,
         backend_version,
+        fork_hold,
         started,
         finished,
         pipeline,
@@ -2161,6 +2313,7 @@ async fn run_session(task: SessionTask) {
     // still leaves the fact startup repairs from.
     sink.app_log.flushed().await;
 
+    let is_fork = fork_hold.is_some();
     let mut cancel = live.cancel.subscribe();
     let as_sink: Arc<dyn AdapterSink> = sink.clone();
     // The start runs in a task of its own, so an adapter that panics fails
@@ -2179,12 +2332,18 @@ async fn run_session(task: SessionTask) {
             None
         }
     };
+    drop(fork_hold);
     let mut pipeline = pipeline;
     let mut pipeline_done = false;
     match outcome {
         Some(Ok(session)) => {
             let session: Arc<dyn AdapterSession> = Arc::from(session);
             *lock(&handle.start_failure) = None;
+            // Before the session can be sent anything, so a first message's
+            // lines come after this.
+            if is_fork {
+                sink.record_fact(LifecycleFact::ForkReady);
+            }
             started.send_replace(Started::Ready(Arc::clone(&session)));
             sink.start_finished(Ok(()));
             // A stop that arrived as the start completed saw nothing to stop.
@@ -2242,11 +2401,9 @@ async fn run_session(task: SessionTask) {
     // The record now holds the session's turns, and with them its title.
     // Read after the stop has its answer, never on its way.
     let row = lock(&handle.row).clone();
-    if let Some(backend_id) = row.backend_session_id {
-        tokio::spawn(async move {
-            apply_summary(&handle, adapter, transport, row.cwd, backend_id).await;
-        });
-    }
+    tokio::spawn(async move {
+        read_summary(&store, &handle, adapter, transport, row).await;
+    });
 }
 
 /// Returns once the flag is raised; never if its sender is gone.
@@ -2870,6 +3027,8 @@ mod tests {
             pinned: false,
             section_id: None,
             last_activity_at: None,
+            forked_from: None,
+            forked_through: None,
         };
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&manager.sessions).insert(handle.id.clone(), handle);

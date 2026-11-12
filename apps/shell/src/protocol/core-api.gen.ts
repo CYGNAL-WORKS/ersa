@@ -172,6 +172,12 @@ export type Request =
   | {
       jsonrpc: "2.0";
       id: RequestId;
+      method: "session.fork";
+      params: SessionForkParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
       method: "session.send";
       params: SessionSendParams;
     }
@@ -587,6 +593,9 @@ export interface SessionDeleteParams {
    * The token of the workspace.changes the user was shown. Needed for a session in an isolated workspace: when what would be lost now differs, the delete is refused with invalid_state and the new workspace.changes, as JSON text, in detail. Ignored for a root workspace.
    */
   token?: string;
+}
+export interface SessionForkParams {
+  id: Id;
 }
 export interface SessionSendParams {
   id: Id;
@@ -1482,6 +1491,51 @@ export interface Session7 {
    */
   deleting?: "running" | "failed";
 }
+export interface Session8 {
+  id: Id;
+  workspace_id: Id;
+  host_id: Id;
+  backend: string;
+  /**
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   */
+  model?: string;
+  /**
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   */
+  effort?: string;
+  /**
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
+   */
+  permission_mode: string;
+  mode?: string;
+  title?: string;
+  state: AgentEvents.SessionState["state"];
+  created_at: string;
+  /**
+   * Absent when the session has no events yet.
+   */
+  last_event_seq?: number;
+  tile: Tile;
+  sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
+  /**
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
+}
 export interface SessionDeleteResult {
   id: Id;
   /**
@@ -1499,7 +1553,7 @@ export interface SessionSendResult {
    */
   turn?: number;
 }
-export interface Session8 {
+export interface Session9 {
   id: Id;
   workspace_id: Id;
   host_id: Id;
@@ -1568,51 +1622,6 @@ export interface AttachmentInspectResult {
    * Whether a send would copy it into the workspace's scratch folder: true for a file or folder whose target, resolved as a send resolves it, is outside workspace_id, or for any file or folder given a host_id; false for an image, which goes inline, and for a path inside the workspace.
    */
   copied: boolean;
-}
-export interface Session9 {
-  id: Id;
-  workspace_id: Id;
-  host_id: Id;
-  backend: string;
-  /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
-   */
-  model?: string;
-  /**
-   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
-   */
-  effort?: string;
-  /**
-   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
-   */
-  permission_mode: string;
-  mode?: string;
-  title?: string;
-  state: AgentEvents.SessionState["state"];
-  created_at: string;
-  /**
-   * Absent when the session has no events yet.
-   */
-  last_event_seq?: number;
-  tile: Tile;
-  sending?: SendPhase1;
-  /**
-   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
-   */
-  archived: boolean;
-  /**
-   * Whether the user pinned the session. Core stores it; session.arrange sets it.
-   */
-  pinned: boolean;
-  section_id?: Id3;
-  /**
-   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
-   */
-  last_activity_at?: string;
-  /**
-   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
-   */
-  deleting?: "running" | "failed";
 }
 export interface Session10 {
   id: Id;
@@ -1705,6 +1714,51 @@ export interface Session11 {
   deleting?: "running" | "failed";
 }
 export interface Session12 {
+  id: Id;
+  workspace_id: Id;
+  host_id: Id;
+  backend: string;
+  /**
+   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   */
+  model?: string;
+  /**
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   */
+  effort?: string;
+  /**
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
+   */
+  permission_mode: string;
+  mode?: string;
+  title?: string;
+  state: AgentEvents.SessionState["state"];
+  created_at: string;
+  /**
+   * Absent when the session has no events yet.
+   */
+  last_event_seq?: number;
+  tile: Tile;
+  sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
+  /**
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
+}
+export interface Session13 {
   id: Id;
   workspace_id: Id;
   host_id: Id;
@@ -1856,6 +1910,7 @@ export type SessionResumeResult = Session;
 export type SessionRemoveResult = Session;
 export type SessionSetArchivedResult = Session;
 export type SessionArrangeResult = Session;
+export type SessionForkResult = Session;
 export type SessionInterruptResult = Session;
 export type SessionDecidePermissionResult = Session;
 export type SessionAnswerQuestionResult = Session;
@@ -1892,6 +1947,7 @@ export interface CoreApiMethods {
   "session.remove": { params: SessionRemoveParams; result: SessionRemoveResult };
   "session.set_archived": { params: SessionSetArchivedParams; result: SessionSetArchivedResult };
   "session.arrange": { params: SessionArrangeParams; result: SessionArrangeResult };
+  "session.fork": { params: SessionForkParams; result: SessionForkResult };
   "session.delete": { params: SessionDeleteParams; result: SessionDeleteResult };
   "session.send": { params: SessionSendParams; result: SessionSendResult };
   "session.interrupt": { params: SessionInterruptParams; result: SessionInterruptResult };

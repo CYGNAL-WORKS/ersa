@@ -153,7 +153,10 @@ async fn a_session_another_process_has_open_is_refused_with_its_pid_and_nothing_
         .delete_record(no_transport(), CWD, SESSION)
         .await
         .expect("answered");
-    assert_eq!(deleted, RecordDeletion::Refused(OpenElsewhere::Yes { pid }));
+    assert_eq!(
+        deleted,
+        RecordDeletion::Refused(OpenElsewhere::Yes { pids: vec![pid] })
+    );
     assert_eq!(files(home.path()), before);
 }
 
