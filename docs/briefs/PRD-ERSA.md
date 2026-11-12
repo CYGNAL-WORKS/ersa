@@ -38,7 +38,7 @@ Ersa exposes its own tool server to every session, so agents can message other s
 
 ## Principles
 
-- **A wrapper that extends.** Ersa does what the vendor CLIs do through one common shape and adds what they lack: the user's own harness, many sessions at a glance, version control beyond git. It never builds a rival version of something a CLI already does.
+- **A wrapper that extends.** Ersa wraps the vendor CLIs and adds what they lack; it never rebuilds what they already do.
 - **Plain for everyone.** Agentic game development is the target, and non-technical people work in Ersa beside programmers. What a person needs to do never asks them to understand the machinery underneath.
 - **The user's existing tools, the user's existing auth.** Ersa drives CLIs the user already has. It never asks for or stores a model API key.
 - **Structured events, never console scraping.** Every backend is driven through a machine-readable protocol. If a backend has none, it is not supported.
