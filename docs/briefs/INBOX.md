@@ -8,4 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-12 PROTO-CORE-API: for a backend whose titles may span lines (R70), `session.set_title` says only "takes each run of spacing as one space, keeping line breaks"; it leaves open whether each line is trimmed, what becomes of blank lines, and whether a kept line break counts toward the limit. #294 trims each line, takes each run of spacing within a line as one space, keeps interior blank lines, drops blank lines at either end, treats CRLF as a line break, and counts each kept line break as a character. No registered adapter has multi-line titles yet.
+
 ## Resolved recently (optional, trimmed in planning passes)
