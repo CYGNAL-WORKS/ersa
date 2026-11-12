@@ -18,7 +18,7 @@ Docket runs the merge review on the owner's machine (ADR 0030): it reviews each 
 
 1. The implementing session polls Docket for its own pull request and fixes what the review posts (`implement-ticket` step 5); forward nothing to it while it does. Read its end-of-turn report and act on what it escalates: three rounds spent, a pull request waiting on the owner, Docket or CI not running, or a pull request no session owns. Decide what `CLAUDE.md` (Agents make the calls the rules settle) lets you decide, and take only the rest to the owner. A session whose pull request waits on a planning pass messages you when it stops: run the pass at once (Resolve inbox entries): settle each entry by that order, record it in the brief's change log as your call, and take to the owner only an entry the order leaves to them. Only when a session is not polling its pull request (its turn ended before the review posted), send it every finding of the round in one message: a second message queues behind the session's turn and may never be read.
 2. To see where any pull request stands, ask Docket (`curl -sS http://127.0.0.1:4477/pulls/<n>`); never poll GitHub for it.
-3. Stop after three fix rounds. Docket then holds the pull request for the owner, so bring them one choice with your recommendation (merge and follow up, or another round), after moving every finding the rubric makes a follow-up out of the way.
+3. Stop after five fix rounds (Docket's `review.maxRounds`). Docket then holds the pull request for the owner, so bring them one choice with your recommendation (merge and follow up, or another round), after moving every finding the rubric makes a follow-up out of the way.
 
 ## Resolve inbox entries
 
