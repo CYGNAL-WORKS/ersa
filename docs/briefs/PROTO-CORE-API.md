@@ -4,8 +4,7 @@ type: protocol
 title: Core request/response API
 status: ready
 references: [PROTO-AGENT-EVENTS]
-adrs: [0011, 0017, 0028, 0026, 0032]
-adrs: [0011, 0017, 0028, 0026, 0031]
+adrs: [0011, 0017, 0028, 0026, 0031, 0032]
 ---
 
 # Core request/response API
