@@ -1,0 +1,2 @@
+{"backend_version":"2.1.316","event":{"origin":"human","text":"Reply with the single word: titled","type":"user.message"},"message_id":"0f836b34-83ec-47ab-8973-86a27a1d5d1e","ts":"2026-11-09T02:49:51.873Z"}
+{"backend_version":"2.1.316","event":{"block_id":"msg_011CgrbPAZ5bpXLbbttUeBCo/0","final":true,"text":"titled","type":"assistant.text"},"message_id":"6af66b6d-e425-4fcf-8e24-caaf843b63c5","ts":"2026-11-09T02:49:52.736Z"}

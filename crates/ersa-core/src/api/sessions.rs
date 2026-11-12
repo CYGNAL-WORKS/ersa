@@ -2,22 +2,27 @@
 //! parsed params and returns the typed result or an [`ApiError`]; the work
 //! is the session manager's.
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_adapter::{BackendChoices, Direction, PermissionDecision, QuestionReply, SessionConfig};
+use ersa_adapter::{
+    BackendChoices, Direction, ForkOf, PermissionDecision, QuestionReply, SessionConfig, Transport,
+};
 use ersa_protocol::core_api::{
     AnswerQuestionParams, ArrangeParams, Attachment, AttachmentKind, Choice,
-    DecidePermissionParams, Empty, IdParams, InspectParams, Inspected, RawDirection, RawLogEntry,
-    RawLogParams, Session, SessionCreateParams, SessionSendParams, SessionSendResult,
-    SetArchivedParams, SetModeParams, SetTitleParams, SubscribeParams, SubscribeResult,
-    WorkspaceState,
+    DecidePermissionParams, Empty, IdParams, InspectParams, Inspected, Project, RawDirection,
+    RawLogEntry, RawLogParams, Session, SessionCreateParams, SessionSendParams, SessionSendResult,
+    SetArchivedParams, SetModeParams, SetTitleParams, SubscribeParams, SubscribeResult, Workspace,
+    WorkspaceCreateParams, WorkspaceKind, WorkspaceState,
 };
 use serde_json::Value;
 
-use super::{ApiError, Peer};
+use super::{ApiError, Peer, handlers};
 use crate::attachments::{self, InspectError};
 use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
+use crate::sessions::{Forkable, MAX_TITLE_CHARS};
 use crate::state::Core;
+use crate::workspace;
 
 /// The most raw lines one `session.raw_log` call returns, and the most bytes
 /// of line text (one line always comes back, however long). A client pages
@@ -25,10 +30,6 @@ use crate::state::Core;
 /// The log is held in memory, from when Core started the session's backend.
 pub const RAW_LOG_LIMIT: usize = 1000;
 pub const RAW_LOG_BYTES: usize = 8 * 1024 * 1024;
-
-/// The longest title `session.set_title` takes: as much as Claude Code's
-/// own session list shows.
-pub const MAX_TITLE_CHARS: usize = 200;
 
 pub(super) async fn list(core: &Core, _: Empty) -> Result<Vec<Session>, ApiError> {
     Ok(core.sessions.list())
@@ -38,12 +39,21 @@ async fn find(core: &Core, id: &str) -> Result<Session, ApiError> {
     Ok(core.sessions.get(id)?)
 }
 
-pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<Session, ApiError> {
+/// What starting a session in a workspace takes, looked up the same way
+/// for a new session and a fork.
+struct Starting {
+    transport: Arc<dyn Transport>,
+    /// The version detection found, until the backend announces its own.
+    backend_version: String,
+}
+
+/// The workspace `id`, which must be `ready`, and its project.
+async fn ready_workspace(core: &Core, id: &str) -> Result<(Workspace, Project), ApiError> {
     let workspace = core
         .store
-        .workspace(params.workspace_id.clone())
+        .workspace(id.to_string())
         .await?
-        .ok_or_else(|| ApiError::not_found(format!("no workspace {}", params.workspace_id)))?;
+        .ok_or_else(|| ApiError::not_found(format!("no workspace {id}")))?;
     if workspace.state != WorkspaceState::Ready {
         return Err(ApiError::invalid_state(format!(
             "workspace {} is not ready",
@@ -55,6 +65,47 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         .project(workspace.project_id.clone())
         .await?
         .ok_or_else(|| ApiError::not_found(format!("no project {}", workspace.project_id)))?;
+    Ok((workspace, project))
+}
+
+async fn starting(core: &Core, project: &Project, backend: &str) -> Result<Starting, ApiError> {
+    let transport = core
+        .session_transport_for(&project.host_id)
+        .ok_or_else(|| {
+            ApiError::new(
+                ersa_protocol::core_api::ErrorKind::TransportError,
+                format!("host {} cannot be reached", project.host_id),
+            )
+        })?;
+    let backend_version = if project.host_id == LOCAL_HOST_ID {
+        core.local_backends()
+            .await
+            .into_iter()
+            .find(|d| d.backend.name == backend)
+            .and_then(|d| d.version)
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    Ok(Starting {
+        transport,
+        backend_version,
+    })
+}
+
+/// Whether the user trusts the project now. Read last before a session
+/// starts, after whatever may have taken seconds: an answer the user changed
+/// meanwhile is the one that counts.
+async fn trusted_now(core: &Core, project: &Project) -> Result<bool, ApiError> {
+    Ok(core
+        .store
+        .project(project.id.clone())
+        .await?
+        .is_some_and(|p| p.trusted))
+}
+
+pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<Session, ApiError> {
+    let (workspace, project) = ready_workspace(core, &params.workspace_id).await?;
     let Some(adapter) = core.sessions.adapter(&params.backend) else {
         return Err(ApiError::new(
             ersa_protocol::core_api::ErrorKind::BackendMissing,
@@ -78,33 +129,11 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         .clone()
         .unwrap_or_else(|| BackendChoices::default_of(&choices.permission_modes));
 
-    let transport = core
-        .session_transport_for(&project.host_id)
-        .ok_or_else(|| {
-            ApiError::new(
-                ersa_protocol::core_api::ErrorKind::TransportError,
-                format!("host {} cannot be reached", project.host_id),
-            )
-        })?;
-    // The version detection found, until the backend announces its own.
-    let backend_version = if project.host_id == LOCAL_HOST_ID {
-        core.local_backends()
-            .await
-            .into_iter()
-            .find(|d| d.backend.name == params.backend)
-            .and_then(|d| d.version)
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-
-    // Trust is read again here, after the detection above, which can take
-    // seconds: an answer the user changed meanwhile is the one that counts.
-    let trusted = core
-        .store
-        .project(project.id.clone())
-        .await?
-        .is_some_and(|p| p.trusted);
+    let Starting {
+        transport,
+        backend_version,
+    } = starting(core, &project, &params.backend).await?;
+    let trusted = trusted_now(core, &project).await?;
 
     // A backend that starts a session under an id Ersa chooses gets one
     // now: stored with the row before the backend starts, so the session can
@@ -130,6 +159,8 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         pinned: false,
         section_id: None,
         last_activity_at: None,
+        forked_from: None,
+        forked_through: None,
     };
     let config = SessionConfig {
         cwd: workspace.path,
@@ -147,12 +178,153 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         // keeps its own trust record is told of it (ADR 0018).
         project_path: project.path.clone(),
         backend_session_id,
+        fork_of: None,
         extra: Value::Null,
     };
     Ok(core
         .sessions
         .create(session, transport, config, backend_version)
         .await?)
+}
+
+/// `session.fork` (FLOW-FORK-SESSION): a new session from a copy of the
+/// conversation of `params.id`, with its backend, model, effort, permission
+/// mode and section, not pinned or archived. An original in an isolated
+/// workspace forks into a new one, on a new branch from the commit it has
+/// checked out; one in a root workspace shares it (R05).
+pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiError> {
+    // Said first: a delete's claim turns the workspace away from `ready`, and
+    // its `busy` is the answer that says why.
+    core.sessions.refuse_fork_if_busy(&params.id)?;
+    let original = core.sessions.row(&params.id)?;
+    let (original_workspace, project) = ready_workspace(core, &original.workspace_id).await?;
+    let Starting {
+        transport,
+        backend_version,
+    } = starting(core, &project, &original.backend).await?;
+    // Every refusal comes before the workspace is made. Holding `hold`
+    // keeps the original from being sent to or deleted meanwhile.
+    let Forkable {
+        backend_id,
+        adapter,
+        name,
+        beginning,
+    } = core
+        .sessions
+        .prepare_fork(&params.id, Arc::clone(&transport))
+        .await?;
+    let trusted = trusted_now(core, &project).await?;
+    let made_for_it = original_workspace.kind == WorkspaceKind::Isolated;
+    let workspace = if made_for_it {
+        new_workspace_at_head(core, &project, &original_workspace).await?
+    } else {
+        original_workspace
+    };
+
+    let permission_mode = original
+        .permission_mode
+        .clone()
+        .unwrap_or_else(|| BackendChoices::default_of(&adapter.choices().permission_modes));
+    // Chosen and stored before the backend starts, as for a new session, so
+    // a fork can be renamed before its first message (R38).
+    let backend_session_id = adapter.new_session_id();
+    let fork = SessionRow {
+        id: persistence::new_id("s"),
+        workspace_id: workspace.id.clone(),
+        host_id: project.host_id.clone(),
+        backend: original.backend,
+        backend_session_id: backend_session_id.clone(),
+        mode: original.mode,
+        // The stored path, never the one the backend reports (R38).
+        cwd: workspace.path.clone(),
+        model: original.model.clone(),
+        effort: original.effort.clone(),
+        permission_mode: original.permission_mode,
+        archived: false,
+        deleting: None,
+        pinned: false,
+        section_id: original.section_id,
+        last_activity_at: None,
+        forked_from: Some(backend_id.clone()),
+        forked_through: beginning
+            .record
+            .iter()
+            .rev()
+            .find_map(|event| event.message_id.clone()),
+    };
+    let config = SessionConfig {
+        cwd: workspace.path.clone(),
+        permission_mode,
+        model: original.model,
+        effort: original.effort,
+        project_trusted: trusted,
+        project_path: project.path.clone(),
+        backend_session_id,
+        fork_of: Some(ForkOf {
+            original: backend_id,
+            name,
+        }),
+        extra: Value::Null,
+    };
+    let created = core
+        .sessions
+        .create_with(fork, beginning, adapter, transport, config, backend_version)
+        .await;
+    if created.is_err() && made_for_it {
+        discard_workspace(core, &project, &workspace).await;
+    }
+    Ok(created?)
+}
+
+/// A new isolated workspace on a new branch at the commit `from` has checked
+/// out, made as `workspace.create` makes one; uncommitted changes stay behind.
+async fn new_workspace_at_head(
+    core: &Core,
+    project: &Project,
+    from: &Workspace,
+) -> Result<Workspace, ApiError> {
+    let git = core
+        .transport_for(&project.host_id)
+        .ok_or_else(|| handlers::unreachable_host(&project.host_id))?;
+    let head = workspace::git_resolve_commit(git.as_ref(), &from.path, "HEAD")
+        .await?
+        .ok_or_else(|| {
+            ApiError::invalid_state(format!("workspace {} has no commit to start from", from.id))
+        })?;
+    handlers::workspace_create(
+        core,
+        WorkspaceCreateParams {
+            project_id: project.id.clone(),
+            name: None,
+            base: Some(head),
+        },
+    )
+    .await
+}
+
+/// Removes a workspace made for a fork that then wasn't created, as far as it
+/// can: what can't be removed stays listed for the user to remove.
+async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace) {
+    let Some(git) = core.transport_for(&project.host_id) else {
+        return;
+    };
+    let deleted = workspace::git_worktree_delete(
+        git.as_ref(),
+        &project.path,
+        &workspace.path,
+        &workspace.vcs_ref,
+    )
+    .await;
+    match deleted {
+        Ok(_) => {
+            if let Err(e) = core.store.delete_workspace(workspace.id.clone()).await {
+                tracing::warn!(workspace = %workspace.id, error = %e, "could not forget a fork's workspace");
+            }
+        }
+        Err(e) => {
+            tracing::warn!(workspace = %workspace.id, error = %e, "could not remove a fork's workspace");
+        }
+    }
 }
 
 /// Refuses a `field` value that is not one of `offered`; absent is the
