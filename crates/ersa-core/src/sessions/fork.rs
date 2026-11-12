@@ -24,7 +24,7 @@ pub struct Beginning {
 const FORK_MARK: &str = " (fork)";
 
 /// A fork's title: the original's, shortened so the whole fits the limit on a
-/// title, then marked (FLOW-FORK-SESSION-R07).
+/// title, then marked (FLOW-FORK-SESSION-R08).
 fn fork_title(original: &str) -> String {
     let room = MAX_TITLE_CHARS - FORK_MARK.chars().count();
     let kept: String = original.chars().take(room).collect();
