@@ -73,14 +73,7 @@ async fn settle(client: &mut Client, id: &str) {
 /// Waits for the fork of a session of the fake's to start, then takes away
 /// the record the fake made it: the CLI writes none before the first message.
 async fn without_a_record_of_its_own(fake: &FakeAdapter, original_backend_id: &str) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while fake.records.lock().unwrap().len() < 2 {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the fork never started"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    fork_started(fake).await;
     without_a_record_of_its_own_now(fake, original_backend_id);
 }
 
@@ -103,6 +96,19 @@ async fn fork_config(fake: &FakeAdapter) -> SessionConfig {
 fn fork_backend_id(fake: &FakeAdapter, original: &str) -> String {
     let records = fake.records.lock().unwrap();
     records.keys().find(|k| *k != original).unwrap().clone()
+}
+
+/// Waits for the fake to have made a record for a fork, as it does when the
+/// fork's backend starts.
+async fn fork_started(fake: &FakeAdapter) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while fake.records.lock().unwrap().len() < 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fork never started"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 /// Takes away every record but the original's.
@@ -627,7 +633,6 @@ async fn a_fork_never_sent_a_message_still_shows_its_conversation_after_a_restar
     );
 }
 
-/// A fork whose first message never came, its original since deleted.
 // verifies: FLOW-FORK-SESSION-R09
 #[tokio::test(flavor = "multi_thread")]
 async fn a_forks_link_to_its_original_goes_once_it_has_a_record() {
@@ -647,11 +652,7 @@ async fn a_forks_link_to_its_original_goes_once_it_has_a_record() {
         .to_string();
     let started = fork_config(&fake).await;
     assert!(started.fork_of.is_some());
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while fake.records.lock().unwrap().len() < 2 {
-        assert!(tokio::time::Instant::now() < deadline, "never started");
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    fork_started(&fake).await;
 
     // Seen with a record of its own, as Core starts.
     let (core, mut client) = restarted(core, &mut client, &fake).await;
@@ -685,14 +686,7 @@ async fn a_fork_with_a_record_of_its_own_shows_its_title_and_date() {
     let fork = forked(&mut client, &id).await;
     let fork_id = fork["id"].as_str().unwrap().to_string();
     assert_eq!(fork["title"], Value::Null);
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while fake.records.lock().unwrap().len() < 2 {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the fork never started"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    fork_started(&fake).await;
     // Its record starts with the entries it copied, which keep their times.
     let reply = fake::recorded_reply("reply-1", "the reply");
     let copied_at = reply.ts.clone().unwrap();
@@ -711,6 +705,7 @@ async fn a_fork_with_a_record_of_its_own_shows_its_title_and_date() {
     assert_eq!(listed["created_at"], copied_at.as_str());
 }
 
+/// A fork whose first message never came, its original since deleted.
 // verifies: FLOW-FORK-SESSION-R01
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_whose_conversation_is_gone_says_so() {
@@ -726,14 +721,7 @@ async fn a_fork_whose_conversation_is_gone_says_so() {
         .push(fake::recorded_reply("reply-1", "the reply"));
     let fork = client.result("session.fork", json!({ "id": id })).await;
     let fork_id = fork["id"].as_str().unwrap().to_string();
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while fake.records.lock().unwrap().len() < 2 {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the fork never started"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    fork_started(&fake).await;
     // Neither record is left: the fork's was never written, the original's
     // went with its delete.
     fake.records.lock().unwrap().clear();
@@ -884,14 +872,7 @@ async fn a_fork_of_an_isolated_session_gets_its_own_workspace_and_branch_at_its_
     assert!(made_folder.join("committed.txt").exists());
     assert!(!made_folder.join("uncommitted.txt").exists());
     assert!(folder.join("uncommitted.txt").exists());
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while fake.stats.configs.lock().unwrap().len() < 2 {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the fork never started"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+    fork_config(&fake).await;
     assert_eq!(
         fake.stats.configs.lock().unwrap()[1].cwd,
         made["path"].as_str().unwrap()
