@@ -47,7 +47,7 @@ use std::time::Duration;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, Direction, OpenElsewhere,
     PermissionDecision, ProcessExit, QuestionReply, RawLine, RecordDeletion, RecordEvent,
-    RecordSummary, SessionConfig, Transport,
+    RecordSummary, SessionConfig, TitleRules, Transport,
 };
 use ersa_protocol::core_api::rpc::Notification;
 use ersa_protocol::core_api::{
@@ -66,10 +66,6 @@ use crate::raw_log::RawLog;
 
 mod fork;
 mod send;
-
-/// The longest title `session.set_title` takes: as much as Claude Code's
-/// own session list shows.
-pub const MAX_TITLE_CHARS: usize = 200;
 
 pub use fork::{Beginning, ForkHold, Forkable};
 pub use send::Pacer;
@@ -171,7 +167,10 @@ pub enum SessionError {
 /// Every session Core knows, and the adapters it can start them with.
 pub struct SessionManager {
     store: Store,
-    adapters: HashMap<String, Arc<dyn Adapter>>,
+    /// The registered adapters, in the order they were registered, which
+    /// is the order backends are listed in (PROTO-CORE-API-R65). Few enough
+    /// to look up by walking the list.
+    adapters: Vec<Arc<dyn Adapter>>,
     /// Where Core writes each backend process's lifecycle facts.
     app_log: Arc<AppLog>,
     /// Every session in the database, by id. A std mutex: only held to look
@@ -671,12 +670,22 @@ impl Handle {
 
 impl SessionManager {
     pub fn new(store: Store, adapters: Vec<Arc<dyn Adapter>>, app_log: Arc<AppLog>) -> Self {
+        // One adapter per backend: a second registration of a name is a
+        // mistake in the build, and the first one stands.
+        let mut registered: Vec<Arc<dyn Adapter>> = Vec::new();
+        for adapter in adapters {
+            if registered.iter().any(|a| a.backend() == adapter.backend()) {
+                tracing::error!(
+                    backend = adapter.backend(),
+                    "an adapter for this backend is registered twice; the first stands"
+                );
+            } else {
+                registered.push(adapter);
+            }
+        }
         SessionManager {
             store,
-            adapters: adapters
-                .into_iter()
-                .map(|adapter| (adapter.backend().to_string(), adapter))
-                .collect(),
+            adapters: registered,
             app_log,
             sessions: Mutex::new(HashMap::new()),
             tiles: Arc::default(),
@@ -714,14 +723,22 @@ impl SessionManager {
         let mut summaries = tokio::task::JoinSet::new();
         let rows = self.store.sessions().await?;
         // Facts of sessions removed in an earlier run are not carried on.
+        // Every stored session counts here, dormant ones included, so their
+        // facts are kept for when their adapter is back.
         self.app_log
             .retain_only(rows.iter().map(|row| row.id.clone()).collect());
         for mut row in rows {
+            // A session whose backend has no registered adapter is dormant
+            // (PROTO-CORE-API-R66, R67): not loaded, so absent from every
+            // list and `not_found` by id, while its row and its facts stay
+            // stored for a Core that has the adapter again. Every session
+            // loaded therefore has an adapter.
+            let Some(adapter) = self.adapter(&row.backend) else {
+                continue;
+            };
             // Sessions from before Core recorded the permission mode were
             // all started stating their backend's default.
-            if row.permission_mode.is_none()
-                && let Some(adapter) = self.adapters.get(&row.backend)
-            {
+            if row.permission_mode.is_none() {
                 let default = BackendChoices::default_of(&adapter.choices().permission_modes);
                 row.permission_mode = (!default.is_empty()).then_some(default);
             }
@@ -742,18 +759,16 @@ impl SessionManager {
                 // and nothing is made up for it.
                 Some(None) | None => {}
             }
-            if let Some(adapter) = self.adapters.get(&handle.backend) {
-                let row = lock(&handle.row).clone();
-                if let (true, Some(transport)) = (
-                    row.backend_session_id.is_some(),
-                    transport_for(&row.host_id),
-                ) {
-                    let (handle, adapter) = (Arc::clone(&handle), Arc::clone(adapter));
-                    let store = self.store.clone();
-                    summaries.spawn(async move {
-                        read_summary(&store, &handle, adapter, transport, row).await;
-                    });
-                }
+            let row = lock(&handle.row).clone();
+            if let (true, Some(transport)) = (
+                row.backend_session_id.is_some(),
+                transport_for(&row.host_id),
+            ) {
+                let handle = Arc::clone(&handle);
+                let store = self.store.clone();
+                summaries.spawn(async move {
+                    read_summary(&store, &handle, adapter, transport, row).await;
+                });
             }
             lock(&self.sessions).insert(handle.id.clone(), handle);
         }
@@ -773,14 +788,34 @@ impl SessionManager {
         self.app_log.flushed().await;
     }
 
-    /// Whether an adapter for `backend` is registered.
-    pub fn has_backend(&self, backend: &str) -> bool {
-        self.adapters.contains_key(backend)
-    }
-
     /// The adapter registered for `backend`.
     pub fn adapter(&self, backend: &str) -> Option<Arc<dyn Adapter>> {
-        self.adapters.get(backend).cloned()
+        self.adapters
+            .iter()
+            .find(|adapter| adapter.backend() == backend)
+            .cloned()
+    }
+
+    /// Every registered adapter, in the order they were registered.
+    pub fn adapters(&self) -> &[Arc<dyn Adapter>] {
+        &self.adapters
+    }
+
+    /// The adapter of a session Core has loaded, or is creating. Every
+    /// loaded session has one, since a session without one stays dormant
+    /// (see [`SessionManager::recover`]); a session created for a backend
+    /// with none is refused here.
+    fn adapter_of(&self, backend: &str) -> Result<Arc<dyn Adapter>, SessionError> {
+        self.adapter(backend).ok_or_else(|| {
+            SessionError::BackendMissing(format!("no adapter for backend {backend}"))
+        })
+    }
+
+    /// The titles session `id`'s backend takes, as its adapter states them
+    /// (PROTO-CORE-API-R70).
+    pub fn title_rules(&self, id: &str) -> Result<TitleRules, SessionError> {
+        let handle = self.handle(id)?;
+        Ok(self.adapter_of(&handle.backend)?.title_rules())
     }
 
     /// Receives `session.tile` notifications from now on, the latest per
@@ -794,7 +829,7 @@ impl SessionManager {
     pub fn image_types(&self) -> Vec<&'static str> {
         let mut types: Vec<&'static str> = self
             .adapters
-            .values()
+            .iter()
             .flat_map(|adapter| adapter.image_limits().media_types.iter().copied())
             .collect();
         types.sort_unstable();
@@ -857,9 +892,7 @@ impl SessionManager {
         config: SessionConfig,
         backend_version: String,
     ) -> Result<Session, SessionError> {
-        let adapter = self.adapters.get(&row.backend).cloned().ok_or_else(|| {
-            SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
-        })?;
+        let adapter = self.adapter_of(&row.backend)?;
         self.create_with(
             row,
             Beginning::default(),
@@ -1093,7 +1126,7 @@ impl SessionManager {
         handle.removed.store(true, Ordering::SeqCst);
         let row = lock(&handle.row).clone();
         if let (Some(backend_id), Some(adapter)) =
-            (&row.backend_session_id, self.adapters.get(&row.backend))
+            (&row.backend_session_id, self.adapter(&row.backend))
         {
             adapter.forget_record(&row.cwd, backend_id);
         }
@@ -1155,9 +1188,7 @@ impl SessionManager {
         } else {
             let row = lock(&handle.row).clone();
             let backend_id = row.backend_session_id.ok_or_else(unnamed)?;
-            let adapter = self.adapters.get(&row.backend).cloned().ok_or_else(|| {
-                SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
-            })?;
+            let adapter = self.adapter_of(&row.backend)?;
             let transport = transport_for(&row.host_id).ok_or_else(|| {
                 SessionError::Adapter(AdapterError::Io(io::Error::new(
                     io::ErrorKind::NotConnected,
@@ -1387,9 +1418,7 @@ impl SessionManager {
         let Some(backend_id) = row.backend_session_id else {
             return Ok(OpenElsewhere::No);
         };
-        let adapter = self.adapter(&row.backend).ok_or_else(|| {
-            SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
-        })?;
+        let adapter = self.adapter_of(&row.backend)?;
         Ok(ask_open_elsewhere(adapter, transport, &backend_id, ()).await)
     }
 
@@ -1431,9 +1460,7 @@ impl SessionManager {
         let Some(backend_id) = row.backend_session_id else {
             return Ok(RecordDeletion::Deleted);
         };
-        let adapter = self.adapter(&row.backend).ok_or_else(|| {
-            SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
-        })?;
+        let adapter = self.adapter_of(&row.backend)?;
         let cwd = row.cwd;
         let call =
             tokio::spawn(async move { adapter.delete_record(transport, &cwd, &backend_id).await });
@@ -1631,12 +1658,7 @@ impl SessionManager {
         transport_for: &impl Fn(&str) -> Option<Arc<dyn Transport>>,
     ) -> Result<(View, Vec<Envelope>), SessionError> {
         let row = lock(&handle.row).clone();
-        let Some(adapter) = self.adapters.get(&row.backend).cloned() else {
-            return Err(SessionError::InvalidState(format!(
-                "the events of session {} cannot be read: Core has no adapter for backend {}",
-                row.id, row.backend
-            )));
-        };
+        let adapter = self.adapter_of(&row.backend)?;
         let source = match transport_for(&row.host_id) {
             Some(transport) => {
                 record_id(&self.store, handle, Arc::clone(&adapter), transport, &row).await
@@ -2954,6 +2976,12 @@ mod tests {
     impl Adapter for GatedReads {
         fn backend(&self) -> &str {
             "gated"
+        }
+        fn title_rules(&self) -> ersa_adapter::TitleRules {
+            ersa_adapter::TitleRules {
+                max_chars: 10,
+                one_line: true,
+            }
         }
         async fn start(
             &self,

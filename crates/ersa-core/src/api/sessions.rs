@@ -6,7 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ersa_adapter::{
-    BackendChoices, Direction, ForkOf, PermissionDecision, QuestionReply, SessionConfig, Transport,
+    BackendChoices, Direction, ForkOf, PermissionDecision, QuestionReply, SessionConfig,
+    TitleRules, Transport,
 };
 use ersa_protocol::core_api::{
     AnswerQuestionParams, ArrangeParams, Attachment, AttachmentKind, Choice,
@@ -20,7 +21,7 @@ use serde_json::Value;
 use super::{ApiError, Peer, handlers};
 use crate::attachments::{self, InspectError};
 use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
-use crate::sessions::{Forkable, MAX_TITLE_CHARS};
+use crate::sessions::Forkable;
 use crate::state::Core;
 use crate::workspace;
 
@@ -81,7 +82,7 @@ async fn starting(core: &Core, project: &Project, backend: &str) -> Result<Start
         core.local_backends()
             .await
             .into_iter()
-            .find(|d| d.backend.name == backend)
+            .find(|d| d.name == backend)
             .and_then(|d| d.version)
             .unwrap_or_default()
     } else {
@@ -648,18 +649,39 @@ pub(super) fn one_line(text: &str) -> Option<String> {
     Some(text.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
-/// Renames the session in its backend, which keeps the title where its own
-/// tools show it too (ADR 0017, PROTO-CORE-API-R12).
-pub(super) async fn set_title(core: &Core, params: SetTitleParams) -> Result<Session, ApiError> {
+/// `text` with each run of spacing within a line as one space, none at the
+/// ends of a line, and its line breaks kept, without blank lines at either
+/// end. `None` when it holds a control character other than spacing.
+fn spaced_lines(text: &str) -> Option<String> {
+    if text.chars().any(|c| c.is_control() && !c.is_whitespace()) {
+        return None;
+    }
+    // `\r` is spacing, so a CRLF line ends as an LF one does.
+    let lines: Vec<String> = text
+        .split('\n')
+        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect();
+    Some(lines.join("\n").trim().to_string())
+}
+
+/// `title` in the form its backend's `rules` take it (PROTO-CORE-API-R70),
+/// or why it can't be a title.
+fn checked_title(title: &str, rules: TitleRules) -> Result<String, ApiError> {
     // The title goes into the backend's record for good and shows in its own
-    // tools, which list one line of at most 200 characters with every run of
-    // spaces as one (PROTO-CLAUDE-CODE-STREAM, Listing). The title is taken
-    // in that form, so Ersa shows what the backend's list will: a longer
-    // title, or one holding a control character, would read differently
-    // there. A line break or a tab is spacing, and collapses like any other.
-    let Some(title) = one_line(&params.title) else {
+    // tools (for Claude Code, one line of at most 200 characters with every
+    // run of spaces as one: PROTO-CLAUDE-CODE-STREAM, Listing). The title is
+    // taken in that form, so Ersa shows what the backend's list will: a
+    // longer title, or one holding a control character, would read
+    // differently there. For a backend whose titles are one line, a line
+    // break or a tab is spacing, and collapses like any other.
+    let title = if rules.one_line {
+        one_line(title)
+    } else {
+        spaced_lines(title)
+    };
+    let Some(title) = title else {
         return Err(ApiError::invalid_params(
-            "a session's title is one line, without control characters",
+            "a session's title can't hold control characters other than spacing",
         ));
     };
     if title.is_empty() {
@@ -667,11 +689,19 @@ pub(super) async fn set_title(core: &Core, params: SetTitleParams) -> Result<Ses
             "a session's title cannot be empty",
         ));
     }
-    if title.chars().count() > MAX_TITLE_CHARS {
+    if title.chars().count() > rules.max_chars {
         return Err(ApiError::invalid_params(format!(
-            "a session's title is at most {MAX_TITLE_CHARS} characters"
+            "a session's title is at most {} characters",
+            rules.max_chars
         )));
     }
+    Ok(title)
+}
+
+/// Renames the session in its backend, which keeps the title where its own
+/// tools show it too (ADR 0017, PROTO-CORE-API-R12).
+pub(super) async fn set_title(core: &Core, params: SetTitleParams) -> Result<Session, ApiError> {
+    let title = checked_title(&params.title, core.sessions.title_rules(&params.id)?)?;
     Ok(core
         .sessions
         .set_title(&params.id, &title, |host| core.session_transport_for(host))

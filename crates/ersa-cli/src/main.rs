@@ -8,7 +8,19 @@ use std::sync::Arc;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use ersa_core::replay::{Pace, Recording, Replay};
-use ersa_core::{CoreConfig, ServeError, Server};
+use ersa_core::{Adapter, CoreConfig, ServeError, Server};
+
+/// Every adapter this build includes: the backends Core can drive, and the
+/// only ones it knows (ADR 0031). Adding a backend adds its adapter here,
+/// behind a feature of its own. The order is the order backends are listed
+/// in, so the first available one is a new session's default backend
+/// (FLOW-NEW-SESSION-R02).
+fn registered_adapters() -> Vec<Arc<dyn Adapter>> {
+    vec![
+        #[cfg(feature = "claude-code")]
+        Arc::new(ersa_adapter_claude::ClaudeAdapter::new()),
+    ]
+}
 
 /// Command-line arguments.
 ///
@@ -147,10 +159,7 @@ async fn serve(data_dir: Option<PathBuf>, endpoint: EndpointArg) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    // Every backend this build can drive. Core itself knows none of them.
-    let adapters: Vec<Arc<dyn ersa_core::Adapter>> =
-        vec![Arc::new(ersa_adapter_claude::ClaudeAdapter::new())];
-    let server = match Server::bind_with(config, adapters).await {
+    let server = match Server::bind_with(config, registered_adapters()).await {
         Ok(server) => server,
         Err(e @ ServeError::AlreadyRunning { .. }) => {
             eprintln!("ersa-core: {e}. Attach to it instead, or stop it first.");
@@ -182,19 +191,17 @@ async fn replay(fixture: PathBuf, pace: PaceArg, endpoint: EndpointArg) -> ExitC
             return ExitCode::FAILURE;
         }
     };
-    // Only Claude Code recordings exist so far, and they note the CLI's
-    // version under this key. Without it the replay would report an empty
-    // version, a default in place of the recording, so it is refused.
-    let backend_version = match recording.meta["claude_code_version"].as_str() {
-        Some(version) if !version.trim().is_empty() => version.to_string(),
-        _ => {
-            eprintln!(
-                "ersa-core: cannot replay {}: the recording does not say which Claude Code version made it (`claude_code_version`)",
-                fixture.display()
-            );
-            return ExitCode::FAILURE;
-        }
-    };
+    // Played through the registered adapter that recognizes it, with the
+    // backend version its notes give (PROTO-CORE-API-R69). One that none
+    // recognizes is refused, rather than played with a made-up version.
+    let (adapter, backend_version) =
+        match ersa_core::replay::recognize(&registered_adapters(), &recording) {
+            Ok(found) => found,
+            Err(reason) => {
+                eprintln!("ersa-core: cannot replay {}: {reason}", fixture.display());
+                return ExitCode::FAILURE;
+            }
+        };
     let endpoint = match endpoint.endpoint.as_deref() {
         Some(label) => ersa_core::platform::labelled_endpoint(label),
         None => ersa_core::platform::labelled_endpoint(REPLAY_LABEL),
@@ -246,7 +253,7 @@ async fn replay(fixture: PathBuf, pace: PaceArg, endpoint: EndpointArg) -> ExitC
         .map(|stem| stem.to_string_lossy().into_owned())
         .unwrap_or_else(|| "replay".into());
     let replay = Replay {
-        adapter: Arc::new(ersa_adapter_claude::ClaudeAdapter::new()),
+        adapter,
         recording,
         title,
         backend_version,

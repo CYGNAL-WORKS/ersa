@@ -62,6 +62,31 @@ pub struct Replay {
     pub pace: Pace,
 }
 
+/// The registered adapter that recognizes `recording`, with the backend
+/// version its notes give (PROTO-CORE-API-R69): the first in `adapters`, in
+/// the order they were registered. When none does, why not, each adapter's
+/// reason in turn, so the replay is refused at start rather than played
+/// with a made-up version.
+pub fn recognize(
+    adapters: &[Arc<dyn Adapter>],
+    recording: &Recording,
+) -> Result<(Arc<dyn Adapter>, String), String> {
+    let mut reasons = Vec::new();
+    for adapter in adapters {
+        match adapter.recording_version(recording) {
+            Ok(version) => return Ok((Arc::clone(adapter), version)),
+            Err(reason) => reasons.push(format!("{}: {reason}", adapter.label())),
+        }
+    }
+    if reasons.is_empty() {
+        return Err("no adapter is registered to replay it".into());
+    }
+    Err(format!(
+        "no registered adapter recognizes it ({})",
+        reasons.join("; ")
+    ))
+}
+
 /// The answer a replay server gives `method` instead of running it, when
 /// running it would change something. `None` for a method it runs as Core.
 pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
@@ -289,6 +314,22 @@ impl Adapter for Recordless {
         self.0.choices()
     }
 
+    fn version_command(&self) -> ersa_adapter::ProcessSpec {
+        self.0.version_command()
+    }
+
+    fn read_version(&self, stdout: &[String]) -> Option<String> {
+        self.0.read_version(stdout)
+    }
+
+    fn title_rules(&self) -> ersa_adapter::TitleRules {
+        self.0.title_rules()
+    }
+
+    fn recording_version(&self, recording: &Recording) -> Result<String, String> {
+        self.0.recording_version(recording)
+    }
+
     fn projector(&self) -> Box<dyn Projector> {
         self.0.projector()
     }
@@ -371,6 +412,22 @@ impl Adapter for ReplayAdapter {
             done.send_replace(true);
         });
         Ok(Box::new(ReplaySession { stop, finished }))
+    }
+
+    fn version_command(&self) -> ersa_adapter::ProcessSpec {
+        self.inner.version_command()
+    }
+
+    fn read_version(&self, stdout: &[String]) -> Option<String> {
+        self.inner.read_version(stdout)
+    }
+
+    fn title_rules(&self) -> ersa_adapter::TitleRules {
+        self.inner.title_rules()
+    }
+
+    fn recording_version(&self, recording: &Recording) -> Result<String, String> {
+        self.inner.recording_version(recording)
     }
 
     fn projector(&self) -> Box<dyn Projector> {
@@ -460,6 +517,12 @@ mod tests {
     impl Adapter for NoBackend {
         fn backend(&self) -> &str {
             "none"
+        }
+        fn title_rules(&self) -> ersa_adapter::TitleRules {
+            ersa_adapter::TitleRules {
+                max_chars: 10,
+                one_line: true,
+            }
         }
         async fn start(
             &self,
@@ -605,5 +668,60 @@ mod tests {
             .collect();
         assert_eq!(lines, ["a", "b"]);
         assert!(*sink.exited.lock().unwrap());
+    }
+
+    /// An adapter that answers every recording with `answer`.
+    struct Recognizes {
+        name: &'static str,
+        answer: Result<&'static str, &'static str>,
+    }
+
+    #[async_trait]
+    impl Adapter for Recognizes {
+        fn backend(&self) -> &str {
+            self.name
+        }
+        fn title_rules(&self) -> ersa_adapter::TitleRules {
+            NoBackend.title_rules()
+        }
+        fn recording_version(&self, _: &Recording) -> Result<String, String> {
+            self.answer.map(String::from).map_err(String::from)
+        }
+        async fn start(
+            &self,
+            _: Arc<dyn Transport>,
+            _: SessionConfig,
+            _: Arc<dyn AdapterSink>,
+        ) -> Result<Box<dyn AdapterSession>, AdapterError> {
+            unreachable!("a replay never starts its backend")
+        }
+        fn projector(&self) -> Box<dyn Projector> {
+            NoBackend.projector()
+        }
+    }
+
+    // verifies: PROTO-CORE-API-R69
+    #[test]
+    fn a_recording_plays_through_the_first_registered_adapter_that_recognizes_it() {
+        let recording = Recording::parse("", serde_json::json!({})).unwrap();
+        let adapter = |name, answer| -> Arc<dyn Adapter> { Arc::new(Recognizes { name, answer }) };
+        let adapters = [
+            adapter("a", Err("not mine")),
+            adapter("b", Ok("1.0")),
+            adapter("c", Ok("2.0")),
+        ];
+        let (found, version) = recognize(&adapters, &recording).unwrap();
+        assert_eq!((found.backend(), version.as_str()), ("b", "1.0"));
+
+        // None does: refused, with each adapter's reason.
+        let adapters = [
+            adapter("a", Err("not mine")),
+            adapter("b", Err("no version")),
+        ];
+        let reason = recognize(&adapters, &recording).err().unwrap();
+        assert!(reason.contains("a: not mine"), "{reason}");
+        assert!(reason.contains("b: no version"), "{reason}");
+        let reason = recognize(&[], &recording).err().unwrap();
+        assert!(reason.contains("no adapter"), "{reason}");
     }
 }
