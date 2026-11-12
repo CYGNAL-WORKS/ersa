@@ -1,6 +1,6 @@
 # 0026: Ersa keeps the user's arrangement of its sessions
 
-- Status: superseded by 0032
+- Status: superseded by 0033
 - Date: 2026-11-05
 - Supersedes: 0017
 - Related briefs: FLOW-ORGANIZE-SESSIONS, FLOW-ARCHIVE-DELETE-SESSION, FLOW-FORK-SESSION, PROTO-CORE-API, ARCH-CORE, LAY-SHELL

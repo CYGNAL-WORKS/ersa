@@ -4,7 +4,7 @@ type: flow
 title: Archive or delete a session
 status: ready
 references: [LAY-SHELL, PROTO-CORE-API, FLOW-ORGANIZE-SESSIONS]
-adrs: [0017, 0026, 0032]
+adrs: [0017, 0026, 0033]
 ---
 
 # Archive or delete a session

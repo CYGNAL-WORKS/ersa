@@ -4,7 +4,7 @@ type: flow
 title: Start a new session
 status: ready
 references: [LAY-SHELL, PROTO-CORE-API, FLOW-RESUME-SESSION, FLOW-SEND-MESSAGE]
-adrs: [0011, 0017, 0028, 0032]
+adrs: [0011, 0017, 0028, 0033]
 ---
 
 # Start a new session
