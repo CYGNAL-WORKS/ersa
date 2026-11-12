@@ -23,7 +23,7 @@ Before writing code, write the plan to `.scratch/plan.md`: the requirements in b
 Write the issue to `.scratch/issue.md` (`gh issue view <n>`), then start the `assumption-checker` agent in a fresh context with the checkout's path, the plan file and the issue file, never your reasoning about them. It reports each assumption as holds, false or open.
 
 - **False**: change the plan. When the plan was right and a brief is wrong, write an inbox line.
-- **Open** where a brief is silent and your code depends on the answer: write an inbox line, pick the most reasonable answer, and carry on.
+- **Open** where a brief is silent and your code depends on the answer: write an inbox line, pick the answer `CLAUDE.md` (Agents make the calls the rules settle) gives, and carry on.
 
 When the build turns up an assumption the plan did not name, add it to the plan, and before you push, run the checker once more on the new ones alone.
 
@@ -66,8 +66,9 @@ Fixing findings:
 
 - Fix each with the smallest change that removes the defect, with a test where one is cheap. Fix low ones when trivial and list the rest as follow-ups in the pull request.
 - A fix that needs a new mechanism (a cache, a background task, a protocol field, a state machine or reducer) becomes its own ticket unless the branch is unsafe to merge without it: new mechanisms bring their own defects. So does a reshape the review names that is larger than the ticket. A gap the brief does not cover gets an inbox line when your code depends on it, and is a follow-up otherwise.
-- A finding on a planning-only path, or one that contradicts a harness rule, is the owner's: report it and stop rather than spend a round on it.
-- After the third round (`round` in the state), stop and report to the owner in plain English what remains.
+- A finding on a planning-only path, or one that contradicts a harness rule, needs a planning pass: send it, with the pull request, to the session that started you as for `waits-on-planning`, and stop rather than spend a round on it.
+- A finding marked as a follow-up goes in the pull request's follow-ups; it takes no round.
+- After the third round (`round` in the state), stop and report what remains in plain English to the session that started you, or to the owner when none did.
 
 Pushing:
 
