@@ -26,23 +26,38 @@ fn the_version_command_finds_the_cli_as_sessions_do() {
         ("C:/elsewhere/claude.exe", "C:/elsewhere/claude.exe"),
     ] {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", INNER, "--ignored", "--test-threads=1"])
+            .args([
+                "--exact",
+                INNER,
+                "--ignored",
+                "--nocapture",
+                "--test-threads=1",
+            ])
             .env("ERSA_CLAUDE", value)
             .env(EXPECTED, expected)
             .output()
             .expect("the test binary runs");
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(output.status.success(), "{value:?}: {stdout}");
-        assert!(stdout.contains("1 passed"), "{value:?}: {stdout}");
+        // The inner test ran, rather than being filtered away.
+        assert!(
+            stdout.contains(&format!("checked {expected}")),
+            "{value:?}: {stdout}"
+        );
     }
 }
 
 #[test]
 #[ignore = "run by the_version_command_finds_the_cli_as_sessions_do"]
 fn inner_the_version_command_runs_the_program_sessions_run() {
+    // Run on its own (by `--ignored`, say), there is nothing to check.
+    let Ok(expected) = std::env::var(EXPECTED) else {
+        return;
+    };
     let spec = ClaudeAdapter::new().version_command();
-    assert_eq!(spec.program, std::env::var(EXPECTED).unwrap());
+    assert_eq!(spec.program, expected);
     assert_eq!(spec.args, ["--version"]);
+    println!("checked {expected}");
 }
 
 #[test]
