@@ -118,17 +118,23 @@ pub fn end_with_this_run() {
 pub fn end_with_this_run() {}
 
 /// The stand-in backend CLI (examples/stand_in_backend.rs), which `cargo
-/// test` builds beside this test: tests live in `target/<profile>/deps/`.
+/// test` builds into `target/<profile>/examples/`. Cargo tells a test
+/// neither that directory nor the profile, and where the test binary sits
+/// below it depends on the Cargo version (`<profile>/deps/` before 1.100,
+/// `<profile>/build/<package>/<hash>/out/` since), so this takes the
+/// nearest directory above the test binary that holds the example.
 pub fn stand_in_backend() -> PathBuf {
     let exe = std::env::current_exe().expect("this test binary");
-    let path = exe
-        .parent()
-        .and_then(Path::parent)
-        .expect("target/<profile>")
-        .join("examples")
-        .join(format!("stand_in_backend{}", std::env::consts::EXE_SUFFIX));
-    assert!(path.exists(), "no stand-in backend at {}", path.display());
-    path
+    let name = format!("stand_in_backend{}", std::env::consts::EXE_SUFFIX);
+    exe.ancestors()
+        .map(|dir| dir.join("examples").join(&name))
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| {
+            panic!(
+                "no examples/{name} in any directory above {}",
+                exe.display()
+            )
+        })
 }
 
 pub async fn open(location: &CoreLocation) -> (CoreLink, How, mpsc::UnboundedReceiver<LinkEvent>) {
