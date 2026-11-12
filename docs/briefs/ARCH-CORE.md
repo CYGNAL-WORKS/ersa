@@ -5,7 +5,7 @@ title: Ersa system architecture
 status: ready
 verified-by: review
 references: [PROTO-CORE-API, PROTO-AGENT-EVENTS, PROTO-CLAUDE-CODE-STREAM, PROTO-COPILOT-SDK, PROTO-HARNESS-TOOLS]
-adrs: [0004, 0006, 0007, 0008, 0009, 0011, 0014, 0017, 0028, 0026]
+adrs: [0004, 0006, 0007, 0008, 0009, 0011, 0014, 0017, 0028, 0026, 0031]
 ---
 
 # Ersa system architecture
@@ -63,10 +63,10 @@ A Rust library wrapped in a thin binary, running as its own process (ADR 0011). 
 - **Core API**: the request/response surface the Interface uses. Schema-defined; TypeScript types are generated from it.
 - **Session manager**: the lifecycle of every session (created, starting, running, waiting on user, idle, disconnected, ended). Routes user input and permission decisions to adapters and backend output to the projection. Emits each session's lifecycle events itself and writes Core's operational records (process started, exited, failed to start, Core restarted) to the app log.
 - **Projection**: a session's history is the backend's own session record (ADR 0017). When a session is opened (`PROTO-AGENT-EVENTS`, Opening a session), Core projects the record through the adapter into Ersa events, then appends events projected from the live stream, merged on the backend's message ids. Details only the live stream carries (text as it arrives, permission prompts, turn ends, cost, rate limits) are shown and not stored. Nothing projected is stored. The raw log, the lines exchanged with a live backend since Core opened it, is held in memory for the developer pane.
-- **Adapter registry**: which backends are installed on which hosts, their versions and capabilities, and how to start them.
+- **Adapter registry**: the adapters this build includes, which are the only backends Core knows (ADR 0031), and for each one the hosts it is installed on and its version and capabilities there.
 - **Transport layer**: starts processes and carries their stdio on a host, and reads files there: local spawn, or SSH. It sets the variables a process is given and removes inherited ones it must not see, and every transport honors both. Adapters and the VCS layer run through it without knowing which one they got, so a remote host's session record and live-session registry are read on that host, as M4's remote sessions need.
 - **Workspace and VCS**: creates and destroys isolated workspaces for a project behind a VCS interface. Git worktrees first; Perforce second. Executes through the transport so remote hosts work the same way.
-- **Pack client**: fetches packs from a pack source, verifies and caches them, and renders the neutral pack definition into each installed backend's native configuration.
+- **Pack client**: fetches packs from a pack source, verifies and caches them, and has each installed backend's adapter render the neutral pack definition into that backend's native configuration.
 - **Mode engine**: resolves a session's mode into the base instructions, allowed tools, and tool-server list handed to the adapter at start.
 - **Harness tools server**: the MCP tools Ersa exposes to every session's backend (`PROTO-HARNESS-TOOLS`): cross-session messaging, session metadata, user-defined tools, and the interface-driving tools. For Claude Code it is served in-process over the control channel (ADR 0014). Permission requests do not go through it.
 - **Persistence**: one local SQLite database per Core process. It holds projects, hosts, workspaces with their lifecycle state, pack cache metadata, settings, and per session only pointers: host, project, workspace, backend, the backend's session id, and mode, plus the user's arrangement of it (pinned, section, archived, when its latest turn ended; ADR 0026). It also holds the user's sections. A workspace's state survives a crash part way through creating or removing its worktree, so Core finds the half-made or half-removed worktree at startup. A session's title and creation time are not stored: the title is the backend's, and the creation time is that of the first entry in its session record, else of the app log's first fact for it.
@@ -74,7 +74,7 @@ A Rust library wrapped in a thin binary, running as its own process (ADR 0011). 
 
 ### Adapters
 
-One per backend, behind one interface: start or resume a session on a transport with a configuration, send user input and permission decisions, receive the live stream, list the backend's sessions for a directory, read a session's record, stop. Adapters provide the projection from both the live stream and the session record to `PROTO-AGENT-EVENTS`.
+One per backend, behind one interface: say how the backend is detected and what limits it sets, recognize its own recordings, render a pack into the backend's native configuration, start or resume a session on a transport with a configuration, send user input and permission decisions, receive the live stream, list the backend's sessions for a directory, read a session's record, stop. Adapters provide the projection from both the live stream and the session record to `PROTO-AGENT-EVENTS`.
 
 - **Claude Code adapter**: drives the CLI in its streaming JSON mode, launched as an ordinary Claude Code session with the user's settings, with every behavior-affecting flag passed explicitly, reads the session record from the CLI's session files, reads capabilities from the CLI's initial message, and receives permission requests over the CLI's stdio control channel (`PROTO-CLAUDE-CODE-STREAM`, ADR 0014).
 - **Copilot adapter**: uses the official Copilot Rust SDK, including its session listing and history, and maps its types to Ersa events (`PROTO-COPILOT-SDK`, ADR 0009).
@@ -84,6 +84,7 @@ One per backend, behind one interface: start or resume a session on a transport 
 - The Interface depends only on `PROTO-CORE-API` and `PROTO-AGENT-EVENTS`, through generated types.
 - Core never renders. It emits events and answers requests.
 - Adapters and the VCS layer depend on the transport interface, never on a concrete transport.
+- Core and the Interface depend on the adapter interface, never on a particular adapter. The build registers each adapter in one place.
 - Nothing in Core depends on Tauri.
 - Harness tools can never operate permission controls, and interface-driving tools require visible per-invocation consent.
 - Platform-specific code lives behind narrow modules (ADR 0006). Process trees are killed as a unit on Windows (job objects) so stopped sessions leave no orphans.
@@ -117,7 +118,7 @@ The what; the why is in the linked ADRs.
 - **M2 Workbench**: files, diff, terminal, and browser panes. Done when the author stops opening a separate tool to review agent changes.
 - **M3 Second backend and modes**: Copilot adapter via the SDK; modes as presets. Done when a Copilot and a Claude Code session run side by side with the same interface.
 - **M4 Remote and VCS**: remote hosts in the rail, remote worktrees, disconnect and backfill; Perforce workspace adapter. Done when a session on a Linux VM and a session in a Perforce project both behave like local git sessions.
-- **M5 Packs**: neutral pack format, renderers per backend, pack sources (directory, share, HTTP), apply and update. Done when a pack edited locally is published and picked up by a second machine.
+- **M5 Packs**: neutral pack format, a renderer in each adapter, pack sources (directory, share, HTTP), apply and update. Done when a pack edited locally is published and picked up by a second machine.
 - **M6 Harness tools**: cross-session messaging, user-defined tools, and a minimal show-me (focus, highlight, explain). Done when one session can hand work to another and a user can ask "how do I add a host" and watch it happen.
 
 ## Requirements
@@ -136,6 +137,7 @@ Verified by review at this level; testable requirements live in the protocol bri
 - **ARCH-CORE-R10**: No harness tool can operate a permission control.
 - **ARCH-CORE-R11**: The Interface can run against the replay server with no live backend.
 - **ARCH-CORE-R12**: A session's transcript, apart from details only the live stream carries, is reconstructible from the backend's own session record alone.
+- **ARCH-CORE-R13**: Core builds and its own tests pass with no adapter present, and adding or removing a backend changes only that backend's adapter, its tests and its registration.
 
 ## Out of scope
 
@@ -147,9 +149,11 @@ Verified by review at this level; testable requirements live in the protocol bri
 
 - Perforce isolation model (see PRD-ERSA open questions).
 - Which local-inference harness to support first.
+- How a backend's own mark reaches the Interface once the vendors' brand terms are checked, since adding a backend changes only its adapter, its tests and its registration.
 
 ## Changes
 
+- 2026-11-09: adapters are compile-time crates behind one registry, the registered adapters are the only backends Core knows, and each adapter renders packs for its backend (ADR 0031). ARCH-CORE-R13 added.
 - 2026-11-05: Persistence holds the user's arrangement of sessions and their sections (ADR 0026). No requirement IDs changed.
 - 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
 - 2026-11-01: from #35 inbox: Core keeps its SQLite database, holding projects, workspaces with lifecycle state that survives a crash mid-create or mid-remove, settings, and per-session pointers including mode; titles and creation times are not stored. The app log is read back at startup (interrupted sessions, last facts of ended sessions, creation times) and rotation keeps each session's first and last facts. No requirement IDs changed.
