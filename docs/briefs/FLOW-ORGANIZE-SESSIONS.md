@@ -4,7 +4,7 @@ type: flow
 title: Arrange sessions in the rail
 status: ready
 references: [LAY-SHELL, PROTO-CORE-API]
-adrs: [0026, 0031]
+adrs: [0026, 0032]
 ---
 
 # Arrange sessions in the rail
@@ -39,7 +39,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **A rename the backend refuses** (a blank or too-long title, or a record that is gone) keeps the field open with the reason. Rename is available on every session, a starting one included, and the new name shows at once; the backend keeps the user's name apart from the one it generates, and the user's wins. A fork before its first message is the one exception, open until forking is built (FLOW-FORK-SESSION).
 - **Nothing to show.** Showing active sessions with every session archived, the rail says there are no active sessions. Changing what is shown never closes the active session, even when its tile leaves the rail. Starting a session while showing archived sessions only switches the rail to show active sessions, so the new tile is in view.
 - **A project whose sessions are all pinned** has its tiles in the Pinned group; its heading follows `LAY-SHELL` (Projects), and a collapsed heading counts only the tiles under it.
-- **Last activity** moves a tile only when a turn ends, never while a reply streams, and never because the session's state changed. Work done outside Ersa counts, and shows the next time the rail lists sessions (PROTO-CORE-API-R69).
+- **Last activity** moves a tile only when a turn ends, never while a reply streams, and never because the session's state changed. Work done outside Ersa counts, and shows the next time the rail lists sessions (PROTO-CORE-API-R75).
 - **Unseen.** A session is unseen when it goes idle after working while not the active one, or when the user chooses Mark as unread; the mark goes when the user makes it active or chooses Mark as read.
 
 ## Requirements
@@ -83,7 +83,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 
 ## Changes
 
-- 2026-11-09: owner's decisions from the audit against Claude Desktop: moving a pinned session to a section unpins it (R22); a section's name follows Desktop's limits (R06 retired for R23); Mark as unread, and an unseen mark that survives restarts (R24, R25); the menu item is View all, as in the web app (R26, and R16 reworded to name no label); last activity counts work done outside Ersa (R10 reworded, ADR 0031).
+- 2026-11-09: owner's decisions from the audit against Claude Desktop: moving a pinned session to a section unpins it (R22); a section's name follows Desktop's limits (R06 retired for R23); Mark as unread, and an unseen mark that survives restarts (R24, R25); the menu item is View all, as in the web app (R26, and R16 reworded to name no label); last activity counts work done outside Ersa (R10 reworded, ADR 0032).
 - 2026-11-08: from #205 inbox: the order follows a name that changes while sorting by name (R09), and Core correcting the date created of a session with no activity yet can move its tile (R09 and R10 reworded, their IDs unchanged).
 - 2026-11-08: from #208 inbox: All sessions does nothing while a first message is on its way (R16 reworded, its ID unchanged).
 - 2026-11-08: from #267 inbox: the date groups' bounds: Previous 7 days is 2 to 7 calendar days back, and a session created in the future is in Today. No requirement IDs changed.
