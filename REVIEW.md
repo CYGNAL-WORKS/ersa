@@ -24,7 +24,7 @@ A known defect stays at its severity when it needs a repeat or a slow peer to sh
 
 Ersa abstracts what the backend CLIs do into one common shape; it never adds to or duplicates their concepts. If the backend owns it, Ersa asks the backend.
 
-- A change that keeps its own copy of something a backend owns, or adds to a concept a backend owns, is medium at least. Report it even when a brief asks for it, and say that it needs the owner.
+- A change that keeps its own copy of something a backend owns, or adds to a concept a backend owns, is medium at least. Report it even when a brief asks for it, and say that the brief needs a planning pass.
 - A concept no backend has, such as a workspace or the user's arrangement of sessions (ADR 0026), is outside this rule.
 
 ## What counts as verified
@@ -37,4 +37,5 @@ Ersa abstracts what the backend CLIs do into one common shape; it never adds to 
 
 - A first review reads the whole change against main. A re-review reads only the commits since the last reviewed head, and of a merge of main only its conflict resolution.
 - Leave style alone. Formatting, naming taste and lint that CI already runs are not findings.
-- A finding the review loop cannot act on, such as a defect on a planning-only path or a contradiction between harness rules, is still reported at its severity; say that it needs the owner.
+- A defect the change did not introduce, make reachable or make worse, and that is outside the requirements its ticket builds, does not block: report it as low, say the severity it would have in scope, and say that it is a follow-up. Confirm it as any finding.
+- A finding the review loop cannot act on, such as a defect on a planning-only path or a contradiction between harness rules, is still reported at its severity; say that it needs a planning pass.
