@@ -3,8 +3,8 @@
 // component only draws this.
 
 import type { Project, Session, Workspace } from "../protocol/core-api.gen";
-import { newestFirst } from "./controls";
-import type { GroupBy, Show } from "./arrangement";
+import { newestFirst, timeOf } from "./controls";
+import { DEFAULT_ARRANGEMENT, type GroupBy, type Show, type SortBy } from "./arrangement";
 import { wantTone } from "./tile";
 
 /** A date group's key, also its key among the collapsed groups (PROTO-CORE-API, Settings). */
@@ -17,20 +17,21 @@ export type Group =
   | { kind: "date"; key: DateKey; sessions: Session[] };
 
 export interface Tree {
-  /** The pinned sessions shown, newest first: they lead the rail in the Pinned group and appear nowhere else (FLOW-ORGANIZE-SESSIONS-R01). */
+  /** The pinned sessions shown, in the chosen sort: they lead the rail in the Pinned group and appear nowhere else (FLOW-ORGANIZE-SESSIONS-R01). */
   pinned: Session[];
-  /** The groups with headings, in order, each with its sessions newest first. Grouped by project, a project may have none. */
+  /** The groups with headings, in order, each with its sessions in the chosen sort. Grouped by project, a project may have none. */
   groups: Group[];
   /**
-   * The sessions under no heading, newest first: grouped by project, those whose project the window can't tell, at
+   * The sessions under no heading, in the chosen sort: grouped by project, those whose project the window can't tell, at
    * the end; grouped by none, every session not pinned (R08).
    */
   loose: Session[];
 }
 
-/** How the tree is arranged: the grouping and the filter of the rail's arrangement, and today, for date groups. */
+/** How the tree is arranged: the grouping, the sort and the filter of the rail's arrangement, and today, for date groups. */
 export interface TreeArrangement {
   groupBy: GroupBy;
+  sortBy: SortBy;
   show: Show;
   /** Now, whose local date the date groups count from. */
   now: Date;
@@ -48,13 +49,13 @@ export function treeOf(
   projects: readonly Project[],
   workspaces: Readonly<Record<string, Pick<Workspace, "project_id">>>,
   sessions: readonly Session[],
-  { groupBy, show, now }: TreeArrangement = { groupBy: "project", show: "active", now: new Date() },
+  { groupBy, sortBy, show, now }: TreeArrangement = { ...DEFAULT_ARRANGEMENT, now: new Date() },
 ): Tree {
   const pinned: Session[] = [];
   const loose: Session[] = [];
   const byProject = new Map<string, Session[]>(projects.map((p) => [p.id, []]));
   const byDate = new Map<DateKey, Session[]>(DATE_KEYS.map((k) => [k, []]));
-  for (const s of newestFirst(sessions)) {
+  for (const s of sortedBy(sessions, sortBy)) {
     if (!shows(show, s)) continue;
     if (s.pinned) {
       pinned.push(s);
@@ -78,6 +79,37 @@ export function treeOf(
         ? DATE_KEYS.map((key) => ({ kind: "date" as const, key, sessions: byDate.get(key) ?? [] })).filter((g) => g.sessions.length > 0)
         : [];
   return { pinned, groups, loose };
+}
+
+// The user's locale, as the webview reports it (R09).
+const names = new Intl.Collator();
+
+/** A session's last activity, for sorting: its creation until a turn has ended (R09). */
+function lastActivityOf(session: Session): string {
+  return session.last_activity_at ?? session.created_at;
+}
+
+function byName(a: Session, b: Session): number {
+  // Untitled sessions go last, and tie with each other.
+  if (!a.title || !b.title) return (a.title ? 0 : 1) - (b.title ? 0 : 1);
+  return names.compare(a.title, b.title);
+}
+
+/** Each sort: what it reads of a session, and how it compares two; a tie keeps the order it is given (R09). */
+const SORTS: Record<SortBy, { read: (s: Session) => string | undefined; compare: (a: Session, b: Session) => number }> = {
+  created: { read: (s) => s.created_at, compare: () => 0 },
+  last_activity: { read: lastActivityOf, compare: (a, b) => timeOf(lastActivityOf(b)) - timeOf(lastActivityOf(a)) },
+  name: { read: (s) => s.title, compare: byName },
+};
+
+/** The sessions in the chosen sort, ties by date created, newest first (R09), since a sort keeps the order of equals. */
+function sortedBy(sessions: readonly Session[], sortBy: SortBy): Session[] {
+  return newestFirst(sessions).sort(SORTS[sortBy].compare);
+}
+
+/** What the chosen sort reads of a session, its tie-break included: while it holds, the tile keeps its place (R10). */
+export function sortValueOf(session: Session, sortBy: SortBy): string {
+  return `${SORTS[sortBy].read(session)}/${session.created_at}`;
 }
 
 /** Whether the filter shows the session (R11): showing All, an archived one too, its tile marked as archived. */
