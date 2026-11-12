@@ -22,6 +22,19 @@ export type SessionsView =
   | { state: "error"; message: string }
   | { state: "unavailable" };
 
+/**
+ * A list read before a turn's end carries an older last activity than the tile that reported it, so the newer stays
+ * and the tile doesn't slide back (FLOW-ORGANIZE-SESSIONS-R10). Core writes these times at one width, so text orders them.
+ */
+function keepingActivity(listed: Session[], shown: SessionsView): Session[] {
+  if (shown.state !== "ready") return listed;
+  const known = new Map(shown.sessions.map((s) => [s.id, s.last_activity_at]));
+  return listed.map((s) => {
+    const at = known.get(s.id);
+    return at !== undefined && (s.last_activity_at === undefined || at > s.last_activity_at) ? { ...s, last_activity_at: at } : s;
+  });
+}
+
 export type CoreView =
   | { phase: "connecting" }
   | {
@@ -136,7 +149,7 @@ export function connect(
       };
       client.call("session.list").then(
         (sessions) => {
-          patch((view) => ({ ...view, sessions: { state: "ready", sessions: checkSessions(sessions) } }));
+          patch((view) => ({ ...view, sessions: { state: "ready", sessions: keepingActivity(checkSessions(sessions), view.sessions) } }));
           done();
         },
         // A failed reread keeps the list the rail already shows.
@@ -155,23 +168,33 @@ export function connect(
         if (event.method === "session.tile") {
           const session_id = event.params.session_id;
           const tile = checkTile(event.params.tile);
-          const known =
-            current.phase === "connected" &&
-            current.sessions.state === "ready" &&
-            current.sessions.sessions.some((s) => s.id === session_id);
+          const last_activity_at = event.params.last_activity_at;
+          const listed =
+            current.phase === "connected" && current.sessions.state === "ready"
+              ? current.sessions.sessions.find((s) => s.id === session_id)
+              : undefined;
+          const known = listed !== undefined;
+          // A turn's end: no notification carries a title the backend announced or a creation time Core corrected
+          // from the session's record, and the rail sorts by both, so the list is read for them now.
+          const turnEnded = last_activity_at !== undefined && last_activity_at !== listed?.last_activity_at;
           // A tile for a session the list lacks means a session was created
           // since it was read: read it again.
           if (known) {
             // A read in flight may answer with a list older than this
             // tile; read once more after it so the newer tile is not lost.
-            if (sessionRead !== "idle") listSessions();
+            if (sessionRead !== "idle" || turnEnded) listSessions();
             patch((view) =>
               view.sessions.state === "ready"
                 ? {
                     ...view,
                     sessions: {
                       state: "ready",
-                      sessions: view.sessions.sessions.map((s) => (s.id === session_id ? { ...s, tile } : s)),
+                      // Every tile carries the last activity once a turn has ended, and that is how the rail
+                      // hears of a new one (FLOW-ORGANIZE-SESSIONS-R10). Core never clears it, so one that
+                      // comes without keeps what was listed.
+                      sessions: view.sessions.sessions.map((s) =>
+                        s.id === session_id ? { ...s, tile, last_activity_at: last_activity_at ?? s.last_activity_at } : s,
+                      ),
                     },
                   }
                 : view,

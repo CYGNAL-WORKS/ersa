@@ -242,8 +242,9 @@
   animation: session-breath var(--motion-breathe-once) var(--motion-ease-in-out);
 }
 
-/* A tile that holds a shelf slides by its offset, not a transform, so the shelf stays on its anchor. */
-.session-item[data-slide-top] {
+/* A tile that holds a shelf or an open menu slides by its offset, not a transform, so it stays on its anchor. */
+.session-item[data-slide-top],
+.session-item:has(.menu) {
   position: relative;
 }
 
