@@ -1,4 +1,4 @@
-# 0032: What Core stores per session, and what it asks the backend
+# 0033: What Core stores per session, and what it asks the backend
 
 - Status: accepted
 - Date: 2026-11-09

@@ -4,7 +4,7 @@ type: protocol
 title: Claude Code streaming JSON protocol
 status: ready
 references: [PROTO-AGENT-EVENTS, PROTO-HARNESS-TOOLS]
-adrs: [0004, 0014, 0017, 0028, 0032]
+adrs: [0004, 0014, 0017, 0028, 0033]
 ---
 
 # Claude Code streaming JSON protocol
