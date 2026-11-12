@@ -9,6 +9,7 @@ use std::sync::Arc;
 use ersa_adapter::Adapter;
 use ersa_core::{ServeError, Server};
 use serde_json::json;
+use support::fake::FakeAdapter;
 use support::suite::{self, Target};
 use support::{assert_valid, kind, start, start_with_adapters, tempdir, test_config};
 
@@ -91,9 +92,28 @@ async fn status_reports_the_database_and_no_sessions() {
 }
 
 // verifies: PROTO-CORE-API-R06
+// verifies: PROTO-CORE-API-R65
 #[tokio::test(flavor = "multi_thread")]
-async fn host_and_backend_lists_describe_the_local_host() {
+async fn host_and_backend_lists_hold_each_registered_adapter_in_order() {
+    // Core names no backend of its own: with no adapter registered, the
+    // host has none.
     let core = start().await;
+    let mut client = core.client().await;
+    let hosts = client.result("host.list", json!({})).await;
+    assert_eq!(hosts[0]["backends"], json!([]));
+    let infos = client
+        .result("backend.list", json!({ "host_id": "local" }))
+        .await;
+    assert_eq!(infos, json!([]));
+
+    // Registered adapters are listed once each, in the order registered,
+    // whatever their names. A second registration of a name is dropped.
+    let adapters: Vec<Arc<dyn Adapter>> = vec![
+        Arc::new(FakeAdapter::named("zeta")),
+        Arc::new(FakeAdapter::named("alpha")),
+        Arc::new(FakeAdapter::named("zeta")),
+    ];
+    let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
     let mut client = core.client().await;
 
     let hosts = client.result("host.list", json!({})).await;
@@ -102,17 +122,28 @@ async fn host_and_backend_lists_describe_the_local_host() {
     assert_eq!(hosts[0]["id"], json!("local"));
     assert_eq!(hosts[0]["kind"], json!("local"));
     assert_eq!(hosts[0]["status"], json!("connected"));
-    let backends = hosts[0]["backends"].as_array().unwrap();
-    assert_eq!(backends[0]["name"], json!("claude-code"));
+    let names = |list: &serde_json::Value| -> Vec<String> {
+        list.as_array()
+            .unwrap()
+            .iter()
+            .map(|b| b["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(names(&hosts[0]["backends"]), ["zeta", "alpha"]);
     // The test Core points detection at a program that does not exist.
-    assert_eq!(backends[0]["status"], json!("missing"));
+    assert!(
+        hosts[0]["backends"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|b| b["status"] == json!("missing"))
+    );
 
     let infos = client
         .result("backend.list", json!({ "host_id": "local" }))
         .await;
-    assert_eq!(infos[0]["name"], json!("claude-code"));
-    assert!(infos[0]["tested"]["min"].is_string());
-    assert!(infos[0]["tested"]["max"].is_string());
+    assert_eq!(names(&infos), ["zeta", "alpha"]);
+    assert_eq!(infos[0]["models"][0]["id"], json!("model-a"));
 
     let error = client
         .error("backend.list", json!({ "host_id": "nowhere" }))

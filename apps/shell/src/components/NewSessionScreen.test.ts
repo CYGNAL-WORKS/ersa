@@ -154,7 +154,7 @@ describe("the new-session screen", () => {
     const html = render({ backends: { local: [claude("missing")] }, open: "backend" });
     expect(chips(html)).toContain("Backend: No backend");
     expect(html).toContain("Not installed");
-    expect(html).toContain("No backend is available on this host. Install Claude Code or GitHub Copilot on it to start a session.");
+    expect(html).toContain("No backend is available on this host. Install a backend on it to start a session.");
     expect(html).toMatch(/<textarea[^>]*disabled/);
   });
 
@@ -164,7 +164,7 @@ describe("the new-session screen", () => {
     const html = render({ backends: { local: [copilot, { ...claude("error"), label: "Claude Code" }] } });
     // The markup escapes the apostrophes.
     expect(html.replaceAll("&#x27;", "'")).toContain("Claude Code isn't working on this host. Check that it's installed and signed in, then open New session again.");
-    expect(html).not.toContain("Install Claude Code or GitHub Copilot");
+    expect(html).not.toContain("No backend is available on this host.");
     expect(html).toMatch(/<textarea[^>]*disabled/);
   });
 

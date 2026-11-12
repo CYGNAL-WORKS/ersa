@@ -167,11 +167,19 @@ async fn replay_refuses_empty_timings_for_stdout_lines() {
     );
 }
 
+// A recording no registered adapter recognizes is refused at start, with
+// each adapter's reason.
+// verifies: PROTO-CORE-API-R69
 #[tokio::test]
 async fn replay_refuses_a_recording_without_a_version() {
     let dir = tempfile::tempdir().unwrap();
     let fixture = write_recording(dir.path(), INIT, json!({ "stdout_timing_ms": [0] }));
     let stderr = refused_at_start(&fixture).await;
+    assert!(
+        stderr.contains("no registered adapter recognizes it"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("Claude Code: "), "{stderr}");
     assert!(stderr.contains("claude_code_version"), "{stderr}");
     // An empty version is no version either.
     let fixture = write_recording(

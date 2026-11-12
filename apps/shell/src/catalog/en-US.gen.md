@@ -622,7 +622,7 @@ Detecting the backends on this host…
 
 ### `composer.noBackendError`
 
-No backend is available on this host. Install Claude Code or GitHub Copilot on it to start a session.
+No backend is available on this host. Install a backend on it to start a session.
 
 ### `composer.backendFailedError`
 
