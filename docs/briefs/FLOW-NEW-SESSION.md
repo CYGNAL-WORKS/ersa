@@ -4,7 +4,7 @@ type: flow
 title: Start a new session
 status: ready
 references: [LAY-SHELL, PROTO-CORE-API, FLOW-RESUME-SESSION, FLOW-SEND-MESSAGE]
-adrs: [0011, 0017, 0028, 0031]
+adrs: [0011, 0017, 0028, 0032]
 ---
 
 # Start a new session
@@ -68,7 +68,7 @@ New session shows the new-session screen and creates nothing until the first mes
 
 ## Changes
 
-- 2026-11-09: owner's decisions from the audit against Claude Desktop: a running session's model, effort and permission mode can change (R30), its models come from the backend (PROTO-CORE-API-R66), and withdrawing trust says that the backend's own tools keep it (R31). Two open questions closed.
+- 2026-11-09: owner's decisions from the audit against Claude Desktop: a running session's model, effort and permission mode can change (R30), its models come from the backend (PROTO-CORE-API-R72), and withdrawing trust says that the backend's own tools keep it (R31). Two open questions closed.
 - 2026-11-06: Built so far follows #184 and #226 as one paragraph; a union merge had left two. No requirement IDs changed.
 - 2026-11-06: Built so far follows #184: new workspaces start from the chosen base branch (R21, R22). No requirement IDs changed.
 - 2026-11-06: from #229 inbox: what the workspace chip shows while the branches are read and when they can't be, and that the new workspace then starts at the default branch (R28); R22 retired for R29, which names the base branch only once the branches have been read.
