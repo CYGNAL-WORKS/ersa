@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::raw::{Direction, RawLine};
+use crate::recording::Recording;
 use crate::transport::{ProcessExit, ProcessSpec, Transport};
 
 /// One backend's adapter. Core holds one of each in its adapter registry.
@@ -45,6 +46,39 @@ pub trait Adapter: Send + Sync {
     /// the backend configured alike. The default leaves the inherited
     /// environment as it is.
     fn set_environment(&self, _spec: &mut ProcessSpec) {}
+
+    /// The command Core runs to detect the backend on a host: its version
+    /// command, which [`Adapter::read_version`] reads. Core adds the
+    /// adapter's environment ([`Adapter::set_environment`]). The default:
+    /// `<backend> --version`.
+    fn version_command(&self) -> ProcessSpec {
+        ProcessSpec {
+            program: self.backend().to_string(),
+            args: vec!["--version".to_string()],
+            ..ProcessSpec::default()
+        }
+    }
+
+    /// The backend's version in what its version command printed to
+    /// stdout, one entry per line; `None` when it printed nothing usable.
+    /// The default: [`first_word_version`] of the first line.
+    fn read_version(&self, stdout: &[String]) -> Option<String> {
+        stdout.first().and_then(|line| first_word_version(line))
+    }
+
+    /// The titles the backend takes for a session, which Core applies to
+    /// `session.set_title` (PROTO-CORE-API-R70). No default: every backend
+    /// has its own.
+    fn title_rules(&self) -> TitleRules;
+
+    /// The backend version that made `recording`, read from its notes, when
+    /// the recording is one of this adapter's backend; otherwise why it is
+    /// not, which the replay server gives when no registered adapter
+    /// recognizes a recording (PROTO-CORE-API-R69). The default: no
+    /// recording is.
+    fn recording_version(&self, _recording: &Recording) -> Result<String, String> {
+        Err(format!("{} has no recordings", self.label()))
+    }
 
     /// The oldest and newest backend versions this adapter was tested with,
     /// as `backend.list` reports them. `None`, the default, when it does not
@@ -255,6 +289,24 @@ impl BackendChoices {
             .map(|c| c.id.clone())
             .unwrap_or_default()
     }
+}
+
+/// The version number in a version command's line: its first word, when
+/// that starts with a digit. Claude Code prints `2.1.302 (Claude Code)`.
+fn first_word_version(line: &str) -> Option<String> {
+    let word = line.split_whitespace().next()?;
+    word.starts_with(|c: char| c.is_ascii_digit())
+        .then(|| word.to_string())
+}
+
+/// The titles a backend takes for a session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TitleRules {
+    /// The most characters (not bytes) a title may have.
+    pub max_chars: usize,
+    /// Whether a title is a single line. When it is, Core turns line
+    /// breaks into spaces; otherwise it keeps them.
+    pub one_line: bool,
 }
 
 /// A session as its record presents it.

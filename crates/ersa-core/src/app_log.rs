@@ -37,7 +37,7 @@ pub const PREVIOUS_FILE_NAME: &str = "app-log.1.jsonl";
 
 /// How large the app log may grow before it is moved aside. Each fact is a
 /// short line, so this holds a great many sessions' worth.
-const ROTATE_BYTES: u64 = 8 * 1024 * 1024;
+pub(crate) const ROTATE_BYTES: u64 = 8 * 1024 * 1024;
 
 /// The `type` of a line carried into a rotated log for a session whose
 /// last fact could not be read: not a fact, so its ending stays unknown.

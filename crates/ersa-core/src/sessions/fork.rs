@@ -23,10 +23,10 @@ pub struct Beginning {
 /// How a fork's title ends.
 const FORK_MARK: &str = " (fork)";
 
-/// A fork's title: the original's, shortened so the whole fits the limit on a
-/// title, then marked (FLOW-FORK-SESSION-R08).
-fn fork_title(original: &str) -> String {
-    let room = MAX_TITLE_CHARS - FORK_MARK.chars().count();
+/// A fork's title: the original's, shortened so the whole fits its
+/// backend's longest title, `max_chars`, then marked (FLOW-FORK-SESSION-R08).
+fn fork_title(original: &str, max_chars: usize) -> String {
+    let room = max_chars.saturating_sub(FORK_MARK.chars().count());
     let kept: String = original.chars().take(room).collect();
     format!("{}{FORK_MARK}", kept.trim_end())
 }
@@ -103,9 +103,7 @@ impl SessionManager {
                 "the session's backend has not named it yet, so there is nothing to fork".into(),
             ));
         };
-        let adapter = self.adapter(&row.backend).ok_or_else(|| {
-            SessionError::BackendMissing(format!("no adapter for backend {}", row.backend))
-        })?;
+        let adapter = self.adapter_of(&row.backend)?;
 
         if handle.forking.swap(true, Ordering::SeqCst) {
             return Err(SessionError::InvalidState(format!(
@@ -142,10 +140,15 @@ impl SessionManager {
         self.refuse_fork_if_busy(id)?;
         let handle = self.handle(id)?;
         refuse_if_turn_running(&handle)?;
+        let max_chars = adapter.title_rules().max_chars;
         Ok(Forkable {
             backend_id,
             adapter,
-            name: handle.describe().title.as_deref().map(fork_title),
+            name: handle
+                .describe()
+                .title
+                .as_deref()
+                .map(|title| fork_title(title, max_chars)),
             beginning: Beginning {
                 title: None,
                 record,

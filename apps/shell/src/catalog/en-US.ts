@@ -248,7 +248,7 @@ export const enUS = {
     detectingProgress: "Detecting the backends on this host…",
     // The host has no backend to run: none installed, on the status line and as why a start is refused; or one
     // that failed detection, by the label backend.list gives it.
-    noBackendError: "No backend is available on this host. Install Claude Code or GitHub Copilot on it to start a session.",
+    noBackendError: "No backend is available on this host. Install a backend on it to start a session.",
     backendFailedError: "{label} isn't working on this host. Check that it's installed and signed in, then open New session again.",
     // The status line while a message is on its way (FLOW-SEND-MESSAGE-R16), and when Ersa can't tell whether it
     // reached the agent (R15), which never says it failed.

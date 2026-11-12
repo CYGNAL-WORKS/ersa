@@ -36,8 +36,8 @@ use std::sync::{Arc, Mutex};
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
     ImageLimits, OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit, Projected,
-    Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary, SessionConfig, Transport,
-    async_trait,
+    Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary, SessionConfig, TitleRules,
+    Transport, async_trait,
 };
 use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::{
@@ -162,6 +162,12 @@ pub struct FakeAdapter {
     pub read_gate: Arc<tokio::sync::Mutex<()>>,
     /// A backend that takes a stop and never exits.
     stop_hangs: bool,
+    /// The backend's name: [`BACKEND`] unless a test registers more than
+    /// one fake.
+    pub name: &'static str,
+    /// The titles the backend takes: one line of at most 200 characters,
+    /// as Claude Code's, unless a test says otherwise.
+    pub title_rules: TitleRules,
 }
 
 impl FakeAdapter {
@@ -180,6 +186,19 @@ impl FakeAdapter {
             conversation_end_fails: Arc::default(),
             read_gate: Arc::default(),
             stop_hangs: false,
+            name: BACKEND,
+            title_rules: TitleRules {
+                max_chars: 200,
+                one_line: true,
+            },
+        }
+    }
+
+    /// An adapter for the backend `name`.
+    pub fn named(name: &'static str) -> Self {
+        FakeAdapter {
+            name,
+            ..FakeAdapter::new(1)
         }
     }
 
@@ -227,7 +246,11 @@ impl FakeAdapter {
 #[async_trait]
 impl Adapter for FakeAdapter {
     fn backend(&self) -> &str {
-        BACKEND
+        self.name
+    }
+
+    fn title_rules(&self) -> TitleRules {
+        self.title_rules
     }
 
     /// Two of each, with a default marked in each list as Claude Code's are.

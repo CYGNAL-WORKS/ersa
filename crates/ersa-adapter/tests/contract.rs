@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 use ersa_adapter::fake::FakeTransport;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, Direction, LineWriter, PermissionDecision,
-    Process, ProcessExit, ProcessSpec, Projected, Projector, RawLine, SessionConfig, Transport,
-    async_trait,
+    Process, ProcessExit, ProcessSpec, Projected, Projector, RawLine, SessionConfig, TitleRules,
+    Transport, async_trait,
 };
 use ersa_protocol::events::{BackendPassthrough, Event, PermissionBehavior};
 use ersa_protocol::schema::validate_event;
@@ -33,6 +33,13 @@ struct EchoSession {
 impl Adapter for EchoAdapter {
     fn backend(&self) -> &str {
         "echo"
+    }
+
+    fn title_rules(&self) -> TitleRules {
+        TitleRules {
+            max_chars: 80,
+            one_line: true,
+        }
     }
 
     async fn start(
@@ -247,4 +254,30 @@ async fn an_adapter_session_round_trips_through_the_traits() {
         validate_event(&payload).unwrap_or_else(|e| panic!("{e}\n{payload}"));
     }
     assert_eq!(project(&lines), events);
+}
+
+/// An adapter that says nothing of its detection is detected as
+/// `<backend> --version`, its version the first word of the first line.
+#[test]
+fn detection_defaults_to_the_backends_version_flag() {
+    let spec = EchoAdapter.version_command();
+    assert_eq!(spec.program, "echo");
+    assert_eq!(spec.args, ["--version"]);
+    let lines = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(
+        EchoAdapter
+            .read_version(&lines(&["2.1.302 (Claude Code)", "9.9"]))
+            .as_deref(),
+        Some("2.1.302")
+    );
+    assert_eq!(
+        EchoAdapter.read_version(&lines(&["  1.0.0"])).as_deref(),
+        Some("1.0.0")
+    );
+    assert_eq!(EchoAdapter.read_version(&lines(&["Echo 2.1"])), None);
+    assert_eq!(EchoAdapter.read_version(&lines(&[""])), None);
+    assert_eq!(EchoAdapter.read_version(&[]), None);
+    // And no recording is its own unless it says so.
+    let recording = ersa_adapter::recording::Recording::parse("", serde_json::json!({})).unwrap();
+    assert!(EchoAdapter.recording_version(&recording).is_err());
 }

@@ -58,7 +58,7 @@ Docket holds the request until your head reaches a state in the table below, or 
 | `ci-failed` | Fix the checks it lists and push. CI runs on GitHub-hosted Linux and Windows runners: a test that assumes a platform's path form or locale fails on the other one. |
 | `findings` | Fix every high and medium finding, push, and wait again (below). |
 | `merged` | Done. |
-| `waits-on-owner` | Report the `reason` and stop. |
+| `waits-on-owner` | When the `reason` is review rounds spent and the state lists findings, treat it as `findings` (see the last bullet of Fixing findings). Otherwise report the `reason` and stop. |
 | `waits-on-planning` | Send one message with `SendMessage` to the session that started you (`get_session` on `self` gives its id as `parentSessionId`): the pull request, the `reason`, and your inbox lines verbatim. It runs the planning pass. Then report and stop. When no session started you, report and stop. |
 | `error`, twice in a row on the same head | Report the `reason` to the owner and stop. |
 
@@ -67,7 +67,7 @@ Fixing findings:
 - Fix each with the smallest change that removes the defect, with a test where one is cheap. Fix low ones when trivial and list the rest as follow-ups in the pull request.
 - A fix that needs a new mechanism (a cache, a background task, a protocol field, a state machine or reducer) becomes its own ticket unless the branch is unsafe to merge without it: new mechanisms bring their own defects. So does a reshape the review names that is larger than the ticket. A gap the brief does not cover gets an inbox line when your code depends on it, and is a follow-up otherwise.
 - A finding on a planning-only path, or one that contradicts a harness rule, is the owner's: report it and stop rather than spend a round on it.
-- After the third round (`round` in the state), stop and report to the owner in plain English what remains.
+- After the third round (`round` in the state), keep fixing while each round finds new defects you can fix within the ticket. Stop and report to the owner in plain English when a finding needs a decision `CLAUDE.md` leaves to the owner, or a round finds again a defect you already fixed.
 
 Pushing:
 
@@ -76,4 +76,4 @@ Pushing:
 
 ## 6. End the turn
 
-End your turn only when the pull request merged, or its state says it waits on the owner or on a planning pass, or three rounds are spent, or Docket or CI cannot run. Report the pull request link, the check results, and anything the owner must decide. When told a planning pass was pushed, `git pull` and go back to step 5 with the new head. If asked to change the branch later, `git pull` first: a planning commit may have been pushed to it.
+End your turn only when the pull request merged, or its state says it waits on a planning pass, or step 5 says to stop, or Docket or CI cannot run. Report the pull request link, the check results, and anything the owner must decide. When told a planning pass was pushed, `git pull` and go back to step 5 with the new head. If asked to change the branch later, `git pull` first: a planning commit may have been pushed to it.
