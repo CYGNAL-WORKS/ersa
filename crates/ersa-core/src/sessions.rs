@@ -751,11 +751,7 @@ impl SessionManager {
                     let (handle, adapter) = (Arc::clone(&handle), Arc::clone(adapter));
                     let store = self.store.clone();
                     summaries.spawn(async move {
-                        let at = Arc::clone(&transport);
-                        let found = record_id(&store, &handle, Arc::clone(&adapter), at, &row);
-                        if let Some(id) = found.await {
-                            apply_summary(&handle, adapter, transport, row.cwd, id).await;
-                        }
+                        read_summary(&store, &handle, adapter, transport, row).await;
                     });
                 }
             }
@@ -1887,6 +1883,21 @@ fn is_rfc3339(text: &str) -> bool {
     rest == "Z"
 }
 
+/// Reads session `row`'s title and creation time from the record that
+/// holds its conversation ([`record_id`]).
+async fn read_summary(
+    store: &Store,
+    handle: &Handle,
+    adapter: Arc<dyn Adapter>,
+    transport: Arc<dyn Transport>,
+    row: SessionRow,
+) {
+    let read = Arc::clone(&transport);
+    if let Some(id) = record_id(store, handle, Arc::clone(&adapter), read, &row).await {
+        apply_summary(handle, adapter, transport, row.cwd, id).await;
+    }
+}
+
 /// Whose record holds session `row`'s conversation: its own, or for a fork
 /// the backend has not written a record for yet (it does with the first
 /// message), its original's. A record that can't be looked at counts as its
@@ -2391,10 +2402,7 @@ async fn run_session(task: SessionTask) {
     // Read after the stop has its answer, never on its way.
     let row = lock(&handle.row).clone();
     tokio::spawn(async move {
-        let read = Arc::clone(&transport);
-        if let Some(id) = record_id(&store, &handle, Arc::clone(&adapter), read, &row).await {
-            apply_summary(&handle, adapter, transport, row.cwd, id).await;
-        }
+        read_summary(&store, &handle, adapter, transport, row).await;
     });
 }
 
