@@ -153,8 +153,9 @@ pub trait Adapter: Send + Sync {
 
     /// Whether a process other than Ersa's has session `backend_session_id`
     /// open on the transport's host, asked before Core resumes the session
-    /// or writes to its record (PROTO-AGENT-EVENTS-R14). The answer only
-    /// informs the user: Core goes ahead whatever it is. The default, for a
+    /// or writes to its record (PROTO-AGENT-EVENTS-R14), which it does
+    /// whatever the answer, telling the user, and before it forks the
+    /// session, which it refuses when the answer is yes. The default, for a
     /// backend that keeps no registry of open sessions: not open.
     async fn open_elsewhere(
         &self,
@@ -182,10 +183,38 @@ pub trait Adapter: Send + Sync {
             self.backend()
         )))
     }
+
+    /// How session `backend_session_id`'s conversation ends, as its record
+    /// holds it, which is what decides whether it can be forked
+    /// (FLOW-FORK-SESSION-R03). A session with no record has
+    /// [`ConversationEnd::NoReply`]. `None`, the default, for a backend
+    /// that cannot fork a session.
+    async fn conversation_end(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        _backend_session_id: &str,
+    ) -> Result<Option<ConversationEnd>, AdapterError> {
+        Ok(None)
+    }
+}
+
+/// How a session's conversation ends, read from its record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationEnd {
+    /// With a finished reply: the session can be forked.
+    Finished,
+    /// No reply has finished yet.
+    NoReply,
+    /// The last turn was interrupted, or ended in an error.
+    Interrupted,
+    /// Part way through a turn: one still being written, or one the process
+    /// that was writing it never finished.
+    Unfinished,
 }
 
 /// What [`Adapter::delete_record`] did.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordDeletion {
     /// The record is gone, or was already.
     Deleted,
@@ -197,12 +226,13 @@ pub enum RecordDeletion {
 
 /// Whether another process has a session open, as the backend's own
 /// registry of open sessions tells it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OpenElsewhere {
     /// No other process has it open.
     No,
-    /// Process `pid` has it open, so both would write to one record.
-    Yes { pid: u32 },
+    /// These processes have it open, in order of pid, so writing beside
+    /// them would put two writers on one record. Never empty.
+    Yes { pids: Vec<u32> },
     /// The registry could not be read well enough to tell.
     Unknown,
 }
@@ -447,6 +477,16 @@ impl Projected {
     }
 }
 
+/// What a fork starts from (FLOW-FORK-SESSION).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ForkOf {
+    /// The backend's id for the session it starts from a copy of.
+    pub original: String,
+    /// The name the backend gives it as it starts, if any.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 /// How Core wants a session started.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SessionConfig {
@@ -474,6 +514,11 @@ pub struct SessionConfig {
     /// backend to choose, as it does for a backend without host-chosen ids.
     #[serde(default)]
     pub backend_session_id: Option<String>,
+    /// For a fork: what it starts from. The new session has an id of its
+    /// own, [`SessionConfig::backend_session_id`] or the one the backend
+    /// reports.
+    #[serde(default)]
+    pub fork_of: Option<ForkOf>,
     /// Backend-specific settings, read only by that backend's adapter. `null`
     /// when there are none.
     pub extra: Value,

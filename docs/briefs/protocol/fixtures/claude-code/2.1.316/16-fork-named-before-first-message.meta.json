@@ -1,0 +1,118 @@
+{
+  "recorded_at": "2026-11-09T00:09:35.641Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--resume",
+    "67e5f4e2-f63e-48f6-a938-1c8f53780b27",
+    "--fork-session",
+    "--session-id",
+    "7830632d-af9a-4a3a-a63f-b70ee3de8f31"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": false,
+  "session_id": "7830632d-af9a-4a3a-a63f-b70ee3de8f31",
+  "fork_original": {
+    "session_id": "67e5f4e2-f63e-48f6-a938-1c8f53780b27",
+    "cut_to_lines": null,
+    "before": {
+      "lines": 38,
+      "sha256": "fef1632fe0f9a43b239136b9e9c542c8059822f529ff417752800204e6188db4"
+    },
+    "after": {
+      "lines": 38,
+      "sha256": "fef1632fe0f9a43b239136b9e9c542c8059822f529ff417752800204e6188db4"
+    }
+  },
+  "session_record": "record/16-fork-named-before-first-message.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 1956,
+  "stderr": "",
+  "stdout_lines": 14,
+  "stdout_timing_ms": [
+    700,
+    708,
+    708,
+    987,
+    990,
+    1454,
+    1454,
+    1454,
+    1457,
+    1457,
+    1458,
+    1458,
+    1459,
+    1465
+  ],
+  "sent": [
+    {
+      "t": 7,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 700,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-rename_session-1\",\"request\":{\"subtype\":\"rename_session\",\"title\":\"Named fork\",\"source\":\"host\",\"session_id\":\"7830632d-af9a-4a3a-a63f-b70ee3de8f31\"}}"
+    },
+    {
+      "t": 708,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with the single word: named\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "control": "rename_session",
+      "got_response": true,
+      "subtype": "success"
+    },
+    {
+      "turn": 2,
+      "text": "Reply with the single word: named",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}

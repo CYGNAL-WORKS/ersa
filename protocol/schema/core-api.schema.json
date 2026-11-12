@@ -680,6 +680,30 @@
               "$ref": "#/$defs/request_id"
             },
             "method": {
+              "const": "session.fork"
+            },
+            "params": {
+              "$ref": "#/$defs/session.fork.params"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "const": "2.0"
+            },
+            "id": {
+              "$ref": "#/$defs/request_id"
+            },
+            "method": {
               "const": "session.send"
             },
             "params": {
@@ -2596,6 +2620,21 @@
       "description": "Changes the fields given and leaves the others. A session marked deleting answers invalid_state."
     },
     "session.arrange.result": {
+      "$ref": "#/$defs/session"
+    },
+    "session.fork.params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "session.fork.result": {
       "$ref": "#/$defs/session"
     },
     "session.delete.params": {

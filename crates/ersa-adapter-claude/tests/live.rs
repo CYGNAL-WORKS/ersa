@@ -74,6 +74,7 @@ async fn a_tiny_prompt_with_a_permission_round_trip_against_the_real_cli() {
         project_trusted: false,
         project_path: String::new(),
         backend_session_id: None,
+        fork_of: None,
         extra: json!({ "claude_path": claude_path() }),
     };
 
@@ -215,6 +216,7 @@ async fn workspace_configuration_loaded(
         project_trusted: trusted,
         project_path: String::new(),
         backend_session_id: None,
+        fork_of: None,
         extra: json!({ "claude_path": claude_path() }),
     };
     let sink = Arc::new(RecordingSink::new());
@@ -373,6 +375,7 @@ async fn start_and_stop(
         project_trusted: trusted,
         project_path: project_path.to_string_lossy().into_owned(),
         backend_session_id: None,
+        fork_of: None,
         extra: json!({ "claude_path": claude_path() }),
     };
     let sink = Arc::new(RecordingSink::new());
