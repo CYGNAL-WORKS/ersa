@@ -68,7 +68,7 @@ Fixing findings:
 - A fix that needs a new mechanism (a cache, a background task, a protocol field, a state machine or reducer) becomes its own ticket unless the branch is unsafe to merge without it: new mechanisms bring their own defects. So does a reshape the review names that is larger than the ticket. A gap the brief does not cover gets an inbox line when your code depends on it, and is a follow-up otherwise.
 - A finding on a planning-only path, or one that contradicts a harness rule, needs a planning pass: send it, with the pull request, to the session that started you as for `waits-on-planning`, and stop rather than spend a round on it.
 - A finding marked as a follow-up goes in the pull request's follow-ups; it takes no round.
-- After the third round (`round` in the state), stop and report what remains in plain English to the session that started you, or to the owner when none did.
+- After the fifth round (`round` in the state), stop and report what remains in plain English to the session that started you, or to the owner when none did.
 
 Pushing:
 
@@ -77,4 +77,4 @@ Pushing:
 
 ## 6. End the turn
 
-End your turn only when the pull request merged, or its state says it waits on the owner or on a planning pass, or three rounds are spent, or Docket or CI cannot run. Report the pull request link, the check results, and anything the owner must decide. When told a planning pass was pushed, `git pull` and go back to step 5 with the new head. If asked to change the branch later, `git pull` first: a planning commit may have been pushed to it.
+End your turn only when the pull request merged, or its state says it waits on the owner or on a planning pass, or five rounds are spent, or Docket or CI cannot run. Report the pull request link, the check results, and anything the owner must decide. When told a planning pass was pushed, `git pull` and go back to step 5 with the new head. If asked to change the branch later, `git pull` first: a planning commit may have been pushed to it.
