@@ -1102,7 +1102,7 @@ async fn rename_while_open_elsewhere(answer: OpenElsewhere) -> (Vec<Value>, Arc<
 // verifies: PROTO-AGENT-EVENTS-R16
 #[tokio::test(flavor = "multi_thread")]
 async fn renaming_a_session_another_process_has_open_says_so_and_renames_it() {
-    let (after, _) = rename_while_open_elsewhere(OpenElsewhere::Yes { pid: 4242 }).await;
+    let (after, _) = rename_while_open_elsewhere(OpenElsewhere::Yes { pids: vec![4242] }).await;
     assert_eq!(types(&after), ["session.notice"], "{after:#?}");
     let notice = &after[0];
     assert_eq!(notice["event"]["code"], "session_open_elsewhere");
@@ -1142,7 +1142,7 @@ async fn renaming_a_session_no_other_process_has_open_gives_no_notice() {
 async fn renaming_a_running_session_asks_no_registry() {
     // Ersa's own process has it open: the rename goes through it.
     let adapter = FakeAdapter::new(1);
-    *adapter.open_elsewhere.lock().unwrap() = OpenElsewhere::Yes { pid: 4242 };
+    *adapter.open_elsewhere.lock().unwrap() = OpenElsewhere::Yes { pids: vec![4242] };
     let (core, stats) = start_fake(adapter).await;
     let mut client = core.client().await;
     let id = new_session(&core, &mut client).await;

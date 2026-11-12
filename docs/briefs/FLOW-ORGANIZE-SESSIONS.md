@@ -31,12 +31,12 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 
 ## Variations and errors
 
-- **Groups by date** are Today, Yesterday, Previous 7 days and Older, by when the session was created, in the user's local time, so a session never changes group as it works; only the passing of days moves it. Yesterday is the calendar day before today, Previous 7 days the six before that (2 to 7 days back), and Older anything earlier; a session created later than now, by a clock set wrong, is in Today.
+- **Groups by date** are Today, Yesterday, Previous 7 days and Older, by when the session was created, in the user's local time, so a session never changes group as it works; only the passing of days moves it, and a fork moves to its original's date once it has its own record. Yesterday is the calendar day before today, Previous 7 days the six before that (2 to 7 days back), and Older anything earlier; a session created later than now, by a clock set wrong, is in Today.
 - **Sections in other groupings.** Sections are seen only when grouping by section. Choosing New section, from either menu, while grouping by something else switches the grouping to Section so the new heading is in view.
 - **Deleting a section** puts its sessions in "No section" and asks nothing, since no session is lost.
 - **A name already taken, too long or holding a control character.** Two sections may not share a name, ignoring case, a name has at most 80 characters, and runs of spacing in it become one space as in a session's title (PROTO-CORE-API, Sections); the name field says so and keeps the name typed.
 - **Saving fails.** When Core refuses or can't be reached, the change is undone in the rail and the rail says why. Nothing is kept only in the window.
-- **A rename the backend refuses** (a blank or too-long title, or a record that is gone) keeps the field open with the reason. Rename is available on every session, a starting one included, and the new name shows at once; the backend keeps the user's name apart from the one it generates, and the user's wins. A fork before its first message is the one exception, open until forking is built (FLOW-FORK-SESSION).
+- **A rename the backend refuses** (a blank or too-long title, or a record that is gone) keeps the field open with the reason. Rename is available on every session, a starting one included, and the new name shows at once; the backend keeps the user's name apart from the one it generates, and the user's wins.
 - **Nothing to show.** Showing active sessions with every session archived, the rail says there are no active sessions. Changing what is shown never closes the active session, even when its tile leaves the rail. Starting a session while showing archived sessions only switches the rail to show active sessions, so the new tile is in view.
 - **A project whose sessions are all pinned** has its tiles in the Pinned group; its heading follows `LAY-SHELL` (Projects), and a collapsed heading counts only the tiles under it.
 - **Last activity** moves a tile only when a turn ends, never while a reply streams, and never because the session's state changed.
@@ -77,6 +77,7 @@ The user opens a tile's menu (Pin, Rename, Move to section) or the arrange menu 
 
 ## Changes
 
+- 2026-11-09: from #272 inbox: a fork's creation time is its record's, so a fork moves to its original's date once it has a record. No requirement IDs changed.
 - 2026-11-08: from #205 inbox: the order follows a name that changes while sorting by name (R09), and Core correcting the date created of a session with no activity yet can move its tile (R09 and R10 reworded, their IDs unchanged).
 - 2026-11-08: from #208 inbox: All sessions does nothing while a first message is on its way (R16 reworded, its ID unchanged).
 - 2026-11-08: from #267 inbox: the date groups' bounds: Previous 7 days is 2 to 7 calendar days back, and a session created in the future is in Today. No requirement IDs changed.
