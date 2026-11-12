@@ -28,6 +28,13 @@ impl Adapter for TreeAdapter {
         "tree"
     }
 
+    fn title_rules(&self) -> ersa_adapter::TitleRules {
+        ersa_adapter::TitleRules {
+            max_chars: 10,
+            one_line: true,
+        }
+    }
+
     async fn start(
         &self,
         transport: Arc<dyn Transport>,

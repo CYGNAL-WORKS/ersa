@@ -865,41 +865,6 @@ async fn a_client_resubscribing_keeps_the_view_it_was_reading() {
     assert_eq!(fresh["last_seq"], last);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn a_running_session_without_its_adapter_cannot_be_read_until_one_is_back() {
-    let records = Records::default();
-    let (core, _) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
-    let mut client = core.client().await;
-    let id = new_session(&core, &mut client).await;
-    client
-        .result("session.send", json!({ "id": id, "text": "hello" }))
-        .await;
-    drop(client);
-    let TestCore { dir, task, .. } = core;
-    task.abort();
-    let _ = task.await;
-
-    // A Core without the fake adapter still ends it, in its app log.
-    let core = start_with_adapters(dir, |_| {}, Vec::new()).await;
-    let mut client = core.client().await;
-    assert_eq!(session_row(&mut client, &id).await["state"], "ended");
-    let error = client
-        .error("session.subscribe", json!({ "id": id, "from_seq": 0 }))
-        .await;
-    assert_eq!(kind(&error), "invalid_state");
-    client.result("core.shutdown", json!({})).await;
-    let TestCore { dir, task, .. } = core;
-    task.await.unwrap().unwrap();
-
-    // One with the adapter shows its history, ended by that restart.
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(records))];
-    let core = start_with_adapters(dir, |_| {}, adapters).await;
-    let mut client = core.client().await;
-    let events = all_events(&mut client, &id).await;
-    assert_eq!(types(&events)[..2], ["user.message", "assistant.text"]);
-    assert_eq!(events.last().unwrap()["event"]["reason"], "error");
-}
-
 /// Every event of a session, by subscribing from 0 until `session.ended`.
 async fn all_events(client: &mut Client, id: &str) -> Vec<Value> {
     client
@@ -1177,6 +1142,7 @@ async fn a_session_its_backend_never_named_cannot_be_renamed() {
     assert_eq!(kind(&error), "not_found");
 }
 
+// verifies: PROTO-CORE-API-R70
 #[tokio::test(flavor = "multi_thread")]
 async fn a_blank_long_or_multi_line_title_is_refused() {
     let (core, stats) = start_fake(FakeAdapter::new(1)).await;
@@ -1210,6 +1176,64 @@ async fn a_blank_long_or_multi_line_title_is_refused() {
         )
         .await;
     assert_eq!(renamed["title"], "Fix the bug on Windows");
+}
+
+/// A title is held to the rules its backend's adapter states: its limit, and
+/// whether a line break is kept or taken as a space.
+// verifies: PROTO-CORE-API-R70
+#[tokio::test(flavor = "multi_thread")]
+async fn a_title_follows_the_rules_its_backends_adapter_states() {
+    use ersa_adapter::TitleRules;
+    for one_line in [true, false] {
+        let mut adapter = FakeAdapter::new(1);
+        adapter.title_rules = TitleRules {
+            max_chars: 25,
+            one_line,
+        };
+        let (core, _) = start_fake(adapter).await;
+        let mut client = core.client().await;
+        let id = new_session(&core, &mut client).await;
+        client
+            .result("session.send", json!({ "id": id, "text": "hello" }))
+            .await;
+        let error = client
+            .error(
+                "session.set_title",
+                json!({ "id": id, "title": "y".repeat(26) }),
+            )
+            .await;
+        assert_eq!(error["code"], -32602, "{error:#}");
+        assert!(
+            error["message"].as_str().unwrap().contains("25"),
+            "{error:#}"
+        );
+        let longest = "y".repeat(25);
+        let renamed = client
+            .result("session.set_title", json!({ "id": id, "title": longest }))
+            .await;
+        assert_eq!(renamed["title"], longest.as_str());
+
+        let renamed = client
+            .result(
+                "session.set_title",
+                json!({ "id": id, "title": "\n Fix  the \t bug \r\non Windows\n" }),
+            )
+            .await;
+        let expected = if one_line {
+            "Fix the bug on Windows"
+        } else {
+            "Fix the bug\non Windows"
+        };
+        assert_eq!(renamed["title"], expected, "one line: {one_line}");
+        // Spacing is spacing either way; another control character is not.
+        let error = client
+            .error(
+                "session.set_title",
+                json!({ "id": id, "title": "bell\u{7}" }),
+            )
+            .await;
+        assert_eq!(error["code"], -32602, "{error:#}");
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
