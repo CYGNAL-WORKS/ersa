@@ -77,11 +77,14 @@ export function workspaceKinds(project: Project): WorkspaceKind[] {
 }
 
 /**
- * The sessions newest first, by `created_at`: the rail's order, and the project list's (FLOW-NEW-SESSION-R14).
- * Core issues `created_at` as RFC 3339 in UTC, so the strings sort as times do.
+ * A time Core sent, as a number to compare. Core may pass on a backend's time with a fraction of any length, so the
+ * text alone does not order them.
  */
+export const timeOf = (at: string): number => Date.parse(at) || 0;
+
+/** The sessions newest first, by `created_at`: the rail's default order, and the project list's (FLOW-NEW-SESSION-R14). */
 export function newestFirst<S extends Pick<Session, "created_at">>(sessions: readonly S[]): S[] {
-  return sessions.slice().sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
+  return sessions.slice().sort((a, b) => timeOf(b.created_at) - timeOf(a.created_at));
 }
 
 /**

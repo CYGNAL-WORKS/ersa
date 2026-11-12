@@ -5,24 +5,24 @@ describe("the rail's arrangement in Core's settings", () => {
   it("reads the defaults from settings that hold none of the rail's keys", () => {
     expect(arrangementOf({})).toEqual(DEFAULT_ARRANGEMENT);
     expect(arrangementOf(undefined)).toEqual(DEFAULT_ARRANGEMENT);
-    expect(DEFAULT_ARRANGEMENT).toEqual({ groupBy: "project", show: "active", collapsed: {} });
+    expect(DEFAULT_ARRANGEMENT).toEqual({ groupBy: "project", sortBy: "created", show: "active", collapsed: {} });
   });
 
   // verifies: FLOW-ORGANIZE-SESSIONS-R13
-  it("reads back the grouping, the filter and each grouping's collapsed groups it saved, as a restart does", () => {
+  it("reads back the grouping, the sort, the filter and each grouping's collapsed groups it saved, as a restart does", () => {
     let settings: unknown = { new_session: { last_used: {} } };
-    for (const patch of [choicePatch({ groupBy: "date" }), choicePatch({ show: "all" }), collapsePatch("date", ["today", "pinned"]), collapsePatch("project", ["p1"])])
+    for (const patch of [choicePatch({ groupBy: "date" }), choicePatch({ sortBy: "last_activity" }), choicePatch({ show: "all" }), collapsePatch("date", ["today", "pinned"]), collapsePatch("project", ["p1"])])
       settings = mergePatch(settings, patch);
     expect(settings).toEqual({
       new_session: { last_used: {} },
-      rail: { group_by: "date", show: "all", collapsed: { date: ["today", "pinned"], project: ["p1"] } },
+      rail: { group_by: "date", sort_by: "last_activity", show: "all", collapsed: { date: ["today", "pinned"], project: ["p1"] } },
     });
-    expect(arrangementOf(settings)).toEqual({ groupBy: "date", show: "all", collapsed: { date: ["today", "pinned"], project: ["p1"] } });
+    expect(arrangementOf(settings)).toEqual({ groupBy: "date", sortBy: "last_activity", show: "all", collapsed: { date: ["today", "pinned"], project: ["p1"] } });
   });
 
   it("reads a value it does not know as the default, since settings are the user's and may hold anything", () => {
     const odd = { rail: { group_by: "section", show: 3, collapsed: { project: ["p1", 7], date: "today", none: null } } };
-    expect(arrangementOf(odd)).toEqual({ groupBy: "project", show: "active", collapsed: { project: ["p1"] } });
+    expect(arrangementOf(odd)).toEqual({ groupBy: "project", sortBy: "created", show: "active", collapsed: { project: ["p1"] } });
     expect(arrangementOf({ rail: "flat" })).toEqual(DEFAULT_ARRANGEMENT);
   });
 
@@ -35,7 +35,7 @@ describe("the rail's arrangement in Core's settings", () => {
     };
     const reset = mergePatch(settings, RESET_PATCH);
     expect(reset).toEqual({ new_session: { last_used: { p1: { host_id: "local" } } }, rail: {} });
-    expect(arrangementOf(reset)).toEqual({ groupBy: "project", show: "active", collapsed: {} });
+    expect(arrangementOf(reset)).toEqual({ groupBy: "project", sortBy: "created", show: "active", collapsed: {} });
   });
 
   it("merges a patch as RFC 7386 does: objects merge, arrays and values replace, null removes", () => {
