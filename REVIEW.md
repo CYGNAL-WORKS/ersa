@@ -37,4 +37,5 @@ Ersa abstracts what the backend CLIs do into one common shape; it never adds to 
 
 - A first review reads the whole change against main. A re-review reads only the commits since the last reviewed head, and of a merge of main only its conflict resolution.
 - Leave style alone. Formatting, naming taste and lint that CI already runs are not findings.
+- A defect the change did not introduce, make reachable or make worse, and that is outside the requirements its ticket builds, does not block: report it as low, say the severity it would have in scope, and say that it is a follow-up. Confirm it as any finding (ADR 0032).
 - A finding the review loop cannot act on, such as a defect on a planning-only path or a contradiction between harness rules, is still reported at its severity; say that it needs the owner.
