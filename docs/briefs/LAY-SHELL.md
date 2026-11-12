@@ -79,11 +79,12 @@ A debug build attaches to a labeled Core endpoint, such as a replay, only when t
 
 ## Built so far
 
-Of the rail described above, what is built is the tree grouped by project, by date or by none, with sessions newest first and a leading Pinned group, New session at the rail's top, each project heading with New session and trusting the project, group headings that collapse and then count their sessions with the mark in the tone of what they want, the tiles, the arrange button and its menu (Group by Project, Date or None; Show Active, Archived or All; Reset to defaults; All sessions), the sessions page, and the foot; Sort by, New section and grouping by section are still to build. Collapsed groups are kept for each grouping across restarts. The shelf is built: a tile's chevron is the shelf's handle on every tile but the active one's.
+Of the rail described above, what is built is the tree grouped by project, by date or by none, with a leading Pinned group, New session at the rail's top, each project heading with New session and trusting the project, group headings that collapse and then count their sessions with the mark in the tone of what they want, the tiles, the arrange button and its menu (Group by Project, Date or None; Sort by Date created, Last activity or Name; Show Active, Archived or All; Reset to defaults; All sessions), the sessions page, and the foot; New section and grouping by section are still to build. Collapsed groups are kept for each grouping across restarts. The shelf is built: a tile's chevron is the shelf's handle on every tile but the active one's.
 
 ## Changes
 
 - 2026-11-09: owner's decisions from the audit against Claude Desktop: View all, Mark as unread, Archive unavailable while a session is busy, the unseen mark kept across restarts, and the model, effort and permission mode chips changing a running session. No requirement IDs changed.
+- 2026-11-08: from #205 inbox: Built so far follows Sort by. No requirement IDs changed.
 - 2026-11-08: from #208 merge review: the session being shown stays laid out behind the sessions page; `size-row-title-min` joins `DESIGN.md`. No requirement IDs changed.
 - 2026-11-08: from #208 inbox: Built so far follows the sessions page; `RAIL.md` gives a row's More button, where focus goes when a row leaves, what the page does when the active session leaves from a row, and the time in hours. No requirement IDs changed.
 - 2026-11-08: from #267 merge review: Built so far follows the arrange menu and persisted collapsed groups; the tree's notes for nothing to show, and what the rail does while the arrangement is being read or can't be read. No requirement IDs changed.

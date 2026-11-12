@@ -54,6 +54,8 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **FLOW-ORGANIZE-SESSIONS-R08**: When grouping by project, Ersa shall group as `LAY-SHELL` (The rail) gives; when grouping by none, Ersa shall show one list with no headings after the Pinned group.
 - **FLOW-ORGANIZE-SESSIONS-R09**: Ersa shall sort the tiles within each group by the chosen sort: date created newest first; last activity newest first, taking a session's creation for its last activity until it has one; or name in the user's locale order, with untitled sessions last; ties fall back to date created, newest first.
 - **FLOW-ORGANIZE-SESSIONS-R10**: When sorting by last activity, Ersa shall move a tile only when Core reports a new last activity for its session, which Core reports when a turn ends.
+- **FLOW-ORGANIZE-SESSIONS-R09**: Ersa shall sort the tiles within each group by the chosen sort: date created newest first; last activity newest first, taking a session's creation for its last activity until it has one; or name in the user's locale order, with untitled sessions last; ties fall back to date created, newest first. The order holds whenever what it sorts by changes, so a tile moves when its name changes while sorting by name, whether the user renamed it or its backend titled it later.
+- **FLOW-ORGANIZE-SESSIONS-R10**: When sorting by last activity, Ersa shall move a tile only when Core reports a new last activity for its session, which Core sets when a turn ends, or a corrected date created for a session with no last activity yet.
 - **FLOW-ORGANIZE-SESSIONS-R11**: When showing Active, Ersa shall leave archived sessions out of the rail; showing Archived, only archived sessions; showing All, both, each archived tile marked as archived.
 - **FLOW-ORGANIZE-SESSIONS-R12**: When the user collapses or expands a group, Ersa shall keep that for the grouping in use, so the same group in another grouping is unaffected.
 - **FLOW-ORGANIZE-SESSIONS-R13**: Pins, sections and their membership, the grouping, the sort, the filter and the collapsed groups shall survive a restart of Ersa and of Core.
@@ -84,6 +86,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 ## Changes
 
 - 2026-11-09: owner's decisions from the audit against Claude Desktop: moving a pinned session to a section unpins it (R22); a section's name follows Desktop's limits (R06 retired for R23); Mark as unread, and an unseen mark that survives restarts (R24, R25); the menu item is View all, as in the web app (R26, and R16 reworded to name no label); last activity counts work done outside Ersa (R10 reworded, ADR 0031).
+- 2026-11-08: from #205 inbox: the order follows a name that changes while sorting by name (R09), and Core correcting the date created of a session with no activity yet can move its tile (R09 and R10 reworded, their IDs unchanged).
 - 2026-11-08: from #208 inbox: All sessions does nothing while a first message is on its way (R16 reworded, its ID unchanged).
 - 2026-11-08: from #267 inbox: the date groups' bounds: Previous 7 days is 2 to 7 calendar days back, and a session created in the future is in Today. No requirement IDs changed.
 - 2026-11-07: from #255 inbox: a section's name follows a title's rules for spacing and control characters (PROTO-CORE-API-R60, R61). No requirement IDs changed.
