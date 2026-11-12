@@ -26,7 +26,7 @@ describe("the rail's arrangement while Core saves it", () => {
     expect(result.current.reading).toBe(true);
     act(() => result.current.read({ rail: { group_by: "none", show: "archived", collapsed: { none: ["pinned"] } } }));
     expect(result.current.reading).toBe(false);
-    expect(result.current.arrangement).toEqual({ groupBy: "none", show: "archived", collapsed: { none: ["pinned"] } });
+    expect(result.current.arrangement).toEqual({ groupBy: "none", sortBy: "created", show: "archived", collapsed: { none: ["pinned"] } });
   });
 
   it("changes at once, sends the change to Core, and keeps it once Core has it", async () => {
@@ -61,7 +61,7 @@ describe("the rail's arrangement while Core saves it", () => {
     const { result } = renderHook(() => useRailArrangement(save, describeError));
     act(() => result.current.readFailed("Core is away"));
     expect(result.current.reading).toBe(false);
-    expect(result.current.arrangement).toEqual({ groupBy: "project", show: "active", collapsed: {} });
+    expect(result.current.arrangement).toEqual({ groupBy: "project", sortBy: "created", show: "active", collapsed: {} });
     expect(result.current.problem).toEqual({ kind: "read", message: "Core is away" });
   });
 

@@ -727,6 +727,35 @@ describe("arranging the rail", () => {
     expect(tiles()).toEqual(["s2", "s1"]);
   });
 
+  // verifies: FLOW-ORGANIZE-SESSIONS-R09
+  // verifies: FLOW-ORGANIZE-SESSIONS-R13
+  it("sorts as chosen in the arrange menu, which names the choice, and still does after Ersa reconnects to Core", async () => {
+    const named = (id: string, title: string, at: string) => ({ ...session(id, "alpha", at), title });
+    const core = await open({ "session.list": () => [named("s1", "Beta", "2026-11-01T09:00:00Z"), named("s2", "Gamma", "2026-11-01T10:00:00Z"), named("s3", "Alpha", "2026-11-01T08:00:00Z")] });
+    expect(tiles()).toEqual(["s2", "s1", "s3"]);
+    fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
+    expect(screen.getByRole("menuitem", { name: /^Sort by/ }).textContent).toContain("Date created");
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Sort by/ }));
+    expect(screen.getByRole("menuitemradio", { name: "Date created" }).getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Name" }));
+    expect(tiles()).toEqual(["s3", "s1", "s2"]);
+    expect(sets(core)).toEqual([{ rail: { sort_by: "name" } }]);
+    await reconnect(core);
+    expect(tiles()).toEqual(["s3", "s1", "s2"]);
+  });
+
+  // verifies: FLOW-ORGANIZE-SESSIONS-R10
+  it("moves a tile sorted by last activity when Core reports a new one, and not as the session's tile changes", async () => {
+    const quiet = { ...session("s1", "alpha", "2026-11-01T09:00:00Z"), last_activity_at: "2026-11-01T12:00:00.000Z" };
+    const core = await open({ "session.list": () => [quiet, session("s2", "alpha", "2026-11-01T10:00:00Z")], "settings.get": () => ({ rail: { sort_by: "last_activity" } }) });
+    expect(tiles()).toEqual(["s1", "s2"]);
+    const tile = (more: object) => act(async () => core.emit({ kind: "notification", method: "session.tile", params: { session_id: "s2", tile: { state: "running", pending: [] }, ...more } } as CoreEvent));
+    await tile({});
+    expect(tiles()).toEqual(["s1", "s2"]);
+    await tile({ last_activity_at: "2026-11-01T13:00:00.000Z" });
+    expect(tiles()).toEqual(["s2", "s1"]);
+  });
+
   // verifies: FLOW-ORGANIZE-SESSIONS-R12
   it("keeps a collapsed group to the grouping it was collapsed in", async () => {
     const core = await open();
