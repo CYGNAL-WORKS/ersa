@@ -226,7 +226,7 @@ export function RailTree(props: RailTreeProps) {
               initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
             />
           </ErrorBoundary>
-          <Refusals session={s} pinning={pinning} archiving={archiving} />
+          <Refusals session={s} pinning={pinning} archiving={archiving} forking={props.forking} />
           </>
         )}
       </TileItem>
@@ -354,20 +354,27 @@ export function Problem({ lead, reason }: { lead: string; reason: string }) {
   );
 }
 
-/** Why Core refused a session's pin, archive or unarchive, beneath its tile or row, which stays as Core has it (R15). */
+/**
+ * Why Core refused a session's pin, archive, unarchive or fork, beneath its tile or row, which stays as Core has it
+ * (R15; FLOW-FORK-SESSION, Variations).
+ */
 export function Refusals({
   session,
   pinning,
   archiving,
+  forking,
 }: {
   session: Session;
   pinning?: Readonly<Record<string, Sending>>;
   archiving?: Readonly<Record<string, Sending>>;
+  forking?: Readonly<Record<string, Sending>>;
 }) {
   const pin = pinning?.[session.id];
   const archive = archiving?.[session.id];
+  const fork = forking?.[session.id];
   return (
     <>
+      {fork?.state === "failed" && <Problem lead={t("rail.tile.forkError")} reason={fork.message} />}
       {archive?.state === "failed" && <Problem lead={session.archived ? t("rail.tile.unarchiveError") : t("rail.tile.archiveError")} reason={archive.message} />}
       {pin?.state === "failed" && <Problem lead={session.pinned ? t("rail.tile.unpinError") : t("rail.tile.pinError")} reason={pin.message} />}
     </>

@@ -3,6 +3,7 @@ import { type CSSProperties, type HTMLAttributes, type KeyboardEvent, type Mouse
 import { t } from "../catalog";
 import type { Session } from "../protocol/core-api.gen";
 import { deleteUnavailable } from "../session/deletion";
+import { forkUnavailable } from "../session/fork";
 import type { Sending } from "../session/follow";
 import { IconButton } from "./Icon";
 import { Menu, type MenuClose, type MenuEntry, type MenuPlace } from "./Menu";
@@ -46,10 +47,19 @@ interface TileArchive {
   unavailable?: string;
 }
 
+/** Fork on the menu (FLOW-FORK-SESSION, steps 1 and 2). */
+interface TileFork {
+  /** Starts the fork, which becomes the active session (FLOW-FORK-SESSION-R04). */
+  onChoose: () => void;
+  /** Why Fork can't be used now; given, the menu shows it unavailable with this reason (R03). */
+  unavailable?: string;
+}
+
 /** What a session's menu can do. The menu is there only with `rename`. */
 export interface TileActions {
   rename?: TileRename;
   pin?: TilePin;
+  fork?: TileFork;
   archive?: TileArchive;
   remove?: TileDelete;
 }
@@ -66,6 +76,10 @@ export interface TileHandlers {
   onPin?: (id: string, pinned: boolean) => void;
   /** Pins and unpins on their way, and why the last was refused (R15). */
   pinning?: Readonly<Record<string, Sending>>;
+  /** Forks a session (FLOW-FORK-SESSION); the fork becomes the active session once Core has started it. */
+  onFork?: (id: string) => void;
+  /** Forks on their way, and why the last was refused, by the original's id. */
+  forking?: Readonly<Record<string, Sending>>;
   /** Archives a session, or unarchives an archived one (FLOW-ARCHIVE-DELETE-SESSION, steps 1 and 3). */
   onArchive?: (id: string, archived: boolean) => void;
   /** Archives and unarchives on their way, and why the last was refused. */
@@ -78,7 +92,7 @@ export interface TileHandlers {
 
 /** A session's menu actions, each unavailable with its reason while it can't be used. */
 export function tileActions(s: Session, h: TileHandlers): TileActions {
-  const { onRename, onPin, onArchive, onDelete, offline = false } = h;
+  const { onRename, onPin, onFork, onArchive, onDelete, offline = false } = h;
   const offlineReason = offline ? t("rail.tile.offlineReason") : undefined;
   // One pin at a time, so each move in the rail is measured from where the last one left it.
   const saving = Object.values(h.pinning ?? {}).some((p) => p.state === "sending");
@@ -96,6 +110,7 @@ export function tileActions(s: Session, h: TileHandlers): TileActions {
       onChoose: () => onPin(s.id, !s.pinned),
       unavailable: offlineReason ?? (saving ? t("rail.tile.savingProgress") : undefined),
     },
+    fork: onFork && { onChoose: () => onFork(s.id), unavailable: forkUnavailable(s, offline, h.forking?.[s.id]) },
     archive: onArchive && { onChoose: (archived) => onArchive(s.id, archived), unavailable: offlineReason },
     remove: onDelete && { onAsk: () => onDelete(s.id), unavailable: deleteUnavailable(s, offline) },
   };
@@ -109,7 +124,7 @@ export function tileActions(s: Session, h: TileHandlers): TileActions {
 export function useTileMenu({
   session,
   title,
-  actions: { rename, pin, archive, remove },
+  actions: { rename, pin, fork, archive, remove },
   beforeChevron,
   initialMenu,
   initialDraft,
@@ -194,6 +209,9 @@ export function useTileMenu({
             unavailable: rename.unavailable,
             onChoose: edit,
           },
+          ...(fork
+            ? [{ kind: "item" as const, label: t("rail.tile.forkButton"), unavailable: fork.unavailable, onChoose: fork.onChoose }]
+            : []),
           ...(archive
             ? [
                 {
