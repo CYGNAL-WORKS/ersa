@@ -578,6 +578,22 @@ Reconnecting to Core…
 
 ## `transcript`
 
+### `transcript.question.name`
+
+Question
+
+### `transcript.question.answeredTitle`
+
+Question, answered
+
+### `transcript.question.declinedTitle`
+
+Question, declined
+
+### `transcript.question.unansweredStatus`
+
+Not answered
+
 ### `transcript.attachment.listLabel`
 
 Attachments

@@ -7,6 +7,7 @@ import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Envelope, QuestionAsked } from "../protocol/agent-events.gen";
 import type { Reply } from "../session/answers";
+import type { ShelfShows } from "../session/shelf";
 import { EVENT_VERSION, apply, emptyTranscript } from "../session/transcript";
 import { Shelf } from "./Shelf";
 import { Transcript } from "./Transcript";
@@ -147,5 +148,51 @@ describe("a question's answers while Ersa can't reach Core", () => {
     expect((within(surface).getByRole("button", { name: "Decline" }) as HTMLButtonElement).disabled).toBe(true);
     expect((within(surface).getByRole("button", { name: "Answer" }) as HTMLButtonElement).disabled).toBe(true);
     expect(surface.textContent).toContain("Reconnecting to Core…");
+  });
+});
+
+describe("a question's choices in the shelf", () => {
+  // verifies: FLOW-APPROVE-PERMISSION-R16
+  it("last while the shelf loads again and as it settles after the answer", () => {
+    const shelf = (shows: ShelfShows) =>
+      createElement(Shelf, { tile: { title: "Fix the build" }, shows, live: true, onDecide: () => {}, onAnswer: () => {} });
+    const question: ShelfShows = { state: "question", requestId: "r1", questions };
+    const { rerender } = render(shelf(question));
+    answerAll(screen.getByRole("dialog"));
+    // A reconnect reads the session's events again.
+    rerender(shelf({ state: "loading" }));
+    rerender(shelf(question));
+    const chosen = () => (screen.getByRole("radio", { name: /Everywhere/ }) as HTMLInputElement).checked;
+    expect(chosen()).toBe(true);
+    expect((screen.getByRole("button", { name: "Answer" }) as HTMLButtonElement).disabled).toBe(false);
+    // Answered: the shelf shows the last request, its answers unavailable, until it closes.
+    rerender(shelf({ state: "settled" }));
+    expect(chosen()).toBe(true);
+    expect((screen.getByRole("textbox", { name: "What should the branch be called?" }) as HTMLInputElement).value).toBe("retry-on-windows");
+  });
+});
+
+describe("the transcript's question card once answered", () => {
+  // verifies: FLOW-APPROVE-PERMISSION-R28
+  it("says the user declined, not that the question was answered", () => {
+    const answered = (declined: boolean): Envelope => ({
+      ...asked,
+      seq: 1,
+      event: { type: "question.answered", request_id: "r1", answers: [], declined, answered_by: "user" },
+    });
+    const card = (declined: boolean) => {
+      cleanup();
+      render(
+        createElement(Transcript, {
+          title: "Fix the build",
+          view: { id: "s1", transcript: apply(apply(emptyTranscript, asked), answered(declined)), stream: { state: "live" } },
+          onDecide: () => {},
+          onAnswer: () => {},
+        }),
+      );
+      return screen.getByRole("region", { name: "Question" }).textContent;
+    };
+    expect(card(true)).toContain("Question, declined");
+    expect(card(false)).toContain("Question, answered");
   });
 });

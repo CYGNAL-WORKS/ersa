@@ -228,6 +228,14 @@ export const enUS = {
     },
   },
   transcript: {
+    // A question's card: its name, its title once answered or declined, and its state once the session ended without
+    // an answer.
+    question: {
+      name: "Question",
+      answeredTitle: "Question, answered",
+      declinedTitle: "Question, declined",
+      unansweredStatus: "Not answered",
+    },
     attachment: {
       listLabel: "Attachments",
       imageLabel: "Attached image",

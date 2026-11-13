@@ -7,11 +7,12 @@ import type { SessionView, Sending } from "../session/follow";
 import { pathName } from "../session/attachments";
 import { imageSize } from "../session/imageSize";
 import { stateText } from "../session/states";
-import { type Item, type MessageAttachment, isOpen } from "../session/transcript";
+import { type Item, type MessageAttachment, isOpen, isOpenQuestion } from "../session/transcript";
 import { Button } from "./Button";
 import { AttachmentChip } from "./AttachmentChip";
 import { Icon } from "./Icon";
 import { PermissionAnswers } from "./PermissionAnswers";
+import type { Draft } from "../session/questionForm";
 import { QuestionForm } from "./QuestionForm";
 import { SessionTitle } from "./SessionTitle";
 import "./Transcript.css";
@@ -124,12 +125,10 @@ interface BlockProps {
 /** The answer on its way or refused for a request still open, if any. */
 function answerTo(item: Item, answers: Readonly<Record<string, Answer>>): Answer | undefined {
   if (item.kind === "permission" && isOpen(item)) return answers[item.request.request_id];
-  if (item.kind === "question" && isAnswerable(item)) return answers[item.requestId];
+  if (item.kind === "question" && isOpenQuestion(item)) return answers[item.requestId];
   return undefined;
 }
 
-/** A question nobody has answered yet, in a session that has not ended. */
-const isAnswerable = (item: Extract<Item, { kind: "question" }>) => !item.answered && !item.unanswered;
 
 /**
  * What came with a user's message, above its words (FLOW-SEND-MESSAGE-R11; DESIGN.md, Layout): an image as the image;
@@ -334,17 +333,28 @@ function PermissionCard({
  * R28); once answered, or once the session ended without an answer, its questions and what became of it.
  */
 function QuestionCard({ item, answer, live, onAnswer }: { item: Extract<Item, { kind: "question" }>; answer?: Answer; live: boolean; onAnswer: AnswerQuestion }) {
-  const open = isAnswerable(item);
+  const open = isOpenQuestion(item);
+  // The QuestionForm's choices so far: kept here, so they last as long as the card does.
+  const [draft, setDraft] = useState<Draft>({});
+  const title = item.declined ? "declinedTitle" : item.answered ? "answeredTitle" : "name";
   return (
     // Focusable outside the tab order, so focus moves to the card as an answer makes its answers unavailable.
-    <section tabIndex={-1} className="transcript-card transcript-question" data-open={open || undefined} aria-label="Question">
+    <section tabIndex={-1} className="transcript-card transcript-question" data-open={open || undefined} aria-label={t("transcript.question.name")}>
       <div className="transcript-card-head">
-        <span className="transcript-card-title">{item.answered ? "Question, answered" : "Question"}</span>
-        {item.unanswered && <Status>Not answered</Status>}
+        <span className="transcript-card-title">{t(`transcript.question.${title}`)}</span>
+        {item.unanswered && <Status>{t("transcript.question.unansweredStatus")}</Status>}
       </div>
       {open ? (
         // None is focused by default, and Enter never answers. The transcript says it is reconnecting above, once.
-        <QuestionForm questions={item.questions} answer={answer} live={live} reconnectingNote={false} onAnswer={(reply) => onAnswer(item.requestId, reply)} />
+        <QuestionForm
+          questions={item.questions}
+          draft={draft}
+          onDraft={setDraft}
+          answer={answer}
+          live={live}
+          reconnectingNote={false}
+          onAnswer={(reply) => onAnswer(item.requestId, reply)}
+        />
       ) : (
         item.questions.map((q) => (
           <p key={q.id} className="transcript-card-detail">

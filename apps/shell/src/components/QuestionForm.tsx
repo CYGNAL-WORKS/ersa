@@ -1,5 +1,5 @@
 import { Check, LoaderCircle } from "lucide-react";
-import { type MouseEvent, type ReactNode, useId, useState } from "react";
+import { type MouseEvent, type ReactNode, useId } from "react";
 import { t } from "../catalog";
 import type { QuestionAsked } from "../protocol/agent-events.gen";
 import type { Answer, Reply } from "../session/answers";
@@ -22,8 +22,10 @@ interface QuestionFormProps {
   /** What sits between the questions and the answers: the shelf's readouts (R23). */
   between?: ReactNode;
   onAnswer: (reply: Reply) => void;
-  /** For the gallery: choices and words already given. */
-  initial?: Draft;
+  /** What the user has chosen or written so far, held by the surface around the form so it outlasts the form: the
+   *  shelf redraws its contents as it loads again or settles, and the choices must still be there. */
+  draft: Draft;
+  onDraft: (update: (draft: Draft) => Draft) => void;
 }
 
 /**
@@ -32,8 +34,7 @@ interface QuestionFormProps {
  * question takes them; then Decline, available at once, and Answer, available once every question has an answer. The
  * shelf and the transcript's question card both offer them so (R17). docs/design/RAIL.md, The shelf: A question.
  */
-export function QuestionForm({ questions, answer, live, reconnectingNote = true, between, onAnswer, initial = {} }: QuestionFormProps) {
-  const [draft, setDraft] = useState<Draft>(initial);
+export function QuestionForm({ questions, answer, live, reconnectingNote = true, between, onAnswer, draft, onDraft: setDraft }: QuestionFormProps) {
   const name = useId();
   const sending = answer?.state === "sending" ? answer.decision : undefined;
   // One answer at a time, and none while Core can't be reached (R18, R20).

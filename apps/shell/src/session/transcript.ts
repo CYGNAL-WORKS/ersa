@@ -35,8 +35,9 @@ export type Item =
     }
   /** A permission request, answered once `decision` is set; `unanswered` once the session ended without one. */
   | { kind: "permission"; key: string; request: PermissionRequested; decision?: PermissionDecided; unanswered?: true }
-  /** A question, answered once its answer arrives; `unanswered` once the session ended without one. */
-  | { kind: "question"; key: string; requestId: string; questions: QuestionAsked["questions"]; answered: boolean; unanswered?: true }
+  /** A question, answered once its answer arrives, `declined` when the user chose not to answer; `unanswered` once
+   *  the session ended without one. */
+  | { kind: "question"; key: string; requestId: string; questions: QuestionAsked["questions"]; answered: boolean; declined?: true; unanswered?: true }
   /** Something went wrong: an `error` event, or a tool the backend denied with nobody to ask. */
   | { kind: "problem"; key: string; message: string }
   | { kind: "notice"; key: string; message: string }
@@ -86,7 +87,7 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
     case "session.ended": {
       // Nobody can answer a request once the session has ended.
       const items = next.items.map((i) =>
-        (i.kind === "permission" && isOpen(i)) || (i.kind === "question" && !i.answered) ? { ...i, unanswered: true as const } : i,
+        (i.kind === "permission" && isOpen(i)) || (i.kind === "question" && isOpenQuestion(i)) ? { ...i, unanswered: true as const } : i,
       );
       return add({ ...next, items, working: false }, { kind: "ended", key: `ended:${envelope.seq}`, reason: endedReason[event.reason] ?? "Ended." });
     }
@@ -136,7 +137,7 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
       if (next.items.some((i) => i.key === `question:${event.request_id}`)) return next;
       return put(next, { kind: "question", key: `question:${event.request_id}`, requestId: event.request_id, questions: event.questions, answered: false });
     case "question.answered":
-      return patch(next, `question:${event.request_id}`, "question", (item) => ({ ...item, answered: true }));
+      return patch(next, `question:${event.request_id}`, "question", (item) => ({ ...item, answered: true, ...(event.declined ? { declined: true as const } : {}) }));
     case "error":
       return add(next, { kind: "problem", key: `problem:${envelope.seq}`, message: event.message });
     // Shown elsewhere (the tile carries usage), or nowhere outside the
@@ -167,6 +168,11 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
 /** Whether the request still waits for an answer. */
 export function isOpen(item: Extract<Item, { kind: "permission" }>): boolean {
   return item.decision === undefined && !item.unanswered;
+}
+
+/** Whether the question still waits for an answer. */
+export function isOpenQuestion(item: Extract<Item, { kind: "question" }>): boolean {
+  return !item.answered && !item.unanswered;
 }
 
 const endedReason: Partial<Record<string, string>> = {
