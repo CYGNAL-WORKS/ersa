@@ -51,6 +51,7 @@ export function publishShots({ root = ROOT, remote = "origin" } = {}) {
       cwd: root,
       encoding: "utf8",
       timeout: 2 * 60 * 1000,
+      windowsHide: true,
       env: { ...process.env, ...env, GIT_TERMINAL_PROMPT: "0" },
     });
     if (r.status !== 0) throw new Error(`git ${args[0]} failed: ${(r.stderr || r.stdout || String(r.error)).trim()}`);
