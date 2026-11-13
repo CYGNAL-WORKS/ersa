@@ -213,7 +213,7 @@ describe("the sessions page", () => {
       fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
       return items;
     };
-    expect(names(row("Fix the build") as HTMLElement, "Fix the build")).toEqual(["Pin", "RenameF2", "Archive", "Delete…"]);
+    expect(names(row("Fix the build") as HTMLElement, "Fix the build")).toEqual(["Pin", "RenameF2", "Fork", "Archive", "Delete…"]);
   });
 
   it("shows the mark a tile shows, named, and the host when it is not this machine", async () => {
