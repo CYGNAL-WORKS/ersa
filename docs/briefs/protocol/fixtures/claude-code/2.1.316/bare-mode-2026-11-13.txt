@@ -1,0 +1,9 @@
+Claude Code 2.1.316 started as Ersa starts it (stream-json, initialize sent first, Haiku) with --bare added, recorded 2026-11-13 by scripts/record-claude-stream.mjs. A summary; the ticket that builds the check records it as a numbered fixture.
+
+- The initialize response and system/init arrive as usual. system/init carries `apiKeySource: "none"`, as a normal session signed in with a subscription does, so it can't tell bare mode apart.
+- system/init has no `memory_paths` and no `scratchpad_path` (a normal 2.1.316 session's init, such as fixture 06-invocation-without-print, has both), and lists 4 tools (Bash, Edit, PowerShell, Read) where a normal session lists 35.
+- The first message then fails without an API call: a synthetic assistant message "Not logged in · Please run /login" with `error: "authentication_failed"`, and a result with `is_error` true. The CLI exits 1.
+
+For comparison, a normal session started the same way with `--settings '{"autoMemoryEnabled":false}'` (same day, not kept) had no `memory_paths` either, but kept `scratchpad_path` and listed 32 tools: `memory_paths` follows auto-memory, while `scratchpad_path` is missing only in bare mode.
+
+So in bare mode the user's subscription sign-in is not read, and the failure looks exactly like being signed out.
