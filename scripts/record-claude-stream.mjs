@@ -20,6 +20,10 @@
 // each user message, as Ersa's driver does when the user chooses stop, so a
 // turn ending as interrupted is recorded.
 //
+// ERSA_STREAM_TITLE=1 asks the CLI to name the session with the
+// generate_session_title control request right after the first user
+// message, as Ersa's adapter does for a new session.
+//
 // Set ERSA_CLAUDE to the claude executable if it is not on PATH.
 
 import { spawn, spawnSync } from "node:child_process";
@@ -151,6 +155,9 @@ for (const text of messages) {
   turn += 1;
   const p = waitForResult(180_000);
   send(userMessage(text));
+  if (process.env.ERSA_STREAM_TITLE && turn === 1) {
+    send({ type: "control_request", request_id: "ersa-title-1", request: { subtype: "generate_session_title", description: text, persist: true } });
+  }
   const interruptAfter = Number(process.env.ERSA_STREAM_INTERRUPT_MS);
   if (interruptAfter > 0) {
     setTimeout(() => send({ type: "control_request", request_id: `ersa-interrupt-${turn}`, request: { subtype: "interrupt" } }), interruptAfter);
