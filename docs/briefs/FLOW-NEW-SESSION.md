@@ -61,7 +61,7 @@ New session shows the new-session screen and creates nothing until the first mes
 ## Open questions
 
 - The mode control (a named preset, milestone M3) and where it sits among the session controls.
-- Which session a reopened window shows when several were running (FLOW-RESUME-SESSION).
+- Which session a reopened window shows when several were running.
 - How the user picks a folder on a remote host, which the system's folder dialog cannot browse (FLOW-REMOTE-SESSION).
 - Whether the base branch can also be a remote branch or a tag, and whether a project remembers a base branch other than the default.
 - What the trust question's security guide link opens, as the CLI's prompt has one. Ersa has no user guide yet, and the CLI's guide is one backend's, so the question has no link until one exists.
