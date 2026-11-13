@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// What moves when the rail regroups (DESIGN.md: nothing pops in; FLOW-ORGANIZE-SESSIONS, step 4).
+// What moves when the rail rearranges (DESIGN.md: nothing pops in; FLOW-ORGANIZE-SESSIONS, step 4).
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { placesOf, regroup, slideFrom } from "./motion";
+import { placesOf, rearrange } from "./motion";
 
 /** Records each animation on `el`; its `finish` ends the animation as the browser would. */
 function animated(el: HTMLElement) {
@@ -32,7 +32,7 @@ function rail() {
   return root;
 }
 
-describe("what the rail does as it regroups", () => {
+describe("what the rail does as it rearranges", () => {
   afterEach(() => {
     document.body.replaceChildren();
     vi.unstubAllGlobals();
@@ -42,7 +42,7 @@ describe("what the rail does as it regroups", () => {
     const root = rail();
     const before = placesOf(root);
     const { runs } = marked(root, "heading:today");
-    regroup(root, before);
+    rearrange(root, before);
     expect(runs.map((r) => r.frames)).toEqual([[{ opacity: 0 }, { opacity: 1 }]]);
   });
 
@@ -51,7 +51,7 @@ describe("what the rail does as it regroups", () => {
     const { el, runs } = marked(root, "session:s1");
     const before = placesOf(root);
     el.remove();
-    regroup(root, before);
+    rearrange(root, before);
     expect(el.parentElement).toBe(root);
     expect(el.inert).toBe(true);
     expect(el.dataset.leaving).toBe("");
@@ -75,13 +75,13 @@ describe("what the rail does as it regroups", () => {
     Object.defineProperty(el, "offsetTop", { value: 120 });
     const before = placesOf(root);
     group.remove();
-    // Every element here has it, as in a browser: the copies are made while the rail regroups.
+    // Every element here has it, as in a browser: the copies are made while the rail rearranges.
     const fades: Keyframe[][] = [];
     let finish = () => {};
     const finished = new Promise<void>((resolve) => (finish = resolve));
     const prototype = HTMLElement.prototype as unknown as { animate?: unknown };
     prototype.animate = (frames: Keyframe[]) => (fades.push(frames), { finished });
-    regroup(root, before);
+    rearrange(root, before);
     delete prototype.animate;
     const ghost = el.parentElement as HTMLElement;
     expect(ghost.parentElement).toBe(root);
@@ -110,17 +110,7 @@ describe("what the rail does as it regroups", () => {
     const { el, runs } = marked(frame, "session:s1");
     const before = placesOf(root);
     el.remove();
-    regroup(root, before);
-    expect(el.isConnected).toBe(false);
-    expect(runs).toEqual([]);
-  });
-
-  it("leaves gone what has gone since a pin's places were taken, as a tile archived while the pin saves", () => {
-    const root = rail();
-    const { el, runs } = marked(root, "session:s1");
-    const before = placesOf(root);
-    el.remove();
-    slideFrom(root, before);
+    rearrange(root, before);
     expect(el.isConnected).toBe(false);
     expect(runs).toEqual([]);
   });
@@ -132,7 +122,7 @@ describe("what the rail does as it regroups", () => {
     const before = placesOf(root);
     el.remove();
     const added = marked(root, "heading:today");
-    regroup(root, before);
+    rearrange(root, before);
     expect(el.isConnected).toBe(false);
     expect(runs).toEqual([]);
     expect(added.runs).toEqual([]);
