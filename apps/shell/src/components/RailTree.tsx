@@ -7,7 +7,7 @@ import type { Sending } from "../session/follow";
 import { type ArrangeProblem, DEFAULT_ARRANGEMENT, type GroupBy, type Show, type SortBy } from "../session/arrangement";
 import { type Collapsed, type DateKey, collapsedOf, sortValueOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { HeightEase, type Place, arrive, placesOf, rearrange } from "../theme/motion";
+import { type Place, arrive, placesOf, rearrange } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem } from "./SessionTile";
@@ -225,11 +225,12 @@ export function RailTree(props: RailTreeProps) {
               shelf={open && { tone: open.tone, domId: shelfDomId }}
               onChevron={onChevron}
               {...actionsOf(s)}
+              forking={props.forking?.[s.id]?.state === "sending"}
               initialMenu={initialTileMenu === s.id}
               initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
             />
           </ErrorBoundary>
-          <TileNotes session={s} pinning={pinning} archiving={archiving} forking={props.forking} />
+          <Refusals session={s} pinning={pinning} archiving={archiving} forking={props.forking} />
           </>
         )}
       </TileItem>
@@ -381,11 +382,10 @@ export function Problem({ lead, reason }: { lead: string; reason: string }) {
 }
 
 /**
- * The notes beneath a session's tile or row: a fork on its way, and why Core refused its pin, archive, unarchive or
- * fork, the session staying as Core has it (R15; FLOW-FORK-SESSION, Variations). A note fades in, and the room it
- * takes eases open and closed, so the tiles beneath never jump (DESIGN.md, Motion).
+ * Why Core refused a session's pin, archive, unarchive or fork, beneath its tile or row, which stays as Core has it
+ * (R15; FLOW-FORK-SESSION, Variations).
  */
-export function TileNotes({
+export function Refusals({
   session,
   pinning,
   archiving,
@@ -399,25 +399,12 @@ export function TileNotes({
   const pin = pinning?.[session.id];
   const archive = archiving?.[session.id];
   const fork = forking?.[session.id];
-  const box = useRef<HTMLDivElement>(null);
-  const ease = useRef(new HeightEase()).current;
-  // Which notes show; only a change of these eases the room they take.
-  const shown = `${fork?.state}/${archive?.state}/${pin?.state}`;
-  useLayoutEffect(() => {
-    if (box.current) ease.change(box.current);
-  }, [ease, shown]);
   return (
-    <div ref={box} className="rail-tile-notes">
-      {/* Core may make a workspace and start the backend before it answers, which can take seconds. */}
-      {fork?.state === "sending" && (
-        <p className="rail-note" role="status">
-          {t("rail.tile.forkingProgress")}
-        </p>
-      )}
+    <>
       {fork?.state === "failed" && <Problem lead={t("rail.tile.forkError")} reason={fork.message} />}
       {archive?.state === "failed" && <Problem lead={session.archived ? t("rail.tile.unarchiveError") : t("rail.tile.archiveError")} reason={archive.message} />}
       {pin?.state === "failed" && <Problem lead={session.pinned ? t("rail.tile.unpinError") : t("rail.tile.pinError")} reason={pin.message} />}
-    </div>
+    </>
   );
 }
 
