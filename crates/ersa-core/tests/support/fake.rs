@@ -33,12 +33,15 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use ersa_adapter::recording::Recording;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
     ImageLimits, OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit, Projected,
     Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary, SessionConfig, TitleRules,
     Transport, async_trait,
 };
+use ersa_core::CoreConfig;
+use ersa_core::replay::{Pace, Replay};
 use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::{
     AssistantText, BackendPassthrough, DecidedBy, Event, LifecycleState, MessageOrigin,
@@ -47,6 +50,8 @@ use ersa_protocol::events::{
     TurnTrigger, UsageUpdated, UserMessage,
 };
 use serde_json::{Map, Value, json};
+
+use super::{TestCore, start_replay_of};
 
 pub const BACKEND: &str = "fake";
 
@@ -105,6 +110,56 @@ fn title_of(event: &RecordEvent) -> Option<String> {
 /// keeps of each session, as Claude Code keeps its session files. Share one
 /// between the Cores of a test to have the record outlive a Core.
 pub type Records = Arc<Mutex<HashMap<String, Vec<RecordEvent>>>>;
+
+/// The title of the session the fake's recording replays as.
+pub const RECORDING_TITLE: &str = "fake-recording";
+
+/// A turn of the fake backend as a recording, in the fake's own line format:
+/// it starts, takes a message, asks for a permission, is allowed, replies,
+/// and goes idle. Core's replay server plays it with no backend behind it
+/// (PROTO-CORE-API, Conformance: fixtures substituted for live backends).
+pub fn recording() -> Recording {
+    let stdout = [
+        json!({ "t": "ready", "session_id": "fake-recorded" }),
+        json!({ "t": "ask", "id": "r-1" }),
+        json!({ "t": "done", "id": "r-1" }),
+        json!({ "t": "reply", "id": "r-2", "text": "done" }),
+        json!({ "t": "completed" }),
+        json!({ "t": "idle" }),
+    ]
+    .map(|line| line.to_string())
+    .join(
+        "
+",
+    );
+    let sent = [
+        (0, json!({ "t": "hello", "cwd": "" })),
+        (10, json!({ "t": "user", "text": "ask" })),
+        (
+            30,
+            json!({ "t": "decide", "id": "r-1", "behavior": "allow" }),
+        ),
+    ]
+    .map(|(t, line)| json!({ "t": t, "line": line.to_string() }));
+    let meta = json!({
+        "stdout_timing_ms": [5, 20, 40, 45, 50, 60],
+        "sent": sent,
+    });
+    Recording::parse(&stdout, meta).expect("the fake's recording parses")
+}
+
+/// A replay server for the fake's [`recording`] in a temporary data
+/// directory, with `configure` applied to its configuration.
+pub async fn start_replay_with(configure: impl FnOnce(&mut CoreConfig), pace: Pace) -> TestCore {
+    let replay = Replay {
+        adapter: Arc::new(FakeAdapter::new(1)),
+        recording: recording(),
+        title: RECORDING_TITLE.to_string(),
+        backend_version: String::new(),
+        pace,
+    };
+    start_replay_of(replay, configure).await
+}
 
 /// Numbers the fake backend's sessions across every Core in the test run.
 static NEXT_SESSION: AtomicUsize = AtomicUsize::new(1);
