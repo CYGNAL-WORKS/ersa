@@ -126,7 +126,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - **PROTO-AGENT-EVENTS-R03**: Projecting the same raw log twice with the same adapter version shall yield identical events.
 - **PROTO-AGENT-EVENTS-R04**: A Claude Code `can_use_tool` control request shall project to one `permission.requested` carrying tool name, input, description, blocked path, suggestions, and flags.
 - **PROTO-AGENT-EVENTS-R05**: A Claude Code `result` line shall project to one `turn.completed` and one `usage.updated` carrying total cost and token usage.
-- **PROTO-AGENT-EVENTS-R06**: A Claude Code `authentication_failed` synthetic message shall project to one `error` with `code: authentication_failed` and `action: log_in`, and no `assistant.text`.
+- ~~**PROTO-AGENT-EVENTS-R06**~~: retired 2026-11-13 (a session Claude Code started in its minimal mode is not signed out), replaced by R22.
 - **PROTO-AGENT-EVENTS-R07**: With partial streaming enabled, `assistant.text` events for one block shall share a `block_id` and end with exactly one `final: true`.
 - **PROTO-AGENT-EVENTS-R08**: No event outside `backend.passthrough.payload` and `permission.requested.suggestions[].payload` shall contain a backend-specific field name; tool-defined data in `tool.requested.input`, `permission.requested.input`, and `tool.result.content` is not backend protocol.
 - **PROTO-AGENT-EVENTS-R09**: Every projected event shall validate against `protocol/schema/agent-events.schema.json`.
@@ -142,6 +142,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - **PROTO-AGENT-EVENTS-R19**: The host's answer to a Claude Code question shall project to one `question.answered` with `answered_by` `user`, `declined` when it was a deny, and no `permission.decided`, matching each answer to its question by text and to options by label as PROTO-CLAUDE-CODE-STREAM (Questions) says; the CLI withdrawing a pending question, or the turn ending with it unanswered, shall project to `question.answered` with `answered_by` `backend` and no answers.
 - **PROTO-AGENT-EVENTS-R20**: A `tool.requested` for a call that replaces text in a file or writes a whole file shall carry `edits`, one entry per change with the file's path, the text replaced (absent for a whole file written) and the new text; any other call shall carry none.
 - **PROTO-AGENT-EVENTS-R21**: A `tool.requested` for a call the adapter knows to act on one path, command, search or address shall carry it as `target`; any other call shall carry none.
+- **PROTO-AGENT-EVENTS-R22**: A Claude Code `authentication_failed` synthetic message shall project to one `error`, and no `assistant.text`: with `code: authentication_failed` and `action: log_in`, except in a live session the CLI started in its minimal mode, which PROTO-CLAUDE-CODE-STREAM-R51 governs; read from a session record, it always projects this way.
 
 ## Out of scope
 
@@ -158,6 +159,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 ## Changes
 
+- 2026-11-13: from #148: PROTO-AGENT-EVENTS-R06 retired for R22, which excepts a session Claude Code started in its minimal mode (PROTO-CLAUDE-CODE-STREAM-R51).
 - 2026-11-13: for FLOW-READ-TRANSCRIPT: `tool.requested` gains `target` and `edits`, filled by the adapter, so tool and diff cards are drawn without reading a backend's tool input. A shape change, so `v` is bumped. PROTO-AGENT-EVENTS-R20 and R21 added.
 - 2026-11-09: `user.message` for a message written during a turn is emitted when its own turn starts (PROTO-CLAUDE-CODE-STREAM-R43). No requirement IDs changed.
 - 2026-11-08: from #272 inbox: a fork's `session.state` goes to `idle` when its backend process is ready, a new lifecycle fact. No requirement IDs changed.
