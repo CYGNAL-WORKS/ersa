@@ -5,20 +5,18 @@
 //! starts waits for the CLI to answer `initialize`, then goes as
 //! `rename_session` (PROTO-CLAUDE-CODE-STREAM, Invocation and Renaming).
 
-mod support;
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::claude::{OnTransport, fixtures_of, parse};
+use crate::support::{Client, TestCore, kind, start_with_adapters, tempdir, workspace};
 use ersa_adapter::Adapter;
 use ersa_adapter::fake::FakeTransport;
 use ersa_adapter::recording::Recording;
 use ersa_adapter_claude::ClaudeAdapter;
 use ersa_adapter_claude::record::encoded_cwd;
 use serde_json::{Value, json};
-use support::claude::{OnTransport, fixtures_of, parse};
-use support::{Client, TestCore, kind, start_with_adapters, tempdir, workspace};
 
 /// The title the recorded session was given before its first message.
 const NAMED: &str = "Named before the first message";
