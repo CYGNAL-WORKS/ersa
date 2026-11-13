@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../catalog";
 import type { Answer, Decision, Reply } from "../session/answers";
 import type { PermissionRequested } from "../protocol/agent-events.gen";
+import type { Draft } from "../session/questionForm";
 import { type ShelfShows, shelfTone, shownRequest } from "../session/shelf";
 import type { TileView } from "../session/tile";
 import { Button } from "./Button";
@@ -49,6 +50,10 @@ export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, onAns
   // same place after loading, as on a reconnect, is not moving on.
   const [last, setLast] = useState<{ key: string; shown?: ShelfShows; onScreen: boolean }>({ key, shown: request, onScreen: request !== undefined });
   const [next, setNext] = useState<{ key?: string; said: string; from?: ShelfShows }>();
+  // What the user has chosen or written for each question shown, by request id: held here, since the contents are
+  // drawn afresh as the shelf loads again (a reconnect) or settles after an answer, and the choices must not go.
+  const [drafts, setDrafts] = useState<Readonly<Record<string, Draft>>>({});
+  const onDraft = (requestId: string) => (update: (draft: Draft) => Draft) => setDrafts((d) => ({ ...d, [requestId]: update(d[requestId] ?? {}) }));
   if (key !== last.key) {
     // The last request stays on screen while the shelf settles.
     setLast({ key, shown: request ?? last.shown, onScreen: request !== undefined || shows.state === "settled" });
@@ -69,7 +74,19 @@ export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, onAns
   const contents = (shown: ShelfShows, done = false) => (
     // A request it can't draw is said here, in the shelf, and leaves the rail as it was.
     <ErrorBoundary what={t("rail.shelf.boundaryName")} resetKey={shownKey(shown)}>
-      <Contents shows={shown} ring={tile.ring} cost={tile.cost} onRetry={onRetry} answers={answers} live={live} settled={done} onDecide={onDecide} onAnswer={onAnswer} />
+      <Contents
+        shows={shown}
+        ring={tile.ring}
+        cost={tile.cost}
+        onRetry={onRetry}
+        answers={answers}
+        live={live}
+        settled={done}
+        onDecide={onDecide}
+        onAnswer={onAnswer}
+        drafts={drafts}
+        onDraft={onDraft}
+      />
     </ErrorBoundary>
   );
   return (
@@ -111,7 +128,15 @@ function Contents({
   settled,
   onDecide,
   onAnswer,
-}: Pick<ShelfProps, "shows" | "onRetry" | "answers" | "live" | "onDecide" | "onAnswer"> & { ring?: number; cost?: string; settled: boolean }) {
+  drafts,
+  onDraft,
+}: Pick<ShelfProps, "shows" | "onRetry" | "answers" | "live" | "onDecide" | "onAnswer"> & {
+  ring?: number;
+  cost?: string;
+  settled: boolean;
+  drafts: Readonly<Record<string, Draft>>;
+  onDraft: (requestId: string) => (update: (draft: Draft) => Draft) => void;
+}) {
   switch (shows.state) {
     case "settled":
       return null;
@@ -181,6 +206,8 @@ function Contents({
           <Heading kind={t("rail.shelf.questionHeading")} place={shows.place} />
           <QuestionForm
             questions={shows.questions}
+            draft={drafts[shows.requestId] ?? {}}
+            onDraft={onDraft(shows.requestId)}
             answer={answers?.[shows.requestId]}
             // Answered already, as the shelf settles or as it fades out: nothing to choose, and nothing to reconnect for.
             live={live && !settled}
