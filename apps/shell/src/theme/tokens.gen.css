@@ -96,6 +96,8 @@
   --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
   --material-hover: color-mix(in oklab, var(--color-ink) 4%, transparent);
   --material-pressed: color-mix(in oklab, var(--color-ink) 9%, transparent);
+  --material-diff-added: color-mix(in oklab, var(--color-positive) 12%, transparent);
+  --material-diff-removed: color-mix(in oklab, var(--color-danger) 12%, transparent);
   --glow-focal: 0 0 0 1px var(--color-accent), 0 0 0 4px color-mix(in oklab, var(--color-accent) 16%, transparent), 0 0 12px 2px color-mix(in oklab, var(--color-accent) 20%, transparent);
   --shadow-transient: 0 4px 12px -4px color-mix(in oklab, var(--color-ink) 14%, transparent);
 }
@@ -125,6 +127,8 @@
     --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
     --material-hover: color-mix(in oklab, var(--color-ink) 4%, transparent);
     --material-pressed: color-mix(in oklab, var(--color-ink) 9%, transparent);
+    --material-diff-added: color-mix(in oklab, var(--color-positive) 12%, transparent);
+    --material-diff-removed: color-mix(in oklab, var(--color-danger) 12%, transparent);
     --glow-focal: 0 0 0 1px var(--color-accent), 0 0 16px -4px color-mix(in oklab, var(--color-accent) 32%, transparent);
     --shadow-transient: 0 4px 12px -4px color-mix(in oklab, black 60%, transparent);
   }
@@ -154,6 +158,8 @@
   --material-open-session: color-mix(in oklab, var(--color-ink) 6%, var(--color-surface));
   --material-hover: color-mix(in oklab, var(--color-ink) 4%, transparent);
   --material-pressed: color-mix(in oklab, var(--color-ink) 9%, transparent);
+  --material-diff-added: color-mix(in oklab, var(--color-positive) 12%, transparent);
+  --material-diff-removed: color-mix(in oklab, var(--color-danger) 12%, transparent);
   --glow-focal: 0 0 0 1px var(--color-accent), 0 0 16px -4px color-mix(in oklab, var(--color-accent) 32%, transparent);
   --shadow-transient: 0 4px 12px -4px color-mix(in oklab, black 60%, transparent);
 }
