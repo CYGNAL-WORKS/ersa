@@ -31,6 +31,7 @@ test("a failing live check leaves no process or folder behind", async () => {
         env: { ...process.env, [FAIL_ON_PURPOSE]: record },
         stdio: "pipe",
         timeout: 4 * 60_000,
+        windowsHide: true,
       });
     } catch {
       failed = true;
