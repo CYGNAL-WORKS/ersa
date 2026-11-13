@@ -109,6 +109,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Archives and unarchives on their way from a tile, and resumes from the archived note, by session id.
   const [archiving, setArchiving] = useState<Record<string, Sending>>({});
   const [resuming, setResuming] = useState<Record<string, Sending>>({});
+  // Forks on their way from a tile or row, and why the last was refused, by the original's id.
+  const [forking, setForking] = useState<Record<string, Sending>>({});
   // How the rail is arranged (FLOW-ORGANIZE-SESSIONS): kept in Core's settings and read on each connection.
   const saveArrangement = useCallback((patch: object) => client.call("settings.set", { patch }), [client]);
   const {
@@ -433,6 +435,24 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       connection.current?.reload("sessions");
     } catch (error) {
       setArchiving((a) => ({ ...a, [id]: { state: "failed", message: describeError(error) } }));
+    }
+  };
+
+  // Fork from a tile or row (FLOW-FORK-SESSION): Core starts the fork and answers with it as listed; it becomes the
+  // active session (R04), and its tile slides in at its place once the list is read again. A refusal, or a workspace
+  // Core can't make, leaves the original as it was and says why beneath its tile until the next try.
+  const fork = async (id: string) => {
+    setForking((f) => ({ ...f, [id]: { state: "sending" } }));
+    try {
+      const forked = await client.call("session.fork", { id });
+      setForking(({ [id]: _, ...rest }) => rest);
+      // A fork is never archived: showing archived sessions only, the rail switches to active ones, so its tile is
+      // in view, as after a new session's start (FLOW-ORGANIZE-SESSIONS-R21).
+      if (showing.current === "archived") arrange(choicePatch({ show: "active" }));
+      connection.current?.reload("sessions");
+      dispatch({ type: "select", id: forked.id });
+    } catch (error) {
+      setForking((f) => ({ ...f, [id]: { state: "failed", message: describeError(error) } }));
     }
   };
 
@@ -772,6 +792,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onRename={rename}
               renaming={renaming}
               onRenameReset={resetRename}
+              onFork={fork}
+              forking={forking}
               onArchive={archive}
               archiving={archiving}
               onDelete={askDelete}
@@ -822,6 +844,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onRename={rename}
               renaming={renaming}
               onRenameReset={resetRename}
+              onFork={fork}
+              forking={forking}
               onArchive={archive}
               archiving={archiving}
               onDelete={(id) => askDelete(id, true)}

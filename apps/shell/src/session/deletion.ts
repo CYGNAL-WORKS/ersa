@@ -4,7 +4,7 @@
 
 import { t } from "../catalog";
 import { type CoreClient, describeError, refusalOf } from "../core/client";
-import { isBusy } from "../core/shell";
+import { inTurn } from "../core/shell";
 import type { Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
 
 /**
@@ -15,8 +15,7 @@ export function deleteUnavailable(session: Session, offline: boolean): string | 
   if (offline) return t("rail.tile.offlineReason");
   // Core holds a running deletion's workspace, and refuses another until it ends.
   if (session.deleting === "running") return t("rail.delete.deletingReason");
-  // Busy as Quit counts it, and also whenever a request waits on the user, since the tile then says it needs them.
-  if (isBusy(session) || session.tile.pending.length > 0) return t("rail.delete.busyReason");
+  if (inTurn(session)) return t("rail.delete.busyReason");
   return undefined;
 }
 
