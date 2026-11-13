@@ -61,7 +61,10 @@ export interface Place {
   el: HTMLElement | undefined;
 }
 
-/** Where each element marked `data-slide` under `root` sits now, by its mark: taken before the rail changes. */
+/**
+ * Where each element marked `data-slide` under `root` sits now, by its mark. Taken just before the commit that changes
+ * the rail, so the elements it holds are the ones that commit takes away, never ones that went earlier.
+ */
 export function placesOf(root: HTMLElement): Map<string, Place> {
   const places = new Map<string, Place>();
   for (const el of root.querySelectorAll<HTMLElement>("[data-slide]")) places.set(el.dataset.slide ?? "", { top: topOf(el), el: el.closest("[inert]") ? undefined : el });
@@ -76,11 +79,11 @@ interface Move {
   leaves: boolean;
 }
 
-/** How a tile moves when the user reorders the rail (DESIGN.md, Motion: "each tile slides to its new position"). */
-const SETTLE: Move = { duration: "--motion-settle", easing: "--motion-ease-in-out", enters: "fade", leaves: false };
-
-/** How the rail regroups: as a reorder, with what the new grouping or filter takes away fading out (DESIGN.md: nothing pops in). */
-const REGROUP: Move = { ...SETTLE, leaves: true };
+/**
+ * How the rail rearranges: each tile slides to its new position (DESIGN.md, Motion), what the change brings fades in,
+ * and what it takes away fades out (nothing pops in).
+ */
+const REARRANGE: Move = { duration: "--motion-settle", easing: "--motion-ease-in-out", enters: "fade", leaves: true };
 
 /** How a new session's tile slides in, and the others make room (DESIGN.md, Motion: "A new session's tile"). */
 const ARRIVE: Move = { duration: "--motion-slow", easing: "--motion-ease-out", enters: "slide", leaves: false };
@@ -114,15 +117,10 @@ function fadeOut(root: HTMLElement, el: HTMLElement, top: number, timing: Keyfra
 /**
  * Slides each element marked `data-slide` from where `before` had it to where it is now, over `motion-settle` with
  * `motion-ease-in-out` (DESIGN.md, Motion: "each tile slides to its new position"). One that is new fades in where it
- * is. `before` may be old by now, as a pin's is while it saves, so one that has gone is left gone.
+ * is, and one that has gone fades out where it sat. `before` is taken just before the commit that rearranged the rail.
  */
-export function slideFrom(root: HTMLElement, before: ReadonlyMap<string, Place>): void {
-  slide(root, before, SETTLE);
-}
-
-/** As `slideFrom`, for `before` taken just now, as the rail regroups: one that has gone fades out where it was. */
-export function regroup(root: HTMLElement, before: ReadonlyMap<string, Place>): void {
-  slide(root, before, REGROUP);
+export function rearrange(root: HTMLElement, before: ReadonlyMap<string, Place>): void {
+  slide(root, before, REARRANGE);
 }
 
 /**
