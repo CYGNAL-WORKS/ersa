@@ -91,6 +91,7 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Assumption check**: what an implementing session runs on its plan before writing code: a fresh read-only agent tries to disprove each assumption the plan rests on.
 - **Merge queue**: GitHub's queue that merges a pull request onto `main` and runs CI on that merge before `main` moves.
 - **Manifest**: the generated index of briefs, their status, requirement coverage, and problems.
+- **Daily build**: the Ersa the owner installs and uses every day: an unsigned installer built locally from `main`, running on its own endpoint label and data folder so development builds and live checks never touch it (ADR 0035). *Not: release, production build.*
 - **Reviewer agent**: an agent the merge review runs on one diff for one concern (Spec, Code, Surface or Design) that reports only findings it confirmed.
 - **Ticket**: an ephemeral unit of implementation work sized to one fresh agent context, derived from a brief.
 - **Planning session**: an agent session that may edit briefs and ADRs. Declares itself with the planning role.
