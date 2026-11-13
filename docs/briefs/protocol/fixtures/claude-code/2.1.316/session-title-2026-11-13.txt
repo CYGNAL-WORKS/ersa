@@ -1,0 +1,9 @@
+Claude Code 2.1.316 on the stream, recorded 2026-11-13 with Ersa's stream-json invocation (initialize sent first) and Haiku, by scripts/record-claude-stream.mjs with ERSA_STREAM_TITLE=1. The lines below are verbatim; the ticket that builds the request records it as a numbered fixture once the adapter models it.
+
+Sent, right after the first user message ("Why is the sky blue? Answer in one sentence."):
+{"type":"control_request","request_id":"ersa-title-1","request":{"subtype":"generate_session_title","description":"Why is the sky blue? Answer in one sentence.","persist":true}}
+
+Received, after system/init and a rate_limit_event and before the turn's first assistant line:
+{"type":"control_response","response":{"subtype":"success","request_id":"ersa-title-1","response":{"title":"Why the sky is blue"}}}
+
+No other line mentioned the title: no system/session_title_changed, as for any generated name. The turn then answered and ended with result/success.

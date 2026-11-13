@@ -24,7 +24,7 @@ import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit }
 import type { Project, Session, Workspace } from "./protocol/core-api.gen";
 import { type BackendChoices, type Branches, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
 import { contextUsed, tileOf } from "./session/tile";
-import { type Answers, type Decision, answering } from "./session/answers";
+import { type Answers, type Decision, type Reply, answering } from "./session/answers";
 import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./session/shelf";
 import { sharedSubscriptions } from "./session/subscriptions";
 import { type DeletePhase, Deletion } from "./session/deletion";
@@ -341,6 +341,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Stable for each session, so the transcript's memoised blocks do not re-render for it.
   const decide = useCallback((id: string, requestId: string, decision: Decision) => sending.decide(id, requestId, decision), [sending]);
   const decideShown = useMemo(() => (requestId: string, decision: Decision) => shownId !== undefined && decide(shownId, requestId, decision), [decide, shownId]);
+  const answer = useCallback((id: string, requestId: string, reply: Reply) => sending.answer(id, requestId, reply), [sending]);
+  const answerShown = useMemo(() => (requestId: string, reply: Reply) => shownId !== undefined && answer(shownId, requestId, reply), [answer, shownId]);
 
   // New session shows the screen; leaving it, by choosing a session, leaves nothing behind (FLOW-NEW-SESSION-R03).
   const newSession = (project: Project) => dispatch({ type: "newSession", projectId: project.id });
@@ -741,6 +743,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           answers={answers[shelfSession.id]}
           live={connected}
           onDecide={(requestId, decision) => decide(shelfSession.id, requestId, decision)}
+          onAnswer={(requestId, reply) => answer(shelfSession.id, requestId, reply)}
         />
       ),
     };
@@ -862,6 +865,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               view={shown}
               answers={answers[shown.id]}
               onDecide={decideShown}
+              onAnswer={answerShown}
               onRetry={retrySubscribe}
               onRename={(title) => rename(shown.id, title)}
               renaming={renaming[shown.id]}

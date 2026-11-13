@@ -6,7 +6,7 @@ import type { Envelope, PermissionRequested, QuestionAsked } from "../protocol/a
 import type { Session } from "../protocol/core-api.gen";
 import { EARLIER, type Follower, type SessionView, follow } from "./follow";
 import type { SharedSubscriptions } from "./subscriptions";
-import { type Item, isOpen } from "./transcript";
+import { type Item, isOpen, isOpenQuestion } from "./transcript";
 
 type Pending = Session["tile"]["pending"][number];
 
@@ -94,7 +94,7 @@ export function shelfOf(view: SessionView | undefined, pending: readonly Pending
   const settled = new Set(
     items.flatMap((item) => {
       if (item.kind === "permission" && !isOpen(item)) return [item.request.request_id];
-      if (item.kind === "question" && item.answered) return [item.requestId];
+      if (item.kind === "question" && !isOpenQuestion(item)) return [item.requestId];
       return [];
     }),
   );
@@ -103,7 +103,7 @@ export function shelfOf(view: SessionView | undefined, pending: readonly Pending
   type Request = Extract<Item, { kind: "permission" | "question" }>;
   const showable = items.filter((item): item is Request => {
     if (item.kind === "permission") return isOpen(item) && waiting.get(item.request.request_id) === "permission";
-    if (item.kind === "question") return !item.answered && waiting.get(item.requestId) === "question";
+    if (item.kind === "question") return isOpenQuestion(item) && waiting.get(item.requestId) === "question";
     return false;
   });
   const unshowable = stillPending.length - showable.length;

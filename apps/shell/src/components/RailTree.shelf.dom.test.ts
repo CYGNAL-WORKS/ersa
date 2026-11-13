@@ -69,6 +69,7 @@ function Rail() {
                 shows: { state: "permission", request },
                 live: true,
                 onDecide: (_: string, decision) => decided.push(String(decision)),
+                onAnswer: () => {},
               }),
           }
         : undefined,
