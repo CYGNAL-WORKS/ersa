@@ -230,6 +230,10 @@ sequenceDiagram
 - Process exit without `result`: treat the turn as interrupted; the session record keeps the messages already written.
 - Unknown message types: project to a typed passthrough event. Never drop.
 
+### Bare mode
+
+The CLI's `--bare` minimal mode skips the user's sign-in, hooks, CLAUDE.md and auto-memory. Ersa never passes it, but the CLI's makers have said a future version may make it the default for runs like Ersa's, and no flag turns it off. In bare mode the session fails on its first message as if the user were signed out, and its `system/init` has neither `scratchpad_path` nor `memory_paths`, where a signed-out session's lacks only the first and a session with auto-memory off only the second (`2.1.316/bare-mode-2026-11-13.txt`). The adapter tells the two apart by those fields in a live session; a session opened from its record has no `system/init`, so its history shows the failure as a sign-out, so the user is not sent to sign in again when signing in can't help, and the conformance fixtures of each newly tested version show the mode the CLI starts in.
+
 ## Versioning
 
 Minimum tested: 2.1.316. Maximum tested: 2.1.316. The 2.1.302 fixtures still parse, but the invocation (setting sources per trust, entrypoint, environment) was verified on 2.1.316 only. Core takes this range from the adapter. The tested range covers the session record's wrapper as well as the stream. The adapter compares versions using `claude_code_version` from the `initialize` response, because it is the only version known before the first turn; above the maximum tested version it warns and continues. Feature detection reads `capabilities` from `system/init`, which arrives with the first turn; no feature is needed before then.
@@ -289,6 +293,8 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R46**: The adapter shall report how many messages a live session's CLI holds as the `enqueue` entries in its record written since that CLI process started, less the `dequeue` entries written since then, reading them when Core hands a message over during a turn and when a turn starts.
 - **PROTO-CLAUDE-CODE-STREAM-R49**: When the CLI accepts the first message that has words of a new session the adapter started with `--session-id`, the adapter shall send `generate_session_title` once with that message's words and `persist: true`, without holding the turn for its answer, and with a deadline of 5 minutes; it shall send none for a resumed session or a fork.
 - **PROTO-CLAUDE-CODE-STREAM-R50**: The adapter shall report the title a `generate_session_title` answer carries as the session's title until the record holds it, unless a rename was sent or `system/session_title_changed` seen at any time in the session; a decline, an error, an answer with no title or a passed deadline shall report no title and no error.
+- **PROTO-CLAUDE-CODE-STREAM-R51**: When a live session's `system/init` has neither `scratchpad_path` nor `memory_paths` and its turn then fails as not signed in, the adapter shall project the failure as an `error` with `code: backend_error`, `recoverable: false`, no `action`, and a message saying Claude Code started in its minimal mode, which Ersa can't use, instead of `authentication_failed`.
+- **PROTO-CLAUDE-CODE-STREAM-R52**: The adapter's conformance tests shall fail when a fixture at the newest tested version whose recorded arguments are the adapter's own invocation has a `system/init` with neither `scratchpad_path` nor `memory_paths`.
 - **PROTO-CLAUDE-CODE-STREAM-R48**: The adapter shall project each `tool_use` block of a tool named in Tool targets and edits to a `tool.requested` carrying the `target` and `edits` that table gives, and any other tool's to one carrying neither.
 
 ## Out of scope
@@ -308,6 +314,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 ## Changes
 
+- 2026-11-13: from #148: Bare mode added, recorded on 2.1.316 (`bare-mode-2026-11-13.txt`): a bare session's failure is told apart from a signed-out one (PROTO-CLAUDE-CODE-STREAM-R51), and the conformance tests catch a version that starts bare by default (R52).
 - 2026-11-13: owner's decisions on #280: Naming a new session added: the adapter asks the CLI to name a new session (new sessions only), and a rename wins over a name that answers after it. PROTO-CLAUDE-CODE-STREAM-R49 and R50 added.
 - 2026-11-13: for FLOW-READ-TRANSCRIPT: Tool targets and edits added, from the SDK types and to be recorded before it is built; `NotebookEdit` edits cells, not text, so it carries no `edits`. The adapter's projection version changes with it. PROTO-CLAUDE-CODE-STREAM-R48 added.
 - 2026-11-13: for FLOW-RESUME-SESSION: resuming is no longer a milestone away. No requirement IDs changed.

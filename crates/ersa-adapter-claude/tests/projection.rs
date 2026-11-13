@@ -383,7 +383,7 @@ fn rate_limit_event_projects_to_a_rate_limit_update() {
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R05
-// verifies: PROTO-AGENT-EVENTS-R06
+// verifies: PROTO-AGENT-EVENTS-R22
 #[test]
 fn authentication_failure_is_a_session_error_not_transcript_text() {
     let events = events(&fixture("00-not-logged-in").raw_log());
