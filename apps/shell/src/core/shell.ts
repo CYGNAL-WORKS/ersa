@@ -45,6 +45,12 @@ export const QUIT_LIST_TIMEOUT_MS = 2_000;
 /** Whether a session is working, starting, or waiting on the user: Quit would interrupt it, and Delete waits for it. */
 export const isBusy = (session: Session): boolean => BUSY.has(session.tile.state);
 
+/**
+ * Busy as Quit counts it, or with a request waiting on the user, which the tile says too: a turn is under way, and
+ * Delete and Fork wait for it.
+ */
+export const inTurn = (session: Session): boolean => isBusy(session) || session.tile.pending.length > 0;
+
 /** The sessions a quit would interrupt (FLOW-CLOSE-AND-QUIT-R04). */
 export function busySessions(sessions: readonly Session[]): number {
   return sessions.filter(isBusy).length;

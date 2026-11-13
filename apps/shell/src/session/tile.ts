@@ -39,7 +39,7 @@ const dollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "U
 export const titleOf = (session: Pick<Session, "title">) => session.title || t("rail.tile.untitledLabel");
 
 /** What a session's tile shows. `backends` gives each host's backends, to name a session's backend by its own name. */
-export function tileOf(session: Session, backends: Readonly<Record<string, readonly BackendChoices[]>> = {}): TileView {
+export function tileOf(session: Session, backends: Readonly<Record<string, readonly BackendChoices[]>> = {}, forking = false): TileView {
   const { tile } = session;
   const cost = tile.cost_usd_total;
   const base = {
@@ -51,7 +51,13 @@ export function tileOf(session: Session, backends: Readonly<Record<string, reado
   const deleting = deletingOf(session);
   // Being deleted takes precedence over archived (LAY-SHELL, Being deleted).
   if (deleting) return { ...base, ...deleting };
+  // A fork of it on its way, which Core may take seconds to start, reads as a deletion under way does, in place, so
+  // nothing enters the rail until the fork's own tile does (FLOW-FORK-SESSION, step 2). `forking` is the window's to
+  // say: Core lists nothing for it.
   const state = stateOf(tile);
+  // Only over a state with no mark of its own (idle, ended): the original keeps its state (step 4), so a turn started
+  // in it meanwhile, a request for the user or an error still shows.
+  if (forking && !state.mark) return { ...base, titleMuted: false, mark: "starting", tone: "muted", phrase: t("rail.tile.forkingProgress") };
   // An archived session's tile reads quieter and carries the archive mark in place of its state's (LAY-SHELL,
   // Archived); line two still says its state.
   if (session.archived) return { ...base, ...state, titleMuted: true, mark: "archived", tone: undefined, markLabel: t("rail.tile.archivedStatus") };

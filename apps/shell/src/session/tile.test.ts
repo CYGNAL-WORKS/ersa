@@ -167,3 +167,20 @@ describe("a tile while its session is being deleted (LAY-SHELL, Being deleted)",
     expect(view).toMatchObject({ mark: "error", tone: "danger", phrase: "Couldn't delete", titleMuted: false });
   });
 });
+
+describe("a tile while a fork of its session is on its way (FLOW-FORK-SESSION, step 2)", () => {
+  it("reads Forking with the starting arc in ink-muted over a state with no mark of its own", () => {
+    for (const state of ["idle", "ended"] as const) {
+      const view = tileOf(session({ state }), {}, true);
+      expect(view.phrase).toBe("Forking…");
+      expect(view.mark).toBe("starting");
+      expect(view.tone).toBe("muted");
+    }
+  });
+
+  it("keeps a state that has a mark, since the original keeps its state (step 4)", () => {
+    expect(tileOf(session({ state: "running" }), {}, true).mark).toBe("working");
+    expect(tileOf(session({ state: "error" }), {}, true).phrase).toBe("Error");
+    expect(tileOf(session({ pending: [question] }), {}, true).mark).toBe("needsYou");
+  });
+});
