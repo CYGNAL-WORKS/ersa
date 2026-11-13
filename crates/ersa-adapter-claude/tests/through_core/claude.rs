@@ -1,7 +1,7 @@
 //! The real Claude adapter against a stub CLI that replays recorded fixture
 //! 11: a prompt, a permission request, the user's allow, the reply.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use ersa_adapter::fake::FakeTransport;
@@ -149,12 +149,7 @@ pub fn fixture_dir() -> PathBuf {
 
 /// The recorded fixtures of Claude Code `version`.
 pub fn fixtures_of(version: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .unwrap()
-        .join("docs/briefs/protocol/fixtures/claude-code")
-        .join(version)
+    crate::common::fixtures_root().join(version)
 }
 
 /// Fixture 11 as a recording.
