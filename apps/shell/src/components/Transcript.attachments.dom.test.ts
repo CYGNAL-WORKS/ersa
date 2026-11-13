@@ -14,7 +14,7 @@ import { Transcript } from "./Transcript";
 afterEach(cleanup);
 
 const draw = (transcript: Shown) =>
-  render(createElement(Transcript, { title: "Attachments", view: { id: "s1", transcript, stream: { state: "live" } }, onDecide: () => {} }));
+  render(createElement(Transcript, { title: "Attachments", view: { id: "s1", transcript, stream: { state: "live" } }, onDecide: () => {}, onAnswer: () => {} }));
 
 const replayed = () => events("2.1.316-07-attachments").reduce(apply, emptyTranscript);
 
