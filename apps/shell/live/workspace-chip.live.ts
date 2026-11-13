@@ -10,7 +10,7 @@ test("a new workspace starts at the default branch, and is made from the base br
   // A repository whose default branch is main, with a release branch one commit ahead of it.
   const repo = path.join(ersa.dir, "repo");
   mkdirSync(repo);
-  const git = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+  const git = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", windowsHide: true }).trim();
   git("init", "-q", "-b", "main");
   git("config", "user.email", "live@example.com");
   git("config", "user.name", "Live check");
