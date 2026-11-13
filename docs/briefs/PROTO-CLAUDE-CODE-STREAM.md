@@ -59,7 +59,7 @@ First stdout message of every one-shot session. In a bidirectional session the `
 
 ### Tool targets and edits
 
-From the SDK types, not yet recorded: the ticket that builds this records a fixture of each tool below first, and corrects this table from it. The adapter fills `tool.requested`'s `target` and `edits` (`PROTO-AGENT-EVENTS`) from a `tool_use` block's `name` and `input`:
+Recorded for `Read` (`file_path`, fixture 2.1.316/00-session-tools) and `Bash` (`command`, fixture 2.1.302/05-bash-write-default); the rest is from the SDK types, and the 2.1.316 `system/init` tool list offers `Task`, `Edit` and `Write` but not `MultiEdit`, `WebFetch` or `Agent`. The ticket that builds this records a fixture of each tool it can reach first, and corrects this table from it. The adapter fills `tool.requested`'s `target` and `edits` (`PROTO-AGENT-EVENTS`) from a `tool_use` block's `name` and `input`:
 
 | Tool | `target` | `edits` |
 |---|---|---|
