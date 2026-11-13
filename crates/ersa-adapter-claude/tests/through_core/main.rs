@@ -12,6 +12,10 @@
 #[path = "../../../ersa-core/tests/support/mod.rs"]
 mod support;
 
+// This crate's own test helpers, shared with its other test targets.
+#[path = "../common/mod.rs"]
+mod common;
+
 mod choices;
 mod claude;
 mod detection;

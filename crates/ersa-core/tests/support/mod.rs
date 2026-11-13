@@ -120,6 +120,14 @@ pub async fn start_replay_of(replay: Replay, configure: impl FnOnce(&mut CoreCon
     }
 }
 
+/// The one session a replay server serves.
+pub async fn the_session(client: &mut Client) -> Value {
+    let sessions = client.result("session.list", json!({})).await;
+    let sessions = sessions.as_array().expect("a list");
+    assert_eq!(sessions.len(), 1, "{sessions:#?}");
+    sessions[0].clone()
+}
+
 impl TestCore {
     /// A connected client that has already said hello.
     pub async fn client(&self) -> Client {

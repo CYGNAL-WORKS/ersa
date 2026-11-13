@@ -13,18 +13,10 @@ use ersa_core::replay::Pace;
 use serde_json::{Value, json};
 use support::fake::{BACKEND, recording, start_replay_with};
 use support::suite::{self, Target};
-use support::{Client, TestCore, kind};
+use support::{Client, TestCore, kind, the_session};
 
 async fn start_replay(pace: Pace) -> TestCore {
     start_replay_with(|_| {}, pace).await
-}
-
-/// The one session a replay server serves.
-async fn the_session(client: &mut Client) -> Value {
-    let sessions = client.result("session.list", json!({})).await;
-    let sessions = sessions.as_array().expect("a list");
-    assert_eq!(sessions.len(), 1, "{sessions:#?}");
-    sessions[0].clone()
 }
 
 /// Waits until the replay has recorded every line of the recording: lines
