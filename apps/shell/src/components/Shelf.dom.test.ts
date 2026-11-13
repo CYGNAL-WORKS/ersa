@@ -23,7 +23,7 @@ const request = (request_id: string, description: string): PermissionRequested =
   flags,
 });
 
-const shelf = (shows: ShelfShows) => createElement(Shelf, { tile: { title: "Fix the build" }, shows, live: true, onDecide: () => {} });
+const shelf = (shows: ShelfShows) => createElement(Shelf, { tile: { title: "Fix the build" }, shows, live: true, onDecide: () => {}, onAnswer: () => {} });
 const contents = () => document.querySelector(".shelf-contents") as HTMLElement;
 const reduce = (on: boolean) => {
   window.matchMedia = ((query: string) => ({ matches: on && query.includes("reduce"), media: query })) as unknown as typeof window.matchMedia;
@@ -104,7 +104,7 @@ describe("the shelf moving to the next request", () => {
       rerender(shelf({ state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 2 } }));
       expect(eases).toHaveLength(1);
       // Rendering the same request again, as the leaving copy goes, keeps the ease running.
-      rerender(createElement(Shelf, { tile: { title: "Fix the build" }, shows: { state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 2 } }, live: false, onDecide: () => {} }));
+      rerender(createElement(Shelf, { tile: { title: "Fix the build" }, shows: { state: "permission", request: request("r2", "Build the shell"), place: { n: 2, m: 2 } }, live: false, onDecide: () => {}, onAnswer: () => {} }));
       expect(eases).toHaveLength(1);
       expect(eases[0]?.cancelled).toBe(false);
     } finally {

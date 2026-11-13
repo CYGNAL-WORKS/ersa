@@ -2,7 +2,7 @@ import { LoaderCircle } from "lucide-react";
 import type { MouseEvent } from "react";
 import { t } from "../catalog";
 import type { PermissionRequested } from "../protocol/agent-events.gen";
-import type { Answer, Decision } from "../session/answers";
+import type { Answer, Decision, Reply } from "../session/answers";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
 import { Revealed } from "./Transcript";
@@ -79,7 +79,7 @@ export function PermissionAnswers({ request, answer, live, reconnectingNote = tr
   );
 }
 
-function same(a: Decision, b: Decision): boolean {
-  if (typeof a === "object" && typeof b === "object") return a.suggestion === b.suggestion;
+function same(a: Decision | Reply, b: Decision): boolean {
+  if (typeof a === "object" && typeof b === "object") return "suggestion" in a && a.suggestion === b.suggestion;
   return a === b;
 }

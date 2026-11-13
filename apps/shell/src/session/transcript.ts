@@ -35,8 +35,8 @@ export type Item =
     }
   /** A permission request, answered once `decision` is set; `unanswered` once the session ended without one. */
   | { kind: "permission"; key: string; request: PermissionRequested; decision?: PermissionDecided; unanswered?: true }
-  /** Questions are answered from the shelf (M1); until then the transcript shows them. */
-  | { kind: "question"; key: string; requestId: string; questions: QuestionAsked["questions"]; answered: boolean }
+  /** A question, answered once its answer arrives; `unanswered` once the session ended without one. */
+  | { kind: "question"; key: string; requestId: string; questions: QuestionAsked["questions"]; answered: boolean; unanswered?: true }
   /** Something went wrong: an `error` event, or a tool the backend denied with nobody to ask. */
   | { kind: "problem"; key: string; message: string }
   | { kind: "notice"; key: string; message: string }
@@ -85,7 +85,9 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
       return { ...next, state: event.state };
     case "session.ended": {
       // Nobody can answer a request once the session has ended.
-      const items = next.items.map((i) => (i.kind === "permission" && isOpen(i) ? { ...i, unanswered: true as const } : i));
+      const items = next.items.map((i) =>
+        (i.kind === "permission" && isOpen(i)) || (i.kind === "question" && !i.answered) ? { ...i, unanswered: true as const } : i,
+      );
       return add({ ...next, items, working: false }, { kind: "ended", key: `ended:${envelope.seq}`, reason: endedReason[event.reason] ?? "Ended." });
     }
     case "session.notice":

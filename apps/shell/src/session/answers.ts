@@ -1,16 +1,19 @@
-// The user's answers to permission requests (FLOW-APPROVE-PERMISSION, Sending an answer). An answer belongs to its
+// The user's answers to permission requests and questions (FLOW-APPROVE-PERMISSION, Sending an answer). An answer belongs to its
 // session, not to whichever view sent it: one sent from the shelf is still on its way on the transcript's card when
 // the user makes the session active meanwhile (R18). So the window keeps one record of answers on their way or
 // refused, by session, and the shelf and the transcript both read it.
 
-import type { Envelope } from "../protocol/agent-events.gen";
+import type { Envelope, QuestionAnswered } from "../protocol/agent-events.gen";
 import { type CoreClient, type Params, describeError } from "../core/client";
 
 /** What the user chose: Allow, Deny, or allowing with one of the request's suggestions, by its index. */
 export type Decision = "allow" | "deny" | { suggestion: number };
 
-/** An answer on its way, or refused with Core's reason; once its decision arrives as an event, it is gone. */
-export type Answer = { state: "sending"; decision: Decision } | { state: "failed"; message: string };
+/** What the user gave a question: an answer to every question in it (R16), or Decline (R28). */
+export type Reply = { answers: QuestionAnswered["answers"] } | "decline";
+
+/** An answer on its way, or refused with Core's reason; once its decision or answer arrives as an event, it is gone. */
+export type Answer = { state: "sending"; decision: Decision | Reply } | { state: "failed"; message: string };
 
 /** Answers by session id, then by request id. */
 export type Answers = Readonly<Record<string, Readonly<Record<string, Answer>>>>;
@@ -21,10 +24,18 @@ function decideParams(id: string, requestId: string, decision: Decision): Params
   return { id, request_id: requestId, behavior: decision };
 }
 
+/** What Core is sent for a question: its answers, or `declined` with none (R16, R28). */
+function answerParams(id: string, requestId: string, reply: Reply): Params<"session.answer_question"> {
+  if (reply === "decline") return { id, request_id: requestId, answers: [], declined: true };
+  return { id, request_id: requestId, answers: reply.answers };
+}
+
 export interface Answering {
   /** Sends one answer to a request, unless one is already on its way (R18). */
   decide(id: string, requestId: string, decision: Decision): void;
-  /** An event Core sent: a decision settles the answer that was on its way. */
+  /** Answers a question, unless an answer to it is already on its way (R18). */
+  answer(id: string, requestId: string, reply: Reply): void;
+  /** An event Core sent: a decision or a question's answer settles the answer that was on its way. */
   receive(envelope: Envelope): void;
 }
 
@@ -46,27 +57,37 @@ export function answering(client: CoreClient, change: (update: (answers: Answers
       return next;
     });
 
+  // One answer at a time to a request, kept on its way until Core's event for it arrives.
+  const send = (id: string, requestId: string, decision: Decision | Reply, call: () => Promise<unknown>) => {
+    const key = `${id}\n${requestId}`;
+    if (onItsWay.has(key)) return;
+    onItsWay.add(key);
+    set(id, requestId, { state: "sending", decision });
+    call().then(
+      // Core took it; it stays on its way until its event arrives, so the answers stay unavailable.
+      () => onItsWay.delete(key),
+      (error) => {
+        onItsWay.delete(key);
+        // Refused: say why, and offer the answers again (R19).
+        set(id, requestId, { state: "failed", message: describeError(error) }, true);
+      },
+    );
+  };
+
   return {
     decide(id, requestId, decision) {
-      const key = `${id}\n${requestId}`;
-      if (onItsWay.has(key)) return;
-      onItsWay.add(key);
-      set(id, requestId, { state: "sending", decision });
-      client.call("session.decide_permission", decideParams(id, requestId, decision)).then(
-        // Core took it; it stays on its way until its `permission.decided` arrives, so the answers stay unavailable.
-        () => onItsWay.delete(key),
-        (error) => {
-          onItsWay.delete(key);
-          // Refused: say why, and offer the answers again (R19).
-          set(id, requestId, { state: "failed", message: describeError(error) }, true);
-        },
-      );
+      send(id, requestId, decision, () => client.call("session.decide_permission", decideParams(id, requestId, decision)));
+    },
+
+    answer(id, requestId, reply) {
+      send(id, requestId, reply, () => client.call("session.answer_question", answerParams(id, requestId, reply)));
     },
 
     receive(envelope) {
-      // Read defensively: the follower checks events, and this only looks for a decision's ids.
+      // Read defensively: the follower checks events, and this only looks for a decision's or an answer's ids.
       const { session_id: id, event } = envelope as { session_id?: unknown; event?: { type?: unknown; request_id?: unknown } };
-      if (typeof id === "string" && event?.type === "permission.decided" && typeof event.request_id === "string") {
+      const settles = event?.type === "permission.decided" || event?.type === "question.answered";
+      if (typeof id === "string" && settles && typeof event.request_id === "string") {
         set(id, event.request_id, undefined);
       }
     },

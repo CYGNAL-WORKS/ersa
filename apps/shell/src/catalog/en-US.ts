@@ -217,6 +217,11 @@ export const enUS = {
       // A permission request's answers: the transcript's permission card offers the same ones (R27).
       denyButton: "Deny",
       allowButton: "Allow",
+      // A question's answers (R16, R28): the transcript's question card offers the same ones (R17).
+      declineButton: "Decline",
+      answerButton: "Answer",
+      // The text field for the user's own words, beneath a question's options; named by its placeholder.
+      ownWordsPlaceholder: "Answer in your own words",
       // Followed by Core's reason, beneath.
       answerRefusedError: "Your answer wasn't accepted.",
       reconnectingNote: "Reconnecting to Core…",

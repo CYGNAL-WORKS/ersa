@@ -556,6 +556,18 @@ Deny
 
 Allow
 
+### `rail.shelf.declineButton`
+
+Decline
+
+### `rail.shelf.answerButton`
+
+Answer
+
+### `rail.shelf.ownWordsPlaceholder`
+
+Answer in your own words
+
 ### `rail.shelf.answerRefusedError`
 
 Your answer wasn't accepted.

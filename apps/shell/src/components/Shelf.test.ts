@@ -34,6 +34,7 @@ const draw = (shows: ShelfShows, more: { ring?: number; cost?: string; onRetry?:
       answers: more.answer && { [request.request_id]: more.answer },
       live: more.live ?? true,
       onDecide: () => {},
+      onAnswer: () => {},
     }),
   );
 
@@ -150,10 +151,11 @@ describe("the shelf", () => {
     expect(draw({ state: "permission", request })).toContain(answers);
   });
 
-  it("is the accent for a question, and shows what it asks", () => {
-    const html = draw({ state: "question", requestId: "r3", questions: [{ id: "q1", text: "Which branch?", multi_select: false, takes_text: false }] });
+  // verifies: FLOW-APPROVE-PERMISSION-R23
+  it("is the accent for a question, and reads its kind, what it asks, the readouts, then its answers", () => {
+    const html = draw({ state: "question", requestId: "r3", questions: [{ id: "q1", text: "Which branch?", multi_select: false, takes_text: false }] }, { ring: 0.53, cost: "$0.82" });
     expect(html).toContain('data-tone="accent"');
-    expect(text(html)).toBe("Question Which branch?");
+    expect(text(html)).toBe("Question Which branch? 53% · $0.82 Decline Answer");
   });
 
   // verifies: FLOW-APPROVE-PERMISSION-R04
