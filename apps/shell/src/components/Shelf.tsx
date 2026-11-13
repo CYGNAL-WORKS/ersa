@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../catalog";
-import type { Answer, Decision } from "../session/answers";
+import type { Answer, Decision, Reply } from "../session/answers";
 import type { PermissionRequested } from "../protocol/agent-events.gen";
+import type { Draft } from "../session/questionForm";
 import { type ShelfShows, shelfTone, shownRequest } from "../session/shelf";
 import type { TileView } from "../session/tile";
 import { Button } from "./Button";
@@ -9,6 +10,7 @@ import { ContextRing } from "./ContextRing";
 import { HeightEase, reducedMotion } from "../theme/motion";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { PermissionAnswers } from "./PermissionAnswers";
+import { QuestionForm } from "./QuestionForm";
 import { PermissionInput, Revealed } from "./Transcript";
 import "./Shelf.css";
 
@@ -25,6 +27,8 @@ interface ShelfProps {
   live: boolean;
   /** Answers the shown permission request (R13). */
   onDecide: (requestId: string, decision: Decision) => void;
+  /** Answers the shown question, or declines it (R16, R28). */
+  onAnswer: (requestId: string, reply: Reply) => void;
   /** For the gallery: show keyboard focus on the shelf itself without it. */
   force?: "focus";
 }
@@ -35,7 +39,7 @@ interface ShelfProps {
  * kind, what is asked, its details, the session's readouts, then the answers (R23). `shelfOf` decides what it
  * shows; this only lays it out.
  */
-export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, force }: ShelfProps) {
+export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, onAnswer, force }: ShelfProps) {
   const root = useRef<HTMLDivElement>(null);
   const key = shownKey(shows);
   // A request, or one it can't show: what the shelf counts its place by.
@@ -46,6 +50,10 @@ export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, force
   // same place after loading, as on a reconnect, is not moving on.
   const [last, setLast] = useState<{ key: string; shown?: ShelfShows; onScreen: boolean }>({ key, shown: request, onScreen: request !== undefined });
   const [next, setNext] = useState<{ key?: string; said: string; from?: ShelfShows }>();
+  // What the user has chosen or written for each question shown, by request id: held here, since the contents are
+  // drawn afresh as the shelf loads again (a reconnect) or settles after an answer, and the choices must not go.
+  const [drafts, setDrafts] = useState<Readonly<Record<string, Draft>>>({});
+  const onDraft = (requestId: string) => (update: (draft: Draft) => Draft) => setDrafts((d) => ({ ...d, [requestId]: update(d[requestId] ?? {}) }));
   if (key !== last.key) {
     // The last request stays on screen while the shelf settles.
     setLast({ key, shown: request ?? last.shown, onScreen: request !== undefined || shows.state === "settled" });
@@ -66,7 +74,19 @@ export function Shelf({ id, tile, shows, onRetry, answers, live, onDecide, force
   const contents = (shown: ShelfShows, done = false) => (
     // A request it can't draw is said here, in the shelf, and leaves the rail as it was.
     <ErrorBoundary what={t("rail.shelf.boundaryName")} resetKey={shownKey(shown)}>
-      <Contents shows={shown} ring={tile.ring} cost={tile.cost} onRetry={onRetry} answers={answers} live={live} settled={done} onDecide={onDecide} />
+      <Contents
+        shows={shown}
+        ring={tile.ring}
+        cost={tile.cost}
+        onRetry={onRetry}
+        answers={answers}
+        live={live}
+        settled={done}
+        onDecide={onDecide}
+        onAnswer={onAnswer}
+        drafts={drafts}
+        onDraft={onDraft}
+      />
     </ErrorBoundary>
   );
   return (
@@ -107,7 +127,16 @@ function Contents({
   live,
   settled,
   onDecide,
-}: Pick<ShelfProps, "shows" | "onRetry" | "answers" | "live" | "onDecide"> & { ring?: number; cost?: string; settled: boolean }) {
+  onAnswer,
+  drafts,
+  onDraft,
+}: Pick<ShelfProps, "shows" | "onRetry" | "answers" | "live" | "onDecide" | "onAnswer"> & {
+  ring?: number;
+  cost?: string;
+  settled: boolean;
+  drafts: Readonly<Record<string, Draft>>;
+  onDraft: (requestId: string) => (update: (draft: Draft) => Draft) => void;
+}) {
   switch (shows.state) {
     case "settled":
       return null;
@@ -171,18 +200,21 @@ function Contents({
       );
     }
     case "question":
-      // What a question asks; its header, form and answers come with the question ticket, as the events gain them.
+      // Its questions and their form, then the session's readouts, then Decline and Answer (R15, R16, R23, R28).
       return (
         <>
           <Heading kind={t("rail.shelf.questionHeading")} place={shows.place} />
-          {shows.questions.map((q) => (
-            <div key={q.id} className="shelf-question">
-              <p className="shelf-question-text">
-                <Revealed text={q.text} />
-              </p>
-            </div>
-          ))}
-          <Readouts ring={ring} cost={cost} />
+          <QuestionForm
+            questions={shows.questions}
+            draft={drafts[shows.requestId] ?? {}}
+            onDraft={onDraft(shows.requestId)}
+            answer={answers?.[shows.requestId]}
+            // Answered already, as the shelf settles or as it fades out: nothing to choose, and nothing to reconnect for.
+            live={live && !settled}
+            reconnectingNote={!settled}
+            between={<Readouts ring={ring} cost={cost} />}
+            onAnswer={(reply) => onAnswer(shows.requestId, reply)}
+          />
         </>
       );
   }

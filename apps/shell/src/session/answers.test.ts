@@ -89,3 +89,43 @@ describe("answering a permission request", () => {
     expect(answers()).toEqual({});
   });
 });
+
+const questionAnswered = (session_id: string, request_id: string, answered_by: "user" | "backend") =>
+  ({
+    session_id,
+    seq: 9,
+    event: { type: "question.answered", request_id, answers: [], declined: false, answered_by },
+  }) as unknown as Envelope;
+
+describe("answering a question", () => {
+  // verifies: FLOW-APPROVE-PERMISSION-R16
+  it("sends one answer per question, own words included, and no declined", () => {
+    const { sending, calls } = setup();
+    const answers = [
+      { id: "q1", value: "o2", own_words: false },
+      { id: "q2", value: ["o1", "o3"], own_words: false },
+      { id: "q3", value: "retry-on-windows", own_words: true },
+    ];
+    sending.answer("s", "r1", { answers });
+    expect(calls).toEqual([{ method: "session.answer_question", params: { id: "s", request_id: "r1", answers } }]);
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R28
+  it("sends declined with no answers when the user declines", () => {
+    const { sending, calls } = setup();
+    sending.answer("s", "r1", "decline");
+    expect(calls).toEqual([{ method: "session.answer_question", params: { id: "s", request_id: "r1", answers: [], declined: true } }]);
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R18
+  it("sends one answer, which stays on its way until the question's answer arrives, whoever answered it", async () => {
+    const { sending, calls, answers } = setup(() => Promise.resolve({}));
+    sending.answer("s", "r1", "decline");
+    sending.answer("s", "r1", { answers: [] });
+    expect(calls).toHaveLength(1);
+    await settle();
+    expect(answers()).toEqual({ s: { r1: { state: "sending", decision: "decline" } } });
+    sending.receive(questionAnswered("s", "r1", "backend"));
+    expect(answers()).toEqual({});
+  });
+});
