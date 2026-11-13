@@ -55,6 +55,7 @@ export function SessionTile({
   remove,
   initialMenu,
   initialDraft,
+  forking,
 }: TileActions & {
   session: Session;
   backends?: Backends;
@@ -68,8 +69,10 @@ export function SessionTile({
   /** For the gallery: the tile's menu shown open, and the title being edited with this text. */
   initialMenu?: boolean;
   initialDraft?: string;
+  /** A fork of this session is on its way: it says so in place of its state. */
+  forking?: boolean;
 }) {
-  const view = tileOf(session, backends);
+  const view = tileOf(session, backends, forking);
   const needsYou = view.mark === "needsYou";
   const { root, editing, rootHandlers, titleField, moreAndMenu } = useTileMenu({
     session,

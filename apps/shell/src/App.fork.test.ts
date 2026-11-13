@@ -78,7 +78,7 @@ function fakeCore(fork: (params: { id: string }) => unknown) {
 
 const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
 const rail = () => screen.getByRole("navigation", { name: "Rail" });
-const tile = (title: string) => [...rail().querySelectorAll<HTMLElement>(".session")].find((el) => el.textContent?.includes(title));
+const tile = (title: string) => [...rail().querySelectorAll<HTMLElement>(".session")].find((el) => el.querySelector(".session-title")?.textContent === title);
 const forkItem = (title: string) => {
   fireEvent.click(within(rail()).getByRole("button", { name: `More for ${title}` }));
   return screen.getByRole("menuitem", { name: /^Fork/ });
@@ -108,19 +108,20 @@ describe("Fork on a tile", () => {
     expect(core.calls.some((c) => c.method === "session.subscribe" && (c.params as { id: string }).id === "f1")).toBe(true);
   });
 
-  it("says the fork is on its way beneath the original's tile until Core answers, and Fork waits for it", async () => {
+  it("says on the original's tile, in place of its state, that the fork is on its way until Core answers, and Fork waits for it", async () => {
     let answer: (s: Session) => void = () => {};
     await open(() => new Promise<Session>((resolve) => (answer = resolve)));
     fireEvent.click(forkItem("Fix the build"));
     await settle();
-    expect(rail().querySelector(".rail-note[role=status]")?.textContent).toBe("Forking…");
+    expect(tile("Fix the build")?.querySelector(".session-phrase")?.textContent).toBe("Forking…");
+    expect(rail().querySelector(".rail-note")).toBeNull();
     const again = forkItem("Fix the build");
     expect(again.getAttribute("aria-disabled")).toBe("true");
     expect(again.textContent).toContain("Forking…");
     answer(forked);
     await settle();
     await settle();
-    expect(rail().querySelector(".rail-note[role=status]")).toBeNull();
+    expect(tile("Fix the build")?.querySelector(".session-phrase")).toBeNull();
     expect(tile("Fix the build (fork)")?.getAttribute("aria-current")).toBe("true");
   });
 
