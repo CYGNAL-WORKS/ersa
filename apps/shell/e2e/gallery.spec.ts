@@ -10,6 +10,7 @@ const components = [
   "DeleteQuestion",
   "RailTree",
   "SessionsPage",
+  "QuestionForm",
   "Shelf",
   "AttachmentChip",
   "Transcript",
