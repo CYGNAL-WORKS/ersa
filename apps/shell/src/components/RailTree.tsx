@@ -374,6 +374,12 @@ export function Refusals({
   const fork = forking?.[session.id];
   return (
     <>
+      {/* Core may make a workspace and start the backend before it answers, which can take seconds. */}
+      {fork?.state === "sending" && (
+        <p className="rail-note" role="status">
+          {t("rail.tile.forkingProgress")}
+        </p>
+      )}
       {fork?.state === "failed" && <Problem lead={t("rail.tile.forkError")} reason={fork.message} />}
       {archive?.state === "failed" && <Problem lead={session.archived ? t("rail.tile.unarchiveError") : t("rail.tile.archiveError")} reason={archive.message} />}
       {pin?.state === "failed" && <Problem lead={session.pinned ? t("rail.tile.unpinError") : t("rail.tile.pinError")} reason={pin.message} />}

@@ -58,9 +58,9 @@ function fakeCore(fork: (params: { id: string }) => unknown) {
     "settings.get": () => ({}),
     "session.subscribe": () => ({ view: "v1", last_seq: 0 }),
     "session.unsubscribe": () => ({}),
-    "session.fork": (params: { id: string }) => {
-      const answer = fork(params);
-      list = [...list, answer as Session];
+    "session.fork": async (params: { id: string }) => {
+      const answer = (await fork(params)) as Session;
+      list = [...list, answer];
       return answer;
     },
   };
@@ -106,6 +106,22 @@ describe("Fork on a tile", () => {
     expect(tile("Fix the build")?.getAttribute("aria-current")).toBeNull();
     // The window follows the fork, so its transcript shows.
     expect(core.calls.some((c) => c.method === "session.subscribe" && (c.params as { id: string }).id === "f1")).toBe(true);
+  });
+
+  it("says the fork is on its way beneath the original's tile until Core answers, and Fork waits for it", async () => {
+    let answer: (s: Session) => void = () => {};
+    await open(() => new Promise<Session>((resolve) => (answer = resolve)));
+    fireEvent.click(forkItem("Fix the build"));
+    await settle();
+    expect(rail().querySelector(".rail-note[role=status]")?.textContent).toBe("Forking…");
+    const again = forkItem("Fix the build");
+    expect(again.getAttribute("aria-disabled")).toBe("true");
+    expect(again.textContent).toContain("Forking…");
+    answer(forked);
+    await settle();
+    await settle();
+    expect(rail().querySelector(".rail-note[role=status]")).toBeNull();
+    expect(tile("Fix the build (fork)")?.getAttribute("aria-current")).toBe("true");
   });
 
   // verifies: FLOW-FORK-SESSION-R03
