@@ -197,13 +197,14 @@ export function SessionsPage({
                       host={hostOf(s)}
                       time={lastActive(s, now)}
                       actions={tileActions(s, handlers)}
+                      forking={handlers.forking?.[s.id]?.state === "sending"}
                       onOpen={onOpen}
                       force={force?.id === s.id ? force.state : undefined}
                       initialMenu={initialTileMenu === s.id}
                       initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
                     />
                   </ErrorBoundary>
-                  <Refusals session={s} pinning={handlers.pinning} archiving={handlers.archiving} />
+                  <Refusals session={s} pinning={handlers.pinning} archiving={handlers.archiving} forking={handlers.forking} />
                 </li>
               ))}
             </ul>
@@ -226,6 +227,7 @@ function SessionRow({
   force,
   initialMenu,
   initialDraft,
+  forking,
 }: {
   session: Session;
   backends?: Backends;
@@ -237,8 +239,10 @@ function SessionRow({
   force?: ForcedTile["state"];
   initialMenu?: boolean;
   initialDraft?: string;
+  /** A fork of this session is on its way: it says so in place of its state. */
+  forking?: boolean;
 }) {
-  const view = tileOf(session, backends);
+  const view = tileOf(session, backends, forking);
   const { root, editing, rootHandlers, titleField, moreAndMenu } = useTileMenu({ session, title: view.title, actions, initialMenu, initialDraft });
   return (
     <>

@@ -124,6 +124,12 @@ export const enUS = {
       renameButton: "Rename",
       // The key that does the same as Rename, at the item's trailing edge.
       renameKey: "F2",
+      // A new session from this one's conversation (FLOW-FORK-SESSION), and why it can't be chosen now.
+      forkButton: "Fork",
+      forkBusyReason: "Available once the reply finishes",
+      forkingProgress: "Forking…",
+      // Beneath the tile, before Core's reason, when Core refuses or the fork can't be made.
+      forkError: "Ersa can't fork this session.",
       // Why an item that goes through Core, such as Rename, Pin, Archive or Delete, is unavailable.
       offlineReason: "Available once Ersa reaches your sessions",
       // In the tile's menu, apart in its own group. It asks first, so it ends in an ellipsis.
