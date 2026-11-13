@@ -12,7 +12,7 @@ export default function build() {
   }
   const run = (program: string, args: string[], cwd: string) =>
     // `shell` so Windows finds pnpm's and cargo's .cmd and .exe shims on PATH.
-    execFileSync(program, args, { cwd, stdio: "inherit", shell: true });
+    execFileSync(program, args, { cwd, stdio: "inherit", shell: true, windowsHide: true });
   // The Interface the window embeds.
   run("pnpm", ["build"], path.join(root, "apps", "shell"));
   // Core, the stand-in backend, and the window with the Interface embedded (Tauri's custom-protocol feature).
