@@ -30,7 +30,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 
 ## Variations and errors
 
-- **Resume is refused**, as it is until resuming is built (milestone M1): the session stays archived and Ersa says why; Unarchive still returns it to its group.
+- **Resume is refused**, as when the session's folder is gone (FLOW-RESUME-SESSION-R03): the session stays archived and Ersa says why; Unarchive still returns it to its group.
 - **Deleting fails** (the folder is in use, the branch can't be deleted): the session stays in the rail, stopped, its tile saying the deletion failed (`LAY-SHELL`), and Ersa says what failed and offers **Try again**, which asks the question again with what is left, then repeats the deletion from where it stopped.
 - **The workspace changed after the question.** On confirm Ersa stops the session, then checks that what would be lost is what the question described; when anything changed, even with the same counts, Ersa asks again, and the session stays stopped.
 - **Ersa stops part way through a delete** (a crash, a restart): when it starts again, a delete the user had confirmed shows as failed and offers Try again; one stopped before the confirmation was checked deleted and marked nothing.
@@ -62,6 +62,7 @@ The user chooses **Archive**, **Unarchive** or **Delete** in a tile's menu (`LAY
 
 ## Changes
 
+- 2026-11-13: a refused Resume's example is now a folder that is gone, since resuming is specified (FLOW-RESUME-SESSION). No requirement IDs changed.
 - 2026-11-09: owner's decision from the audit against Claude Desktop: Archive is unavailable while the session is starting, working or waiting on the user, which closes the open question on asking first. R11 added.
 - 2026-11-07: from #261 inbox: the active session goes to the new-session screen only when the user archives or deletes it in this window, and launch opens the newest session that is not archived; COMPOSER.md draws the archived note and RAIL.md an archived tile's line two, a refused Archive or Unarchive, and focus when a tile leaves the rail. No requirement IDs changed.
 - 2026-11-07: from #252 inbox: a delete refused because the session is open in another process leaves the session stopped. No requirement IDs added or retired.
