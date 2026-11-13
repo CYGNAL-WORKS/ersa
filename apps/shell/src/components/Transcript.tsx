@@ -2,20 +2,23 @@ import { Image } from "lucide-react";
 import { type CSSProperties, type ReactNode, memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { t } from "../catalog";
 import type { PermissionRequested, ToolInput } from "../protocol/agent-events.gen";
-import type { Answer, Decision } from "../session/answers";
+import type { Answer, Decision, Reply } from "../session/answers";
 import type { SessionView, Sending } from "../session/follow";
 import { pathName } from "../session/attachments";
 import { imageSize } from "../session/imageSize";
 import { stateText } from "../session/states";
-import { type Item, type MessageAttachment, isOpen } from "../session/transcript";
+import { type Item, type MessageAttachment, isOpen, isOpenQuestion } from "../session/transcript";
 import { Button } from "./Button";
 import { AttachmentChip } from "./AttachmentChip";
 import { Icon } from "./Icon";
 import { PermissionAnswers } from "./PermissionAnswers";
+import type { Draft } from "../session/questionForm";
+import { QuestionForm } from "./QuestionForm";
 import { SessionTitle } from "./SessionTitle";
 import "./Transcript.css";
 
 type Decide = (requestId: string, decision: Decision) => void;
+type AnswerQuestion = (requestId: string, reply: Reply) => void;
 
 interface TranscriptProps {
   title: string;
@@ -26,6 +29,8 @@ interface TranscriptProps {
   answers?: Readonly<Record<string, Answer>>;
   /** Kept stable across renders, so streaming text does not re-render every block. */
   onDecide: Decide;
+  /** Answers a question or declines it; kept stable, as `onDecide` is. */
+  onAnswer: AnswerQuestion;
   /** Subscribes again after subscribing failed. */
   onRetry?: () => void;
   /** Renames the session; see SessionTitle. */
@@ -36,7 +41,7 @@ interface TranscriptProps {
 }
 
 /** The active session as a document: the user's and the agent's words, tool cards, and permission requests to answer. */
-export function Transcript({ title, untitled, view, answers = {}, onDecide, onRetry, onRename, renaming, onRenameReset, renameDisabled }: TranscriptProps) {
+export function Transcript({ title, untitled, view, answers = {}, onDecide, onAnswer, onRetry, onRename, renaming, onRenameReset, renameDisabled }: TranscriptProps) {
   const { transcript, stream } = view;
   const scroller = useRef<HTMLDivElement>(null);
   // Whether the reader is at the end; new content keeps them there, and
@@ -88,10 +93,11 @@ export function Transcript({ title, untitled, view, answers = {}, onDecide, onRe
             <Block
               key={item.key}
               item={item}
-              answer={item.kind === "permission" && isOpen(item) ? answers[item.request.request_id] : undefined}
+              answer={answerTo(item, answers)}
               waiting={item.kind === "tool" && awaiting.has(item.key.slice("tool:".length))}
               live={live}
               onDecide={onDecide}
+              onAnswer={onAnswer}
             />
           ))}
           {transcript.refused && (
@@ -113,7 +119,16 @@ interface BlockProps {
   /** Whether answers can reach Core now. */
   live: boolean;
   onDecide: Decide;
+  onAnswer: AnswerQuestion;
 }
+
+/** The answer on its way or refused for a request still open, if any. */
+function answerTo(item: Item, answers: Readonly<Record<string, Answer>>): Answer | undefined {
+  if (item.kind === "permission" && isOpen(item)) return answers[item.request.request_id];
+  if (item.kind === "question" && isOpenQuestion(item)) return answers[item.requestId];
+  return undefined;
+}
+
 
 /**
  * What came with a user's message, above its words (FLOW-SEND-MESSAGE-R11; DESIGN.md, Layout): an image as the image;
@@ -178,7 +193,7 @@ function UserBubble({ item }: { item: Extract<Item, { kind: "user" }> }) {
  * One block. Memoised: items keep their identity until their own event
  * changes them, so a streamed delta re-renders one block, not the page.
  */
-const Block = memo(function Block({ item, answer, waiting, live, onDecide }: BlockProps) {
+const Block = memo(function Block({ item, answer, waiting, live, onDecide, onAnswer }: BlockProps) {
   switch (item.kind) {
     case "user":
       return <UserBubble item={item} />;
@@ -196,16 +211,7 @@ const Block = memo(function Block({ item, answer, waiting, live, onDecide }: Blo
     case "permission":
       return <PermissionCard item={item} answer={answer} live={live} onDecide={onDecide} />;
     case "question":
-      return (
-        <div className="transcript-card">
-          <span className="transcript-card-title">{item.answered ? "Question, answered" : "Question"}</span>
-          {item.questions.map((q) => (
-            <p key={q.id} className="transcript-card-detail">
-              <Revealed text={q.text} />
-            </p>
-          ))}
-        </div>
-      );
+      return <QuestionCard item={item} answer={answer} live={live} onAnswer={onAnswer} />;
     case "problem":
       return (
         <p className="problem" role="alert">
@@ -317,6 +323,44 @@ function PermissionCard({
           reconnectingNote={false}
           onDecide={(decision) => onDecide(request.request_id, decision)}
         />
+      )}
+    </section>
+  );
+}
+
+/**
+ * A question: while nobody has answered it, the same answers the shelf would offer (FLOW-APPROVE-PERMISSION-R17,
+ * R28); once answered, or once the session ended without an answer, its questions and what became of it.
+ */
+function QuestionCard({ item, answer, live, onAnswer }: { item: Extract<Item, { kind: "question" }>; answer?: Answer; live: boolean; onAnswer: AnswerQuestion }) {
+  const open = isOpenQuestion(item);
+  // The QuestionForm's choices so far: kept here, so they last as long as the card does.
+  const [draft, setDraft] = useState<Draft>({});
+  const title = item.declined ? "declinedTitle" : item.answered ? "answeredTitle" : "name";
+  return (
+    // Focusable outside the tab order, so focus moves to the card as an answer makes its answers unavailable.
+    <section tabIndex={-1} className="transcript-card transcript-question" data-open={open || undefined} aria-label={t("transcript.question.name")}>
+      <div className="transcript-card-head">
+        <span className="transcript-card-title">{t(`transcript.question.${title}`)}</span>
+        {item.unanswered && <Status>{t("transcript.question.unansweredStatus")}</Status>}
+      </div>
+      {open ? (
+        // None is focused by default, and Enter never answers. The transcript says it is reconnecting above, once.
+        <QuestionForm
+          questions={item.questions}
+          draft={draft}
+          onDraft={setDraft}
+          answer={answer}
+          live={live}
+          reconnectingNote={false}
+          onAnswer={(reply) => onAnswer(item.requestId, reply)}
+        />
+      ) : (
+        item.questions.map((q) => (
+          <p key={q.id} className="transcript-card-detail">
+            <Revealed text={q.text} />
+          </p>
+        ))
       )}
     </section>
   );
