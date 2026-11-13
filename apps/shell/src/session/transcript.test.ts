@@ -41,6 +41,7 @@ const render = (transcript: Transcript, answers: Record<string, Answer> = {}) =>
       view: { id: "s-replay", transcript, stream: { state: "live" } },
       answers,
       onDecide: () => {},
+      onAnswer: () => {},
     }),
   );
 
@@ -296,6 +297,16 @@ describe("a repeated question", () => {
     const again = { ...asked, seq: 2 };
     const shown = play([asked, answered, again]);
     expect(shown.items).toEqual([{ kind: "question", key: "question:q", requestId: "q", questions: [{ id: "a", text: "Which?", multi_select: false, takes_text: false }], answered: true }]);
+  });
+});
+
+describe("a question in a session that ended", () => {
+  // verifies: FLOW-APPROVE-PERMISSION-R17
+  it("is no longer answerable once the session ends without an answer", () => {
+    const asked = envelope(0, { type: "question.asked", request_id: "q", questions: [{ id: "a", text: "Which?", multi_select: false, takes_text: true }] });
+    const ended = envelope(1, { type: "session.ended", reason: "backend_exited" });
+    const [question] = play([asked, ended]).items;
+    expect(question).toMatchObject({ kind: "question", answered: false, unanswered: true });
   });
 });
 

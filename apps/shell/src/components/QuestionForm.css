@@ -1,0 +1,138 @@
+/* A question (docs/design/RAIL.md, The shelf: A question): its header, its text, its options, and a text field for the
+   user's own words, space-xs apart. */
+.question {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+/* The header: ui-small at the heading weight in ink-muted. */
+.question-header {
+  margin: 0;
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  font-weight: var(--type-heading-weight);
+  overflow-wrap: anywhere;
+}
+
+/* The question's text: ui in ink. */
+.question-text {
+  margin: 0;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+
+.question-options {
+  display: flex;
+  flex-direction: column;
+}
+
+/* An option: the row a floating layer's options use, at least size-control high, radius-md, padded space-sm; the label
+   in ui and its description beneath in ui-small, ink-muted; the check at the trailing edge. */
+.question-option {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-height: var(--size-control);
+  padding: var(--space-xs) var(--space-sm);
+  color: var(--color-ink);
+  border: var(--line-hairline) solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background var(--motion-quick) var(--motion-ease-out),
+    border-color var(--motion-quick) var(--motion-ease-out);
+}
+
+.question-option:hover:not([data-unavailable]) {
+  background: var(--material-hover);
+}
+
+.question-option:active:not([data-unavailable]) {
+  background: var(--material-pressed);
+}
+
+/* Keyboard focus on its control: the accent edge every control takes. */
+.question-option:has(.question-control:focus-visible) {
+  border-color: var(--color-accent);
+}
+
+/* Unavailable while an answer is on its way or Ersa can't reach Core: ink-faint, unchanged under the pointer. */
+.question-option[data-unavailable] {
+  color: var(--color-ink-faint);
+  cursor: default;
+}
+
+/* The native control stays in the page for the keyboard and assistive technology, unseen; the row is its look. */
+.question-control {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.question-option-label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.question-option-description {
+  color: var(--color-ink-muted);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+}
+
+.question-option[data-unavailable] .question-option-description {
+  color: var(--color-ink-faint);
+}
+
+/* The chosen option's check, size-icon-sm in accent; its place is kept when none shows. */
+.question-check {
+  display: inline-flex;
+  flex: none;
+  width: var(--size-icon-sm);
+  color: var(--color-accent);
+}
+
+/* The user's own words: the text field every other surface uses. */
+.question-words {
+  box-sizing: border-box;
+  min-width: 0;
+  height: var(--size-control);
+  padding-inline: var(--space-sm);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: var(--type-ui-size);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+  transition: border-color var(--motion-quick) var(--motion-ease-out);
+}
+
+.question-words::placeholder {
+  color: var(--color-ink-faint);
+}
+
+.question-words:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.question-words:read-only {
+  color: var(--color-ink-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .question-option,
+  .question-words {
+    transition: none;
+  }
+}
