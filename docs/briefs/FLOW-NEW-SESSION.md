@@ -4,7 +4,7 @@ type: flow
 title: Start a new session
 status: ready
 references: [LAY-SHELL, PROTO-CORE-API, FLOW-RESUME-SESSION, FLOW-SEND-MESSAGE]
-adrs: [0011, 0017, 0028]
+adrs: [0011, 0017, 0028, 0033]
 ---
 
 # Start a new session
@@ -47,6 +47,8 @@ The project chip on the new-session screen is the only place a project is added;
 - **FLOW-NEW-SESSION-R27**: When the user chooses Add project, or presses Ctrl+O on the new-session screen, with the local host chosen, Ersa shall open the system's folder dialog; once the user picks a folder that is not yet a project, Ersa shall ask the trust question (R24), and once they answer Trust, add the project as R25 says and choose it in the session controls.
 - **FLOW-NEW-SESSION-R28**: When a git project has a new workspace chosen and its branches are being read or could not be read, the workspace chip shall read "New workspace", with no base branch, and say in place of the branches that they are being read, or that they could not be read and the new workspace will start at the default branch; R04 shall then create the workspace from the default branch Core finds.
 - **FLOW-NEW-SESSION-R29**: When the project folder is chosen, or a new workspace is chosen and its project's branches have been read, the workspace chip shall name the workspace a session will start in: the new workspace with its base branch, or the project folder.
+- **FLOW-NEW-SESSION-R30**: While a session is running, the session controls shall let the user change its model, effort and permission mode, taking effect from its next turn; when a change is refused, the chip shall keep its value and the status line shall say why until the user sends or opens a chip.
+- **FLOW-NEW-SESSION-R31**: When the user withdraws trust from a project, a note beneath the project's heading shall say, for as long as the window stays open, that the backend's own tools keep trusting the folder.
 
 ## Verification
 
@@ -54,13 +56,11 @@ The replay server refuses every request that would create or change a session (P
 
 ## Built so far
 
-New session shows the new-session screen and creates nothing until the first message (R01 to R05, R08, R12), and a started session's tile sits under its project (R13). A project is added from the project chip through the system's folder dialog, after the trust question (R14 to R20, R24, R25, R27). A new workspace starts from the base branch the workspace chip offers (R21, R28, R29). Until the open question on changing values mid-session is answered, the session controls under a running session show its values read-only. A host whose backend listing fails reads as having no backend available, which R11 replaces, and the screen does not yet say while backends are being detected (R23). With no session chosen, the window shows the newest.
+New session shows the new-session screen and creates nothing until the first message (R01 to R05, R08, R12), and a started session's tile sits under its project (R13). A project is added from the project chip through the system's folder dialog, after the trust question (R14 to R20, R24, R25, R27). A new workspace starts from the base branch the workspace chip offers (R21, R28, R29). Until R30 is built, the session controls under a running session show its values read-only. A host whose backend listing fails reads as having no backend available, which R11 replaces, and the screen does not yet say while backends are being detected (R23). With no session chosen, the window shows the newest.
 
 ## Open questions
 
-- Whether model, effort and permission mode can change during a session from the session controls, where the backend allows it, or only at start. Until answered, the controls show a running session's values read-only.
 - The mode control (a named preset, milestone M3) and where it sits among the session controls.
-- Which models and efforts a backend offers: the adapter's knowledge of its tested versions, or detected on the host.
 - Which session a reopened window shows when several were running (FLOW-RESUME-SESSION).
 - How the user picks a folder on a remote host, which the system's folder dialog cannot browse (FLOW-REMOTE-SESSION).
 - Whether the base branch can also be a remote branch or a tag, and whether a project remembers a base branch other than the default.
@@ -68,6 +68,7 @@ New session shows the new-session screen and creates nothing until the first mes
 
 ## Changes
 
+- 2026-11-09: owner's decisions from the audit against Claude Desktop: a running session's model, effort and permission mode can change (R30), its models come from the backend (PROTO-CORE-API-R72), and withdrawing trust says that the backend's own tools keep it (R31). Two open questions closed.
 - 2026-11-06: Built so far follows #184 and #226 as one paragraph; a union merge had left two. No requirement IDs changed.
 - 2026-11-06: Built so far follows #184: new workspaces start from the chosen base branch (R21, R22). No requirement IDs changed.
 - 2026-11-06: from #229 inbox: what the workspace chip shows while the branches are read and when they can't be, and that the new workspace then starts at the default branch (R28); R22 retired for R29, which names the base branch only once the branches have been read.
