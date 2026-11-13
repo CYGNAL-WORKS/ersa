@@ -33,6 +33,9 @@ libc = "0.2"
 [dev-dependencies]
 # The fake transport, for the round trip against a stub CLI.
 ersa-adapter = { path = "../ersa-adapter", features = ["test-support"] }
+# Core, for the tests in tests/through_core/ that drive Claude Code through
+# Core's API with Core's own socket test harness.
+ersa-core = { path = "../ersa-core" }
 # Golden-file tests validate every projected event against the schema.
 ersa-protocol = { path = "../ersa-protocol", features = ["schema-validation"] }
 # Scratch Claude homes for the session-record listing and registry tests.

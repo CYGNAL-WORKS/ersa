@@ -2,7 +2,7 @@
 // file. Run: node --test scripts/redact.test.mjs
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -111,10 +111,12 @@ test("leaves other paths and placeholders alone", () => {
 });
 
 function* recordings() {
-  const dirs = [
-    join(ROOT, "docs", "briefs", "protocol", "fixtures"),
-    join(ROOT, "crates", "ersa-adapter-claude", "tests"),
-  ];
+  // The protocol fixtures, and every adapter's tests, where its goldens live.
+  const adapters = readdirSync(join(ROOT, "crates"))
+    .filter((name) => name.startsWith("ersa-adapter-"))
+    .map((name) => join(ROOT, "crates", name, "tests"))
+    .filter((dir) => existsSync(dir));
+  const dirs = [join(ROOT, "docs", "briefs", "protocol", "fixtures"), ...adapters];
   for (const dir of dirs) {
     for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
       if (entry.isFile()) yield join(entry.parentPath, entry.name);
