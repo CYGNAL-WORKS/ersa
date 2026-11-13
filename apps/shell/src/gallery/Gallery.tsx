@@ -462,6 +462,11 @@ const transcriptStates: [string, SessionView, answers?: Record<string, Answer>][
   ["Permission while Core is away", sessionView(asked, { stream: { state: "offline" } })],
   ["Question open", sessionView(questionAsked)],
   ["Question answer on its way", sessionView(questionAsked), { rq: { state: "sending", decision: "decline" } }],
+  ["Question answer refused", sessionView(questionAsked), { rq: { state: "failed", message: refusal } }],
+  ["Question while Core is away", sessionView(questionAsked, { stream: { state: "offline" } })],
+  ["Question answered", sessionView([...questionAsked, { type: "question.answered", request_id: "rq", answers: [{ id: "q1", value: "o2", own_words: false }], declined: false, answered_by: "user" }])],
+  ["Question declined", sessionView([...questionAsked, { type: "question.answered", request_id: "rq", answers: [], declined: true, answered_by: "user" }])],
+  ["Question not answered", sessionView([...questionAsked, { type: "session.ended", reason: "backend_exited" }])],
   ["Hidden characters", sessionView(hiding)],
   ["Answered", sessionView(answered)],
   ["Two turns", sessionView(twoTurns)],
@@ -637,9 +642,10 @@ function MenuOpen({ entries, submenu }: { entries: MenuEntry[]; submenu?: number
 
 /** A question's form on an open question card, with `initial` already chosen or written. */
 function QuestionCardOpen({ questions, initial }: { questions: Question[]; initial: Draft }) {
+  const [draft, setDraft] = useState<Draft>(initial);
   return (
     <section className="transcript-card transcript-question" data-open>
-      <QuestionForm questions={questions} live initial={initial} onAnswer={() => {}} />
+      <QuestionForm questions={questions} draft={draft} onDraft={setDraft} live onAnswer={() => {}} />
     </section>
   );
 }
@@ -697,6 +703,7 @@ const shelfStates: [string, ShelfShows, more?: ShelfMore][] = [
   ["A multiple-choice question", { state: "question", requestId: "rq", questions: [multiQuestion] }],
   ["A question in the user's own words", { state: "question", requestId: "rq", questions: [wordsQuestion] }],
   ["A question's answer on its way", { state: "question", requestId: "rq", questions: [singleQuestion] }, { answer: { state: "sending", decision: { answers: [] } } }],
+  ["A question's answer refused", { state: "question", requestId: "rq", questions: [singleQuestion] }, { answer: { state: "failed", message: "the session has ended" } }],
   ["A question while Ersa reconnects", { state: "question", requestId: "rq", questions: [singleQuestion] }, { live: false }],
   ["Loading", { state: "loading" }],
   ["Reading failed", { state: "failed", message: "the session's events could not be read" }],

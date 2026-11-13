@@ -56,9 +56,9 @@
   background: var(--material-pressed);
 }
 
-/* Keyboard focus on its control: the accent edge every control takes. */
+/* Keyboard focus on its control: an ink edge, as an option in a chip's list takes (DESIGN.md, Pointer and press). */
 .question-option:has(.question-control:focus-visible) {
-  border-color: var(--color-accent);
+  border-color: var(--color-ink);
 }
 
 /* Unavailable while an answer is on its way or Ersa can't reach Core: ink-faint, unchanged under the pointer. */
@@ -115,6 +115,11 @@
   border: var(--line-hairline) solid var(--color-line);
   border-radius: var(--radius-md);
   transition: border-color var(--motion-quick) var(--motion-ease-out);
+}
+
+/* Under the pointer, its edge turns ink-faint, as every edged control's does. */
+.question-words:hover:not(:read-only):not(:focus) {
+  border-color: var(--color-ink-faint);
 }
 
 .question-words::placeholder {
