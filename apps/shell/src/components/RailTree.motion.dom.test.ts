@@ -379,3 +379,121 @@ describe("a new session's tile", () => {
     expect([...container.querySelectorAll<HTMLElement>("[data-slide]")].every((el) => el.style.display === "")).toBe(true);
   });
 });
+
+// What leaves the rail fades out where it sat, decided from the commit that took it away (DESIGN.md: nothing pops
+// in; things leave the same way they come in, and at once with reduced motion).
+describe("what leaves the rail as it rearranges", () => {
+  const runs: { el: HTMLElement; slide: string | undefined; keyframes: Keyframe[] }[] = [];
+  let reduced = false;
+  beforeEach(() => {
+    runs.length = 0;
+    reduced = false;
+    document.documentElement.style.setProperty("--motion-settle", "260ms");
+    document.documentElement.style.setProperty("--motion-ease-in-out", "ease-in-out");
+    window.matchMedia = ((query: string) => ({ matches: reduced && query.includes("reduce") })) as never;
+    // jsdom lays nothing out: each marked element sits at its order among those marked, 10 apart.
+    vi.spyOn(HTMLElement.prototype, "offsetTop", "get").mockImplementation(function (this: HTMLElement) {
+      return [...document.querySelectorAll<HTMLElement>("[data-slide]")].indexOf(this) * 10;
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(10);
+    HTMLElement.prototype.animate = function (this: HTMLElement, keyframes: Keyframe[]) {
+      runs.push({ el: this, slide: this.dataset.slide, keyframes });
+      // Never finishes, so a faded element stays on the page to be found.
+      return { finished: new Promise(() => {}) } as unknown as Animation;
+    } as never;
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    delete (HTMLElement.prototype as { animate?: unknown }).animate;
+    delete (window as { matchMedia?: unknown }).matchMedia;
+    document.documentElement.removeAttribute("style");
+  });
+
+  const out = [{ opacity: 1 }, { opacity: 0 }];
+  const fadeIn = [{ opacity: 0 }, { opacity: 1 }];
+  /** What an element shows: a heading's name, or a tile's text. */
+  const named = (el: Element) => (el.querySelector(".rail-heading-name") ?? el).textContent;
+  /** What each element that faded out shows, in order. */
+  const fadedOut = () => runs.filter((r) => JSON.stringify(r.keyframes) === JSON.stringify(out)).map((r) => named(r.el));
+  const fadedIn = () => runs.filter((r) => JSON.stringify(r.keyframes) === JSON.stringify(fadeIn)).map((r) => r.slide);
+  /** What fades out on the page: each element put back with `data-leaving`. */
+  const ghosts = (container: HTMLElement) => [...container.querySelectorAll<HTMLElement>("[data-leaving]")].map(named);
+
+  // Local times, as the date groups count from the local date of now.
+  const now = new Date(2026, 10, 6, 12);
+  const today = new Date(2026, 10, 6, 9).toISOString();
+  const lastMonth = new Date(2026, 9, 1, 9).toISOString();
+  const byDate = (sessions: Session[], more: Partial<Parameters<typeof RailTree>[0]> = {}) => rail(sessions, undefined, { groupBy: "date", now, ...more });
+
+  it("fades out each project heading and fades in each date heading as the rail regroups by date", () => {
+    const fix = session("a", "Fix", today);
+    const { container, rerender } = render(rail([fix], undefined, { now }));
+    rerender(byDate([fix]));
+    expect(fadedOut()).toEqual(["p"]);
+    expect(fadedIn()).toContain("heading:today");
+    expect(ghosts(container)).toEqual(["p"]);
+  });
+
+  it("fades out a group's heading when pinning its last session empties it", () => {
+    const fix = session("a", "Fix", today);
+    const old = session("b", "Old", lastMonth);
+    const { container, rerender } = render(byDate([fix, old], { pinning: {} }));
+    rerender(byDate([fix, old], { pinning: { a: { state: "sending" } } }));
+    expect(runs).toEqual([]);
+    // Core has the pin: the tile moves to Pinned, and Today has nothing left.
+    rerender(byDate([{ ...fix, pinned: true }, old], { pinning: {} }));
+    expect(fadedOut()).toEqual(["Today"]);
+    expect(ghosts(container)).toEqual(["Today"]);
+    expect(runs.some((r) => r.slide === "session:a" && JSON.stringify(r.keyframes) !== JSON.stringify(out))).toBe(true);
+  });
+
+  it("never brings back a session archived while a pin saves", () => {
+    const fix = session("a", "Fix", today);
+    const gone = session("c", "Gone", today);
+    const old = session("b", "Old", lastMonth);
+    const { container, rerender } = render(byDate([fix, gone, old], { pinning: {} }));
+    rerender(byDate([fix, gone, old], { pinning: { a: { state: "sending" } } }));
+    // Archived while the pin saves: showing active sessions, its tile goes.
+    rerender(byDate([fix, { ...gone, archived: true }, old], { pinning: { a: { state: "sending" } } }));
+    expect(container.querySelector('[data-session-id="c"]')).toBeNull();
+    rerender(byDate([{ ...fix, pinned: true }, { ...gone, archived: true }, old], { pinning: {} }));
+    // Only what the pin's own commit took away fades: Today's heading, never the archived tile.
+    expect(fadedOut()).toEqual(["Today"]);
+    expect(ghosts(container).some((text) => text?.includes("Gone"))).toBe(false);
+  });
+
+  it("fades out a tile the new Show takes away, and never a folded one", () => {
+    const fix = session("a", "Fix", today);
+    const shut = { ...session("b", "Shut", today, undefined, "x"), archived: true };
+    const second: Project = { ...project, id: "q", path: "D:/q", name: "q" };
+    const more = { projects: { state: "ready" as const, projects: [project, second] }, workspaces: { w: { project_id: "p" }, x: { project_id: "q" } }, collapsed: new Set(["q"]) };
+    const { container, rerender } = render(rail([fix, shut], undefined, { ...more, show: "all" }));
+    rerender(rail([fix, shut], undefined, { ...more, show: "archived" }));
+    // Fix leaves with its project, which has nothing archived; Shut stays, folded under q.
+    expect(fadedOut()).toEqual(["p", "Fix"]);
+    runs.length = 0;
+    rerender(rail([fix, shut], undefined, { ...more, show: "active" }));
+    // Shut leaves folded out of sight: it never shows.
+    expect(fadedOut().some((text) => text?.includes("Shut"))).toBe(false);
+    expect(ghosts(container).some((text) => text?.includes("Shut"))).toBe(false);
+  });
+
+  it("fades out Today's heading and fades in Yesterday's when the day turns", () => {
+    const fix = session("a", "Fix", today);
+    const { rerender } = render(byDate([fix]));
+    rerender(byDate([fix], { now: new Date(2026, 10, 7, 0, 1) }));
+    expect(fadedOut()).toEqual(["Today"]);
+    expect(fadedIn()).toContain("heading:yesterday");
+  });
+
+  it("takes it all away at once with reduced motion on", () => {
+    reduced = true;
+    const fix = session("a", "Fix", today);
+    const old = session("b", "Old", lastMonth);
+    const { container, rerender } = render(byDate([fix, old]));
+    rerender(byDate([{ ...fix, pinned: true }, old]));
+    rerender(rail([{ ...fix, pinned: true }, old], undefined, { now }));
+    expect(runs).toEqual([]);
+    expect(ghosts(container)).toEqual([]);
+  });
+});
