@@ -57,6 +57,25 @@ First stdout message of every one-shot session. In a bidirectional session the `
 
 `message.content` is an array of content blocks: `text`, `tool_use` (`id`, `name`, `input`, `caller`), `thinking` (`thinking` text, often empty, with `signature`). Carries `parent_tool_use_id` (null for the main thread). One `assistant` line per content block in practice (fixtures 03, 05).
 
+### Tool targets and edits
+
+From the SDK types, not yet recorded: the ticket that builds this records a fixture of each tool below first, and corrects this table from it. The adapter fills `tool.requested`'s `target` and `edits` (`PROTO-AGENT-EVENTS`) from a `tool_use` block's `name` and `input`:
+
+| Tool | `target` | `edits` |
+|---|---|---|
+| `Read` | `file_path` | none |
+| `Write` | `file_path` | one, `new_text` from `content`, no `old_text` |
+| `Edit` | `file_path` | one, from `old_string` and `new_string` |
+| `MultiEdit`, where the CLI still offers it | `file_path` | one per entry of `edits`, from its `old_string` and `new_string` |
+| `NotebookEdit` | `notebook_path` | none |
+| `Bash` | `command` | none |
+| `Grep`, `Glob` | `pattern` | none |
+| `WebFetch` | `url` | none |
+| `WebSearch` | `query` | none |
+| `Task`, `Agent` | `description` | none |
+
+Any other tool, an MCP server's included, carries neither. A field missing from the input, or not a string, leaves `target` or that edit out.
+
 ### user
 
 Either an echoed stdin message (with `--replay-user-messages`) or a `tool_result` block the CLI produced after running a tool: `tool_use_id`, `content`, `is_error`. Permission denials also arrive as a `tool_result` explaining the denial (fixtures 05, 06).
@@ -262,6 +281,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R44**: While a user message written to the CLI has not started its turn, the adapter shall report the session as working, including between one turn's `result` and the next `system/init`.
 - **PROTO-CLAUDE-CODE-STREAM-R47**: The adapter shall report a session's model and effort from the `assistant` entry with the latest `timestamp` whose model is not `<synthetic>`, and its permission mode from the `user` entry with the latest `timestamp` that carries `permissionMode`, each only from a turn that began after a time Core gives, when it gives one; when listing it shall read only the tail and report none for a value the tail does not hold, and before a relaunch it shall read back as far as that time.
 - **PROTO-CLAUDE-CODE-STREAM-R46**: The adapter shall report how many messages a live session's CLI holds as the `enqueue` entries in its record written since that CLI process started, less the `dequeue` entries written since then, reading them when Core hands a message over during a turn and when a turn starts.
+- **PROTO-CLAUDE-CODE-STREAM-R48**: The adapter shall project each `tool_use` block of a tool named in Tool targets and edits to a `tool.requested` carrying the `target` and `edits` that table gives, and any other tool's to one carrying neither.
 
 ## Out of scope
 
@@ -280,6 +300,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 ## Changes
 
+- 2026-11-13: for FLOW-READ-TRANSCRIPT: Tool targets and edits added, from the SDK types and to be recorded before it is built; `NotebookEdit` edits cells, not text, so it carries no `edits`. The adapter's projection version changes with it. PROTO-CLAUDE-CODE-STREAM-R48 added.
 - 2026-11-09: owner's decisions from the audit against Claude Desktop and the backend rule, on what `stream-controls-2026-11-09.txt` shows: the models come from `initialize` (R39); a live session's model and permission mode come from the CLI (R40) and change through it (R41); last activity comes from the record's tail (R42); a message written during a turn waits in the CLI and opens its own turn (R43, R44); the record says how many wait (R46) and what a session's model, effort and permission mode are (R47); effort changes through `apply_flag_settings` (R41). The open question on a note when trust is revoked is closed by FLOW-NEW-SESSION-R31.
 - 2026-11-09: owner's decision from the audit against the backend rule: a fork is named at launch with `--name` (R45), which the CLI announces before the first message.
 - 2026-11-08: owner's decision: a fork can run in a workspace of its own, and a titled original's fork is named `<title> (fork)`. PROTO-CLAUDE-CODE-STREAM-R28 retired for R38.
