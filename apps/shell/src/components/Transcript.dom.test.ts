@@ -34,6 +34,7 @@ describe("the transcript's permission card", () => {
         title: "Write the notes",
         view: { id: "s1", transcript: apply(emptyTranscript, requested), stream: { state: "live" } },
         onDecide: () => {},
+        onAnswer: () => {},
       }),
     );
     const allow = screen.getByRole("button", { name: "Allow" });

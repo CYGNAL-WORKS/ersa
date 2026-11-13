@@ -194,3 +194,49 @@ describe("answering from the shelf", () => {
     expect(core.calls.filter((c) => c.method === "session.decide_permission")).toHaveLength(1);
   });
 });
+
+describe("answering a question", () => {
+  const asked = envelope(
+    {
+      type: "question.asked",
+      request_id: "rq",
+      questions: [
+        { id: "q1", text: "Where should it retry?", options: [{ id: "o1", label: "Windows only" }, { id: "o2", label: "Everywhere" }], multi_select: false, takes_text: true },
+      ],
+    },
+    0,
+  );
+  const answerCalls = (core: ReturnType<typeof fakeCore>) => core.calls.filter((c) => c.method === "session.answer_question").map((c) => c.params);
+
+  // verifies: FLOW-APPROVE-PERMISSION-R16
+  it("sends the session's answer from the shelf", async () => {
+    const core = fakeCore([{ kind: "question", request_id: "rq" }]);
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Request from / }));
+    await settle();
+    await core.send(asked);
+    const shelf = screen.getByRole("dialog", { name: /^Request from / });
+    fireEvent.click(within(shelf).getByRole("radio", { name: "Everywhere" }));
+    fireEvent.click(within(shelf).getByRole("button", { name: "Answer" }));
+    expect(answerCalls(core)).toEqual([{ id: "s1", request_id: "rq", answers: [{ id: "q1", value: "o2", own_words: false }] }]);
+  });
+
+  // verifies: FLOW-APPROVE-PERMISSION-R17
+  it("sends the active session's answer from its transcript's question card", async () => {
+    const core = fakeCore([{ kind: "question", request_id: "rq" }]);
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+
+    fireEvent.click(screen.getByRole("button", { name: /Has a question/ }));
+    await settle();
+    await core.send(asked);
+    const card = screen.getByRole("region", { name: "Question" });
+    fireEvent.change(within(card).getByRole("textbox", { name: "Where should it retry?" }), { target: { value: "Only nightly" } });
+    fireEvent.click(within(card).getByRole("button", { name: "Answer" }));
+    expect(answerCalls(core)).toEqual([{ id: "s1", request_id: "rq", answers: [{ id: "q1", value: "Only nightly", own_words: true }] }]);
+  });
+});

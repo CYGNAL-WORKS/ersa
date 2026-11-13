@@ -173,17 +173,20 @@
 }
 
 /* An open request needs the user: its edge takes the accent (a line's colour, never its width or a fill). */
-.transcript-permission[data-open] {
+.transcript-permission[data-open],
+.transcript-question[data-open] {
   border-color: var(--color-accent);
 }
 
 /* An answered permission card holds focus while its answer is on its way; keyboard focus shows as an ink edge,
    over the open card's accent. */
-.transcript-permission:focus {
+.transcript-permission:focus,
+.transcript-question:focus {
   outline: none;
 }
 
-.transcript-permission:focus-visible {
+.transcript-permission:focus-visible,
+.transcript-question:focus-visible {
   border-color: var(--color-ink);
 }
 
