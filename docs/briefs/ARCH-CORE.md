@@ -114,7 +114,7 @@ The what; the why is in the linked ADRs.
 ## Milestones
 
 - **M0 Foundations**: Core binary with socket protocols; protocol brief for Claude Code's streaming mode written from the real CLI with recorded fixtures; Claude Code adapter with explicit flags and permission requests over the control channel; raw log and projection v1; replay server; shell window rendering raw events; Windows process-tree kill. Done when a prompt typed into a bare window gets a streamed reply, a permission request round-trips, and the session survives the window closing.
-- **M1 Dogfood** (the author switches to it daily): rail with projects, worktree workspaces, and session tiles (title, backend, activity, context ring, cost); shelf for permissions and questions answerable from the rail; transcript with formatted text, tool cards, diff cards; composer; session list and resume from the backend's session record; light and dark token sets; developer pane; a minimal SSH transport tested against WSL so the adapter never grows local-only assumptions. Done when the author has used it exclusively for a week.
+- **M1 Dogfood** (the author switches to it daily), in two parts. *The switch*, when the dogfood week starts: the daily build installed from `main` (ADR 0035); rail with projects, worktree workspaces, and session tiles (title, backend, activity, context ring, cost); shelf for permissions and questions answerable from the rail; transcript with formatted text, tool cards, diff cards; composer, with a running session's model, effort and permission mode changeable; session list and resume from the backend's session record; new sessions named by the backend; light and dark token sets. *During the week*: the developer pane, and a minimal SSH transport tested against WSL so the adapter never grows local-only assumptions. Done when the author has used it exclusively for a week and both parts are built.
 - **M2 Workbench**: files, diff, terminal, and browser panes. Done when the author stops opening a separate tool to review agent changes.
 - **M3 Second backend and modes**: Copilot adapter via the SDK; modes as presets. Done when a Copilot and a Claude Code session run side by side with the same interface.
 - **M4 Remote and VCS**: remote hosts in the rail, remote worktrees, disconnect and backfill; Perforce workspace adapter. Done when a session on a Linux VM and a session in a Perforce project both behave like local git sessions.
@@ -153,6 +153,7 @@ Verified by review at this level; testable requirements live in the protocol bri
 
 ## Changes
 
+- 2026-11-13: owner's decision: M1 splits into the switch and the week; the developer pane and the SSH transport tested against WSL are built after the dogfood week starts, and the switch needs the daily build. No requirement IDs changed.
 - 2026-11-08: from #272 inbox: the store keeps a fork's original and the last message it copied. No requirement IDs changed.
 - 2026-11-09: adapters are compile-time crates behind one registry, the registered adapters are the only backends Core knows, and each adapter renders packs for its backend (ADR 0031). ARCH-CORE-R13 added.
 - 2026-11-05: Persistence holds the user's arrangement of sessions and their sections (ADR 0026). No requirement IDs changed.
