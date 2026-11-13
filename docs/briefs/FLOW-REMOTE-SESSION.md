@@ -19,9 +19,11 @@ The user adds a host from their SSH configuration. Ersa connects, checks which b
 - How the remote Core is installed and updated, and what happens when its version differs from the local one.
 - How missing backend installation or authentication on the remote host is detected and explained.
 - Whether remote workspace roots are configurable per host.
+- What the rail shows for a remote host's sessions when the host can't be reached as Ersa starts (from FLOW-RESUME-SESSION).
 
 ## Changes
 
+- 2026-11-13: open question on unreachable hosts at start, moved from FLOW-RESUME-SESSION. No requirement IDs changed.
 - 2026-11-01: backfill after a disconnect comes from the backend's session record on the remote host (ADR 0017).
 - 2026-10-31: remote Core, reconnect defined as resume plus backfill, interrupted turns surfaced.
 - 2026-10-31: created as draft.
