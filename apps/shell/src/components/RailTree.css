@@ -378,3 +378,25 @@
     transition: none;
   }
 }
+
+/* The notes beneath a tile or row: the room they take eases (HeightEase), and clips while it does. */
+.rail-tile-notes {
+  overflow: clip;
+}
+
+/* A note fades in as its room opens. */
+.rail-tile-notes > * {
+  animation: rail-tile-note-in var(--motion-settle) var(--motion-ease-out);
+}
+
+@keyframes rail-tile-note-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-tile-notes > * {
+    animation: none;
+  }
+}

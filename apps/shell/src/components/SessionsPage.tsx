@@ -8,7 +8,7 @@ import { tileOf } from "../session/tile";
 import { Button } from "./Button";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { Icon, IconButton } from "./Icon";
-import { Problem, Refusals } from "./RailTree";
+import { Problem, TileNotes } from "./RailTree";
 import { type Backends, type ForcedTile, Mark } from "./SessionTile";
 import { SessionRoot, type TileActions, type TileHandlers, tileActions, useTileMenu } from "./TileMenu";
 import { useLeavingFocus } from "./useLeavingFocus";
@@ -203,7 +203,7 @@ export function SessionsPage({
                       initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
                     />
                   </ErrorBoundary>
-                  <Refusals session={s} pinning={handlers.pinning} archiving={handlers.archiving} forking={handlers.forking} />
+                  <TileNotes session={s} pinning={handlers.pinning} archiving={handlers.archiving} forking={handlers.forking} />
                 </li>
               ))}
             </ul>
