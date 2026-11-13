@@ -300,7 +300,7 @@ describe("a repeated question", () => {
 });
 
 describe("a turn the agent is working on", () => {
-  // verifies: FLOW-SEND-MESSAGE-R04
+  // was FLOW-SEND-MESSAGE-R04; R18 replaces it, unbuilt
   it("is working from turn.started until the turn completes, however it ends, or the session ends", () => {
     let t = apply(emptyTranscript, envelope(0, { type: "turn.started", turn: 1, trigger: "user" }));
     expect(t.working).toBe(true);

@@ -5,7 +5,7 @@ title: Ersa system architecture
 status: ready
 verified-by: review
 references: [PROTO-CORE-API, PROTO-AGENT-EVENTS, PROTO-CLAUDE-CODE-STREAM, PROTO-COPILOT-SDK, PROTO-HARNESS-TOOLS]
-adrs: [0004, 0006, 0007, 0008, 0009, 0011, 0014, 0017, 0028, 0026, 0031]
+adrs: [0004, 0006, 0007, 0008, 0009, 0011, 0014, 0017, 0028, 0026, 0031, 0033]
 ---
 
 # Ersa system architecture
@@ -69,7 +69,7 @@ A Rust library wrapped in a thin binary, running as its own process (ADR 0011). 
 - **Pack client**: fetches packs from a pack source, verifies and caches them, and has each installed backend's adapter render the neutral pack definition into that backend's native configuration.
 - **Mode engine**: resolves a session's mode into the base instructions, allowed tools, and tool-server list handed to the adapter at start.
 - **Harness tools server**: the MCP tools Ersa exposes to every session's backend (`PROTO-HARNESS-TOOLS`): cross-session messaging, session metadata, user-defined tools, and the interface-driving tools. For Claude Code it is served in-process over the control channel (ADR 0014). Permission requests do not go through it.
-- **Persistence**: one local SQLite database per Core process. It holds projects, hosts, workspaces with their lifecycle state, pack cache metadata, settings, and per session only pointers: host, project, workspace, backend, the backend's session id and mode, for a fork the original's backend session id and the last message it copied, plus the user's arrangement of it (pinned, section, archived, when its latest turn ended; ADR 0026). It also holds the user's sections. A workspace's state survives a crash part way through creating or removing its worktree, so Core finds the half-made or half-removed worktree at startup. A session's title and creation time are not stored: the title is the backend's, and the creation time is that of the first entry in its session record, else of the app log's first fact for it.
+- **Persistence**: one local SQLite database per Core process. It holds projects, hosts, workspaces with their lifecycle state, pack cache metadata, settings, and per session only pointers: host, project, workspace, backend, the backend's session id and mode, for a fork until it has a record of its own the original's backend session id and the last message it copied, plus the user's arrangement of it (pinned, section, archived, unseen) and the model, effort and permission mode Core last asked the backend for, with when (ADR 0033). It also holds the user's sections. A workspace's state survives a crash part way through creating or removing its worktree, so Core finds the half-made or half-removed worktree at startup. A session's title and creation time are not stored: the title is the backend's, and the creation time is that of the first entry in its session record, else of the app log's first fact for it.
 - **App log**: kept beside the database. Core writes its operational records to it and reads it back at startup. A session whose last fact is `process_started` is marked as interrupted by a Core restart. The last fact of a session that has ended is shown again at the end of its reopened view. The first fact's time is a session's creation time when the record cannot give one. Rotated app-log files keep each session's first and last facts.
 
 ### Adapters
