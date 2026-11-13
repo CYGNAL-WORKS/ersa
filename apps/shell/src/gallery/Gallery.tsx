@@ -589,7 +589,7 @@ const menuParts: MenuEntry[] = [
   { kind: "submenu", label: "Sort by", current: "Date created", entries: [{ kind: "item", label: "Date created", checked: true }] },
   { kind: "rule" },
   { kind: "item", label: "Rename", keyHint: "F2" },
-  { kind: "item", label: "Fork", unavailable: "Available once the session has finished its reply" },
+  { kind: "item", label: "Fork", unavailable: "Available once the reply finishes" },
   { kind: "rule" },
   { kind: "item", label: "Delete…", danger: true },
 ];

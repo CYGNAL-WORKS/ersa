@@ -302,6 +302,22 @@ Rename
 
 F2
 
+### `rail.tile.forkButton`
+
+Fork
+
+### `rail.tile.forkBusyReason`
+
+Available once the reply finishes
+
+### `rail.tile.forkingProgress`
+
+Forking…
+
+### `rail.tile.forkError`
+
+Ersa can't fork this session.
+
 ### `rail.tile.offlineReason`
 
 Available once Ersa reaches your sessions
