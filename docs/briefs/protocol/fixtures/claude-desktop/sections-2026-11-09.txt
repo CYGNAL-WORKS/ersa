@@ -1,0 +1,15 @@
+Claude Desktop's and the web app's session arrangement, observed 2026-11-09.
+
+Sections, created through Desktop's own sidebar tool in the Code tab:
+
+  Name given                 Result
+  a name                     a new section
+  the same name again        the same section (same id); no second section, no refusal
+  the same name, upper case  a new section
+  a 120-character name       a new section (the tool states a limit of 1 to 200 characters)
+
+Not observed: the same cases typed into the app's own field, and renaming a section to a name another section has.
+
+Tool descriptions, 2026-11-09: moving a pinned session into a group unpins it, and moving it to Ungrouped keeps the pin. A session that is still working (mid-turn, or with live background work) is not archived, and the call says so.
+
+claude.ai/code (the web app, which may differ from Desktop), a session's row menu: Open in, Pin, Mark as unread, Rename, Share, Copy link, Move to section, Archive, Delete. The sidebar's Group and sort menu: Group by, Sort by, Show, New section, Reset to defaults, View all.

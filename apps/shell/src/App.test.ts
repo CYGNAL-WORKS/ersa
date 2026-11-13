@@ -1426,7 +1426,7 @@ describe("the composer App draws when Core is lost", () => {
 // Stop under a session (FLOW-SEND-MESSAGE-R03, R04): App holds stop from the send until the turn shows.
 describe("stop under a session App draws", () => {
   // verifies: FLOW-SEND-MESSAGE-R03
-  // verifies: FLOW-SEND-MESSAGE-R04
+  // was FLOW-SEND-MESSAGE-R04, which R18 replaces once a message can wait
   it("keeps stop shown and Enter from sending when Core answers the send before the turn shows", async () => {
     const core = fakeCore({
       "session.subscribe": () => ({ last_seq: -1 }),

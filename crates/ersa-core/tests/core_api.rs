@@ -153,7 +153,7 @@ async fn host_and_backend_lists_hold_each_registered_adapter_in_order() {
 
 /// The choices are the adapter's knowledge, so they are listed even while
 /// the CLI is missing from the host.
-// verifies: PROTO-CORE-API-R16
+// was PROTO-CORE-API-R16; R71 replaces it, unbuilt
 #[tokio::test(flavor = "multi_thread")]
 async fn backend_list_offers_claude_codes_choices_with_their_defaults() {
     let claude: Arc<dyn Adapter> = Arc::new(ersa_adapter_claude::ClaudeAdapter::new());
