@@ -134,7 +134,14 @@ describe("the rail's tree", () => {
     expect(render({ ...none, groupBy: "none", show: "all" })).toContain("No sessions.</p>");
     // Headings stand in for the note.
     expect(render(none)).not.toContain("sessions.</p>");
-    expect(render({ ...none, projects: { state: "loading" }, show: "all" })).not.toContain("No sessions.</p>");
+    // No note draws beneath Loading, to jump up once the projects arrive.
+    const archived = { ...session("s1", "w", "Fix"), archived: true };
+    for (const waiting of [
+      { ...none, show: "all" as const },
+      { ...none, show: "archived" as const },
+      { ...none, groupBy: "date" as const, sessions: { state: "ready" as const, sessions: [archived] } },
+    ])
+      expect(render({ ...waiting, projects: { state: "loading" } })).not.toMatch(/No \w* ?sessions\./);
     // Showing all reads as showing archived does, with no projects too.
     expect(render({ ...none, projects: { state: "ready", projects: [] }, show: "all" })).toContain("No sessions.</p>");
     expect(render({ arrangeProblem: { kind: "read", message: "Core is away" } })).toContain("Ersa can&#x27;t read how you arranged the rail.");
