@@ -7,7 +7,7 @@ import type { Sending } from "../session/follow";
 import { type ArrangeProblem, DEFAULT_ARRANGEMENT, type GroupBy, type Show, type SortBy } from "../session/arrangement";
 import { type Collapsed, type DateKey, collapsedOf, sortValueOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { type Place, arrive, placesOf, rearrange } from "../theme/motion";
+import { HeightEase, type Place, arrive, placesOf, rearrange } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem } from "./SessionTile";
@@ -399,12 +399,25 @@ export function Refusals({
   const pin = pinning?.[session.id];
   const archive = archiving?.[session.id];
   const fork = forking?.[session.id];
+  // A note opens growing and fading in (docs/design/RAIL.md, notes), pushing the tiles beneath it down over
+  // motion-settle: the box's height eases whenever which notes show changes, and is measured afresh on every other
+  // render, so a reason rewrapped meanwhile is where the next ease starts from.
+  const box = useRef<HTMLDivElement>(null);
+  const ease = useRef(new HeightEase()).current;
+  const shown = `${fork?.state}/${archive?.state}/${pin?.state}`;
+  const lastShown = useRef(shown);
+  useLayoutEffect(() => {
+    if (!box.current) return;
+    if (lastShown.current === shown) ease.hold(box.current);
+    else ease.change(box.current);
+    lastShown.current = shown;
+  });
   return (
-    <>
+    <div ref={box} className="rail-refusals">
       {fork?.state === "failed" && <Problem lead={t("rail.tile.forkError")} reason={fork.message} />}
       {archive?.state === "failed" && <Problem lead={session.archived ? t("rail.tile.unarchiveError") : t("rail.tile.archiveError")} reason={archive.message} />}
       {pin?.state === "failed" && <Problem lead={session.pinned ? t("rail.tile.unpinError") : t("rail.tile.pinError")} reason={pin.message} />}
-    </>
+    </div>
   );
 }
 
