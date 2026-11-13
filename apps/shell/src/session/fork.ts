@@ -3,7 +3,7 @@
 // ahead, so the others are said beneath the tile once Core gives them.
 
 import { t } from "../catalog";
-import { isBusy } from "../core/shell";
+import { inTurn } from "../core/shell";
 import type { Session } from "../protocol/core-api.gen";
 import type { Sending } from "./follow";
 
@@ -16,7 +16,7 @@ export function forkUnavailable(session: Session, offline: boolean, forking?: Se
   // Core refuses a second fork of a session while the first is starting.
   if (forking?.state === "sending") return t("rail.tile.forkingProgress");
   // A reply running, a request waiting on the user, or a message on its way: Core refuses until the turn ends.
-  if (isBusy(session) || session.tile.pending.length > 0 || session.sending !== undefined) return t("rail.tile.forkBusyReason");
+  if (inTurn(session) || session.sending !== undefined) return t("rail.tile.forkBusyReason");
   // Whether a reply has finished, and whether the last turn was interrupted or another process has the session open,
   // only Core can tell from the record: the listing says none of it (a missing last activity is no sign, since
   // sessions whose turns ended before Core kept it have none), so Core's refusal says those beneath the tile.
