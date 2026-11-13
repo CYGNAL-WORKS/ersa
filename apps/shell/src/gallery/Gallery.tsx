@@ -836,10 +836,10 @@ const entries: Entry[] = [
       ],
       ["Tile menu, pinned", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: pointerPair.map((s) => ({ ...s, pinned: true })) }} initialTileMenu="p2" />)],
       ["Tile menu, while a pin is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" pinning={{ p2: { state: "sending" } }} />)],
-      ["A fork on its way", <RailTree {...pairOnly} forking={{ p2: { state: "sending" } }} />],
+      ["A fork on its way", <RailTree {...pairOnly} forking={{ p1: { state: "sending" } }} />],
       [
         "Fork refused",
-        <RailTree {...pairOnly} forking={{ p2: { state: "failed", message: "the last turn in session p2 was interrupted; it can be forked once a reply finishes" } }} />,
+        <RailTree {...pairOnly} forking={{ p1: { state: "failed", message: "the last turn in session p1 was interrupted; it can be forked once a reply finishes" } }} />,
       ],
       ["Pin refused", <RailTree {...pairOnly} pinning={{ p2: { state: "failed", message: "session.arrange: the session is being deleted" } }} />],
       ["Renaming on the tile", <RailTree {...pairOnly} initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }} />],
