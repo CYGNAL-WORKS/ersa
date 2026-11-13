@@ -182,17 +182,32 @@ async fn a_starting_session_is_renamed_once_the_cli_answers_initialize() {
         json!({ "subtype": "rename_session", "title": NAMED, "source": "host",
             "session_id": session_id })
     );
-    // It went out only once `initialize` had its answer.
-    let log = client.result("session.raw_log", json!({ "id": id })).await;
-    let position = |wanted: &dyn Fn(&Value) -> bool| {
-        log.as_array()
+    // It went out only once `initialize` had its answer. The raw log records
+    // a line as it crosses, which can trail the stub's copy of stdin, so
+    // wait for both lines to be in it.
+    let is_init = |l: &Value| l["response"]["request_id"] == "ersa-init-1";
+    let is_rename = |l: &Value| l["request"]["subtype"] == "rename_session";
+    let mut positions = None;
+    let mut log = Value::Null;
+    for _ in 0..200 {
+        log = client.result("session.raw_log", json!({ "id": id })).await;
+        let lines: Vec<Value> = log
+            .as_array()
             .unwrap()
             .iter()
-            .position(|l| wanted(&parse(l["line"].as_str().unwrap())))
-            .unwrap()
-    };
-    let initialized = position(&|l| l["response"]["request_id"] == "ersa-init-1");
-    let rename_sent = position(&|l| l["request"]["subtype"] == "rename_session");
+            .map(|l| parse(l["line"].as_str().unwrap()))
+            .collect();
+        if let (Some(i), Some(r)) = (
+            lines.iter().position(is_init),
+            lines.iter().position(is_rename),
+        ) {
+            positions = Some((i, r));
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let (initialized, rename_sent) =
+        positions.unwrap_or_else(|| panic!("the raw log lacks a line: {log:#}"));
     assert!(initialized < rename_sent, "{log:#}");
 
     // The first message; the name stays.
