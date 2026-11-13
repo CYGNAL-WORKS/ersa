@@ -4,7 +4,7 @@ type: layout
 title: Application shell
 status: draft
 references: []
-adrs: [0008, 0026, 0033]
+adrs: [0008, 0026, 0033, 0035]
 ---
 
 # Application shell
@@ -60,7 +60,7 @@ The shelf pulls out of the tile it belongs to, at the tile's height, and lies ov
 
 ## Development
 
-A debug build attaches to a labeled Core endpoint, such as a replay, only when told to: `ERSA_ATTACH=<label>` makes it attach there and never launch a Core, and the rail's foot reads "Attached to <label>". A release build ignores the variable and always uses the user's own Core.
+A debug build attaches to a labeled Core endpoint, such as a replay, only when told to: `ERSA_ATTACH=<label>` makes it attach there and never launch a Core, and the rail's foot reads "Attached to <label>". A release build ignores the variable and always uses its own Core: the daily build's, on the label `daily` (ADR 0035), launched and quit as the user's own, with the foot empty.
 
 ## Open questions
 
@@ -84,6 +84,7 @@ Of the rail described above, what is built is the tree grouped by project, by da
 ## Changes
 
 - 2026-11-13: the tile's menu gains Copy session ID (FLOW-RESUME-SESSION-R07). No requirement IDs changed.
+- 2026-11-13: a release build uses the daily build's own Core (ADR 0035). No requirement IDs changed.
 - 2026-11-09: owner's decisions from the audit against Claude Desktop: View all, Mark as unread, Archive unavailable while a session is busy, the unseen mark kept across restarts, and the model, effort and permission mode chips changing a running session. No requirement IDs changed.
 - 2026-11-08: from #205 inbox: Built so far follows Sort by. No requirement IDs changed.
 - 2026-11-08: from #208 merge review: the session being shown stays laid out behind the sessions page; `size-row-title-min` joins `DESIGN.md`. No requirement IDs changed.
