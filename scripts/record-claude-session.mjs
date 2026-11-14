@@ -2,7 +2,7 @@
 // Records a Claude Code session the way Ersa runs one, as a protocol fixture
 // pair: the live stream and the CLI's own session record for the same run.
 //
-//   node scripts/record-claude-session.mjs <name> [--keep] [--bare] [--signed-out] [--settings <json>] [--cwd <dir>] [--resume <session id> [--fork-session [--cut-original <lines>] [--original-cwd <dir>]]] [--session-id] "<message 1>" ["<message 2>" ...]
+//   node scripts/record-claude-session.mjs <name> [--keep] [--bare] [--replay] [--signed-out] [--settings <json>] [--cwd <dir>] [--resume <session id> [--fork-session [--cut-original <lines>] [--original-cwd <dir>]]] [--session-id] "<message 1>" ["<message 2>" ...]
 //
 // A message of the form `control:<json>` is sent as a host control request
 // instead, with `<json>` as its `request` object, and the recorder waits for
@@ -79,6 +79,9 @@
 // session; the folder holds the session record and is deleted afterwards.
 // With --settings <json>, the CLI also gets `--settings <json>`, say
 // '{"autoMemoryEnabled":false}' for a user who turned auto-memory off.
+//
+// With --replay, the CLI also gets `--replay-user-messages`, which Ersa does
+// not pass, so the recording shows when the CLI echoes each user message back.
 //
 // With --trust, `initialize` attests the user's trust in the working
 // directory (`workspaceTrust`), as Ersa does for a trusted project's session,
@@ -196,6 +199,7 @@ const flag = (name) => {
 const keep = flag("--keep");
 const trust = flag("--trust");
 const bare = flag("--bare");
+const replay = flag("--replay");
 const signedOut = flag("--signed-out");
 const settings = option("--settings");
 const givenCwd = option("--cwd");
@@ -262,6 +266,7 @@ const args = [
   ...(fork ? ["--fork-session"] : []),
   ...(chosenId ? ["--session-id", chosenId] : []),
   ...(bare ? ["--bare"] : []),
+  ...(replay ? ["--replay-user-messages"] : []),
   ...(settings ? ["--settings", settings] : []),
 ];
 

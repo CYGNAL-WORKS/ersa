@@ -144,3 +144,63 @@ async fn the_count_is_read_from_the_record_at_a_handover_during_a_turn_and_at_a_
 
     session.stop().await.unwrap();
 }
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R46
+#[tokio::test]
+async fn a_message_folded_into_a_turn_that_uses_tools_is_read_at_the_next_model_call() {
+    // Fixture 51: the CLI hands the waiting message to the model at the
+    // running turn's next call, which starts no turn of its own.
+    let stdout = fixture("51-message-during-tool-turn").stdout;
+    let (answer, init) = (&stdout[0], &stdout[1]);
+    let requesting = &stdout[19];
+    assert!(requesting.contains(r#""status":"requesting""#));
+    let transport = FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(is("initialize"))
+        .then_stdout([answer.clone()])
+        .wait_for_stdin(is("user"))
+        .then_stdout([init.clone()])
+        .wait_for_stdin(is("user"))
+        // The test interrupts once the record shows the message taken in;
+        // the stub makes its next model call then.
+        .wait_for_stdin(is("interrupt"))
+        .then_stdout([requesting.clone()])
+        .hold_open();
+
+    let home = tempfile::tempdir().unwrap();
+    let path = record::record_path(home.path(), CWD, SESSION_ID);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let sink = Arc::new(RecordingSink::new());
+    let config = SessionConfig {
+        cwd: CWD.into(),
+        permission_mode: "default".into(),
+        backend_session_id: Some(SESSION_ID.into()),
+        extra: Value::Null,
+        ..SessionConfig::default()
+    };
+    let session = ClaudeAdapter::new()
+        .with_claude_home(home.path().to_path_buf())
+        .with_handshake_timeout(WAIT)
+        .with_stop_grace(Duration::from_millis(200))
+        .start(
+            Arc::new(transport),
+            config,
+            Arc::clone(&sink) as Arc<dyn AdapterSink>,
+        )
+        .await
+        .unwrap();
+
+    queue(&path, "enqueue", &now());
+    queue(&path, "dequeue", &now());
+    session.send_message(&message("one")).await.unwrap();
+    sink.wait_for_line(WAIT, |l| is_kind(l, "system/init"))
+        .await;
+    queue(&path, "enqueue", &now());
+    session.send_message(&message("two")).await.unwrap();
+    assert_eq!(sink.wait_for_waiting(WAIT, 1).await, [1]);
+
+    queue(&path, "remove", &now());
+    session.interrupt().await.unwrap();
+    assert_eq!(sink.wait_for_waiting(WAIT, 2).await, [1, 0]);
+
+    session.stop().await.unwrap();
+}
