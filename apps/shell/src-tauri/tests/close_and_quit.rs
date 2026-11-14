@@ -529,3 +529,36 @@ async fn eventually_gone(pid: u32) {
     }
     panic!("process {pid} is still running");
 }
+
+// verifies: FLOW-CLOSE-AND-QUIT-R09
+#[test]
+fn the_daily_builds_window_keeps_its_web_data_in_daily() {
+    let app_data = PathBuf::from("app-data").join("Ersa");
+    let daily = startup(Build::Daily, None, Some(&app_data));
+    assert_eq!(daily.web_data, Some(app_data.join("daily")));
+    // A development build keeps the webview's default folder, whatever it
+    // attaches to.
+    for attach in [None, Some("replay"), Some("daily")] {
+        let dev = startup(Build::Development, attach, Some(&app_data));
+        assert_eq!(dev.web_data, None, "attach {attach:?}");
+    }
+    // Without an application data folder, never the webview's default (the
+    // development build's) folder either.
+    let lost = startup(Build::Daily, None, None);
+    assert_eq!(
+        lost.web_data,
+        Some(std::env::temp_dir().join("ersa-daily-web"))
+    );
+}
+
+// verifies: FLOW-CLOSE-AND-QUIT-R10
+#[test]
+fn the_daily_and_development_windows_claim_apart() {
+    let app_data = PathBuf::from("app-data").join("Ersa");
+    let daily = startup(Build::Daily, None, Some(&app_data)).claim;
+    assert_eq!(daily, "daily-window");
+    for attach in [None, Some("replay"), Some("daily"), Some("live-1")] {
+        let dev = startup(Build::Development, attach, Some(&app_data)).claim;
+        assert_ne!(dev, daily, "attach {attach:?}");
+    }
+}
