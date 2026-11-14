@@ -151,6 +151,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
     // (PROTO-CLAUDE-CODE-STREAM-R35). Any other backend names it as it
     // starts.
     let backend_session_id = adapter.new_session_id();
+    let requested = Stamped::now(&params.model, &params.effort, &permission_mode);
     let session = SessionRow {
         id: persistence::new_id("s"),
         workspace_id: workspace.id,
@@ -160,10 +161,13 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         mode: params.mode,
         cwd: workspace.path.clone(),
         // Only the model and effort named; one left out is the backend's to
-        // choose (PROTO-CORE-API-R16).
+        // choose. Each kept with when Core gave it (PROTO-CORE-API-R71).
         model: params.model.clone(),
         effort: params.effort.clone(),
         permission_mode: (!permission_mode.is_empty()).then(|| permission_mode.clone()),
+        model_at: requested.model,
+        effort_at: requested.effort,
+        permission_mode_at: requested.permission_mode,
         archived: false,
         deleting: None,
         pinned: false,
@@ -233,10 +237,13 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         original_workspace
     };
 
-    let permission_mode = original
-        .permission_mode
-        .clone()
+    // The original's values as `session.list` reports them now: the
+    // backend's newest, not only what Core last asked for (PROTO-CORE-API-R71).
+    let listed = core.sessions.get(&params.id)?;
+    let permission_mode = Some(listed.permission_mode)
+        .filter(|mode| !mode.is_empty())
         .unwrap_or_else(|| BackendChoices::default_of(&adapter.choices().permission_modes));
+    let requested = Stamped::now(&listed.model, &listed.effort, &permission_mode);
     // Chosen and stored before the backend starts, as for a new session, so
     // a fork can be renamed before its first message (R38).
     let backend_session_id = adapter.new_session_id();
@@ -249,9 +256,12 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         mode: original.mode,
         // The stored path, never the one the backend reports (R38).
         cwd: workspace.path.clone(),
-        model: original.model.clone(),
-        effort: original.effort.clone(),
-        permission_mode: original.permission_mode,
+        model: listed.model.clone(),
+        effort: listed.effort.clone(),
+        permission_mode: (!permission_mode.is_empty()).then(|| permission_mode.clone()),
+        model_at: requested.model,
+        effort_at: requested.effort,
+        permission_mode_at: requested.permission_mode,
         archived: false,
         deleting: None,
         pinned: false,
@@ -267,8 +277,8 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
     let config = SessionConfig {
         cwd: workspace.path.clone(),
         permission_mode,
-        model: original.model,
-        effort: original.effort,
+        model: listed.model,
+        effort: listed.effort,
         project_trusted: trusted,
         project_path: project.path.clone(),
         backend_session_id,
@@ -834,4 +844,25 @@ pub(super) async fn raw_log(
             line: line.line,
         })
         .collect())
+}
+
+/// When Core gives a new session's backend its model, effort and permission
+/// mode: now, on the host's clock, for each value given, and nothing for one
+/// left to the backend (PROTO-CORE-API-R71). Core runs on the only host it
+/// reaches, so its clock is the host's, which the backend's record uses.
+struct Stamped {
+    model: Option<String>,
+    effort: Option<String>,
+    permission_mode: Option<String>,
+}
+
+impl Stamped {
+    fn now(model: &Option<String>, effort: &Option<String>, permission_mode: &str) -> Self {
+        let now = persistence::now_rfc3339();
+        Stamped {
+            model: model.as_ref().map(|_| now.clone()),
+            effort: effort.as_ref().map(|_| now.clone()),
+            permission_mode: (!permission_mode.is_empty()).then(|| now.clone()),
+        }
+    }
 }

@@ -19,6 +19,13 @@
 //!   backend has the message.
 //! - `stopped mid-write`: the line is recorded, then the session is found
 //!   stopped, as a kill landing during the write would leave it.
+//! - `report <model> <permission mode>`: the backend reports its model and
+//!   permission mode on the live stream, as Claude Code's `init` and
+//!   status lines do, then says it is idle.
+//!
+//! What a session's record says of its model, effort and permission mode is
+//! [`FakeAdapter::recorded_settings`], which a test sets as turns taken
+//! with other values would.
 //!
 //! Every message is kept in [`Stats::messages`] as the fake was given it,
 //! attachments and all; the fake takes PNG and GIF images of up to
@@ -38,8 +45,8 @@ use ersa_adapter::recording::Recording;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
     ImageLimits, OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit, ProcessSpec,
-    Projected, Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary, SessionConfig,
-    TitleRules, Transport, async_trait,
+    Projected, Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary, RecordedSettings,
+    SessionConfig, TitleRules, Transport, async_trait,
 };
 use ersa_core::CoreConfig;
 use ersa_core::replay::{Pace, Replay};
@@ -261,7 +268,14 @@ pub struct FakeAdapter {
     /// The titles the backend takes: one line of at most 200 characters,
     /// as Claude Code's, unless a test says otherwise.
     pub title_rules: TitleRules,
+    /// What each session's record says of its model, effort and permission
+    /// mode, by the backend's id for it; none for a session not in it.
+    pub recorded_settings: RecordedSettingsMap,
 }
+
+/// The fake records' settings, by backend session id, shared like
+/// [`Records`] so they outlive a Core.
+pub type RecordedSettingsMap = Arc<Mutex<HashMap<String, RecordedSettings>>>;
 
 impl FakeAdapter {
     pub fn new(projector_version: u32) -> Self {
@@ -286,6 +300,7 @@ impl FakeAdapter {
                 max_chars: 200,
                 one_line: true,
             },
+            recorded_settings: Arc::default(),
         }
     }
 
@@ -318,6 +333,15 @@ impl FakeAdapter {
         FakeAdapter {
             records,
             ..FakeAdapter::new(1)
+        }
+    }
+
+    /// An adapter whose backend keeps its records in `records` and what
+    /// they say of each session's settings in `settings`.
+    pub fn with_record_settings(records: Records, settings: RecordedSettingsMap) -> Self {
+        FakeAdapter {
+            recorded_settings: settings,
+            ..FakeAdapter::with_records(records)
         }
     }
 
@@ -469,6 +493,8 @@ impl Adapter for FakeAdapter {
         Box::new(FakeProjector {
             version: self.projector_version,
             turn: 0,
+            model: None,
+            permission_mode: None,
         })
     }
 
@@ -590,7 +616,13 @@ impl Adapter for FakeAdapter {
         Ok(Some(RecordSummary {
             title,
             created_at: record.iter().find_map(|e| e.ts.clone()),
-            settings: Default::default(),
+            settings: self
+                .recorded_settings
+                .lock()
+                .unwrap()
+                .get(backend_session_id)
+                .cloned()
+                .unwrap_or_default(),
         }))
     }
 }
@@ -712,6 +744,10 @@ impl AdapterSession for FakeSession {
             self.exit(Some(0));
         } else if text == "idle" {
             self.backend(json!({ "t": "idle" }));
+        } else if let Some(report) = text.strip_prefix("report ") {
+            let (model, mode) = report.split_once(' ').expect("report <model> <mode>");
+            self.backend(json!({ "t": "settings", "model": model, "permission_mode": mode }));
+            self.backend(json!({ "t": "idle" }));
         } else if text == "question" {
             self.backend(json!({ "t": "question", "id": "q-1" }));
         } else if text == "ask" {
@@ -798,6 +834,9 @@ impl AdapterSession for FakeSession {
 struct FakeProjector {
     version: u32,
     turn: u32,
+    /// The model and permission mode the stream last reported.
+    model: Option<String>,
+    permission_mode: Option<String>,
 }
 
 impl Projector for FakeProjector {
@@ -805,9 +844,22 @@ impl Projector for FakeProjector {
         self.version
     }
 
+    fn reported_model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
+    fn reported_permission_mode(&self) -> Option<&str> {
+        self.permission_mode.as_deref()
+    }
+
     fn project(&mut self, line: &RawLine) -> Vec<Projected> {
         let value: Value = serde_json::from_str(&line.line).unwrap_or(Value::Null);
         let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
+        if (line.dir, value["t"].as_str()) == (Direction::Backend, Some("settings")) {
+            self.model = Some(text("model"));
+            self.permission_mode = Some(text("permission_mode"));
+            return Vec::new();
+        }
         let events = match (line.dir, value["t"].as_str()) {
             (Direction::Host, Some("user")) => {
                 self.turn += 1;

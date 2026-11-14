@@ -67,6 +67,7 @@ use crate::raw_log::RawLog;
 mod fork;
 mod resume;
 mod send;
+mod settings;
 
 pub use fork::{Beginning, ForkHold, Forkable};
 pub use resume::Resumption;
@@ -492,12 +493,14 @@ struct Presented {
     /// the record holds a title, the announced one is the session's
     /// (PROTO-CLAUDE-CODE-STREAM-R36), kept in memory only.
     title: Option<String>,
-    /// How many titles the live stream has announced, so a rename can tell
-    /// whether the backend's own word on the new title is already shown.
-    announcements: u64,
     /// RFC 3339: from the record when it has said, else when Core first
     /// started the session's backend, else [`UNKNOWN_TIME`].
     created_at: String,
+    /// What the record last said of the session's model, effort and
+    /// permission mode, and what its live stream last reported of them
+    /// (PROTO-CORE-API-R71).
+    recorded: ersa_adapter::RecordedSettings,
+    reported: settings::Reported,
 }
 
 /// The creation time of a session nothing remembers starting: one from
@@ -655,8 +658,9 @@ impl Handle {
             row: Mutex::new(row),
             presented: Mutex::new(Presented {
                 title: None,
-                announcements: 0,
                 created_at,
+                recorded: Default::default(),
+                reported: Default::default(),
             }),
             op: tokio::sync::Mutex::new(()),
             hub: Mutex::default(),
@@ -726,6 +730,7 @@ impl Handle {
                 (view.state(), view.tile().clone())
             }
         };
+        let listed = settings::listed(&row, &presented.recorded, &presented.reported);
         Session {
             id: row.id,
             // Filled by the tickets that build them (PROTO-CORE-API,
@@ -734,9 +739,9 @@ impl Handle {
             workspace_id: row.workspace_id,
             host_id: row.host_id,
             backend: row.backend,
-            model: row.model,
-            effort: row.effort,
-            permission_mode: row.permission_mode.unwrap_or_default(),
+            model: listed.model,
+            effort: listed.effort,
+            permission_mode: listed.permission_mode.unwrap_or_default(),
             mode: row.mode,
             title: presented.title,
             state,
@@ -1014,7 +1019,7 @@ impl SessionManager {
         if self.closing.load(Ordering::SeqCst) {
             return Err(shutting_down());
         }
-        // Only what was named is stored and reported (PROTO-CORE-API-R16).
+        // Only what was given the backend is stored, with when (PROTO-CORE-API-R71).
         self.store.insert_session(row.clone()).await?;
         // Checked once the row exists, so a delete that claims the workspace
         // after this check counts the new session, and one that claimed it
@@ -1262,7 +1267,10 @@ impl SessionManager {
                 .backend_session_id
                 .clone()
                 .ok_or_else(unnamed)?;
-            let announced_before = lock(&handle.presented).announcements;
+            // The projector's count of the titles the stream announced, the
+            // one tally of them, tells whether the backend's own word on the
+            // new title came meanwhile.
+            let announced_before = announcements(&handle);
             let requested = title.to_string();
             // A backend that is stopping refuses (not running) while it may
             // still be writing its record, so a refusal never falls back to
@@ -1273,11 +1281,14 @@ impl SessionManager {
             // that name, which it may have made unique, is the one shown
             // once the announcement is projected. Until then, the title the
             // user gave; never in place of an announcement already shown.
-            let mut presented = lock(&handle.presented);
-            if presented.announcements == announced_before {
-                presented.title = Some(title.to_string());
+            // Checked and set under the hub's lock, which the pipeline holds
+            // while it projects: an announcement projected before this check
+            // is seen here, and one projected after it is applied after it.
+            let hub = lock(&handle.hub);
+            if announced(&hub) == announced_before {
+                lock(&handle.presented).title = Some(title.to_string());
             }
-            drop(presented);
+            drop(hub);
             return Ok(handle.describe());
         } else {
             let row = lock(&handle.row).clone();
@@ -1898,6 +1909,19 @@ impl SessionManager {
     }
 }
 
+/// How many titles the session's live stream has announced so far, as its
+/// projector counts them; `None` before any.
+fn announcements(handle: &Handle) -> Option<u64> {
+    announced(&lock(&handle.hub))
+}
+
+fn announced(hub: &Hub) -> Option<u64> {
+    hub.view
+        .as_ref()
+        .and_then(|view| view.announced_title())
+        .map(|(count, _)| count)
+}
+
 /// Registers `subscriber` on the hub's open view and takes its backlog from
 /// `from_seq` (or the first event held, if later).
 fn register(
@@ -1929,6 +1953,7 @@ async fn apply_summary(
     backend_id: String,
 ) {
     let removed = Arc::clone(&handle.removed);
+    let live = handle.live().is_some();
     // A fork with no record of its own was given its original's to read for
     // the conversation. What that record says of its title and first time is
     // the original's, and changes with it.
@@ -1950,6 +1975,12 @@ async fn apply_summary(
             let mut presented = lock(&handle.presented);
             if summary.title.is_some() {
                 presented.title = summary.title;
+            }
+            presented.recorded = summary.settings;
+            // A session not running has no stream: the record holds what it
+            // last reported (PROTO-CORE-API-R71).
+            if !live {
+                presented.reported = settings::Reported::default();
             }
             // The record's wrapper is the backend's and changes between
             // versions: a time that is not RFC 3339 is not used.
@@ -2603,7 +2634,7 @@ async fn run_pipeline(pipeline: Pipeline) {
                 *lock(&handle.ending) = Some((fact.clone(), ts.clone()));
             }
         }
-        let (events, tile, turn, announced, retitled) = {
+        let (events, tile, turn, announced, retitled, reported) = {
             let mut hub = lock(&handle.hub);
             let Some(view) = hub.view.as_mut() else {
                 // Never: a live session's view is open from its start.
@@ -2623,6 +2654,10 @@ async fn run_pipeline(pipeline: Pipeline) {
                 }
             }
             let announced = view.backend_session_id().map(String::from);
+            let reported = settings::Reported {
+                model: view.reported_model().map(String::from),
+                permission_mode: view.reported_permission_mode().map(String::from),
+            };
             // Any announcement in this batch, the same title again included:
             // the latest is the session's.
             let retitled = view
@@ -2630,15 +2665,26 @@ async fn run_pipeline(pipeline: Pipeline) {
                 .filter(|(count, _)| title_before != Some(*count))
                 .map(|(_, title)| title.to_string());
             let (tile, turn) = (view.tile().clone(), view.turn());
-            (events, tile, turn, announced, retitled)
+            (events, tile, turn, announced, retitled, reported)
         };
+
+        // What the stream reports of the model and permission mode is the
+        // session's from now on, over Core's request and the record
+        // (PROTO-CORE-API-R71).
+        {
+            let mut presented = lock(&handle.presented);
+            if reported.model.is_some() {
+                presented.reported.model = reported.model;
+            }
+            if reported.permission_mode.is_some() {
+                presented.reported.permission_mode = reported.permission_mode;
+            }
+        }
 
         // A title the backend announced is the session's from now on, until
         // a newer one or its record says otherwise (PROTO-CLAUDE-CODE-STREAM-R36).
         if let Some(title) = retitled {
-            let mut presented = lock(&handle.presented);
-            presented.title = Some(title);
-            presented.announcements += 1;
+            lock(&handle.presented).title = Some(title);
         }
 
         // The backend's own id finds the session's record later; it is the
@@ -3190,6 +3236,9 @@ mod tests {
             last_activity_at: None,
             forked_from: None,
             forked_through: None,
+            model_at: None,
+            effort_at: None,
+            permission_mode_at: None,
         };
         let handle = Arc::new(Handle::new(row, now_rfc3339()));
         lock(&manager.sessions).insert(handle.id.clone(), handle);
@@ -3484,6 +3533,9 @@ mod tests {
                 last_activity_at: None,
                 forked_from: None,
                 forked_through: None,
+                model_at: None,
+                effort_at: None,
+                permission_mode_at: None,
             })
             .await
             .unwrap();
