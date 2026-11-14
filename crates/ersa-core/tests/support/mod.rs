@@ -8,7 +8,6 @@
 // Each test file compiles this module separately and uses a different part of it.
 #![allow(dead_code)]
 
-pub mod claude;
 pub mod fake;
 pub mod procs;
 pub mod suite;
@@ -22,6 +21,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use ersa_core::platform::{self, BoxStream};
+use ersa_core::replay::Replay;
 use ersa_core::{Adapter, CoreConfig, Server};
 use ersa_protocol::schema::{validate_notification, validate_response};
 use serde_json::{Value, json};
@@ -102,6 +102,30 @@ pub async fn start_with_adapters(
         endpoint,
         task,
     }
+}
+
+/// A replay server for `replay` in a temporary data directory, with
+/// `configure` applied to its configuration.
+pub async fn start_replay_of(replay: Replay, configure: impl FnOnce(&mut CoreConfig)) -> TestCore {
+    let dir = tempdir();
+    let endpoint = unique_endpoint();
+    let mut config = test_config(&dir.path().join("data"), &endpoint);
+    configure(&mut config);
+    let server = Server::bind_replay(config, replay).await.expect("bind");
+    let task = tokio::spawn(server.run());
+    TestCore {
+        dir,
+        endpoint,
+        task,
+    }
+}
+
+/// The one session a replay server serves.
+pub async fn the_session(client: &mut Client) -> Value {
+    let sessions = client.result("session.list", json!({})).await;
+    let sessions = sessions.as_array().expect("a list");
+    assert_eq!(sessions.len(), 1, "{sessions:#?}");
+    sessions[0].clone()
 }
 
 impl TestCore {

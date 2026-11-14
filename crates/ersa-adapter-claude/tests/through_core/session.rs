@@ -3,18 +3,18 @@
 //! fixture 11: a prompt, a permission request, the user's allow, the reply;
 //! and the 2.1.316 question recordings, answered and declined.
 
-mod support;
+use crate::support;
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::claude::{
+    OnTransport, fixture, fixtures_of, isolated_claude, parse, stub, stub_asking_at,
+};
+use crate::support::{Client, start_with_adapters, tempdir, workspace};
 use ersa_adapter::Adapter;
 use ersa_adapter::recording::Recording;
 use serde_json::{Value, json};
-use support::claude::{
-    OnTransport, fixture, fixtures_of, isolated_claude, parse, stub, stub_asking_at,
-};
-use support::{Client, start_with_adapters, tempdir, workspace};
 
 async fn next_event(client: &mut Client, event_type: &str) -> Value {
     client.events_until(event_type).await.pop().unwrap()["event"].clone()

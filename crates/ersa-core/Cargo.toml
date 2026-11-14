@@ -41,10 +41,8 @@ windows-sys = { workspace = true, features = [
 libc = "0.2"
 
 [dev-dependencies]
-# The fake transport, for driving the real Claude adapter against a stub CLI.
+# The fake transport, for driving adapters against a scripted process.
 ersa-adapter = { path = "../ersa-adapter", features = ["test-support"] }
-# A Claude Code session through Core, in tests/claude_session.rs.
-ersa-adapter-claude = { path = "../ersa-adapter-claude" }
 # The socket-level tests validate every response against the Core API schema.
 ersa-protocol = { path = "../ersa-protocol", features = ["schema-validation"] }
 tempfile.workspace = true
