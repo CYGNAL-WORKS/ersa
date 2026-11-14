@@ -117,6 +117,14 @@ impl Drop for Copies {
     }
 }
 
+/// The refusal of a send while an archive is under way: no `reason`, since
+/// the archive may still fail or be refused (PROTO-CORE-API-R85).
+fn being_archived() -> SessionError {
+    SessionError::InvalidState(
+        "the session is being archived; unarchive or resume it to send it a message".into(),
+    )
+}
+
 impl SessionManager {
     /// Sends a user message with its attachments (PROTO-CORE-API-R21 to
     /// R23, R26), answering with the turn it starts or joins once the
@@ -145,6 +153,12 @@ impl SessionManager {
                 "the session is archived; unarchive or resume it to send it a message".into(),
             ));
         }
+        // Before the session is found not running: between an archive's stop
+        // and its mark, the refusal is this one, and nothing resumes it
+        // (PROTO-CORE-API-R85). Checked again under the `sending` lock below.
+        if handle.archiving.load(Ordering::SeqCst) > 0 {
+            return Err(being_archived());
+        }
         let resuming = resume::current_run(&handle).await?.is_none();
         if resuming && resumption.is_none() {
             return Err(handle.not_running());
@@ -163,6 +177,12 @@ impl SessionManager {
                 return Err(SessionError::InvalidState(
                     "this session is being forked; send the message again in a moment".into(),
                 ));
+            }
+            // Under this lock too, and an archive checks `sending` after
+            // raising this, so one of the two always sees the other
+            // (PROTO-CORE-API-R85).
+            if handle.archiving.load(Ordering::SeqCst) > 0 {
+                return Err(being_archived());
             }
             if sending.is_some() {
                 return Err(SessionError::InvalidState(
