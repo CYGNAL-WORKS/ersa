@@ -46,6 +46,10 @@ pub struct CoreConfig {
     /// of its run. Zero, except in tests that need a request to land while
     /// a run winds down.
     pub wind_down_pause: Duration,
+    /// How long a backend detection that found anything other than
+    /// `available` is reused. [`FAILED_DETECTION_TTL`], except in tests
+    /// that need every detection after a failed one to run again.
+    pub failed_detection_ttl: Duration,
 }
 
 /// The default for [`CoreConfig::max_line_bytes`]: 16 MiB, far above any
@@ -58,7 +62,7 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How long a backend detection that found anything other than `available`
 /// is reused, so a backend installed while Core runs shows up soon after.
-const FAILED_DETECTION_TTL: Duration = Duration::from_secs(30);
+pub const FAILED_DETECTION_TTL: Duration = Duration::from_secs(30);
 
 impl CoreConfig {
     /// The configuration for `data_dir` with the platform's default endpoint
@@ -74,6 +78,7 @@ impl CoreConfig {
             replay: false,
             copy_pause: Duration::ZERO,
             wind_down_pause: Duration::ZERO,
+            failed_detection_ttl: FAILED_DETECTION_TTL,
         })
     }
 
@@ -173,7 +178,7 @@ impl Core {
         let mut cached = self.local_backends.lock().await;
         if let Some((at, found)) = cached.as_ref() {
             let all_available = found.iter().all(|d| d.state == BackendState::Available);
-            if all_available || at.elapsed() < FAILED_DETECTION_TTL {
+            if all_available || at.elapsed() < self.config.failed_detection_ttl {
                 return found.clone();
             }
         }

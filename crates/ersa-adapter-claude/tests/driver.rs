@@ -304,6 +304,26 @@ async fn a_cli_that_never_answers_is_an_error() {
     assert!(matches!(error, AdapterError::Protocol(_)), "{error}");
 }
 
+/// The probe waits 60 seconds for the CLI's answer, and no longer, before it
+/// reports an error. On a paused clock, so the test takes no time.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R56
+#[tokio::test(start_paused = true)]
+async fn the_probe_gives_up_on_a_silent_cli_after_60_seconds() {
+    let transport = FakeTransport::new(Vec::<String>::new()).hold_open();
+    let started = tokio::time::Instant::now();
+    let error = ClaudeAdapter::new()
+        .models(Arc::new(transport))
+        .await
+        .expect_err("no answer");
+    let waited = started.elapsed();
+    assert!(matches!(error, AdapterError::Protocol(_)), "{error}");
+    // The handshake's limit, then at most the stop grace to end the CLI.
+    assert!(
+        waited >= Duration::from_secs(60) && waited < Duration::from_secs(64),
+        "{waited:?}"
+    );
+}
+
 /// A CLI that exits before answering, or answers with no models, is an
 /// error too.
 // verifies: PROTO-CLAUDE-CODE-STREAM-R56
