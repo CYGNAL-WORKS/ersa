@@ -59,19 +59,19 @@ First stdout message of every one-shot session. In a bidirectional session the `
 
 ### Tool targets and edits
 
-Recorded for `Read` (`file_path`, fixture 2.1.316/00-session-tools) and `Bash` (`command`, fixture 2.1.302/05-bash-write-default); the rest is from the SDK types, and the 2.1.316 `system/init` tool list offers `Task`, `Edit` and `Write` but not `MultiEdit`, `WebFetch` or `Agent`. The ticket that builds this records a fixture of each tool it can reach first, and corrects this table from it. The adapter fills `tool.requested`'s `target` and `edits` (`PROTO-AGENT-EVENTS`) from a `tool_use` block's `name` and `input`:
+Recorded on 2.1.316 for `Read` and `Bash` (fixture 00-session-tools), `Edit`, `Write`, `NotebookEdit`, `Grep`, `Glob`, `WebSearch` and `Agent` (fixtures 28 to 34), `ToolSearch` (fixtures 30, 33), `PowerShell` (fixture 35-tool-powershell) and an `Edit` whose `replace_all` is true (fixture 36-tool-edit-replace-all). `MultiEdit` and `WebFetch` are from the SDK types alone: 2.1.316 lists neither. A ticket that builds a row records its tool first where the CLI offers it. `system/init` lists the subagent tool as `Task`, but its call arrives named `Agent` (fixture 34), so the table names both. `NotebookEdit` and `WebSearch` are deferred tools: the model loads each through a `ToolSearch` call before its first use (fixtures 30, 33). The adapter fills `tool.requested`'s `target` and `edits` (`PROTO-AGENT-EVENTS`) from a `tool_use` block's `name` and `input`:
 
 | Tool | `target` | `edits` |
 |---|---|---|
 | `Read` | `file_path` | none |
 | `Write` | `file_path` | one, `new_text` from `content`, no `old_text` |
-| `Edit` | `file_path` | one, from `old_string` and `new_string` |
-| `MultiEdit`, where the CLI still offers it | `file_path` | one per entry of `edits`, from its `old_string` and `new_string` |
+| `Edit` | `file_path` | one, from `old_string` and `new_string`, with `every_occurrence` when `replace_all` is true |
+| `MultiEdit`, where the CLI still offers it | `file_path` | one per entry of `edits`, from its `old_string` and `new_string`, with `every_occurrence` when its `replace_all` is true |
 | `NotebookEdit` | `notebook_path` | none |
-| `Bash` | `command` | none |
+| `Bash`, `PowerShell` | `command` | none |
 | `Grep`, `Glob` | `pattern` | none |
 | `WebFetch` | `url` | none |
-| `WebSearch` | `query` | none |
+| `WebSearch`, `ToolSearch` | `query` | none |
 | `Task`, `Agent` | `description` | none |
 
 Any other tool, an MCP server's included, carries neither. A field missing from the input, or not a string, leaves `target` or that edit out.
@@ -313,6 +313,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 ## Changes
 
+- 2026-11-13: from #351 inbox: Tool targets and edits corrected from fixtures 28 to 34: the subagent tool is listed as `Task` and called as `Agent`; `NotebookEdit` and `WebSearch` load through `ToolSearch`, which joins `WebSearch`'s row; `PowerShell` joins `Bash`'s row, since it is the shell the CLI offers on Windows (fixture 35); an edit that replaces every occurrence says so (PROTO-AGENT-EVENTS-R23, fixture 36). No requirement IDs changed: R48 follows the table.
 - 2026-11-13: from #345 inbox: recordings 22 to 27 answer two open questions: a message written during a turn is stamped at its turn's start and holds the mode it starts with, and model, effort and mode controls sent during a turn apply at once. The control shapes, the record's local-command entries, and where live and record projections differ are recorded. No requirement IDs changed.
 - 2026-11-13: from #148: Bare mode added, recorded on 2.1.316 (`bare-mode-2026-11-13.txt`): a bare session's failure is told apart from a signed-out one (PROTO-CLAUDE-CODE-STREAM-R51), and the conformance tests catch a version that starts bare by default (R52).
 - 2026-11-13: owner's decisions on #280: Naming a new session added: the adapter asks the CLI to name a new session (new sessions only), and a rename wins over a name that answers after it. PROTO-CLAUDE-CODE-STREAM-R49 and R50 added.
