@@ -184,6 +184,14 @@ impl SessionManager {
             if handle.archiving.load(Ordering::SeqCst) > 0 {
                 return Err(being_archived());
             }
+            // An archive may have finished while this send waited for a run
+            // winding down; a resume would unarchive it, so the mark is read
+            // again here (FLOW-ARCHIVE-DELETE-SESSION-R02).
+            if lock(&handle.row).archived {
+                return Err(SessionError::InvalidState(
+                    "the session is archived; unarchive or resume it to send it a message".into(),
+                ));
+            }
             if sending.is_some() {
                 return Err(SessionError::InvalidState(
                     "a message is already being sent to this session; wait for its answer".into(),
