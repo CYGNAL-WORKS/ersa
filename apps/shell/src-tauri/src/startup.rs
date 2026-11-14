@@ -1,6 +1,7 @@
 //! What a build of the Shell uses when it starts (ADR 0035): which Core it
 //! reaches, where that Core keeps its data, and the window's one-per-user
-//! claim (FLOW-CLOSE-AND-QUIT-R02, R08).
+//! claim, and where its webview keeps its data (FLOW-CLOSE-AND-QUIT-R02,
+//! R08, R09, R10).
 //!
 //! - The daily build (a release build) runs its own Core on the endpoint
 //!   label `daily`, with its data in the `daily` folder of Ersa's
@@ -77,6 +78,12 @@ pub struct Startup {
     /// says so in the rail's foot, and Quit leaves that Core running.
     pub attached: Option<String>,
     pub core: Core,
+    /// The folder the window's webview keeps its own data in (cookies,
+    /// local storage, caches), or `None` for the webview's default. Both
+    /// builds share one bundle identifier, and the default folder is named
+    /// after it, so the daily build moves its own into `daily`
+    /// (FLOW-CLOSE-AND-QUIT-R09).
+    pub web_data: Option<PathBuf>,
 }
 
 /// The labels a development build may not attach to: the daily build's
@@ -96,6 +103,15 @@ pub fn startup(build: Build, attach: Option<&str>, app_data: Option<&Path>) -> S
         Build::Daily => Startup {
             claim: DAILY_WINDOW.to_string(),
             attached: None,
+            // Without the application data folder there is no `daily`
+            // folder either, and the window only says why it has no Core.
+            // Its web data still never goes to the webview's default folder:
+            // that one comes from the system rather than LOCALAPPDATA, so it
+            // is the development build's even then.
+            web_data: Some(match app_data {
+                Some(dir) => dir.join(DAILY),
+                None => std::env::temp_dir().join("ersa-daily-web"),
+            }),
             core: match app_data {
                 Some(dir) => Core::Own {
                     label: DAILY.to_string(),
@@ -113,11 +129,13 @@ pub fn startup(build: Build, attach: Option<&str>, app_data: Option<&Path>) -> S
             None => Startup {
                 claim: "window".to_string(),
                 attached: None,
+                web_data: None,
                 core: Core::Default,
             },
             Some(label) => Startup {
                 claim: format!("window-{label}"),
                 attached: Some(label.to_string()),
+                web_data: None,
                 core: if belongs_to_daily(label) {
                     Core::Refused(format!(
                         "This development build can't attach to {label}: it belongs to the daily build, so your daily sessions stay out of reach. Attach to another label, or open the daily build."
@@ -236,7 +254,7 @@ mod tests {
         assert_eq!(near.core, Core::AttachOnly("daily2".to_string()));
     }
 
-    // verifies: FLOW-CLOSE-AND-QUIT-R08
+    // verifies: FLOW-CLOSE-AND-QUIT-R10
     #[test]
     fn the_daily_and_development_windows_claim_apart() {
         let daily = startup(Build::Daily, None, Some(&app_data())).claim;
@@ -244,5 +262,25 @@ mod tests {
             let dev = startup(Build::Development, attach, Some(&app_data())).claim;
             assert_ne!(dev, daily, "attach {attach:?}");
         }
+    }
+
+    // verifies: FLOW-CLOSE-AND-QUIT-R09
+    #[test]
+    fn the_daily_builds_window_keeps_its_web_data_in_daily() {
+        let daily = startup(Build::Daily, None, Some(&app_data()));
+        assert_eq!(daily.web_data, Some(app_data().join("daily")));
+        // A development build keeps the webview's default folder, whatever
+        // it attaches to.
+        for attach in [None, Some("replay"), Some("daily")] {
+            let dev = startup(Build::Development, attach, Some(&app_data()));
+            assert_eq!(dev.web_data, None, "attach {attach:?}");
+        }
+        // Without an application data folder, never the webview's default
+        // (the development build's) folder either.
+        let lost = startup(Build::Daily, None, None);
+        assert_eq!(
+            lost.web_data,
+            Some(std::env::temp_dir().join("ersa-daily-web"))
+        );
     }
 }
