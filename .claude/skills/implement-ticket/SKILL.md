@@ -39,7 +39,7 @@ When the build turns up an assumption the plan did not name, add it to the plan,
 
 ## 4. Check, push, open the pull request
 
-1. When the ticket's scope is built and everything is committed: `git fetch origin && git rebase origin/main`, then `node scripts/check.mjs`. If the app refuses the rebase because `main` changed protected files (under `.claude/`), skip it, push as is, and say so in your report; whoever drives the pull request merges `main` in. Everything passes.
+1. When the ticket's scope is built and everything is committed: `git fetch origin && git rebase origin/main`, then `node scripts/check.mjs`, and when the ticket changes the interface, the live checks (`docs/agents/live-checks.md`) whether or not its **Done when** asks. If the app refuses the rebase because `main` changed protected files (under `.claude/`), skip it, push as is, and say so in your report; whoever drives the pull request merges `main` in. Everything passes.
 2. `git push -u origin HEAD` (force-with-lease only for your own rebased branch).
 3. `gh pr create` against `main`, titled with the issue's title. Body: the `pr` skill's **Summary**, **Evidence** and **Merge Danger**, then **Requirements** (each ID and the test that verifies it), **Test seams**, **Assumptions** (each with the checker's verdict and what you did about it), **Inbox entries** added (verbatim), and `Fixes #<n>`. Evidence says what the tests proved, what was driven in the running app or against the real CLI, and what was not exercised.
 
