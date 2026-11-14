@@ -1,6 +1,6 @@
 //! What the adapter reports of a session's model, effort and permission
 //! mode: a live session's from its stream (PROTO-CLAUDE-CODE-STREAM-R40),
-//! any session's from its record (R47).
+//! any session's from its record (R57, R58, R59).
 
 mod common;
 
@@ -380,6 +380,46 @@ fn a_relaunch_reads_back_as_far_as_each_request() {
     };
     let back = read_back(&lines, requested).since(requested);
     assert_eq!(values(&back), [None, Some("high"), Some("acceptEdits")]);
+}
+
+/// Before a relaunch, the read stops once the record reaches Core's time
+/// for every value: the old reply before that time is never read.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R59
+#[test]
+fn a_relaunch_stops_reading_at_cores_time() {
+    let mut lines = vec![
+        prompt("2026-11-14T10:00:01.000Z", "plan"),
+        reply("2026-11-14T10:00:02.000Z", OPUS, "high"),
+    ];
+    lines.extend(filler(300));
+    lines.push(prompt("2026-11-14T10:00:30.000Z", "plan"));
+    lines.push(prompt("2026-11-14T10:05:00.000Z", "acceptEdits"));
+    // Read as it is, before Core picks: the reply was never reached.
+    let back = read_back(&lines, every("2026-11-14T10:01:00.000Z"));
+    assert_eq!(values(&back), [None, None, Some("acceptEdits")]);
+}
+
+/// Times are compared to the millisecond: a turn that began at Core's very
+/// time did not begin after it, and a reply stamped with its prompt belongs
+/// to that prompt's turn.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R58
+#[test]
+fn a_turn_that_began_at_cores_time_is_not_after_it() {
+    let lines = [
+        prompt("2026-11-14T10:00:05.000Z", "plan"),
+        reply("2026-11-14T10:00:05.000Z", OPUS, "high"),
+    ];
+    let settings = listed(&lines);
+    let began = Some(at("2026-11-14T10:00:05.000Z"));
+    assert_eq!(settings.model.as_ref().unwrap().turn_began, began);
+    assert_eq!(
+        values(&settings.clone().since(every("2026-11-14T10:00:05.000Z"))),
+        [None, None, None]
+    );
+    assert_eq!(
+        values(&settings.since(every("2026-11-14T10:00:04.999Z"))),
+        [Some(OPUS), Some("high"), Some("plan")]
+    );
 }
 
 /// A tail that holds a reply but not the prompt its turn began with: the
