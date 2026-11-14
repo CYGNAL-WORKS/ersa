@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BackendInfo, Choice, Project } from "../protocol/core-api.gen";
 import type { Session } from "../protocol/core-api.gen";
-import { type SessionValues, baseFor, branchesMatching, projectOrder, recentFirst, seedScreen, sessionShown, showsBackend, startingProject, valuesFor, workspaceKinds } from "./controls";
+import { type SessionValues, baseFor, branchesMatching, effortsFor, projectOrder, recentFirst, seedScreen, sessionShown, showsBackend, startingProject, valuesFor, workspaceKinds } from "./controls";
 
 const project = (vcs: Project["vcs"]): Project => ({ id: "p1", host_id: "local", path: "D:\\Projects\\p", name: "p", vcs, trusted: true });
 
@@ -12,7 +12,7 @@ const backend = (name: string, status: BackendInfo["status"] = "available"): Bac
   label: name,
   status,
   tested: { min: "1.0.0", max: "2.0.0" },
-  models: choices([`${name}-small`, `${name}-large`], `${name}-large`),
+  models: choices([`${name}-small`, `${name}-large`], `${name}-large`).map((m) => ({ ...m, efforts: ["low", "high"] })),
   efforts: choices(["low", "high"], "high"),
   permission_modes: choices(["ask", "edits", "bypass"], "ask"),
 });
@@ -52,9 +52,41 @@ describe("the session controls' starting values", () => {
   });
 
   // verifies: FLOW-NEW-SESSION-R02
-  it("take the first choice when a backend marks none as default", () => {
-    const plain = { ...backend("claude-code"), efforts: choices(["low", "high"], "none") };
-    expect(valuesFor(project("git"), [plain]).effort).toBe("low");
+  it("take the first model when a backend marks none as default, and no effort when it marks no effort", () => {
+    const plain = { ...backend("claude-code"), models: choices(["a", "b"], "none"), efforts: choices(["low", "high"], "none") };
+    expect(valuesFor(project("git"), [plain])).toMatchObject({ model: "a", effort: undefined });
+  });
+
+  /** Claude Code as `backend.list` lists it: the CLI's own `default` entry first, a model without efforts, and no effort marked. */
+  const claude: BackendInfo = {
+    ...backend("claude-code"),
+    models: [
+      { id: "default", label: "Default (recommended)", default: true, resolved: "claude-opus-5-5", efforts: ["low", "high"] },
+      { id: "opus", label: "Opus 5.5", default: false, resolved: "claude-opus-5-5", efforts: ["low", "high"] },
+      { id: "claude-haiku-4-5", label: "Haiku 4.5", default: false, resolved: "claude-haiku-4-5" },
+      { id: "older", label: "Older", default: false, efforts: ["low"] },
+    ],
+    efforts: choices(["low", "high"], "none"),
+  };
+
+  // verifies: FLOW-NEW-SESSION-R02
+  it("start at the backend's own default model and no effort", () => {
+    expect(valuesFor(project("git"), [claude])).toMatchObject({ model: "default", effort: undefined });
+  });
+
+  // verifies: FLOW-NEW-SESSION-R02
+  it("keep an effort only while the chosen model takes it", () => {
+    const wanted = { backend: "claude-code", effort: "high" };
+    expect(valuesFor(project("git"), [claude], { ...wanted, model: "opus" }).effort).toBe("high");
+    expect(valuesFor(project("git"), [claude], { ...wanted, model: "older" }).effort).toBeUndefined();
+    expect(valuesFor(project("git"), [claude], { ...wanted, model: "claude-haiku-4-5" }).effort).toBeUndefined();
+  });
+
+  it("offer each model only the efforts it takes", () => {
+    expect(effortsFor(claude, "older").map((e) => e.id)).toEqual(["low"]);
+    expect(effortsFor(claude, "claude-haiku-4-5")).toEqual([]);
+    // A model the backend does not list, as a session's own, is offered every level.
+    expect(effortsFor(claude, "retired").map((e) => e.id)).toEqual(["low", "high"]);
   });
 
   it("name no backend, model, effort or permission mode when none is available", () => {

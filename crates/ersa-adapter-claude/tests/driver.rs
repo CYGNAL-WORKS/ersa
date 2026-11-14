@@ -157,26 +157,25 @@ fn model_and_effort_are_passed_only_when_named() {
     assert_eq!(flag_value(&args, "--permission-mode"), Some("default"));
 }
 
-/// What `backend.list` offers for Claude Code: the brief's model aliases,
-/// effort levels and permission modes, each list with one default, and
-/// never `bypassPermissions`.
+/// The efforts and permission modes `backend.list` offers for Claude Code:
+/// the brief's effort levels with none marked, as the CLI marks none, and
+/// its permission modes, never `bypassPermissions`.
 #[test]
-fn the_choices_are_the_briefs_with_one_default_each() {
+fn the_choices_are_the_briefs_efforts_and_permission_modes() {
     let choices = adapter().choices();
     let ids = |list: &[ersa_protocol::core_api::Choice]| -> Vec<String> {
         list.iter().map(|c| c.id.clone()).collect()
     };
-    assert_eq!(ids(&choices.models), ["fable", "opus", "sonnet", "haiku"]);
     assert_eq!(
         ids(&choices.efforts),
         ["low", "medium", "high", "xhigh", "max"]
     );
+    assert!(choices.efforts.iter().all(|c| !c.default), "{choices:?}");
     assert_eq!(
         ids(&choices.permission_modes),
         ["default", "acceptEdits", "plan", "auto"]
     );
-    for list in [&choices.models, &choices.efforts, &choices.permission_modes] {
-        assert_eq!(list.iter().filter(|c| c.default).count(), 1, "{list:?}");
+    for list in [&choices.efforts, &choices.permission_modes] {
         assert!(list.iter().all(|c| !c.label.is_empty()), "{list:?}");
     }
     // The session's permission mode when none is named is the one that asks
@@ -185,6 +184,159 @@ fn the_choices_are_the_briefs_with_one_default_each() {
         ersa_adapter::BackendChoices::default_of(&choices.permission_modes),
         "default"
     );
+}
+
+/// Choosing the CLI's own `default` entry passes no `--model`
+/// (PROTO-CLAUDE-CODE-STREAM, Invocation).
+#[test]
+fn the_default_model_passes_no_model_flag() {
+    let mut chosen = config();
+    chosen.model = Some("default".into());
+    let args = ersa_adapter_claude::invocation_args(&chosen);
+    assert!(!args.iter().any(|a| a == "--model"), "{args:?}");
+}
+
+/// The `initialize` answer of 2.1.316 fixture 25, which lists the models.
+fn models_answer() -> String {
+    fixture("2.1.316/25-controls-between-turns")
+        .stdout
+        .into_iter()
+        .find(|line| parse(line)["response"]["response"]["models"].is_array())
+        .expect("fixture 25 answers initialize with its models")
+}
+
+/// A probe CLI that answers `initialize` and exits once its stdin closes.
+fn probe_stub(answer: String) -> FakeTransport {
+    FakeTransport::new(Vec::<String>::new())
+        .wait_for_stdin(expect("initialize", is_initialize))
+        .then_stdout([answer])
+        .hold_open()
+}
+
+/// The models are read from the recorded `initialize` answer, every field
+/// mapped, in the CLI's order, with `default` on the `default` entry alone
+/// and no efforts on a model the CLI gives none; the probe is a new session
+/// sent no message, so it leaves no record.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R39
+#[tokio::test]
+async fn models_come_from_the_initialize_answer_of_a_cli_sent_no_message() {
+    let transport = probe_stub(models_answer());
+    let models = adapter()
+        .with_stop_grace(WAIT)
+        .models(Arc::new(transport.clone()))
+        .await
+        .expect("models");
+
+    let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [
+            "default",
+            "opus",
+            "claude-fable-5-2",
+            "sonnet",
+            "haiku",
+            "fable",
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-5",
+            "claude-opus-5",
+            "claude-fable-5",
+            "claude-opus-4-8",
+            "claude-opus-4-7",
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+        ]
+    );
+    let defaults: Vec<&str> = models
+        .iter()
+        .filter(|m| m.default)
+        .map(|m| m.id.as_str())
+        .collect();
+    assert_eq!(defaults, ["default"]);
+    let all = ["low", "medium", "high", "xhigh", "max"]
+        .map(String::from)
+        .to_vec();
+    assert_eq!(
+        models[0],
+        ersa_protocol::core_api::ModelChoice {
+            id: "default".into(),
+            label: "Default (recommended)".into(),
+            default: true,
+            resolved: Some("claude-opus-5-5".into()),
+            efforts: Some(all.clone()),
+        }
+    );
+    assert_eq!(models[1].label, "Opus 5.5");
+    assert_eq!(models[1].resolved.as_deref(), Some("claude-opus-5-5"));
+    assert_eq!(models[5].resolved.as_deref(), Some("claude-fable-5-1"));
+    // Haiku 4.5 has no effort levels at all.
+    assert_eq!(models[6].label, "Haiku 4.5");
+    assert_eq!(models[6].efforts, None);
+    assert_eq!(
+        models[12].efforts.as_deref(),
+        Some(&["low", "medium", "high", "max"].map(String::from)[..])
+    );
+
+    // One CLI, started as a new session under an id of its own, with no
+    // model, given `initialize` and nothing else.
+    let spawned = transport.spawned();
+    assert_eq!(spawned.len(), 1);
+    assert!(!spawned[0].args.iter().any(|a| a == "--model"));
+    assert!(flag_value(&spawned[0].args, "--session-id").is_some());
+    assert!(!spawned[0].args.iter().any(|a| a == "--resume"));
+    let sent = transport.stdin_lines();
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert!(is_initialize(&parse(&sent[0])));
+}
+
+/// A CLI that never answers is one that cannot report its models.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R56
+#[tokio::test]
+async fn a_cli_that_never_answers_is_an_error() {
+    let transport = FakeTransport::new(Vec::<String>::new()).hold_open();
+    let error = adapter()
+        .with_handshake_timeout(Duration::from_millis(200))
+        .models(Arc::new(transport))
+        .await
+        .expect_err("no answer");
+    assert!(matches!(error, AdapterError::Protocol(_)), "{error}");
+}
+
+/// The probe waits 60 seconds for the CLI's answer, and no longer, before it
+/// reports an error. On a paused clock, so the test takes no time.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R56
+#[tokio::test(start_paused = true)]
+async fn the_probe_gives_up_on_a_silent_cli_after_60_seconds() {
+    let transport = FakeTransport::new(Vec::<String>::new()).hold_open();
+    let started = tokio::time::Instant::now();
+    let error = ClaudeAdapter::new()
+        .models(Arc::new(transport))
+        .await
+        .expect_err("no answer");
+    let waited = started.elapsed();
+    assert!(matches!(error, AdapterError::Protocol(_)), "{error}");
+    // The handshake's limit, then at most the stop grace to end the CLI.
+    assert!(
+        waited >= Duration::from_secs(60) && waited < Duration::from_secs(64),
+        "{waited:?}"
+    );
+}
+
+/// A CLI that exits before answering, or answers with no models, is an
+/// error too.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R56
+#[tokio::test]
+async fn a_cli_that_exits_or_lists_nothing_is_an_error() {
+    let exits = FakeTransport::new(Vec::<String>::new()).with_exit_code(1);
+    let error = adapter().models(Arc::new(exits)).await.expect_err("exited");
+    assert!(matches!(error, AdapterError::Protocol(_)), "{error}");
+
+    let empty = probe_stub(init_answer().replace("\"models\"", "\"not_models\""));
+    let error = adapter()
+        .models(Arc::new(empty))
+        .await
+        .expect_err("no list");
+    assert!(matches!(error, AdapterError::Protocol(_)), "{error}");
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R12

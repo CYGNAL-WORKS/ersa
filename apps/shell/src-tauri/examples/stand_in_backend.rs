@@ -7,7 +7,8 @@
 //! - With `ERSA_STAND_IN_FAIL` set, it fails to start: it writes the
 //!   variable's value to stderr, as a CLI says why it cannot run, and exits 1.
 //! - With `ERSA_STAND_IN_ANSWER` set, it answers the host's `initialize`
-//!   request, so the session starts and takes messages.
+//!   request with one model, the CLI's own `default` entry, so detection
+//!   lists it and the session starts and takes messages.
 //! - Otherwise it starts that grandchild, writes `<own pid> <grandchild pid>`
 //!   to the file named by `ERSA_STAND_IN_PIDS`, and reads its input until
 //!   the input closes, which is how Core tells the CLI to stop. Its
@@ -59,8 +60,8 @@ fn main() {
 }
 
 /// Reads the host's lines until `initialize`, and answers it with success
-/// (PROTO-CLAUDE-CODE-STREAM, the handshake); what follows is read and
-/// ignored by the caller.
+/// and the CLI's `default` model entry (PROTO-CLAUDE-CODE-STREAM, the
+/// handshake); what follows is read and ignored by the caller.
 fn answer_initialize() {
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
@@ -74,7 +75,14 @@ fn answer_initialize() {
                 "response": {
                     "subtype": "success",
                     "request_id": message["request_id"],
-                    "response": {},
+                    "response": {
+                        "models": [{
+                            "value": "default",
+                            "displayName": "Default (recommended)",
+                            "resolvedModel": "stand-in-model",
+                            "supportedEffortLevels": ["low", "high"],
+                        }],
+                    },
                 },
             });
             let mut out = std::io::stdout().lock();

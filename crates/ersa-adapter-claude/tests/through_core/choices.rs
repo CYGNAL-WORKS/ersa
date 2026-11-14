@@ -7,8 +7,11 @@ use serde_json::json;
 
 use crate::support::{start_with_adapters, tempdir};
 
-/// The choices are the adapter's knowledge, so they are listed even while
-/// the CLI is missing from the host.
+/// The efforts and permission modes are the adapter's knowledge, listed
+/// even while the CLI is missing from the host; the models are the CLI's
+/// own, so a missing CLI lists none (PROTO-CORE-API-R72). No effort is
+/// marked, as the CLI marks none.
+// verifies: PROTO-CORE-API-R72
 #[tokio::test(flavor = "multi_thread")]
 async fn backend_list_offers_claude_codes_choices_with_their_defaults() {
     let claude: Arc<dyn Adapter> = Arc::new(ersa_adapter_claude::ClaudeAdapter::new());
@@ -20,6 +23,8 @@ async fn backend_list_offers_claude_codes_choices_with_their_defaults() {
         .await;
     let claude = &infos[0];
     assert_eq!(claude["label"], json!("Claude Code"));
+    assert_eq!(claude["status"], json!("missing"));
+    assert_eq!(claude["models"], json!([]));
     let offered = |list: &str| -> Vec<(String, bool)> {
         claude[list]
             .as_array()
@@ -39,12 +44,8 @@ async fn backend_list_offers_claude_codes_choices_with_their_defaults() {
             .collect()
     };
     assert_eq!(
-        offered("models"),
-        with_default(&["fable", "opus", "sonnet", "haiku"], "opus")
-    );
-    assert_eq!(
         offered("efforts"),
-        with_default(&["low", "medium", "high", "xhigh", "max"], "medium")
+        with_default(&["low", "medium", "high", "xhigh", "max"], "")
     );
     assert_eq!(
         offered("permission_modes"),
