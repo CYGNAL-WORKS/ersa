@@ -40,14 +40,14 @@ async fn reserved_methods_answer_invalid_state_naming_their_milestone() {
     suite::reserved_methods_answer_invalid_state_naming_their_milestone(Target::Core).await;
 }
 
-// verifies: PROTO-CORE-API-R10
+/// `session.resume` is built: an unknown session is `not_found`, as for
+/// any other method naming one.
 #[tokio::test(flavor = "multi_thread")]
-async fn session_resume_answers_invalid_state_naming_m1() {
+async fn session_resume_of_an_unknown_session_is_not_found() {
     let core = start().await;
     let mut client = core.client().await;
     let error = client.error("session.resume", json!({ "id": "s-1" })).await;
-    assert_eq!(kind(&error), "invalid_state");
-    assert!(error["message"].as_str().unwrap().contains("M1"));
+    assert_eq!(kind(&error), "not_found");
 }
 
 // verifies: PROTO-CORE-API-R06

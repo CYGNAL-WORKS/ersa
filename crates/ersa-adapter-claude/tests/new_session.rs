@@ -28,12 +28,12 @@ fn adapter() -> ClaudeAdapter {
         .with_stop_grace(Duration::from_millis(200))
 }
 
-fn config(backend_session_id: Option<&str>, extra: Value) -> SessionConfig {
+fn config(backend_session_id: Option<&str>, resume: Option<&str>) -> SessionConfig {
     SessionConfig {
         cwd: CWD.into(),
         permission_mode: "default".into(),
         backend_session_id: backend_session_id.map(String::from),
-        extra,
+        resume: resume.map(String::from),
         ..SessionConfig::default()
     }
 }
@@ -89,7 +89,7 @@ async fn a_new_session_starts_under_the_id_core_chose() {
     let session = adapter()
         .start(
             Arc::new(transport.clone()),
-            config(Some(&id), Value::Null),
+            config(Some(&id), None),
             Arc::new(RecordingSink::new()),
         )
         .await
@@ -132,34 +132,30 @@ fn every_new_session_gets_a_fresh_id_the_cli_takes() {
     assert!(is_session_id(&b), "{b}");
     assert_ne!(a, b);
     // No id chosen, no flag: the CLI names the session itself.
-    assert!(
-        session_id_args(&config(None, Value::Null))
-            .unwrap()
-            .is_empty()
-    );
+    assert!(session_id_args(&config(None, None)).unwrap().is_empty());
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R35
 #[tokio::test]
 async fn a_chosen_id_never_goes_with_resume_or_as_anything_but_an_id() {
     let id = recorded_meta()["session_id"].as_str().unwrap().to_string();
-    let resume = json!({ "resume": "d34f0c1b-64ee-437e-a4e3-3487df29a506" });
-    for (chosen, extra) in [
+    let resume = Some("d34f0c1b-64ee-437e-a4e3-3487df29a506");
+    for (chosen, resume) in [
         (id.as_str(), resume),
-        ("--dangerously-skip-permissions", Value::Null),
-        ("abc", Value::Null),
+        ("--dangerously-skip-permissions", None),
+        ("abc", None),
     ] {
         let transport = stub();
         let result = adapter()
             .start(
                 Arc::new(transport.clone()),
-                config(Some(chosen), extra.clone()),
+                config(Some(chosen), resume),
                 Arc::new(RecordingSink::new()),
             )
             .await;
         assert!(
             matches!(result, Err(AdapterError::Protocol(_))),
-            "{chosen:?} with {extra} was accepted"
+            "{chosen:?} with resume {resume:?} was accepted"
         );
         assert!(transport.spawned().is_empty(), "{chosen:?} spawned the CLI");
     }
@@ -204,7 +200,7 @@ async fn a_session_is_renamed_before_its_first_message() {
     let session = adapter()
         .start(
             Arc::new(transport.clone()),
-            config(Some(&id), Value::Null),
+            config(Some(&id), None),
             sink.clone(),
         )
         .await
