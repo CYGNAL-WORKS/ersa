@@ -43,6 +43,11 @@ impl WaitingCount {
     /// A count for a CLI process started at `since`, before any of its
     /// record is read.
     pub(crate) fn new(since: OffsetDateTime) -> Self {
+        // Cut to the millisecond, as the CLI stamps its entries, so an entry
+        // written in the process's first millisecond still counts.
+        let since = since
+            .replace_nanosecond(since.nanosecond() / 1_000_000 * 1_000_000)
+            .unwrap_or(since);
         WaitingCount {
             since,
             read_to: 0,
@@ -215,6 +220,20 @@ mod tests {
         // One started between the first message's pair and the waiting
         // message counts the waiting message alone.
         assert_eq!(count(&record, "2026-11-14T01:04:35.000Z"), 1);
+    }
+
+    // verifies: PROTO-CLAUDE-CODE-STREAM-R46
+    #[test]
+    fn an_entry_in_the_millisecond_the_process_started_counts() {
+        let record = up_to(&record_22(), MID_TURN_ENQUEUE);
+        // Started part way through the millisecond the `enqueue` is stamped
+        // with: the CLI stamps to the millisecond, so it is this process's.
+        let started = at("2026-11-14T01:04:38.253700Z");
+        let mut waiting = WaitingCount::new(started);
+        assert_eq!(
+            waiting.read_from(Cursor::new(record.as_bytes())).unwrap(),
+            1
+        );
     }
 
     // verifies: PROTO-CLAUDE-CODE-STREAM-R46
