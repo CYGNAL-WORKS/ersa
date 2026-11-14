@@ -21,4 +21,5 @@ mod claude;
 mod detection;
 mod naming;
 mod replay;
+mod resume;
 mod session;

@@ -11,17 +11,17 @@ use ersa_adapter::{
 };
 use ersa_protocol::core_api::{
     AnswerQuestionParams, ArrangeParams, Attachment, AttachmentKind, Choice,
-    DecidePermissionParams, Empty, IdParams, InspectParams, Inspected, Project, RawDirection,
-    RawLogEntry, RawLogParams, Session, SessionCreateParams, SessionSendParams, SessionSendResult,
-    SetArchivedParams, SetModeParams, SetTitleParams, SubscribeParams, SubscribeResult, Workspace,
-    WorkspaceCreateParams, WorkspaceKind, WorkspaceState,
+    DecidePermissionParams, Empty, ErrorReason, IdParams, InspectParams, Inspected, Project,
+    RawDirection, RawLogEntry, RawLogParams, Session, SessionCreateParams, SessionSendParams,
+    SessionSendResult, SetArchivedParams, SetModeParams, SetTitleParams, SubscribeParams,
+    SubscribeResult, Workspace, WorkspaceCreateParams, WorkspaceKind, WorkspaceState,
 };
 use serde_json::Value;
 
 use super::{ApiError, Peer, handlers};
 use crate::attachments::{self, InspectError};
 use crate::persistence::{self, LOCAL_HOST_ID, SessionRow};
-use crate::sessions::Forkable;
+use crate::sessions::{Forkable, Resumption};
 use crate::state::Core;
 use crate::workspace;
 
@@ -50,17 +50,23 @@ struct Starting {
 
 /// The workspace `id`, which must be `ready`, and its project.
 async fn ready_workspace(core: &Core, id: &str) -> Result<(Workspace, Project), ApiError> {
-    let workspace = core
-        .store
-        .workspace(id.to_string())
-        .await?
-        .ok_or_else(|| ApiError::not_found(format!("no workspace {id}")))?;
+    let (workspace, project) = workspace_and_project(core, id).await?;
     if workspace.state != WorkspaceState::Ready {
         return Err(ApiError::invalid_state(format!(
             "workspace {} is not ready",
             workspace.id
         )));
     }
+    Ok((workspace, project))
+}
+
+/// The workspace `id` and its project.
+async fn workspace_and_project(core: &Core, id: &str) -> Result<(Workspace, Project), ApiError> {
+    let workspace = core
+        .store
+        .workspace(id.to_string())
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no workspace {id}")))?;
     let project = core
         .store
         .project(workspace.project_id.clone())
@@ -175,6 +181,7 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         project_path: project.path.clone(),
         backend_session_id,
         fork_of: None,
+        resume: None,
         extra: Value::Null,
     };
     Ok(core
@@ -260,6 +267,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
             original: backend_id,
             name,
         }),
+        resume: None,
         extra: Value::Null,
     };
     let created = core
@@ -340,25 +348,42 @@ fn check_choice(field: &str, value: &Option<String>, offered: &[Choice]) -> Resu
 
 pub(super) async fn start(core: &Core, params: IdParams) -> Result<Session, ApiError> {
     find(core, &params.id).await?;
-    if core.sessions.is_live(&params.id)? {
+    if core.sessions.is_running(&params.id).await? {
         return Err(ApiError::invalid_state(format!(
             "session {} is already running",
             params.id
         )));
     }
-    Err(ApiError::invalid_state(
-        "starting a stopped session again is resuming it, which is milestone M1",
-    ))
+    Err(
+        ApiError::invalid_state("the session is not running; starting it again is session.resume")
+            .with_reason(ErrorReason::SessionNotRunning),
+    )
 }
 
-/// Restarting a session is milestone M1, and until then it is answered like
-/// a reserved method, for an unknown id too. Core clears an archived
-/// session's mark only once it accepts a resume, so a refused resume leaves
-/// the session archived, as it was.
-pub(super) async fn resume(_core: &Core, _params: IdParams) -> Result<Session, ApiError> {
-    Err(ApiError::invalid_state(
-        "session.resume is milestone M1 and not implemented yet",
-    ))
+/// `session.resume` (FLOW-RESUME-SESSION-R01). Core clears an archived
+/// session's mark only once it accepts the resume, so a refused resume
+/// leaves the session archived, as it was (PROTO-CORE-API-R43).
+pub(super) async fn resume(core: &Core, params: IdParams) -> Result<Session, ApiError> {
+    let how = resumption(core, &params.id).await?;
+    Ok(core.sessions.resume(&params.id, how).await?)
+}
+
+/// What starting session `id`'s backend again takes, looked up as for a
+/// new session: the host's transport, the backend's version, and the
+/// project's trust as it is now.
+async fn resumption(core: &Core, id: &str) -> Result<Resumption, ApiError> {
+    let row = core.sessions.row(id)?;
+    let (_, project) = workspace_and_project(core, &row.workspace_id).await?;
+    let Starting {
+        transport,
+        backend_version,
+    } = starting(core, &project, &row.backend).await?;
+    Ok(Resumption {
+        transport,
+        backend_version,
+        project_trusted: project.trusted,
+        project_path: project.path,
+    })
 }
 
 /// `session.set_archived`: archiving stops a live session first, as
@@ -405,11 +430,22 @@ pub(super) async fn send(
         well_formed(attachment)
             .map_err(|e| ApiError::invalid_params(format!("attachments[{index}]: {e}")))?;
     }
+    // Looked up only for a session that is not running, which the send
+    // resumes first (FLOW-RESUME-SESSION-R02).
+    let resumption = if core.sessions.is_running(&params.id).await? {
+        None
+    } else {
+        Some(resumption(core, &params.id).await?)
+    };
     let turn = core
         .sessions
-        .send(&params.id, params.text, params.attachments, || {
-            peer.open_lane()
-        })
+        .send(
+            &params.id,
+            params.text,
+            params.attachments,
+            || peer.open_lane(),
+            resumption,
+        )
         .await?;
     Ok(SessionSendResult { turn })
 }

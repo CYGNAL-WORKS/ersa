@@ -66,6 +66,10 @@ pub enum LifecycleFact {
     /// A fork's backend is ready for its first message. It has no turn to
     /// report one, as the CLI reports a session only once a turn opens.
     ForkReady,
+    /// A stopped session's backend, started again, is ready for its next
+    /// message, which the backend reports no turn before
+    /// (FLOW-RESUME-SESSION-R01).
+    Resumed,
     /// The backend process ended.
     ProcessExited {
         /// The exit code; absent when there was none (killed) or the
@@ -105,7 +109,9 @@ impl LifecycleFact {
     pub fn ends(&self) -> bool {
         !matches!(
             self,
-            LifecycleFact::ProcessStarted { .. } | LifecycleFact::ForkReady
+            LifecycleFact::ProcessStarted { .. }
+                | LifecycleFact::ForkReady
+                | LifecycleFact::Resumed
         )
     }
 }

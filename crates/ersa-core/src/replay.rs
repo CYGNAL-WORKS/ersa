@@ -226,6 +226,7 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         // A recording names its session itself, as it did when recorded.
         backend_session_id: None,
         fork_of: None,
+        resume: None,
         extra: Value::Null,
     };
     core.sessions
