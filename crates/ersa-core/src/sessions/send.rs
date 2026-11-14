@@ -137,13 +137,16 @@ fn being_archived() -> SessionError {
 /// paces it, except while another send on the session is under way, which
 /// reports for the session itself. Once the send has its slot its own
 /// progress takes over. Dropped before the send's answer goes out.
+///
+/// Its reports are never forgotten as a send's own progress is at its end:
+/// the session's latest report may by then be another send's, and a
+/// `checking` that arrives after an answer changes nothing, since the
+/// Interface shows nothing for `checking` and the Shell counts a report
+/// only toward a send still waiting on that session.
 pub struct Waiting {
     handle: Arc<Handle>,
-    tiles: Arc<TileHub>,
     /// Raised, under the `sending` lock, when the reports must stop.
     done: Arc<AtomicBool>,
-    /// Risen once the send has its slot; its own progress reported since.
-    admitted: watch::Receiver<bool>,
     ticker: AbortHandle,
 }
 
@@ -151,18 +154,8 @@ impl Drop for Waiting {
     fn drop(&mut self) {
         self.ticker.abort();
         // Under the lock the reports are published under, so none follows.
-        let sending = lock(&self.handle.sending);
+        let _sending = lock(&self.handle.sending);
         self.done.store(true, Ordering::SeqCst);
-        // A send answered before it had its slot may leave a report not
-        // yet delivered, which would arrive after the answer: forget it. Any
-        // other send waiting its turn on the session then reports again at
-        // once, in case the report forgotten was its own. A send that had its
-        // slot was reported by its own progress, whose end forgot its line,
-        // and the latest line now belongs to whichever send comes next.
-        if sending.is_none() && !*self.admitted.borrow() {
-            self.tiles.forget_one(&self.handle.id, Latest::SendProgress);
-            self.handle.send_ended.notify_waiters();
-        }
     }
 }
 
@@ -178,14 +171,12 @@ impl SessionManager {
             Arc::downgrade(&handle),
             Arc::clone(&self.tiles),
             Arc::clone(&done),
-            admitted.clone(),
+            admitted,
         ))
         .abort_handle();
         Some(Waiting {
             handle,
-            tiles: Arc::clone(&self.tiles),
             done,
-            admitted,
             ticker,
         })
     }
@@ -565,9 +556,9 @@ async fn report_waiting(
             }
         };
         // While another send reports for the session, this one waits for it
-        // to end. Either way, a send ending (or a report forgotten, see
-        // [`Waiting`]) has this one report at once, so the session's reports
-        // keep their pace.
+        // to end. Either way, a send ending, which forgets its last report,
+        // has this one report at once, so the session's reports keep their
+        // pace.
         let ended_first = if other_send {
             send_ended.await;
             true

@@ -28,13 +28,7 @@ async fn reply_to(core: &mut BufReader<DuplexStream>, request: &str, result: Val
     let id = serde_json::from_str::<Value>(request).expect("json")["id"].clone();
     let reply = json!({ "jsonrpc": "2.0", "id": id, "result": result });
     core.get_mut()
-        .write_all(
-            format!(
-                "{reply}
-"
-            )
-            .as_bytes(),
-        )
+        .write_all(format!("{reply}\n").as_bytes())
         .await
         .expect("reply");
 }
