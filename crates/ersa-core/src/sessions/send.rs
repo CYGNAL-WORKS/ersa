@@ -145,14 +145,6 @@ impl SessionManager {
     ) -> Result<Option<u32>, SessionError> {
         let handle = self.handle(id)?;
         self.refuse_if_deleting(&handle)?;
-        // An archived session is read-only until it is unarchived, or a resume is accepted
-        // (FLOW-ARCHIVE-DELETE-SESSION-R02). Said before anything else, so
-        // the refusal names the reason rather than that it is not running.
-        if lock(&handle.row).archived {
-            return Err(SessionError::InvalidState(
-                "the session is archived; unarchive or resume it to send it a message".into(),
-            ));
-        }
         // Before the session is found not running: between an archive's stop
         // and its mark, the refusal is this one, and nothing resumes it
         // (PROTO-CORE-API-R85). Checked again under the `sending` lock below.
@@ -160,9 +152,6 @@ impl SessionManager {
             return Err(being_archived());
         }
         let resuming = resume::current_run(&handle).await?.is_none();
-        if resuming && resumption.is_none() {
-            return Err(handle.not_running());
-        }
         let (cancel, mut canceled) = watch::channel(false);
         let changed = Arc::new(Notify::new());
         {
@@ -184,13 +173,19 @@ impl SessionManager {
             if handle.archiving.load(Ordering::SeqCst) > 0 {
                 return Err(being_archived());
             }
-            // An archive may have finished while this send waited for a run
-            // winding down; a resume would unarchive it, so the mark is read
-            // again here (FLOW-ARCHIVE-DELETE-SESSION-R02).
+            // An archived session is read-only until it is unarchived, or a
+            // resume is accepted (FLOW-ARCHIVE-DELETE-SESSION-R02). Read
+            // here, under the lock an archive checks `sending` through, and
+            // before the session is found not running, so the refusal names
+            // the reason, and an archive that finished while this send waited
+            // for a run winding down is never undone by the resume below.
             if lock(&handle.row).archived {
                 return Err(SessionError::InvalidState(
                     "the session is archived; unarchive or resume it to send it a message".into(),
                 ));
+            }
+            if resuming && resumption.is_none() {
+                return Err(handle.not_running());
             }
             if sending.is_some() {
                 return Err(SessionError::InvalidState(
