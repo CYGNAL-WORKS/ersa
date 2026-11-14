@@ -11,11 +11,14 @@ use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use ersa_adapter::RecordedSettings;
+
+use super::settings::settings;
 use super::{is_session_id, project_dir};
 use crate::wire::{ContentBlock, MessageContent, RecordEntry, RecordUser};
 
 /// How much of each end of a record is read.
-const CHUNK: u64 = 64 * 1024;
+pub(super) const CHUNK: u64 = 64 * 1024;
 
 /// The longest title, in characters, its ellipsis included; a prompt can be
 /// pages long. It is also the longest a session can be renamed to, which the
@@ -47,6 +50,9 @@ pub struct SessionSummary {
     /// When the session began: the `timestamp` of the record's first entry
     /// that has one, as the record gives it.
     pub created_at: Option<String>,
+    /// The model, effort and permission mode the tail holds; a value only
+    /// the rest of the record holds is none (PROTO-CLAUDE-CODE-STREAM-R59).
+    pub settings: RecordedSettings,
 }
 
 /// The sessions the CLI recorded for working directory `cwd`. A directory
@@ -89,6 +95,7 @@ pub fn list_sessions(claude_home: &Path, cwd: &str) -> io::Result<SessionList> {
                 session_id: id.to_string(),
                 title: ends.title(),
                 modified: metadata.modified().ok(),
+                settings: settings(&ends.tail),
                 created_at: ends.created_at,
             }),
             // The CLI's retention deleted it since the directory was read.
@@ -128,6 +135,7 @@ pub fn summarize_session(
         session_id: session_id.to_string(),
         title: ends.title(),
         modified,
+        settings: settings(&ends.tail),
         created_at: ends.created_at,
     }))
 }
@@ -183,7 +191,7 @@ fn first_timestamp(head: &[u8]) -> Option<String> {
 
 /// The entries of the complete lines in `bytes`, skipping the first segment
 /// (cut, or the byte before a line) and the last (possibly cut) as asked.
-fn entries(bytes: &[u8], skip_first: bool, skip_last: bool) -> Vec<RecordEntry> {
+pub(super) fn entries(bytes: &[u8], skip_first: bool, skip_last: bool) -> Vec<RecordEntry> {
     let mut lines: Vec<&[u8]> = bytes.split(|b| *b == b'\n').collect();
     if skip_last {
         lines.pop();
