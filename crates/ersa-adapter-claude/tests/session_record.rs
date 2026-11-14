@@ -129,7 +129,7 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
                 .collect();
             let value: Value = serde_json::from_str(&line.line).unwrap();
             let is_message = matches!(value["type"].as_str(), Some("user" | "assistant"));
-            if line.dir == Direction::Backend && is_message {
+            if line.dir == Direction::Backend && is_message && !from_a_subagent(&value) {
                 live.push((value["uuid"].as_str().unwrap().to_string(), events));
             }
         }
@@ -947,6 +947,13 @@ fn a_session_with_no_record_has_no_history_and_a_bad_id_is_refused() {
     assert_eq!(refused.kind(), std::io::ErrorKind::InvalidInput);
 }
 
+/// Whether a stream line is a subagent's own message. Its entries are a
+/// sidechain, kept outside the conversation's record (R20), so the record has
+/// no match for it.
+fn from_a_subagent(line: &Value) -> bool {
+    line["parent_tool_use_id"].is_string()
+}
+
 /// The merge key against the real CLI: every message event the projector
 /// tags on a recorded stream carries a `uuid` the session record of the same
 /// run gives a message with the same events, so Core can match them
@@ -965,7 +972,12 @@ fn live_message_ids_are_the_record_uuids_of_the_same_messages() {
         let live: BTreeSet<String> = stream
             .raw_log()
             .iter()
-            .flat_map(|line| projector.project(line))
+            .flat_map(|line| {
+                let projected = projector.project(line);
+                let subagent = serde_json::from_str::<Value>(&line.line)
+                    .is_ok_and(|value| from_a_subagent(&value));
+                if subagent { Vec::new() } else { projected }
+            })
             .filter(|p| {
                 matches!(
                     p.event,

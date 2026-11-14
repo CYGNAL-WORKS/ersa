@@ -1314,3 +1314,103 @@ fn a_question_without_questions_still_reaches_the_user_with_an_error() {
     );
     assert!(the_question(&events).questions.is_empty());
 }
+
+/// The `tool.requested` events a fixture's live stream projects, by tool name.
+fn tool_requests(fixture_name: &str) -> Vec<ToolRequested> {
+    events(&fixture(fixture_name).raw_log())
+        .into_iter()
+        .filter_map(|event| match event {
+            Event::ToolRequested(request) => Some(request),
+            _ => None,
+        })
+        .collect()
+}
+
+fn the_request<'a>(requests: &'a [ToolRequested], name: &str) -> &'a ToolRequested {
+    let mut named = requests.iter().filter(|r| r.name == name);
+    let request = named.next().unwrap_or_else(|| panic!("no {name} call"));
+    assert!(named.next().is_none(), "more than one {name} call");
+    request
+}
+
+// Recorded on 2.1.316: each tool in Tool targets and edits that the CLI
+// offers, and the tools its deferred ones load through.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R48
+// verifies: PROTO-AGENT-EVENTS-R20
+// verifies: PROTO-AGENT-EVENTS-R21
+#[test]
+fn recorded_tool_calls_carry_the_target_and_edits_the_table_gives() {
+    const SCRATCH: &str = r"C:/Users/user\AppData\Local\Temp";
+    let edit = |path: &str, old: Option<&str>, new: &str| FileEdit {
+        path: path.into(),
+        old_text: old.map(Into::into),
+        new_text: new.into(),
+    };
+
+    let requests = tool_requests("2.1.316/28-tool-edit");
+    let notes = format!(r"{SCRATCH}\ersa-rec-tEzd1M\NOTES.md");
+    let call = the_request(&requests, "Edit");
+    assert_eq!(call.target.as_deref(), Some(notes.as_str()));
+    assert_eq!(
+        call.edits,
+        Some(vec![edit(
+            &notes,
+            Some("Notes for the scratch repository."),
+            "Notes, edited."
+        )])
+    );
+
+    // A whole file written: no replaced text.
+    let requests = tool_requests("2.1.316/29-tool-write");
+    let hello = format!(r"{SCRATCH}\ersa-rec-QII59F\hello.txt");
+    let call = the_request(&requests, "Write");
+    assert_eq!(call.target.as_deref(), Some(hello.as_str()));
+    assert_eq!(call.edits, Some(vec![edit(&hello, None, "Hello\nWorld\n")]));
+
+    // NotebookEdit edits cells, not text: a target and no edits. ToolSearch,
+    // which loads a deferred tool, is not in the table: neither.
+    let requests = tool_requests("2.1.316/30-tool-notebook-edit");
+    let notebook = format!(r"{SCRATCH}\ersa-rec-9CpFGX\nb.ipynb");
+    let call = the_request(&requests, "NotebookEdit");
+    assert_eq!(call.target.as_deref(), Some(notebook.as_str()));
+    assert_eq!(call.edits, None);
+    let call = the_request(&requests, "Read");
+    assert_eq!(
+        (call.target.as_deref(), &call.edits),
+        (Some(notebook.as_str()), &None)
+    );
+    let call = the_request(&requests, "ToolSearch");
+    assert_eq!((&call.target, &call.edits), (&None, &None));
+
+    let requests = tool_requests("2.1.316/00-session-tools");
+    let call = the_request(&requests, "Read");
+    let readme = format!(r"{SCRATCH}\ersa-rec-m4YrBk\README.md");
+    assert_eq!(
+        (call.target.as_deref(), &call.edits),
+        (Some(readme.as_str()), &None)
+    );
+
+    for (fixture_name, tool, target) in [
+        ("2.1.316/31-tool-grep", "Grep", "scratch"),
+        ("2.1.316/32-tool-glob", "Glob", "*.md"),
+        (
+            "2.1.316/33-tool-web-search",
+            "WebSearch",
+            "Tauri 2 release notes",
+        ),
+        (
+            "2.1.302/05-bash-write-default",
+            "Bash",
+            "echo probe > probe.txt",
+        ),
+        // The CLI lists `Task` in `system/init` but names the call `Agent`.
+        ("2.1.316/34-tool-agent", "Agent", "Count files"),
+        // The subagent's own call, inside the Agent call.
+        ("2.1.316/34-tool-agent", "Glob", "*"),
+    ] {
+        let requests = tool_requests(fixture_name);
+        let call = the_request(&requests, tool);
+        assert_eq!(call.target.as_deref(), Some(target), "{fixture_name}");
+        assert_eq!(call.edits, None, "{fixture_name}");
+    }
+}
