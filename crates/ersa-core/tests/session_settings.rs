@@ -340,3 +340,54 @@ async fn a_fork_starts_with_the_values_its_original_lists() {
         three("model-a", "low", "ask")
     );
 }
+
+/// Stops `core` and takes away the times of its sessions' requests, as a
+/// Core from before it kept them would have left the store.
+async fn without_request_times(core: TestCore) -> tempfile::TempDir {
+    let db = core.data_dir().join("ersa.db");
+    let TestCore { dir, task, .. } = core;
+    task.abort();
+    let _ = task.await;
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    conn.execute(
+        "UPDATE sessions SET model_at = NULL, effort_at = NULL, permission_mode_at = NULL",
+        [],
+    )
+    .unwrap();
+    dir
+}
+
+// verifies: PROTO-CORE-API-R97
+#[tokio::test(flavor = "multi_thread")]
+async fn a_value_stored_without_its_time_yields_to_the_records_from_any_turn() {
+    let backend = Backend::default();
+    let (core, _) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let before = OffsetDateTime::now_utc() - time::Duration::hours(1);
+    let id = started(
+        &core,
+        &mut client,
+        json!({ "model": "model-b", "effort": "low", "permission_mode": "auto" }),
+    )
+    .await;
+    drop(client);
+
+    // The record holds none: the stored values stand.
+    let dir = without_request_times(core).await;
+    let (core, _) = start(&backend, dir).await;
+    let mut client = core.client().await;
+    assert_eq!(
+        values(&mut client, &id).await,
+        three("model-b", "low", "auto")
+    );
+
+    // The record holds values from a turn that began before the stored
+    // request was made: with no time to compare, the record's stand.
+    backend.record_says("model-a", "high", "ask", Some(before));
+    drop(client);
+    let (_core, mut client) = restart(core, &backend).await;
+    assert_eq!(
+        values(&mut client, &id).await,
+        three("model-a", "high", "ask")
+    );
+}
