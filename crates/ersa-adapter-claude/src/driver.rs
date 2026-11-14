@@ -37,7 +37,7 @@ use crate::projector::ClaudeProjector;
 use crate::questions::{self, QUESTION_TOOL};
 use crate::record::{self, LiveCheck};
 use crate::suggestions;
-use crate::waiting::WaitingReader;
+use crate::waiting::{Expect, WaitingReader};
 use crate::wire::{
     HostControlResponse, HostMessage, HostRequest, HostResponse, InitializeRequest, RenameSource,
     WorkspaceTrust,
@@ -1016,13 +1016,15 @@ impl Shared {
             match moment {
                 Some(Moment::Started) => {
                     reader.turn_started();
-                    self.report_waiting(false);
+                    self.report_waiting(Expect::Nothing);
                 }
-                Some(Moment::ModelCall) if reader.holds_some() => self.report_waiting(false),
+                Some(Moment::ModelCall) if reader.holds_some() => {
+                    self.report_waiting(Expect::Fewer)
+                }
                 Some(Moment::Ended) => {
                     reader.turn_ended();
                     if reader.holds_some() {
-                        self.report_waiting(false);
+                        self.report_waiting(Expect::Nothing);
                     }
                 }
                 _ => {}
@@ -1066,7 +1068,7 @@ impl Shared {
         if let Some(reader) = &self.waiting {
             reader.wrote_message();
             if busy {
-                self.report_waiting(true);
+                self.report_waiting(Expect::Enqueue);
             }
         }
         Ok(())
@@ -1074,16 +1076,16 @@ impl Shared {
 
     /// Reads the count of waiting messages in the background and tells the
     /// sink if it changed, unless the session is stopping by then.
-    fn report_waiting(self: &Arc<Self>, after_handover: bool) {
+    fn report_waiting(self: &Arc<Self>, expect: Expect) {
         let Some(reader) = &self.waiting else {
             return;
         };
         let shared = Arc::clone(self);
-        tokio::spawn(Arc::clone(reader).report(
-            Arc::clone(&self.sink),
-            after_handover,
-            move || !shared.stopping.load(Ordering::SeqCst),
-        ));
+        tokio::spawn(
+            Arc::clone(reader).report(Arc::clone(&self.sink), expect, move || {
+                !shared.stopping.load(Ordering::SeqCst)
+            }),
+        );
     }
 }
 
