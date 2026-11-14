@@ -5,14 +5,14 @@
 
 import { t } from "../catalog";
 import { type BridgeError, type CoreClient, describeError } from "../core/client";
-import type { Attachment, Session, SessionCreateParams, Workspace } from "../protocol/core-api.gen";
+import type { Attachment, BackendInfo, Session, SessionCreateParams, Workspace } from "../protocol/core-api.gen";
 import { type Sending, sendFailure } from "./follow";
-import type { BackendChoices, SessionValues, WorkspaceKind } from "./controls";
+import type { SessionValues, WorkspaceKind } from "./controls";
 
 /** What the new-session screen offers on a host: its backends, and the values each project last started with. */
 export interface Choices {
   /** None when `backend.list` failed. */
-  backends: BackendChoices[];
+  backends: BackendInfo[];
   lastUsed: Record<string, SessionValues>;
 }
 

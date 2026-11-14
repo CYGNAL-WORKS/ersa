@@ -19,6 +19,7 @@ const session = (archived: boolean): Session => ({
   created_at: "2026-11-01T09:00:00Z",
   archived,
   pinned: true,
+  unseen: false,
   section_id: "sec",
   tile: { state: "ended", pending: [] },
 });

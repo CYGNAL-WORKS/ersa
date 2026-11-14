@@ -111,7 +111,7 @@ async fn open_link(
 async fn round_trips(link: CoreLink, location: CoreLocation) {
     // The handshake: Core's `core.hello` result, as the Interface receives it.
     let hello = link.hello();
-    assert_eq!(hello["api_version"], json!(4));
+    assert_eq!(hello["api_version"], json!(5));
     assert!(hello["core_version"].is_string(), "{hello}");
     assert!(hello["host"]["id"].is_string(), "{hello}");
 

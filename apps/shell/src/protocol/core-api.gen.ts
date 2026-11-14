@@ -3,7 +3,7 @@
 import type * as AgentEvents from "./agent-events.gen";
 
 /** The Core API version these types describe (the schema's `x-api-version`). */
-export const CORE_API_VERSION = 4;
+export const CORE_API_VERSION = 5;
 
 /**
  * Any line on the socket.
@@ -583,6 +583,10 @@ export interface SessionArrangeParams {
    * Puts the session in this section, or in none when null; left as it was when absent. A section that does not exist answers not_found.
    */
   section_id?: Id | null;
+  /**
+   * Marks the session unseen or seen; left as it was when absent.
+   */
+  unseen?: boolean;
 }
 /**
  * The user's Delete: stops the session, deletes its isolated workspace's folder and branch when no other session uses the workspace and the branch holds no commit only it holds, deletes its record from its backend, and removes it. While it runs, requests that would change the session or its workspace answer invalid_state with detail busy.
@@ -760,6 +764,23 @@ export interface ErrorData {
    * With attachment_refused: the place in session.send's attachments of the attachment refused.
    */
   index?: number;
+  /**
+   * On invalid_state: names a refusal the user meets, so the Interface can say it in the string catalog's words.
+   */
+  reason?:
+    | "session_busy"
+    | "session_deleting"
+    | "session_archived"
+    | "session_not_running"
+    | "send_in_progress"
+    | "send_stopped"
+    | "folder_gone"
+    | "backend_unnamed"
+    | "record_gone"
+    | "open_elsewhere"
+    | "open_unknown"
+    | "no_finished_reply"
+    | "backend_cannot_fork";
 }
 export interface SessionEventNotification {
   session_id: Id;
@@ -784,6 +805,10 @@ export interface SessionTileNotification {
    * The session's last_activity_at as session.list has it: when its latest turn ended; absent until one has. Every tile carries it, and a turn's end sends a tile even when the tile itself is unchanged.
    */
   last_activity_at?: string;
+  /**
+   * The session's current title, as session.list has it; absent while the session has none.
+   */
+  title?: string;
 }
 /**
  * What the rail renders for a session; Core keeps it current from events. Usage fields are absent until known.
@@ -797,6 +822,10 @@ export interface Tile {
     kind: "permission" | "question";
     request_id: string;
   }[];
+  /**
+   * How many messages the backend holds behind the running turn; absent when none, or when the session is not live.
+   */
+  waiting?: number;
 }
 export interface HostStatusNotification {
   host_id: Id;
@@ -849,7 +878,7 @@ export interface BackendInfo {
   /**
    * The models a session can start with.
    */
-  models: Choice[];
+  models: ModelChoice[];
   /**
    * The efforts a session can start with.
    */
@@ -858,6 +887,31 @@ export interface BackendInfo {
    * The permission modes a session can start with.
    */
   permission_modes: Choice[];
+}
+/**
+ * One model a session can start with, as the backend reports it on the host.
+ */
+export interface ModelChoice {
+  /**
+   * What session.create takes and session.list reports.
+   */
+  id: string;
+  /**
+   * What the Interface shows.
+   */
+  label: string;
+  /**
+   * Whether the backend chooses this model on its own.
+   */
+  default: boolean;
+  /**
+   * The model id a session of this choice reports, so the session controls can name it.
+   */
+  resolved?: string;
+  /**
+   * Ids of the efforts this model takes, from the backend's efforts; absent when the model takes none.
+   */
+  efforts?: string[];
 }
 /**
  * One value a session can start with. The choices are the adapter's knowledge of its tested versions, not detected on the host.
@@ -952,6 +1006,10 @@ export interface WorkspaceChanges {
 }
 export interface Session {
   id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
   workspace_id: Id;
   host_id: Id;
   backend: string;
@@ -986,6 +1044,10 @@ export interface Session {
    */
   pinned: boolean;
   section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
   /**
    * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
    */
@@ -1178,6 +1240,10 @@ export interface WorkspaceChangesResult {
 }
 export interface Session1 {
   id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
   workspace_id: Id;
   host_id: Id;
   backend: string;
@@ -1212,6 +1278,10 @@ export interface Session1 {
    */
   pinned: boolean;
   section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
   /**
    * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
    */
@@ -1223,6 +1293,10 @@ export interface Session1 {
 }
 export interface Session2 {
   id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
   workspace_id: Id;
   host_id: Id;
   backend: string;
@@ -1257,6 +1331,10 @@ export interface Session2 {
    */
   pinned: boolean;
   section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
   /**
    * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
    */
@@ -1268,6 +1346,10 @@ export interface Session2 {
 }
 export interface Session3 {
   id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
   workspace_id: Id;
   host_id: Id;
   backend: string;
@@ -1302,6 +1384,10 @@ export interface Session3 {
    */
   pinned: boolean;
   section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
   /**
    * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
    */
@@ -1313,6 +1399,10 @@ export interface Session3 {
 }
 export interface Session4 {
   id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
   workspace_id: Id;
   host_id: Id;
   backend: string;
@@ -1347,6 +1437,10 @@ export interface Session4 {
    */
   pinned: boolean;
   section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
   /**
    * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
    */
@@ -1358,6 +1452,10 @@ export interface Session4 {
 }
 export interface Session5 {
   id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
   workspace_id: Id;
   host_id: Id;
   backend: string;
@@ -1392,6 +1490,10 @@ export interface Session5 {
    */
   pinned: boolean;
   section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
   /**
    * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
    */
@@ -1403,6 +1505,10 @@ export interface Session5 {
 }
 export interface Session6 {
   id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
   workspace_id: Id;
   host_id: Id;
   backend: string;
@@ -1437,6 +1543,10 @@ export interface Session6 {
    */
   pinned: boolean;
   section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
   /**
    * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
    */
@@ -1448,6 +1558,10 @@ export interface Session6 {
 }
 export interface Session7 {
   id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
   workspace_id: Id;
   host_id: Id;
   backend: string;
@@ -1482,6 +1596,10 @@ export interface Session7 {
    */
   pinned: boolean;
   section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
   /**
    * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
    */
@@ -1493,6 +1611,10 @@ export interface Session7 {
 }
 export interface Session8 {
   id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
   workspace_id: Id;
   host_id: Id;
   backend: string;
@@ -1527,6 +1649,10 @@ export interface Session8 {
    */
   pinned: boolean;
   section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
   /**
    * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
    */
@@ -1555,6 +1681,10 @@ export interface SessionSendResult {
 }
 export interface Session9 {
   id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
   workspace_id: Id;
   host_id: Id;
   backend: string;
@@ -1589,6 +1719,10 @@ export interface Session9 {
    */
   pinned: boolean;
   section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
   /**
    * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
    */
@@ -1625,6 +1759,10 @@ export interface AttachmentInspectResult {
 }
 export interface Session10 {
   id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
   workspace_id: Id;
   host_id: Id;
   backend: string;
@@ -1659,6 +1797,10 @@ export interface Session10 {
    */
   pinned: boolean;
   section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
   /**
    * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
    */
@@ -1670,6 +1812,10 @@ export interface Session10 {
 }
 export interface Session11 {
   id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
   workspace_id: Id;
   host_id: Id;
   backend: string;
@@ -1704,6 +1850,10 @@ export interface Session11 {
    */
   pinned: boolean;
   section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
   /**
    * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
    */
@@ -1715,6 +1865,10 @@ export interface Session11 {
 }
 export interface Session12 {
   id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
   workspace_id: Id;
   host_id: Id;
   backend: string;
@@ -1749,6 +1903,10 @@ export interface Session12 {
    */
   pinned: boolean;
   section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
   /**
    * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
    */
@@ -1760,6 +1918,10 @@ export interface Session12 {
 }
 export interface Session13 {
   id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
   workspace_id: Id;
   host_id: Id;
   backend: string;
@@ -1794,6 +1956,10 @@ export interface Session13 {
    */
   pinned: boolean;
   section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
   /**
    * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
    */

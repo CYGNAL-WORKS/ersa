@@ -33,6 +33,7 @@ const session = (id: string, title: string, created_at: string, more: Partial<Se
   last_activity_at: created_at,
   archived: false,
   pinned: false,
+  unseen: false,
   tile: { state: "idle", pending: [] },
   ...more,
 });
