@@ -529,3 +529,54 @@ async fn eventually_gone(pid: u32) {
     }
     panic!("process {pid} is still running");
 }
+
+// verifies: FLOW-CLOSE-AND-QUIT-R09
+#[test]
+fn the_daily_builds_window_keeps_its_web_data_in_daily() {
+    let app_data = PathBuf::from("app-data").join("Ersa");
+    let daily = startup(Build::Daily, None, Some(&app_data));
+    assert_eq!(daily.web_data, Some(app_data.join("daily")));
+    // A development build keeps the webview's default folder, whatever it
+    // attaches to.
+    for attach in [None, Some("replay"), Some("daily")] {
+        let dev = startup(Build::Development, attach, Some(&app_data));
+        assert_eq!(dev.web_data, None, "attach {attach:?}");
+    }
+}
+
+// verifies: FLOW-CLOSE-AND-QUIT-R11
+#[test]
+fn the_daily_build_without_a_data_folder_runs_no_core_and_says_why() {
+    let lost = startup(Build::Daily, None, None);
+    // No Core of its own, none attached to, and a window that says why.
+    assert_eq!(lost.attached, None);
+    let Core::Refused(why) = &lost.core else {
+        panic!("the daily build runs no Core without its folder, got {lost:?}");
+    };
+    assert!(why.starts_with("Ersa can't find the folder"), "{why}");
+    assert_eq!(lost.core.location().map(|_| ()), Err(why.clone()));
+}
+
+// verifies: FLOW-CLOSE-AND-QUIT-R12
+#[test]
+fn the_daily_build_without_a_data_folder_keeps_its_web_data_in_the_temporary_folder() {
+    let lost = startup(Build::Daily, None, None);
+    // A folder of its own there, never the webview's default (`None`),
+    // which is the development build's.
+    assert_eq!(
+        lost.web_data,
+        Some(std::env::temp_dir().join("ersa-daily-web"))
+    );
+}
+
+// verifies: FLOW-CLOSE-AND-QUIT-R10
+#[test]
+fn the_daily_and_development_windows_claim_apart() {
+    let app_data = PathBuf::from("app-data").join("Ersa");
+    let daily = startup(Build::Daily, None, Some(&app_data)).claim;
+    assert_eq!(daily, "daily-window");
+    for attach in [None, Some("replay"), Some("daily"), Some("live-1")] {
+        let dev = startup(Build::Development, attach, Some(&app_data)).claim;
+        assert_ne!(dev, daily, "attach {attach:?}");
+    }
+}
