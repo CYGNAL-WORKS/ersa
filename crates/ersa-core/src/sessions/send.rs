@@ -142,6 +142,8 @@ pub struct Waiting {
     tiles: Arc<TileHub>,
     /// Raised, under the `sending` lock, when the reports must stop.
     done: Arc<AtomicBool>,
+    /// Risen once the send has its slot; its own progress reported since.
+    admitted: watch::Receiver<bool>,
     ticker: AbortHandle,
 }
 
@@ -151,10 +153,15 @@ impl Drop for Waiting {
         // Under the lock the reports are published under, so none follows.
         let sending = lock(&self.handle.sending);
         self.done.store(true, Ordering::SeqCst);
-        // A report not yet delivered would arrive after the answer. One
-        // belonging to a send under way is that send's, and stays.
-        if sending.is_none() {
+        // A send answered before it had its slot may leave a report not
+        // yet delivered, which would arrive after the answer: forget it. Any
+        // other send waiting its turn on the session then reports again at
+        // once, in case the report forgotten was its own. A send that had its
+        // slot was reported by its own progress, whose end forgot its line,
+        // and the latest line now belongs to whichever send comes next.
+        if sending.is_none() && !*self.admitted.borrow() {
             self.tiles.forget_one(&self.handle.id, Latest::SendProgress);
+            self.handle.send_ended.notify_waiters();
         }
     }
 }
@@ -171,13 +178,14 @@ impl SessionManager {
             Arc::downgrade(&handle),
             Arc::clone(&self.tiles),
             Arc::clone(&done),
-            admitted,
+            admitted.clone(),
         ))
         .abort_handle();
         Some(Waiting {
             handle,
             tiles: Arc::clone(&self.tiles),
             done,
+            admitted,
             ticker,
         })
     }
@@ -490,19 +498,24 @@ async fn report_progress(handle: Weak<Handle>, tiles: Arc<TileHub>, changed: Arc
             let Some(sending) = sending.as_ref() else {
                 return;
             };
-            let progress = sending.progress(&handle.id);
-            if pacer.due(&progress) {
-                tiles.publish(
-                    &handle.id,
-                    Latest::SendProgress,
-                    notification_line(
-                        ersa_protocol::core_api::notification::SESSION_SEND_PROGRESS,
-                        &progress,
-                    ),
-                );
-            }
+            publish_if_due(&mut pacer, &tiles, &sending.progress(&handle.id));
         }
         pacer.wait(&changed).await;
+    }
+}
+
+/// Publishes a send's progress to every connection when `pacer` says it is
+/// due.
+fn publish_if_due(pacer: &mut Pacer, tiles: &TileHub, progress: &SendProgressParams) {
+    if pacer.due(progress) {
+        tiles.publish(
+            &progress.session_id,
+            Latest::SendProgress,
+            notification_line(
+                ersa_protocol::core_api::notification::SESSION_SEND_PROGRESS,
+                progress,
+            ),
+        );
     }
 }
 
@@ -540,33 +553,32 @@ async fn report_waiting(
             match sending.as_ref() {
                 Some(_) => true,
                 None => {
-                    let progress = SendProgressParams {
+                    let waiting = SendProgressParams {
                         session_id: handle.id.clone(),
                         phase: SendPhase::Checking,
                         copied_bytes: None,
                         total_bytes: None,
                     };
-                    if pacer.due(&progress) {
-                        tiles.publish(
-                            &handle.id,
-                            Latest::SendProgress,
-                            notification_line(
-                                ersa_protocol::core_api::notification::SESSION_SEND_PROGRESS,
-                                &progress,
-                            ),
-                        );
-                    }
+                    publish_if_due(&mut pacer, &tiles, &waiting);
                     false
                 }
             }
         };
-        if other_send {
-            // That send reports for the session; once it ends, this one
-            // reports at once, so the session's reports keep their pace.
-            pacer = Pacer::default();
+        // While another send reports for the session, this one waits for it
+        // to end. Either way, a send ending (or a report forgotten, see
+        // [`Waiting`]) has this one report at once, so the session's reports
+        // keep their pace.
+        let ended_first = if other_send {
             send_ended.await;
+            true
         } else {
-            pacer.wait(&unchanged).await;
+            tokio::select! {
+                () = pacer.wait(&unchanged) => false,
+                () = send_ended.as_mut() => true,
+            }
+        };
+        if ended_first {
+            pacer = Pacer::default();
         }
     }
 }
