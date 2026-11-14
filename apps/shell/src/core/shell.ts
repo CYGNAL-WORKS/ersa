@@ -35,6 +35,11 @@ export interface ShellControl {
   pickFiles(images: boolean): Promise<string[]>;
   /** Hears files, images and folders dragged from the file manager over the window; returns a function that stops. */
   onDragDrop(handler: (event: DragDrop) => void): () => void;
+  /**
+   * Opens a link from the agent's words in the system's default handler: a web address in the browser, an email
+   * address in the mail app. The Shell opens only `http`, `https` and `mailto` addresses (FLOW-READ-TRANSCRIPT-R03).
+   */
+  openLink(url: string): void;
 }
 
 const BUSY = new Set<string>(["starting", "running", "waiting_user"]);
