@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import type { Project } from "../protocol/core-api.gen";
+import type { BackendInfo, Choice, Project } from "../protocol/core-api.gen";
 import type { Session } from "../protocol/core-api.gen";
-import { type BackendChoices, type Choice, type SessionValues, baseFor, branchesMatching, projectOrder, recentFirst, seedScreen, sessionShown, showsBackend, startingProject, valuesFor, workspaceKinds } from "./controls";
+import { type SessionValues, baseFor, branchesMatching, projectOrder, recentFirst, seedScreen, sessionShown, showsBackend, startingProject, valuesFor, workspaceKinds } from "./controls";
 
 const project = (vcs: Project["vcs"]): Project => ({ id: "p1", host_id: "local", path: "D:\\Projects\\p", name: "p", vcs, trusted: true });
 
 const choices = (ids: string[], dflt: string): Choice[] => ids.map((id) => ({ id, label: id, default: id === dflt }));
 
-const backend = (name: string, status: BackendChoices["status"] = "available"): BackendChoices => ({
+const backend = (name: string, status: BackendInfo["status"] = "available"): BackendInfo => ({
   name,
   label: name,
   status,
