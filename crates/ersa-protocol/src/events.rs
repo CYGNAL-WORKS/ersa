@@ -416,6 +416,10 @@ pub struct FileEdit {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub old_text: Option<String>,
     pub new_text: String,
+    /// Whether the change replaces `old_text` everywhere it occurs in the
+    /// file, not once (PROTO-AGENT-EVENTS-R23). On the wire only when true.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub every_occurrence: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

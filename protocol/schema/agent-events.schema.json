@@ -255,7 +255,11 @@
           "description": "The text replaced; absent when the call writes the whole file.",
           "type": "string"
         },
-        "new_text": { "type": "string" }
+        "new_text": { "type": "string" },
+        "every_occurrence": {
+          "description": "Present, and true, when the change replaces old_text everywhere it occurs in the file rather than once.",
+          "const": true
+        }
       }
     },
     "tool.result": {

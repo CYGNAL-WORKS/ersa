@@ -91,11 +91,13 @@ fn examples() -> Vec<Event> {
                     path: "src/lib.rs".into(),
                     old_text: Some("fn old()".into()),
                     new_text: "fn new()".into(),
+                    every_occurrence: true,
                 },
                 FileEdit {
                     path: "NOTES.md".into(),
                     old_text: None,
                     new_text: "Whole file.\n".into(),
+                    every_occurrence: false,
                 },
             ]),
         }),
@@ -484,15 +486,17 @@ fn the_two_open_payloads_accept_backend_fields() {
 
 // verifies: PROTO-AGENT-EVENTS-R20
 // verifies: PROTO-AGENT-EVENTS-R21
+// verifies: PROTO-AGENT-EVENTS-R23
 #[test]
 fn a_tool_request_carries_its_target_and_edits_on_the_wire() {
     let wire = serde_json::to_value(example("tool.requested")).expect("serialize");
     assert_eq!(wire["target"], "cargo test");
-    // A text replaced keeps `old_text`; a whole file written has none.
+    // A text replaced keeps `old_text`; a whole file written has none. Only a
+    // change made everywhere says `every_occurrence`, and only as true.
     assert_eq!(
         wire["edits"],
         json!([
-            { "path": "src/lib.rs", "old_text": "fn old()", "new_text": "fn new()" },
+            { "path": "src/lib.rs", "old_text": "fn old()", "new_text": "fn new()", "every_occurrence": true },
             { "path": "NOTES.md", "new_text": "Whole file.\n" },
         ])
     );
@@ -502,6 +506,7 @@ fn a_tool_request_carries_its_target_and_edits_on_the_wire() {
     for bad in [
         json!([{ "path": "a.rs", "old_text": "x" }]),
         json!([{ "new_text": "x" }]),
+        json!([{ "path": "a.rs", "new_text": "x", "every_occurrence": false }]),
         json!([]),
     ] {
         let mut payload = wire.clone();

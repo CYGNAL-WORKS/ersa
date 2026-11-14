@@ -1338,6 +1338,7 @@ fn the_request<'a>(requests: &'a [ToolRequested], name: &str) -> &'a ToolRequest
 // verifies: PROTO-CLAUDE-CODE-STREAM-R48
 // verifies: PROTO-AGENT-EVENTS-R20
 // verifies: PROTO-AGENT-EVENTS-R21
+// verifies: PROTO-AGENT-EVENTS-R23
 #[test]
 fn recorded_tool_calls_carry_the_target_and_edits_the_table_gives() {
     const SCRATCH: &str = r"C:/Users/user\AppData\Local\Temp";
@@ -1345,6 +1346,7 @@ fn recorded_tool_calls_carry_the_target_and_edits_the_table_gives() {
         path: path.into(),
         old_text: old.map(Into::into),
         new_text: new.into(),
+        every_occurrence: false,
     };
 
     let requests = tool_requests("2.1.316/28-tool-edit");
@@ -1367,8 +1369,21 @@ fn recorded_tool_calls_carry_the_target_and_edits_the_table_gives() {
     assert_eq!(call.target.as_deref(), Some(hello.as_str()));
     assert_eq!(call.edits, Some(vec![edit(&hello, None, "Hello\nWorld\n")]));
 
-    // NotebookEdit edits cells, not text: a target and no edits. ToolSearch,
-    // which loads a deferred tool, is not in the table: neither.
+    // An Edit with `replace_all` true: one edit, made everywhere.
+    let requests = tool_requests("2.1.316/36-tool-edit-replace-all");
+    let notes = format!(r"{SCRATCH}\ersa-rec-o32uKM\NOTES.md");
+    let call = the_request(&requests, "Edit");
+    assert_eq!(call.target.as_deref(), Some(notes.as_str()));
+    assert_eq!(
+        call.edits,
+        Some(vec![FileEdit {
+            every_occurrence: true,
+            ..edit(&notes, Some("scratch"), "draft")
+        }])
+    );
+
+    // NotebookEdit edits cells, not text: a target and no edits. ToolSearch
+    // loads the deferred tool first, and targets its query.
     let requests = tool_requests("2.1.316/30-tool-notebook-edit");
     let notebook = format!(r"{SCRATCH}\ersa-rec-9CpFGX\nb.ipynb");
     let call = the_request(&requests, "NotebookEdit");
@@ -1380,7 +1395,10 @@ fn recorded_tool_calls_carry_the_target_and_edits_the_table_gives() {
         (Some(notebook.as_str()), &None)
     );
     let call = the_request(&requests, "ToolSearch");
-    assert_eq!((&call.target, &call.edits), (&None, &None));
+    assert_eq!(
+        (call.target.as_deref(), &call.edits),
+        (Some("select:NotebookEdit"), &None)
+    );
 
     let requests = tool_requests("2.1.316/00-session-tools");
     let call = the_request(&requests, "Read");
@@ -1402,6 +1420,16 @@ fn recorded_tool_calls_carry_the_target_and_edits_the_table_gives() {
             "2.1.302/05-bash-write-default",
             "Bash",
             "echo probe > probe.txt",
+        ),
+        (
+            "2.1.316/33-tool-web-search",
+            "ToolSearch",
+            "select:WebSearch",
+        ),
+        (
+            "2.1.316/35-tool-powershell",
+            "PowerShell",
+            "Get-ChildItem -Name",
         ),
         // The CLI lists `Task` in `system/init` but names the call `Agent`.
         ("2.1.316/34-tool-agent", "Agent", "Count files"),
