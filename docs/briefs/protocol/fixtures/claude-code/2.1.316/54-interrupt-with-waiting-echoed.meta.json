@@ -1,0 +1,128 @@
+{
+  "recorded_at": "2026-11-14T21:02:47.479Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--replay-user-messages"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "db4476d7-6c3e-44ef-a7cc-bd844a66426a",
+  "session_record": "record/54-interrupt-with-waiting-echoed.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command",
+    "queue-operation",
+    "system/compact_boundary"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 8704,
+  "stderr": "[claude-code:unrecognized_model] {\"model\":\"claude-fable-5-2\",\"query_source\":\"sdk\"}\n",
+  "stdout_lines": 26,
+  "stdout_timing_ms": [
+    1852,
+    2160,
+    2173,
+    5119,
+    5120,
+    5120,
+    5120,
+    5132,
+    5140,
+    5142,
+    5146,
+    5146,
+    5146,
+    5149,
+    5178,
+    5181,
+    8260,
+    8260,
+    8260,
+    8260,
+    8262,
+    8262,
+    8269,
+    8270,
+    8273,
+    8303
+  ],
+  "sent": [
+    {
+      "t": 14,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 1852,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Write an essay of about 400 words on the history of lighthouses. Do not use any tools.\"}]}}"
+    },
+    {
+      "t": 5120,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Now reply with the single word: second\"}]}}"
+    },
+    {
+      "t": 5121,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-interrupt-1\",\"request\":{\"subtype\":\"interrupt\"}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Write an essay of about 400 words on the history of lighthouses. Do not use any tools.",
+      "waited": false
+    },
+    {
+      "turn": 2,
+      "until": "text_delta",
+      "seen": true
+    },
+    {
+      "turn": 3,
+      "text": "Now reply with the single word: second",
+      "waited": false
+    },
+    {
+      "turn": 4,
+      "control": "interrupt",
+      "got_response": true,
+      "subtype": "success"
+    }
+  ]
+}
