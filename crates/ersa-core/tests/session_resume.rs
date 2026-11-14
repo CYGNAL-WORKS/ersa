@@ -427,3 +427,44 @@ async fn a_send_with_attachments_to_a_session_whose_folder_is_gone_copies_nothin
         assert_ne!(n["params"]["phase"], "starting", "{n:#}");
     }
 }
+
+/// A backend that exits by itself is announced ended before Core has let go
+/// of its run; a message sent in that moment resumes the session rather
+/// than finding it still running.
+// verifies: FLOW-RESUME-SESSION-R02
+#[tokio::test(flavor = "multi_thread")]
+async fn a_send_just_after_the_backend_exited_resumes_the_session() {
+    let fake = FakeAdapter::new(1);
+    let stats = Arc::clone(&fake.stats);
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(fake)];
+    let core = start_with_adapters(
+        tempdir(),
+        |config| config.wind_down_pause = std::time::Duration::from_secs(2),
+        adapters,
+    )
+    .await;
+    let mut client = core.client().await;
+    let workspace_id = workspace(&mut client, core.dir.path()).await;
+    let id = client
+        .result(
+            "session.create",
+            json!({ "workspace_id": workspace_id, "backend": fake::BACKEND }),
+        )
+        .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client
+        .result("session.send", json!({ "id": id, "text": "exit" }))
+        .await;
+    client.events_until("session.ended").await;
+
+    client
+        .result("session.send", json!({ "id": id, "text": "again" }))
+        .await;
+    let configs = started(&stats, 2).await;
+    assert!(configs[1].resume.is_some(), "{:?}", configs[1]);
+}

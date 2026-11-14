@@ -190,9 +190,9 @@ impl SessionManager {
         admitted();
 
         // A session to resume is refused for a folder that is gone before
-        // anything is copied into it (FLOW-RESUME-SESSION-R03). Without
-        // attachments, the resume's own look is the only one.
-        if resuming && !attachments.is_empty() {
+        // anything is copied into it or the backend is said to be starting
+        // (FLOW-RESUME-SESSION-R03); the resume then looks no more.
+        if resuming {
             resume::check_folder(&handle).await?;
         }
 
@@ -210,7 +210,8 @@ impl SessionManager {
             (Some(live), _) => live,
             (None, Some(resumption)) => {
                 set_phase(&handle, SendPhase::Starting);
-                self.start_again(&handle, resumption).await?;
+                self.start_again(&handle, resumption, resume::FolderChecked::Yes)
+                    .await?;
                 handle.live().ok_or_else(|| handle.not_running())?
             }
             (None, None) => return Err(handle.not_running()),
