@@ -165,11 +165,32 @@ function pick(choices: readonly Choice[], wanted: string | undefined): string | 
 }
 
 /**
+ * The efforts `model` takes, from its backend's list: the levels its `backend.list` entry names, none when it names
+ * none, and every level for a model the backend does not list (PROTO-CORE-API, `backend.list`).
+ */
+export function effortsFor(backend: BackendInfo, model: string | undefined): Choice[] {
+  const listed = backend.models.find((m) => m.id === model);
+  if (!listed) return [...backend.efforts];
+  const takes = listed.efforts ?? [];
+  return backend.efforts.filter((e) => takes.includes(e.id));
+}
+
+/**
+ * `wanted` when the model takes it, else the effort the backend marks as its default, which for Claude Code is none:
+ * the session then runs at the backend's own, which the effort chip reads as Default (docs/design/COMPOSER.md).
+ */
+function pickEffort(efforts: readonly Choice[], wanted: string | undefined): string | undefined {
+  return efforts.some((c) => c.id === wanted) ? wanted : efforts.find((c) => c.default)?.id;
+}
+
+/**
  * The values the session controls show for `project`: each value from `wanted` where the project and its host still offer
  * it, else the default. `wanted` is what the user last started a session with for the project, or what they have
  * chosen on the screen so far. The defaults: a new workspace where the project's version control has an adapter,
- * else the root; the first available backend; that backend's default model, effort and permission mode, which for
- * permission mode is the one that asks before every action outside the allow rules (FLOW-NEW-SESSION-R02, R06).
+ * else the root; the first available backend; that backend's default model (the entry it marks, Claude Code's own
+ * `default`), effort (the one it marks, else none) and permission mode, which for permission mode is the one that
+ * asks before every action outside the allow rules (FLOW-NEW-SESSION-R02, R06). An effort the model does not take
+ * falls back to the default.
  */
 export function valuesFor(project: Project, backends: readonly BackendInfo[], wanted?: Partial<SessionValues>): SessionValues {
   const kinds = workspaceKinds(project);
@@ -189,10 +210,11 @@ export function howFor(backends: readonly BackendInfo[], wanted?: Partial<Sessio
   const backend = runnable.find((b) => b.name === wanted?.backend) ?? runnable[0];
   // A value chosen for another backend means nothing to this one.
   const same = backend !== undefined && backend.name === wanted?.backend;
+  const model = backend && pick(backend.models, same ? wanted?.model : undefined);
   return {
     backend: backend?.name,
-    model: backend && pick(backend.models, same ? wanted?.model : undefined),
-    effort: backend && pick(backend.efforts, same ? wanted?.effort : undefined),
+    model,
+    effort: backend && pickEffort(effortsFor(backend, model), same ? wanted?.effort : undefined),
     permission_mode: backend && pick(backend.permission_modes, same ? wanted?.permission_mode : undefined),
   };
 }
@@ -223,7 +245,7 @@ export function sessionShown(
 ): SessionShown {
   const listed = hostBackends.find((b) => b.name === session.backend);
   const model = session.model ?? (listed && defaultOf(listed.models));
-  const effort = session.effort ?? (listed && defaultOf(listed.efforts));
+  const effort = session.effort ?? listed?.efforts.find((c) => c.default)?.id;
   const backend: BackendInfo = {
     ...(listed ?? { name: session.backend, label: session.backend, status: "available", tested: { min: "", max: "" }, models: [], efforts: [], permission_modes: [] }),
   };
