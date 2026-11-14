@@ -5,6 +5,7 @@
 
 import { ChevronDown, ChevronRight, Plus, ShieldAlert, X } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useId, useState } from "react";
+import { t } from "../catalog";
 import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
 import { ContextRing } from "../components/ContextRing";
@@ -425,7 +426,8 @@ const sessionView = (events: Event[], more: Partial<SessionView> = {}): SessionV
   ...more,
 });
 
-// What the user sees of Core's refusal: its message without the method name (describeError).
+// What the user sees of Core's refusal that names no reason: its message without the method name (describeError). A
+// refusal with a reason reads in the catalog's words (errors.refusal).
 const refusal = "the session is a replay of a recording and cannot change";
 
 // Questions as Claude Code asks them (PROTO-AGENT-EVENTS-R18): options with descriptions, and own words beside them.
@@ -930,16 +932,16 @@ const entries: Entry[] = [
       ["Arrangement not saved", <RailTree {...ersaOnly} arrangeProblem={{ kind: "save", message: "settings.set: the database is locked" }} />],
       [
         "Archive refused",
-        <RailTree {...pairOnly} archiving={{ p2: { state: "failed", message: "session.set_archived: the session is being deleted" } }} />,
+        <RailTree {...pairOnly} archiving={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />,
       ],
       ["Tile menu, pinned", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: pointerPair.map((s) => ({ ...s, pinned: true })) }} initialTileMenu="p2" />)],
       ["Tile menu, while a pin is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" pinning={{ p2: { state: "sending" } }} />)],
       ["A fork on its way", <RailTree {...pairOnly} forking={{ p1: { state: "sending" } }} />],
       [
         "Fork refused",
-        <RailTree {...pairOnly} forking={{ p1: { state: "failed", message: "the last turn in session p1 was interrupted; it can be forked once a reply finishes" } }} />,
+        <RailTree {...pairOnly} forking={{ p1: { state: "failed", message: t("errors.refusal.noFinishedReplyError") } }} />,
       ],
-      ["Pin refused", <RailTree {...pairOnly} pinning={{ p2: { state: "failed", message: "session.arrange: the session is being deleted" } }} />],
+      ["Pin refused", <RailTree {...pairOnly} pinning={{ p2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
       ["Renaming on the tile", <RailTree {...pairOnly} initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }} />],
       [
         "A title the backend refused",
@@ -970,7 +972,7 @@ const entries: Entry[] = [
       ["A row's menu, open", room(<SessionsPage {...sessionsPage} initialTileMenu="r2" />)],
       ["Renaming on a row", <SessionsPage {...sessionsPage} initialTileDraft={{ id: "r2", draft: "Tidy the gallery, renamed" }} />],
       ["Rename refused", <SessionsPage {...sessionsPage} initialTileDraft={{ id: "r2", draft: "Tidy the gallery, renamed" }} renaming={{ r2: { state: "failed", message: "session.set_title: the backend refused the title" } }} />],
-      ["Archive refused", <SessionsPage {...sessionsPage} archiving={{ r2: { state: "failed", message: "session.set_archived: the session is being deleted" } }} />],
+      ["Archive refused", <SessionsPage {...sessionsPage} archiving={{ r2: { state: "failed", message: t("errors.refusal.sessionDeletingError") } }} />],
       ["Loading", <SessionsPage {...sessionsPage} sessions={{ state: "loading" }} />],
       ["Could not be read", <SessionsPage {...sessionsPage} sessions={{ state: "error", message: "session.list: the database is locked" }} />],
       ["While Ersa can't reach Core", <SessionsPage {...sessionsPage} sessions={{ state: "unavailable" }} offline />],

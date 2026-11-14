@@ -331,3 +331,38 @@ describe("the sessions page", () => {
     expect(document.activeElement).toBe(open("Fix the build"));
   });
 });
+
+// A refusal Core names with a reason reads in the catalog's words wherever it shows (PROTO-CORE-API-R80).
+describe("a refusal with a reason, on the tile's menu and the sessions page", () => {
+  const busy = () =>
+    Promise.reject({
+      kind: "rpc",
+      error: { code: -32000, message: "session.set_archived: core's own words", data: { kind: "invalid_state", reason: "session_busy" } },
+    });
+
+  // verifies: PROTO-CORE-API-R80
+  it("says Archive's refusal beneath the rail's tile in the catalog's words", async () => {
+    await start({ "session.set_archived": busy });
+    fireEvent.click(within(rail()).getByRole("button", { name: "More for Fix the build" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
+    await settle();
+    await settle();
+    const note = within(rail()).getByRole("alert");
+    expect(note.textContent).toContain("Ersa can't archive this session.");
+    expect(note.textContent).toContain("This session is busy. Stop it or let it finish, then try again.");
+    expect(note.textContent).not.toContain("core's own words");
+  });
+
+  // verifies: PROTO-CORE-API-R80
+  it("says Archive's refusal beneath the sessions page's row in the catalog's words", async () => {
+    await start({ "session.set_archived": busy });
+    await allSessions();
+    fireEvent.click(within(row("Fix the build") as HTMLElement).getByRole("button", { name: "More for Fix the build" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Archive" }));
+    await settle();
+    await settle();
+    const note = within(page() as HTMLElement).getByRole("alert");
+    expect(note.textContent).toContain("This session is busy. Stop it or let it finish, then try again.");
+    expect(note.textContent).not.toContain("core's own words");
+  });
+});
