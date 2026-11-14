@@ -46,6 +46,7 @@ describe("the Interface's boundary", () => {
       "core_attach",
       "core_request",
       "shell_hide",
+      "shell_open_link",
       "shell_quit",
       "shell_quit_heard",
       "shell_show",

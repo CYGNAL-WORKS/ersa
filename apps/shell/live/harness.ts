@@ -57,6 +57,11 @@ export interface Ersa {
   drop(paths: string[], onto?: Locator): Promise<void>;
   /** Saves a screenshot of the window for the pull request, numbered in the order taken. */
   shot(name: string): Promise<void>;
+  /**
+   * Quits Ersa and opens it again, as a user closing it and starting it later would: ends the window and Core,
+   * then starts Core on the same label and data folder and opens a new window. `page` is the new window's afterward.
+   */
+  restart(): Promise<void>;
 }
 
 /**
@@ -101,12 +106,18 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
       const label = `live-${process.pid}-${counter++}-${randomBytes(4).toString("hex")}`;
       const dir = mkdtempSync(path.join(tmpdir(), "ersa-live-"));
       folders.add(dir);
-      const deadline = Date.now() + START_LIMIT_MS;
       const running: ChildProcess[] = [];
       let browser: Browser | undefined;
-      let unanswered: string[] = [];
-      try {
-        // Logs go beside the screenshots, so they outlive the temporary folder for a failure to be read.
+      const unanswered: string[] = [];
+      let launches = 0;
+      // Starts Core, then the window attached to it, within the start's limit; returns the window.
+      const launch = async () => {
+        const deadline = Date.now() + START_LIMIT_MS;
+        // Logs go beside the screenshots, so they outlive the temporary folder for a failure to be read; each
+        // start after a restart has its own.
+        launches += 1;
+        const nth = launches;
+        const log = (name: string) => testInfo.outputPath(nth === 1 ? `${name}.log` : `${name}-${nth}.log`);
         const coreEnv: NodeJS.ProcessEnv = { ...process.env };
         if (backend === "stand-in") {
           coreEnv.ERSA_CLAUDE = bin.standIn;
@@ -115,9 +126,7 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
           // Core prefers ERSA_CLAUDE to the `claude` on PATH; one inherited from the caller is not the real CLI.
           delete coreEnv.ERSA_CLAUDE;
         }
-        running.push(
-          start(bin.core, ["serve", "--endpoint", label, "--data-dir", path.join(dir, "data")], coreEnv, testInfo.outputPath("core.log")),
-        );
+        running.push(start(bin.core, ["serve", "--endpoint", label, "--data-dir", path.join(dir, "data")], coreEnv, log("core")));
         await waitFor(() => servesLabel(label), "Core to serve its endpoint", running, deadline);
 
         const port = await freePort();
@@ -135,32 +144,50 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
               WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
               WEBVIEW2_USER_DATA_FOLDER: path.join(dir, "webview"),
             },
-            testInfo.outputPath("shell.log"),
+            log("shell"),
           ),
         );
         await waitFor(() => debuggerUp(port), "the window's debugging port", running, deadline);
         browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`, { timeout: remaining(deadline) });
         const page = await windowPage(browser, deadline);
-        const dialogs = await within(deadline, answerDialogs(page), "the dialog answers to install");
-        unanswered = dialogs.unanswered;
+        const dialogs = await within(deadline, answerDialogs(page, unanswered), "the dialog answers to install");
+        return { page, answerDialog: dialogs.answer };
+      };
+      // Ends the window, then Core, as quitting Ersa does.
+      const quit = async () => {
+        // Disconnects only; ending the processes below closes the window.
+        await browser?.close().catch(() => {});
+        browser = undefined;
+        for (const child of [...running].reverse()) await endTree(child);
+        // Those ended are let go, so a restart's wait does not take one for its own start failing; any still
+        // running stay for the check below.
+        const left = running.filter((child) => !ended(child));
+        running.splice(0, running.length, ...left);
+      };
+      try {
+        let window = await launch();
         let shots = 0;
-        await use({
-          page,
+        const ersa: Ersa = {
+          page: window.page,
           label,
           dir,
-          answerDialog: dialogs.answer,
-          drop: (paths, onto) => drop(page, paths, onto),
+          answerDialog: (answer) => window.answerDialog(answer),
+          drop: (paths, onto) => drop(ersa.page, paths, onto),
           async shot(name) {
             shots += 1;
             const file = testInfo.outputPath(`${String(shots).padStart(2, "0")}-${name}.png`);
-            await page.screenshot({ path: file });
+            await ersa.page.screenshot({ path: file });
             await testInfo.attach(name, { path: file, contentType: "image/png" });
           },
-        });
+          async restart() {
+            await quit();
+            window = await launch();
+            ersa.page = window.page;
+          },
+        };
+        await use(ersa);
       } finally {
-        // Disconnects only; ending the processes below closes the window.
-        await browser?.close().catch(() => {});
-        for (const child of running.reverse()) await endTree(child);
+        await quit();
         rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
         const left = [...running.filter((child) => !ended(child)).map((child) => `process ${child.pid}`), ...(existsSync(dir) ? [dir] : [])];
         if (left.length > 0) throw new Error(`the live check left behind ${left.join(", ")}`);
@@ -181,9 +208,8 @@ export { expect };
 // WebView2 serves that address inside the webview, out of reach of Playwright's network routing, so the harness
 // wraps the window's `fetch` and answers those two commands from the test: neither the Shell nor the system's dialog
 // sees them. Every other request goes through untouched.
-async function answerDialogs(page: Page) {
+async function answerDialogs(page: Page, unanswered: string[]) {
   const waiting: { answer: DialogAnswer; answered: (dialog: AnsweredDialog) => void }[] = [];
-  const unanswered: string[] = [];
   await page.exposeBinding("__ersaLiveDialog", (_source, dialog: AnsweredDialog) => {
     const next = waiting.shift();
     if (!next) {
@@ -217,7 +243,6 @@ async function answerDialogs(page: Page) {
   await page.addInitScript(wrap);
   await page.evaluate(wrap);
   return {
-    unanswered,
     answer: (answer: DialogAnswer) => new Promise<AnsweredDialog>((answered) => waiting.push({ answer, answered })),
   };
 }

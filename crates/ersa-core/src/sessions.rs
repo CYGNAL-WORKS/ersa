@@ -65,9 +65,11 @@ use crate::projection::View;
 use crate::raw_log::RawLog;
 
 mod fork;
+mod resume;
 mod send;
 
 pub use fork::{Beginning, ForkHold, Forkable};
+pub use resume::Resumption;
 pub use send::Pacer;
 
 /// How many events may wait for one subscriber before it counts as unable
@@ -212,6 +214,8 @@ pub struct SessionManager {
     tiles: Arc<TileHub>,
     /// A pause after each chunk an attachment's copy writes, for tests.
     copy_pause: Duration,
+    /// A pause before Core lets go of a run that has ended, for tests.
+    wind_down_pause: Duration,
     /// Set by [`SessionManager::stop_all`]; no session starts after it.
     /// Read and written under the `sessions` lock.
     closing: AtomicBool,
@@ -326,6 +330,9 @@ struct Handle {
     version_check: ReadSlot<Result<Option<String>, String>>,
     /// The same for reading the record's title and creation time.
     summary_read: ReadSlot<Result<Option<RecordSummary>, String>>,
+    /// The same for looking at the session's folder before a resume: on a
+    /// network drive that stops answering, one stuck look per session.
+    folder_check: ReadSlot<resume::FolderLook>,
     /// Set when the session is removed, for reads of its record that
     /// outlive it ([`read_unless_removed`]).
     removed: Arc<AtomicBool>,
@@ -369,7 +376,8 @@ async fn read_unless_removed<T>(
     value
 }
 
-/// One read of a session's record that may still be running.
+/// One look at a session's files (its record, or its folder) that may
+/// still be running.
 type ReadSlot<T> = tokio::sync::Mutex<Option<tokio::task::JoinHandle<T>>>;
 
 /// The result of a read of the session's record, started with `start`
@@ -444,7 +452,7 @@ async fn wait<T>(slot: &mut Option<tokio::task::JoinHandle<T>>, timeout: Duratio
             match result {
                 Ok(value) => Some(value),
                 Err(e) => {
-                    tracing::error!(error = %e, "a session record read failed");
+                    tracing::error!(error = %e, "a look at a session's files failed");
                     None
                 }
             }
@@ -659,6 +667,7 @@ impl Handle {
             record_read: tokio::sync::Mutex::new(None),
             version_check: tokio::sync::Mutex::new(None),
             summary_read: tokio::sync::Mutex::new(None),
+            folder_check: tokio::sync::Mutex::new(None),
             removed: Arc::default(),
             sending: Mutex::default(),
             scratch: Arc::default(),
@@ -767,6 +776,7 @@ impl SessionManager {
             sessions: Mutex::new(HashMap::new()),
             tiles: Arc::default(),
             copy_pause: Duration::ZERO,
+            wind_down_pause: Duration::ZERO,
             closing: AtomicBool::new(false),
             claims: Arc::default(),
             arrangement: tokio::sync::Mutex::new(()),
@@ -777,6 +787,13 @@ impl SessionManager {
     /// writes ([`crate::CoreConfig::copy_pause`]).
     pub fn with_copy_pause(mut self, copy_pause: Duration) -> Self {
         self.copy_pause = copy_pause;
+        self
+    }
+
+    /// The same manager, pausing before it lets go of a run that has ended
+    /// ([`crate::CoreConfig::wind_down_pause`]).
+    pub fn with_wind_down_pause(mut self, pause: Duration) -> Self {
+        self.wind_down_pause = pause;
         self
     }
 
@@ -928,11 +945,6 @@ impl SessionManager {
         self.handle(id)?.live().ok_or_else(not_running)
     }
 
-    /// Whether the session's backend is running (or starting).
-    pub fn is_live(&self, id: &str) -> Result<bool, SessionError> {
-        Ok(self.handle(id)?.live().is_some())
-    }
-
     /// Every session, oldest first.
     pub fn list(&self) -> Vec<Session> {
         let handles: Vec<Arc<Handle>> = lock(&self.sessions).values().cloned().collect();
@@ -1037,7 +1049,7 @@ impl SessionManager {
                     transport,
                     config,
                     backend_version,
-                    fork_hold,
+                    Launched::New { fork_hold },
                 );
                 return Ok(handle.describe());
             }
@@ -1055,7 +1067,7 @@ impl SessionManager {
         transport: Arc<dyn Transport>,
         config: SessionConfig,
         backend_version: String,
-        fork_hold: Option<Arc<ForkHold>>,
+        launched: Launched,
     ) {
         let (fed_tx, fed_rx) = mpsc::unbounded_channel();
         let sink = Arc::new(CoreSink::new(&handle.id, Arc::clone(&self.app_log), fed_tx));
@@ -1086,10 +1098,11 @@ impl SessionManager {
             transport,
             config,
             backend_version,
-            fork_hold,
+            launched,
             started: started_tx,
             finished: finished_tx,
             pipeline,
+            wind_down_pause: self.wind_down_pause,
         }));
     }
 
@@ -2394,6 +2407,15 @@ impl AdapterSink for CoreSink {
 
 // -- The session task ----------------------------------------------------------
 
+/// Why Core starts a session's backend.
+enum Launched {
+    /// A new session, or a fork with its hold on the original, let go once
+    /// the start is over.
+    New { fork_hold: Option<Arc<ForkHold>> },
+    /// A stopped session started again (FLOW-RESUME-SESSION).
+    Resumed,
+}
+
 struct SessionTask {
     store: Store,
     handle: Arc<Handle>,
@@ -2402,11 +2424,11 @@ struct SessionTask {
     transport: Arc<dyn Transport>,
     config: SessionConfig,
     backend_version: String,
-    /// A fork's hold on its original, let go once the start is over.
-    fork_hold: Option<Arc<ForkHold>>,
+    launched: Launched,
     started: watch::Sender<Started>,
     finished: watch::Sender<bool>,
     pipeline: tokio::task::JoinHandle<()>,
+    wind_down_pause: Duration,
 }
 
 async fn run_session(task: SessionTask) {
@@ -2418,11 +2440,21 @@ async fn run_session(task: SessionTask) {
         transport,
         config,
         backend_version,
-        fork_hold,
+        launched,
         started,
         finished,
         pipeline,
+        wind_down_pause,
     } = task;
+    // Ready with no turn to report one: a fork, and a session started again,
+    // whose backend reports nothing until its next message.
+    let (fork_hold, ready_fact) = match launched {
+        Launched::New { fork_hold } => {
+            let fact = fork_hold.is_some().then_some(LifecycleFact::ForkReady);
+            (fork_hold, fact)
+        }
+        Launched::Resumed => (None, Some(LifecycleFact::Resumed)),
+    };
     let sink = Arc::clone(&live.sink);
     sink.record_fact(LifecycleFact::ProcessStarted {
         backend: handle.backend.clone(),
@@ -2432,7 +2464,6 @@ async fn run_session(task: SessionTask) {
     // still leaves the fact startup repairs from.
     sink.app_log.flushed().await;
 
-    let is_fork = fork_hold.is_some();
     let mut cancel = live.cancel.subscribe();
     let as_sink: Arc<dyn AdapterSink> = sink.clone();
     // The start runs in a task of its own, so an adapter that panics fails
@@ -2460,8 +2491,8 @@ async fn run_session(task: SessionTask) {
             *lock(&handle.start_failure) = None;
             // Before the session can be sent anything, so a first message's
             // lines come after this.
-            if is_fork {
-                sink.record_fact(LifecycleFact::ForkReady);
+            if let Some(fact) = ready_fact {
+                sink.record_fact(fact);
             }
             started.send_replace(Started::Ready(Arc::clone(&session)));
             sink.start_finished(Ok(()));
@@ -2512,6 +2543,9 @@ async fn run_session(task: SessionTask) {
     }
     if let Some(view) = lock(&handle.hub).view.as_mut() {
         view.finish_live();
+    }
+    if !wind_down_pause.is_zero() {
+        tokio::time::sleep(wind_down_pause).await;
     }
     *lock(&handle.live) = None;
     // Nobody reading it: nothing more will be added, so it goes.

@@ -264,7 +264,8 @@ describe("marking hidden characters", () => {
     const flood = "x" + "\u200B".repeat(5000) + "y";
     const out = html(flood);
     expect(out.match(/U\+200B/g)?.length).toBe(64);
-    expect(out).toContain("4936 more invisible characters");
+    // The count is written as the catalog writes numbers, with a thousands separator.
+    expect(out).toContain("4,936 more invisible characters");
     // Past the cap each one still shows where it was.
     expect(out.split("\uFFFD").length - 1).toBeGreaterThanOrEqual(4936);
     expect(out).toContain("y");

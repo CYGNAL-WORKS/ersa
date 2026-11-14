@@ -598,6 +598,124 @@ Reconnecting to Core…
 
 ## `transcript`
 
+### `transcript.name`
+
+Transcript
+
+### `transcript.userLabel`
+
+You
+
+### `transcript.streamFailedLabel`
+
+Not receiving this session's events: {message}
+
+### `transcript.retryButton`
+
+Retry
+
+### `transcript.reconnectingProgress`
+
+Reconnecting to Core…
+
+### `transcript.loadingProgress`
+
+Loading…
+
+### `transcript.nothingYetEmpty`
+
+Nothing yet. Write to the agent below.
+
+### `transcript.thinkingProgress`
+
+Thinking…
+
+### `transcript.thoughtLabel`
+
+Thought
+
+### `transcript.tool.runningProgress`
+
+Running…
+
+### `transcript.tool.doneStatus`
+
+Done
+
+### `transcript.tool.failedStatus`
+
+Failed
+
+### `transcript.tool.waitingLabel`
+
+Waiting for you
+
+### `transcript.permission.nameLabel`
+
+Permission: {tool}
+
+### `transcript.permission.openTitle`
+
+Allow {tool}?
+
+### `transcript.permission.pathLabel`
+
+Path:
+
+### `transcript.permission.unansweredStatus`
+
+Not answered
+
+### `transcript.permission.allowedStatus`
+
+Allowed
+
+### `transcript.permission.deniedStatus`
+
+Denied
+
+### `transcript.permission.byRuleLabel`
+
+{decision} (by rule)
+
+### `transcript.permission.byBackendLabel`
+
+{decision} (by backend)
+
+### `transcript.permission.timedOutLabel`
+
+{decision} (timed out)
+
+### `transcript.hidden.codePointLabel`
+
+U+{code}
+
+### `transcript.hidden.oneLabel`
+
+An invisible character
+
+### `transcript.hidden.manyLabel`
+
+Invisible characters
+
+### `transcript.hidden.moreLabel`
+
+#### `one`
+
+{count} more invisible character, shown as {mark}
+
+#### `other`
+
+{count} more invisible characters, each shown as {mark}
+
+### `transcript.markdown.copyCodeButton`
+
+Copy code
+
+### `transcript.markdown.copiedLabel`
+
+Copied
+
 ### `transcript.question.name`
 
 Question

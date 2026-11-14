@@ -49,29 +49,6 @@
     "Saving…",
     "Session title"
   ],
-  "components/Transcript.tsx": [
-    "Allow",
-    "An invisible character",
-    "Done",
-    "Failed",
-    "Invisible characters",
-    "Loading…",
-    "Not answered",
-    "Not receiving this session's events:",
-    "Nothing yet. Write to the agent below.",
-    "Path:",
-    "Permission:",
-    "Reconnecting to Core…",
-    "Retry",
-    "Running…",
-    "Thinking…",
-    "Thought",
-    "Transcript",
-    "U+",
-    "Waiting for you",
-    "You",
-    "more invisible characters, each shown as"
-  ],
   "session/follow.ts": [
     "Earlier events of this session are no longer held."
   ],

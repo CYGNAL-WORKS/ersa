@@ -460,13 +460,11 @@ async fn a_stopped_session_has_ended_and_can_then_be_removed() {
     // Stopping again changes nothing.
     client.result("session.stop", json!({ "id": id })).await;
 
-    let error = client
-        .error("session.send", json!({ "id": id, "text": "hello" }))
-        .await;
-    assert_eq!(kind(&error), "invalid_state");
+    // Starting it again is `session.resume`, which `session.start` names.
     let error = client.error("session.start", json!({ "id": id })).await;
     assert_eq!(kind(&error), "invalid_state");
-    assert!(error["message"].as_str().unwrap().contains("M1"));
+    assert_eq!(error["data"]["reason"], "session_not_running");
+    assert_eq!(stats.starts.load(Ordering::SeqCst), 1, "not started again");
 
     // Removal never cascades: the workspace keeps its session until the
     // session is removed.
@@ -1909,43 +1907,16 @@ async fn unarchiving_clears_the_mark_and_leaves_the_session_stopped() {
     assert_eq!(unarchived["archived"], false);
     assert_eq!(unarchived["state"], "ended");
     assert_eq!(stats.starts.load(Ordering::SeqCst), starts, "not restarted");
-    let error = client
-        .error("session.send", json!({ "id": id, "text": "hello" }))
+    // A message is taken again: it resumes the session.
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
         .await;
-    assert!(
-        !error["message"].as_str().unwrap().contains("archived"),
-        "{error:#}"
-    );
+    assert_eq!(stats.starts.load(Ordering::SeqCst), starts + 1);
+    client.result("session.stop", json!({ "id": id })).await;
 
     drop(client);
     let (_core, mut client) = restarted(core).await;
     assert_eq!(session_row(&mut client, &id).await["archived"], false);
-}
-
-/// A refused `session.resume` leaves an archived session archived: Core
-/// clears the mark only once it accepts a resume. Restarting the session is
-/// milestone M1, so every resume is refused for now.
-// verifies: PROTO-CORE-API-R43
-#[tokio::test(flavor = "multi_thread")]
-async fn a_refused_resume_leaves_an_archived_session_archived() {
-    let (core, _) = start_fake(FakeAdapter::new(1)).await;
-    let mut client = core.client().await;
-    let id = idle_session(&core, &mut client).await;
-    client
-        .result(
-            "session.set_archived",
-            json!({ "id": id, "archived": true }),
-        )
-        .await;
-
-    let error = client.error("session.resume", json!({ "id": id })).await;
-    assert_eq!(kind(&error), "invalid_state");
-    assert!(error["message"].as_str().unwrap().contains("M1"));
-    assert_eq!(session_row(&mut client, &id).await["archived"], true);
-
-    drop(client);
-    let (_core, mut client) = restarted(core).await;
-    assert_eq!(session_row(&mut client, &id).await["archived"], true);
 }
 
 #[tokio::test(flavor = "multi_thread")]
