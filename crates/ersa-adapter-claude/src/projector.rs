@@ -81,6 +81,17 @@ pub struct ClaudeProjector {
     /// mode (`--bare`): it has none of `scratchpad_path`, `memory_paths` and
     /// `messaging_socket_path` (PROTO-CLAUDE-CODE-STREAM-R53).
     minimal_mode: bool,
+    /// `request_id`s of the host's `set_model` requests not yet answered:
+    /// the answer names the model the CLI resolved
+    /// (PROTO-CLAUDE-CODE-STREAM-R40).
+    set_model_ids: HashSet<String>,
+    /// The model the stream last reported: each `system/init`, and each
+    /// answer to `set_model` (PROTO-CLAUDE-CODE-STREAM-R40).
+    model: Option<String>,
+    /// The permission mode the stream last reported: the `initialize`
+    /// answer before the first turn, then each `system/init` and each
+    /// `system/status` that carries one (PROTO-CLAUDE-CODE-STREAM-R40).
+    permission_mode: Option<String>,
 }
 
 /// A `can_use_tool` request the CLI is waiting on.
@@ -146,6 +157,14 @@ impl Projector for ClaudeProjector {
             .as_ref()
             .map(|(count, title)| (*count, title.as_str()))
     }
+
+    fn reported_model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
+    fn reported_permission_mode(&self) -> Option<&str> {
+        self.permission_mode.as_deref()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -175,6 +194,13 @@ impl ClaudeProjector {
                 if let Some(title) = field("/title") {
                     let count = self.announced_title.as_ref().map_or(0, |(n, _)| *n);
                     self.announced_title = Some((count + 1, title.to_string()));
+                }
+            }
+            // The mode right after `set_permission_mode`; most status lines
+            // carry none and leave it. The line stays a passthrough.
+            (Some("system"), Some("status"), _) => {
+                if let Some(mode) = field("/permissionMode") {
+                    self.permission_mode = Some(mode.to_string());
                 }
             }
             _ => {}
@@ -239,6 +265,13 @@ impl ClaudeProjector {
             out.push(drift_error(line, kind));
         }
         self.minimal_mode = started_in_minimal_mode(&value);
+        // Every turn's `init` says the model and mode it runs with.
+        if let Some(model) = value["model"].as_str() {
+            self.model = Some(model.to_string());
+        }
+        if let Some(mode) = value["permissionMode"].as_str() {
+            self.permission_mode = Some(mode.to_string());
+        }
         // The CLI repeats `init` at the start of every turn; only the first
         // announces the session (PROTO-CLAUDE-CODE-STREAM-R06).
         if !self.session_started {
@@ -719,6 +752,10 @@ impl ClaudeProjector {
                         );
                     }
                 };
+                // Before the first turn's `init`, the mode the CLI starts in.
+                if let Some(mode) = reply.current_permission_mode {
+                    self.permission_mode = Some(mode);
+                }
                 // Only the version is projected; the rest (commands, models,
                 // account) is for the developer pane until something needs it.
                 match reply.claude_code_version.filter(|v| newer_than_tested(v)) {
@@ -750,6 +787,23 @@ impl ClaudeProjector {
                         action: Some(ErrorAction::Restart),
                     }),
                 )]
+            }
+            // The model `set_model` resolved its choice to (fixture 25:
+            // `haiku` answers `claude-haiku-5-5`). The line stays a
+            // passthrough.
+            CliResponse::Success(success) if self.set_model_ids.remove(&success.request_id) => {
+                if let Some(model) = success
+                    .response
+                    .as_ref()
+                    .and_then(|answer| answer.get("model"))
+                    .and_then(Value::as_str)
+                {
+                    self.model = Some(model.to_string());
+                }
+                vec![passthrough(line, value)]
+            }
+            CliResponse::Error(refusal) if self.set_model_ids.remove(&refusal.request_id) => {
+                vec![passthrough(line, value)]
             }
             // Answers to interrupts and other host requests.
             _ => vec![passthrough(line, value)],
@@ -791,10 +845,18 @@ impl ClaudeProjector {
         match value.get("type").and_then(Value::as_str) {
             Some("user") => self.host_user(line, value),
             Some("control_request") => {
-                if value.pointer("/request/subtype").and_then(Value::as_str) == Some("initialize")
-                    && let Some(id) = value.get("request_id").and_then(Value::as_str)
-                {
-                    self.initialize_ids.insert(id.to_string());
+                let id = value.get("request_id").and_then(Value::as_str);
+                match (
+                    value.pointer("/request/subtype").and_then(Value::as_str),
+                    id,
+                ) {
+                    (Some("initialize"), Some(id)) => {
+                        self.initialize_ids.insert(id.to_string());
+                    }
+                    (Some("set_model"), Some(id)) => {
+                        self.set_model_ids.insert(id.to_string());
+                    }
+                    _ => {}
                 }
                 vec![passthrough(line, value)]
             }
