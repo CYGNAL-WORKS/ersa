@@ -25,7 +25,7 @@ use crate::events::{Answer, Envelope, LifecycleState, PermissionBehavior};
 /// The Core API version this build speaks. Negotiated in `core.hello`; bumped
 /// only for removals or changes of meaning, never for additions. The schema
 /// file records the same number as `x-api-version`; a test checks they agree.
-pub const API_VERSION: u32 = 4;
+pub const API_VERSION: u32 = 5;
 
 /// Every Core API version this build can speak, for the handshake.
 pub const SUPPORTED_API_VERSIONS: &[u32] = &[API_VERSION];
@@ -175,6 +175,38 @@ pub enum ErrorKind {
     DeliveryUnknown,
 }
 
+/// `data.reason` of an `invalid_state` error: a refusal the user meets, so
+/// the Interface can say it in the string catalog's words (PROTO-CORE-API,
+/// Errors).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorReason {
+    /// The session is starting, being sent a message, or running a turn.
+    SessionBusy,
+    SessionDeleting,
+    SessionArchived,
+    /// The session has no live backend.
+    SessionNotRunning,
+    /// Another connection is sending to the session.
+    SendInProgress,
+    /// `session.interrupt` stopped the message before it was sent.
+    SendStopped,
+    /// The session's folder no longer exists.
+    FolderGone,
+    /// The backend has not reported the session's id yet.
+    BackendUnnamed,
+    /// The backend has no record of the session.
+    RecordGone,
+    /// Another process has the session open, named in `detail`.
+    OpenElsewhere,
+    /// Core can't tell whether another process has the session open.
+    OpenUnknown,
+    /// The record's conversation does not end with a finished reply.
+    NoFinishedReply,
+    /// The backend, or the version installed, can't fork.
+    BackendCannotFork,
+}
+
 // ---------------------------------------------------------------------------
 // Shared shapes
 
@@ -310,7 +342,7 @@ pub struct BackendInfo {
     pub version: Option<String>,
     pub status: BackendState,
     pub tested: TestedRange,
-    pub models: Vec<Choice>,
+    pub models: Vec<ModelChoice>,
     pub efforts: Vec<Choice>,
     pub permission_modes: Vec<Choice>,
 }
@@ -337,6 +369,24 @@ pub struct Choice {
     /// Whether a new session starts with this one when none is named. One
     /// per list.
     pub default: bool,
+}
+
+/// One model a session can start with, as the backend reports it on the host
+/// (PROTO-CORE-API-R72). A [`Choice`] with what only a model has.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelChoice {
+    pub id: String,
+    pub label: String,
+    /// Whether the backend chooses this model on its own.
+    pub default: bool,
+    /// The model id a session of this choice reports (an alias such as
+    /// `opus` resolves to a full id), so the session controls can name it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved: Option<String>,
+    /// Ids of the efforts this model takes; `None` when it takes none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub efforts: Option<Vec<String>>,
 }
 
 /// One entry of `mode.list` (reserved for milestone M3).
@@ -523,6 +573,10 @@ pub struct WorkspaceChanges {
 #[serde(deny_unknown_fields)]
 pub struct Session {
     pub id: String,
+    /// The session's id in its backend; absent until the backend has
+    /// reported it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_session_id: Option<String>,
     pub workspace_id: String,
     pub host_id: String,
     pub backend: String,
@@ -560,6 +614,9 @@ pub struct Session {
     /// (ADR 0026).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub section_id: Option<String>,
+    /// Whether the session is unseen: the user's arrangement, which Core
+    /// stores (ADR 0033, PROTO-CORE-API-R78).
+    pub unseen: bool,
     /// RFC 3339: when the session's latest turn ended, which Core records as
     /// a turn ends and at no other time; absent until a turn has ended.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -609,6 +666,10 @@ pub struct Tile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd_total: Option<f64>,
     pub pending: Vec<PendingRequest>,
+    /// How many messages the backend holds behind the running turn; absent
+    /// when none, or when the session is not live (PROTO-CORE-API-R81).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting: Option<u64>,
 }
 
 impl Tile {
@@ -621,6 +682,7 @@ impl Tile {
             context_window: None,
             cost_usd_total: None,
             pending: Vec::new(),
+            waiting: None,
         }
     }
 }
@@ -808,6 +870,8 @@ pub struct ArrangeParams {
         deserialize_with = "present"
     )]
     pub section_id: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unseen: Option<bool>,
 }
 
 /// Reads a field that is present, `null` included, as `Some`. Used with
@@ -987,6 +1051,9 @@ pub struct SessionTileParams {
     /// rail learns when a turn ends without reading the list again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_activity_at: Option<String>,
+    /// The session's current title; absent while it has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 /// `host.status` params.
