@@ -950,6 +950,7 @@ name = "ersa-adapter-claude"
 version = "0.1.0"
 dependencies = [
  "ersa-adapter",
+ "ersa-core",
  "ersa-protocol",
  "libc",
  "serde",
@@ -982,7 +983,6 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "ersa-adapter",
- "ersa-adapter-claude",
  "ersa-protocol",
  "libc",
  "rusqlite",

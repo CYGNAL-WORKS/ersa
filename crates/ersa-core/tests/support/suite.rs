@@ -14,14 +14,14 @@ use ersa_protocol::core_api::Method;
 use ersa_protocol::events::PROJECTION_VERSION;
 use serde_json::{Value, json};
 
-use super::claude::start_replay_with;
+use super::fake::start_replay_with;
 use super::{Client, TestCore, assert_valid, kind, start_with, tempdir};
 
 /// Which server a check runs against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     Core,
-    /// The replay server serving fixture 11, all at once.
+    /// The replay server serving the fake's recording, all at once.
     Replay,
 }
 
