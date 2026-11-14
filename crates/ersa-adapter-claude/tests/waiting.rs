@@ -198,8 +198,13 @@ async fn a_message_folded_into_a_turn_that_uses_tools_is_read_at_the_next_model_
     session.send_message(&message("two")).await.unwrap();
     assert_eq!(sink.wait_for_waiting(WAIT, 1).await, [1]);
 
-    queue(&path, "remove", &now());
+    // The CLI writes the `remove` just after the line announcing the call
+    // (2 ms in fixture 51), which the read waits for.
     session.interrupt().await.unwrap();
+    sink.wait_for_line(WAIT, |l| l.line.contains(r#""status":"requesting""#))
+        .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    queue(&path, "remove", &now());
     assert_eq!(sink.wait_for_waiting(WAIT, 2).await, [1, 0]);
 
     session.stop().await.unwrap();

@@ -21,13 +21,27 @@ use time::OffsetDateTime;
 
 use crate::record::{self, WaitingCount};
 
-/// How long a read after a handover waits for the CLI to write the message's
-/// `enqueue` entry. The CLI writes it as soon as it reads the message (1 ms
-/// after the write in fixtures 22 and 24), so this allows for a busy disk.
-const ENQUEUE_WAIT: Duration = Duration::from_secs(2);
+/// How long a read waits for the entry it expects: the `enqueue` of a
+/// message just handed over, or the `remove` of messages a turn that uses
+/// tools takes in at a model call. The CLI writes each within a few
+/// milliseconds (fixtures 22, 24 and 51), so this allows for a busy disk.
+const ENTRY_WAIT: Duration = Duration::from_secs(2);
 
-/// How often a read after a handover looks again for the `enqueue` entry.
-const ENQUEUE_POLL: Duration = Duration::from_millis(50);
+/// How often a read that waits for an entry looks again.
+const ENTRY_POLL: Duration = Duration::from_millis(50);
+
+/// What a read waits for before it reports, for up to [`ENTRY_WAIT`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Expect {
+    /// Nothing: a turn started, or one ended, and the record already says.
+    Nothing,
+    /// The `enqueue` of a message just handed over.
+    Enqueue,
+    /// Fewer messages than the sink last heard: at a model call while some
+    /// wait, which a turn that uses tools takes them in at, the CLI writing
+    /// their `remove` just after the `system/status` line announcing it.
+    Fewer,
+}
 
 /// One CLI process's count of waiting messages, and what the sink last heard.
 pub(crate) struct WaitingReader {
@@ -98,20 +112,20 @@ impl WaitingReader {
         self.turn_running.store(false, Ordering::SeqCst);
     }
 
-    /// Reads the record and tells `sink` the count if it changed. After a
-    /// handover (`after_handover`), it first waits, for up to
-    /// [`ENQUEUE_WAIT`], for the CLI to write the message's `enqueue`, and
+    /// Reads the record and tells `sink` the count if it changed. It first
+    /// waits, for up to [`ENTRY_WAIT`], for the entry `expect` names, and
     /// then reports what it read either way. Nothing is reported once
     /// `alive` says the session is going away. A record that cannot be read
     /// is logged and reports nothing.
     pub(crate) async fn report(
         self: Arc<Self>,
         sink: Arc<dyn AdapterSink>,
-        after_handover: bool,
+        expect: Expect,
         alive: impl Fn() -> bool + Send,
     ) {
         let _one_at_a_time = self.reading.lock().await;
-        let deadline = tokio::time::Instant::now() + ENQUEUE_WAIT;
+        let deadline = tokio::time::Instant::now() + ENTRY_WAIT;
+        let heard = self.reported.load(Ordering::SeqCst);
         let waiting = loop {
             let reader = Arc::clone(&self);
             let read = tokio::task::spawn_blocking(move || reader.read()).await;
@@ -128,11 +142,15 @@ impl WaitingReader {
                 // The blocking thread panicked or was canceled at shutdown.
                 Err(_) => return,
             };
-            let entry_in = enqueued >= self.written.load(Ordering::SeqCst);
-            if !after_handover || entry_in || tokio::time::Instant::now() >= deadline {
+            let entry_in = match expect {
+                Expect::Nothing => true,
+                Expect::Enqueue => enqueued >= self.written.load(Ordering::SeqCst),
+                Expect::Fewer => waiting < heard,
+            };
+            if entry_in || tokio::time::Instant::now() >= deadline {
                 break waiting;
             }
-            tokio::time::sleep(ENQUEUE_POLL).await;
+            tokio::time::sleep(ENTRY_POLL).await;
         };
         if self.reported.swap(waiting, Ordering::SeqCst) != waiting && alive() {
             sink.waiting(waiting);
