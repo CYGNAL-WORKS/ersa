@@ -499,6 +499,20 @@ pub trait Projector: Send {
     fn announced_title(&self) -> Option<(u64, &str)> {
         None
     }
+
+    /// The session's model as the live stream last reported it, from the
+    /// lines projected so far. Core lists it as the session's model while
+    /// the session is live (PROTO-CORE-API-R71). `None`, the default, before
+    /// any report, and for a backend that makes none.
+    fn reported_model(&self) -> Option<&str> {
+        None
+    }
+
+    /// The session's permission mode as the live stream last reported it,
+    /// like [`Projector::reported_model`].
+    fn reported_permission_mode(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// One event a projector produced, with the backend's id for the message it
