@@ -22,8 +22,14 @@ const claude = (status: BackendInfo["status"] = "available"): BackendInfo => ({
   version: "2.1.302",
   status,
   tested: { min: "2.1.0", max: "2.1.400" },
-  models: choices([["sonnet", "Sonnet"], ["opus", "Opus"]], "opus"),
-  efforts: choices([["medium", "Medium"], ["high", "High"]], "high"),
+  // As Claude Code reports them: its own default entry first, and a model that takes no effort.
+  models: [
+    { id: "default", label: "Default (recommended)", default: true, resolved: "claude-opus-5-5", efforts: ["medium", "high"] },
+    { id: "sonnet", label: "Sonnet", default: false, resolved: "claude-sonnet-5-5", efforts: ["medium", "high"] },
+    { id: "haiku-4-5", label: "Haiku 4.5", default: false, resolved: "claude-haiku-4-5" },
+  ],
+  // The CLI marks no effort as its default.
+  efforts: choices([["medium", "Medium"], ["high", "High"]], "none"),
   permission_modes: choices([["default", "Ask before acting"], ["acceptEdits", "Accept edits"]], "default"),
 });
 const copilot = (status: BackendInfo["status"]): BackendInfo => ({
@@ -60,11 +66,33 @@ describe("the new-session screen", () => {
       "Host: Local",
       "Project: ersa",
       "Workspace: New workspace",
-      "Model: Opus",
-      "Effort: High",
+      "Model: Default (recommended)",
+      "Effort: Default",
       "Permission mode: Ask before acting",
     ]);
     expect(html).toContain('aria-label="Context: none used yet"');
+  });
+
+  // verifies: FLOW-NEW-SESSION-R02
+  it("lists Default first among the efforts, chosen while no level is", () => {
+    const html = render({ open: "effort" });
+    const options = [...html.matchAll(/data-id="([^"]*)"[^>]*aria-selected="(true|false)"/g)].map((m) => [m[1], m[2]]);
+    expect(options).toEqual([
+      ["", "true"],
+      ["medium", "false"],
+      ["high", "false"],
+    ]);
+    expect(html.indexOf(">Default<")).toBeLessThan(html.indexOf(">Medium<"));
+  });
+
+  // verifies: FLOW-NEW-SESSION-R02
+  it("leaves the effort chip unavailable, reading None, for a model that takes no effort", () => {
+    const html = render({
+      projectId: "p1",
+      lastUsed: { p1: { host_id: "local", project_id: "p1", workspace: "root", backend: "claude-code", model: "haiku-4-5", effort: "high", permission_mode: "default" } },
+    });
+    expect(chips(html)).toContain("Effort: None");
+    expect(html).toMatch(/aria-label="Effort: None"[^>]*disabled|disabled[^>]*aria-label="Effort: None"/);
   });
 
   // verifies: FLOW-NEW-SESSION-R01
@@ -175,7 +203,7 @@ describe("the new-session screen", () => {
   it("leaves out the chip for a choice the backend does not offer", () => {
     const html = render({ backends: { local: [{ ...claude(), efforts: [] }] } });
     expect(chips(html).some((c) => c.startsWith("Effort"))).toBe(false);
-    expect(chips(html)).toContain("Model: Opus");
+    expect(chips(html)).toContain("Model: Default (recommended)");
   });
 
   it("lists a host without projects as one that has nothing to start", () => {

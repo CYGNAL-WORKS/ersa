@@ -67,6 +67,8 @@ async fn a_session_running_at_quit_ends_user_stopped_and_leaves_no_process() {
     let mut location = private_location(dir.path());
     location.env = vec![
         ("ERSA_CLAUDE".into(), stand_in_backend().into_os_string()),
+        // Answers detection's model probe as well as the session's start.
+        ("ERSA_STAND_IN_ANSWER".into(), "1".into()),
         (
             "ERSA_STAND_IN_PIDS".into(),
             pids_file.clone().into_os_string(),
@@ -85,6 +87,11 @@ async fn a_session_running_at_quit_ends_user_stopped_and_leaves_no_process() {
         async move {
             let (link, _how, events) = open(&location).await;
             let host = link.hello()["host"]["id"].clone();
+            // Detection asks the stand-in for its models, which starts it
+            // once before the session does: let that finish, and forget its
+            // process ids, so those read below are the session's.
+            request(&link, "backend.list", json!({ "host_id": host })).await;
+            let _ = std::fs::remove_file(&pids_file);
             let project = request(
                 &link,
                 "project.add",

@@ -7,6 +7,7 @@ import {
   type WorkspaceKind,
   available,
   branchesMatching,
+  effortsFor,
   showsBackend,
   workspaceKinds,
 } from "../session/controls";
@@ -18,6 +19,15 @@ export type Host = CoreHelloResult["host"];
 
 /** The chips, by the value each sets. */
 export type ControlKey = "host" | "project" | "workspace" | "base" | "backend" | "model" | "effort" | "permission_mode";
+
+/** What every chip takes from the session controls. */
+interface ChipHandlers {
+  onChoose: (id: string) => void;
+  disabled?: boolean;
+  readOnly?: boolean;
+  initialOpen: boolean;
+  force?: "hover" | "focus" | "pressed";
+}
 
 interface SessionControlsProps {
   hosts: readonly Host[];
@@ -103,6 +113,32 @@ const projectOption = (p: Project): ChipOption => ({
 
 const choiceOptions = (choices: readonly Choice[]): ChipOption[] => choices.map(({ id, label }) => ({ id, label }));
 
+/** The effort chip's Default row, which chooses no level: its id, which the screen turns back into none. */
+export const DEFAULT_EFFORT = "";
+
+/**
+ * The effort chip (docs/design/COMPOSER.md, The session controls): the levels the chosen model takes. With none chosen
+ * it reads Default, and before the session starts Default is its list's first row; a running session's list holds only
+ * the levels. A model that takes no effort leaves the chip in its place, unavailable, reading None.
+ */
+function EffortChip({ backend, values, readOnly, chip }: { backend: BackendInfo; values: SessionValues; readOnly?: boolean; chip: ChipHandlers }) {
+  const levels = choiceOptions(effortsFor(backend, values.model));
+  if (levels.length === 0) {
+    return <Chip name="Effort" prefix="Effort" reads={t("sessionControls.effort.noneLabel")} options={[]} {...chip} disabled />;
+  }
+  const defaultRow: ChipOption = { id: DEFAULT_EFFORT, label: t("sessionControls.effort.defaultLabel") };
+  return (
+    <Chip
+      name="Effort"
+      prefix="Effort"
+      value={values.effort ?? DEFAULT_EFFORT}
+      reads={values.effort === undefined ? t("sessionControls.effort.defaultLabel") : undefined}
+      options={readOnly ? levels : [defaultRow, ...levels]}
+      {...chip}
+    />
+  );
+}
+
 /**
  * The session controls (GLOSSARY): a chip for each of host, project, workspace, backend, model, effort and
  * permission mode, with the context ring at the row's end (LAY-SHELL). The backend chip shows only when the host
@@ -111,7 +147,7 @@ const choiceOptions = (choices: readonly Choice[]): ChipOption[] => choices.map(
 export function SessionControls({ hosts, localHostId, projects, backends, values, branches, workspaceLabel, onChoose, onAddProject, disabled, readOnly, used, open, force }: SessionControlsProps) {
   const project = projects.find((p) => p.id === values.project_id);
   const backend = backends?.find((b) => b.name === values.backend);
-  const chip = (key: ControlKey) => ({
+  const chip = (key: ControlKey): ChipHandlers => ({
     onChoose: (id: string) => onChoose(key, id),
     disabled,
     readOnly,
@@ -199,9 +235,7 @@ export function SessionControls({ hosts, localHostId, projects, backends, values
             {backend && backend.models.length > 0 && (
               <Chip name="Model" value={values.model} options={choiceOptions(backend.models)} {...chip("model")} />
             )}
-            {backend && backend.efforts.length > 0 && (
-              <Chip name="Effort" prefix="Effort" value={values.effort} options={choiceOptions(backend.efforts)} {...chip("effort")} />
-            )}
+            {backend && backend.efforts.length > 0 && <EffortChip backend={backend} values={values} readOnly={readOnly} chip={chip("effort")} />}
             {backend && backend.permission_modes.length > 0 && (
               <Chip
                 name="Permission mode"

@@ -60,6 +60,12 @@ pub fn test_config(data_dir: &Path, endpoint: &str) -> CoreConfig {
     config
 }
 
+/// Configures a test Core to detect backends by running their own version
+/// commands, so a fake backend is found available and asked for its models.
+pub fn detecting(config: &mut CoreConfig) {
+    config.backend_program_override = None;
+}
+
 /// A new temporary directory, under the canonical form of the system's
 /// temporary directory.
 ///
