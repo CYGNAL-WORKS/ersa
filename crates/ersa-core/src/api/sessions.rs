@@ -50,17 +50,23 @@ struct Starting {
 
 /// The workspace `id`, which must be `ready`, and its project.
 async fn ready_workspace(core: &Core, id: &str) -> Result<(Workspace, Project), ApiError> {
-    let workspace = core
-        .store
-        .workspace(id.to_string())
-        .await?
-        .ok_or_else(|| ApiError::not_found(format!("no workspace {id}")))?;
+    let (workspace, project) = workspace_and_project(core, id).await?;
     if workspace.state != WorkspaceState::Ready {
         return Err(ApiError::invalid_state(format!(
             "workspace {} is not ready",
             workspace.id
         )));
     }
+    Ok((workspace, project))
+}
+
+/// The workspace `id` and its project.
+async fn workspace_and_project(core: &Core, id: &str) -> Result<(Workspace, Project), ApiError> {
+    let workspace = core
+        .store
+        .workspace(id.to_string())
+        .await?
+        .ok_or_else(|| ApiError::not_found(format!("no workspace {id}")))?;
     let project = core
         .store
         .project(workspace.project_id.clone())
@@ -367,16 +373,7 @@ pub(super) async fn resume(core: &Core, params: IdParams) -> Result<Session, Api
 /// project's trust as it is now.
 async fn resumption(core: &Core, id: &str) -> Result<Resumption, ApiError> {
     let row = core.sessions.row(id)?;
-    let workspace = core
-        .store
-        .workspace(row.workspace_id.clone())
-        .await?
-        .ok_or_else(|| ApiError::not_found(format!("no workspace {}", row.workspace_id)))?;
-    let project = core
-        .store
-        .project(workspace.project_id.clone())
-        .await?
-        .ok_or_else(|| ApiError::not_found(format!("no project {}", workspace.project_id)))?;
+    let (_, project) = workspace_and_project(core, &row.workspace_id).await?;
     let Starting {
         transport,
         backend_version,
@@ -435,7 +432,7 @@ pub(super) async fn send(
     }
     // Looked up only for a session that is not running, which the send
     // resumes first (FLOW-RESUME-SESSION-R02).
-    let resumption = if core.sessions.is_live(&params.id)? {
+    let resumption = if core.sessions.is_running(&params.id).await? {
         None
     } else {
         Some(resumption(core, &params.id).await?)

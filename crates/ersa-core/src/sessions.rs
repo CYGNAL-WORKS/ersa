@@ -264,6 +264,9 @@ struct Handle {
     version_check: ReadSlot<Result<Option<String>, String>>,
     /// The same for reading the record's title and creation time.
     summary_read: ReadSlot<Result<Option<RecordSummary>, String>>,
+    /// The same for looking at the session's folder before a resume: on a
+    /// network drive that stops answering, one stuck look per session.
+    folder_check: ReadSlot<resume::FolderLook>,
     /// Set when the session is removed, for reads of its record that
     /// outlive it ([`read_unless_removed`]).
     removed: Arc<AtomicBool>,
@@ -595,6 +598,7 @@ impl Handle {
             record_read: tokio::sync::Mutex::new(None),
             version_check: tokio::sync::Mutex::new(None),
             summary_read: tokio::sync::Mutex::new(None),
+            folder_check: tokio::sync::Mutex::new(None),
             removed: Arc::default(),
             sending: Mutex::default(),
             scratch: Arc::default(),
