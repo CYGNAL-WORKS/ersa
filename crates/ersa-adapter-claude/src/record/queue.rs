@@ -133,9 +133,7 @@ mod tests {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
             "../../docs/briefs/protocol/fixtures/claude-code/2.1.316/record/22-message-during-turn.jsonl",
         );
-        fs::read_to_string(path)
-            .unwrap()
-            .replace("\r\n", "\n")
+        fs::read_to_string(path).unwrap().replace("\r\n", "\n")
     }
 
     /// The record up to and including the line holding `marker`.

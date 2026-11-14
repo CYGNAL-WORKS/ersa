@@ -1564,8 +1564,7 @@ fn without_lines(sequence: Vec<(u64, String)>) -> Vec<String> {
     sequence.into_iter().map(|(_, what)| what).collect()
 }
 
-const ESSAY: &str =
-    "user.message Write an essay of about 400 words on the history of lighthouses. Do not use any tools.";
+const ESSAY: &str = "user.message Write an essay of about 400 words on the history of lighthouses. Do not use any tools.";
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R43
 // verifies: PROTO-CLAUDE-CODE-STREAM-R44

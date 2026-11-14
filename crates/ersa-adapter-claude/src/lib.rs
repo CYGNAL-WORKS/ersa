@@ -26,6 +26,7 @@ mod questions;
 pub mod record;
 mod suggestions;
 mod tools;
+mod waiting;
 pub mod wire;
 
 pub use driver::{
