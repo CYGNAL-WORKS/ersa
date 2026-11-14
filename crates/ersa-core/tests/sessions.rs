@@ -39,6 +39,25 @@ async fn new_session(core: &TestCore, client: &mut Client) -> String {
     session["id"].as_str().unwrap().to_string()
 }
 
+/// A new session of the fake backend, subscribed, started and idle after a
+/// first turn: one Archive takes (PROTO-CORE-API-R77). Returns its id.
+async fn idle_session(core: &TestCore, client: &mut Client) -> String {
+    let id = new_session(core, client).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.started").await;
+    client
+        .result("session.send", json!({ "id": id, "text": "idle" }))
+        .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while session_row(client, &id).await["state"] != "idle" {
+        assert!(tokio::time::Instant::now() < deadline, "{id} never idle");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    id
+}
+
 fn seqs(events: &[Value]) -> Vec<u64> {
     events.iter().map(|e| e["seq"].as_u64().unwrap()).collect()
 }
@@ -1493,14 +1512,11 @@ async fn workspace_listed(client: &mut Client, workspace_id: &Value) -> bool {
 async fn archiving_a_running_session_stops_it_and_keeps_it_and_its_workspace() {
     let (core, stats) = start_fake(FakeAdapter::new(1)).await;
     let mut client = core.client().await;
-    let id = new_session(&core, &mut client).await;
+    // Ready, so the stop reaches the backend rather than cancelling its
+    // start, and idle, since a busy session can't be archived.
+    let id = idle_session(&core, &mut client).await;
     let workspace_id = session_row(&mut client, &id).await["workspace_id"].clone();
     assert_eq!(session_row(&mut client, &id).await["archived"], false);
-    client
-        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
-        .await;
-    // Ready, so the stop reaches the backend rather than cancelling its start.
-    client.events_until("session.started").await;
 
     let response = client
         .call(
@@ -1529,6 +1545,65 @@ async fn archiving_a_running_session_stops_it_and_keeps_it_and_its_workspace() {
     assert!(workspace_listed(&mut client, &workspace_id).await);
 }
 
+/// Archiving is refused while the session is starting or a turn runs in it,
+/// one waiting on the user included, and the refusal changes nothing: the
+/// session is neither stopped nor marked archived.
+// verifies: PROTO-CORE-API-R77
+// verifies: FLOW-ARCHIVE-DELETE-SESSION-R11
+#[tokio::test(flavor = "multi_thread")]
+async fn archiving_is_refused_while_the_session_is_starting_or_a_turn_runs() {
+    /// Asserts `session.set_archived` refuses `id` as busy and leaves it be.
+    async fn refused(client: &mut Client, stats: &Stats, id: &str, what: &str) {
+        let response = client
+            .call(
+                "session.set_archived",
+                json!({ "id": id, "archived": true }),
+            )
+            .await;
+        support::assert_valid("session.set_archived", &response);
+        let error = &response["error"];
+        assert_eq!(kind(error), "invalid_state", "{what}: {response}");
+        assert_eq!(
+            error["data"]["reason"], "session_busy",
+            "{what}: {response}"
+        );
+        let row = session_row(client, id).await;
+        assert_eq!(row["archived"], false, "{what}: not archived");
+        assert_ne!(row["state"], "ended", "{what}: not stopped");
+        assert_eq!(stats.stops.load(Ordering::SeqCst), 0, "{what}: not stopped");
+    }
+
+    // Starting: the backend takes a while to become ready.
+    let (core, stats) = start_fake(FakeAdapter::slow_start(Duration::from_secs(2))).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    refused(&mut client, &stats, &id, "starting").await;
+
+    // A turn running, and one waiting on the user.
+    for (text, what) in [("work", "running"), ("ask", "waiting on the user")] {
+        let (core, stats) = start_fake(FakeAdapter::new(1)).await;
+        let mut client = core.client().await;
+        let id = new_session(&core, &mut client).await;
+        client
+            .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+            .await;
+        client.events_until("session.started").await;
+        client
+            .result("session.send", json!({ "id": id, "text": text }))
+            .await;
+        if text == "ask" {
+            client.events_until("permission.requested").await;
+        } else {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+            while session_row(&mut client, &id).await["state"] != "running" {
+                assert!(tokio::time::Instant::now() < deadline, "never running");
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+        refused(&mut client, &stats, &id, what).await;
+    }
+}
+
 /// What `session.set_archived` sets outlives Core, and `session.list`
 /// reports it: `session.set_archived`'s half of R34 (`arrangement.rs` has
 /// `session.arrange`'s).
@@ -1537,7 +1612,7 @@ async fn archiving_a_running_session_stops_it_and_keeps_it_and_its_workspace() {
 async fn an_archived_session_is_still_archived_after_core_restarts() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
     let mut client = core.client().await;
-    let archived = new_session(&core, &mut client).await;
+    let archived = idle_session(&core, &mut client).await;
     let workspace_id = session_row(&mut client, &archived).await["workspace_id"].clone();
     let kept = client
         .result(
@@ -1569,11 +1644,8 @@ async fn an_archived_session_is_still_archived_after_core_restarts() {
 async fn a_message_to_an_archived_session_is_refused() {
     let (core, stats) = start_fake(FakeAdapter::new(1)).await;
     let mut client = core.client().await;
-    let id = new_session(&core, &mut client).await;
-    client
-        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
-        .await;
-    client.events_until("session.started").await;
+    let id = idle_session(&core, &mut client).await;
+    let sent = stats.messages.lock().unwrap().len();
     client
         .result(
             "session.set_archived",
@@ -1592,7 +1664,7 @@ async fn a_message_to_an_archived_session_is_refused() {
         error["message"].as_str().unwrap().contains("archived"),
         "{error:#}"
     );
-    assert!(stats.messages.lock().unwrap().is_empty());
+    assert_eq!(stats.messages.lock().unwrap().len(), sent);
 
     // Still refused after a restart, which kept the mark.
     drop(client);
@@ -1614,7 +1686,7 @@ async fn a_message_to_an_archived_session_is_refused() {
 async fn unarchiving_clears_the_mark_and_leaves_the_session_stopped() {
     let (core, stats) = start_fake(FakeAdapter::new(1)).await;
     let mut client = core.client().await;
-    let id = new_session(&core, &mut client).await;
+    let id = idle_session(&core, &mut client).await;
     client
         .result(
             "session.set_archived",
@@ -1653,7 +1725,7 @@ async fn unarchiving_clears_the_mark_and_leaves_the_session_stopped() {
 async fn a_refused_resume_leaves_an_archived_session_archived() {
     let (core, _) = start_fake(FakeAdapter::new(1)).await;
     let mut client = core.client().await;
-    let id = new_session(&core, &mut client).await;
+    let id = idle_session(&core, &mut client).await;
     client
         .result(
             "session.set_archived",
