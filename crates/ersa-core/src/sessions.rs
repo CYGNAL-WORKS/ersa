@@ -70,7 +70,7 @@ mod send;
 
 pub use fork::{Beginning, ForkHold, Forkable};
 pub use resume::Resumption;
-pub use send::Pacer;
+pub use send::{Pacer, Waiting};
 
 /// How many events may wait for one subscriber before it counts as unable
 /// to keep up. Streaming text produces many small events, so this is
@@ -338,6 +338,9 @@ struct Handle {
     removed: Arc<AtomicBool>,
     /// The send under way, if any: one at a time per session.
     sending: Mutex<Option<send::Sending>>,
+    /// Woken when a send ends, so a send waiting its turn behind it reports
+    /// at once (PROTO-CORE-API-R90).
+    send_ended: Arc<Notify>,
     /// Held by whatever works in the session's scratch folder: a send's
     /// copying, and removing the folder with the session.
     scratch: Arc<tokio::sync::Mutex<()>>,
@@ -670,6 +673,7 @@ impl Handle {
             folder_check: tokio::sync::Mutex::new(None),
             removed: Arc::default(),
             sending: Mutex::default(),
+            send_ended: Arc::default(),
             scratch: Arc::default(),
         }
     }
