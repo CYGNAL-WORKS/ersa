@@ -51,7 +51,7 @@ use ersa_adapter::{
 };
 use ersa_protocol::core_api::rpc::Notification;
 use ersa_protocol::core_api::{
-    Deleting, Section, Session, SessionEventParams, SessionTileParams, Tile,
+    Deleting, ErrorReason, Section, Session, SessionEventParams, SessionTileParams, Tile,
 };
 use ersa_protocol::events::{
     Envelope, ErrorCode, ErrorEvent, Event, LifecycleState, NoticeCode, NoticeLevel, SessionNotice,
@@ -162,6 +162,14 @@ pub enum SessionError {
     /// A `session.arrange` named a section that does not exist.
     #[error("no section {0}")]
     NoSection(String),
+    /// A refusal the user meets: answered `invalid_state` with `reason`, so
+    /// the Interface can say it in its own words; `message` is for the log
+    /// (PROTO-CORE-API, Errors).
+    #[error("{message}")]
+    Refused {
+        reason: ErrorReason,
+        message: String,
+    },
 }
 
 /// Every session Core knows, and the adapters it can start them with.
@@ -210,6 +218,21 @@ impl Drop for WorkspaceClaim {
 }
 
 /// The refusal for a request a delete under way holds back.
+/// Whether the session is starting, a turn is running in it (one waiting
+/// on the user included), or a message is being sent to it: what Delete and
+/// Archive wait for (PROTO-CORE-API, `session_busy`).
+fn in_turn(handle: &Handle) -> bool {
+    let session = handle.describe();
+    let working = matches!(
+        session.state,
+        LifecycleState::Starting | LifecycleState::Running | LifecycleState::WaitingUser
+    );
+    // A pending permission or question is a turn waiting on the user,
+    // whatever state the backend last reported.
+    let waiting = !session.tile.pending.is_empty();
+    (handle.live().is_some() && (working || waiting)) || session.sending.is_some()
+}
+
 fn busy(workspace_id: &str) -> SessionError {
     SessionError::Busy(format!(
         "a session in workspace {workspace_id} is being deleted; try again once it is done"
@@ -1251,6 +1274,16 @@ impl SessionManager {
         let handle = self.handle(id)?;
         self.refuse_if_deleting(&handle)?;
         if archived {
+            // Refused before the stop, so a busy session is left exactly as
+            // it was (PROTO-CORE-API-R77).
+            if in_turn(&handle) {
+                return Err(SessionError::Refused {
+                    reason: ErrorReason::SessionBusy,
+                    message: format!(
+                        "session {id} is starting or working; stop it before archiving it"
+                    ),
+                });
+            }
             self.stop(id).await?;
         }
         // Taken after the stop, which takes it itself. Held while marking,
@@ -1343,21 +1376,13 @@ impl SessionManager {
     /// once it holds the claim, so a send cannot start in between.
     pub fn check_deletable(&self, id: &str) -> Result<(), SessionError> {
         let handle = self.handle(id)?;
-        let session = handle.describe();
-        let working = matches!(
-            session.state,
-            LifecycleState::Starting | LifecycleState::Running | LifecycleState::WaitingUser
-        );
-        // A pending permission or question is a turn waiting on the user,
-        // whatever state the backend last reported.
-        let waiting = !session.tile.pending.is_empty();
         // The fork's CLI has yet to read the record a delete would take.
         if handle.forking.load(Ordering::SeqCst) {
             return Err(SessionError::InvalidState(format!(
                 "session {id} is being forked; delete it once the fork has started"
             )));
         }
-        if (handle.live().is_some() && (working || waiting)) || session.sending.is_some() {
+        if in_turn(&handle) {
             return Err(SessionError::InvalidState(format!(
                 "session {id} is starting or working; stop it before deleting it"
             )));

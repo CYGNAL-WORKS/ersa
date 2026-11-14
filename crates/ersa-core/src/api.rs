@@ -126,6 +126,9 @@ impl From<SessionError> for ApiError {
             }
             SessionError::Busy(message) => ApiError::invalid_state(message).with_detail("busy"),
             SessionError::NoSection(id) => ApiError::not_found(format!("no section {id}")),
+            SessionError::Refused { reason, message } => ApiError(
+                ErrorObject::application(ErrorKind::InvalidState, message).with_reason(reason),
+            ),
         }
     }
 }

@@ -334,6 +334,10 @@ Archive
 
 Unarchive
 
+### `rail.tile.archiveBusyReason`
+
+Stop the session to archive it
+
 ### `rail.tile.archiveError`
 
 Ersa can't archive this session.
