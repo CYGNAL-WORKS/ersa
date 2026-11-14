@@ -1014,6 +1014,14 @@ Reading the branches…
 
 Ersa couldn't read this project's branches. The new workspace will start at the default branch.
 
+### `sessionControls.effort.defaultLabel`
+
+Default
+
+### `sessionControls.effort.noneLabel`
+
+None
+
 ### `sessionControls.contextRing.noneLabel`
 
 Context: none used yet

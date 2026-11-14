@@ -8,8 +8,9 @@ use std::sync::Arc;
 
 use ersa_adapter::Adapter;
 use ersa_core::{ServeError, Server};
+use ersa_protocol::core_api::ModelChoice;
 use serde_json::json;
-use support::fake::FakeAdapter;
+use support::fake::{FakeAdapter, ModelsAnswer};
 use support::suite::{self, Target};
 use support::{assert_valid, kind, start, start_with_adapters, tempdir, test_config};
 
@@ -143,12 +144,105 @@ async fn host_and_backend_lists_hold_each_registered_adapter_in_order() {
         .result("backend.list", json!({ "host_id": "local" }))
         .await;
     assert_eq!(names(&infos), ["zeta", "alpha"]);
-    assert_eq!(infos[0]["models"][0]["id"], json!("model-a"));
+    // A missing backend lists no models (PROTO-CORE-API-R72).
+    assert_eq!(infos[0]["models"], json!([]));
 
     let error = client
         .error("backend.list", json!({ "host_id": "nowhere" }))
         .await;
     assert_eq!(kind(&error), "not_found");
+}
+
+/// `backend.list` on a Core that detects the fake backend for real, with
+/// the fake answering `models` as given.
+async fn listed(answer: ModelsAnswer) -> serde_json::Value {
+    let fake = FakeAdapter::new(1);
+    *fake.models.lock().unwrap() = answer;
+    let core = start_with_adapters(tempdir(), support::detecting, vec![Arc::new(fake)]).await;
+    let mut client = core.client().await;
+    let infos = client
+        .result("backend.list", json!({ "host_id": "local" }))
+        .await;
+    infos[0].clone()
+}
+
+/// A backend's models are its own report, every field as it gave it; one
+/// that cannot report them is `error`, and one the probe cannot find
+/// `missing`, either with no models.
+// verifies: PROTO-CORE-API-R72
+#[tokio::test(flavor = "multi_thread")]
+async fn backend_list_lists_the_models_the_backend_reports() {
+    let listed_models = |models: Vec<ModelChoice>| listed(ModelsAnswer::Listed(models));
+    let mut reported = support::fake::fake_models();
+    reported[0].label = "Default (recommended)".into();
+    reported[0].resolved = Some("model-a-7".into());
+    let info = listed_models(reported).await;
+    assert_eq!(info["status"], json!("available"));
+    assert_eq!(info["version"], json!("1.0.0"));
+    assert_eq!(
+        info["models"],
+        json!([
+            { "id": "model-a", "label": "Default (recommended)", "default": true, "resolved": "model-a-7" },
+            { "id": "model-b", "label": "MODEL-B", "default": false, "resolved": "model-b-1", "efforts": ["low"] },
+        ])
+    );
+
+    let info = listed(ModelsAnswer::Fails).await;
+    assert_eq!(info["status"], json!("error"));
+    assert_eq!(info["models"], json!([]));
+
+    let info = listed(ModelsAnswer::Missing).await;
+    assert_eq!(info["status"], json!("missing"));
+    assert_eq!(info["models"], json!([]));
+}
+
+/// A detection that found every backend available is kept: listing again
+/// and starting a session ask the backend for nothing more. The reuse of a
+/// failed detection is turned off, so only that rule can keep it; a
+/// backend that fails is asked again each time.
+// verifies: PROTO-CORE-API-R96
+#[tokio::test(flavor = "multi_thread")]
+async fn a_detection_that_found_every_backend_is_not_run_again() {
+    let no_reuse = |config: &mut ersa_core::CoreConfig| {
+        support::detecting(config);
+        config.failed_detection_ttl = std::time::Duration::ZERO;
+    };
+    let probes =
+        |stats: &support::fake::Stats| stats.model_probes.load(std::sync::atomic::Ordering::SeqCst);
+
+    let failing = FakeAdapter::new(1);
+    *failing.models.lock().unwrap() = ModelsAnswer::Fails;
+    let stats = Arc::clone(&failing.stats);
+    let core = start_with_adapters(tempdir(), no_reuse, vec![Arc::new(failing)]).await;
+    let mut client = core.client().await;
+    for _ in 0..2 {
+        client
+            .result("backend.list", json!({ "host_id": "local" }))
+            .await;
+    }
+    assert_eq!(probes(&stats), 2);
+
+    let fake = FakeAdapter::new(1);
+    let stats = Arc::clone(&fake.stats);
+    let core = start_with_adapters(tempdir(), no_reuse, vec![Arc::new(fake)]).await;
+    let mut client = core.client().await;
+    for _ in 0..2 {
+        let infos = client
+            .result("backend.list", json!({ "host_id": "local" }))
+            .await;
+        assert_eq!(infos[0]["status"], json!("available"));
+    }
+    let workspace_id = support::workspace(&mut client, core.dir.path()).await;
+    client
+        .result(
+            "session.create",
+            json!({ "workspace_id": workspace_id, "backend": support::fake::BACKEND, "model": "model-b" }),
+        )
+        .await;
+    assert_eq!(
+        stats.model_probes.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
 }
 
 // verifies: PROTO-CORE-API-R06
