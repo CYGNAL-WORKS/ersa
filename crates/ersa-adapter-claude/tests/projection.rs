@@ -1595,8 +1595,9 @@ const READ_THRICE: &str = "user.message Use the Read tool to read README.md. Aft
      again with the Read tool. After that, read it a third time with the Read tool. Do these one \
      at a time, one tool call per reply, then say done.";
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R43
-// verifies: PROTO-CLAUDE-CODE-STREAM-R44
+// verifies: PROTO-CLAUDE-CODE-STREAM-R63
+// verifies: PROTO-CLAUDE-CODE-STREAM-R64
+// verifies: PROTO-CLAUDE-CODE-STREAM-R67
 #[test]
 fn messages_written_during_a_turn_open_the_next_turn_when_the_cli_echoes_them() {
     // Fixture 53: two messages written while the first turn runs. The CLI
@@ -1629,8 +1630,8 @@ fn messages_written_during_a_turn_open_the_next_turn_when_the_cli_echoes_them() 
     assert_eq!(joined.0, echoes(&lines)[1]);
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R43
-// verifies: PROTO-CLAUDE-CODE-STREAM-R44
+// verifies: PROTO-CLAUDE-CODE-STREAM-R63
+// verifies: PROTO-CLAUDE-CODE-STREAM-R67
 #[test]
 fn a_message_a_turn_that_uses_tools_takes_in_joins_it_where_the_cli_echoes_it() {
     // Fixture 52: written while the turn's first tool call ran, the message
@@ -1657,7 +1658,7 @@ fn a_message_a_turn_that_uses_tools_takes_in_joins_it_where_the_cli_echoes_it() 
     assert_eq!(second.0, echoes(&lines)[1]);
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R44
+// verifies: PROTO-CLAUDE-CODE-STREAM-R67
 #[test]
 fn an_interrupted_turn_with_a_message_waiting_leaves_the_session_working() {
     // Fixture 54: interrupting ends only the running turn; the waiting
@@ -1682,7 +1683,7 @@ fn an_interrupted_turn_with_a_message_waiting_leaves_the_session_working() {
     );
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R46
+// verifies: PROTO-CLAUDE-CODE-STREAM-R68
 #[test]
 fn the_count_of_waiting_messages_follows_the_handovers_and_the_echoes() {
     // Fixture 53: each message written during the turn waits until the CLI
@@ -1709,8 +1710,8 @@ fn echo_of(text: &str, uuid: &str) -> String {
     echo_of_blocks(&[text], uuid)
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R43
-// verifies: PROTO-CLAUDE-CODE-STREAM-R46
+// verifies: PROTO-CLAUDE-CODE-STREAM-R65
+// verifies: PROTO-CLAUDE-CODE-STREAM-R68
 #[test]
 fn the_echo_of_a_message_that_opened_its_turn_does_not_take_in_one_waiting() {
     // The first message's echo can come after a second was written: it
@@ -1759,9 +1760,9 @@ fn echo_of_blocks(texts: &[&str], uuid: &str) -> String {
     .to_string()
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R43
-// verifies: PROTO-CLAUDE-CODE-STREAM-R44
-// verifies: PROTO-CLAUDE-CODE-STREAM-R46
+// verifies: PROTO-CLAUDE-CODE-STREAM-R65
+// verifies: PROTO-CLAUDE-CODE-STREAM-R67
+// verifies: PROTO-CLAUDE-CODE-STREAM-R68
 #[test]
 fn a_message_taken_in_with_one_that_opened_its_turn_is_still_shown() {
     // Written a moment after a message to an idle CLI, before the CLI took
@@ -1791,9 +1792,9 @@ fn a_message_taken_in_with_one_that_opened_its_turn_is_still_shown() {
     );
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R43
-// verifies: PROTO-CLAUDE-CODE-STREAM-R44
-// verifies: PROTO-CLAUDE-CODE-STREAM-R46
+// verifies: PROTO-CLAUDE-CODE-STREAM-R66
+// verifies: PROTO-CLAUDE-CODE-STREAM-R67
+// verifies: PROTO-CLAUDE-CODE-STREAM-R68
 #[test]
 fn a_local_commands_output_marked_as_an_echo_takes_in_no_waiting_message() {
     // The CLI marks a model change's output as an echo too (fixture 26,
@@ -1836,8 +1837,8 @@ fn a_local_commands_output_marked_as_an_echo_takes_in_no_waiting_message() {
     );
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R43
-// verifies: PROTO-CLAUDE-CODE-STREAM-R46
+// verifies: PROTO-CLAUDE-CODE-STREAM-R66
+// verifies: PROTO-CLAUDE-CODE-STREAM-R68
 #[test]
 fn a_local_commands_output_before_an_idle_messages_echo_leaves_its_match_alone() {
     // The model-change output arrives before the echo that takes in "one"
@@ -1863,8 +1864,8 @@ fn a_local_commands_output_before_an_idle_messages_echo_leaves_its_match_alone()
     assert_eq!(messages, ["user.message one", "user.message two"]);
 }
 
-// verifies: PROTO-CLAUDE-CODE-STREAM-R43
-// verifies: PROTO-CLAUDE-CODE-STREAM-R44
+// verifies: PROTO-CLAUDE-CODE-STREAM-R65
+// verifies: PROTO-CLAUDE-CODE-STREAM-R67
 #[test]
 fn a_command_echoed_only_as_its_output_does_not_hold_up_later_echoes() {
     // `/compact` written to an idle CLI comes back only as its output
