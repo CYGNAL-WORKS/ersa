@@ -11,7 +11,7 @@
 //! between lines (the turn number, text streamed so far, which requests are
 //! pending) is all derived from earlier lines.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use ersa_adapter::{Direction, Projected, Projector, RawLine};
 use ersa_protocol::events::{
@@ -92,16 +92,24 @@ pub struct ClaudeProjector {
     /// answer before the first turn, then each `system/init` and each
     /// `system/status` that carries one (PROTO-CLAUDE-CODE-STREAM-R40).
     permission_mode: Option<String>,
-    /// How many messages the host wrote while a turn ran (or while others
-    /// already waited) that the CLI has not taken in yet. The CLI echoes
-    /// what it takes in (`--replay-user-messages`): every waiting message at
-    /// once, at the next turn's start or, in a turn that uses tools, at the
-    /// turn's next model call (PROTO-CLAUDE-CODE-STREAM-R43, R46).
-    waiting: u32,
-    /// How many messages the host wrote to an idle CLI whose echo has not
-    /// come yet. Each was projected from its host line, which opened its
-    /// turn, so its echo projects to nothing more.
-    shown_unechoed: u32,
+    /// Messages the host wrote while a turn ran (or while others already
+    /// waited) that the CLI has not taken in yet, in the order written. The
+    /// CLI echoes what it takes in (`--replay-user-messages`): every waiting
+    /// message at once, at the next turn's start or, in a turn that uses
+    /// tools, at the turn's next model call, and the echo is their
+    /// `user.message` (PROTO-CLAUDE-CODE-STREAM-R43, R46). They are kept for
+    /// a log without echoes, where each is projected at the next turn's
+    /// `system/init` instead.
+    waiting: Vec<UserMessage>,
+    /// For each message written to an idle CLI whose echo has not come yet,
+    /// how many content blocks it has. Each was projected from its host
+    /// line, which opened its turn, so its echo repeats it; an echo with
+    /// more blocks also took in the messages written just after it.
+    unechoed: VecDeque<usize>,
+    /// Whether the log has no echoes: a turn its host message opened ended
+    /// without the CLI echoing that message, as in a log from before the
+    /// adapter passed `--replay-user-messages`.
+    no_echoes: bool,
 }
 
 /// A `can_use_tool` request the CLI is waiting on.
@@ -177,7 +185,8 @@ impl Projector for ClaudeProjector {
     }
 
     fn waiting(&self) -> u32 {
-        self.waiting
+        // Saturating: a count past u32 is not a count anyone shows.
+        u32::try_from(self.waiting.len()).unwrap_or(u32::MAX)
     }
 }
 
@@ -318,6 +327,15 @@ impl ClaudeProjector {
         // given on the command line. Either way a user's message started it.
         if !self.turn_open {
             out.extend(self.open_turn(line, TurnTrigger::User));
+            // Without echoes, the turn after one that had messages written
+            // during it is theirs (2.1.316/22-message-during-turn).
+            if self.no_echoes {
+                out.extend(
+                    self.waiting
+                        .drain(..)
+                        .map(|message| at(line, Event::UserMessage(message))),
+                );
+            }
         }
         if out.is_empty() || drifted.is_some() {
             out.push(passthrough(line, value));
@@ -564,12 +582,18 @@ impl ClaudeProjector {
         // (PROTO-CLAUDE-CODE-STREAM-R44).
         out.push(state(
             line,
-            if self.waiting == 0 {
+            if self.waiting.is_empty() {
                 LifecycleState::Idle
             } else {
                 LifecycleState::Running
             },
         ));
+        // The CLI echoes a message as its turn starts, so a turn that ends
+        // with its own message unechoed is from a log without echoes.
+        if !self.unechoed.is_empty() {
+            self.no_echoes = true;
+            self.unechoed.clear();
+        }
 
         // Message ids and streams never span turns.
         self.turn_open = false;
@@ -906,11 +930,11 @@ impl ClaudeProjector {
         let Some(message) = user_message(&value) else {
             return vec![passthrough(line, value)];
         };
-        if self.turn_open || self.waiting > 0 {
-            self.waiting += 1;
+        if self.turn_open || !self.waiting.is_empty() {
+            self.waiting.push(message);
             return vec![passthrough(line, value)];
         }
-        self.shown_unechoed += 1;
+        self.unechoed.push_back(blocks(&value).len());
         let mut out = self.open_turn(line, TurnTrigger::User);
         out.push(at(line, Event::UserMessage(message)));
         out
@@ -921,18 +945,19 @@ impl ClaudeProjector {
     /// during one turn come back joined, as the record keeps them), so the
     /// echo is their `user.message`, under the record entry's id. The echo of
     /// a message written to an idle CLI repeats one already projected from
-    /// its host line, and projects to nothing more. Echoes come in the order
-    /// the messages were written.
+    /// its host line, and projects to nothing more, unless the CLI took in
+    /// messages written a moment after it with it: their blocks follow its
+    /// own. Echoes come in the order the messages were written.
     fn echo(&mut self, line: &RawLine, uuid: String, value: Value) -> Vec<Projected> {
-        if self.shown_unechoed > 0 {
-            self.shown_unechoed -= 1;
-            return vec![passthrough(line, value)];
-        }
-        let message = user_message(&value).filter(|_| self.waiting > 0);
+        let blocks = blocks(&value);
+        let shown = self.unechoed.pop_front().unwrap_or(0);
+        let message = (!self.waiting.is_empty() && blocks.len() > shown)
+            .then(|| user_message_of(&blocks[shown..]))
+            .flatten();
         let Some(message) = message else {
             return vec![passthrough(line, value)];
         };
-        self.waiting = 0;
+        self.waiting.clear();
         let mut out = self.ensure_turn(line);
         out.push(Projected::of_message(
             Some(uuid),
@@ -1318,17 +1343,28 @@ fn drift_error(line: &RawLine, kind: &str) -> Projected {
     )
 }
 
-/// The text of a message's text blocks, if it has any.
+/// The content blocks of a host user line or its echo; a message whose
+/// content is a plain string is one text block.
+fn blocks(value: &Value) -> Vec<Value> {
+    match value.pointer("/message/content") {
+        Some(Value::Array(blocks)) => blocks.clone(),
+        Some(Value::String(text)) => vec![serde_json::json!({ "type": "text", "text": text })],
+        _ => Vec::new(),
+    }
+}
+
 /// The `user.message` of a host user line or its echo, or `None` for one
-/// with neither words nor attachments. A message with attachments carries its
+/// with neither words nor attachments.
+fn user_message(value: &Value) -> Option<UserMessage> {
+    user_message_of(&blocks(value))
+}
+
+/// The `user.message` of these content blocks, or `None` when they hold
+/// neither words nor attachments. A message with attachments carries its
 /// images and its list of files and folders as blocks of their own, never as
 /// its text (R26).
-fn user_message(value: &Value) -> Option<UserMessage> {
-    let (text, attachments) = match value.pointer("/message/content") {
-        Some(Value::Array(blocks)) => crate::attachments::split(blocks),
-        Some(content) => (content.as_str().map(String::from), Vec::new()),
-        None => (None, Vec::new()),
-    };
+fn user_message_of(blocks: &[Value]) -> Option<UserMessage> {
+    let (text, attachments) = crate::attachments::split(blocks);
     if text.is_none() && attachments.is_empty() {
         return None;
     }
@@ -1340,6 +1376,7 @@ fn user_message(value: &Value) -> Option<UserMessage> {
     })
 }
 
+/// The text of a message's text blocks, if it has any.
 fn plain_text(blocks: &[ContentBlock]) -> Option<String> {
     let texts: Vec<&str> = blocks
         .iter()
