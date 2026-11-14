@@ -15,7 +15,7 @@ Status: pre-alpha.
 
 ## Run the daily build
 
-The daily build is Ersa built from the latest `main` and installed for your Windows account. ADR 0035 explains how it relates to a development build.
+The daily build is Ersa built from the latest `main` and installed for your Windows account. It keeps its own sessions and data in `%LOCALAPPDATA%\Ersa\daily`, apart from any development build you run beside it. ADR 0035 explains why.
 
 To build it, you need Git, Rust, Node.js, and pnpm. From any checkout of this repository, run:
 
@@ -27,7 +27,7 @@ The script fetches `main`, builds it in a checkout of its own in `%LOCALAPPDATA%
 
 The installer isn't signed, so Windows SmartScreen warns you the first time. Select **More info**, then **Run anyway**.
 
-To update, quit the daily build, then run the script again. To remove the daily build, uninstall Ersa from Windows settings.
+To update, quit the daily build, then run the script again; your sessions and data stay. To remove the daily build, uninstall Ersa from Windows settings.
 
 ## License
 
