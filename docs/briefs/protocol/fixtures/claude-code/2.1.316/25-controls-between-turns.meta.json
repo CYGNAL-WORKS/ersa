@@ -1,0 +1,147 @@
+{
+  "recorded_at": "2026-11-14T01:07:01.033Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "654dd2b4-c2e3-444b-a312-6d7726dc5c68",
+  "session_record": "record/25-controls-between-turns.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command",
+    "queue-operation",
+    "system/compact_boundary"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 3478,
+  "stderr": "",
+  "stdout_lines": 27,
+  "stdout_timing_ms": [
+    849,
+    1154,
+    1157,
+    2188,
+    2188,
+    2188,
+    2192,
+    2192,
+    2194,
+    2194,
+    2195,
+    2211,
+    2222,
+    2223,
+    2226,
+    2227,
+    2268,
+    2295,
+    2297,
+    2750,
+    2750,
+    2750,
+    2888,
+    2888,
+    2901,
+    2901,
+    2906
+  ],
+  "sent": [
+    {
+      "t": 22,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 849,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with the single word: first\"}]}}"
+    },
+    {
+      "t": 2212,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-set_model-1\",\"request\":{\"subtype\":\"set_model\",\"model\":\"haiku\"}}"
+    },
+    {
+      "t": 2223,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-set_permission_mode-2\",\"request\":{\"subtype\":\"set_permission_mode\",\"mode\":\"acceptEdits\"}}"
+    },
+    {
+      "t": 2226,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-apply_flag_settings-3\",\"request\":{\"subtype\":\"apply_flag_settings\",\"settings\":{\"effortLevel\":\"low\"}}}"
+    },
+    {
+      "t": 2269,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with the single word: second\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Reply with the single word: first",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    },
+    {
+      "turn": 2,
+      "control": "set_model",
+      "got_response": true,
+      "subtype": "success"
+    },
+    {
+      "turn": 3,
+      "control": "set_permission_mode",
+      "got_response": true,
+      "subtype": "success"
+    },
+    {
+      "turn": 4,
+      "control": "apply_flag_settings",
+      "got_response": true,
+      "subtype": "success"
+    },
+    {
+      "turn": 5,
+      "text": "Reply with the single word: second",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}
