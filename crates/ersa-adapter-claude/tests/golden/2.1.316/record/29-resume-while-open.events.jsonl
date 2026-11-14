@@ -1,0 +1,4 @@
+{"backend_version":"2.1.316","event":{"origin":"human","text":"Reply with only the word one.","type":"user.message"},"message_id":"5fe3366a-6528-42f1-a673-ea011d7506a5","ts":"2026-11-14T03:40:56.549Z"}
+{"backend_version":"2.1.316","event":{"block_id":"msg_011Ch28KdHCapmyvze44o67j/0","final":true,"text":"one","type":"assistant.text"},"message_id":"f146c2c4-f0a2-4d3e-84ad-96455ab643fb","ts":"2026-11-14T03:40:57.719Z"}
+{"backend_version":"2.1.316","event":{"origin":"human","text":"Reply with only the word two.","type":"user.message"},"message_id":"ea3e6d8b-8c9d-4c82-ae53-d8cd763d7322","ts":"2026-11-14T03:41:34.371Z"}
+{"backend_version":"2.1.316","event":{"block_id":"msg_011Ch28NQrRUQffncpXtuR8o/0","final":true,"text":"two","type":"assistant.text"},"message_id":"9b5d9826-6494-4117-a9e4-0c21fde20f46","ts":"2026-11-14T03:41:35.332Z"}

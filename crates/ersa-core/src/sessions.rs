@@ -65,9 +65,11 @@ use crate::projection::View;
 use crate::raw_log::RawLog;
 
 mod fork;
+mod resume;
 mod send;
 
 pub use fork::{Beginning, ForkHold, Forkable};
+pub use resume::Resumption;
 pub use send::Pacer;
 
 /// How many events may wait for one subscriber before it counts as unable
@@ -162,6 +164,10 @@ pub enum SessionError {
     /// A `session.arrange` named a section that does not exist.
     #[error("no section {0}")]
     NoSection(String),
+    /// The session's folder no longer exists, so it can't be resumed
+    /// (FLOW-RESUME-SESSION-R03).
+    #[error("{0}")]
+    FolderGone(String),
 }
 
 /// Every session Core knows, and the adapters it can start them with.
@@ -964,7 +970,7 @@ impl SessionManager {
                     transport,
                     config,
                     backend_version,
-                    fork_hold,
+                    Launched::New { fork_hold },
                 );
                 return Ok(handle.describe());
             }
@@ -982,7 +988,7 @@ impl SessionManager {
         transport: Arc<dyn Transport>,
         config: SessionConfig,
         backend_version: String,
-        fork_hold: Option<Arc<ForkHold>>,
+        launched: Launched,
     ) {
         let (fed_tx, fed_rx) = mpsc::unbounded_channel();
         let sink = Arc::new(CoreSink::new(&handle.id, Arc::clone(&self.app_log), fed_tx));
@@ -1013,7 +1019,7 @@ impl SessionManager {
             transport,
             config,
             backend_version,
-            fork_hold,
+            launched,
             started: started_tx,
             finished: finished_tx,
             pipeline,
@@ -2304,6 +2310,15 @@ impl AdapterSink for CoreSink {
 
 // -- The session task ----------------------------------------------------------
 
+/// Why Core starts a session's backend.
+enum Launched {
+    /// A new session, or a fork with its hold on the original, let go once
+    /// the start is over.
+    New { fork_hold: Option<Arc<ForkHold>> },
+    /// A stopped session started again (FLOW-RESUME-SESSION).
+    Resumed,
+}
+
 struct SessionTask {
     store: Store,
     handle: Arc<Handle>,
@@ -2312,8 +2327,7 @@ struct SessionTask {
     transport: Arc<dyn Transport>,
     config: SessionConfig,
     backend_version: String,
-    /// A fork's hold on its original, let go once the start is over.
-    fork_hold: Option<Arc<ForkHold>>,
+    launched: Launched,
     started: watch::Sender<Started>,
     finished: watch::Sender<bool>,
     pipeline: tokio::task::JoinHandle<()>,
@@ -2328,11 +2342,20 @@ async fn run_session(task: SessionTask) {
         transport,
         config,
         backend_version,
-        fork_hold,
+        launched,
         started,
         finished,
         pipeline,
     } = task;
+    // Ready with no turn to report one: a fork, and a session started again,
+    // whose backend reports nothing until its next message.
+    let (fork_hold, ready_fact) = match launched {
+        Launched::New { fork_hold } => {
+            let fact = fork_hold.is_some().then_some(LifecycleFact::ForkReady);
+            (fork_hold, fact)
+        }
+        Launched::Resumed => (None, Some(LifecycleFact::Resumed)),
+    };
     let sink = Arc::clone(&live.sink);
     sink.record_fact(LifecycleFact::ProcessStarted {
         backend: handle.backend.clone(),
@@ -2342,7 +2365,6 @@ async fn run_session(task: SessionTask) {
     // still leaves the fact startup repairs from.
     sink.app_log.flushed().await;
 
-    let is_fork = fork_hold.is_some();
     let mut cancel = live.cancel.subscribe();
     let as_sink: Arc<dyn AdapterSink> = sink.clone();
     // The start runs in a task of its own, so an adapter that panics fails
@@ -2370,8 +2392,8 @@ async fn run_session(task: SessionTask) {
             *lock(&handle.start_failure) = None;
             // Before the session can be sent anything, so a first message's
             // lines come after this.
-            if is_fork {
-                sink.record_fact(LifecycleFact::ForkReady);
+            if let Some(fact) = ready_fact {
+                sink.record_fact(fact);
             }
             started.send_replace(Started::Ready(Arc::clone(&session)));
             sink.start_finished(Ok(()));

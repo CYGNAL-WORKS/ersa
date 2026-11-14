@@ -123,12 +123,17 @@ impl SessionManager {
     /// backend has it, `None` when Core has not projected it yet.
     /// `admitted` runs once the send has its session's slot, so requests
     /// behind it on the same connection need not wait for the copying.
+    ///
+    /// A session that is not running is resumed first with `resumption`,
+    /// its backend starting as the send's `starting` phase
+    /// (FLOW-RESUME-SESSION-R02); without one, the send is refused.
     pub async fn send(
         &self,
         id: &str,
         text: String,
         attachments: Vec<Attachment>,
         admitted: impl FnOnce(),
+        resumption: Option<Resumption>,
     ) -> Result<Option<u32>, SessionError> {
         let handle = self.handle(id)?;
         self.refuse_if_deleting(&handle)?;
@@ -140,7 +145,9 @@ impl SessionManager {
                 "the session is archived; unarchive or resume it to send it a message".into(),
             ));
         }
-        let live = handle.live().ok_or_else(|| handle.not_running())?;
+        if handle.live().is_none() && resumption.is_none() {
+            return Err(handle.not_running());
+        }
         let (cancel, mut canceled) = watch::channel(false);
         let changed = Arc::new(Notify::new());
         {
@@ -181,6 +188,13 @@ impl SessionManager {
         };
         admitted();
 
+        // A session to resume is refused for a folder that is gone before
+        // anything is copied into it (FLOW-RESUME-SESSION-R03).
+        if handle.live().is_none() {
+            let cwd = lock(&handle.row).cwd.clone();
+            resume::check_folder(&cwd).await?;
+        }
+
         let mut copies = Copies(None);
         let outgoing = if attachments.is_empty() {
             Vec::new()
@@ -191,6 +205,15 @@ impl SessionManager {
             outgoing
         };
 
+        let live = match (handle.live(), resumption) {
+            (Some(live), _) => live,
+            (None, Some(resumption)) => {
+                set_phase(&handle, SendPhase::Starting);
+                self.start_again(&handle, resumption).await?;
+                handle.live().ok_or_else(|| handle.not_running())?
+            }
+            (None, None) => return Err(handle.not_running()),
+        };
         if live.ready().is_none() {
             set_phase(&handle, SendPhase::Starting);
         }
