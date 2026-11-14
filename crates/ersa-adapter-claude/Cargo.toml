@@ -14,6 +14,9 @@ ersa-protocol = { path = "../ersa-protocol" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+# The record's timestamps, read as RFC 3339 to find a session's latest
+# turn (PROTO-CLAUDE-CODE-STREAM-R58).
+time = { workspace = true, features = ["parsing"] }
 # Warnings for Core's log, where nothing else reports them.
 tracing.workspace = true
 # A new session's id, chosen before the CLI starts (`--session-id`).

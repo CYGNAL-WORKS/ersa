@@ -44,8 +44,8 @@ pub mod fake;
 pub use adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, ForkOf,
     ImageLimits, OpenElsewhere, OutgoingAttachment, OutgoingMessage, PermissionDecision, Projected,
-    Projector, QuestionReply, RecordDeletion, RecordEvent, RecordSummary, SessionConfig,
-    TitleRules,
+    Projector, QuestionReply, RecordDeletion, RecordEvent, RecordSummary, Recorded,
+    RecordedSettings, Requested, SessionConfig, TitleRules,
 };
 pub use local::LocalTransport;
 pub use raw::{Direction, RawLine};
