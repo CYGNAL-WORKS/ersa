@@ -13,7 +13,7 @@
 // build when that checkout isn't exactly `origin/main`.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -23,19 +23,20 @@ function git(cwd, ...args) {
   return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 
-/** Fetches `origin/main` into `repo` and puts the checkout at `dir` on it,
- * creating the worktree on the first run. Touches no other working tree. */
+/** Fetches `origin/main` and puts the checkout at `dir` on it, creating the
+ * worktree from `repo` on the first run. Touches no other working tree. */
 export function prepareCheckout(repo, dir) {
-  git(repo, "fetch", "--quiet", "origin", "main");
   // A worktree whose folder was deleted is still registered; forget it so
   // `worktree add` can recreate it.
   git(repo, "worktree", "prune");
   if (!existsSync(dir)) {
+    git(repo, "fetch", "--quiet", "origin", "main");
     git(repo, "worktree", "add", "--quiet", "--detach", dir, "origin/main");
     return;
   }
-  // The worktree shares the repository's refs, so `origin/main` here is the
-  // commit just fetched.
+  // Fetch through the checkout itself: it may belong to another clone than
+  // the one the script runs from, and its `origin/main` is that clone's ref.
+  git(dir, "fetch", "--quiet", "origin", "main");
   git(dir, "checkout", "--quiet", "--detach", "--force", "origin/main");
   // Untracked files go; ignored ones (the build caches) stay.
   git(dir, "clean", "-ffdq");
@@ -57,22 +58,29 @@ export function verifyAtMain(dir) {
 
 // Runs a command in `cwd`, showing its output, and throws when it fails.
 // pnpm is a .cmd on Windows, which Node starts only through the shell, and
-// the shell needs paths with spaces quoted.
-function run(cwd, cmd, args) {
+// the shell needs paths with spaces quoted. Cargo's output is pinned to the
+// checkout's own target folder, whatever CARGO_TARGET_DIR the owner set, since
+// the script reads the build from there.
+function run(cwd, cmd, args, targetDir) {
   process.stdout.write(`\n== ${cmd} ${args.join(" ")}\n`);
   const shell = process.platform === "win32";
-  const quoted = shell ? args.map((a) => (/\s/.test(a) ? `"${a}"` : a)) : args;
-  const result = spawnSync(cmd, quoted, { cwd, stdio: "inherit", shell });
+  const quote = (a) => (shell && /\s/.test(a) ? `"${a}"` : a);
+  const env = targetDir ? { ...process.env, CARGO_TARGET_DIR: targetDir } : process.env;
+  const result = spawnSync(quote(cmd), args.map(quote), { cwd, stdio: "inherit", shell, env });
   if (result.status !== 0) throw new Error(`${cmd} ${args.join(" ")} failed (exit ${result.status}).`);
 }
 
 // Builds the installer in `dir` and returns its path.
 export function build(dir) {
   const shell = join(dir, "apps", "shell");
-  const release = join(dir, "target", "release");
+  const target = join(dir, "target");
+  const release = join(target, "release");
+  const nsis = join(release, "bundle", "nsis");
+  // An installer left from an earlier run must never be mistaken for this one.
+  rmSync(nsis, { recursive: true, force: true });
   run(shell, "pnpm", ["install", "--frozen-lockfile"]);
   // Core's executable, `ersa-core`, is package ersa-cli's binary.
-  run(dir, "cargo", ["build", "--release", "--locked", "-p", "ersa-cli"]);
+  run(dir, "cargo", ["build", "--release", "--locked", "-p", "ersa-cli"], target);
   // Tauri bundles an external binary from `<path>-<target triple>.exe` and
   // installs it as `<name>.exe` beside the window, where a release build looks
   // for Core. The setting lives only in this build's extra config: in
@@ -82,15 +90,11 @@ export function build(dir) {
   copyFileSync(`${core}.exe`, `${core}-${triple}.exe`);
   const overlay = join(release, "daily-build.tauri.json");
   writeFileSync(overlay, JSON.stringify({ bundle: { externalBin: [core.replaceAll("\\", "/")] } }));
-  run(shell, "pnpm", ["exec", "tauri", "build", "--config", overlay]);
+  run(shell, "pnpm", ["exec", "tauri", "build", "--config", overlay], target);
 
-  const nsis = join(release, "bundle", "nsis");
-  const installers = readdirSync(nsis)
-    .filter((f) => f.endsWith("-setup.exe"))
-    .map((f) => join(nsis, f))
-    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
-  if (!installers.length) throw new Error(`The build made no installer in ${nsis}.`);
-  return installers[0];
+  const installers = existsSync(nsis) ? readdirSync(nsis).filter((f) => f.endsWith("-setup.exe")) : [];
+  if (installers.length !== 1) throw new Error(`Expected one installer in ${nsis}, found ${installers.length}.`);
+  return join(nsis, installers[0]);
 }
 
 function main() {
