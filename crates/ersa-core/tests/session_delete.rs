@@ -685,17 +685,10 @@ async fn a_record_opened_elsewhere_part_way_fails_the_delete_until_tried_again()
     assert!(!folder.exists(), "the files had gone");
     assert_eq!(backend_ids(&fake.records).len(), 1);
     // Its files gone, the workspace takes no new session.
-    let workspaces = client
-        .result("workspace.list", json!({ "project_id": project["id"] }))
-        .await;
-    let listed_workspace = workspaces
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|w| w["id"] == workspace["id"])
-        .cloned()
-        .unwrap();
-    assert_eq!(listed_workspace["state"], "error");
+    assert_eq!(
+        workspace_state(&mut client, &project, &workspace).await,
+        "error"
+    );
     let error = client
         .error(
             "session.create",
@@ -959,16 +952,10 @@ async fn a_workspace_leaves_ready_when_the_session_is_marked_before_its_folder_i
         listed(&mut client, &id).await.unwrap()["deleting"],
         "failed"
     );
-    let workspaces = client
-        .result("workspace.list", json!({ "project_id": project["id"] }))
-        .await;
-    let state = workspaces
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|w| w["id"] == workspace["id"])
-        .map(|w| w["state"].clone());
-    assert_eq!(state, Some(json!("error")));
+    assert_eq!(
+        workspace_state(&mut client, &project, &workspace).await,
+        "error"
+    );
     let error = client
         .error(
             "session.create",
@@ -983,4 +970,161 @@ async fn a_workspace_leaves_ready_when_the_session_is_marked_before_its_folder_i
         .result("session.delete", json!({ "id": id, "token": fresh }))
         .await;
     assert!(!workspace_listed(&mut client, &project, &workspace).await);
+}
+
+/// The workspace's state in `workspace.list`.
+async fn workspace_state(client: &mut Client, project: &Value, workspace: &Value) -> Value {
+    let workspaces = client
+        .result("workspace.list", json!({ "project_id": project["id"] }))
+        .await;
+    workspaces
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["id"] == workspace["id"])
+        .map(|w| w["state"].clone())
+        .expect("the workspace is listed")
+}
+
+/// `workspace.remove`'s pause, taken before its claim and again after.
+const REMOVE_PAUSE: Duration = Duration::from_millis(3000);
+/// Into a removal: inside its pause before the claim.
+const BEFORE_CLAIM: Duration = Duration::from_millis(300);
+/// Into a removal: inside its pause after the claim.
+const AFTER_CLAIM: Duration = Duration::from_millis(3200);
+
+/// A Core whose `workspace.remove` pauses before and after claiming the
+/// workspace, so another request can land on either side.
+async fn start_with_remove_pause(fake: &Arc<FakeAdapter>) -> TestCore {
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
+    start_with_adapters(
+        tempdir(),
+        |config| config.remove_claim_pause = REMOVE_PAUSE,
+        adapters,
+    )
+    .await
+}
+
+/// A delete marks the workspace `error` while a `workspace.remove` runs,
+/// `land` into it: before its claim (it read `ready`) or while it holds the
+/// claim. The removal is refused for the session and leaves `error`, so the
+/// workspace takes no new session while its folder may be going. The delete
+/// takes the files (a sole session, a token it showed), so it sets `error`
+/// (R57), and a locked worktree stops it at step 5 with the session kept.
+async fn a_removal_refused_for_sessions_keeps_a_deletes_error_mark(land: Duration) {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let core = start_with_remove_pause(&fake).await;
+    let mut client = core.client().await;
+    let mut remover = core.client().await;
+    let (project, repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, folder) = isolated(&mut client, &project).await;
+    let mut deleter = core.client().await;
+    let id = idle_session(&mut client, &workspace).await;
+    git(&repo, &["worktree", "lock", folder.to_str().unwrap()]);
+    let shown = token(&mut client, &workspace).await;
+
+    let started = tokio::time::Instant::now();
+    let removal = remover
+        .request("workspace.remove", json!({ "id": workspace["id"] }))
+        .await;
+    tokio::time::sleep(land).await;
+    let deletion = deleter
+        .request("session.delete", json!({ "id": id, "token": shown }))
+        .await;
+    // When the mark lands, so the test fails rather than passes by luck if
+    // it misses the window it was meant for.
+    let deadline = started + REMOVE_PAUSE * 2;
+    while workspace_state(&mut client, &project, &workspace).await != "error" {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the delete never marked the workspace inside the removal"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let marked = started.elapsed();
+    if land < REMOVE_PAUSE {
+        assert!(marked < REMOVE_PAUSE, "marked after the claim: {marked:?}");
+    }
+    let error = &deleter.response(deletion).await["error"];
+    assert_eq!(kind(error), "vcs_error", "{error}");
+
+    let response = remover.response(removal).await;
+    let error = &response["error"];
+    assert_eq!(kind(error), "invalid_state", "{response}");
+    assert!(
+        error["message"].as_str().unwrap().contains("has sessions"),
+        "{response}"
+    );
+    assert_eq!(
+        workspace_state(&mut client, &project, &workspace).await,
+        "error"
+    );
+    let error = client
+        .error(
+            "session.create",
+            json!({ "workspace_id": workspace["id"], "backend": fake::BACKEND }),
+        )
+        .await;
+    assert_eq!(kind(&error), "invalid_state", "{error}");
+}
+
+// verifies: PROTO-CORE-API-R94
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_refused_for_sessions_keeps_an_error_mark_set_before_its_claim() {
+    a_removal_refused_for_sessions_keeps_a_deletes_error_mark(BEFORE_CLAIM).await;
+}
+
+// verifies: PROTO-CORE-API-R94
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_refused_for_sessions_keeps_an_error_mark_set_while_it_holds_the_claim() {
+    a_removal_refused_for_sessions_keeps_a_deletes_error_mark(AFTER_CLAIM).await;
+}
+
+/// The same, where git refuses the removal: another request marks the
+/// workspace `error` between the removal's read and its claim, and the
+/// refusal leaves it `error`.
+// verifies: PROTO-CORE-API-R94
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removal_git_refuses_keeps_an_error_mark_set_after_its_read() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let core = start_with_remove_pause(&fake).await;
+    let mut client = core.client().await;
+    let mut remover = core.client().await;
+    let (project, repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, folder) = isolated(&mut client, &project).await;
+    git(&repo, &["worktree", "lock", folder.to_str().unwrap()]);
+
+    let removal = remover
+        .request("workspace.remove", json!({ "id": workspace["id"] }))
+        .await;
+    tokio::time::sleep(BEFORE_CLAIM).await;
+    // As `session.delete` step 4 writes it (R57), straight to the row.
+    let db = core.dir.path().join("data").join("ersa.db");
+    let store = ersa_core::persistence::Store::open(&db).expect("open");
+    let workspace_id = workspace["id"].as_str().unwrap().to_string();
+    store
+        .call(move |conn| {
+            conn.execute(
+                "UPDATE workspaces SET state = 'error' WHERE id = ?1",
+                [workspace_id.as_str()],
+            )?;
+            Ok(())
+        })
+        .await
+        .expect("update");
+
+    let response = remover.response(removal).await;
+    assert_eq!(kind(&response["error"]), "vcs_error", "{response}");
+    assert!(folder.is_dir(), "a refusal leaves the folder");
+    assert_eq!(
+        workspace_state(&mut client, &project, &workspace).await,
+        "error"
+    );
+    let error = client
+        .error(
+            "session.create",
+            json!({ "workspace_id": workspace["id"], "backend": fake::BACKEND }),
+        )
+        .await;
+    assert_eq!(kind(&error), "invalid_state", "{error}");
 }
