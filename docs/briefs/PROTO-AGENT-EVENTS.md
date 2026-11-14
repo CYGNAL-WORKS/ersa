@@ -143,7 +143,6 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - **PROTO-AGENT-EVENTS-R20**: A `tool.requested` for a call that replaces text in a file or writes a whole file shall carry `edits`, one entry per change with the file's path, the text replaced (absent for a whole file written) and the new text; any other call shall carry none.
 - **PROTO-AGENT-EVENTS-R21**: A `tool.requested` for a call the adapter knows to act on one path, command, search or address shall carry it as `target`; any other call shall carry none.
 - **PROTO-AGENT-EVENTS-R22**: A Claude Code `authentication_failed` synthetic message shall project to one `error`, and no `assistant.text`: with `code: authentication_failed` and `action: log_in`, except in a live session the CLI started in its minimal mode, which PROTO-CLAUDE-CODE-STREAM-R53 governs; read from a session record, it always projects this way.
-- **PROTO-AGENT-EVENTS-R22**: A Claude Code `authentication_failed` synthetic message shall project to one `error`, and no `assistant.text`: with `code: authentication_failed` and `action: log_in`, except in a live session the CLI started in its minimal mode, which PROTO-CLAUDE-CODE-STREAM-R51 governs; read from a session record, it always projects this way.
 - **PROTO-AGENT-EVENTS-R23**: An entry of `edits` whose change replaces its text everywhere it occurs in the file shall carry `every_occurrence` true; any other entry shall carry no `every_occurrence`.
 
 ## Out of scope
