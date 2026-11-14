@@ -233,7 +233,7 @@ sequenceDiagram
 
 ### Bare mode
 
-The CLI's `--bare` minimal mode skips the user's sign-in, hooks, CLAUDE.md and auto-memory. Ersa never passes it, but the CLI's makers have said a future version may make it the default for runs like Ersa's, and no flag turns it off. In bare mode the session fails on its first message as if the user were signed out, and its `system/init` has neither `scratchpad_path` nor `memory_paths`, where a signed-out session's lacks only the first and a session with auto-memory off only the second (`2.1.316/bare-mode-2026-11-13.txt`). The adapter tells the two apart by those fields in a live session; a session opened from its record has no `system/init`, so its history shows the failure as a sign-out, so the user is not sent to sign in again when signing in can't help, and the conformance fixtures of each newly tested version show the mode the CLI starts in.
+The CLI's `--bare` minimal mode skips the user's sign-in, hooks, CLAUDE.md and auto-memory. Ersa never passes it, but the CLI's makers have said a future version may make it the default for runs like Ersa's, and no flag turns it off. In bare mode the session fails on its first message as if the user were signed out, and its `system/init` has none of `scratchpad_path`, `memory_paths` and `messaging_socket_path` (fixture 2.1.316/37-bare-mode). The first two are not enough, alone or together: a signed-out session's lacks `scratchpad_path` (fixture 2.1.302/00-not-logged-in), and with auto-memory off it lacks `memory_paths` too, while it keeps `messaging_socket_path` (fixture 2.1.316/38-signed-out-no-auto-memory). The adapter takes a live session as bare only when all three are missing, so that a signed-out user is always asked to sign in. A session opened from its record has no `system/init`, so its history shows the failure as a sign-out, and the conformance fixtures of each newly tested version show the mode the CLI starts in.
 
 ## Versioning
 
@@ -294,8 +294,10 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R46**: The adapter shall report how many messages a live session's CLI holds as the `enqueue` entries in its record written since that CLI process started, less the `dequeue` entries written since then, reading them when Core hands a message over during a turn and when a turn starts.
 - **PROTO-CLAUDE-CODE-STREAM-R49**: When the CLI accepts the first message that has words of a new session the adapter started with `--session-id`, the adapter shall send `generate_session_title` once with that message's words and `persist: true`, without holding the turn for its answer, and with a deadline of 5 minutes; it shall send none for a resumed session or a fork.
 - **PROTO-CLAUDE-CODE-STREAM-R50**: The adapter shall report the title a `generate_session_title` answer carries as the session's title until the record holds it, unless a rename was sent or `system/session_title_changed` seen at any time in the session; a decline, an error, an answer with no title or a passed deadline shall report no title and no error.
-- **PROTO-CLAUDE-CODE-STREAM-R51**: When a live session's `system/init` has neither `scratchpad_path` nor `memory_paths` and its turn then fails as not signed in, the adapter shall project the failure as an `error` with `code: backend_error`, `recoverable: false`, no `action`, and a message saying Claude Code started in its minimal mode, which Ersa can't use, instead of `authentication_failed`.
-- **PROTO-CLAUDE-CODE-STREAM-R52**: The adapter's conformance tests shall fail when a fixture at the newest tested version whose recorded arguments are the adapter's own invocation has a `system/init` with neither `scratchpad_path` nor `memory_paths`.
+- ~~**PROTO-CLAUDE-CODE-STREAM-R51**~~: retired 2026-11-13 (its two-field signal also matched a signed-out session with auto-memory off), replaced by R53.
+- ~~**PROTO-CLAUDE-CODE-STREAM-R52**~~: retired 2026-11-13 (the same signal), replaced by R54.
+- **PROTO-CLAUDE-CODE-STREAM-R53**: When a live session's `system/init` has none of `scratchpad_path`, `memory_paths` and `messaging_socket_path` and its turn then fails as not signed in, the adapter shall project the failure as an `error` with `code: backend_error`, `recoverable: false`, no `action`, and a message saying Claude Code started in its minimal mode, which Ersa can't use, instead of `authentication_failed`.
+- **PROTO-CLAUDE-CODE-STREAM-R54**: The adapter's conformance tests shall fail when a fixture at the newest tested version whose recorded arguments are the adapter's own invocation has a `system/init` with none of `scratchpad_path`, `memory_paths` and `messaging_socket_path`.
 - **PROTO-CLAUDE-CODE-STREAM-R48**: The adapter shall project each `tool_use` block of a tool named in Tool targets and edits to a `tool.requested` carrying the `target` and `edits` that table gives, and any other tool's to one carrying neither.
 
 ## Out of scope
@@ -305,6 +307,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 ## Open questions
 
+- Whether `messaging_socket_path` tells bare mode apart on macOS and Linux: every recording is from Windows, where it is a named pipe. A bare session that kept it would be asked to sign in.
 - Whether `system/session_title_changed` becomes an event of its own rather than a passthrough.
 - Exact shapes of `get_context_usage`, `get_session_cost`, and `mcp_message` responses (to be recorded).
 - Whether `permissions.allow` already applies in the session that first attests trust: the CLI logs that it re-applies project settings after recording trust, but its stderr warning is printed before `initialize` is read, and checking needs a tool call. The opt-in live test checks the next session only.
@@ -313,6 +316,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 ## Changes
 
+- 2026-11-13: from #350 inbox: Bare mode's signal narrowed to all three of `scratchpad_path`, `memory_paths` and `messaging_socket_path` missing: a signed-out session with auto-memory off lacks the first two (fixture 2.1.316/38-signed-out-no-auto-memory) and was told signing in can't help. Bare mode cites fixture 2.1.316/37-bare-mode in place of the summary it replaced. PROTO-CLAUDE-CODE-STREAM-R51 and R52 retired for R53 and R54.
 - 2026-11-13: from #351 inbox: Tool targets and edits corrected from fixtures 28 to 34: the subagent tool is listed as `Task` and called as `Agent`; `NotebookEdit` and `WebSearch` load through `ToolSearch`, which joins `WebSearch`'s row; `PowerShell` joins `Bash`'s row, since it is the shell the CLI offers on Windows (fixture 35); an edit that replaces every occurrence says so (PROTO-AGENT-EVENTS-R23, fixture 36). No requirement IDs changed: R48 follows the table.
 - 2026-11-13: from #345 inbox: recordings 22 to 27 answer two open questions: a message written during a turn is stamped at its turn's start and holds the mode it starts with, and model, effort and mode controls sent during a turn apply at once. The control shapes, the record's local-command entries, and where live and record projections differ are recorded. No requirement IDs changed.
 - 2026-11-13: from #148: Bare mode added, recorded on 2.1.316 (`bare-mode-2026-11-13.txt`): a bare session's failure is told apart from a signed-out one (PROTO-CLAUDE-CODE-STREAM-R51), and the conformance tests catch a version that starts bare by default (R52).
