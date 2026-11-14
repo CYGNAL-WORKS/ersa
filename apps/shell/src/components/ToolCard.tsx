@@ -199,30 +199,31 @@ export function ToolCard({
 /** An open tool card: its input, its subagent's calls, then its output or error. */
 function ToolOpenBody({ item, calls, context }: { item: Tool; calls: readonly Tool[]; context: ToolContext }) {
   return (
-        <div className="tool-open-body">
-          {/* Input, then Output or Error, each under its label whatever it holds (TRANSCRIPT.md, Tool cards); a part
-              with nothing in it says so in quiet words, rather than showing an empty box. */}
-          <span className="tool-label">{t("transcript.tool.inputLabel")}</span>
-          {Object.keys(item.input).length > 0 ? <InputFields input={item.input} /> : <p className="tool-empty">{t("transcript.tool.noInputLabel")}</p>}
+    <div className="tool-open-body">
+      {/* Input, then Output or Error, each under its label whatever it holds (TRANSCRIPT.md, Tool cards); a part
+          with nothing in it says so in quiet words, rather than showing an empty box. */}
+      <span className="tool-label">{t("transcript.tool.inputLabel")}</span>
+      {Object.keys(item.input).length > 0 ? <InputFields input={item.input} /> : <p className="tool-empty">{t("transcript.tool.noInputLabel")}</p>}
 
-          {calls.length > 0 && (
-            <div className="tool-calls">
-              {calls.map((call) => (
-                <ToolCard key={call.key} item={call} context={context} />
-              ))}
-            </div>
-          )}
-          {item.result && (
-            <>
-              <span className="tool-label">{item.result.isError ? t("transcript.tool.errorLabel") : t("transcript.tool.outputLabel")}</span>
-              {item.result.content !== "" ? (
-                <pre className="tool-output mono">{item.result.content}</pre>
-              ) : (
-                <p className="tool-empty">{t("transcript.tool.noOutputLabel")}</p>
-              )}
-            </>
-          )}
+      {calls.length > 0 && (
+        <div className="tool-calls">
+          {calls.map((call) => (
+            <ToolCard key={call.key} item={call} context={context} />
+          ))}
         </div>
+      )}
+      {item.result && <Outcome result={item.result} />}
+    </div>
+  );
+}
+
+/** A call's output under "Output", or its error under "Error", shared by a tool card and a failed diff card. */
+function Outcome({ result }: { result: NonNullable<Tool["result"]> }) {
+  return (
+    <>
+      <span className="tool-label">{result.isError ? t("transcript.tool.errorLabel") : t("transcript.tool.outputLabel")}</span>
+      {result.content !== "" ? <pre className="tool-output mono">{result.content}</pre> : <p className="tool-empty">{t("transcript.tool.noOutputLabel")}</p>}
+    </>
   );
 }
 
@@ -296,12 +297,7 @@ function DiffChange({ diffs, item, workspace }: { diffs: readonly FileDiff[]; it
       ))}
       {item.result?.isError && (
         <div className="tool-open-body">
-          <span className="tool-label">{t("transcript.tool.errorLabel")}</span>
-          {item.result.content !== "" ? (
-            <pre className="tool-output mono">{item.result.content}</pre>
-          ) : (
-            <p className="tool-empty">{t("transcript.tool.noOutputLabel")}</p>
-          )}
+          <Outcome result={item.result} />
         </div>
       )}
     </div>
