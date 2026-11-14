@@ -586,9 +586,7 @@ pub(super) async fn workspace_remove(
         .transport_for(&project.host_id)
         .ok_or_else(|| unreachable_host(&project.host_id))?;
 
-    if !core.config.remove_claim_pause.is_zero() {
-        tokio::time::sleep(core.config.remove_claim_pause).await;
-    }
+    pause_for_tests(core).await;
 
     // Claim the workspace, so a second removal (or, later, a session start)
     // cannot run against it at the same time. A workspace in `error` from a
@@ -606,6 +604,7 @@ pub(super) async fn workspace_remove(
             workspace.id
         )));
     };
+    pause_for_tests(core).await;
 
     // A workspace with sessions is refused, as a project with workspaces
     // is: removal never cascades, and no backend may be left running in a
@@ -652,6 +651,15 @@ pub(super) async fn workspace_remove(
     core.store.delete_workspace(workspace.id.clone()).await?;
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
+}
+
+/// Sleeps for [`crate::CoreConfig::remove_claim_pause`], zero outside
+/// tests: once before `workspace.remove`'s claim and once after it, so a
+/// test can land another request on either side.
+async fn pause_for_tests(core: &Core) {
+    if !core.config.remove_claim_pause.is_zero() {
+        tokio::time::sleep(core.config.remove_claim_pause).await;
+    }
 }
 
 /// Puts back the state a refused `workspace.remove`'s claim replaced, only

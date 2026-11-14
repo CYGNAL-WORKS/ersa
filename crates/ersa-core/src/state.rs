@@ -46,9 +46,9 @@ pub struct CoreConfig {
     /// of its run. Zero, except in tests that need a request to land while
     /// a run winds down.
     pub wind_down_pause: Duration,
-    /// A pause between `workspace.remove` reading the workspace and claiming
-    /// it. Zero, except in tests that need another request to land in
-    /// between.
+    /// A pause `workspace.remove` takes before claiming the workspace and
+    /// again after. Zero, except in tests that need another request to land
+    /// between its read and its claim, or while it holds the claim.
     pub remove_claim_pause: Duration,
     /// How long a backend detection that found anything other than
     /// `available` is reused. [`FAILED_DETECTION_TTL`], except in tests
