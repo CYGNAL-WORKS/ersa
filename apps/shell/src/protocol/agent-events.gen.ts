@@ -33,7 +33,7 @@ export interface Envelope {
   /**
    * Event schema version. Bumped when any event's meaning or shape changes, including the lifecycle events Core emits itself.
    */
-  v: 5;
+  v: 6;
   session_id: string;
   /**
    * Gap-free and increasing within a session; assigned by Core.
@@ -145,11 +145,29 @@ export interface ToolRequested {
   display_name?: string;
   input: ToolInput;
   parent_tool_use_id?: string;
+  /**
+   * The one thing the call acts on, as the user would name it: a path, a command, a search or an address. Filled by the adapter from its backend's own tools; absent for any other call.
+   */
+  target?: string;
+  /**
+   * For a call that changes files, one entry per change in the order the call makes them; absent for any other call.
+   *
+   * @minItems 1
+   */
+  edits?: [FileEdit, ...FileEdit[]];
 }
 /**
  * A tool's arguments, as the tool defines them. Open: the keys are the tool's parameter names, not protocol fields.
  */
 export interface ToolInput {}
+export interface FileEdit {
+  path: string;
+  /**
+   * The text replaced; absent when the call writes the whole file.
+   */
+  old_text?: string;
+  new_text: string;
+}
 export interface ToolResult {
   type: "tool.result";
   tool_use_id: string;

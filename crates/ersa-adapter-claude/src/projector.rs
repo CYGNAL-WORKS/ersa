@@ -27,6 +27,7 @@ use serde_json::Value;
 
 use crate::questions::{self, QUESTION_TOOL};
 use crate::suggestions;
+use crate::tools;
 use crate::wire::{
     ApiMessage, AssistantMessage, CliMessage, CliResponse, ContentBlock, Delta, InitializeResponse,
     MessageContent, RateLimitInfo, StreamEvent, StreamEventMessage, SystemMessage, Usage,
@@ -35,7 +36,7 @@ use crate::{BACKEND, MAX_TESTED_VERSION};
 
 /// The version of this projection. Bump it whenever the events produced for
 /// some raw log would change, so Core re-projects cached sessions.
-pub const PROJECTOR_VERSION: u32 = 6;
+pub const PROJECTOR_VERSION: u32 = 7;
 
 /// The `model` the CLI gives the messages it writes itself rather than
 /// receiving from the API.
@@ -959,13 +960,18 @@ pub(crate) fn reply_events(
             ContentBlock::ToolUse {
                 id, name, input, ..
             } => match input {
-                Value::Object(input) => events.push(Event::ToolRequested(ToolRequested {
-                    tool_use_id: id,
-                    name,
-                    display_name: None,
-                    input,
-                    parent_tool_use_id: parent_tool_use_id.clone(),
-                })),
+                Value::Object(input) => {
+                    let (target, edits) = tools::target_and_edits(&name, &input);
+                    events.push(Event::ToolRequested(ToolRequested {
+                        tool_use_id: id,
+                        name,
+                        display_name: None,
+                        input,
+                        parent_tool_use_id: parent_tool_use_id.clone(),
+                        target,
+                        edits,
+                    }))
+                }
                 _ => events.push(Event::Error(ErrorEvent {
                     code: ErrorCode::Protocol,
                     message: format!("tool_use {id} has an input that is not an object"),
