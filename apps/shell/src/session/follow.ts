@@ -8,7 +8,7 @@
 import type { Envelope } from "../protocol/agent-events.gen";
 import type { Attachment, SessionSendProgressNotification } from "../protocol/core-api.gen";
 import { hasSeq } from "../core/checks";
-import { type BridgeError, type CoreClient, describeError, refusalOf } from "../core/client";
+import { type BridgeError, type CoreClient, describeError, refusalOf, stoppedBeforeSent } from "../core/client";
 import { type Transcript, apply, emptyTranscript } from "./transcript";
 
 /** The key that starts the notice saying Core no longer holds a session's earliest events. */
@@ -235,8 +235,8 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         set((v) => ({ ...v, message: undefined, turnPending: pending || undefined }));
         return true;
       } catch (error) {
-        // Only Core's cancel, answered as an invalid state, is the stop's doing; any other failure is still shown.
-        const stopped = stopping && refusalOf(error)?.kind === "invalid_state";
+        // Only Core's cancel is the stop's doing; any other failure, even after a stop, is still shown.
+        const stopped = stopping && stoppedBeforeSent(error);
         set((v) => ({ ...v, message: stopped ? undefined : sendFailure(error) }));
         return false;
       } finally {
