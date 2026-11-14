@@ -60,7 +60,7 @@ export function refusalOf(error: unknown): ErrorData | undefined {
 type Reason = NonNullable<ErrorData["reason"]>;
 
 // The catalog's words for each refusal reason the Interface knows (PROTO-CORE-API-R80). `folder_gone` has none yet:
-// its words, and where they show, come with Copy session ID (#340); until then it reads as Core's message.
+// its words, and where they show, come with the ticket for Copy session ID; until then it reads as Core's message.
 const REFUSAL_WORDS: Partial<Record<Reason, () => string>> = {
   session_busy: () => t("errors.refusal.sessionBusyError"),
   session_deleting: () => t("errors.refusal.sessionDeletingError"),
