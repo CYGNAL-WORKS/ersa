@@ -12,7 +12,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ersa_adapter::{Adapter, BackendChoices, Transport};
-use ersa_protocol::core_api::{BackendInfo, BackendState, BackendStatus, TestedRange};
+use ersa_protocol::core_api::{
+    BackendInfo, BackendState, BackendStatus, Choice, ModelChoice, TestedRange,
+};
 
 use crate::transport::{self, RunError};
 
@@ -55,10 +57,25 @@ impl Detected {
                 min: self.tested.0.clone(),
                 max: self.tested.1.clone(),
             },
-            models: self.choices.models.clone(),
+            // The adapter knows its models' ids, labels and default; what
+            // only the backend can report (the resolved id, the efforts a
+            // model takes) is left absent until Core reads it from the
+            // backend (PROTO-CORE-API-R72).
+            models: self.choices.models.iter().map(model_choice).collect(),
             efforts: self.choices.efforts.clone(),
             permission_modes: self.choices.permission_modes.clone(),
         }
+    }
+}
+
+/// An adapter's model choice as `backend.list` lists it.
+fn model_choice(choice: &Choice) -> ModelChoice {
+    ModelChoice {
+        id: choice.id.clone(),
+        label: choice.label.clone(),
+        default: choice.default,
+        resolved: None,
+        efforts: None,
     }
 }
 
@@ -149,7 +166,16 @@ mod tests {
                 ersa_adapter_claude::MAX_TESTED_VERSION
             )
         );
-        assert_eq!(info.models, claude.choices().models);
+        let ids = |ids: Vec<String>| ids;
+        assert_eq!(
+            ids(info.models.iter().map(|m| m.id.clone()).collect()),
+            ids(claude
+                .choices()
+                .models
+                .iter()
+                .map(|m| m.id.clone())
+                .collect())
+        );
         assert_eq!(info.label, "Claude Code");
 
         let mut session = ProcessSpec::default();
