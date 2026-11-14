@@ -8,6 +8,7 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-14 PROTO-CORE-API: R71 says nothing of a session from before Core kept the time of its requests: its stored model, effort or permission mode has no time to compare a turn's start with. Core counts such a value as never requested, so the record's value from any turn stands over it, and the stored value only while the record holds none.
 
 
 ## Resolved recently (optional, trimmed in planning passes)
