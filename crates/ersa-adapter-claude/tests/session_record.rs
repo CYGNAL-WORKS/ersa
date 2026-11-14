@@ -197,7 +197,12 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
             // stream shows the mode, so live its sign-in failure is the
             // minimal-mode error (PROTO-CLAUDE-CODE-STREAM-R51) and read back
             // it is a sign-in failure (PROTO-AGENT-EVENTS-R22).
-            if stream.name == "2.1.316/28-bare-mode" {
+            if (stream.name.as_str(), uuid.as_str())
+                == (
+                    "2.1.316/28-bare-mode",
+                    "e1632d1e-dd8e-4819-bf67-b98092b915b9",
+                )
+            {
                 assert!(
                     matches!(
                         (events.as_slice(), recorded.as_slice()),
@@ -211,7 +216,7 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
                                 ..
                             })]
                         )
-                    ) || recorded == &events,
+                    ),
                     "{}: {uuid}: {events:?} live, {recorded:?} from the record",
                     stream.name
                 );
