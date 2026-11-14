@@ -201,6 +201,9 @@ describe("a subagent's calls", () => {
     show([{ type: "tool.requested", tool_use_id: "e", name: "Ping", input: {} }, { type: "tool.result", tool_use_id: "e", content: "", is_error: true }]);
     const row = screen.getByRole("button", { name: "Ping, Failed" });
     expect([...openPart(row).querySelectorAll(".tool-label")].map((l) => l.textContent)).toEqual(["Input", "Error"]);
+    // Each says it is empty rather than showing an empty box.
+    expect([...openPart(row).querySelectorAll(".tool-empty")].map((l) => l.textContent)).toEqual(["No input", "No output"]);
+    expect(openPart(row).querySelector(".tool-output")).toBeNull();
   });
 });
 
