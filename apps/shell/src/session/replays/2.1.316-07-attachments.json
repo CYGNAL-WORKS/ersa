@@ -1,5 +1,5 @@
 {
-  "ersa_commit": "a5d08b906704712e4266e776c280883bddbf9dc1",
+  "ersa_commit": "4fc9b11c13492bdc392c13b2bf63142698602cf2",
   "notifications": [
     {
       "kind": "notification",
@@ -3589,6 +3589,7 @@
       "id": "s-replay",
       "last_activity_at": "2026-01-01T00:00:00Z",
       "last_event_seq": 83,
+      "model": "claude-opus-5-5",
       "permission_mode": "default",
       "pinned": false,
       "state": "idle",
