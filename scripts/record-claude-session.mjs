@@ -305,6 +305,7 @@ let waiting = null; // { want: (msg) => bool, resolve }
 // not in a wait, since a `result` may come while nothing waits for it.
 let messagesSent = 0;
 let resultsSeen = 0;
+let lastResult = null;
 // Where in stdout the latest user message was sent, for `until:`.
 let sinceMessage = 0;
 
@@ -346,7 +347,10 @@ child.stdout.on("data", (d) => {
     } catch {
       continue;
     }
-    if (msg.type === "result") resultsSeen++;
+    if (msg.type === "result") {
+      resultsSeen++;
+      lastResult = msg;
+    }
     if (msg.type === "control_request" && msg.request?.subtype === "can_use_tool") {
       // Allow with the input as asked, the way Ersa answers an unedited allow.
       send({
@@ -428,7 +432,7 @@ if (initialized) {
     sendMessage(text);
     const ok = await drain();
     // The latest `result`: this message's own.
-    const res = ok ? stdoutLines.map((l) => { try { return JSON.parse(l.line); } catch { return null; } }).findLast((m) => m?.type === "result") : null;
+    const res = ok ? lastResult : null;
     turns.push({ turn: n + 1, text, got_result: !!res, subtype: res?.subtype ?? null, is_error: res?.is_error ?? null });
     if (!res) break;
   }
