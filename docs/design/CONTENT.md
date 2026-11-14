@@ -1,6 +1,6 @@
 # Ersa content
 
-These rules cover every word Ersa shows and every document in this repository. They are taken from the [Microsoft Writing Style Guide](https://learn.microsoft.com/style-guide/welcome/), chosen rule by rule, and a machine checks each one that can be checked: Vale in CI for prose, and the string catalog's test for interface copy. ADR 0020 records why. Spelling is US English.
+These rules cover every word Ersa shows and every document in this repository. They are taken from the [Microsoft Writing Style Guide](https://learn.microsoft.com/style-guide/welcome/), chosen rule by rule, and a machine checks each one that can be checked: Vale for prose, and the string catalog's test for interface copy. Vale doesn't run yet (see Checks). ADR 0020 records why. Spelling is US English.
 
 ## Voice
 
@@ -72,4 +72,4 @@ The catalog's test fails on copy written into a component, and on a string that 
 
 ## Checks
 
-Vale runs in CI over the catalog's text export and the docs in scope, with the Microsoft package pinned to one release and the `Ersa` style beside it. An error fails the build; a warning is reported; a suggestion shows only in the editor. Every rule this page names runs as a warning or an error, even where the Microsoft package ships it as a suggestion; `Microsoft.Passive` stays a suggestion. A rule that misfires is fixed in the `Ersa` style or turned down, never silenced line by line.
+The catalog's test runs in CI now. Vale doesn't run yet: #78 sets it up in CI and #83 adds the catalog's text export to its scope. Until they land, nothing checks the rules that name a Vale check: follow them as you write. The setup they build: Vale runs in CI over the catalog's text export and the docs in scope, with the Microsoft package pinned to one release and the `Ersa` style beside it. An error fails the build; a warning is reported; a suggestion shows only in the editor. Every rule this page names runs as a warning or an error, even where the Microsoft package ships it as a suggestion; `Microsoft.Passive` stays a suggestion. A rule that misfires is fixed in the `Ersa` style or turned down, never silenced line by line.

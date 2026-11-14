@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -142,5 +142,22 @@ test("a failing check that reports no problem blocks with its stderr", () => {
   const dir = repo({ status: 1 });
   const run = hook('git commit -m "x"', dir);
   assert.equal(run.status, 2);
+  assert.match(run.stderr, /manifest check failed/);
+});
+
+// The hook as Claude Code runs it: the command .claude/settings.json gives,
+// through a shell whose folder is a subfolder (a `cd` earlier in the session).
+test("blocks from a subfolder of the repository, as the settings command runs it", () => {
+  const root = join(fileURLToPath(import.meta.url), "..", "..");
+  const settings = JSON.parse(readFileSync(join(root, ".claude", "settings.json"), "utf8"));
+  const { command } = settings.hooks.PreToolUse.find((h) => h.matcher.includes("Bash")).hooks[0];
+  const sub = join(repo({ status: 1 }), "docs");
+  const run = spawnSync("bash", ["-c", command], {
+    cwd: sub,
+    input: JSON.stringify({ tool_name: "Bash", tool_input: { command: 'git commit -m "x"' }, cwd: sub }),
+    env: { ...process.env, CLAUDE_PROJECT_DIR: root },
+    encoding: "utf8",
+  });
+  assert.equal(run.status, 2, run.stderr);
   assert.match(run.stderr, /manifest check failed/);
 });
