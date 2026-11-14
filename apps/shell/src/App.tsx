@@ -21,8 +21,8 @@ import { Transcript } from "./components/Transcript";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
-import type { Project, Session, Workspace } from "./protocol/core-api.gen";
-import { type BackendChoices, type Branches, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
+import type { BackendInfo, Project, Session, Workspace } from "./protocol/core-api.gen";
+import { type Branches, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
 import { contextUsed, tileOf } from "./session/tile";
 import { type Answers, type Decision, type Reply, answering } from "./session/answers";
 import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./session/shelf";
@@ -92,7 +92,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const follower = useRef<Follower | null>(null);
 
   // What the screen offers: each host's backends, and the values each project last started a session with.
-  const [backends, setBackends] = useState<Record<string, BackendChoices[]>>({});
+  const [backends, setBackends] = useState<Record<string, BackendInfo[]>>({});
   const [lastUsed, setLastUsed] = useState<Record<string, SessionValues>>({});
   // Every project's workspaces, by id: the rail puts a session under its workspace's project, and the session
   // controls read a session's workspace from them. Each project's last read: null once read, else why it failed.

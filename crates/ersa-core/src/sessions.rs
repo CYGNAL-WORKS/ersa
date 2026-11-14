@@ -646,6 +646,9 @@ impl Handle {
         };
         Session {
             id: row.id,
+            // Filled by the tickets that build them (PROTO-CORE-API,
+            // Sessions): the backend's id and the stored unseen mark.
+            backend_session_id: None,
             workspace_id: row.workspace_id,
             host_id: row.host_id,
             backend: row.backend,
@@ -661,6 +664,7 @@ impl Handle {
             archived: row.archived,
             pinned: row.pinned,
             section_id: row.section_id,
+            unseen: false,
             last_activity_at: row.last_activity_at,
             deleting: row.deleting,
             tile,
@@ -2622,6 +2626,8 @@ fn send_tile(tiles: &TileHub, session_id: &str, tile: &Tile, last_activity_at: O
         session_id: session_id.to_string(),
         tile: tile.clone(),
         last_activity_at,
+        // Every tile carries the title once PROTO-CORE-API-R83 is built.
+        title: None,
     };
     tiles.publish(
         session_id,
