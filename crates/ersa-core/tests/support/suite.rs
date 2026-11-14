@@ -60,10 +60,10 @@ pub async fn hello_reports_versions_and_the_local_host(target: Target) {
     let hello = client
         .result(
             "core.hello",
-            json!({ "client": "test", "client_version": "0", "api_versions": [4, 7] }),
+            json!({ "client": "test", "client_version": "0", "api_versions": [5, 7] }),
         )
         .await;
-    assert_eq!(hello["api_version"], json!(4), "the highest shared version");
+    assert_eq!(hello["api_version"], json!(5), "the highest shared version");
     assert_eq!(hello["event_projection_version"], json!(PROJECTION_VERSION));
     assert_eq!(hello["host"]["id"], json!("local"));
     assert_eq!(hello["host"]["platform"], json!(std::env::consts::OS));
@@ -73,7 +73,7 @@ pub async fn hello_reports_versions_and_the_local_host(target: Target) {
     let error = client
         .error(
             "core.hello",
-            json!({ "client": "test", "client_version": "0", "api_versions": [4] }),
+            json!({ "client": "test", "client_version": "0", "api_versions": [5] }),
         )
         .await;
     assert_eq!(kind(&error), "invalid_state");
@@ -82,16 +82,23 @@ pub async fn hello_reports_versions_and_the_local_host(target: Target) {
 pub async fn hello_without_a_shared_version_names_the_supported_ones_and_closes(target: Target) {
     let core = target.start().await;
     let mut client = Client::connect(&core.endpoint).await;
+    // A client of the version before Track A's changes of meaning (PROTO-CORE-API,
+    // Changes 2026-11-09) speaks no version Core does.
     let error = client
         .error(
             "core.hello",
-            json!({ "client": "test", "client_version": "0", "api_versions": [2, 3] }),
+            json!({ "client": "test", "client_version": "0", "api_versions": [3, 4] }),
         )
         .await;
     assert_eq!(kind(&error), "invalid_state");
     let message = error["message"].as_str().unwrap();
-    assert!(message.contains("supports [4]"), "{message}");
-    assert!(message.contains("[2, 3]"), "{message}");
+    assert!(message.contains("supports [5]"), "{message}");
+    assert!(message.contains("[3, 4]"), "{message}");
+    assert_eq!(
+        error["data"]["detail"],
+        json!("supported api_versions: [5]"),
+        "the detail names them too"
+    );
 
     assert_eq!(client.read_line().await, None, "Core closed the connection");
 

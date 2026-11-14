@@ -179,17 +179,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.shelf-question {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-}
-
-.shelf-question-text {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
 /* A request that failed to draw says so inside the shelf's own padding. */
 .shelf .error-boundary {
   padding: 0;

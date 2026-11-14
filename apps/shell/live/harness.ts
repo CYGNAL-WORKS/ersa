@@ -76,7 +76,7 @@ process.once("exit", () => {
   for (const child of started) {
     if (ended(child)) continue;
     try {
-      execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+      execFileSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
     } catch {
       // Gone already.
     }
@@ -276,7 +276,7 @@ function start(program: string, args: string[], env: NodeJS.ProcessEnv, log: str
 async function endTree(child: ChildProcess) {
   if (ended(child)) return;
   // Fails when the process is already gone; `ended` below says.
-  await promisify(execFile)("taskkill", ["/PID", String(child.pid), "/T", "/F"]).catch(() => {});
+  await promisify(execFile)("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true }).catch(() => {});
   // taskkill returns before the process is gone; Node marks it ended once it is.
   const until = Date.now() + 10_000;
   while (!ended(child) && Date.now() < until) await sleep(100);

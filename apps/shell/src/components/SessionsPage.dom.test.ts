@@ -20,6 +20,7 @@ const session: Session = {
   created_at: "2026-11-01T09:00:00Z",
   archived: false,
   pinned: false,
+  unseen: false,
   tile: { state: "idle", pending: [] },
 };
 

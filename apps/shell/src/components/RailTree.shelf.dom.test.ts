@@ -34,6 +34,7 @@ const session = (id: string, title: string, created_at: string, pending: Session
   created_at,
   archived: false,
   pinned: false,
+  unseen: false,
   tile: { state: pending.length > 0 ? "waiting_user" : "idle", pending },
 });
 
@@ -69,6 +70,7 @@ function Rail() {
                 shows: { state: "permission", request },
                 live: true,
                 onDecide: (_: string, decision) => decided.push(String(decision)),
+                onAnswer: () => {},
               }),
           }
         : undefined,

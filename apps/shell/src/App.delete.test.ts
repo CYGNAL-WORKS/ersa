@@ -35,6 +35,7 @@ const session = (id: string, title: string, created_at: string, tile: Session["t
   created_at,
   archived: false,
   pinned: false,
+  unseen: false,
   tile,
 });
 

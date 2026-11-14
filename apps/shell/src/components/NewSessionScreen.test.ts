@@ -4,8 +4,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { Project } from "../protocol/core-api.gen";
-import type { BackendChoices, Choice } from "../session/controls";
+import type { BackendInfo, Choice, Project } from "../protocol/core-api.gen";
+
 import { ContextRing } from "./ContextRing";
 import { NewSessionScreen } from "./NewSessionScreen";
 
@@ -16,7 +16,7 @@ const notes: Project = { id: "p2", host_id: "local", path: "C:\\notes", name: "n
 const choices = (pairs: [string, string][], dflt: string): Choice[] =>
   pairs.map(([id, label]) => ({ id, label, default: id === dflt }));
 
-const claude = (status: BackendChoices["status"] = "available"): BackendChoices => ({
+const claude = (status: BackendInfo["status"] = "available"): BackendInfo => ({
   name: "claude-code",
   label: "Claude Code",
   version: "2.1.302",
@@ -26,7 +26,7 @@ const claude = (status: BackendChoices["status"] = "available"): BackendChoices 
   efforts: choices([["medium", "Medium"], ["high", "High"]], "high"),
   permission_modes: choices([["default", "Ask before acting"], ["acceptEdits", "Accept edits"]], "default"),
 });
-const copilot = (status: BackendChoices["status"]): BackendChoices => ({
+const copilot = (status: BackendInfo["status"]): BackendInfo => ({
   ...claude(),
   name: "copilot",
   label: "GitHub Copilot",
@@ -160,7 +160,7 @@ describe("the new-session screen", () => {
 
   // verifies: FLOW-NEW-SESSION-R07
   it("names a backend that failed detection, by its label, when none can run", () => {
-    const copilot: BackendChoices = { ...claude("missing"), name: "copilot", label: "GitHub Copilot" };
+    const copilot: BackendInfo = { ...claude("missing"), name: "copilot", label: "GitHub Copilot" };
     const html = render({ backends: { local: [copilot, { ...claude("error"), label: "Claude Code" }] } });
     // The markup escapes the apostrophes.
     expect(html.replaceAll("&#x27;", "'")).toContain("Claude Code isn't working on this host. Check that it's installed and signed in, then open New session again.");
