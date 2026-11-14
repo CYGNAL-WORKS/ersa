@@ -27,6 +27,7 @@ use ersa_shell::instance::{self, Instance};
 use ersa_shell::launch::{self, CoreLocation, How};
 use ersa_shell::process::CoreProcess;
 use ersa_shell::quit::{self, QUIT_LIMIT, Stopped};
+use ersa_shell::startup::{Build, Core, startup};
 use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
@@ -250,7 +251,7 @@ async fn a_shell_that_exits_without_quit_leaves_core_serving() {
 // verifies: FLOW-CLOSE-AND-QUIT-R02
 #[tokio::test]
 async fn a_second_launch_shows_the_first_window_instead_of_opening_one() {
-    let label = instance::label_for(Some(&unique_label("t")));
+    let label = unique_label("window-t");
     let endpoint = ersa_core::platform::labelled_endpoint(&label).expect("an endpoint");
     let Instance::First(listener) = instance::claim(&endpoint).await.expect("claim") else {
         panic!("nothing else serves {endpoint}");
@@ -271,10 +272,57 @@ async fn a_second_launch_shows_the_first_window_instead_of_opening_one() {
     first.abort();
 }
 
-#[test]
-fn a_window_attached_by_label_has_its_own_instance() {
-    assert_eq!(instance::label_for(None), "window");
-    assert_eq!(instance::label_for(Some("replay")), "window-replay");
+// verifies: FLOW-CLOSE-AND-QUIT-R08
+#[tokio::test]
+async fn the_daily_build_launches_its_own_core_in_its_folder_and_quit_stops_it() {
+    common::end_with_this_run();
+    let dir = tempfile::tempdir().expect("temp dir");
+    let daily = startup(Build::Daily, Some("replay"), Some(dir.path()));
+    let Core::Own { label, data_dir } = &daily.core else {
+        panic!("the daily build runs its own Core, got {daily:?}");
+    };
+    assert_eq!(label, "daily");
+    assert_eq!(data_dir, &dir.path().join("daily"));
+    // The real `daily` endpoint is the owner's installed daily build: this
+    // test serves the same location on a label of its own.
+    let mut location =
+        CoreLocation::own(&unique_label("daily-test"), data_dir).expect("a location");
+    location.program = common::core_program();
+    location.start_timeout = Duration::from_secs(60);
+    let checks = tokio::spawn({
+        let location = location.clone();
+        let attached = daily.attached.clone();
+        let data_dir = data_dir.clone();
+        async move {
+            let (link, how, _events) = open(&location).await;
+            assert_eq!(how, How::Launched);
+            drop(link);
+            // Its data and its log are in the daily folder.
+            assert!(
+                data_dir.join("core.log").is_file(),
+                "no log in {data_dir:?}"
+            );
+            assert!(
+                std::fs::read_dir(&data_dir)
+                    .expect("the data folder")
+                    .count()
+                    > 1,
+                "no data in {data_dir:?}"
+            );
+            // Quit, as the Shell's quit handling decides it: the daily
+            // build is not attached, so its Core is the one stopped.
+            let endpoint = quit::endpoint_to_stop(attached.as_deref(), Some(&location))
+                .expect("Quit stops the daily build's Core");
+            let stopped = quit::shut_down(endpoint, QUIT_LIMIT, None)
+                .await
+                .expect("quit");
+            let Stopped::Exited { pid } = stopped else {
+                panic!("Core should stop when asked, got {stopped:?}");
+            };
+            assert!(!running(pid), "Core's process {pid} outlived the quit");
+        }
+    });
+    finish(checks, &location).await;
 }
 
 /// A Core that never accepts a connection, with a child of its own; writes
