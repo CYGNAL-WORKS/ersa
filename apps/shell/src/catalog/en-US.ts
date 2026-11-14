@@ -257,6 +257,8 @@ export const enUS = {
       runningStatus: "Running",
       doneStatus: "Done",
       failedStatus: "Failed",
+      // A call with no result when its turn or session ended; also shows as the row's detail.
+      stoppedStatus: "Stopped",
       // While the call's permission request waits for the user.
       waitingLabel: "Waiting for you",
       // The open card's parts: the call's input, then its output or, for a failed call, its error.
@@ -274,6 +276,20 @@ export const enUS = {
         hoursLabel: "{hours}h",
         hoursMinutesLabel: "{hours}h {minutes}m",
       },
+    },
+    // A diff card (docs/design/TRANSCRIPT.md, Diff cards): a tool card whose call changes files.
+    diff: {
+      // The row's detail: the lines added and removed, each figure after its sign, "+12 −3" (the minus sign, U+2212).
+      addedDetail: "+{count}",
+      removedDetail: "−{count}",
+      // The row's target for a call that changes several files: the first file's path and how many more.
+      filesLabel: { one: "{path} and {count} more", other: "{path} and {count} more" },
+      // Heard after the row's name: "Edit src/app.ts, done, 12 lines added, 3 lines removed".
+      countsLabel: "{row}, {added}, {removed}",
+      addedPart: { one: "{count} line added", other: "{count} lines added" },
+      removedPart: { one: "{count} line removed", other: "{count} lines removed" },
+      // Above a file's diff when an edit to it replaces its text everywhere it occurs in the file.
+      everyOccurrenceLabel: "Replaces every occurrence",
     },
     // A permission request's card: its name, its title while open, and what became of it.
     permission: {
