@@ -1,5 +1,5 @@
 //! What a session's record says of its model, effort and permission mode
-//! (PROTO-CLAUDE-CODE-STREAM-R47).
+//! (PROTO-CLAUDE-CODE-STREAM-R57 to R59).
 //!
 //! The model and effort are those of the main thread's latest reply that
 //! came from the API, and the permission mode that of the latest prompt:
