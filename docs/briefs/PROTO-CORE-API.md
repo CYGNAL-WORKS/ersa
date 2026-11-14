@@ -134,13 +134,13 @@ A method naming a session, project, workspace, section, host or pending request 
 - `session_busy`: the session is starting, a message is being sent to it, or a turn is running in it (`session.set_archived`, `session.delete`, `session.fork`).
 - `session_deleting`: the session is marked deleting.
 - `session_archived`: a message to an archived session.
-- `session_not_running`: the session has no live backend.
+- `session_not_running`: the session has no live backend. A send refused because its backend could not be started is not this: it carries the adapter's reason in `message` and no `reason`, so the user reads why the start failed (FLOW-NEW-SESSION-R08).
 - `send_in_progress`: another connection is sending to the session.
 - `send_stopped`: `session.interrupt` stopped the message before it was sent.
 - `folder_gone`: the session's folder no longer exists, so it can't be resumed or sent to while it is not running (FLOW-RESUME-SESSION-R03).
 - `backend_unnamed`: the backend has not reported the session's id yet.
 - `record_gone`: the backend has no record of the session.
-- `open_elsewhere`: another process has the session open, named in `detail`.
+- `open_elsewhere`: another process has the session open. `detail` holds those processes' ids and nothing else, as decimal numbers separated by a comma and a space (`4242, 4343`), for the Interface to name in its own words.
 - `open_unknown`: Core can't tell whether another process has the session open.
 - `no_finished_reply`: the record's conversation does not end with a finished reply.
 - `backend_cannot_fork`: the backend, or the version installed, can't fork.
@@ -232,8 +232,10 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 - **PROTO-CORE-API-R82**: `session.set_effort` shall change a live session's effort through its backend at once, and keep the new value with the time (R71); a session that is not live shall answer `invalid_state`, and an effort `backend.list` does not list for the session's model, `invalid_params`.
 - **PROTO-CORE-API-R83**: When a session's title changes, whether by `session.set_title` from any client, a rename the backend announces, or a name the backend generated, Core shall send a `session.tile` for it, and every `session.tile` shall carry the session's current `title`, so a coalesced tile never loses a change.
 - **PROTO-CORE-API-R84**: When the Interface receives a `session.tile` carrying `title`, it shall show that title on the session's tile, in the transcript header and on the sessions page without rereading `session.list`.
-- **PROTO-CORE-API-R86**: When `session.interrupt` cancels a message that was waiting for a stopped session's backend to start, the session shall stay resumed, with its backend running and idle.
 - **PROTO-CORE-API-R85**: While a `session.set_archived` with `archived: true` is under way on a session, `session.send` to that session shall answer `invalid_state`, start no turn and resume nothing.
+- **PROTO-CORE-API-R86**: When `session.interrupt` cancels a message that was waiting for a stopped session's backend to start, the session shall stay resumed, with its backend running and idle.
+- **PROTO-CORE-API-R87**: A refusal with reason `open_elsewhere` shall carry in `detail` the ids of the processes that have the session open, as decimal numbers separated by a comma and a space, and nothing else.
+- **PROTO-CORE-API-R88**: A `session.send` refused because the session's backend could not be started shall carry no `reason`.
 - **PROTO-CORE-API-R65**: `backend.list`, and the backends `host.list` reports for a host, shall hold exactly one entry for each registered adapter, in the order the adapters were registered.
 - **PROTO-CORE-API-R66**: When a session's backend has no registered adapter, making it a dormant session, Core shall leave the session out of `session.list` and answer `not_found` for its id.
 - **PROTO-CORE-API-R67**: Core shall keep what it stores about a dormant session, and shall list the session again, with its arrangement, once Core starts with that adapter registered.
@@ -258,6 +260,7 @@ A replay capture is what the replay server sent for one fixture, kept so the Int
 
 ## Changes
 
+- 2026-11-14: from #356 inbox: a send refused because its backend could not be started carries no `reason`, so the Interface shows the adapter's reason and not the catalog's words for a session that is not running; `open_elsewhere`'s `detail` is the process ids alone, in a stated form. PROTO-CORE-API-R87 and R88 added.
 - 2026-11-13: from #353 inbox: `session.interrupt` that cancels a message waiting for a resumed session's backend leaves the session resumed and idle: the user stopped the message, not the session. PROTO-CORE-API-R86 added (R85 is #352's).
 - 2026-11-13: from #352 inbox: a send that arrives while a session is being archived is refused, as one to a session being forked is, so R77's archive stops nothing the user started after its check. It carries no `reason`: the archive can still fail or be refused, so no existing reason is true of it. What `session.resume` answers meanwhile is an open question. PROTO-CORE-API-R85 added.
 - 2026-11-13: from #345 inbox: recordings 22 to 27 (Claude Code 2.1.316) show the backend applies a model, effort or permission mode change at once, from a running turn's next model call, so `session.set_model` and `session.set_effort` say so (the backend's behavior, ADR 0033). R73 and R82 reworded.
