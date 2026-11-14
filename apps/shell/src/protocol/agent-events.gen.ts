@@ -167,6 +167,10 @@ export interface FileEdit {
    */
   old_text?: string;
   new_text: string;
+  /**
+   * Present, and true, when the change replaces old_text everywhere it occurs in the file rather than once.
+   */
+  every_occurrence?: true;
 }
 export interface ToolResult {
   type: "tool.result";

@@ -1,0 +1,127 @@
+{
+  "recorded_at": "2026-11-14T04:25:44.093Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "9e839ae4-884f-42dd-b3a5-60e1b9b37c7f",
+  "session_record": "record/36-tool-edit-replace-all.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command",
+    "queue-operation",
+    "system/compact_boundary"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 5828,
+  "stderr": "",
+  "stdout_lines": 44,
+  "stdout_timing_ms": [
+    1540,
+    1940,
+    1954,
+    2682,
+    2682,
+    3017,
+    3018,
+    3260,
+    3260,
+    3261,
+    3268,
+    3268,
+    3268,
+    3268,
+    3268,
+    3270,
+    3321,
+    3372,
+    3421,
+    3472,
+    3622,
+    3857,
+    3923,
+    4026,
+    4036,
+    4039,
+    4042,
+    4042,
+    4046,
+    4100,
+    4156,
+    4176,
+    5272,
+    5273,
+    5273,
+    5273,
+    5273,
+    5273,
+    5273,
+    5274,
+    5274,
+    5278,
+    5278,
+    5286
+  ],
+  "sent": [
+    {
+      "t": 11,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 1541,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Use the Edit tool once, with replace_all set to true, to replace every occurrence of the word 'scratch' with 'draft' in NOTES.md. Make exactly that one tool call, then say done.\"}]}}"
+    },
+    {
+      "t": 4100,
+      "line": "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"35fa5389-f94d-44af-ad00-2300b6b9376e\",\"response\":{\"behavior\":\"allow\",\"updatedInput\":{\"file_path\":\"C:/Users/user\\\\AppData\\\\Local\\\\Temp\\\\ersa-rec-o32uKM\\\\NOTES.md\",\"old_string\":\"scratch\",\"new_string\":\"draft\",\"replace_all\":true}}}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Use the Edit tool once, with replace_all set to true, to replace every occurrence of the word 'scratch' with 'draft' in NOTES.md. Make exactly that one tool call, then say done.",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}
