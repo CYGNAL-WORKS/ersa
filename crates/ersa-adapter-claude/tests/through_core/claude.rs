@@ -8,7 +8,7 @@ use ersa_adapter::fake::FakeTransport;
 use ersa_adapter::recording::Recording;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, OpenElsewhere, Projector, RecordEvent,
-    RecordSummary, SessionConfig, Transport, async_trait,
+    RecordSummary, RecordedSettings, Requested, SessionConfig, Transport, async_trait,
 };
 use ersa_adapter_claude::ClaudeAdapter;
 use ersa_core::CoreConfig;
@@ -98,6 +98,18 @@ impl Adapter for OnTransport {
     ) -> Result<Option<RecordSummary>, AdapterError> {
         self.adapter
             .summarize_record(transport, cwd, backend_session_id)
+            .await
+    }
+
+    async fn record_settings(
+        &self,
+        transport: Arc<dyn Transport>,
+        cwd: &str,
+        backend_session_id: &str,
+        requested: Requested,
+    ) -> Result<RecordedSettings, AdapterError> {
+        self.adapter
+            .record_settings(transport, cwd, backend_session_id, requested)
             .await
     }
 
