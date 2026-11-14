@@ -80,12 +80,14 @@ fn tile() -> Tile {
             kind: PendingKind::Permission,
             request_id: "r-1".into(),
         }],
+        waiting: Some(2),
     }
 }
 
 fn session() -> Session {
     Session {
         id: "s-1".into(),
+        backend_session_id: Some("0f8e2c1a-5b6d-4e7f-8a9b-0c1d2e3f4a5b".into()),
         workspace_id: "w-5e6f7a8b".into(),
         host_id: "local".into(),
         backend: "claude-code".into(),
@@ -101,6 +103,7 @@ fn session() -> Session {
         archived: true,
         pinned: true,
         section_id: Some("sec-1".into()),
+        unseen: true,
         last_activity_at: Some("2026-10-31T12:05:00.250Z".into()),
         deleting: Some(Deleting::Failed),
         tile: tile(),
@@ -290,11 +293,23 @@ fn result_examples() -> Vec<(Method, Value)> {
                     min: "2.1.302".into(),
                     max: "2.1.316".into(),
                 },
-                models: vec![Choice {
-                    id: "opus".into(),
-                    label: "Opus".into(),
-                    default: true,
-                }],
+                models: vec![
+                    ModelChoice {
+                        id: "opus".into(),
+                        label: "Opus".into(),
+                        default: true,
+                        resolved: Some("claude-opus-5-5".into()),
+                        efforts: Some(vec!["low".into(), "medium".into(), "high".into()]),
+                    },
+                    // A model that takes no effort and reports no resolved id.
+                    ModelChoice {
+                        id: "haiku".into(),
+                        label: "Haiku".into(),
+                        default: false,
+                        resolved: None,
+                        efforts: None,
+                    },
+                ],
                 efforts: vec![Choice {
                     id: "medium".into(),
                     label: "Medium".into(),
@@ -329,7 +344,7 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&HelloParams {
                 client: "ersa-shell".into(),
                 client_version: "0.1.0".into(),
-                api_versions: vec![4],
+                api_versions: vec![API_VERSION],
             }),
         ),
         (Method::CoreStatus, to_value(&Empty {})),
@@ -506,6 +521,7 @@ fn params_examples() -> Vec<(Method, Value)> {
                 id: "s-1".into(),
                 pinned: Some(true),
                 section_id: Some(Some("sec-1".into())),
+                unseen: Some(false),
             }),
         ),
         (
@@ -514,6 +530,7 @@ fn params_examples() -> Vec<(Method, Value)> {
                 id: "s-1".into(),
                 pinned: None,
                 section_id: Some(None),
+                unseen: None,
             }),
         ),
         (Method::SectionList, to_value(&Empty {})),
@@ -597,6 +614,7 @@ fn notification_examples() -> Vec<Notification> {
                 session_id: "s-1".into(),
                 tile: Tile::starting(),
                 last_activity_at: Some("2026-10-31T12:05:00.250Z".into()),
+                title: Some("Rename the module".into()),
             },
         )
         .expect("serialize"),
@@ -725,6 +743,17 @@ fn error_responses_validate() {
             ErrorObject::application(ErrorKind::DeliveryUnknown, "the backend stopped"),
         ),
         Response::failure(
+            Some(RequestId::Number(6)),
+            ErrorObject::application(ErrorKind::InvalidState, "the folder is gone")
+                .with_reason(ErrorReason::FolderGone),
+        ),
+        Response::failure(
+            Some(RequestId::Number(7)),
+            ErrorObject::application(ErrorKind::InvalidState, "open in another process")
+                .with_reason(ErrorReason::OpenElsewhere)
+                .with_detail("claude (pid 4242)"),
+        ),
+        Response::failure(
             None,
             ErrorObject::protocol(code::PARSE_ERROR, "parse error"),
         ),
@@ -774,6 +803,76 @@ fn an_extra_field_on_a_closed_object_fails() {
     let mut value = to_value(&host());
     value["backends"][0]["vendor_field"] = json!(1);
     assert!(validate_core_api("host", &value).is_err());
+}
+
+/// Every reason the brief names serializes to a value the schema takes, and
+/// the schema takes no other, `resume_not_built` (replaced by `folder_gone`)
+/// included.
+#[test]
+fn error_reasons_are_exactly_the_schemas() {
+    use ErrorReason::*;
+    let all = [
+        SessionBusy,
+        SessionDeleting,
+        SessionArchived,
+        SessionNotRunning,
+        SendInProgress,
+        SendStopped,
+        FolderGone,
+        BackendUnnamed,
+        RecordGone,
+        OpenElsewhere,
+        OpenUnknown,
+        NoFinishedReply,
+        BackendCannotFork,
+    ];
+    let ours: BTreeSet<String> = all.iter().map(|r| to_value(r).to_string()).collect();
+    let theirs: BTreeSet<String> = schema()["$defs"]["error_data"]["properties"]["reason"]["enum"]
+        .as_array()
+        .expect("reason is an enum")
+        .iter()
+        .map(Value::to_string)
+        .collect();
+    assert_eq!(ours, theirs);
+    let mut data = json!({ "kind": "invalid_state", "reason": "resume_not_built" });
+    assert!(validate_core_api("error_data", &data).is_err());
+    data["reason"] = json!("folder_gone");
+    validate_core_api("error_data", &data).expect("folder_gone is a reason");
+}
+
+/// The new shapes stay closed: what only a model has is refused on an
+/// effort, a tile never says zero messages wait, and a session without
+/// `unseen` is incomplete.
+#[test]
+fn track_a_shapes_stay_closed() {
+    let backends = to_value(
+        &result_examples()
+            .into_iter()
+            .find(|(m, _)| *m == Method::BackendList)
+            .expect("a backend.list example")
+            .1,
+    );
+    validate_core_api("backend.list.result", &backends).expect("the example is valid");
+    let mut effort_with_resolved = backends.clone();
+    effort_with_resolved[0]["efforts"][0]["resolved"] = json!("x");
+    assert!(validate_core_api("backend.list.result", &effort_with_resolved).is_err());
+    let mut model_with_stray = backends;
+    model_with_stray[0]["models"][0]["vendor_field"] = json!(1);
+    assert!(validate_core_api("backend.list.result", &model_with_stray).is_err());
+
+    let mut tile = to_value(&tile());
+    validate_core_api("tile", &tile).expect("the example is valid");
+    tile["waiting"] = json!(0);
+    assert!(validate_core_api("tile", &tile).is_err());
+
+    let mut session = to_value(&session());
+    session.as_object_mut().unwrap().remove("unseen");
+    assert!(validate_core_api("session", &session).is_err());
+
+    let mut arrange = json!({ "id": "s-1", "unseen": true });
+    validate_core_api("session.arrange.params", &arrange).expect("unseen is arrangeable");
+    arrange["unseen"] = json!("yes");
+    assert!(validate_core_api("session.arrange.params", &arrange).is_err());
 }
 
 #[test]
@@ -830,6 +929,7 @@ fn arrange_params_tell_a_missing_section_from_a_null_one() {
         id: "s-1".into(),
         pinned: None,
         section_id: Some(None),
+        unseen: None,
     });
     assert_eq!(null, json!({ "id": "s-1", "section_id": null }));
 }

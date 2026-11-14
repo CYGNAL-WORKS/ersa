@@ -29,9 +29,9 @@ import { QuestionForm } from "../components/QuestionForm";
 import { Transcript } from "../components/Transcript";
 import type { CoreView, SessionsView } from "../core/connection";
 import type { Envelope, Event, QuestionAsked } from "../protocol/agent-events.gen";
-import type { CoreHelloResult, Project, Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
+import type { BackendInfo, Choice, CoreHelloResult, Project, Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
 import type { Answer } from "../session/answers";
-import { type BackendChoices, type Choice, branchesMatching } from "../session/controls";
+import { branchesMatching } from "../session/controls";
 import { type DeletePhase, whatGoes } from "../session/deletion";
 import type { SessionView } from "../session/follow";
 import type { Draft } from "../session/questionForm";
@@ -123,6 +123,7 @@ const session = (id: string, title: string, created_at: string, tile: Session["t
   created_at,
   archived: false,
   pinned: false,
+  unseen: false,
   tile,
 });
 
@@ -492,7 +493,7 @@ const draft = "Fix the flaky reconnect test on Windows";
 // What the Claude Code adapter lists for `backend.list` (PROTO-CLAUDE-CODE-STREAM), with the CLI's default marked.
 const choices = (pairs: [string, string][], dflt: string): Choice[] =>
   pairs.map(([id, label]) => ({ id, label, default: id === dflt }));
-const claudeCode: BackendChoices = {
+const claudeCode: BackendInfo = {
   name: "claude-code",
   label: "Claude Code",
   version: "2.1.302",
@@ -505,7 +506,7 @@ const claudeCode: BackendChoices = {
     "default",
   ),
 };
-const copilot = (status: BackendChoices["status"]): BackendChoices => ({
+const copilot = (status: BackendInfo["status"]): BackendInfo => ({
   name: "copilot",
   label: "GitHub Copilot",
   status,

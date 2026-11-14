@@ -3,8 +3,8 @@
 // state, a tone or a phrase is made, and tested, here.
 
 import { t } from "../catalog";
-import type { Session } from "../protocol/core-api.gen";
-import type { BackendChoices } from "./controls";
+import type { BackendInfo, Session } from "../protocol/core-api.gen";
+
 
 type Tile = Session["tile"];
 
@@ -39,7 +39,7 @@ const dollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "U
 export const titleOf = (session: Pick<Session, "title">) => session.title || t("rail.tile.untitledLabel");
 
 /** What a session's tile shows. `backends` gives each host's backends, to name a session's backend by its own name. */
-export function tileOf(session: Session, backends: Readonly<Record<string, readonly BackendChoices[]>> = {}, forking = false): TileView {
+export function tileOf(session: Session, backends: Readonly<Record<string, readonly BackendInfo[]>> = {}, forking = false): TileView {
   const { tile } = session;
   const cost = tile.cost_usd_total;
   const base = {

@@ -5,8 +5,8 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Project } from "../protocol/core-api.gen";
-import type { BackendChoices, Choice } from "../session/controls";
+import type { BackendInfo, Choice, Project } from "../protocol/core-api.gen";
+
 import { NewSessionScreen } from "./NewSessionScreen";
 
 const host = { id: "local", name: "devbox", platform: "windows" as const };
@@ -14,7 +14,7 @@ const project = (id: string): Project => ({ id, host_id: "local", path: `D:/code
 const [alpha, beta, gamma] = [project("alpha"), project("beta"), project("gamma")];
 
 const choices = (ids: string[]): Choice[] => ids.map((id, i) => ({ id, label: id, default: i === 0 }));
-const claude: BackendChoices = {
+const claude: BackendInfo = {
   name: "claude-code",
   label: "Claude Code",
   version: "2.1.302",

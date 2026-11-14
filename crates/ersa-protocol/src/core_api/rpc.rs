@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::ErrorKind;
+use super::{ErrorKind, ErrorReason};
 
 /// The `jsonrpc` member every message carries.
 pub const JSONRPC_VERSION: &str = "2.0";
@@ -147,6 +147,10 @@ pub struct ErrorData {
     /// `session.send`'s `attachments`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<u32>,
+    /// With `invalid_state`: which refusal the user met, when the brief
+    /// names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<ErrorReason>,
 }
 
 impl ErrorObject {
@@ -159,6 +163,7 @@ impl ErrorObject {
                 kind,
                 detail: None,
                 index: None,
+                reason: None,
             }),
         }
     }
@@ -186,6 +191,15 @@ impl ErrorObject {
     pub fn with_index(mut self, index: u32) -> Self {
         if let Some(data) = &mut self.data {
             data.index = Some(index);
+        }
+        self
+    }
+
+    /// The same error with `data.reason` set. Does nothing to a
+    /// protocol-level error, which has no `data`.
+    pub fn with_reason(mut self, reason: ErrorReason) -> Self {
+        if let Some(data) = &mut self.data {
+            data.reason = Some(reason);
         }
         self
     }
