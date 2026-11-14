@@ -236,6 +236,52 @@ export const enUS = {
     },
   },
   transcript: {
+    // Heard, not shown: the transcript's name, and a user's bubble's.
+    name: "Transcript",
+    userLabel: "You",
+    // Followed by the reason the subscription failed.
+    streamFailedLabel: "Not receiving this session's events: {message}",
+    retryButton: "Retry",
+    reconnectingProgress: "Reconnecting to Core…",
+    loadingProgress: "Loading…",
+    nothingYetEmpty: "Nothing yet. Write to the agent below.",
+    // The agent's thinking, then its summary after a colon when the backend gives one.
+    thinkingProgress: "Thinking…",
+    thoughtLabel: "Thought",
+    // A tool card's state.
+    tool: {
+      runningProgress: "Running…",
+      doneStatus: "Done",
+      failedStatus: "Failed",
+      // While the call's permission request waits for the user.
+      waitingLabel: "Waiting for you",
+    },
+    // A permission request's card: its name, its title while open, and what became of it.
+    permission: {
+      nameLabel: "Permission: {tool}",
+      openTitle: "Allow {tool}?",
+      pathLabel: "Path:",
+      unansweredStatus: "Not answered",
+      allowedStatus: "Allowed",
+      deniedStatus: "Denied",
+      // Decided by something other than the user: "Allowed (by rule)".
+      byRuleLabel: "{decision} (by rule)",
+      byBackendLabel: "{decision} (by backend)",
+      timedOutLabel: "{decision} (timed out)",
+    },
+    // A character that would be invisible, shown as its code point: "U+200B". Past a cap, the rest are counted.
+    hidden: {
+      codePointLabel: "U+{code}",
+      oneLabel: "An invisible character",
+      manyLabel: "Invisible characters",
+      moreLabel: { one: "{count} more invisible character, shown as {mark}", other: "{count} more invisible characters, each shown as {mark}" },
+    },
+    // The agent's formatted text (docs/design/TRANSCRIPT.md, Formatted text): a code block's Copy, its tooltip and
+    // name, and what they say once the code is copied.
+    markdown: {
+      copyCodeButton: "Copy code",
+      copiedLabel: "Copied",
+    },
     // A question's card: its name, its title once answered or declined, and its state once the session ended without
     // an answer.
     question: {
