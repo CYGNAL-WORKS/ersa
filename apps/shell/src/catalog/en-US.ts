@@ -137,6 +137,8 @@ export const enUS = {
       // Archive or Unarchive, by whether the session is archived (FLOW-ARCHIVE-DELETE-SESSION).
       archiveButton: "Archive",
       unarchiveButton: "Unarchive",
+      // Beneath Archive in the tile's menu, while the session is starting, working or waiting on the user.
+      archiveBusyReason: "Stop the session to archive it",
       // Beneath the tile, before Core's reason, when Core refuses.
       archiveError: "Ersa can't archive this session.",
       unarchiveError: "Ersa can't unarchive this session.",
