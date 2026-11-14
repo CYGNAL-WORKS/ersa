@@ -29,6 +29,9 @@ const FS_JOB: Duration = Duration::from_secs(5 * 60);
 const PROGRESS_EVERY: Duration = Duration::from_secs(5);
 /// and at most this often.
 const PROGRESS_GAP: Duration = Duration::from_secs(1);
+/// How often a send waiting its turn looks whether another send on its
+/// session has ended, so its own reports follow that one's promptly.
+const TURN_WATCH: Duration = Duration::from_millis(250);
 
 /// A send under way, kept on its session's handle.
 pub(super) struct Sending {
@@ -128,7 +131,58 @@ fn being_archived() -> SessionError {
     )
 }
 
+/// Reports a `session.send` that is still waiting its turn: behind an
+/// earlier request on its session, or for a run winding down
+/// (PROTO-CORE-API-R90). From when Core receives the send until it has its
+/// session's slot, `session.send_progress` says `checking` as [`Pacer`]
+/// paces it, except while another send on the session is under way, which
+/// reports for the session itself. Once the send has its slot its own
+/// progress takes over. Dropped before the send's answer goes out.
+pub struct Waiting {
+    handle: Arc<Handle>,
+    tiles: Arc<TileHub>,
+    /// Raised, under the `sending` lock, when the reports must stop.
+    done: Arc<AtomicBool>,
+    ticker: AbortHandle,
+}
+
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        self.ticker.abort();
+        // Under the lock the reports are published under, so none follows.
+        let sending = lock(&self.handle.sending);
+        self.done.store(true, Ordering::SeqCst);
+        // A report not yet delivered would arrive after the answer. One
+        // belonging to a send under way is that send's, and stays.
+        if sending.is_none() {
+            self.tiles.forget_one(&self.handle.id, Latest::SendProgress);
+        }
+    }
+}
+
 impl SessionManager {
+    /// Starts reporting a `session.send` to session `id` that Core has just
+    /// received; the reports end when `admitted` rises (the send has its
+    /// slot) or the returned [`Waiting`] is dropped. `None` for a session
+    /// Core does not know, whose send is refused at once.
+    pub fn report_waiting(&self, id: &str, admitted: watch::Receiver<bool>) -> Option<Waiting> {
+        let handle = self.handle(id).ok()?;
+        let done = Arc::new(AtomicBool::new(false));
+        let ticker = tokio::spawn(report_waiting(
+            Arc::downgrade(&handle),
+            Arc::clone(&self.tiles),
+            Arc::clone(&done),
+            admitted,
+        ))
+        .abort_handle();
+        Some(Waiting {
+            handle,
+            tiles: Arc::clone(&self.tiles),
+            done,
+            ticker,
+        })
+    }
+
     /// Sends a user message with its attachments (PROTO-CORE-API-R21 to
     /// R23, R26), answering with the turn it starts or joins once the
     /// backend has it, `None` when Core has not projected it yet.
@@ -450,6 +504,61 @@ async fn report_progress(handle: Weak<Handle>, tiles: Arc<TileHub>, changed: Arc
             }
         }
         pacer.wait(&changed).await;
+    }
+}
+
+/// Publishes `checking` for a send waiting its turn (see [`Waiting`]).
+async fn report_waiting(
+    handle: Weak<Handle>,
+    tiles: Arc<TileHub>,
+    done: Arc<AtomicBool>,
+    admitted: watch::Receiver<bool>,
+) {
+    let mut pacer = Pacer::default();
+    // Nothing changes a waiting send's phase; the pacer waits on its clock.
+    let unchanged = Notify::new();
+    loop {
+        let other_send = {
+            let Some(handle) = handle.upgrade() else {
+                return;
+            };
+            // Published under the lock the send installs itself under, so a
+            // send that has its slot is seen here and reports for itself.
+            let sending = lock(&handle.sending);
+            if done.load(Ordering::SeqCst) || *admitted.borrow() {
+                return;
+            }
+            match sending.as_ref() {
+                Some(_) => true,
+                None => {
+                    let progress = SendProgressParams {
+                        session_id: handle.id.clone(),
+                        phase: SendPhase::Checking,
+                        copied_bytes: None,
+                        total_bytes: None,
+                    };
+                    if pacer.due(&progress) {
+                        tiles.publish(
+                            &handle.id,
+                            Latest::SendProgress,
+                            notification_line(
+                                ersa_protocol::core_api::notification::SESSION_SEND_PROGRESS,
+                                &progress,
+                            ),
+                        );
+                    }
+                    false
+                }
+            }
+        };
+        if other_send {
+            // That send reports for the session; once it ends, this one
+            // reports at once.
+            pacer = Pacer::default();
+            tokio::time::sleep(TURN_WATCH).await;
+        } else {
+            pacer.wait(&unchanged).await;
+        }
     }
 }
 
