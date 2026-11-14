@@ -530,6 +530,7 @@ async fn a_backend_that_fails_to_start_ends_the_session_with_an_error() {
 }
 
 // verifies: FLOW-NEW-SESSION-R08
+// verifies: PROTO-CORE-API-R88
 /// The first message of a session whose backend failed to start is answered
 /// with the backend's own reason, whether it arrives while the start is
 /// still under way or after the session has ended, so the new-session

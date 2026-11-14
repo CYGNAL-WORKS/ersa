@@ -400,6 +400,7 @@ async fn a_fork_is_refused_before_the_backend_has_named_the_session() {
 
 // verifies: FLOW-FORK-SESSION-R03
 // verifies: PROTO-CORE-API-R79
+// verifies: PROTO-CORE-API-R87
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_counts_the_registrys_processes_against_cores_own() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -416,12 +417,8 @@ async fn a_fork_counts_the_registrys_processes_against_cores_own() {
     };
     let error = refusal(&mut client, &id).await;
     assert_eq!(error["data"]["reason"], "open_elsewhere", "{error:#}");
-    // `detail` names the processes, for the Interface to show.
-    let detail = error["data"]["detail"].as_str().unwrap();
-    assert!(
-        detail.contains("4242") && detail.contains("4343"),
-        "{detail}"
-    );
+    // `detail` is the processes' ids alone, for the Interface to name.
+    assert_eq!(error["data"]["detail"], "4242, 4343", "{error:#}");
     let message = error["message"].as_str().unwrap();
     assert!(
         message.contains("4242") && message.contains("4343"),
