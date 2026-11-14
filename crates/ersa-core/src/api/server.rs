@@ -371,6 +371,15 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                 peer.lane = Some(Arc::clone(&released));
                 let core = Arc::clone(&core);
                 let lane = super::session_lane(&conn, &request);
+                // A send reports `checking` from now until it has its
+                // session's slot, however long it waits for its turn
+                // (PROTO-CORE-API-R90). A replay refuses sends: no reports.
+                let waiting = match (&lane, sends && !core.config.replay) {
+                    (Some(session), true) => {
+                        core.sessions.report_waiting(session, released.subscribe())
+                    }
+                    _ => None,
+                };
                 tokio::spawn(async move {
                     if let Some(before) = before {
                         // `Err` from `wait_for` means the earlier task is
@@ -398,6 +407,8 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                     }
                     let method = request.method.clone();
                     let response = run_detached(core, request, peer.clone()).await;
+                    // Before the answer is queued, so no report follows it.
+                    drop(waiting);
                     let line =
                         serde_json::to_string(&response).expect("responses always serialize");
                     if let Some(outbound) = peer.outbound.upgrade() {

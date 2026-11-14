@@ -99,6 +99,8 @@ impl Drop for Finish {
         lock(&self.handle.sending).take();
         // A progress line not yet delivered would arrive after the answer.
         self.tiles.forget_one(&self.handle.id, Latest::SendProgress);
+        // A send waiting its turn behind this one reports in its place.
+        self.handle.send_ended.notify_waiters();
     }
 }
 
@@ -128,7 +130,57 @@ fn being_archived() -> SessionError {
     )
 }
 
+/// Reports a `session.send` that is still waiting its turn: behind an
+/// earlier request on its session, or for a run winding down
+/// (PROTO-CORE-API-R90). From when Core receives the send until it has its
+/// session's slot, `session.send_progress` says `checking` as [`Pacer`]
+/// paces it, except while another send on the session is under way, which
+/// reports for the session itself. Once the send has its slot its own
+/// progress takes over. Dropped before the send's answer goes out.
+///
+/// Its reports are never forgotten as a send's own progress is at its end:
+/// the session's latest report may by then be another send's, and a
+/// `checking` that arrives after an answer changes nothing, since the
+/// Interface shows nothing for `checking` and the Shell counts a report
+/// only toward a send still waiting on that session.
+pub struct Waiting {
+    handle: Arc<Handle>,
+    /// Raised, under the `sending` lock, when the reports must stop.
+    done: Arc<AtomicBool>,
+    ticker: AbortHandle,
+}
+
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        self.ticker.abort();
+        // Under the lock the reports are published under, so none follows.
+        let _sending = lock(&self.handle.sending);
+        self.done.store(true, Ordering::SeqCst);
+    }
+}
+
 impl SessionManager {
+    /// Starts reporting a `session.send` to session `id` that Core has just
+    /// received; the reports end when `admitted` rises (the send has its
+    /// slot) or the returned [`Waiting`] is dropped. `None` for a session
+    /// Core does not know, whose send is refused at once.
+    pub fn report_waiting(&self, id: &str, admitted: watch::Receiver<bool>) -> Option<Waiting> {
+        let handle = self.handle(id).ok()?;
+        let done = Arc::new(AtomicBool::new(false));
+        let ticker = tokio::spawn(report_waiting(
+            Arc::downgrade(&handle),
+            Arc::clone(&self.tiles),
+            Arc::clone(&done),
+            admitted,
+        ))
+        .abort_handle();
+        Some(Waiting {
+            handle,
+            done,
+            ticker,
+        })
+    }
+
     /// Sends a user message with its attachments (PROTO-CORE-API-R21 to
     /// R23, R26), answering with the turn it starts or joins once the
     /// backend has it, `None` when Core has not projected it yet.
@@ -437,19 +489,88 @@ async fn report_progress(handle: Weak<Handle>, tiles: Arc<TileHub>, changed: Arc
             let Some(sending) = sending.as_ref() else {
                 return;
             };
-            let progress = sending.progress(&handle.id);
-            if pacer.due(&progress) {
-                tiles.publish(
-                    &handle.id,
-                    Latest::SendProgress,
-                    notification_line(
-                        ersa_protocol::core_api::notification::SESSION_SEND_PROGRESS,
-                        &progress,
-                    ),
-                );
-            }
+            publish_if_due(&mut pacer, &tiles, &sending.progress(&handle.id));
         }
         pacer.wait(&changed).await;
+    }
+}
+
+/// Publishes a send's progress to every connection when `pacer` says it is
+/// due.
+fn publish_if_due(pacer: &mut Pacer, tiles: &TileHub, progress: &SendProgressParams) {
+    if pacer.due(progress) {
+        tiles.publish(
+            &progress.session_id,
+            Latest::SendProgress,
+            notification_line(
+                ersa_protocol::core_api::notification::SESSION_SEND_PROGRESS,
+                progress,
+            ),
+        );
+    }
+}
+
+/// Publishes `checking` for a send waiting its turn (see [`Waiting`]).
+async fn report_waiting(
+    handle: Weak<Handle>,
+    tiles: Arc<TileHub>,
+    done: Arc<AtomicBool>,
+    admitted: watch::Receiver<bool>,
+) {
+    let mut pacer = Pacer::default();
+    // Nothing changes a waiting send's phase; the pacer waits on its clock.
+    let unchanged = Notify::new();
+    loop {
+        let Some(ended) = handle
+            .upgrade()
+            .map(|handle| Arc::clone(&handle.send_ended))
+        else {
+            return;
+        };
+        // Registered before `sending` is read, so an end in between still
+        // wakes it.
+        let mut send_ended = std::pin::pin!(ended.notified());
+        send_ended.as_mut().enable();
+        let other_send = {
+            let Some(handle) = handle.upgrade() else {
+                return;
+            };
+            // Published under the lock the send installs itself under, so a
+            // send that has its slot is seen here and reports for itself.
+            let sending = lock(&handle.sending);
+            if done.load(Ordering::SeqCst) || *admitted.borrow() {
+                return;
+            }
+            match sending.as_ref() {
+                Some(_) => true,
+                None => {
+                    let waiting = SendProgressParams {
+                        session_id: handle.id.clone(),
+                        phase: SendPhase::Checking,
+                        copied_bytes: None,
+                        total_bytes: None,
+                    };
+                    publish_if_due(&mut pacer, &tiles, &waiting);
+                    false
+                }
+            }
+        };
+        // While another send reports for the session, this one waits for it
+        // to end. Either way, a send ending, which forgets its last report,
+        // has this one report at once, so the session's reports keep their
+        // pace.
+        let ended_first = if other_send {
+            send_ended.await;
+            true
+        } else {
+            tokio::select! {
+                () = pacer.wait(&unchanged) => false,
+                () = send_ended.as_mut() => true,
+            }
+        };
+        if ended_first {
+            pacer = Pacer::default();
+        }
     }
 }
 
