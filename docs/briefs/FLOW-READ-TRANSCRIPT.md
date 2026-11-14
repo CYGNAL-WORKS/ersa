@@ -30,10 +30,11 @@ The user opens a session, or sends a message (`FLOW-SEND-MESSAGE`) and watches t
 ## Variations and errors
 
 - **A call that fails** says so on its card, and its output is the error. A diff card that fails keeps the change it proposed, so the user sees what was not applied.
+- **An edit that replaces every occurrence** of its text shows the change once, and the diff says it is made everywhere that text occurs: the call carries the text, not how many places hold it, so the row's counts are of the change shown.
 - **A call waiting for the user's permission** says so on its card; the request itself is `FLOW-APPROVE-PERMISSION`'s.
 - **Markdown Ersa does not show as itself**: raw HTML shows as its text, and an image shows as its alternative text linked to its address, never loaded (ADR 0034).
 - **A link with any other scheme** than `http`, `https` or `mailto` shows as text and opens nothing.
-- **A session opened from its record** shows the same cards with what the record keeps: a call's progress is live only, so a card read from the record shows its duration and no progress.
+- **A session opened from its record** shows the same cards with what the record keeps: a call's progress is live only, so a card read from the record shows its duration and no progress, and a subagent's calls show only live for now (Open questions).
 
 ## Requirements
 
@@ -49,6 +50,7 @@ The user opens a session, or sends a message (`FLOW-SEND-MESSAGE`) and watches t
 - **FLOW-READ-TRANSCRIPT-R10**: A tool call with a parent tool call shall show inside its parent's card, not as a block of the turn.
 - **FLOW-READ-TRANSCRIPT-R11**: The agent's thinking shall show as one row saying the agent is thinking, or thought, and its summary when the event carries one, shown when the user opens the row.
 - **FLOW-READ-TRANSCRIPT-R12**: Each card's row shall be reachable by keyboard and say to assistive technology the tool, its target, its state, and whether it is open.
+- **FLOW-READ-TRANSCRIPT-R13**: A file's diff with an edit that carries `every_occurrence` shall say, above its lines, that a change it shows is made everywhere its text occurs in the file.
 
 ## Out of scope
 
@@ -62,7 +64,9 @@ The user opens a session, or sends a message (`FLOW-SEND-MESSAGE`) and watches t
 - Whether code blocks and diffs take syntax colors, and from which library (ADR 0015), once the owner has lived with them plain.
 - Whether consecutive tool cards group into one row, as Claude Desktop groups a run of calls.
 - Whether the permission card of a call that changes files shows the change itself, as Claude Desktop's prompt does, rather than its input fields beneath the diff card.
+- Whether a session opened from its record shows a subagent's calls inside its card: the recorded session's record holds none of them (fixture 2.1.316/34-tool-agent) and the record's projection leaves sidechain entries out (PROTO-CLAUDE-CODE-STREAM-R20), so a reopened session's card shows none.
 
 ## Changes
 
+- 2026-11-13: from #351 inbox: a diff says when its change is made at every occurrence of the text, so the user sees a change's reach before allowing it. An open question on a subagent's calls in a session opened from its record. FLOW-READ-TRANSCRIPT-R13 added.
 - 2026-11-13: created ready for M1's transcript: formatted text, tool cards and diff cards, from the owner's Main board and Claude Desktop, under the owner's decision that `docs/design/TRANSCRIPT.md` is approved as a page (owner, 2026-11-13). Code stays without syntax colors and diffs without line numbers for now. FLOW-READ-TRANSCRIPT-R01 to R12 added.

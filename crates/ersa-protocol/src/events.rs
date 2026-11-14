@@ -36,7 +36,9 @@ use serde_json::{Map, Value};
 /// 5: `question.asked` carries each question's `header` and `takes_text` and
 /// each option's `description`; `question.answered` carries `declined`, each
 /// answer's `own_words`, and `answered_by: backend`.
-pub const PROJECTION_VERSION: u32 = 5;
+///
+/// 6: `tool.requested` carries `target` and `edits`.
+pub const PROJECTION_VERSION: u32 = 6;
 
 /// One event as Core streams it: a typed payload plus where it came from.
 ///
@@ -391,6 +393,33 @@ pub struct ToolRequested {
     /// Set for calls made inside a subagent, pointing at the subagent's call.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_tool_use_id: Option<String>,
+    /// The one thing the call acts on, as the user would name it: a path, a
+    /// command, a search or an address (PROTO-AGENT-EVENTS-R21). The adapter
+    /// fills it from its backend's own tools, so the Interface never reads a
+    /// backend's tool input to draw a card.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// For a call that changes files, one entry per change in the order the
+    /// call makes them (PROTO-AGENT-EVENTS-R20). Never an empty list: a call
+    /// that changes no file carries none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edits: Option<Vec<FileEdit>>,
+}
+
+/// One change a tool call makes to a file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FileEdit {
+    /// The file's path, as the tool was given it.
+    pub path: String,
+    /// The text replaced; absent when the call writes the whole file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_text: Option<String>,
+    pub new_text: String,
+    /// Whether the change replaces `old_text` everywhere it occurs in the
+    /// file, not once (PROTO-AGENT-EVENTS-R23). On the wire only when true.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub every_occurrence: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
