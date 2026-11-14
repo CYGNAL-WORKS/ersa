@@ -17,7 +17,7 @@ The shelf is the user's to open: a request arriving never opens it or moves focu
 
 The shelf is for sessions other than the active one. The active session's requests are answered on its transcript's cards, so its tile's chevron opens no shelf, and making a session active closes its shelf. The shelf and a transcript card never show the same request at once.
 
-The answers are the ones the request carries: what the backend accepts for it, as the agent offered them. For a permission request that is allowing, denying, and the request's own suggestions; for a question, its options, the user's own words where the question takes them, or declining to answer. Ersa invents no answer of its own.
+The answers are the ones the request carries: what the backend accepts for it, as the agent offered them. For a permission request that is allowing, denying, and the request's own suggestions; for a question, its options, the user's own words where the question takes them, or declining to answer. Ersa invents no answer of its own. A suggestion's label is where Ersa says how far a lasting answer reaches, so it is always shown whole (R30): Claude Desktop never cuts what its lasting answer covers either (`claude-desktop/permission-2026-11-14.txt`).
 
 What the shelf reads comes from the session's events (`PROTO-AGENT-EVENTS`, Permission and Question): Ersa follows the session's events while its shelf is open (`PROTO-CORE-API`, `session.subscribe`) and stops when it closes, and answers with `session.decide_permission` and `session.answer_question`. The tile's pending list says that a session waits and for how many requests; the events say what each request is, and their order is the requests' order. A request the shelf can't show, because its kind is unknown or its event is not held, is the oldest when Core has let go of the session's earliest events, and otherwise the newest (R29).
 
@@ -43,6 +43,7 @@ A permission request
 
 - **FLOW-APPROVE-PERMISSION-R11**: For a permission request, the shelf shall show "Permission request"; what is asked, being the request's description, else the tool's display name, else its name; the tool's input as the transcript's permission card shows it; the blocked path and the reason when the request gives them; and the session's context ring and cost as its tile shows them.
 - **FLOW-APPROVE-PERMISSION-R12**: For a permission request, the shelf shall offer the answers the request carries: Deny, Allow, and one answer per suggestion in the request, labeled with the suggestion's label, and no suggestion when the request's flags suppress always allowing.
+- **FLOW-APPROVE-PERMISSION-R30**: The shelf and the transcript's permission card shall show each suggestion's whole label, on as many lines as it needs and breaking within a word where it must, never cut.
 - **FLOW-APPROVE-PERMISSION-R13**: When the user chooses Allow, Deny, or a suggestion, Ersa shall send `session.decide_permission` with behavior `allow`, `deny`, or `allow` with that suggestion's index in `apply_suggestions`, respectively, and no message or updated input.
 - **FLOW-APPROVE-PERMISSION-R14**: Allow shall be the shelf's primary answer, except when the request's flags say it defaults to no, when Deny shall be.
 
@@ -72,6 +73,7 @@ Assistive technology
 
 ## Open questions
 
+- Whether Ersa should take Claude Desktop's shape for a lasting answer: one short answer, with a note in the request that lists what it covers (`claude-desktop/permission-2026-11-14.txt`), in place of one answer per suggestion with the reach in its label (R12). The owner's call, since R12 was the owner's.
 - How much of each backend's native permission vocabulary is surfaced versus normalized: a reason with Deny (`message`) and editing the input before allowing (`updated_input`) are not offered yet.
 - Keyboard-only path: a shortcut that opens the oldest pending shelf across sessions, and moves to the next session's once one is done.
 - Whether a request the shelf can't show should hold the shelf when requests behind it can be shown. Today the requests behind it are answered on the transcript's cards.
@@ -79,6 +81,7 @@ Assistive technology
 
 ## Changes
 
+- 2026-11-14: triage of #291: a suggestion's label was cut to one line, so a lasting rule could be granted without its reach in view. The label is shown whole (R30 added), as Claude Desktop shows what its lasting answer covers; whether to take Desktop's one short answer and note is an open question.
 - 2026-11-06: from #222 inbox: R09's n counts only requests whose details the shelf showed, so one answered elsewhere before it was shown takes one from m and adds none to n (R09 reworded).
 - 2026-11-06: from #215 inbox: where a request the shelf can't show falls in the order (R29 added; R01 reworded to place such a request as R29 says).
 - 2026-11-05: a question can be declined (R28 added), as Claude Code accepts (PROTO-CLAUDE-CODE-STREAM, Questions).

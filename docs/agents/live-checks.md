@@ -36,7 +36,7 @@ Everything from the Interface inward is real: the Interface, the Shell's bridge,
 
 ## Put the screenshots in the pull request
 
-The repository is public, and so is every screenshot you publish. Open each one first. A check that ran the real Claude Code can show the owner's account, folders or conversation: delete those screenshots from `apps/shell/live-results`, or describe them in words instead.
+The repository is public, and so is every screenshot you publish, for good. Publish screenshots only from checks that ran the stand-in backend. A check that ran the real Claude Code can show the owner's account, folders or conversation: delete its screenshots from `apps/shell/live-results` before you publish, and describe what the check showed in words in the pull request's **Evidence**. Open each stand-in screenshot first too, since a path in it can show the Windows user name.
 
 Then, from the repository root:
 
