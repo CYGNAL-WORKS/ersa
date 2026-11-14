@@ -872,6 +872,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               // A refusal goes; a rename still on its way stays, so its answer is shown.
               onRenameReset={() => resetRename(shown.id)}
               renameDisabled={view.phase !== "connected"}
+              onOpenLink={shell?.openLink}
             />
           </ErrorBoundary>
           <ErrorBoundary what="The composer" resetKey={shown.id}>
