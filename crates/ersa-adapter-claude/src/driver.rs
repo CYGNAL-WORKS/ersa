@@ -37,6 +37,7 @@ use crate::projector::ClaudeProjector;
 use crate::questions::{self, QUESTION_TOOL};
 use crate::record::{self, LiveCheck};
 use crate::suggestions;
+use crate::waiting::WaitingReader;
 use crate::wire::{
     HostControlResponse, HostMessage, HostRequest, HostResponse, InitializeRequest, RenameSource,
     WorkspaceTrust,
@@ -734,6 +735,17 @@ impl ClaudeAdapter {
         spec.args.extend(fork);
         spec.args.extend(session_id);
         let program = spec.program.clone();
+        // The count of waiting messages reads the record's entries from this
+        // moment on (PROTO-CLAUDE-CODE-STREAM-R46): taken just before the
+        // spawn, so every entry this process writes is after it. Without a
+        // session id or a home there is no record to read.
+        let started = time::OffsetDateTime::now_utc();
+        let waiting = config
+            .backend_session_id
+            .clone()
+            .or_else(|| config.resume.clone())
+            .zip(self.claude_home().ok())
+            .map(|(id, home)| Arc::new(WaitingReader::new(home, config.cwd.clone(), id, started)));
         let mut process = transport.spawn(spec).await.map_err(|e| {
             // Name what was tried: "program not found" alone does not say
             // which program, or where to set another.
@@ -759,6 +771,7 @@ impl ClaudeAdapter {
             deciding: Mutex::default(),
             stderr_tail: Mutex::default(),
             next_id: AtomicU64::new(1),
+            waiting,
         });
         let stderr = process
             .take_stderr()
@@ -902,6 +915,9 @@ struct Shared {
     /// The CLI's last few stderr lines, for a failed start's error.
     stderr_tail: Mutex<VecDeque<String>>,
     next_id: AtomicU64,
+    /// The count of messages the CLI holds, read from its record; `None`
+    /// when the session has no record to read.
+    waiting: Option<Arc<WaitingReader>>,
 }
 
 impl Shared {
@@ -943,7 +959,7 @@ impl Shared {
 
     /// Handles one stdout line: records it, and keeps the driver's view of
     /// pending requests in step with it.
-    async fn on_backend_line(&self, line: String) {
+    async fn on_backend_line(self: &Arc<Self>, line: String) {
         // Read as raw JSON: the driver needs a handful of fields, and reading
         // them directly keeps working when the CLI's shapes drift. A line that
         // is not JSON is still recorded; the projector reports it.
@@ -974,7 +990,26 @@ impl Shared {
             _ => None,
         };
 
+        let turn = match (field("/type"), field("/subtype")) {
+            (Some("system"), Some("init")) => Some(true),
+            (Some("result"), _) => Some(false),
+            _ => None,
+        };
+
         self.sink.record(Direction::Backend, line);
+
+        // A turn started: the CLI has taken every waiting message into it,
+        // so read again how many it holds (PROTO-CLAUDE-CODE-STREAM-R46).
+        if let Some(reader) = &self.waiting {
+            match turn {
+                Some(true) => {
+                    reader.turn_started();
+                    self.report_waiting(false);
+                }
+                Some(false) => reader.turn_ended(),
+                None => {}
+            }
+        }
 
         // Answers are delivered after recording, so whoever waits on one (the
         // handshake in `start`) resumes with the answer already in the log.
@@ -1000,6 +1035,37 @@ impl Shared {
             // A failed write means the process is going away; the exit says so.
             let _ = self.write(&refusal).await;
         }
+    }
+}
+
+impl Shared {
+    /// Writes a user message, then, when it will wait in the CLI behind a
+    /// running turn, reads how many messages the CLI holds
+    /// (PROTO-CLAUDE-CODE-STREAM-R46).
+    async fn write_user(self: &Arc<Self>, message: &HostMessage) -> Result<(), AdapterError> {
+        let busy = self.waiting.as_ref().is_some_and(|reader| reader.busy());
+        self.write(message).await?;
+        if let Some(reader) = &self.waiting {
+            reader.wrote_message();
+            if busy {
+                self.report_waiting(true);
+            }
+        }
+        Ok(())
+    }
+
+    /// Reads the count of waiting messages in the background and tells the
+    /// sink if it changed, unless the session is stopping by then.
+    fn report_waiting(self: &Arc<Self>, after_handover: bool) {
+        let Some(reader) = &self.waiting else {
+            return;
+        };
+        let shared = Arc::clone(self);
+        tokio::spawn(Arc::clone(reader).report(
+            Arc::clone(&self.sink),
+            after_handover,
+            move || !shared.stopping.load(Ordering::SeqCst),
+        ));
     }
 }
 
@@ -1258,7 +1324,7 @@ impl Drop for ClaudeSession {
 #[async_trait]
 impl AdapterSession for ClaudeSession {
     async fn send_user(&self, text: &str) -> Result<(), AdapterError> {
-        self.shared.write(&HostMessage::user_text(text)).await
+        self.shared.write_user(&HostMessage::user_text(text)).await
     }
 
     /// A message with attachments: its text, then its images, then the list
@@ -1271,7 +1337,7 @@ impl AdapterSession for ClaudeSession {
             return Err(AdapterError::Protocol(reason));
         }
         self.shared
-            .write(&HostMessage::user(crate::attachments::blocks(message)))
+            .write_user(&HostMessage::user(crate::attachments::blocks(message)))
             .await
     }
 
