@@ -36,7 +36,7 @@ use crate::{BACKEND, MAX_TESTED_VERSION};
 
 /// The version of this projection. Bump it whenever the events produced for
 /// some raw log would change, so Core re-projects cached sessions.
-pub const PROJECTOR_VERSION: u32 = 7;
+pub const PROJECTOR_VERSION: u32 = 8;
 
 /// The `model` the CLI gives the messages it writes itself rather than
 /// receiving from the API.
@@ -81,6 +81,17 @@ pub struct ClaudeProjector {
     /// mode (`--bare`): it has none of `scratchpad_path`, `memory_paths` and
     /// `messaging_socket_path` (PROTO-CLAUDE-CODE-STREAM-R53).
     minimal_mode: bool,
+    /// `request_id`s of the host's `set_model` requests not yet answered:
+    /// the answer names the model the CLI resolved
+    /// (PROTO-CLAUDE-CODE-STREAM-R40).
+    set_model_ids: HashSet<String>,
+    /// The model the stream last reported: each `system/init`, and each
+    /// answer to `set_model` (PROTO-CLAUDE-CODE-STREAM-R40).
+    model: Option<String>,
+    /// The permission mode the stream last reported: the `initialize`
+    /// answer before the first turn, then each `system/init` and each
+    /// `system/status` that carries one (PROTO-CLAUDE-CODE-STREAM-R40).
+    permission_mode: Option<String>,
 }
 
 /// A `can_use_tool` request the CLI is waiting on.
@@ -146,6 +157,14 @@ impl Projector for ClaudeProjector {
             .as_ref()
             .map(|(count, title)| (*count, title.as_str()))
     }
+
+    fn reported_model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
+    fn reported_permission_mode(&self) -> Option<&str> {
+        self.permission_mode.as_deref()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -175,6 +194,13 @@ impl ClaudeProjector {
                 if let Some(title) = field("/title") {
                     let count = self.announced_title.as_ref().map_or(0, |(n, _)| *n);
                     self.announced_title = Some((count + 1, title.to_string()));
+                }
+            }
+            // The mode right after `set_permission_mode`; most status lines
+            // carry none and leave it. The line stays a passthrough.
+            (Some("system"), Some("status"), _) => {
+                if let Some(mode) = field("/permissionMode") {
+                    self.permission_mode = Some(mode.to_string());
                 }
             }
             _ => {}
@@ -239,6 +265,13 @@ impl ClaudeProjector {
             out.push(drift_error(line, kind));
         }
         self.minimal_mode = started_in_minimal_mode(&value);
+        // Every turn's `init` says the model and mode it runs with.
+        if let Some(model) = value["model"].as_str() {
+            self.model = Some(model.to_string());
+        }
+        if let Some(mode) = value["permissionMode"].as_str() {
+            self.permission_mode = Some(mode.to_string());
+        }
         // The CLI repeats `init` at the start of every turn; only the first
         // announces the session (PROTO-CLAUDE-CODE-STREAM-R06).
         if !self.session_started {
@@ -423,10 +456,12 @@ impl ClaudeProjector {
                     }),
                 ..
             } => {
-                if let Some(message_id) = message_id {
-                    let mut out = self.ensure_turn(line);
-                    out.push(self.turn_output(line, message_id, tokens));
-                    return out;
+                // Usage counts toward the open turn only: a stray one after
+                // `result` opens no turn of its own.
+                if let Some(message_id) = message_id
+                    && self.turn_open
+                {
+                    return vec![self.turn_output(line, message_id, tokens)];
                 }
             }
             _ => {}
@@ -446,7 +481,13 @@ impl ClaudeProjector {
         at(
             line,
             Event::UsageUpdated(UsageUpdated {
-                turn_output_tokens: Some(self.output_tokens.values().sum()),
+                // Saturating: absurd counts from the CLI must not wrap the
+                // sum (or panic a debug build).
+                turn_output_tokens: Some(
+                    self.output_tokens
+                        .values()
+                        .fold(0u64, |sum, n| sum.saturating_add(*n)),
+                ),
                 ..UsageUpdated::default()
             }),
         )
@@ -719,6 +760,10 @@ impl ClaudeProjector {
                         );
                     }
                 };
+                // Before the first turn's `init`, the mode the CLI starts in.
+                if let Some(mode) = reply.current_permission_mode {
+                    self.permission_mode = Some(mode);
+                }
                 // Only the version is projected; the rest (commands, models,
                 // account) is for the developer pane until something needs it.
                 match reply.claude_code_version.filter(|v| newer_than_tested(v)) {
@@ -750,6 +795,23 @@ impl ClaudeProjector {
                         action: Some(ErrorAction::Restart),
                     }),
                 )]
+            }
+            // The model `set_model` resolved its choice to (fixture 25:
+            // `haiku` answers `claude-haiku-5-5`). The line stays a
+            // passthrough.
+            CliResponse::Success(success) if self.set_model_ids.remove(&success.request_id) => {
+                if let Some(model) = success
+                    .response
+                    .as_ref()
+                    .and_then(|answer| answer.get("model"))
+                    .and_then(Value::as_str)
+                {
+                    self.model = Some(model.to_string());
+                }
+                vec![passthrough(line, value)]
+            }
+            CliResponse::Error(refusal) if self.set_model_ids.remove(&refusal.request_id) => {
+                vec![passthrough(line, value)]
             }
             // Answers to interrupts and other host requests.
             _ => vec![passthrough(line, value)],
@@ -791,10 +853,18 @@ impl ClaudeProjector {
         match value.get("type").and_then(Value::as_str) {
             Some("user") => self.host_user(line, value),
             Some("control_request") => {
-                if value.pointer("/request/subtype").and_then(Value::as_str) == Some("initialize")
-                    && let Some(id) = value.get("request_id").and_then(Value::as_str)
-                {
-                    self.initialize_ids.insert(id.to_string());
+                let id = value.get("request_id").and_then(Value::as_str);
+                match (
+                    value.pointer("/request/subtype").and_then(Value::as_str),
+                    id,
+                ) {
+                    (Some("initialize"), Some(id)) => {
+                        self.initialize_ids.insert(id.to_string());
+                    }
+                    (Some("set_model"), Some(id)) => {
+                        self.set_model_ids.insert(id.to_string());
+                    }
+                    _ => {}
                 }
                 vec![passthrough(line, value)]
             }
@@ -810,7 +880,7 @@ impl ClaudeProjector {
         // and folders as blocks of their own, never as its text (R26).
         let (text, attachments) = match value.pointer("/message/content") {
             Some(Value::Array(blocks)) => crate::attachments::split(blocks),
-            Some(content) => (input_text(content), Vec::new()),
+            Some(content) => (content.as_str().map(String::from), Vec::new()),
             None => (None, Vec::new()),
         };
         if text.is_none() && attachments.is_empty() {
@@ -1059,7 +1129,6 @@ pub(crate) fn tool_result_events(content: MessageContent) -> Vec<Event> {
 // ---------------------------------------------------------------------------
 // Helpers
 
-/// An event that came from `line` alone.
 /// How a prompt the user never answered ends when the backend drops it (a
 /// `control_cancel_request`, or the turn ending): a permission request is
 /// denied by the backend, and a question answered by it with no answers.
@@ -1081,6 +1150,7 @@ fn withdrawn(request_id: String, asks: &Asks) -> Event {
     }
 }
 
+/// An event that came from `line` alone.
 fn at(line: &RawLine, event: Event) -> Projected {
     Projected::from_line(line, event)
 }
@@ -1214,7 +1284,7 @@ fn drift_error(line: &RawLine, kind: &str) -> Projected {
 }
 
 /// The text of a message's text blocks, if it has any.
-pub(crate) fn plain_text(blocks: &[ContentBlock]) -> Option<String> {
+fn plain_text(blocks: &[ContentBlock]) -> Option<String> {
     let texts: Vec<&str> = blocks
         .iter()
         .filter_map(|block| match block {
@@ -1223,12 +1293,6 @@ pub(crate) fn plain_text(blocks: &[ContentBlock]) -> Option<String> {
         })
         .collect();
     (!texts.is_empty()).then(|| texts.join("\n"))
-}
-
-/// The text of a host user message's `content` given as a plain string;
-/// content blocks go through [`crate::attachments::split`].
-fn input_text(content: &Value) -> Option<String> {
-    content.as_str().map(String::from)
 }
 
 /// A tool's output: plain text when it is only text, else the blocks as they

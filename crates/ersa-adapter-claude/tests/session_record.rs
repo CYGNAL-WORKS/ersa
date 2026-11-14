@@ -632,7 +632,7 @@ fn a_half_written_last_line_is_left_for_the_next_read() {
 fn an_oversized_line_is_an_error_without_a_copy_of_it() {
     let huge = format!(
         "{{\"type\":\"user\",\"x\":\"{}\"}}\n",
-        "y".repeat(17 * 1024 * 1024)
+        "y".repeat(65 * 1024 * 1024)
     );
     let events = project_record(&huge);
     assert_eq!(events.len(), 2);
@@ -1101,7 +1101,7 @@ fn an_entry_too_long_to_read_is_reported_unless_it_is_still_being_written() {
         "message": {"role": "user", "content": "Hello"}});
     let long = format!(
         "{{\"type\":\"user\",\"uuid\":\"u2\",\"message\":{{\"content\":\"{}\"}}}}",
-        "x".repeat(16 * 1024 * 1024 + 10)
+        "x".repeat(64 * 1024 * 1024 + 10)
     );
     // Whole, with its line end: reported, and the pass carries on.
     let ended = format!("{first}\r\n{long}\r\n{first}\n");
@@ -1127,6 +1127,17 @@ fn an_entry_too_long_to_read_is_reported_unless_it_is_still_being_written() {
         events.iter().map(|e| e.type_name()).collect::<Vec<_>>()
     );
     assert!(matches!(events[0], Event::UserMessage(_)));
+}
+
+/// A prompt as long as Core can send (10 MiB of images is about 13.3 MiB of
+/// base64, plus its text) reopens from the record.
+#[test]
+fn a_prompt_as_long_as_core_sends_reopens() {
+    let long = json!({"type": "user", "uuid": "u1", "parentUuid": null,
+        "message": {"role": "user", "content": "x".repeat(30 * 1024 * 1024)}});
+    let events = project_record(&format!("{long}\n"));
+    assert_eq!(events.len(), 1);
+    assert!(matches!(events[0].event, Event::UserMessage(_)));
 }
 
 #[test]

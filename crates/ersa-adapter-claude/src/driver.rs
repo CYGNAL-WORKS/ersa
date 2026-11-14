@@ -26,7 +26,7 @@ use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
     ImageLimits, LineReader, LineWriter, OpenElsewhere, OutgoingMessage, PermissionDecision,
     Process, ProcessExit, ProcessSpec, Projector, QuestionReply, RecordDeletion, RecordEvent,
-    RecordSummary, SessionConfig, TitleRules, Transport, async_trait,
+    RecordSummary, RecordedSettings, Requested, SessionConfig, TitleRules, Transport, async_trait,
 };
 use ersa_protocol::core_api::{Choice, ModelChoice};
 use ersa_protocol::events::PermissionBehavior;
@@ -609,7 +609,22 @@ impl Adapter for ClaudeAdapter {
         Ok(summary.map(|summary| RecordSummary {
             title: summary.title,
             created_at: summary.created_at,
+            settings: summary.settings,
         }))
+    }
+
+    /// The record's model, effort and permission mode, read back from its
+    /// end on this machine (PROTO-CLAUDE-CODE-STREAM-R59).
+    async fn record_settings(
+        &self,
+        _transport: Arc<dyn Transport>,
+        cwd: &str,
+        backend_session_id: &str,
+        requested: Requested,
+    ) -> Result<RecordedSettings, AdapterError> {
+        let home = self.claude_home()?;
+        let (cwd, id) = (cwd.to_string(), backend_session_id.to_string());
+        blocking(move || record::record_settings(&home, &cwd, &id, requested)).await
     }
 
     /// Appends one `custom-title` entry to the session's record on this

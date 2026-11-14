@@ -68,6 +68,10 @@ pub struct RecordUser {
     /// The tool's structured output, as the stream's `tool_use_result`.
     #[serde(default, rename = "toolUseResult")]
     pub tool_use_result: Option<Value>,
+    /// On a prompt: the permission mode its turn started with. Tool results,
+    /// meta and local-command entries carry none.
+    #[serde(default, rename = "permissionMode")]
+    pub permission_mode: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -193,6 +197,9 @@ pub struct RecordAssistant {
     /// stream.
     #[serde(default)]
     pub error: Option<String>,
+    /// The effort the reply was made with, such as `medium`.
+    #[serde(default)]
+    pub effort: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
 }
