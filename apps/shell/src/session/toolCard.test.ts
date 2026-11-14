@@ -126,6 +126,8 @@ describe("a tool card's target", () => {
     });
     expect(shownTarget("d:\\projects\\Ersa\\a.txt", "D:/Projects/ersa")).toEqual({ text: "a.txt", path: true });
     expect(shownTarget("/home/me/ersa/src/main.rs", "/home/me/ersa")).toEqual({ text: "src/main.rs", path: true });
+    // A folder with a space in its name: inside it is a path whatever its spelling.
+    expect(shownTarget("/Users/jane/My Projects/app/src/main.rs", "/Users/jane/My Projects/app")).toEqual({ text: "src/main.rs", path: true });
   });
 
   // verifies: FLOW-READ-TRANSCRIPT-R08

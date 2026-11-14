@@ -171,21 +171,28 @@ export function ToolCard({
         <Chevron />
       </button>
       <OpenPart id={id} open={open}>
-        <span className="tool-label">{t("transcript.tool.inputLabel")}</span>
-        <InputFields input={item.input} />
-        {calls.length > 0 && (
-          <div className="tool-calls">
-            {calls.map((call) => (
-              <ToolCard key={call.key} item={call} context={context} />
-            ))}
-          </div>
-        )}
-        {item.result && (
-          <>
-            <span className="tool-label">{item.result.isError ? t("transcript.tool.errorLabel") : t("transcript.tool.outputLabel")}</span>
-            <pre className="tool-output mono">{item.result.content}</pre>
-          </>
-        )}
+        <div className="tool-open-body">
+          {/* A part with nothing in it is left out, rather than shown as a label over nothing. */}
+          {Object.keys(item.input).length > 0 && (
+            <>
+              <span className="tool-label">{t("transcript.tool.inputLabel")}</span>
+              <InputFields input={item.input} />
+            </>
+          )}
+          {calls.length > 0 && (
+            <div className="tool-calls">
+              {calls.map((call) => (
+                <ToolCard key={call.key} item={call} context={context} />
+              ))}
+            </div>
+          )}
+          {item.result && item.result.content !== "" && (
+            <>
+              <span className="tool-label">{item.result.isError ? t("transcript.tool.errorLabel") : t("transcript.tool.outputLabel")}</span>
+              <pre className="tool-output mono">{item.result.content}</pre>
+            </>
+          )}
+        </div>
       </OpenPart>
     </div>
   );

@@ -178,13 +178,29 @@ describe("a subagent's calls", () => {
     const child = within(part).getByRole("button", { name: "Glob *, Done", hidden: true });
     expect(child.closest(".tool-calls")).toBeTruthy();
     // Above the output.
-    const order = [...part.querySelectorAll(":scope > .tool-open-inner > :is(.tool-calls, .tool-output)")].map((e) => e.className.split(" ")[0]);
+    const order = [...part.querySelectorAll(":scope > .tool-open-inner > .tool-open-body > :is(.tool-calls, .tool-output)")].map((e) => e.className.split(" ")[0]);
     expect(order).toEqual(["tool-calls", "tool-output"]);
   });
 
   it("show as blocks of the turn when the call that started them isn't in the transcript", () => {
     const page = show([glob]);
     expect(page.querySelectorAll(".transcript-page > .tool-card")).toHaveLength(1);
+  });
+
+  it("show as blocks of the turn when their parents loop, rather than being lost", () => {
+    const page = show([
+      { type: "tool.requested", tool_use_id: "x", name: "Glob", input: {}, parent_tool_use_id: "y" },
+      { type: "tool.requested", tool_use_id: "y", name: "Grep", input: {}, parent_tool_use_id: "x" },
+      { type: "tool.requested", tool_use_id: "z", name: "Read", input: {}, parent_tool_use_id: "z" },
+    ]);
+    expect(page.querySelectorAll(".transcript-page > .tool-card")).toHaveLength(3);
+  });
+
+  it("leave out an empty input and an empty output", () => {
+    show([{ type: "tool.requested", tool_use_id: "e", name: "Ping", input: {} }, { type: "tool.result", tool_use_id: "e", content: "", is_error: false }]);
+    const row = screen.getByRole("button", { name: "Ping, Done" });
+    expect(openPart(row).querySelectorAll(".tool-label")).toHaveLength(0);
+    expect(openPart(row).querySelector(".tool-output")).toBeNull();
   });
 });
 

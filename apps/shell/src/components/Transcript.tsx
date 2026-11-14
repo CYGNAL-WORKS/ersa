@@ -153,12 +153,23 @@ function useToolContext(items: readonly Item[], workspace: string | undefined, n
   const key = awaiting.join(" ");
   const prev = last.current;
   if (prev && prev.awaiting === key && prev.workspace === workspace && prev.now === now && same(prev.tools, tools)) return prev.context;
-  const known = new Set(tools.map((tool) => tool.key));
+  const parentOf = new Map(tools.map((tool) => [tool.key, tool.parent]));
+  // Whether following a call's parents ends at a call shown as a block of the turn. A loop never does: calls that
+  // name each other as parents would otherwise all hide inside cards no block leads to.
+  const reachesTurn = (key: string) => {
+    const seen = new Set<string>();
+    for (let at: string | undefined = key; at !== undefined && parentOf.has(at); at = parentOf.get(at)) {
+      if (seen.has(at)) return false;
+      seen.add(at);
+    }
+    return true;
+  };
   const calls = new Map<string, Extract<Item, { kind: "tool" }>[]>();
   const nested = new Set<string>();
   for (const tool of tools) {
-    // A call whose parent isn't in the transcript stays a block of the turn, rather than being lost.
-    if (tool.parent === undefined || !known.has(tool.parent)) continue;
+    // A call whose parent isn't in the transcript, or whose parents loop, stays a block of the turn rather than
+    // being lost.
+    if (tool.parent === undefined || !parentOf.has(tool.parent) || !reachesTurn(tool.key)) continue;
     nested.add(tool.key);
     calls.set(tool.parent, [...(calls.get(tool.parent) ?? []), tool]);
   }

@@ -61,24 +61,24 @@ const isPath = (text: string) => WINDOWS_PATH.test(text) || (text.startsWith("/"
 
 /**
  * The target as the row shows it. The event says only what the call acts on, not what kind of thing that is, and the
- * Interface never reads a tool's input to draw a card (PROTO-AGENT-EVENTS), so a target is taken for a path when it is
- * spelled as an absolute one; a command or a search that names a path stays as it is. A path inside the session's
- * workspace folder shows relative to it (FLOW-READ-TRANSCRIPT-R08), compared with `\` and `/` alike, as the backend
- * and Core may each write them, and, for a Windows path, without case, as Windows compares them. The rest keeps the
- * target's own spelling.
+ * Interface never reads a tool's input to draw a card (PROTO-AGENT-EVENTS). A target inside the session's workspace
+ * folder is a path, shown relative to it (FLOW-READ-TRANSCRIPT-R08), compared with `\` and `/` alike, as the backend
+ * and Core may each write them, and, for a Windows folder, without case, as Windows compares them; the rest keeps the
+ * target's own spelling. Any other target is taken for a path when it is spelled as an absolute one, so a command or a
+ * search that names a path stays as it is.
  */
 export function shownTarget(target: string, workspace: string | undefined): ShownTarget {
-  const path = isPath(target);
-  if (!path || !workspace) return { text: target, path };
-  const windows = WINDOWS_PATH.test(workspace);
-  const norm = (p: string) => {
-    const slashed = p.replace(/\\/g, "/");
-    return windows ? slashed.toLowerCase() : slashed;
-  };
-  const root = norm(workspace).replace(/\/+$/, "");
-  const inside = norm(target);
-  // Inside means past the folder and a separator: a sibling sharing its prefix ("ersa-old") is outside.
-  if (root === "" || !inside.startsWith(`${root}/`)) return { text: target, path };
-  const rest = target.slice(root.length + 1);
-  return { text: rest === "" ? target : rest, path };
+  if (workspace) {
+    const windows = WINDOWS_PATH.test(workspace);
+    const norm = (p: string) => {
+      const slashed = p.replace(/\\/g, "/");
+      return windows ? slashed.toLowerCase() : slashed;
+    };
+    const root = norm(workspace).replace(/\/+$/, "");
+    // Inside means past the folder and a separator: a sibling sharing its prefix ("ersa-old") is outside.
+    if (root !== "" && norm(target).startsWith(`${root}/`) && target.length > root.length + 1) {
+      return { text: target.slice(root.length + 1), path: true };
+    }
+  }
+  return { text: target, path: isPath(target) };
 }
