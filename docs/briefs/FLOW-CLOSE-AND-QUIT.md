@@ -25,6 +25,8 @@ Closing the window and quitting are different acts. Closing hides the window to 
 - **FLOW-CLOSE-AND-QUIT-R08**: A release build shall serve its Core on the endpoint label `daily` with its data in the `daily` folder of Ersa's application data folder, launch that Core itself and shut it down on quit; a debug build shall refuse to attach to the label `daily`.
 - **FLOW-CLOSE-AND-QUIT-R09**: A release build shall keep its window's web data (the webview's own data folder) inside the `daily` folder, so that the daily build and a development build share no web data.
 - **FLOW-CLOSE-AND-QUIT-R10**: A release build shall hold a one-window claim of its own, apart from a debug build's, so that one daily window and one development window can run at once, each the only window of its build.
+- **FLOW-CLOSE-AND-QUIT-R11**: When Ersa's application data folder can't be found, a release build shall start no Core and attach to none, and shall open its window to say why.
+- **FLOW-CLOSE-AND-QUIT-R12**: When Ersa's application data folder can't be found, a release build shall keep its window's web data in a folder of its own in the system's temporary folder, never in the webview's default folder, which a debug build uses.
 
 ## Development
 
@@ -40,6 +42,7 @@ A debug build attached to a labeled endpoint (LAY-SHELL, Development) quits with
 
 ## Changes
 
+- 2026-11-13: from #349 inbox: when Ersa's application data folder can't be found there is no `daily` folder, so the daily build runs no Core and its window says why; that window's web data goes in a folder of its own in the system's temporary folder. The window is the only place the user learns what went wrong, and Ersa keeps nothing in web data. FLOW-CLOSE-AND-QUIT-R11 and R12 added.
 - 2026-11-13: from #342 inbox: the daily build installs in the per-user installer's default folder, beside the development build's data, which it never removes; its window's web data goes inside the `daily` folder, since both builds share one bundle identifier and so would share the webview's data. FLOW-CLOSE-AND-QUIT-R09 added; R10 gives ADR 0035's separate window claim its own requirement. Whether the uninstaller leaves the development data is the install ticket's owner check.
 - 2026-11-13: the daily build runs beside a development build, each with its own Shell and Core (ADR 0035). FLOW-CLOSE-AND-QUIT-R08 added.
 - 2026-11-05: from #155 inbox: the wording of a failed quit's reason is an open question. No requirement IDs changed.
