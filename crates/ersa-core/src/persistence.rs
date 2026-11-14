@@ -863,7 +863,12 @@ mod tests {
             None
         );
         assert_eq!(
-            store.workspace("w".into()).await.expect("get").expect("row").state,
+            store
+                .workspace("w".into())
+                .await
+                .expect("get")
+                .expect("row")
+                .state,
             WorkspaceState::Error
         );
         store
