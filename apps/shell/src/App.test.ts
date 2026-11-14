@@ -1747,3 +1747,34 @@ describe("reading the paths picked", () => {
     expect(Array.from(document.querySelectorAll(".attachment-name")).map((n) => n.textContent)).toEqual(picked.map((p) => p.slice(-6)));
   });
 });
+
+// A send Core refuses, on the composer's status line (PROTO-CORE-API, Errors).
+describe("a refused send App's composer says", () => {
+  const refuseWith = (message: string, reason?: string) => () =>
+    Promise.reject({ kind: "rpc", error: { code: -32000, message, data: { kind: "invalid_state", ...(reason ? { reason } : {}) } } });
+
+  async function sendRefused(send: () => Promise<never>) {
+    const core = fakeCore({ "session.subscribe": () => ({ last_seq: -1 }), "session.send": send });
+    render(createElement(App, { client: core.client }));
+    await settle();
+    await settle();
+    fireEvent.change(words(), { target: { value: "Fix the build" } });
+    await act(async () => {
+      fireEvent.keyDown(words(), { key: "Enter" });
+    });
+    await settle();
+    return document.querySelector(".composer-status-line")?.textContent;
+  }
+
+  // verifies: PROTO-CORE-API-R80
+  it("says a refusal with a reason in the catalog's words, not Core's message", async () => {
+    const line = await sendRefused(refuseWith("session.send: another connection is sending to session s2", "send_in_progress"));
+    expect(line).toBe("A message is already on its way to this session from another window. Try again once it's sent.");
+  });
+
+  // Core's side of a failed start carrying no reason is PROTO-CORE-API-R88, verified in Core's tests.
+  it("says why the backend could not be started, from the adapter, when the refusal has no reason", async () => {
+    const line = await sendRefused(refuseWith("session.send: the backend could not be started: Claude Code is not signed in"));
+    expect(line).toBe("the backend could not be started: Claude Code is not signed in");
+  });
+});
