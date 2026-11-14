@@ -739,12 +739,7 @@ impl ClaudeAdapter {
         // moment on (PROTO-CLAUDE-CODE-STREAM-R46): taken just before the
         // spawn, so every entry this process writes is after it. Without a
         // session id or a home there is no record to read.
-        // Cut to the millisecond, as the CLI stamps its entries, so an entry
-        // written in the same millisecond still counts as this process's.
-        let now = time::OffsetDateTime::now_utc();
-        let started = now
-            .replace_nanosecond(now.nanosecond() / 1_000_000 * 1_000_000)
-            .unwrap_or(now);
+        let started = time::OffsetDateTime::now_utc();
         let waiting = config
             .backend_session_id
             .clone()
