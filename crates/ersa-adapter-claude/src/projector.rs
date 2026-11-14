@@ -520,6 +520,11 @@ impl ClaudeProjector {
         out.extend(self.ensure_turn(line));
         out.extend(self.finish_streams());
         out.extend(self.settle_prompts(line));
+        // The CLI echoes a message written to an idle CLI within the turn it
+        // opens. One it did not echo by the turn's end never will be (a
+        // command such as `/compact` is echoed only as its output), so it is
+        // forgotten, and later echoes are matched with the messages after it.
+        self.unechoed.clear();
 
         let is_error = value["is_error"].as_bool();
         let outcome = match drifted {

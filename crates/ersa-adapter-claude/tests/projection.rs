@@ -1835,3 +1835,61 @@ fn a_local_commands_output_marked_as_an_echo_takes_in_no_waiting_message() {
         ]
     );
 }
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R43
+// verifies: PROTO-CLAUDE-CODE-STREAM-R46
+#[test]
+fn a_local_commands_output_before_an_idle_messages_echo_leaves_its_match_alone() {
+    // The model-change output arrives before the echo that takes in "one"
+    // and "two" together: it repeats neither, so "one" is still the
+    // message the joined echo starts with, and "two" shows from its rest.
+    let model_changed = fixture("26-controls-during-turn").stdout[6].clone();
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let (first, second) = (user_text("one"), user_text("two"));
+    let lines = log(&[
+        (Host, &first),
+        (Host, &second),
+        (Backend, init),
+        (Backend, &model_changed),
+        (Backend, &echo_of_blocks(&["one\n", "two"], "u-1")),
+        (Backend, result),
+    ]);
+    assert_eq!(waiting_counts(&lines), [(1, 1), (4, 0)]);
+    let messages: Vec<String> = without_lines(turns_and_messages(&lines))
+        .into_iter()
+        .filter(|what| what.starts_with("user.message"))
+        .collect();
+    assert_eq!(messages, ["user.message one", "user.message two"]);
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R43
+// verifies: PROTO-CLAUDE-CODE-STREAM-R44
+#[test]
+fn a_command_echoed_only_as_its_output_does_not_hold_up_later_echoes() {
+    // `/compact` written to an idle CLI comes back only as its output
+    // (fixture 27), never as itself. After its turn, a message written to
+    // the idle CLI and one written a moment later are still matched.
+    let compacted = fixture("27-compact-between-turns").stdout[17].clone();
+    assert!(compacted.contains(r#""isReplay":true"#) && compacted.contains("Compacted"));
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let (compact, three, four) = (user_text("/compact"), user_text("three"), user_text("four"));
+    let lines = log(&[
+        (Host, &compact),
+        (Backend, init),
+        (Backend, &compacted),
+        (Backend, result),
+        (Host, &three),
+        (Host, &four),
+        (Backend, init),
+        (Backend, &echo_of_blocks(&["three\n", "four"], "u-3")),
+        (Backend, result),
+    ]);
+    let sequence = without_lines(turns_and_messages(&lines));
+    assert!(
+        sequence.contains(&"user.message four".to_string()),
+        "{sequence:?}"
+    );
+    assert_eq!(sequence.last().unwrap(), "session.state Idle");
+}
