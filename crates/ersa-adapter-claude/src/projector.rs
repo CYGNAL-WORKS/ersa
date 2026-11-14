@@ -97,7 +97,7 @@ pub struct ClaudeProjector {
     /// CLI echoes what it takes in (`--replay-user-messages`): every waiting
     /// message at once, at the next turn's start or, in a turn that uses
     /// tools, at the turn's next model call, and the echo is their
-    /// `user.message` (PROTO-CLAUDE-CODE-STREAM-R43, R46). Each is kept as
+    /// `user.message` (PROTO-CLAUDE-CODE-STREAM-R63, R64, R68). Each is kept as
     /// its content blocks, to know its echo by.
     waiting: Vec<Vec<Value>>,
     /// Messages written to an idle CLI whose echo has not come yet, as their
@@ -570,7 +570,7 @@ impl ClaudeProjector {
         ));
         // A message written during the turn waits in the CLI, which runs it
         // next: the session is still working until then
-        // (PROTO-CLAUDE-CODE-STREAM-R44).
+        // (PROTO-CLAUDE-CODE-STREAM-R67).
         out.push(state(
             line,
             if self.waiting.is_empty() {
@@ -909,7 +909,7 @@ impl ClaudeProjector {
     /// turn: the CLI's `system/init` for the turn only arrives after it.
     /// Written while a turn runs, or while messages already wait, it waits
     /// in the CLI, and its `user.message` comes from the CLI's echo when the
-    /// CLI takes it in (PROTO-CLAUDE-CODE-STREAM-R43); the line itself stays
+    /// CLI takes it in (PROTO-CLAUDE-CODE-STREAM-R63, R65); the line itself stays
     /// a passthrough.
     fn host_user(&mut self, line: &RawLine, value: Value) -> Vec<Projected> {
         let Some(message) = user_message(&value) else {
@@ -925,10 +925,11 @@ impl ClaudeProjector {
         out
     }
 
-    /// The CLI's echo of the host messages it just took into a turn. When
-    /// messages wait, it took them all, as this one message (several written
-    /// during one turn come back joined, as the record keeps them), so the
-    /// echo is their `user.message`, under the record entry's id. The echo of
+    /// The CLI's echo of the host messages it just took into a turn. The
+    /// waiting messages it holds, from the first in the order written, come
+    /// back joined as this one message, as the record keeps them, so the
+    /// echo is their `user.message`, under the record entry's id
+    /// (PROTO-CLAUDE-CODE-STREAM-R63, R64, R68). The echo of
     /// a message written to an idle CLI repeats one already projected from
     /// its host line, and projects to nothing more, unless the CLI took in
     /// messages written a moment after it with it: their blocks follow its
@@ -936,7 +937,7 @@ impl ClaudeProjector {
     /// also marks a local command's output as an echo (a model change's, a
     /// compaction's: 2.1.316/25 to 27); an echo whose first block is not
     /// the first of the message it should repeat is no host message's, and
-    /// stays a passthrough.
+    /// stays a passthrough (R65, R66).
     fn echo(&mut self, line: &RawLine, uuid: String, value: Value) -> Vec<Projected> {
         let blocks = blocks(&value);
         let starts_as = |message: &[Value]| match (blocks.first(), message.first()) {
@@ -948,13 +949,28 @@ impl ClaudeProjector {
             _ if self.waiting.first().is_some_and(|sent| starts_as(sent)) => 0,
             _ => return vec![passthrough(line, value)],
         };
-        let message = (!self.waiting.is_empty() && blocks.len() > shown)
-            .then(|| user_message_of(&blocks[shown..]))
-            .flatten();
-        let Some(message) = message else {
+        // The waiting messages it holds come next, in the order written. One
+        // written in the instant after the CLI took the others is not among
+        // them: it still waits, for an echo of its own.
+        let mut end = shown;
+        let mut held = 0;
+        for sent in &self.waiting {
+            let holds = blocks
+                .get(end..end + sent.len())
+                .is_some_and(|echoed| echoed.iter().zip(sent).all(|(e, s)| same_block(e, s)));
+            if !holds {
+                break;
+            }
+            end += sent.len();
+            held += 1;
+        }
+        let Some(message) = (held > 0)
+            .then(|| user_message_of(&blocks[shown..end]))
+            .flatten()
+        else {
             return vec![passthrough(line, value)];
         };
-        self.waiting.clear();
+        self.waiting.drain(..held);
         let mut out = self.ensure_turn(line);
         out.push(Projected::of_message(
             Some(uuid),

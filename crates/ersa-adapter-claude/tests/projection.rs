@@ -1894,3 +1894,63 @@ fn a_command_echoed_only_as_its_output_does_not_hold_up_later_echoes() {
     );
     assert_eq!(sequence.last().unwrap(), "session.state Idle");
 }
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R63
+// verifies: PROTO-CLAUDE-CODE-STREAM-R64
+// verifies: PROTO-CLAUDE-CODE-STREAM-R67
+// verifies: PROTO-CLAUDE-CODE-STREAM-R68
+#[test]
+fn an_echo_takes_in_only_the_waiting_messages_it_holds() {
+    // Three written while a turn runs; the CLI takes in two, and the third
+    // arrives in the instant before Ersa reads their echo. It still waits,
+    // and shows at its own echo.
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let (one, two, three, four) = (
+        user_text("one"),
+        user_text("two"),
+        user_text("three"),
+        user_text("four"),
+    );
+    let lines = log(&[
+        (Host, &one),
+        (Backend, init),
+        (Backend, &echo_of("one", "u-1")),
+        (Host, &two),
+        (Host, &three),
+        (Backend, result),
+        (Backend, init),
+        (Host, &four),
+        (Backend, &echo_of_blocks(&["two\n", "three"], "u-2")),
+        (Backend, result),
+        (Backend, init),
+        (Backend, &echo_of("four", "u-4")),
+        (Backend, result),
+    ]);
+    assert_eq!(
+        waiting_counts(&lines),
+        [(3, 1), (4, 2), (7, 3), (8, 1), (11, 0)]
+    );
+    assert_eq!(
+        without_lines(turns_and_messages(&lines)),
+        [
+            "turn.started 1",
+            "session.state Running",
+            "user.message one",
+            "turn.completed 1",
+            "session.state Running",
+            "turn.started 2",
+            "session.state Running",
+            // The two the echo holds, as one message (R64).
+            "user.message two\n\nthree",
+            "turn.completed 2",
+            // "four" still waits (R67).
+            "session.state Running",
+            "turn.started 3",
+            "session.state Running",
+            "user.message four",
+            "turn.completed 3",
+            "session.state Idle",
+        ]
+    );
+}
