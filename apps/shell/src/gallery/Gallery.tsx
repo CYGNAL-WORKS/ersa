@@ -575,6 +575,52 @@ const longCommandCall: Event = {
   target: "pnpm --filter shell exec vitest run src/components/ToolCard.dom.test.ts src/session/toolCard.test.ts --reporter verbose",
 };
 
+const turnStopped: Event = { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 9000, is_error: false };
+const appFile = "D:\\Projects\\ersa\\apps\\shell\\src\\session\\transcript.ts";
+const editCall: Event = {
+  type: "tool.requested",
+  tool_use_id: "e1",
+  name: "Edit",
+  input: {},
+  target: appFile,
+  edits: [
+    {
+      path: appFile,
+      old_text: '    case "turn.started":\n      return { ...next, working: true };',
+      new_text: '    case "turn.started":\n      // A new turn: the agent is at work until it completes.\n      return { ...next, working: true, since: envelope.ts };',
+    },
+  ],
+};
+const editDone: Event = { type: "tool.result", tool_use_id: "e1", content: "The file has been updated.", is_error: false };
+const writeCall: Event = {
+  type: "tool.requested",
+  tool_use_id: "e1",
+  name: "Write",
+  input: {},
+  target: "D:\\Projects\\ersa\\docs\\notes.md",
+  edits: [{ path: "D:\\Projects\\ersa\\docs\\notes.md", new_text: "# Notes\n\nThe reconnect test races the subscription.\n" }],
+};
+const renameCall: Event = {
+  type: "tool.requested",
+  tool_use_id: "e1",
+  name: "Edit",
+  input: {},
+  target: appFile,
+  edits: [{ path: appFile, old_text: "lastSeq", new_text: "lastApplied", every_occurrence: true }],
+};
+const wideLine = `    const message = "${"A line wider than the column, so the change scrolls sideways rather than wrapping. ".repeat(2)}";`;
+const wideCall: Event = { ...editCall, edits: [{ path: appFile, old_text: "    const message = undefined;", new_text: wideLine }] } as Event;
+const severalCall: Event = {
+  type: "tool.requested",
+  tool_use_id: "e1",
+  name: "Apply",
+  input: {},
+  edits: [
+    { path: appFile, old_text: "working?: boolean;", new_text: "working?: boolean;\n  since?: string;" },
+    { path: "D:\\Projects\\ersa\\docs\\notes.md", new_text: "# Notes\n" },
+  ],
+};
+
 /** One call's card as the transcript shows it, with its subagent's calls, against the gallery's clock and workspace. */
 function Card({
   steps,
@@ -1155,6 +1201,29 @@ const entries: Entry[] = [
       ["A long path, cut at its start", <div style={{ maxWidth: "var(--size-bubble-max)" }}><Card steps={[[0, longPathCall], [3, readDone]]} /></div>],
       ["A long command, cut at its end", <div style={{ maxWidth: "var(--size-bubble-max)" }}><Card steps={[[0, longCommandCall]]} id="b1" /></div>],
       ["Read from the record, unfinished", <Card steps={[[0, readCall]]} input="record" />],
+      ["Stopped, its turn ended without its result", <Card steps={[[0, bashCall], [9, turnStopped]]} id="b1" />],
+    ],
+  },
+  {
+    name: "DiffCard",
+    wide: true,
+    states: [
+      ["Done", <Card steps={[[0, editCall], [1, editDone]]} id="e1" />],
+      ["Running", <Card steps={[[0, editCall]]} id="e1" />],
+      ["Waiting for the user", <Card steps={[[0, editCall]]} id="e1" waiting />],
+      ["Under the pointer", <Card steps={[[0, editCall], [1, editDone]]} id="e1" force="hover" />],
+      ["Pressed", <Card steps={[[0, editCall], [1, editDone]]} id="e1" force="pressed" />],
+      ["Keyboard focus", <Card steps={[[0, editCall], [1, editDone]]} id="e1" force="focus" />],
+      ["Closed", <Card steps={[[0, editCall], [1, editDone]]} id="e1" initialOpen={false} />],
+      [
+        "Failed, keeping its change",
+        <Card steps={[[0, editCall], [1, { type: "tool.result", tool_use_id: "e1", content: "String to replace not found in file.", is_error: true }]]} id="e1" />,
+      ],
+      ["Stopped, keeping its change", <Card steps={[[0, editCall], [9, turnStopped]]} id="e1" />],
+      ["A file written whole", <Card steps={[[0, writeCall], [1, editDone]]} id="e1" />],
+      ["Made at every occurrence", <Card steps={[[0, renameCall], [1, editDone]]} id="e1" />],
+      ["A line wider than the column", <Card steps={[[0, wideCall], [1, editDone]]} id="e1" />],
+      ["Several files", <Card steps={[[0, severalCall], [1, editDone]]} id="e1" />],
     ],
   },
   {
