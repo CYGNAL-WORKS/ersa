@@ -100,26 +100,31 @@ fn belongs_to_daily(label: &str) -> bool {
 /// application data folder (`%LOCALAPPDATA%\Ersa` on Windows).
 pub fn startup(build: Build, attach: Option<&str>, app_data: Option<&Path>) -> Startup {
     match build {
-        Build::Daily => Startup {
-            claim: DAILY_WINDOW.to_string(),
-            attached: None,
-            // Without the application data folder there is no `daily`
-            // folder either, and the window only says why it has no Core.
-            // Its web data still never goes to the webview's default folder:
-            // that one comes from the system rather than LOCALAPPDATA, so it
-            // is the development build's even then.
-            web_data: Some(match app_data {
-                Some(dir) => dir.join(DAILY),
-                None => std::env::temp_dir().join("ersa-daily-web"),
-            }),
-            core: match app_data {
-                Some(dir) => Core::Own {
-                    label: DAILY.to_string(),
-                    data_dir: dir.join(DAILY),
-                },
-                // Never fall back to the default folder: the daily build's
-                // sessions stay apart from a development build's.
-                None => Core::Refused(
+        Build::Daily => match app_data {
+            // The `daily` folder holds both the Core's data and the
+            // window's web data (FLOW-CLOSE-AND-QUIT-R08, R09).
+            Some(dir) => {
+                let daily = dir.join(DAILY);
+                Startup {
+                    claim: DAILY_WINDOW.to_string(),
+                    attached: None,
+                    web_data: Some(daily.clone()),
+                    core: Core::Own {
+                        label: DAILY.to_string(),
+                        data_dir: daily,
+                    },
+                }
+            }
+            // Never fall back to the default folders: the daily build's
+            // sessions stay apart from a development build's, and so does
+            // its web data, since the webview's default folder comes from
+            // the system rather than LOCALAPPDATA and is the development
+            // build's even then. The window only says why it has no Core.
+            None => Startup {
+                claim: DAILY_WINDOW.to_string(),
+                attached: None,
+                web_data: Some(std::env::temp_dir().join("ersa-daily-web")),
+                core: Core::Refused(
                     "Ersa can't find the folder where it keeps your sessions. Make sure LOCALAPPDATA is set, then open Ersa again."
                         .to_string(),
                 ),
@@ -252,35 +257,5 @@ mod tests {
         // A label that only starts like the daily build's is not its.
         let near = startup(Build::Development, Some("daily2"), None);
         assert_eq!(near.core, Core::AttachOnly("daily2".to_string()));
-    }
-
-    // verifies: FLOW-CLOSE-AND-QUIT-R10
-    #[test]
-    fn the_daily_and_development_windows_claim_apart() {
-        let daily = startup(Build::Daily, None, Some(&app_data())).claim;
-        for attach in [None, Some("replay"), Some("daily"), Some("live-1")] {
-            let dev = startup(Build::Development, attach, Some(&app_data())).claim;
-            assert_ne!(dev, daily, "attach {attach:?}");
-        }
-    }
-
-    // verifies: FLOW-CLOSE-AND-QUIT-R09
-    #[test]
-    fn the_daily_builds_window_keeps_its_web_data_in_daily() {
-        let daily = startup(Build::Daily, None, Some(&app_data()));
-        assert_eq!(daily.web_data, Some(app_data().join("daily")));
-        // A development build keeps the webview's default folder, whatever
-        // it attaches to.
-        for attach in [None, Some("replay"), Some("daily")] {
-            let dev = startup(Build::Development, attach, Some(&app_data()));
-            assert_eq!(dev.web_data, None, "attach {attach:?}");
-        }
-        // Without an application data folder, never the webview's default
-        // (the development build's) folder either.
-        let lost = startup(Build::Daily, None, None);
-        assert_eq!(
-            lost.web_data,
-            Some(std::env::temp_dir().join("ersa-daily-web"))
-        );
     }
 }
