@@ -205,7 +205,6 @@
 {"raw":199,"event":{"type":"session.state","state":"running"}}
 {"raw":200,"event":{"type":"turn.started","turn":2,"trigger":"user"}}
 {"raw":200,"event":{"type":"session.state","state":"running"}}
-{"raw":200,"event":{"type":"user.message","text":"Now reply with the single word: second","origin":"human"}}
 {"raw":201,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"system/status","payload":{"session_id":"5249e645-e4a0-4c33-9d4a-9b22e2851275","status":"requesting","subtype":"status","type":"system","uuid":"8a13b202-37b9-4e37-a51e-d5d527e5a3ff"}}}
 {"raw":202,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/message_start","payload":{"api_message_id":"msg_011Ch1vR34vNx3LR91c7vnDg","event":{"message":{"container":null,"content":[],"context_management":null,"diagnostics":{"cache_miss_reason":{"type":"unavailable"}},"id":"msg_011Ch1vR34vNx3LR91c7vnDg","input_transformations":[],"model":"claude-fable-5-2","role":"assistant","stop_details":null,"stop_reason":null,"stop_sequence":null,"type":"message","usage":{"cache_creation":{"ephemeral_1h_input_tokens":13685,"ephemeral_5m_input_tokens":0},"cache_creation_input_tokens":13685,"cache_read_input_tokens":33840,"inference_geo":"global","input_tokens":2,"output_tokens":3,"service_tier":"standard","speed":"standard"}},"type":"message_start"},"parent_tool_use_id":null,"session_id":"5249e645-e4a0-4c33-9d4a-9b22e2851275","thinking_display":"updates","ttft_ms":2506,"type":"stream_event","uuid":"5ceffb81-f5df-49cf-a9be-8cbf91958863"}}}
 {"raw":203,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/content_block_start","payload":{"api_message_id":"msg_011Ch1vR34vNx3LR91c7vnDg","event":{"content_block":{"text":"","type":"text"},"index":0,"type":"content_block_start"},"parent_tool_use_id":null,"session_id":"5249e645-e4a0-4c33-9d4a-9b22e2851275","type":"stream_event","uuid":"a15f571d-2c1c-4f3f-95b2-912e5e2691a4"}}}
@@ -217,4 +216,4 @@
 {"raw":208,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/message_stop","payload":{"api_message_id":"msg_011Ch1vR34vNx3LR91c7vnDg","event":{"type":"message_stop"},"parent_tool_use_id":null,"session_id":"5249e645-e4a0-4c33-9d4a-9b22e2851275","type":"stream_event","uuid":"3db48dc6-83a9-4f07-a6bd-2d201f6fe0d7"}}}
 {"raw":209,"event":{"type":"turn.completed","turn":2,"outcome":"success","duration_ms":2554,"is_error":false,"final_text":"second"}}
 {"raw":209,"event":{"type":"usage.updated","context_tokens":47530,"context_window":1000000,"cost_usd_total":0.620225,"turns":2}}
-{"raw":209,"event":{"type":"session.state","state":"idle"}}
+{"raw":209,"event":{"type":"session.state","state":"running"}}

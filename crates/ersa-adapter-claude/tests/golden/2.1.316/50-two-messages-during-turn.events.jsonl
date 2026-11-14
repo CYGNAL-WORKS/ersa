@@ -219,8 +219,6 @@
 {"raw":213,"event":{"type":"session.state","state":"running"}}
 {"raw":214,"event":{"type":"turn.started","turn":2,"trigger":"user"}}
 {"raw":214,"event":{"type":"session.state","state":"running"}}
-{"raw":214,"event":{"type":"user.message","text":"Now reply with the single word: second","origin":"human"}}
-{"raw":214,"event":{"type":"user.message","text":"Now reply with the single word: third","origin":"human"}}
 {"raw":215,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"system/status","payload":{"session_id":"191eff5f-a940-46e9-a56c-6d303bb299e7","status":"requesting","subtype":"status","type":"system","uuid":"f93d1f5f-4bad-4078-a8b4-02cb3f3665b4"}}}
 {"raw":216,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/message_start","payload":{"api_message_id":"msg_011Ch3QccGXGvzCZ5rwHxu1G","event":{"message":{"container":null,"content":[],"context_management":null,"diagnostics":{"cache_miss_reason":{"type":"unavailable"}},"id":"msg_011Ch3QccGXGvzCZ5rwHxu1G","input_transformations":[],"model":"claude-fable-5-2","role":"assistant","stop_details":null,"stop_reason":null,"stop_sequence":null,"type":"message","usage":{"cache_creation":{"ephemeral_1h_input_tokens":13713,"ephemeral_5m_input_tokens":0},"cache_creation_input_tokens":13713,"cache_read_input_tokens":33839,"inference_geo":"global","input_tokens":2,"output_tokens":3,"service_tier":"standard","speed":"standard"}},"type":"message_start"},"parent_tool_use_id":null,"session_id":"191eff5f-a940-46e9-a56c-6d303bb299e7","thinking_display":"updates","ttft_ms":2810,"type":"stream_event","uuid":"0ea444f4-64eb-4347-9327-18282ee8f23e"}}}
 {"raw":217,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/content_block_start","payload":{"api_message_id":"msg_011Ch3QccGXGvzCZ5rwHxu1G","event":{"content_block":{"text":"","type":"text"},"index":0,"type":"content_block_start"},"parent_tool_use_id":null,"session_id":"191eff5f-a940-46e9-a56c-6d303bb299e7","type":"stream_event","uuid":"2359e974-f277-476b-b9dd-07f236fdf470"}}}
@@ -232,4 +230,4 @@
 {"raw":222,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/message_stop","payload":{"api_message_id":"msg_011Ch3QccGXGvzCZ5rwHxu1G","event":{"type":"message_stop"},"parent_tool_use_id":null,"session_id":"191eff5f-a940-46e9-a56c-6d303bb299e7","type":"stream_event","uuid":"4e04eb9f-3995-47c6-8139-20b56fa99e5a"}}}
 {"raw":223,"event":{"type":"turn.completed","turn":2,"outcome":"success","duration_ms":2851,"is_error":false,"final_text":"third"}}
 {"raw":223,"event":{"type":"usage.updated","context_tokens":47557,"context_window":1000000,"cost_usd_total":0.6214445,"turns":2}}
-{"raw":223,"event":{"type":"session.state","state":"idle"}}
+{"raw":223,"event":{"type":"session.state","state":"running"}}
