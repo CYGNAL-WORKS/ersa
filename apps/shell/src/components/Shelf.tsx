@@ -11,7 +11,8 @@ import { HeightEase, reducedMotion } from "../theme/motion";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { PermissionAnswers } from "./PermissionAnswers";
 import { QuestionForm } from "./QuestionForm";
-import { PermissionInput, Revealed } from "./Transcript";
+import { Revealed } from "./Revealed";
+import { PermissionInput } from "./Transcript";
 import "./Shelf.css";
 
 interface ShelfProps {

@@ -634,9 +634,17 @@ Thinking…
 
 Thought
 
-### `transcript.tool.runningProgress`
+### `transcript.tool.rowLabel`
 
-Running…
+{tool} {target}, {state}
+
+### `transcript.tool.rowNoTargetLabel`
+
+{tool}, {state}
+
+### `transcript.tool.runningStatus`
+
+Running
 
 ### `transcript.tool.doneStatus`
 
@@ -649,6 +657,38 @@ Failed
 ### `transcript.tool.waitingLabel`
 
 Waiting for you
+
+### `transcript.tool.inputLabel`
+
+Input
+
+### `transcript.tool.outputLabel`
+
+Output
+
+### `transcript.tool.errorLabel`
+
+Error
+
+### `transcript.tool.duration.secondsLabel`
+
+{seconds}s
+
+### `transcript.tool.duration.minutesLabel`
+
+{minutes}m
+
+### `transcript.tool.duration.minutesSecondsLabel`
+
+{minutes}m {seconds}s
+
+### `transcript.tool.duration.hoursLabel`
+
+{hours}h
+
+### `transcript.tool.duration.hoursMinutesLabel`
+
+{hours}h {minutes}m
 
 ### `transcript.permission.nameLabel`
 

@@ -5,7 +5,7 @@ import type { PermissionRequested } from "../protocol/agent-events.gen";
 import type { Answer, Decision, Reply } from "../session/answers";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
-import { Revealed } from "./Transcript";
+import { Revealed } from "./Revealed";
 import "./PermissionAnswers.css";
 
 interface PermissionAnswersProps {
