@@ -8,5 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-13 none (ADR 0035): the ADR doesn't say where the daily build installs. Tauri's per-user installer uses `%LOCALAPPDATA%\Ersa`, which is also Ersa's application data folder, where a development build keeps its data (ersa.db, core.log, worktrees) and the daily build's `daily` folder sits. No file names collide, and the uninstaller removes only the files it installed, so the data stays; #318 keeps Tauri's default meanwhile. Both builds also share the webview's data folder `%LOCALAPPDATA%\dev.ersa.app`, since they share the bundle identifier.
 
 ## Resolved recently (optional, trimmed in planning passes)
