@@ -36,6 +36,7 @@ The user chooses **Fork** in a tile's menu (`LAY-SHELL`, The rail).
 - **The new workspace can't be made**: Ersa says so with the reason, no fork is made, and the original is unchanged.
 - **The backend refuses the fork's name**: the fork has no title until it has its own record, then the title the backend copied from the original, until the user renames it.
 - **Ersa restarts before a fork's first message**: the fork has no title, since the backend keeps no record of it until then.
+- **A fork closed before its first message and resumed later** is forked from its original again (FLOW-RESUME-SESSION-R10), so the agent's conversation in it includes what the original did since, though Ersa shows the fork up to its fork point until its first message.
 - **A root workspace**: the fork and the original share files, as two sessions in one workspace always do; deleting either keeps the workspace, as deleting a session always keeps a root workspace (FLOW-ARCHIVE-DELETE-SESSION).
 
 ## Requirements
@@ -57,10 +58,12 @@ The user chooses **Fork** in a tile's menu (`LAY-SHELL`, The rail).
 
 ## Open questions
 
+- Whether a fork resumed before its first message can keep its fork point: the backend keeps no record of the fork until then, so Ersa forks the original again as it is, and needs a way to copy the original only up to a named message.
 - Whether Claude Desktop offers Fork during a reply and on an archived session. Neither has been observed, and the variations above stand until one has.
 
 ## Changes
 
+- 2026-11-13: from #353 inbox: a fork closed before its first message and resumed later is forked from its original again, so it holds the original's later turns; whether it can keep its fork point is an open question. No requirement IDs changed.
 - 2026-11-13: from #302 inbox: the menu marks Fork unavailable only for what the session list already shows (a reply running, a request waiting, a message or fork on its way); a missing finished reply, a session open elsewhere and a backend that can't fork are said after the click, from Core's refusal reason, since `session.list` carrying fork availability would have Core read every record and probe other processes on each listing. The words per reason come with PROTO-CORE-API-R80. R03 and Step 1 reworded.
 - 2026-11-09: owner's decision from the audit against the backend rule: the backend names a fork at launch and Core holds no title (R07 retired for R08); a fork's link to its original goes once it has its own record (R09).
 - 2026-11-09: from #272 inbox, owner's decision: Ersa names a fork in its backend and stores no title for it, so the two cases where the backend's title is not the marked one are variations. R06 retired for R07.

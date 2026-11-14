@@ -97,6 +97,7 @@ fn messages(events: &[Value]) -> Vec<(String, String)> {
 }
 
 // verifies: FLOW-RESUME-SESSION-R01
+// verifies: PROTO-AGENT-EVENTS-R24
 #[tokio::test(flavor = "multi_thread")]
 async fn a_resumed_session_continues_its_record_in_its_own_folder() {
     let records = Records::default();
