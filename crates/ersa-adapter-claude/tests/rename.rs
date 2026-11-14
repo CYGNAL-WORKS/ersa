@@ -235,6 +235,7 @@ fn config() -> SessionConfig {
         project_path: String::new(),
         backend_session_id: None,
         fork_of: None,
+        resume: None,
         extra: Value::Null,
     }
 }

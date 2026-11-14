@@ -12,6 +12,7 @@
 //! - `burst <n>`: `n` replies at once, to flood subscribers.
 //! - `work`: a turn that keeps working, the backend saying it is running,
 //!   until it is interrupted, then ends with outcome `interrupted`.
+//! - `exit`: the backend exits by itself, with code 0.
 //! - `idle`: the backend says it is idle, as Claude Code does once a turn
 //!   ends; the fake otherwise reports itself running from its start.
 //! - `broken pipe`: the write fails halfway, so Core can't tell whether the
@@ -357,12 +358,22 @@ impl Adapter for FakeAdapter {
             sink.process_exited(Ok(ProcessExit { code: Some(1) }));
             return Err(AdapterError::Protocol("the fake refused to start".into()));
         }
-        // Announces its own id for the session, as Claude Code's `init` does.
-        let session_id = format!("fake-{}", NEXT_SESSION.fetch_add(1, Ordering::SeqCst));
-        self.records
+        // Announces its id for the session, as Claude Code's `init` does: the
+        // one it resumes, keeping that record, else the one Core chose, else
+        // its own.
+        let session_id = config
+            .resume
+            .clone()
+            .or_else(|| config.backend_session_id.clone())
+            .unwrap_or_else(|| format!("fake-{}", NEXT_SESSION.fetch_add(1, Ordering::SeqCst)));
+        // Message ids go on from the record's, so a resumed session's are new.
+        let kept = self
+            .records
             .lock()
             .unwrap()
-            .insert(session_id.clone(), Vec::new());
+            .entry(session_id.clone())
+            .or_default()
+            .len();
         sink.record(
             Direction::Backend,
             json!({ "t": "ready", "session_id": session_id }).to_string(),
@@ -374,7 +385,10 @@ impl Adapter for FakeAdapter {
             session_id,
             stop_hangs: self.stop_hangs,
             stop_delay: self.stop_delay,
-            inner: Mutex::default(),
+            inner: Mutex::new(Inner {
+                next_message: u32::try_from(kept).unwrap(),
+                ..Inner::default()
+            }),
         }))
     }
 
@@ -626,6 +640,9 @@ impl AdapterSession for FakeSession {
             let id = self.next_id("r");
             self.backend(json!({ "t": "reply", "id": id, "text": "done" }));
             self.backend(json!({ "t": "completed" }));
+        } else if text == "exit" {
+            // The backend exits by itself, as one that crashed would.
+            self.exit(Some(0));
         } else if text == "idle" {
             self.backend(json!({ "t": "idle" }));
         } else if text == "question" {

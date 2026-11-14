@@ -307,24 +307,24 @@ fn host_program() -> String {
 }
 
 /// The arguments that continue an earlier session, after
-/// [`invocation_args`]: `--resume` with `extra.resume`, the `session_id` from
-/// that session's `system/init`, which Ersa stores with the session. The CLI
-/// keeps that id and appends to its session record
-/// (PROTO-CLAUDE-CODE-STREAM-R14). None for a new session (`extra.resume`
-/// absent or `null`).
+/// [`invocation_args`]: `--resume` with [`SessionConfig::resume`], the
+/// `session_id` from that session's `system/init`, which Ersa stores with the
+/// session. The CLI keeps that id and appends to its session record
+/// (PROTO-CLAUDE-CODE-STREAM-R14). None for a new session or a fork.
 ///
 /// The CLI's session ids are UUIDs, and anything else is an error, so a value
 /// that merely looks like a flag (from a file name in the record directory,
 /// say) can never reach the command line as one.
 pub fn resume_args(config: &SessionConfig) -> Result<Vec<String>, AdapterError> {
-    let Some(value) = config.extra.get("resume").filter(|v| !v.is_null()) else {
+    let Some(id) = &config.resume else {
         return Ok(Vec::new());
     };
-    match value.as_str() {
-        Some(id) if crate::record::is_session_id(id) => Ok(vec!["--resume".into(), id.into()]),
-        _ => Err(AdapterError::Protocol(format!(
-            "cannot resume {value}: not a Claude Code session id"
-        ))),
+    if crate::record::is_session_id(id) {
+        Ok(vec!["--resume".into(), id.clone()])
+    } else {
+        Err(AdapterError::Protocol(format!(
+            "cannot resume {id:?}: not a Claude Code session id"
+        )))
     }
 }
 
@@ -338,7 +338,7 @@ pub fn fork_args(config: &SessionConfig) -> Result<Vec<String>, AdapterError> {
         return Ok(Vec::new());
     };
     let id = &fork.original;
-    if config.extra.get("resume").is_some_and(|v| !v.is_null()) {
+    if config.resume.is_some() {
         return Err(AdapterError::Protocol(
             "a session is either resumed or forked, not both".into(),
         ));
@@ -371,7 +371,7 @@ pub fn session_id_args(config: &SessionConfig) -> Result<Vec<String>, AdapterErr
     let Some(id) = &config.backend_session_id else {
         return Ok(Vec::new());
     };
-    if config.extra.get("resume").is_some_and(|v| !v.is_null()) {
+    if config.resume.is_some() {
         return Err(AdapterError::Protocol(
             "a resumed session keeps its own id; it cannot also start under a new one".into(),
         ));
