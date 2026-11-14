@@ -245,16 +245,32 @@ export const enUS = {
     reconnectingProgress: "Reconnecting to Core…",
     loadingProgress: "Loading…",
     nothingYetEmpty: "Nothing yet. Write to the agent below.",
-    // The agent's thinking, then its summary after a colon when the backend gives one.
+    // The agent's thinking row: while it thinks, and once it has thought (its summary opens beneath).
     thinkingProgress: "Thinking…",
     thoughtLabel: "Thought",
-    // A tool card's state.
+    // A tool card (docs/design/TRANSCRIPT.md, Tool cards).
     tool: {
-      runningProgress: "Running…",
+      // Heard, not shown: the row's name, "Read docs/GLOSSARY.md, done", or without a target "Read, done".
+      rowLabel: "{tool} {target}, {state}",
+      rowNoTargetLabel: "{tool}, {state}",
+      // The card's state, heard in its name; "Failed" also shows as the row's detail.
+      runningStatus: "Running",
       doneStatus: "Done",
       failedStatus: "Failed",
       // While the call's permission request waits for the user.
       waitingLabel: "Waiting for you",
+      // The open card's parts: the call's input, then its output or, for a failed call, its error.
+      inputLabel: "Input",
+      outputLabel: "Output",
+      errorLabel: "Error",
+      // How long a call took or has run, in its two largest units, abbreviated (CONTENT.md).
+      duration: {
+        secondsLabel: "{seconds}s",
+        minutesLabel: "{minutes}m",
+        minutesSecondsLabel: "{minutes}m {seconds}s",
+        hoursLabel: "{hours}h",
+        hoursMinutesLabel: "{hours}h {minutes}m",
+      },
     },
     // A permission request's card: its name, its title while open, and what became of it.
     permission: {
