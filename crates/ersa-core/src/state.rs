@@ -179,6 +179,7 @@ impl Core {
         }
         let found = adapters::detect(
             self.local_transport.as_ref(),
+            Arc::clone(&self.local_session_transport),
             self.config.backend_program_override.as_deref(),
             self.sessions.adapters(),
         )

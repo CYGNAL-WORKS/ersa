@@ -97,20 +97,21 @@ async fn the_first_message_creates_the_workspace_the_session_and_its_first_turn(
                 .find(|b| b["name"] == "claude-code")
                 .expect("Claude Code listed")
                 .clone();
-            // Its status is left alone: detection runs `claude` from PATH,
-            // not the stand-in, so it says whether this machine has Claude
-            // Code. The choices are the adapter's, listed either way.
+            // Detection runs the stand-in (`ERSA_CLAUDE`), which reports
+            // one model, the CLI's own `default` entry (PROTO-CORE-API-R72).
+            assert_eq!(claude["status"], "available", "{claude}");
             let listed = workspaces(&link, &project).await;
             assert_eq!(listed.len(), 1, "only the root workspace: {listed:?}");
             assert!(sessions(&link).await.is_empty());
 
             // The first message: a new workspace, the session with the
             // chips' values, and the message as its first turn.
-            let (model, effort, mode) = (
+            // The CLI marks no default effort, so none is named.
+            let (model, mode) = (
                 default_of(&claude["models"]),
-                default_of(&claude["efforts"]),
                 default_of(&claude["permission_modes"]),
             );
+            assert_eq!(model, "default");
             let workspace = request(
                 &link,
                 "workspace.create",
@@ -125,7 +126,6 @@ async fn the_first_message_creates_the_workspace_the_session_and_its_first_turn(
                     "workspace_id": workspace["id"],
                     "backend": "claude-code",
                     "model": model,
-                    "effort": effort,
                     "permission_mode": mode,
                 }),
             )
@@ -147,8 +147,8 @@ async fn the_first_message_creates_the_workspace_the_session_and_its_first_turn(
             assert_eq!(row["workspace_id"], workspace["id"]);
             assert!(row["tile"]["state"].is_string(), "a tile: {row}");
             assert_eq!(
-                (&row["model"], &row["effort"], &row["permission_mode"]),
-                (&model, &effort, &mode)
+                (&row["model"], row.get("effort"), &row["permission_mode"]),
+                (&model, None, &mode)
             );
             assert_eq!(workspaces(&link, &project).await.len(), 2);
 

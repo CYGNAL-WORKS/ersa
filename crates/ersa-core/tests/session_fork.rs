@@ -15,7 +15,8 @@ use support::{Client, TestCore, git, kind, project, start_with_adapters, tempdir
 
 async fn start(fake: &Arc<FakeAdapter>) -> (TestCore, Client) {
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
-    let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
+    // Detected, so the fake's models are offered and a session can name one.
+    let core = start_with_adapters(tempdir(), support::detecting, adapters).await;
     let client = core.client().await;
     (core, client)
 }
