@@ -129,7 +129,11 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
                 .collect();
             let value: Value = serde_json::from_str(&line.line).unwrap();
             let is_message = matches!(value["type"].as_str(), Some("user" | "assistant"));
-            if line.dir == Direction::Backend && is_message && !from_a_subagent(&value) {
+            // An echo of a host message, from a recording made with
+            // `--replay-user-messages`, which Ersa does not pass: Ersa's
+            // user message comes from the host line it echoes.
+            let echo = value["isReplay"] == true;
+            if line.dir == Direction::Backend && is_message && !echo && !from_a_subagent(&value) {
                 live.push((value["uuid"].as_str().unwrap().to_string(), events));
             }
         }

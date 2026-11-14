@@ -131,13 +131,19 @@ mod tests {
 
     use super::*;
 
+    /// A session-record fixture of 2.1.316, by name.
+    fn fixture_record(name: &str) -> String {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/briefs/protocol/fixtures/claude-code/2.1.316/record")
+            .join(format!("{name}.jsonl"));
+        // Git may check text files out with CRLF line ends on Windows.
+        fs::read_to_string(path).unwrap().replace("\r\n", "\n")
+    }
+
     /// Fixture 22's record: a message written while the first turn runs,
     /// with its queue entries kept verbatim.
     fn record_22() -> String {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
-            "../../docs/briefs/protocol/fixtures/claude-code/2.1.316/record/22-message-during-turn.jsonl",
-        );
-        fs::read_to_string(path).unwrap().replace("\r\n", "\n")
+        fixture_record("22-message-during-turn")
     }
 
     /// The record up to and including the line holding `marker`.
@@ -184,14 +190,7 @@ mod tests {
         // Fixture 51: the turn uses tools, and the CLI hands the waiting
         // message to the model at its next call, writing `remove` with
         // `absorbed_mid_turn` instead of a `dequeue`.
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
-            "../../docs/briefs/protocol/fixtures/claude-code/2.1.316/record/51-message-during-tool-turn.jsonl",
-        );
-        let record = fs::read_to_string(path).unwrap().replace(
-            "
-", "
-",
-        );
+        let record = fixture_record("51-message-during-tool-turn");
         let started = "2026-11-14T20:02:30.702Z";
         assert_eq!(
             count(
