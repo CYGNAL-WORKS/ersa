@@ -23,10 +23,12 @@ Closing the window and quitting are different acts. Closing hides the window to 
 - **FLOW-CLOSE-AND-QUIT-R06**: When Core has not stopped within 10 seconds of a quit, Ersa shall end Core's process tree and exit.
 - **FLOW-CLOSE-AND-QUIT-R07**: When the Shell exits without a quit, Core and every session shall keep running, and the next launch shall attach to that Core.
 - **FLOW-CLOSE-AND-QUIT-R08**: A release build shall serve its Core on the endpoint label `daily` with its data in the `daily` folder of Ersa's application data folder, launch that Core itself and shut it down on quit; a debug build shall refuse to attach to the label `daily`.
+- **FLOW-CLOSE-AND-QUIT-R09**: A release build shall keep its window's web data (the webview's own data folder) inside the `daily` folder, so that the daily build and a development build share no web data.
+- **FLOW-CLOSE-AND-QUIT-R10**: A release build shall hold a one-window claim of its own, apart from a debug build's, so that one daily window and one development window can run at once, each the only window of its build.
 
 ## Development
 
-A debug build attached to a labeled endpoint (LAY-SHELL, Development) quits without shutting that Core down: it was started by someone else, such as a replay or a test. The daily build (ADR 0035) is a Shell of its own: one daily window and one development window may run at once, each the only one of its build, each with its own Core; quitting the daily build shuts down its Core.
+A debug build attached to a labeled endpoint (LAY-SHELL, Development) quits without shutting that Core down: it was started by someone else, such as a replay or a test. The daily build (ADR 0035) is a Shell of its own: one daily window and one development window may run at once, each the only one of its build, each with its own Core; quitting the daily build shuts down its Core. The installer puts the daily build where Windows' per-user installer puts it, Ersa's folder in the user's local application data, beside the development build's data; its uninstall removes only what it installed, so both builds' data stay.
 
 ## Open questions
 
@@ -38,6 +40,7 @@ A debug build attached to a labeled endpoint (LAY-SHELL, Development) quits with
 
 ## Changes
 
+- 2026-11-13: from #342 inbox: the daily build installs in the per-user installer's default folder, beside the development build's data, which it never removes; its window's web data goes inside the `daily` folder, since both builds share one bundle identifier and so would share the webview's data. FLOW-CLOSE-AND-QUIT-R09 added; R10 gives ADR 0035's separate window claim its own requirement. Whether the uninstaller leaves the development data is the install ticket's owner check.
 - 2026-11-13: the daily build runs beside a development build, each with its own Shell and Core (ADR 0035). FLOW-CLOSE-AND-QUIT-R08 added.
 - 2026-11-05: from #155 inbox: the wording of a failed quit's reason is an open question. No requirement IDs changed.
 - 2026-11-02: US spelling (ADR 0020, docs/design/CONTENT.md). Meaning unchanged; no requirement IDs changed.
