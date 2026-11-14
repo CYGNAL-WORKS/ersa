@@ -53,11 +53,21 @@ test("a reply with a table, a list, a link and a code block renders as formatted
   await expect(text.locator(".code-block-language")).toHaveText("bash");
   await ersa.shot("formatted-light");
 
-  // Copy: the code alone reaches the clipboard, and the button says so.
+  // Copy: the code alone is written, and the button says so. A live check never touches the owner's clipboard or
+  // raises its permission prompt, so the page's clipboard write is replaced by a recorder; the component test holds
+  // the exact-text rule (FLOW-READ-TRANSCRIPT-R04).
+  await page.evaluate(() => {
+    const written: string[] = [];
+    (window as unknown as { copied: string[] }).copied = written;
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (data: string) => void written.push(data) },
+    });
+  });
   const copy = text.getByRole("button", { name: "Copy code" });
   await copy.click();
   await expect(text.getByRole("button", { name: "Copied" })).toBeVisible();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("pnpm test --run");
+  expect(await page.evaluate(() => (window as unknown as { copied: string[] }).copied)).toEqual(["pnpm test --run"]);
   await ersa.shot("copied-light");
 
   await page.mouse.move(0, 0);
