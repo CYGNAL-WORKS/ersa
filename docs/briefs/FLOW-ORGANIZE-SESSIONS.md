@@ -34,7 +34,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **Groups by date** are Today, Yesterday, Previous 7 days and Older, by when the session was created, in the user's local time, so a session never changes group as it works; only the passing of days moves it, and a fork moves to its original's date once it has its own record. Yesterday is the calendar day before today, Previous 7 days the six before that (2 to 7 days back), and Older anything earlier; a session created later than now, by a clock set wrong, is in Today.
 - **Sections in other groupings.** Sections are seen only when grouping by section. Choosing New section, from either menu, while grouping by something else switches the grouping to Section so the new heading is in view.
 - **Deleting a section** puts its sessions in "No section" and asks nothing, since no session is lost.
-- **A name already taken, too long or holding a control character.** Making a section with exactly the name of another gives the existing section, as Claude Desktop's does (`claude-desktop/sections-2026-11-09.txt`): nothing new appears, and a session being moved goes there. Names that differ only in case are different sections. Renaming a section to exactly another's name is refused. A name has at most 200 characters, and runs of spacing in it become one space as in a session's title (PROTO-CORE-API, Sections); the name field says why it refused and keeps the name typed.
+- **A name already taken, too long or holding a control character.** Making a section with exactly the name of another gives the existing section, as Claude Desktop's does (`claude-desktop/sections-2026-11-09.txt`): nothing new appears, and a session being moved goes there. Names that differ only in case are different sections. Renaming a section to exactly another's name is refused. A name has at most 200 characters, and runs of spacing in it become one space as in a session's title (PROTO-CORE-API, Sections); a name holding a control character other than spacing is refused. The name field says why it refused and keeps the name typed.
 - **Saving fails.** When Core refuses or can't be reached, the change is undone in the rail and the rail says why. Nothing is kept only in the window.
 - **A rename the backend refuses** (a blank or too-long title, or a record that is gone) keeps the field open with the reason. Rename is available on every session, a starting one included, and the new name shows at once; the backend keeps the user's name apart from the one it generates, and the user's wins.
 - **Nothing to show.** Showing active sessions with every session archived, the rail says there are no active sessions. Changing what is shown never closes the active session, even when its tile leaves the rail. Starting a session while showing archived sessions only switches the rail to show active sessions, so the new tile is in view.
@@ -70,6 +70,7 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 - **FLOW-ORGANIZE-SESSIONS-R24**: A tile's menu shall offer Mark as unread on a session that is not unseen and Mark as read on one that is; Mark as unread shall be unavailable, with the reason, on the active session.
 - **FLOW-ORGANIZE-SESSIONS-R25**: Whether a session is unseen, by Ersa's mark or the user's, shall survive a restart of Ersa and of Core.
 - **FLOW-ORGANIZE-SESSIONS-R26**: The arrange menu's item that opens the sessions page shall read View all.
+- **FLOW-ORGANIZE-SESSIONS-R27**: Ersa shall refuse a section name holding a control character other than spacing.
 
 ## Out of scope
 
@@ -83,12 +84,13 @@ The user opens a tile's menu (Pin, Mark as unread, Rename, Move to section) or t
 
 ## Changes
 
+- 2026-11-14: from the triage of #289: a section name holding a control character other than spacing is refused, as Core does (PROTO-CORE-API-R60), and the edge case says so. R27 added. The 2026-11-07 line named PROTO-CORE-API-R61, the rule on case, and now names R60 alone.
 - 2026-11-09: owner's decisions from the audit against Claude Desktop: moving a pinned session to a section unpins it (R22); a section's name follows Desktop's limits (R06 retired for R23); Mark as unread, and an unseen mark that survives restarts (R24, R25); the menu item is View all, as in the web app (R26, and R16 reworded to name no label); last activity counts work done outside Ersa (R10 reworded, ADR 0033).
 - 2026-11-09: from #272 inbox: a fork's creation time is its record's, so a fork moves to its original's date once it has a record. No requirement IDs changed.
 - 2026-11-08: from #205 inbox: the order follows a name that changes while sorting by name (R09), and Core correcting the date created of a session with no activity yet can move its tile (R09 and R10 reworded, their IDs unchanged).
 - 2026-11-08: from #208 inbox: All sessions does nothing while a first message is on its way (R16 reworded, its ID unchanged).
 - 2026-11-08: from #267 inbox: the date groups' bounds: Previous 7 days is 2 to 7 calendar days back, and a session created in the future is in Today. No requirement IDs changed.
-- 2026-11-07: from #255 inbox: a section's name follows a title's rules for spacing and control characters (PROTO-CORE-API-R60, R61). No requirement IDs changed.
+- 2026-11-07: from #255 inbox: a section's name follows a title's rules for spacing and control characters (PROTO-CORE-API-R60). No requirement IDs changed.
 - 2026-11-07: owner's decision: Rename is available on every session, a starting one included (PROTO-CORE-API-R51). No requirement IDs changed.
 - 2026-11-05: from #174 merge review: starting a session while the rail shows archived sessions only switches it to show active sessions (R21), so FLOW-NEW-SESSION-R13 always has a place for the tile.
 - 2026-11-05: from #174 merge review: the menu item is All sessions, not View all, so it doesn't read like Show ▸ All; R16's order takes creation for a session with no activity yet (reworded before it shipped); R19 and R20 added for the page's loading and failed states and what it hides.
