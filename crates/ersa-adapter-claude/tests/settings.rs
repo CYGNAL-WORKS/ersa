@@ -382,6 +382,28 @@ fn a_relaunch_reads_back_as_far_as_each_request() {
     assert_eq!(values(&back), [None, Some("high"), Some("acceptEdits")]);
 }
 
+/// A tail that holds a reply but not the prompt its turn began with: the
+/// value counts only when Core gave no time for it, since its turn may have
+/// begun before that time.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R58
+#[test]
+fn a_value_whose_turns_start_was_not_read_counts_only_without_a_time() {
+    let mut lines = vec![prompt("2026-11-14T10:00:01.000Z", "plan")];
+    lines.extend(filler(300));
+    lines.push(reply("2026-11-14T10:09:00.000Z", OPUS, "high"));
+    let settings = listed(&lines);
+    assert_eq!(settings.model.as_ref().unwrap().turn_began, None);
+    assert_eq!(
+        values(&settings.clone().since(Requested::default())),
+        [Some(OPUS), Some("high"), None]
+    );
+    // Even a time long before the reply: its turn's start is unknown.
+    assert_eq!(
+        values(&settings.since(every("2026-11-14T10:00:00.000Z"))),
+        [None, None, None]
+    );
+}
+
 /// A session with no record has none.
 // verifies: PROTO-CLAUDE-CODE-STREAM-R57
 #[test]
