@@ -156,6 +156,14 @@ impl SessionManager {
                     "this session is being forked; send the message again in a moment".into(),
                 ));
             }
+            // Under this lock too, and an archive checks `sending` after
+            // raising this, so one of the two always sees the other
+            // (PROTO-CORE-API-R77).
+            if handle.archiving.load(Ordering::SeqCst) > 0 {
+                return Err(SessionError::InvalidState(
+                    "this session is being archived; send the message again once it is done".into(),
+                ));
+            }
             if sending.is_some() {
                 return Err(SessionError::InvalidState(
                     "a message is already being sent to this session; wait for its answer".into(),

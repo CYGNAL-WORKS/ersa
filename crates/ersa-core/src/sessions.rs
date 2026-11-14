@@ -40,7 +40,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
@@ -217,7 +217,22 @@ impl Drop for WorkspaceClaim {
     }
 }
 
-/// The refusal for a request a delete under way holds back.
+/// Keeps a session's `archiving` count raised while an archive is under way.
+struct ArchiveHold<'a>(&'a AtomicUsize);
+
+impl<'a> ArchiveHold<'a> {
+    fn raise(handle: &'a Handle) -> Self {
+        handle.archiving.fetch_add(1, Ordering::SeqCst);
+        ArchiveHold(&handle.archiving)
+    }
+}
+
+impl Drop for ArchiveHold<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// Whether the session is starting, a turn is running in it (one waiting
 /// on the user included), or a message is being sent to it: what Delete and
 /// Archive wait for (PROTO-CORE-API, `session_busy`).
@@ -233,6 +248,7 @@ fn in_turn(handle: &Handle) -> bool {
     (handle.live().is_some() && (working || waiting)) || session.sending.is_some()
 }
 
+/// The refusal for a request a delete under way holds back.
 fn busy(workspace_id: &str) -> SessionError {
     SessionError::Busy(format!(
         "a session in workspace {workspace_id} is being deleted; try again once it is done"
@@ -246,6 +262,11 @@ struct Handle {
     /// is stuck on a disk that hangs, however often the user tries again, and
     /// `session.send` refuses: the CLI has yet to copy the record.
     forking: Arc<AtomicBool>,
+    /// How many `session.set_archived { archived: true }` are between their
+    /// busy check and their mark. While any is, `session.send` refuses, so
+    /// no send starts after the check only to be stopped by the archive
+    /// (PROTO-CORE-API-R77).
+    archiving: AtomicUsize,
     id: String,
     backend: String,
     /// The session's row as last written.
@@ -595,6 +616,7 @@ impl Handle {
     fn new(row: SessionRow, created_at: String) -> Self {
         Handle {
             forking: Arc::default(),
+            archiving: AtomicUsize::new(0),
             id: row.id.clone(),
             backend: row.backend.clone(),
             row: Mutex::new(row),
@@ -1273,6 +1295,11 @@ impl SessionManager {
     pub async fn set_archived(&self, id: &str, archived: bool) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
         self.refuse_if_deleting(&handle)?;
+        // Raised before the busy check, and `session.send` reads it under the
+        // lock it sets `sending` with, while the check reads `sending`
+        // through that lock: either the check sees the send, or the send
+        // sees this archive and refuses. Lowered when this call returns.
+        let _archiving = archived.then(|| ArchiveHold::raise(&handle));
         if archived {
             // Refused before the stop, so a busy session is left exactly as
             // it was (PROTO-CORE-API-R77).
