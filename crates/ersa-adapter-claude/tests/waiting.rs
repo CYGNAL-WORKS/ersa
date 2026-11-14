@@ -89,11 +89,14 @@ async fn the_count_is_read_from_the_record_at_a_handover_during_a_turn_and_at_a_
         // The first message starts a turn.
         .wait_for_stdin(is("user"))
         .then_stdout([init.clone()])
-        // The second waits behind it; the stub ends the turn and starts the
-        // next once the test interrupts, by when the record says it ran.
+        // The second waits behind it. The stub ends the turn when the test
+        // first interrupts, and starts the next when it interrupts again, by
+        // when the record says the CLI took the message in.
         .wait_for_stdin(is("user"))
         .wait_for_stdin(is("interrupt"))
-        .then_stdout([result.clone(), init.clone()])
+        .then_stdout([result.clone()])
+        .wait_for_stdin(is("interrupt"))
+        .then_stdout([init.clone()])
         .hold_open();
 
     let home = tempfile::tempdir().unwrap();
@@ -137,7 +140,13 @@ async fn the_count_is_read_from_the_record_at_a_handover_during_a_turn_and_at_a_
     queue(&path, "enqueue", &now());
     assert_eq!(sink.wait_for_waiting(WAIT, 1).await, [1]);
 
-    // The turn ends and the CLI takes the waiting message into the next.
+    // The turn ends with the message still waiting.
+    session.interrupt().await.unwrap();
+    sink.wait_for_line(WAIT, |l| is_kind(l, "result")).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(sink.waiting(), [1]);
+    // The CLI takes it into the next turn, which the read at that turn's
+    // start sees.
     queue(&path, "dequeue", &now());
     session.interrupt().await.unwrap();
     assert_eq!(sink.wait_for_waiting(WAIT, 2).await, [1, 0]);
