@@ -136,8 +136,7 @@ impl SessionManager {
         let config = SessionConfig {
             cwd: row.cwd.clone(),
             permission_mode,
-            // What the session was started with or last changed to, as
-            // Core stored it (PROTO-CORE-API-R16).
+            // Core's request, as it stored it (PROTO-CORE-API-R71).
             model: row.model.clone(),
             effort: row.effort.clone(),
             project_trusted: how.project_trusted,

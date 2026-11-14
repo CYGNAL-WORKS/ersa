@@ -580,12 +580,12 @@ pub struct Session {
     pub workspace_id: String,
     pub host_id: String,
     pub backend: String,
-    /// The model and effort `session.create` was given, ids from
-    /// `backend.list`; absent when left out, which means the backend's own
-    /// default; both absent for a replayed session and one created before
-    /// Core recorded them. The permission mode the session started with: the
-    /// one given, else the backend's default, which is always stated to it
-    /// (PROTO-CORE-API-R16).
+    /// The backend's newest report of the session's model, effort and
+    /// permission mode (PROTO-CORE-API-R71): what its live stream reported
+    /// (model and permission mode), else its record's value from a turn
+    /// after Core's request, else that request. A model or effort absent is
+    /// the backend's own default. The permission mode is always known, since
+    /// Core always states one to the backend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
