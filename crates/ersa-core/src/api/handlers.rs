@@ -586,20 +586,25 @@ pub(super) async fn workspace_remove(
         .transport_for(&project.host_id)
         .ok_or_else(|| unreachable_host(&project.host_id))?;
 
+    pause_for_tests(core).await;
+
     // Claim the workspace, so a second removal (or, later, a session start)
     // cannot run against it at the same time. A workspace in `error` from a
-    // failed removal may be retried.
+    // failed removal may be retried. The state read above may be stale by
+    // now (a `session.delete` may have marked it `error` since), so what
+    // follows uses the state the claim replaced.
     const REMOVABLE: &[WorkspaceState] = &[WorkspaceState::Ready, WorkspaceState::Error];
-    let claimed = core
+    let Some(replaced) = core
         .store
         .transition_workspace(workspace.id.clone(), REMOVABLE, WorkspaceState::Removing)
-        .await?;
-    if !claimed {
+        .await?
+    else {
         return Err(ApiError::invalid_state(format!(
             "workspace {} is busy; try again when it is ready",
             workspace.id
         )));
-    }
+    };
+    pause_for_tests(core).await;
 
     // A workspace with sessions is refused, as a project with workspaces
     // is: removal never cascades, and no backend may be left running in a
@@ -612,9 +617,7 @@ pub(super) async fn workspace_remove(
         .await?
         .is_empty()
     {
-        core.store
-            .set_workspace_state(workspace.id.clone(), workspace.state)
-            .await?;
+        release_claim(core, &workspace.id, replaced).await?;
         return Err(ApiError::invalid_state(format!(
             "workspace {} has sessions; stop and remove them first",
             workspace.id
@@ -629,26 +632,46 @@ pub(super) async fn workspace_remove(
         force,
         // An `error` workspace may be an add that was killed mid-way;
         // its leftover `initializing` lock must not block removal.
-        workspace.state == WorkspaceState::Error,
+        replaced == WorkspaceState::Error,
     )
     .await;
     if let Err(e) = removed {
         // A refusal (locked, local changes without `force`, or a folder git
         // does not list) leaves the worktree as it was, so it goes back to
         // the state it had; any other failure leaves it in an unknown state.
-        let state = if e.is_refusal() {
-            workspace.state
+        if e.is_refusal() {
+            release_claim(core, &workspace.id, replaced).await?;
         } else {
-            WorkspaceState::Error
-        };
-        core.store
-            .set_workspace_state(workspace.id.clone(), state)
-            .await?;
+            core.store
+                .set_workspace_state(workspace.id.clone(), WorkspaceState::Error)
+                .await?;
+        }
         return Err(e.into());
     }
     core.store.delete_workspace(workspace.id.clone()).await?;
     workspace.state = WorkspaceState::Removing;
     Ok(workspace)
+}
+
+/// Sleeps for [`crate::CoreConfig::remove_claim_pause`], zero outside
+/// tests: once before `workspace.remove`'s claim and once after it, so a
+/// test can land another request on either side.
+async fn pause_for_tests(core: &Core) {
+    if !core.config.remove_claim_pause.is_zero() {
+        tokio::time::sleep(core.config.remove_claim_pause).await;
+    }
+}
+
+/// Puts back the state a refused `workspace.remove`'s claim replaced, only
+/// while the workspace is still `removing`: a state another request set
+/// since (a `session.delete` marking it `error`) stays
+/// (PROTO-CORE-API-R94).
+async fn release_claim(core: &Core, id: &str, replaced: WorkspaceState) -> Result<(), ApiError> {
+    const CLAIMED: &[WorkspaceState] = &[WorkspaceState::Removing];
+    core.store
+        .transition_workspace(id.to_string(), CLAIMED, replaced)
+        .await?;
+    Ok(())
 }
 
 /// `<root>/<project name>/<id>`: outside the project tree, grouped by
