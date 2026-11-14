@@ -22,20 +22,12 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Every package a plain `cargo build` or `cargo test` at the root can compile:
-/// the workspace's default members (Core's crates) and everything they depend
-/// on, directly or transitively, including dev and build dependencies and
-/// dependencies for every target OS.
-///
-/// The Shell is a workspace member too, so `Cargo.lock` lists Tauri; what
-/// matters is whether Core's crates reach it. `cargo metadata` resolves the
-/// graph: `workspace_default_members` names where to start, and each node of
-/// `resolve` lists the package ids it depends on. Without `--filter-platform`
-/// the graph covers every platform, so the check holds for all of them;
-/// `--all-features` adds every optional dependency, so Tauri behind a feature
-/// that is off by default is caught too. `--locked` reads the lockfile as it
-/// is and never changes it.
-fn default_members_dependency_closure() -> BTreeSet<String> {
+/// The workspace as `cargo metadata` describes it: every package with the
+/// dependencies its manifest declares, and the resolved graph. `--all-features`
+/// adds every optional dependency, so nothing behind a feature that is off by
+/// default escapes a check; `--locked` reads the lockfile as it is and never
+/// changes it. Without `--filter-platform` the graph covers every platform.
+fn cargo_metadata() -> Value {
     // CARGO is the cargo that is building this test, so the check uses the
     // same toolchain as the build it checks.
     let output = Command::new(env!("CARGO"))
@@ -54,8 +46,21 @@ fn default_members_dependency_closure() -> BTreeSet<String> {
         "cargo metadata failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let metadata: Value =
-        serde_json::from_slice(&output.stdout).expect("cargo metadata prints JSON");
+    serde_json::from_slice(&output.stdout).expect("cargo metadata prints JSON")
+}
+
+/// Every package a plain `cargo build` or `cargo test` at the root can compile:
+/// the workspace's default members (Core's crates) and everything they depend
+/// on, directly or transitively, including dev and build dependencies and
+/// dependencies for every target OS.
+///
+/// The Shell is a workspace member too, so `Cargo.lock` lists Tauri; what
+/// matters is whether Core's crates reach it. `cargo metadata` resolves the
+/// graph: `workspace_default_members` names where to start, and each node of
+/// `resolve` lists the package ids it depends on, on every platform and with
+/// every feature on, so the check holds for all of them.
+fn default_members_dependency_closure() -> BTreeSet<String> {
+    let metadata = cargo_metadata();
 
     // Package ids are opaque strings; the names are on `packages`.
     let name_of: BTreeMap<&str, &str> = metadata["packages"]
@@ -184,5 +189,136 @@ fn windows_only_code_lives_in_platform_modules() {
         offenders.is_empty(),
         "Windows-only code outside a platform module:\n{}",
         offenders.join("\n")
+    );
+}
+
+/// The binary, `ersa-cli`: the one package that registers adapters (ADR 0031).
+const REGISTERING_PACKAGE: &str = "ersa-cli";
+
+/// A concrete adapter is a workspace crate named `ersa-adapter-<backend>`;
+/// `ersa-adapter` itself is the boundary every adapter and Core share.
+const ADAPTER_PREFIX: &str = "ersa-adapter-";
+
+/// The workspace's members, by name, with the folder each one's manifest is in.
+fn workspace_members(metadata: &Value) -> Vec<(String, PathBuf, &Value)> {
+    let members: BTreeSet<&str> = metadata["workspace_members"]
+        .as_array()
+        .expect("metadata names the workspace members")
+        .iter()
+        .map(|id| id.as_str().unwrap())
+        .collect();
+    metadata["packages"]
+        .as_array()
+        .expect("metadata has packages")
+        .iter()
+        .filter(|p| members.contains(p["id"].as_str().unwrap()))
+        .map(|p| {
+            let manifest = PathBuf::from(p["manifest_path"].as_str().unwrap());
+            let dir = manifest.parent().unwrap().to_path_buf();
+            (p["name"].as_str().unwrap().to_string(), dir, p)
+        })
+        .collect()
+}
+
+// verifies: ARCH-CORE-R13
+#[test]
+fn only_the_binary_depends_on_a_concrete_adapter() {
+    let metadata = cargo_metadata();
+    let members = workspace_members(&metadata);
+    assert!(
+        members.iter().any(|(name, _, _)| name == "ersa-core"),
+        "the workspace should include Core"
+    );
+
+    // Every dependency each member's manifest declares, of every kind
+    // (normal, dev, build) and on every platform, so a test-only dependency
+    // of Core on an adapter is caught as surely as a normal one.
+    let mut offenders = Vec::new();
+    for (name, _, package) in &members {
+        if name == REGISTERING_PACKAGE {
+            continue;
+        }
+        for dep in package["dependencies"].as_array().unwrap() {
+            let dep_name = dep["name"].as_str().unwrap();
+            if dep_name.starts_with(ADAPTER_PREFIX) && dep_name != name {
+                let kind = dep["kind"].as_str().unwrap_or("normal");
+                offenders.push(format!("{name} -> {dep_name} ({kind})"));
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "only {REGISTERING_PACKAGE} may depend on a concrete adapter, so Core          builds and tests with none present:
+{}",
+        offenders.join("
+")
+    );
+}
+
+/// Every Rust source and Cargo manifest under `dir`, skipping build output.
+fn sources_and_manifests(dir: &Path, out: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(dir).expect("readable directory") {
+        let path = entry.expect("readable entry").path();
+        if path.is_dir() {
+            if !matches!(
+                path.file_name().and_then(|n| n.to_str()),
+                Some("target" | "gen" | "node_modules")
+            ) {
+                sources_and_manifests(&path, out);
+            }
+        } else if path.extension().is_some_and(|ext| ext == "rs")
+            || path.file_name().is_some_and(|n| n == "Cargo.toml")
+        {
+            out.push(path);
+        }
+    }
+}
+
+// verifies: ARCH-CORE-R13
+#[test]
+fn no_crate_names_an_adapter_outside_its_registration() {
+    let metadata = cargo_metadata();
+    let members = workspace_members(&metadata);
+    // A crate name, and the name Rust code uses for it.
+    let adapters: Vec<(String, String)> = members
+        .iter()
+        .filter(|(name, _, _)| name.starts_with(ADAPTER_PREFIX))
+        .map(|(name, _, _)| (name.clone(), name.replace('-', "_")))
+        .collect();
+
+    // Adding or removing a backend may touch its own crate and the binary's
+    // registration: its `main.rs` and the feature in its manifest.
+    let registration: Vec<PathBuf> = members
+        .iter()
+        .filter(|(name, _, _)| name == REGISTERING_PACKAGE)
+        .flat_map(|(_, dir, _)| [dir.join("src").join("main.rs"), dir.join("Cargo.toml")])
+        .collect();
+    assert_eq!(
+        registration.len(),
+        2,
+        "the workspace should include the binary"
+    );
+
+    let mut offenders = Vec::new();
+    for (name, dir, _) in &members {
+        let mut files = Vec::new();
+        sources_and_manifests(dir, &mut files);
+        for file in files.iter().filter(|f| !registration.contains(f)) {
+            let text = fs::read_to_string(file).expect("readable file");
+            for (crate_name, rust_name) in &adapters {
+                if crate_name != name && (text.contains(crate_name) || text.contains(rust_name)) {
+                    offenders.push(format!("{}: {crate_name}", file.display()));
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "an adapter is named outside its own crate and its registration:
+{}",
+        offenders.join(
+            "
+"
+        )
     );
 }
