@@ -29,9 +29,6 @@ const FS_JOB: Duration = Duration::from_secs(5 * 60);
 const PROGRESS_EVERY: Duration = Duration::from_secs(5);
 /// and at most this often.
 const PROGRESS_GAP: Duration = Duration::from_secs(1);
-/// How often a send waiting its turn looks whether another send on its
-/// session has ended, so its own reports follow that one's promptly.
-const TURN_WATCH: Duration = Duration::from_millis(250);
 
 /// A send under way, kept on its session's handle.
 pub(super) struct Sending {
@@ -102,6 +99,8 @@ impl Drop for Finish {
         lock(&self.handle.sending).take();
         // A progress line not yet delivered would arrive after the answer.
         self.tiles.forget_one(&self.handle.id, Latest::SendProgress);
+        // A send waiting its turn behind this one reports in its place.
+        self.handle.send_ended.notify_waiters();
     }
 }
 
@@ -518,6 +517,16 @@ async fn report_waiting(
     // Nothing changes a waiting send's phase; the pacer waits on its clock.
     let unchanged = Notify::new();
     loop {
+        let Some(ended) = handle
+            .upgrade()
+            .map(|handle| Arc::clone(&handle.send_ended))
+        else {
+            return;
+        };
+        // Registered before `sending` is read, so an end in between still
+        // wakes it.
+        let mut send_ended = std::pin::pin!(ended.notified());
+        send_ended.as_mut().enable();
         let other_send = {
             let Some(handle) = handle.upgrade() else {
                 return;
@@ -553,9 +562,9 @@ async fn report_waiting(
         };
         if other_send {
             // That send reports for the session; once it ends, this one
-            // reports at once.
+            // reports at once, so the session's reports keep their pace.
             pacer = Pacer::default();
-            tokio::time::sleep(TURN_WATCH).await;
+            send_ended.await;
         } else {
             pacer.wait(&unchanged).await;
         }
