@@ -497,3 +497,61 @@ fn text(words: &str) -> ersa_adapter::OutgoingMessage {
         attachments: Vec::new(),
     }
 }
+
+/// [`ScratchConfig`], running the installed CLI whatever program the adapter
+/// names, since the model probe takes no session's `claude_path`.
+struct ScratchProbe(ScratchConfig);
+
+#[async_trait]
+impl Transport for ScratchProbe {
+    async fn spawn(&self, mut spec: ProcessSpec) -> std::io::Result<Box<dyn Process>> {
+        spec.program = claude_path();
+        self.0.spawn(spec).await
+    }
+}
+
+/// The model probe against the real CLI: it lists the CLI's own `default`
+/// entry, marked, and leaves no session record under the CLI's projects
+/// folder. Under a scratch configuration folder, so it reads nothing of the
+/// user's and makes no model call.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R39
+#[tokio::test]
+#[ignore = "drives the installed Claude Code CLI; run by hand"]
+async fn the_model_probe_lists_the_clis_models_and_leaves_no_record() {
+    let home = std::env::temp_dir().join(format!("ersa-probe-{}", std::process::id()));
+    fs::create_dir_all(&home).unwrap();
+    let transport = Arc::new(ScratchProbe(ScratchConfig(home.clone())));
+    let models = ClaudeAdapter::new()
+        .models(transport)
+        .await
+        .expect("the CLI lists its models");
+    println!("{models:#?}");
+    assert_eq!(models.first().map(|m| m.id.as_str()), Some("default"));
+    assert_eq!(models.iter().filter(|m| m.default).count(), 1);
+    assert!(models.iter().all(|m| !m.label.is_empty()));
+
+    let records: Vec<PathBuf> = walk(&home.join("projects"))
+        .into_iter()
+        .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+        .collect();
+    assert!(records.is_empty(), "the probe left records: {records:?}");
+    let _ = fs::remove_dir_all(&home);
+}
+
+/// Every file under `dir`, none when it does not exist.
+fn walk(dir: &std::path::Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .flat_map(|entry| {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path)
+            } else {
+                vec![path]
+            }
+        })
+        .collect()
+}

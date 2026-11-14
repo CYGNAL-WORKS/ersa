@@ -5,7 +5,7 @@ use std::io;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ersa_protocol::core_api::Choice;
+use ersa_protocol::core_api::{Choice, ModelChoice};
 use ersa_protocol::events::{Answer, Event, PermissionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -88,12 +88,26 @@ pub trait Adapter: Send + Sync {
         None
     }
 
-    /// The models, efforts and permission modes a session of this backend
-    /// can start with, as `backend.list` reports them: the adapter's
-    /// knowledge of its tested versions, not detected on the host. None, the
+    /// The efforts and permission modes a session of this backend can start
+    /// with, as `backend.list` reports them: the adapter's knowledge of its
+    /// tested versions, for which the backend reports no list. None, the
     /// default, for a backend that offers no choice.
     fn choices(&self) -> BackendChoices {
         BackendChoices::default()
+    }
+
+    /// The models a session of this backend can start with, as the backend
+    /// itself reports them on the host behind `transport`
+    /// (PROTO-CORE-API-R72), in the backend's order. Core asks only once
+    /// the version check has found the backend. An `Io` error of kind
+    /// `NotFound` means the backend is missing from the host; any other
+    /// error, that it is present but could not report them. None, the
+    /// default, for a backend that offers no choice of model.
+    async fn models(
+        &self,
+        _transport: Arc<dyn Transport>,
+    ) -> Result<Vec<ModelChoice>, AdapterError> {
+        Ok(Vec::new())
     }
 
     /// The images this backend takes inline with a message: Core refuses any
@@ -288,11 +302,12 @@ pub enum OpenElsewhere {
     Unknown,
 }
 
-/// What a session of a backend can start with. Each list marks the one a
-/// new session starts with when none is named.
+/// The efforts and permission modes a session of a backend can start with.
+/// Each list marks the one a new session starts with when none is named, or
+/// none when the backend marks none (Claude Code marks no effort). The
+/// models are the backend's own report ([`Adapter::models`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BackendChoices {
-    pub models: Vec<Choice>,
     pub efforts: Vec<Choice>,
     pub permission_modes: Vec<Choice>,
 }
