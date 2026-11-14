@@ -193,6 +193,46 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
                 local_commands += 1;
                 continue;
             }
+            // Known divergences, named one by one so a new one still fails:
+            // a message the CLI wrote itself mid-session (the interrupt
+            // marker, a compaction's summary, a control's local-command
+            // output) is a passthrough on the stream, which carries no user
+            // message of Ersa's (R43), and a `system` user message from the
+            // record. Which one live should show is open (inbox, #311).
+            const LIVE_DIFFERS: [(&str, &str); 5] = [
+                (
+                    "2.1.316/24-interrupt-with-waiting",
+                    "4548e4be-9dbc-440f-beb9-0a9421f94eb8",
+                ),
+                (
+                    "2.1.316/25-controls-between-turns",
+                    "2133cd80-e536-4965-bd30-0bd1c6878d9c",
+                ),
+                (
+                    "2.1.316/26-controls-during-turn",
+                    "aee13dda-0ccd-4b0d-b552-fee7e98444b8",
+                ),
+                (
+                    "2.1.316/27-compact-between-turns",
+                    "edd25fc7-164c-4bdb-9cd7-c6dad3bc6290",
+                ),
+                (
+                    "2.1.316/27-compact-between-turns",
+                    "4a38e294-a743-40c9-88f3-5bb34f74eaae",
+                ),
+            ];
+            if LIVE_DIFFERS.contains(&(stream.name.as_str(), uuid.as_str())) {
+                assert!(
+                    matches!(
+                        (events.as_slice(), recorded.as_slice()),
+                        ([Event::BackendPassthrough(live)], [Event::UserMessage(from_record)])
+                            if live.kind == "user" && from_record.origin == MessageOrigin::System
+                    ),
+                    "{}: {uuid}: no longer the known divergence; drop it from the list",
+                    stream.name
+                );
+                continue;
+            }
             assert_eq!(recorded, &events, "{}: {uuid}", stream.name);
             for event in events {
                 let kind = serde_json::to_value(&event).unwrap()["type"].clone();
