@@ -8,5 +8,8 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-14 PROTO-CORE-API: Errors says `session_not_running` is "the session has no live backend", which literally covers a send to a session whose backend failed to start, but `session.send` says that refusal carries the adapter's reason so the new-session screen can show it (FLOW-NEW-SESSION-R08), and R80 would replace it with the catalog's words. Meanwhile #325 gives the failed-start refusal ("the backend could not be started: ...") no `reason`; other methods on such a session (rename, interrupt) that find the backend gone answer `session_not_running`.
+- [ ] 2026-11-14 PROTO-CORE-API: Errors says `open_elsewhere` names the other process "in `detail`" without a form. Meanwhile #325 sets `detail` to the pids alone, comma-separated (`4242, 4343`), so the Interface can name them in its own words; `message` keeps Core's English.
+
 
 ## Resolved recently (optional, trimmed in planning passes)

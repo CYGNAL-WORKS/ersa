@@ -15,7 +15,7 @@ pub mod server;
 mod sessions;
 
 use ersa_protocol::core_api::rpc::{ErrorObject, Request, Response, code};
-use ersa_protocol::core_api::{ErrorKind, Method};
+use ersa_protocol::core_api::{ErrorKind, ErrorReason, Method};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -106,7 +106,11 @@ impl From<SessionError> for ApiError {
             }
             SessionError::Store(e) => e.into(),
             SessionError::Adapter(e) => match e {
-                AdapterError::NotRunning => ApiError::invalid_state("the session is not running"),
+                AdapterError::NotRunning => SessionError::refused(
+                    ErrorReason::SessionNotRunning,
+                    crate::sessions::NOT_RUNNING,
+                )
+                .into(),
                 AdapterError::UnknownRequest(id) => {
                     ApiError::not_found(format!("no pending request {id}"))
                 }
@@ -125,10 +129,20 @@ impl From<SessionError> for ApiError {
                 ApiError::new(ErrorKind::DeliveryUnknown, message)
             }
             SessionError::Busy(message) => ApiError::invalid_state(message).with_detail("busy"),
-            SessionError::NoSection(id) => ApiError::not_found(format!("no section {id}")),
-            SessionError::Refused { reason, message } => ApiError(
-                ErrorObject::application(ErrorKind::InvalidState, message).with_reason(reason),
-            ),
+            // Said once, by `NoSection`'s own message.
+            e @ SessionError::NoSection(_) => ApiError::not_found(e.to_string()),
+            SessionError::Refused {
+                reason,
+                message,
+                detail,
+            } => {
+                let error =
+                    ErrorObject::application(ErrorKind::InvalidState, message).with_reason(reason);
+                ApiError(match detail {
+                    Some(detail) => error.with_detail(detail),
+                    None => error,
+                })
+            }
         }
     }
 }

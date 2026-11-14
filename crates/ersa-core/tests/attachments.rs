@@ -378,6 +378,7 @@ async fn a_linked_ersa_folder_is_never_written_through() {
 }
 
 // verifies: PROTO-CORE-API-R25
+// verifies: PROTO-CORE-API-R79
 #[tokio::test]
 async fn interrupt_cancels_a_send_still_waiting_for_its_backend() {
     let mut s = setup(FakeAdapter::slow_start(Duration::from_secs(5))).await;
@@ -405,6 +406,10 @@ async fn interrupt_cancels_a_send_still_waiting_for_its_backend() {
     assert!(interrupted.get("result").is_some(), "{interrupted:#}");
     let response = s.client.response(send).await;
     assert_eq!(kind(&response["error"]), "invalid_state", "{response:#}");
+    assert_eq!(
+        response["error"]["data"]["reason"], "send_stopped",
+        "{response:#}"
+    );
     assert!(
         response["error"]["message"]
             .as_str()
