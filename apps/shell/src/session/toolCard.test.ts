@@ -147,6 +147,8 @@ describe("a tool card's target", () => {
       path: false,
     });
     expect(shownTarget("**/*.md", "D:\\Projects\\ersa")).toEqual({ text: "**/*.md", path: false });
+    // A program in the workspace, run with arguments, is a command and stays whole.
+    expect(shownTarget("/home/me/ersa/scripts/run.sh --flag", "/home/me/ersa")).toEqual({ text: "/home/me/ersa/scripts/run.sh --flag", path: false });
     expect(shownTarget("https://example.com/a", "D:\\Projects\\ersa")).toEqual({ text: "https://example.com/a", path: false });
   });
 
