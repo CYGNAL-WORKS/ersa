@@ -149,7 +149,7 @@ pub fn invocation_args(config: &SessionConfig) -> Vec<String> {
         "--include-partial-messages",
         // Each user message echoed back when the CLI takes it into a turn,
         // which says when a message written during a turn stops waiting
-        // (PROTO-CLAUDE-CODE-STREAM-R43).
+        // (PROTO-CLAUDE-CODE-STREAM-R62, R63).
         "--replay-user-messages",
     ]
     .into_iter()
