@@ -15,6 +15,8 @@ const components = [
   "AttachmentChip",
   "AgentText",
   "Transcript",
+  "ToolCard",
+  "ThinkingRow",
   "SessionTitle",
   "ErrorBoundary",
   "NewSessionScreen",

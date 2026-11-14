@@ -51,7 +51,7 @@ body {
 }
 
 /* The state glyph every tile shares (DESIGN.md, status lives in tiles): a small dot whose tone carries the state.
-   Neutral by default; pending is hollow; needs-you is the accent with a ring, so it reads apart from positive. */
+   Neutral by default; each other tone carries a state: positive, danger, accent or caution. */
 .glyph {
   display: inline-block;
   flex: none;
@@ -79,13 +79,3 @@ body {
   background: var(--color-caution);
 }
 
-.glyph[data-tone="pending"] {
-  background: transparent;
-  border: var(--line-hairline) solid var(--color-ink-muted);
-}
-
-.glyph[data-tone="attention"] {
-  background: var(--color-accent);
-  outline: var(--line-hairline) solid var(--color-accent);
-  outline-offset: var(--line-hairline);
-}

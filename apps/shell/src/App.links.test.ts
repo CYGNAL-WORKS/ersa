@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-// The window's wiring for links in the agent's words (FLOW-READ-TRANSCRIPT-R03): a link the user chooses reaches the
-// Shell's opener, which opens it in the system's default handler.
+// The window's wiring for the transcript: a link the user chooses reaches the Shell's opener, which opens it in the
+// system's default handler (FLOW-READ-TRANSCRIPT-R03), and a tool card's path shows relative to the session's own
+// workspace folder (FLOW-READ-TRANSCRIPT-R08).
 
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
@@ -8,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import type { Attachment, CoreClient, CoreEvent, Method } from "./core/client";
 import type { ShellControl } from "./core/shell";
-import type { Envelope } from "./protocol/agent-events.gen";
+import type { Envelope, Event } from "./protocol/agent-events.gen";
 import type { CoreHelloResult, Session } from "./protocol/core-api.gen";
 import { EVENT_VERSION } from "./session/transcript";
 
@@ -36,7 +37,7 @@ const session: Session = {
   tile: { state: "idle", pending: [] },
 };
 
-/** A Core with one session, s1, active at launch; `send` delivers s1's agent text to whoever subscribed. */
+/** A Core with one session, s1, active at launch; `send` delivers s1's agent text, `play` its events, to whoever subscribed. */
 function fakeCore() {
   let onEvent: (event: CoreEvent) => void = () => {};
   const answers: Partial<Record<Method, (params: never) => unknown>> = {
@@ -59,18 +60,20 @@ function fakeCore() {
       return (answer ? Promise.resolve(answer(params as never)) : Promise.reject({ kind: "unavailable", message: `no answer for ${method}` })) as never;
     },
   };
-  const send = (text: string) => {
-    const event: Envelope = {
-      v: EVENT_VERSION,
-      session_id: "s1",
-      seq: 0,
-      ts: "2026-11-13T09:00:00Z",
-      source: { backend: "claude-code", backend_version: "2.1.302", input: "live" },
-      event: { type: "assistant.text", block_id: "m1/0", text, final: true },
-    };
-    act(() => onEvent({ kind: "notification", method: "session.event", params: { event } } as CoreEvent));
-  };
-  return { client, send };
+  const play = (...events: Event[]) =>
+    events.forEach((e, seq) => {
+      const event: Envelope = {
+        v: EVENT_VERSION,
+        session_id: "s1",
+        seq,
+        ts: "2026-11-13T09:00:00Z",
+        source: { backend: "claude-code", backend_version: "2.1.302", input: "live" },
+        event: e,
+      };
+      act(() => onEvent({ kind: "notification", method: "session.event", params: { event } } as CoreEvent));
+    });
+  const send = (text: string) => play({ type: "assistant.text", block_id: "m1/0", text, final: true });
+  return { client, send, play };
 }
 
 const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
@@ -104,5 +107,19 @@ describe("a link in the agent's words", () => {
     fireEvent.click(screen.getByRole("link", { name: "us" }));
     fireEvent.click(screen.getByText("this", { exact: false }));
     expect(shell.openLink.mock.calls).toEqual([["https://example.com/guide"], ["mailto:team@example.com"]]);
+  });
+});
+
+describe("a tool card's path", () => {
+  // verifies: FLOW-READ-TRANSCRIPT-R08
+  it("shows relative to the session's workspace folder, whatever separators each uses", async () => {
+    const core = fakeCore();
+    render(createElement(App, { client: core.client, shell: fakeShell() }));
+    await settle();
+    await settle();
+    // Core lists the workspace as D:/code/alpha; the backend names the file with backslashes.
+    core.play({ type: "tool.requested", tool_use_id: "r1", name: "Read", input: {}, target: "D:\\code\\alpha\\src\\main.rs" });
+    const row = screen.getByRole("button", { name: /^Read / });
+    expect(row.querySelector(".tool-target")?.textContent).toBe("src\\main.rs");
   });
 });
