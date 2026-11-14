@@ -549,6 +549,13 @@ pub trait AdapterSink: Send + Sync {
     /// the transport lost track of it. Called exactly once per session, after
     /// the last `record`.
     fn process_exited(&self, exit: io::Result<ProcessExit>);
+
+    /// How many messages the backend now holds behind its running turn,
+    /// for the tile's `waiting` (PROTO-CORE-API-R81): told when the count
+    /// changes, from none waiting when the process starts. Not part of the
+    /// raw log, since it is read from the backend's record rather than its
+    /// stdio. The default ignores it, for a sink with no tile.
+    fn waiting(&self, _count: u32) {}
 }
 
 /// Turns one live session's raw lines into Ersa events
