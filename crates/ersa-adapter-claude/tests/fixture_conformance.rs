@@ -864,7 +864,7 @@ fn minimal_mode_at_newest_version() -> (Vec<String>, Vec<String>, usize) {
 
 // A CLI version that starts in its minimal mode by default (no flag turns it
 // off) shows up here as soon as its fixtures are recorded.
-// verifies: PROTO-CLAUDE-CODE-STREAM-R52
+// verifies: PROTO-CLAUDE-CODE-STREAM-R54
 #[test]
 fn the_newest_version_does_not_start_in_minimal_mode_as_the_adapter_runs_it() {
     let (minimal, not_counted, counted) = minimal_mode_at_newest_version();

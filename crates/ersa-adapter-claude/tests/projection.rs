@@ -418,7 +418,7 @@ fn authentication_failure_is_a_session_error_not_transcript_text() {
 // A session Claude Code started in its minimal mode (`--bare`) fails its first
 // message as if signed out, but signing in can't help: its `system/init` has
 // neither `scratchpad_path` nor `memory_paths` (2.1.316/28-bare-mode).
-// verifies: PROTO-CLAUDE-CODE-STREAM-R51
+// verifies: PROTO-CLAUDE-CODE-STREAM-R53
 // verifies: PROTO-AGENT-EVENTS-R22
 #[test]
 fn a_session_started_in_minimal_mode_fails_with_its_own_reason_not_a_sign_in() {
@@ -446,7 +446,7 @@ fn a_session_started_in_minimal_mode_fails_with_its_own_reason_not_a_sign_in() {
 // auto-memory off lacks only `memory_paths`. The bare fixture with
 // `scratchpad_path` put back stands in for the second, whose credentials
 // then fail.
-// verifies: PROTO-CLAUDE-CODE-STREAM-R51
+// verifies: PROTO-CLAUDE-CODE-STREAM-R53
 // verifies: PROTO-AGENT-EVENTS-R22
 #[test]
 fn a_sign_in_failure_with_auto_memory_off_still_asks_to_sign_in() {
