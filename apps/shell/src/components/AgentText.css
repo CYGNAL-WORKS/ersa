@@ -10,7 +10,7 @@
 }
 
 /* Blocks sit space-md apart; the spacing is the gap between them, never around the message. */
-.agent-text :is(p, ul, ol, blockquote, pre, table, h1, h2, h3, h4, h5, h6, hr) {
+.agent-text :where(p, ul, ol, blockquote, pre, table, h1, h2, h3, h4, h5, h6, hr) {
   margin: 0;
 }
 .agent-text > * + *,
@@ -45,6 +45,7 @@
   padding: 0 var(--space-xs);
   font-family: var(--type-mono-family);
   font-size: var(--type-mono-size);
+  font-variant-ligatures: none;
   background: var(--color-surface-raised);
   border-radius: var(--radius-sm);
 }
@@ -163,6 +164,9 @@
   color: var(--color-ink-faint);
 }
 .code-block-code {
+  /* The browser's own monospace face for pre would override the token. */
+  font: inherit;
+  font-variant-ligatures: none;
   margin: 0;
   padding: 0 var(--space-md) var(--space-md);
   overflow-x: auto;
