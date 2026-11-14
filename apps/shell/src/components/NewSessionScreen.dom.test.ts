@@ -119,3 +119,33 @@ describe("adding a project from the project chip", () => {
     expect(chosen()).toBe("Project: beyond");
   });
 });
+
+describe("the effort chip on the new-session screen", () => {
+  // verifies: FLOW-NEW-SESSION-R02
+  it("goes back to no level when Default is chosen, and keeps a level only while the model takes it", () => {
+    const backend: BackendInfo = {
+      ...claude,
+      models: [
+        { id: "default", label: "Default (recommended)", default: true, efforts: ["low", "high"] },
+        { id: "haiku-4-5", label: "Haiku 4.5", default: false },
+      ],
+      efforts: ["low", "high"].map((id) => ({ id, label: id, default: false })),
+    };
+    render(createElement(NewSessionScreen, props([alpha], { backends: { local: [backend] } })));
+    const effort = () => screen.getByRole("button", { name: /^Effort:/ });
+    expect(effort().getAttribute("aria-label")).toBe("Effort: Default");
+
+    fireEvent.click(effort());
+    fireEvent.click(screen.getByRole("option", { name: /high/ }));
+    expect(effort().getAttribute("aria-label")).toBe("Effort: high");
+    fireEvent.click(effort());
+    fireEvent.click(screen.getByRole("option", { name: /Default/ }));
+    expect(effort().getAttribute("aria-label")).toBe("Effort: Default");
+
+    // A model that takes no effort: the chip stays, unavailable, reading None.
+    fireEvent.click(screen.getByRole("button", { name: /^Model:/ }));
+    fireEvent.click(screen.getByRole("option", { name: /Haiku 4.5/ }));
+    expect(effort().getAttribute("aria-label")).toBe("Effort: None");
+    expect(effort().hasAttribute("disabled")).toBe(true);
+  });
+});

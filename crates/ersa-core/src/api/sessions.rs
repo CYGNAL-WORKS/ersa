@@ -11,10 +11,11 @@ use ersa_adapter::{
 };
 use ersa_protocol::core_api::{
     AnswerQuestionParams, ArrangeParams, Attachment, AttachmentKind, Choice,
-    DecidePermissionParams, Empty, ErrorReason, IdParams, InspectParams, Inspected, Project,
-    RawDirection, RawLogEntry, RawLogParams, Session, SessionCreateParams, SessionSendParams,
-    SessionSendResult, SetArchivedParams, SetModeParams, SetTitleParams, SubscribeParams,
-    SubscribeResult, Workspace, WorkspaceCreateParams, WorkspaceKind, WorkspaceState,
+    DecidePermissionParams, Empty, ErrorReason, IdParams, InspectParams, Inspected, ModelChoice,
+    Project, RawDirection, RawLogEntry, RawLogParams, Session, SessionCreateParams,
+    SessionSendParams, SessionSendResult, SetArchivedParams, SetModeParams, SetTitleParams,
+    SubscribeParams, SubscribeResult, Workspace, WorkspaceCreateParams, WorkspaceKind,
+    WorkspaceState,
 };
 use serde_json::Value;
 
@@ -46,6 +47,9 @@ struct Starting {
     transport: Arc<dyn Transport>,
     /// The version detection found, until the backend announces its own.
     backend_version: String,
+    /// The models the backend reported on the host: none unless detection
+    /// found it available (PROTO-CORE-API-R72).
+    models: Vec<ModelChoice>,
 }
 
 /// The workspace `id`, which must be `ready`, and its project.
@@ -84,19 +88,21 @@ async fn starting(core: &Core, project: &Project, backend: &str) -> Result<Start
                 format!("host {} cannot be reached", project.host_id),
             )
         })?;
-    let backend_version = if project.host_id == LOCAL_HOST_ID {
+    let detected = if project.host_id == LOCAL_HOST_ID {
         core.local_backends()
             .await
             .into_iter()
             .find(|d| d.name == backend)
-            .and_then(|d| d.version)
-            .unwrap_or_default()
     } else {
-        String::new()
+        None
     };
+    let (backend_version, models) = detected
+        .map(|d| (d.version.unwrap_or_default(), d.models))
+        .unwrap_or_default();
     Ok(Starting {
         transport,
         backend_version,
+        models,
     })
 }
 
@@ -114,15 +120,21 @@ async fn trusted_now(core: &Core, project: &Project) -> Result<bool, ApiError> {
 pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<Session, ApiError> {
     let (workspace, project) = ready_workspace(core, &params.workspace_id).await?;
     let adapter = core.sessions.adapter_of(&params.backend)?;
+    let Starting {
+        transport,
+        backend_version,
+        models,
+    } = starting(core, &project, &params.backend).await?;
     // Only what `backend.list` offers: anything else would reach the
-    // backend's command line.
+    // backend's command line. A backend that listed no models (missing, or
+    // unable to report them) offers none.
     let choices = adapter.choices();
-    check_choice("model", &params.model, &choices.models)?;
-    check_choice("effort", &params.effort, &choices.efforts)?;
+    check_choice("model", &params.model, models.iter().map(|m| m.id.as_str()))?;
+    check_choice("effort", &params.effort, ids(&choices.efforts))?;
     check_choice(
         "permission_mode",
         &params.permission_mode,
-        &choices.permission_modes,
+        ids(&choices.permission_modes),
     )?;
     // The permission mode is always stated to the backend: the named one,
     // else the backend's default, which the session then started with.
@@ -131,10 +143,6 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         .clone()
         .unwrap_or_else(|| BackendChoices::default_of(&choices.permission_modes));
 
-    let Starting {
-        transport,
-        backend_version,
-    } = starting(core, &project, &params.backend).await?;
     let trusted = trusted_now(core, &project).await?;
 
     // A backend that starts a session under an id Ersa chooses gets one
@@ -204,6 +212,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
     let Starting {
         transport,
         backend_version,
+        ..
     } = starting(core, &project, &original.backend).await?;
     // Every refusal comes before the workspace is made. Holding `hold`
     // keeps the original from being sent to or deleted meanwhile.
@@ -333,10 +342,20 @@ async fn discard_workspace(core: &Core, project: &Project, workspace: &Workspace
 
 /// Refuses a `field` value that is not one of `offered`; absent is the
 /// backend's default.
-fn check_choice(field: &str, value: &Option<String>, offered: &[Choice]) -> Result<(), ApiError> {
+/// The ids of `choices`.
+fn ids(choices: &[Choice]) -> impl Iterator<Item = &str> {
+    choices.iter().map(|c| c.id.as_str())
+}
+
+fn check_choice<'a>(
+    field: &str,
+    value: &Option<String>,
+    offered: impl Iterator<Item = &'a str>,
+) -> Result<(), ApiError> {
+    let offered: Vec<&str> = offered.collect();
     match value {
-        Some(id) if !offered.iter().any(|c| &c.id == id) => {
-            let ids: Vec<&str> = offered.iter().map(|c| c.id.as_str()).collect();
+        Some(id) if !offered.contains(&id.as_str()) => {
+            let ids = offered;
             Err(ApiError::invalid_params(format!(
                 "{field} {id:?} is not one this backend offers: [{}]",
                 ids.join(", ")
@@ -377,6 +396,7 @@ async fn resumption(core: &Core, id: &str) -> Result<Resumption, ApiError> {
     let Starting {
         transport,
         backend_version,
+        ..
     } = starting(core, &project, &row.backend).await?;
     Ok(Resumption {
         transport,

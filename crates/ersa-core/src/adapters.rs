@@ -4,17 +4,15 @@
 //! registers them: the registered adapters are the only
 //! backends Core knows, and it names none of them (ADR 0031).
 //!
-//! So far this detects backends by running each adapter's version command
-//! through the host's transport.
+//! Detection runs each adapter's version command through the host's
+//! transport, then asks a backend it found for its models.
 
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ersa_adapter::{Adapter, BackendChoices, Transport};
-use ersa_protocol::core_api::{
-    BackendInfo, BackendState, BackendStatus, Choice, ModelChoice, TestedRange,
-};
+use ersa_adapter::{Adapter, AdapterError, BackendChoices, Transport};
+use ersa_protocol::core_api::{BackendInfo, BackendState, BackendStatus, ModelChoice, TestedRange};
 
 use crate::transport::{self, RunError};
 
@@ -32,8 +30,12 @@ pub struct Detected {
     /// The oldest and newest versions its adapter was tested with; empty
     /// when the adapter does not say.
     pub tested: (String, String),
-    /// What a session of it can start with, from its adapter.
+    /// The efforts and permission modes a session of it can start with,
+    /// from its adapter.
     pub choices: BackendChoices,
+    /// Its models, as the backend reported them on the host; none unless
+    /// it is available (PROTO-CORE-API-R72).
+    pub models: Vec<ModelChoice>,
     /// Its display name, from its adapter.
     pub label: String,
 }
@@ -57,25 +59,10 @@ impl Detected {
                 min: self.tested.0.clone(),
                 max: self.tested.1.clone(),
             },
-            // The adapter knows its models' ids, labels and default; what
-            // only the backend can report (the resolved id, the efforts a
-            // model takes) is left absent until Core reads it from the
-            // backend (PROTO-CORE-API-R72).
-            models: self.choices.models.iter().map(model_choice).collect(),
+            models: self.models.clone(),
             efforts: self.choices.efforts.clone(),
             permission_modes: self.choices.permission_modes.clone(),
         }
-    }
-}
-
-/// An adapter's model choice as `backend.list` lists it.
-fn model_choice(choice: &Choice) -> ModelChoice {
-    ModelChoice {
-        id: choice.id.clone(),
-        label: choice.label.clone(),
-        default: choice.default,
-        resolved: None,
-        efforts: None,
     }
 }
 
@@ -85,8 +72,15 @@ fn model_choice(choice: &Choice) -> ModelChoice {
 /// environment, so the check sees the CLI configured as the backend's
 /// sessions see it. `program_override` replaces each command's program,
 /// which tests use to point at a binary that does not exist.
+///
+/// A backend found asks for its models through `probe`, the transport its
+/// sessions start through, since the backend may start processes of its
+/// own that must end with it. One that cannot report them is `error`, and
+/// one the probe cannot find `missing`, either with no models
+/// (PROTO-CORE-API-R72).
 pub async fn detect(
     transport: &dyn Transport,
+    probe: Arc<dyn Transport>,
     program_override: Option<&str>,
     adapters: &[Arc<dyn Adapter>],
 ) -> Vec<Detected> {
@@ -117,10 +111,25 @@ pub async fn detect(
                 (None, BackendState::Error)
             }
         };
+        let (state, models) = if state == BackendState::Available {
+            match adapter.models(Arc::clone(&probe)).await {
+                Ok(models) => (state, models),
+                Err(AdapterError::Io(e)) if e.kind() == io::ErrorKind::NotFound => {
+                    (BackendState::Missing, Vec::new())
+                }
+                Err(e) => {
+                    tracing::warn!(backend = adapter.backend(), error = %e, "backend could not list its models");
+                    (BackendState::Error, Vec::new())
+                }
+            }
+        } else {
+            (state, Vec::new())
+        };
         found.push(Detected {
             name: adapter.backend().to_string(),
             version,
             state,
+            models,
             tested: adapter
                 .tested_versions()
                 .map(|(min, max)| (min.to_string(), max.to_string()))
@@ -168,6 +177,7 @@ mod tests {
         let probe: Arc<dyn Adapter> = Arc::new(Probe);
         let found = detect(
             &ersa_adapter::LocalTransport,
+            Arc::new(ersa_adapter::LocalTransport),
             Some("ersa-no-such-program-xyz"),
             &[probe],
         )
