@@ -1803,6 +1803,25 @@ async fn a_request_to_a_stopped_session_says_it_is_not_running() {
     assert_eq!(error["message"], "the session is not running");
 }
 
+/// A backend that says it is not running, having exited before a write
+/// while Core still held its run, is refused `session_not_running` too.
+// verifies: PROTO-CORE-API-R79
+#[tokio::test(flavor = "multi_thread")]
+async fn a_backend_that_exited_before_a_write_says_it_is_not_running() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = idle_session(&core, &mut client).await;
+    let error = client
+        .error(
+            "session.send",
+            json!({ "id": id, "text": "stopped before the write" }),
+        )
+        .await;
+    assert_eq!(kind(&error), "invalid_state", "{error:#}");
+    assert_eq!(error["data"]["reason"], "session_not_running", "{error:#}");
+    assert_eq!(error["message"], "the session is not running");
+}
+
 /// A second message while one is still being sent is refused
 /// `send_in_progress`; the first goes on.
 // verifies: PROTO-CORE-API-R79

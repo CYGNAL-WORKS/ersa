@@ -626,6 +626,30 @@ async fn a_failed_step_reads_failed_and_a_fresh_token_finishes_it() {
     assert!(backend_ids(&fake.records).is_empty());
 }
 
+/// A backend that refuses to delete the record while saying no process has
+/// the session open broke its contract: the delete fails `internal`, never
+/// with a reason the user could act on.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_record_deletion_refused_with_nothing_open_fails_internal() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let (core, mut client) = start(&fake).await;
+    let (project, _repo) = project(&mut client, core.dir.path()).await;
+    let (workspace, _folder) = isolated(&mut client, &project).await;
+    let id = idle_session(&mut client, &workspace).await;
+    *fake.delete_refusal.lock().unwrap() = Some(OpenElsewhere::No);
+
+    let shown = token(&mut client, &workspace).await;
+    let error = client
+        .error("session.delete", json!({ "id": id, "token": shown }))
+        .await;
+    assert_eq!(kind(&error), "internal", "{error}");
+    assert!(error["data"].get("reason").is_none(), "{error}");
+    assert_eq!(
+        listed(&mut client, &id).await.unwrap()["deleting"],
+        "failed"
+    );
+}
+
 /// A record the registry shows newly open when it is deleted fails the
 /// delete after the files went; trying again with what is left finishes it.
 // verifies: FLOW-ARCHIVE-DELETE-SESSION-R07

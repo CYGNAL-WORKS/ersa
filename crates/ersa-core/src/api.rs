@@ -15,7 +15,7 @@ pub mod server;
 mod sessions;
 
 use ersa_protocol::core_api::rpc::{ErrorObject, Request, Response, code};
-use ersa_protocol::core_api::{ErrorKind, ErrorReason, Method};
+use ersa_protocol::core_api::{ErrorKind, Method};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -106,11 +106,7 @@ impl From<SessionError> for ApiError {
             }
             SessionError::Store(e) => e.into(),
             SessionError::Adapter(e) => match e {
-                AdapterError::NotRunning => SessionError::refused(
-                    ErrorReason::SessionNotRunning,
-                    crate::sessions::NOT_RUNNING,
-                )
-                .into(),
+                AdapterError::NotRunning => crate::sessions::not_running().into(),
                 AdapterError::UnknownRequest(id) => {
                     ApiError::not_found(format!("no pending request {id}"))
                 }

@@ -188,11 +188,10 @@ impl SessionError {
     /// The refusal for a session other processes have open: `detail` lists
     /// their pids, so the Interface can name them in its own words.
     pub fn open_elsewhere(pids: &[u32], message: impl Into<String>) -> Self {
-        let pids: Vec<String> = pids.iter().map(u32::to_string).collect();
         SessionError::Refused {
             reason: ErrorReason::OpenElsewhere,
             message: message.into(),
-            detail: Some(pids.join(", ")),
+            detail: Some(pid_list(pids)),
         }
     }
 }
@@ -631,12 +630,10 @@ impl Live {
     }
 }
 
-fn not_running() -> SessionError {
-    SessionError::refused(ErrorReason::SessionNotRunning, NOT_RUNNING)
+/// The refusal for a request that needs a backend the session does not have.
+pub(crate) fn not_running() -> SessionError {
+    SessionError::refused(ErrorReason::SessionNotRunning, "the session is not running")
 }
-
-/// What Core logs when a request needs a backend the session does not have.
-pub(crate) const NOT_RUNNING: &str = "the session is not running";
 
 impl Handle {
     /// A session first known to have begun at `created_at`, until its
@@ -2065,11 +2062,17 @@ fn up_to(record: Arc<Vec<RecordEvent>>, last: &str) -> Arc<Vec<RecordEvent>> {
 /// The processes a registry named, as a message says them: `pid 7`, or
 /// `pids 7, 9`.
 pub(crate) fn pids_named(pids: &[u32]) -> String {
-    let list: Vec<String> = pids.iter().map(u32::to_string).collect();
-    match list.len() {
-        1 => format!("pid {}", list[0]),
-        _ => format!("pids {}", list.join(", ")),
+    match pids.len() {
+        1 => format!("pid {}", pid_list(pids)),
+        _ => format!("pids {}", pid_list(pids)),
     }
+}
+
+/// The pids alone, as `7, 9`: `open_elsewhere`'s `detail`, and what
+/// [`pids_named`] says.
+fn pid_list(pids: &[u32]) -> String {
+    let list: Vec<String> = pids.iter().map(u32::to_string).collect();
+    list.join(", ")
 }
 
 /// Asks `adapter` whether another process has session `backend_id` open,

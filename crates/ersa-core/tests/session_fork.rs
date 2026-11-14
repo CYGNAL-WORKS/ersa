@@ -134,9 +134,17 @@ async fn restarted(core: TestCore, client: &mut Client, fake: &FakeAdapter) -> (
 
 /// The refusal of a fork asked for now.
 async fn refused_now(client: &mut Client, id: &str) -> String {
+    refusal_now(client, id).await["message"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// The whole error refusing a fork asked for now.
+async fn refusal_now(client: &mut Client, id: &str) -> Value {
     let error = client.error("session.fork", json!({ "id": id })).await;
     assert_eq!(kind(&error), "invalid_state", "{error:#}");
-    error["message"].as_str().unwrap().to_string()
+    error
 }
 
 /// How long a fork answers that an earlier one has not finished starting.
@@ -155,8 +163,7 @@ async fn refused(client: &mut Client, id: &str) -> String {
 async fn refusal(client: &mut Client, id: &str) -> Value {
     let deadline = tokio::time::Instant::now() + STILL_STARTING;
     loop {
-        let error = client.error("session.fork", json!({ "id": id })).await;
-        assert_eq!(kind(&error), "invalid_state", "{error:#}");
+        let error = refusal_now(client, id).await;
         let message = error["message"].as_str().unwrap();
         if !message.contains("has not finished starting") {
             return error;
