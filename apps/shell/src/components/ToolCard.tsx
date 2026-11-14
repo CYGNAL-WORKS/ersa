@@ -116,8 +116,19 @@ export function InputFields({
 }
 
 /** One tool call as a card, closed at first (R07), with its subagent's calls inside it (R10). */
-export function ToolCard({ item, context, force }: { item: Tool; context: ToolContext; force?: "hover" | "pressed" | "focus" }) {
-  const [open, setOpen] = useState(false);
+export function ToolCard({
+  item,
+  context,
+  force,
+  initialOpen = false,
+}: {
+  item: Tool;
+  context: ToolContext;
+  /** For the gallery: a state shown without a pointer, and a card shown open. */
+  force?: "hover" | "pressed" | "focus";
+  initialOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(initialOpen);
   const id = useId();
   const state = toolState(item, context.awaiting.has(item.key));
   const unfinished = !item.result && item.live && !item.stopped && item.progress === undefined;
@@ -184,8 +195,17 @@ export function ToolCard({ item, context, force }: { item: Tool; context: ToolCo
  * The agent's thinking (R11): a quiet row with no card, the ring while it thinks and its place kept empty once it has
  * thought. With a summary, the row opens to it as a card does; without one, there is nothing to open.
  */
-export function ThinkingRow({ item, force }: { item: Extract<Item, { kind: "thinking" }>; force?: "hover" | "pressed" | "focus" }) {
-  const [open, setOpen] = useState(false);
+export function ThinkingRow({
+  item,
+  force,
+  initialOpen = false,
+}: {
+  item: Extract<Item, { kind: "thinking" }>;
+  /** For the gallery, as a tool card's. */
+  force?: "hover" | "pressed" | "focus";
+  initialOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(initialOpen);
   const id = useId();
   const words = (
     <>
