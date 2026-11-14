@@ -454,7 +454,10 @@ fn host_messages_serialise_to_the_recorded_stdin_lines() {
                 HostMessage::control_request(
                     line["request_id"].as_str().unwrap(),
                     HostRequest::SetModel {
-                        model: line.pointer("/request/model").and_then(Value::as_str).map(String::from),
+                        model: line
+                            .pointer("/request/model")
+                            .and_then(Value::as_str)
+                            .map(String::from),
                     },
                 )
             }
