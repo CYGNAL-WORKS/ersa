@@ -5,9 +5,12 @@
 //! the next turn (PROTO-CLAUDE-CODE-STREAM, Sequencing). The CLI keeps no
 //! count of them anywhere Ersa can ask, but its record says what happens to
 //! each message: a `queue-operation` entry with `operation` `enqueue` when
-//! the CLI takes it, and one with `dequeue` when its turn is about to start.
-//! Neither carries the message. So the messages waiting are the `enqueue`
-//! entries less the `dequeue` entries, counting only those written since the
+//! the CLI takes it, and one with `dequeue` when its turn is about to start,
+//! or, when the CLI folds it into the running turn at the turn's next model
+//! call (a turn that uses tools), one with `remove` and `reason`
+//! `absorbed_mid_turn` (2.1.316/51-message-during-tool-turn). So the messages
+//! waiting are the `enqueue` entries less the `dequeue` and `remove`
+//! entries, counting only those written since the
 //! adapter started this CLI process: an earlier process's entries are not
 //! this one's (one killed with a message waiting leaves an `enqueue` that is
 //! never matched).
@@ -32,7 +35,8 @@ pub struct WaitingCount {
     /// a complete line: the CLI may be part way through writing the last one.
     read_to: u64,
     enqueued: u32,
-    dequeued: u32,
+    /// `dequeue` and `remove` entries: messages the CLI no longer holds.
+    taken: u32,
 }
 
 impl WaitingCount {
@@ -43,14 +47,14 @@ impl WaitingCount {
             since,
             read_to: 0,
             enqueued: 0,
-            dequeued: 0,
+            taken: 0,
         }
     }
 
     /// How many messages the CLI holds, as of the last read.
     pub fn waiting(&self) -> u32 {
         // Never below zero, whatever the record holds.
-        self.enqueued.saturating_sub(self.dequeued)
+        self.enqueued.saturating_sub(self.taken)
     }
 
     /// How many messages the CLI has taken since it started, as of the last
@@ -114,7 +118,7 @@ impl WaitingCount {
         }
         match entry["operation"].as_str() {
             Some("enqueue") => self.enqueued = self.enqueued.saturating_add(1),
-            Some("dequeue") => self.dequeued = self.dequeued.saturating_add(1),
+            Some("dequeue" | "remove") => self.taken = self.taken.saturating_add(1),
             _ => {}
         }
     }
@@ -171,6 +175,34 @@ mod tests {
         let started = "2026-11-14T01:04:30.929Z";
         assert_eq!(count(&up_to(&record, MID_TURN_ENQUEUE), started), 1);
         // Its `dequeue` comes when the first turn ends: none waits then.
+        assert_eq!(count(&record, started), 0);
+    }
+
+    // verifies: PROTO-CLAUDE-CODE-STREAM-R46
+    #[test]
+    fn a_message_folded_into_the_running_turn_no_longer_waits() {
+        // Fixture 51: the turn uses tools, and the CLI hands the waiting
+        // message to the model at its next call, writing `remove` with
+        // `absorbed_mid_turn` instead of a `dequeue`.
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../docs/briefs/protocol/fixtures/claude-code/2.1.316/record/51-message-during-tool-turn.jsonl",
+        );
+        let record = fs::read_to_string(path).unwrap().replace(
+            "
+", "
+",
+        );
+        let started = "2026-11-14T20:02:30.702Z";
+        assert_eq!(
+            count(
+                &up_to(
+                    &record,
+                    r#""enqueue","timestamp":"2026-11-14T20:02:35.488Z""#
+                ),
+                started
+            ),
+            1
+        );
         assert_eq!(count(&record, started), 0);
     }
 

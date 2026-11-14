@@ -990,24 +990,42 @@ impl Shared {
             _ => None,
         };
 
-        let turn = match (field("/type"), field("/subtype")) {
-            (Some("system"), Some("init")) => Some(true),
-            (Some("result"), _) => Some(false),
+        // Where the CLI is in a turn, for the count of messages it holds.
+        enum Moment {
+            Started,
+            ModelCall,
+            Ended,
+        }
+        let moment = match (field("/type"), field("/subtype")) {
+            (Some("system"), Some("init")) => Some(Moment::Started),
+            (Some("system"), Some("status")) if field("/status") == Some("requesting") => {
+                Some(Moment::ModelCall)
+            }
+            (Some("result"), _) => Some(Moment::Ended),
             _ => None,
         };
 
         self.sink.record(Direction::Backend, line);
 
-        // A turn started: the CLI has taken every waiting message into it,
-        // so read again how many it holds (PROTO-CLAUDE-CODE-STREAM-R46).
+        // Read again how many messages the CLI holds when that can have
+        // changed (PROTO-CLAUDE-CODE-STREAM-R46): a turn started, which takes
+        // every waiting message into it; or, while some wait, the turn made
+        // its next model call, at which a turn that uses tools takes them in
+        // (2.1.316/51-message-during-tool-turn), or the turn ended.
         if let Some(reader) = &self.waiting {
-            match turn {
-                Some(true) => {
+            match moment {
+                Some(Moment::Started) => {
                     reader.turn_started();
                     self.report_waiting(false);
                 }
-                Some(false) => reader.turn_ended(),
-                None => {}
+                Some(Moment::ModelCall) if reader.holds_some() => self.report_waiting(false),
+                Some(Moment::Ended) => {
+                    reader.turn_ended();
+                    if reader.holds_some() {
+                        self.report_waiting(false);
+                    }
+                }
+                _ => {}
             }
         }
 
