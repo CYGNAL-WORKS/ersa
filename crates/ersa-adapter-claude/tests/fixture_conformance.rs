@@ -624,8 +624,15 @@ fn the_initialize_response_and_permission_prompt_read_as_typed_payloads() {
             CliMessage::ControlRequest(CliControlRequest {
                 request: CliRequest::CanUseTool(prompt),
                 ..
+            }) if prompt.tool_name != "Bash" => {
+                // Another tool's prompt (the 2.1.316 tool recordings): it
+                // reads as a typed payload and offers a rule or a mode.
+                assert!(!prompt.permission_suggestions.is_empty(), "{at}");
+            }
+            CliMessage::ControlRequest(CliControlRequest {
+                request: CliRequest::CanUseTool(prompt),
+                ..
             }) => {
-                assert_eq!(prompt.tool_name, "Bash", "{at}");
                 assert!(prompt.blocked_path.is_some(), "{at}");
                 assert!(matches!(
                     prompt.permission_suggestions.first(),

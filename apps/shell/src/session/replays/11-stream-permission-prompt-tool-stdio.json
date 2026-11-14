@@ -1,5 +1,5 @@
 {
-  "ersa_commit": "3af3763facdd9d6a06d52751185d6363ae69f304",
+  "ersa_commit": "a5d08b906704712e4266e776c280883bddbf9dc1",
   "notifications": [
     {
       "kind": "notification",
@@ -18,7 +18,7 @@
             "input": "core"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -49,7 +49,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -746,7 +746,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -769,7 +769,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -791,7 +791,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -814,7 +814,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -853,7 +853,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -878,7 +878,7 @@
             "message_id": "95ac093d-2c1f-4f14-a74b-c4b0acddfb7a"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -900,7 +900,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -916,6 +916,7 @@
               "description": "Write the word probe to probe.txt"
             },
             "name": "Bash",
+            "target": "echo probe > probe.txt",
             "tool_use_id": "toolu_014GgKrCJ9rQgRzPv9jaW7rc",
             "type": "tool.requested"
           },
@@ -928,7 +929,7 @@
             "message_id": "2422b170-cb59-4f7a-b35d-8e2dd95eecae"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -950,7 +951,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -1015,7 +1016,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -1037,7 +1038,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -1061,7 +1062,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -1083,7 +1084,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -1109,7 +1110,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -1139,7 +1140,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -1164,7 +1165,7 @@
             "message_id": "bdfbcce7-1a52-4dce-b694-caf81f87b583"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -1189,7 +1190,7 @@
             "message_id": "5e19ce3c-0df3-4dd3-ab2a-527b3045b9ae"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -1211,7 +1212,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -1244,7 +1245,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -1270,7 +1271,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -1295,7 +1296,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -1317,7 +1318,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
@@ -1347,7 +1348,7 @@
             "input": "live"
           },
           "ts": "2026-01-01T00:00:00Z",
-          "v": 5
+          "v": 6
         },
         "session_id": "s-replay"
       }
