@@ -76,6 +76,10 @@ pub struct ClaudeProjector {
     /// it, never for a title it generated (PROTO-CLAUDE-CODE-STREAM-R36),
     /// after how many such lines.
     announced_title: Option<(u64, String)>,
+    /// Whether the latest `system/init` shows the CLI started in its minimal
+    /// mode (`--bare`): it has neither `scratchpad_path` nor `memory_paths`
+    /// (PROTO-CLAUDE-CODE-STREAM-R51).
+    minimal_mode: bool,
 }
 
 /// A `can_use_tool` request the CLI is waiting on.
@@ -233,6 +237,10 @@ impl ClaudeProjector {
         if let Some(kind) = &drifted {
             out.push(drift_error(line, kind));
         }
+        // A signed-out session lacks `scratchpad_path` and one with
+        // auto-memory off lacks `memory_paths`; minimal mode lacks both.
+        self.minimal_mode =
+            value.get("scratchpad_path").is_none() && value.get("memory_paths").is_none();
         // The CLI repeats `init` at the start of every turn; only the first
         // announces the session (PROTO-CLAUDE-CODE-STREAM-R06).
         if !self.session_started {
@@ -304,7 +312,10 @@ impl ClaudeProjector {
                 passthrough(line, value).event,
             ));
         }
-        for event in events {
+        for mut event in events {
+            if self.minimal_mode {
+                event = minimal_mode_failure(event);
+            }
             // The complete block ends its stream.
             if let Event::AssistantText(text) = &event {
                 self.streaming.remove(&text.block_id);
@@ -893,6 +904,27 @@ impl ClaudeProjector {
         )];
         out.extend(self.running_unless_waiting(line));
         out
+    }
+}
+
+/// A sign-in failure in a session the CLI started in its minimal mode: there
+/// the CLI never reads the user's sign-in, so signing in can't help, and the
+/// session can't go on (PROTO-CLAUDE-CODE-STREAM-R51). Only the live stream
+/// shows the mode; a session record has no `system/init`, so read back, the
+/// failure stays a sign-in failure (PROTO-AGENT-EVENTS-R22). Any other event
+/// passes through unchanged.
+fn minimal_mode_failure(event: Event) -> Event {
+    match event {
+        Event::Error(ErrorEvent {
+            code: ErrorCode::AuthenticationFailed,
+            ..
+        }) => Event::Error(ErrorEvent {
+            code: ErrorCode::BackendError,
+            message: "Claude Code started in its minimal mode, which Ersa can't use.".into(),
+            recoverable: false,
+            action: None,
+        }),
+        other => other,
     }
 }
 
