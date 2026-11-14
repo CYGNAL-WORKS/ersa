@@ -8,5 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-14 PROTO-CORE-API: `session.send` does not name a refusal while `session.set_archived { archived: true }` is between its busy check and its mark. Without one, a send from another connection could start after the check and be stopped by the archive, against R77's "change nothing". Meanwhile Core refuses such a send with `invalid_state` and no `reason`, saying the session is being archived, as it refuses a send to a session being forked (#313).
 
 ## Resolved recently (optional, trimmed in planning passes)

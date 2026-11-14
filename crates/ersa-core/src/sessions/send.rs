@@ -161,7 +161,8 @@ impl SessionManager {
             // (PROTO-CORE-API-R77).
             if handle.archiving.load(Ordering::SeqCst) > 0 {
                 return Err(SessionError::InvalidState(
-                    "this session is being archived; send the message again once it is done".into(),
+                    "the session is being archived; unarchive or resume it to send it a message"
+                        .into(),
                 ));
             }
             if sending.is_some() {

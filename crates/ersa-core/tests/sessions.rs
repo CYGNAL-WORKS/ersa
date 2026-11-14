@@ -1604,6 +1604,40 @@ async fn archiving_is_refused_while_the_session_is_starting_or_a_turn_runs() {
     }
 }
 
+/// A message sent while an archive is stopping the session is refused, so
+/// the archive never stops a send that started after its busy check.
+// verifies: PROTO-CORE-API-R77
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_sent_while_an_archive_stops_the_session_is_refused() {
+    let (core, stats) = start_fake(FakeAdapter::slow_stop(Duration::from_secs(2))).await;
+    let mut client = core.client().await;
+    let id = idle_session(&core, &mut client).await;
+    let sent = stats.messages.lock().unwrap().len();
+    let archive = client
+        .request(
+            "session.set_archived",
+            json!({ "id": id, "archived": true }),
+        )
+        .await;
+    // Past its busy check and stopping the backend, which takes a while.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while stats.stops.load(Ordering::SeqCst) == 0 {
+        assert!(tokio::time::Instant::now() < deadline, "never stopped");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Another window sends meanwhile.
+    let mut other = core.client().await;
+    let error = other
+        .error("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    assert_eq!(kind(&error), "invalid_state", "{error}");
+    assert_eq!(stats.messages.lock().unwrap().len(), sent, "nothing sent");
+
+    let archived = client.response(archive).await;
+    assert_eq!(archived["result"]["archived"], true, "{archived}");
+}
+
 /// What `session.set_archived` sets outlives Core, and `session.list`
 /// reports it: `session.set_archived`'s half of R34 (`arrangement.rs` has
 /// `session.arrange`'s).
