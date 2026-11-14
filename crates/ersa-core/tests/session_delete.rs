@@ -11,7 +11,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use ersa_adapter::OpenElsewhere;
-use ersa_core::Adapter;
+use ersa_core::{Adapter, RemoveGate};
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Records};
 use support::{Client, TestCore, git, git_repo, kind, start_with_adapters, tempdir};
@@ -986,67 +986,79 @@ async fn workspace_state(client: &mut Client, project: &Value, workspace: &Value
         .expect("the workspace is listed")
 }
 
-/// `workspace.remove`'s pause, taken before its claim and again after.
-const REMOVE_PAUSE: Duration = Duration::from_millis(3000);
-/// Into a removal: inside its pause before the claim.
-const BEFORE_CLAIM: Duration = Duration::from_millis(300);
-/// Into a removal: inside its pause after the claim.
-const AFTER_CLAIM: Duration = Duration::from_millis(3200);
-
-/// A Core whose `workspace.remove` pauses before and after claiming the
-/// workspace, so another request can land on either side.
-async fn start_with_remove_pause(fake: &Arc<FakeAdapter>) -> TestCore {
-    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
-    start_with_adapters(
-        tempdir(),
-        |config| config.remove_claim_pause = REMOVE_PAUSE,
-        adapters,
-    )
-    .await
+/// Where a test lands another request in a `workspace.remove`.
+#[derive(Clone, Copy, PartialEq)]
+enum Land {
+    /// After its read, before its claim.
+    BeforeClaim,
+    /// While it holds the claim.
+    WhileClaimed,
 }
 
-/// A delete marks the workspace `error` while a `workspace.remove` runs,
-/// `land` into it: before its claim (it read `ready`) or while it holds the
-/// claim. The removal is refused for the session and leaves `error`, so the
-/// workspace takes no new session while its folder may be going. The delete
-/// takes the files (a sole session, a token it showed), so it sets `error`
-/// (R57), and a locked worktree stops it at step 5 with the session kept.
-async fn a_removal_refused_for_sessions_keeps_a_deletes_error_mark(land: Duration) {
+/// A Core whose `workspace.remove` stops before and after claiming the
+/// workspace until the test lets it go, and that gate.
+async fn start_with_remove_gate(fake: &Arc<FakeAdapter>) -> (TestCore, Arc<RemoveGate>) {
+    let gate = Arc::new(RemoveGate::default());
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
+    let config_gate = Arc::clone(&gate);
+    let core = start_with_adapters(
+        tempdir(),
+        move |config| config.remove_gate = Some(config_gate),
+        adapters,
+    )
+    .await;
+    (core, gate)
+}
+
+/// Waits until the removal under way is stopped at `land`.
+async fn removal_stopped_at(gate: &RemoveGate, land: Land) {
+    gate.reached().await;
+    if land == Land::WhileClaimed {
+        gate.go();
+        gate.reached().await;
+    }
+}
+
+/// Lets the removal stopped at `land` run to its end.
+fn let_removal_finish(gate: &RemoveGate, land: Land) {
+    gate.go();
+    if land == Land::BeforeClaim {
+        // The stop after the claim; the removal waits there only for this.
+        gate.go();
+    }
+}
+
+/// A delete marks the workspace `error` while a `workspace.remove` is
+/// stopped at `land`: before its claim (it read `ready`) or while it holds
+/// the claim. The removal is refused for the session and leaves `error`, so
+/// the workspace takes no new session while its folder may be going. The
+/// delete takes the files (a sole session, a token it showed), so it sets
+/// `error` (R57), and a locked worktree stops it at step 5 with the session
+/// kept.
+async fn a_removal_refused_for_sessions_keeps_a_deletes_error_mark(land: Land) {
     let fake = Arc::new(FakeAdapter::new(1));
-    let core = start_with_remove_pause(&fake).await;
+    let (core, gate) = start_with_remove_gate(&fake).await;
     let mut client = core.client().await;
     let mut remover = core.client().await;
     let (project, repo) = project(&mut client, core.dir.path()).await;
     let (workspace, folder) = isolated(&mut client, &project).await;
-    let mut deleter = core.client().await;
     let id = idle_session(&mut client, &workspace).await;
     git(&repo, &["worktree", "lock", folder.to_str().unwrap()]);
     let shown = token(&mut client, &workspace).await;
 
-    let started = tokio::time::Instant::now();
     let removal = remover
         .request("workspace.remove", json!({ "id": workspace["id"] }))
         .await;
-    tokio::time::sleep(land).await;
-    let deletion = deleter
-        .request("session.delete", json!({ "id": id, "token": shown }))
+    removal_stopped_at(&gate, land).await;
+    let error = client
+        .error("session.delete", json!({ "id": id, "token": shown }))
         .await;
-    // When the mark lands, so the test fails rather than passes by luck if
-    // it misses the window it was meant for.
-    let deadline = started + REMOVE_PAUSE * 2;
-    while workspace_state(&mut client, &project, &workspace).await != "error" {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the delete never marked the workspace inside the removal"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    let marked = started.elapsed();
-    if land < REMOVE_PAUSE {
-        assert!(marked < REMOVE_PAUSE, "marked after the claim: {marked:?}");
-    }
-    let error = &deleter.response(deletion).await["error"];
-    assert_eq!(kind(error), "vcs_error", "{error}");
+    assert_eq!(kind(&error), "vcs_error", "{error}");
+    assert_eq!(
+        workspace_state(&mut client, &project, &workspace).await,
+        "error"
+    );
+    let_removal_finish(&gate, land);
 
     let response = remover.response(removal).await;
     let error = &response["error"];
@@ -1071,13 +1083,13 @@ async fn a_removal_refused_for_sessions_keeps_a_deletes_error_mark(land: Duratio
 // verifies: PROTO-CORE-API-R94
 #[tokio::test(flavor = "multi_thread")]
 async fn a_removal_refused_for_sessions_keeps_an_error_mark_set_before_its_claim() {
-    a_removal_refused_for_sessions_keeps_a_deletes_error_mark(BEFORE_CLAIM).await;
+    a_removal_refused_for_sessions_keeps_a_deletes_error_mark(Land::BeforeClaim).await;
 }
 
 // verifies: PROTO-CORE-API-R94
 #[tokio::test(flavor = "multi_thread")]
 async fn a_removal_refused_for_sessions_keeps_an_error_mark_set_while_it_holds_the_claim() {
-    a_removal_refused_for_sessions_keeps_a_deletes_error_mark(AFTER_CLAIM).await;
+    a_removal_refused_for_sessions_keeps_a_deletes_error_mark(Land::WhileClaimed).await;
 }
 
 /// The same, where git refuses the removal: another request marks the
@@ -1087,7 +1099,7 @@ async fn a_removal_refused_for_sessions_keeps_an_error_mark_set_while_it_holds_t
 #[tokio::test(flavor = "multi_thread")]
 async fn a_removal_git_refuses_keeps_an_error_mark_set_after_its_read() {
     let fake = Arc::new(FakeAdapter::new(1));
-    let core = start_with_remove_pause(&fake).await;
+    let (core, gate) = start_with_remove_gate(&fake).await;
     let mut client = core.client().await;
     let mut remover = core.client().await;
     let (project, repo) = project(&mut client, core.dir.path()).await;
@@ -1097,7 +1109,7 @@ async fn a_removal_git_refuses_keeps_an_error_mark_set_after_its_read() {
     let removal = remover
         .request("workspace.remove", json!({ "id": workspace["id"] }))
         .await;
-    tokio::time::sleep(BEFORE_CLAIM).await;
+    removal_stopped_at(&gate, Land::BeforeClaim).await;
     // As `session.delete` step 4 writes it (R57), straight to the row.
     let db = core.dir.path().join("data").join("ersa.db");
     let store = ersa_core::persistence::Store::open(&db).expect("open");
@@ -1112,6 +1124,7 @@ async fn a_removal_git_refuses_keeps_an_error_mark_set_after_its_read() {
         })
         .await
         .expect("update");
+    let_removal_finish(&gate, Land::BeforeClaim);
 
     let response = remover.response(removal).await;
     assert_eq!(kind(&response["error"]), "vcs_error", "{response}");
