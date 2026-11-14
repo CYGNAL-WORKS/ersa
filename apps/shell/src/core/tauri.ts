@@ -59,6 +59,10 @@ export const tauriShell: ShellControl = {
   show: () => invoke<boolean>("shell_show"),
   hide: () => invoke("shell_hide"),
   quit: () => invoke("shell_quit"),
+  // The Shell checks the scheme again before it opens anything (FLOW-READ-TRANSCRIPT-R03).
+  openLink: (url) => {
+    invoke("shell_open_link", { url }).catch((error) => console.error(error));
+  },
   // One folder, or null when the user cancels (FLOW-NEW-SESSION-R27, R17).
   pickFolder: async () => {
     const picked = await open({ directory: true, multiple: false });

@@ -32,7 +32,9 @@ The user opens a session, or sends a message (`FLOW-SEND-MESSAGE`) and watches t
 - **A call that fails** says so on its card, and its output is the error. A diff card that fails keeps the change it proposed, so the user sees what was not applied.
 - **An edit that replaces every occurrence** of its text shows the change once, and the diff says it is made everywhere that text occurs: the call carries the text, not how many places hold it, so the row's counts are of the change shown.
 - **A call waiting for the user's permission** says so on its card; the request itself is `FLOW-APPROVE-PERMISSION`'s.
-- **Markdown Ersa does not show as itself**: raw HTML shows as its text, and an image shows as its alternative text linked to its address, never loaded (ADR 0034).
+- **Markdown Ersa does not show as itself**: raw HTML shows as its text, and an image shows as its alternative text linked to its address, or as the address itself when it has no alternative text, never loaded (ADR 0034).
+- **A line that turns out to open a construct**: a table's header row reads as a line of the paragraph before it until its delimiter row arrives, then moves into the table. That is the table arriving; the text before that row does not change (R05).
+- **The clipboard refuses Copy**: Copy stays as it was and does not say it copied.
 - **A link with any other scheme** than `http`, `https` or `mailto` shows as text and opens nothing.
 - **A session opened from its record** shows the same cards with what the record keeps: a call's progress is live only, so a card read from the record shows its duration and no progress, and a subagent's calls show only live for now (Open questions).
 
@@ -51,6 +53,8 @@ The user opens a session, or sends a message (`FLOW-SEND-MESSAGE`) and watches t
 - **FLOW-READ-TRANSCRIPT-R11**: The agent's thinking shall show as one row saying the agent is thinking, or thought, and its summary when the event carries one, shown when the user opens the row.
 - **FLOW-READ-TRANSCRIPT-R12**: Each card's row shall be reachable by keyboard and say to assistive technology the tool, its target, its state, and whether it is open.
 - **FLOW-READ-TRANSCRIPT-R13**: A file's diff with an edit that carries `every_occurrence` shall say, above its lines, that a change it shows is made everywhere its text occurs in the file.
+- **FLOW-READ-TRANSCRIPT-R14**: A Markdown image with no alternative text shall show its address as the link's text.
+- **FLOW-READ-TRANSCRIPT-R15**: When the clipboard refuses Copy's write, Copy shall stay as it was and shall not say it copied.
 
 ## Out of scope
 
@@ -68,5 +72,6 @@ The user opens a session, or sends a message (`FLOW-SEND-MESSAGE`) and watches t
 
 ## Changes
 
+- 2026-11-13: from #355 inbox: an image with no alternative text shows its address as the link's text; Copy says it copied only once the clipboard has taken the text; a table's header row reads as part of the paragraph before it until its delimiter row arrives, which is the table arriving and not earlier text changing (R05 unchanged). FLOW-READ-TRANSCRIPT-R14 and R15 added.
 - 2026-11-13: from #351 inbox: a diff says when its change is made at every occurrence of the text, so the user sees a change's reach before allowing it. An open question on a subagent's calls in a session opened from its record. FLOW-READ-TRANSCRIPT-R13 added.
 - 2026-11-13: created ready for M1's transcript: formatted text, tool cards and diff cards, from the owner's Main board and Claude Desktop, under the owner's decision that `docs/design/TRANSCRIPT.md` is approved as a page (owner, 2026-11-13). Code stays without syntax colors and diffs without line numbers for now. FLOW-READ-TRANSCRIPT-R01 to R12 added.

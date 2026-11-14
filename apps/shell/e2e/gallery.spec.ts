@@ -13,6 +13,7 @@ const components = [
   "QuestionForm",
   "Shelf",
   "AttachmentChip",
+  "AgentText",
   "Transcript",
   "SessionTitle",
   "ErrorBoundary",
