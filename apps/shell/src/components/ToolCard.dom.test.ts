@@ -196,11 +196,11 @@ describe("a subagent's calls", () => {
     expect(page.querySelectorAll(".transcript-page > .tool-card")).toHaveLength(3);
   });
 
-  it("leave out an empty input and an empty output", () => {
-    show([{ type: "tool.requested", tool_use_id: "e", name: "Ping", input: {} }, { type: "tool.result", tool_use_id: "e", content: "", is_error: false }]);
-    const row = screen.getByRole("button", { name: "Ping, Done" });
-    expect(openPart(row).querySelectorAll(".tool-label")).toHaveLength(0);
-    expect(openPart(row).querySelector(".tool-output")).toBeNull();
+  // verifies: FLOW-READ-TRANSCRIPT-R07
+  it("says Input and Error for a failed call with no input fields and no output", () => {
+    show([{ type: "tool.requested", tool_use_id: "e", name: "Ping", input: {} }, { type: "tool.result", tool_use_id: "e", content: "", is_error: true }]);
+    const row = screen.getByRole("button", { name: "Ping, Failed" });
+    expect([...openPart(row).querySelectorAll(".tool-label")].map((l) => l.textContent)).toEqual(["Input", "Error"]);
   });
 });
 
