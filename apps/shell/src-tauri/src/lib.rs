@@ -25,6 +25,9 @@
 //!   [`QUIT_HEARD_LIMIT`], quits at once. `shell_show` shows the window for
 //!   the confirmation and returns whether it was hidden; `shell_hide` puts it
 //!   back when the user cancels.
+//! - `shell_open_link { url }` opens a link from the agent's words in the
+//!   system's default handler, only when its scheme is `http`, `https` or
+//!   `mailto` (FLOW-READ-TRANSCRIPT-R03).
 //!   - [`quit`]: shutting Core down, and ending it when it will not stop.
 //!   - [`startup`]: which Core a build reaches, and its window's claim.
 //!   - [`instance`]: one Shell per user; a second launch shows the first's
@@ -190,6 +193,25 @@ fn shell_quit_heard(shell: State<'_, Shell>) {
     shell.quit_heard.fetch_max(asked, Ordering::SeqCst);
 }
 
+/// Opens a link the user chose in the agent's words in the system's default
+/// handler (FLOW-READ-TRANSCRIPT-R03). The Interface opens only openable
+/// links; the scheme is checked again here, so nothing else the window sends
+/// reaches the system.
+#[tauri::command]
+fn shell_open_link(url: String) -> Result<(), String> {
+    let url = openable_link(&url)
+        .ok_or_else(|| format!("Ersa opens only web and email links, not {url}"))?;
+    open_in_browser(&url);
+    Ok(())
+}
+
+/// `url` parsed, when it is a link Ersa may open: a web address or an email
+/// address. Any other scheme (a file, a script, another app's) is refused.
+fn openable_link(url: &str) -> Option<Url> {
+    let url = Url::parse(url).ok()?;
+    matches!(url.scheme(), "http" | "https" | "mailto").then_some(url)
+}
+
 /// Quits: called by the Interface once the user has confirmed, or when
 /// there was nothing to confirm.
 #[tauri::command]
@@ -328,9 +350,10 @@ fn guard_navigation(url: &Url) -> bool {
     false
 }
 
-/// Hands `url` to the operating system's default browser. The URL is one
-/// argument to the program, never a shell command line, and is already
-/// parsed as http(s).
+/// Hands `url` to the operating system's default handler for its scheme: the
+/// browser for http(s), the mail app for mailto. The URL is one argument to
+/// the program, never a shell command line, and is already parsed and its
+/// scheme checked.
 fn open_in_browser(url: &Url) {
     let program = if cfg!(windows) {
         "explorer.exe"
@@ -405,7 +428,8 @@ pub fn run() {
             shell_show,
             shell_hide,
             shell_quit_heard,
-            shell_quit
+            shell_quit,
+            shell_open_link
         ])
         // The window is built here rather than in tauri.conf.json so it can
         // carry the navigation guard.
@@ -463,6 +487,30 @@ mod tests {
         assert!(!is_app_origin(&url("https://example.com/")));
         assert!(!is_app_origin(&url("file:///C:/Windows/")));
         assert!(!is_app_origin(&url("http://localhost.example.com/")));
+    }
+
+    // verifies: FLOW-READ-TRANSCRIPT-R03
+    #[test]
+    fn opens_only_web_and_email_links() {
+        for url in [
+            "http://example.com/",
+            "https://example.com/a?b=c",
+            "mailto:someone@example.com",
+            "HTTPS://EXAMPLE.COM/",
+        ] {
+            assert!(openable_link(url).is_some(), "{url}");
+        }
+        for url in [
+            "file:///C:/Windows/System32/calc.exe",
+            "javascript:alert(1)",
+            "ftp://example.com/",
+            "irc://example.com/",
+            "ms-settings:",
+            "notes.md",
+            "",
+        ] {
+            assert!(openable_link(url).is_none(), "{url}");
+        }
     }
 
     #[test]
