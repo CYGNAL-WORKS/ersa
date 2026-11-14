@@ -35,6 +35,20 @@ impl Backend {
     /// was last used by a turn that began at `began`.
     fn record_says(&self, model: &str, effort: &str, mode: &str, began: Option<OffsetDateTime>) {
         let backend_id = self.records.lock().unwrap().keys().next().unwrap().clone();
+        self.record_of_says(&backend_id, model, effort, mode, began);
+    }
+
+    /// [`Backend::record_says`], of the session the backend knows as
+    /// `backend_id`.
+    fn record_of_says(
+        &self,
+        backend_id: &str,
+        model: &str,
+        effort: &str,
+        mode: &str,
+        began: Option<OffsetDateTime>,
+    ) {
+        let backend_id = backend_id.to_string();
         let recorded = |value: &str| {
             Some(Recorded {
                 value: value.into(),
@@ -137,7 +151,7 @@ fn three(model: &str, effort: &str, mode: &str) -> (Value, Value, Value) {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_request_stands_until_a_turn_after_it_ran_across_a_restart() {
     let backend = Backend::default();
-    let (core, _) = start(&backend, tempdir()).await;
+    let (core, fake) = start(&backend, tempdir()).await;
     let mut client = core.client().await;
     let before = OffsetDateTime::now_utc() - time::Duration::hours(1);
     let id = started(
@@ -149,6 +163,15 @@ async fn a_request_stands_until_a_turn_after_it_ran_across_a_restart() {
     assert_eq!(
         values(&mut client, &id).await,
         three("model-b", "low", "auto")
+    );
+    let config = fake.stats.configs.lock().unwrap()[0].clone();
+    assert_eq!(
+        (
+            config.model.as_deref(),
+            config.effort.as_deref(),
+            config.permission_mode.as_str()
+        ),
+        (Some("model-b"), Some("low"), "auto")
     );
 
     // The record's latest turn began before Core's request: the request is
@@ -238,6 +261,7 @@ async fn a_fork_starts_with_the_values_its_original_lists() {
     let backend = Backend::default();
     let (core, fake) = start(&backend, tempdir()).await;
     let mut client = core.client().await;
+    let before = OffsetDateTime::now_utc() - time::Duration::hours(1);
     let id = started(
         &core,
         &mut client,
@@ -256,6 +280,15 @@ async fn a_fork_starts_with_the_values_its_original_lists() {
         assert!(tokio::time::Instant::now() < deadline, "never idle");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+
+    let original = backend
+        .records
+        .lock()
+        .unwrap()
+        .keys()
+        .next()
+        .unwrap()
+        .clone();
 
     let fork = client.result("session.fork", json!({ "id": id })).await;
 
@@ -282,5 +315,28 @@ async fn a_fork_starts_with_the_values_its_original_lists() {
             config.permission_mode.as_str()
         ),
         (Some("model-a"), Some("low"), "ask")
+    );
+
+    // The fork's record holds the original's turns, from before the fork:
+    // the values the fork was started with are newer, and a restarted Core
+    // still knows when it gave them.
+    let fork_id = fork["id"].as_str().unwrap().to_string();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let fork_backend = loop {
+        let found = (backend.records.lock().unwrap().keys())
+            .find(|k| **k != original)
+            .cloned();
+        if let Some(found) = found {
+            break found;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no fork record");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    backend.record_of_says(&fork_backend, "model-b", "high", "auto", Some(before));
+    drop(client);
+    let (_core, mut client) = restart(core, &backend).await;
+    assert_eq!(
+        values(&mut client, &fork_id).await,
+        three("model-a", "low", "ask")
     );
 }
