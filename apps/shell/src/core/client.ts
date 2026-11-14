@@ -2,6 +2,7 @@
 // and notifications, typed by the types generated from the protocol schemas.
 // The Shell carries them over the pipe; the Interface never opens it.
 
+import { t } from "../catalog";
 import type {
   CoreApiMethods,
   CoreApiNotifications,
@@ -56,8 +57,59 @@ export function refusalOf(error: unknown): ErrorData | undefined {
   return (error as { error: RpcError }).error.data;
 }
 
-/** A readable message for anything a client call rejected with. */
+type Reason = NonNullable<ErrorData["reason"]>;
+
+// The catalog's words for each refusal reason the Interface knows (PROTO-CORE-API-R80). `folder_gone` has none yet:
+// its words, and where they show, come with the ticket for Copy session ID; until then it reads as Core's message.
+const REFUSAL_WORDS: Partial<Record<Reason, () => string>> = {
+  session_busy: () => t("errors.refusal.sessionBusyError"),
+  session_deleting: () => t("errors.refusal.sessionDeletingError"),
+  session_archived: () => t("errors.refusal.sessionArchivedError"),
+  session_not_running: () => t("errors.refusal.sessionNotRunningError"),
+  send_in_progress: () => t("errors.refusal.sendInProgressError"),
+  send_stopped: () => t("errors.refusal.sendStoppedError"),
+  backend_unnamed: () => t("errors.refusal.backendUnnamedError"),
+  record_gone: () => t("errors.refusal.recordGoneError"),
+  open_unknown: () => t("errors.refusal.openUnknownError"),
+  no_finished_reply: () => t("errors.refusal.noFinishedReplyError"),
+  backend_cannot_fork: () => t("errors.refusal.backendCannotForkError"),
+};
+
+// Process ids as Core lists them for `open_elsewhere`: decimal numbers separated by a comma and a space (R87).
+const PROCESS_IDS = /^\d+(, \d+)*$/;
+
+/**
+ * The catalog's words for a refusal whose `reason` the Interface knows, else undefined. `open_elsewhere` names the
+ * processes in `detail` (PROTO-CORE-API-R87); a detail of any other shape is never shown. A send refused because its
+ * backend could not be started has no reason (R88), so it is said in the adapter's words, as is a reason this build
+ * doesn't know.
+ */
+function refusalWords(data: ErrorData | undefined): string | undefined {
+  const reason = data?.reason;
+  if (reason === undefined) return undefined;
+  if (reason === "open_elsewhere") {
+    const detail = data?.detail ?? "";
+    if (!PROCESS_IDS.test(detail)) return t("errors.refusal.openElsewhereUnnamedError");
+    return t("errors.refusal.openElsewhereError", { count: detail.split(", ").length, ids: detail });
+  }
+  // `hasOwn`, so a reason from a newer Core that happens to name an Object property finds nothing.
+  return Object.hasOwn(REFUSAL_WORDS, reason) ? REFUSAL_WORDS[reason]?.() : undefined;
+}
+
+/**
+ * Whether a refused `session.send` is the stop's cancel: Core canceled the message before it reached the backend,
+ * which it answers `invalid_state` with reason `send_stopped` (PROTO-CORE-API, Errors). Any other refusal after a stop,
+ * as a backend that could not be started, is a failure the user is shown (FLOW-NEW-SESSION-R08).
+ */
+export function stoppedBeforeSent(error: unknown): boolean {
+  const data = refusalOf(error);
+  return data?.kind === "invalid_state" && data.reason === "send_stopped";
+}
+
+/** A readable message for anything a client call rejected with: a refusal Core names in the catalog's words. */
 export function describeError(error: unknown): string {
+  const words = refusalWords(refusalOf(error));
+  if (words !== undefined) return words;
   if (typeof error === "object" && error !== null && "kind" in error) {
     const bridge = error as BridgeError;
     // Core's messages start with the method they answer ("session.send: …"),
