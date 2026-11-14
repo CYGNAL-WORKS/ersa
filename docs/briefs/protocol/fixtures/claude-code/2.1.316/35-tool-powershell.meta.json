@@ -1,0 +1,114 @@
+{
+  "recorded_at": "2026-11-14T04:25:08.618Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "fb6744f2-d30f-4fa7-a4b0-046b90558d21",
+  "session_record": "record/35-tool-powershell.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command",
+    "queue-operation",
+    "system/compact_boundary"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 5647,
+  "stderr": "",
+  "stdout_lines": 35,
+  "stdout_timing_ms": [
+    983,
+    1354,
+    1360,
+    2261,
+    2261,
+    2262,
+    2308,
+    2855,
+    2855,
+    2855,
+    2855,
+    2855,
+    2864,
+    2912,
+    2916,
+    2916,
+    2918,
+    3971,
+    3984,
+    4674,
+    4774,
+    4924,
+    4924,
+    4927,
+    4927,
+    4927,
+    4929,
+    4929,
+    4929,
+    4930,
+    4932,
+    4932,
+    4936,
+    4937,
+    4953
+  ],
+  "sent": [
+    {
+      "t": 12,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 983,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Use the PowerShell tool once to run the command: Get-ChildItem -Name. Make exactly that one tool call, then say done.\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Use the PowerShell tool once to run the command: Get-ChildItem -Name. Make exactly that one tool call, then say done.",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}

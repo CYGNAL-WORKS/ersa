@@ -25,6 +25,7 @@ mod projector;
 mod questions;
 pub mod record;
 mod suggestions;
+mod tools;
 pub mod wire;
 
 pub use driver::{ClaudeAdapter, fork_args, invocation_args, resume_args, session_id_args};
