@@ -1130,6 +1130,17 @@ const entries: Entry[] = [
       ],
       ["A subagent's calls, open", <Card steps={subagent} id="a1" initialOpen />],
       // As narrow as a bubble, so the target overflows.
+      [
+        "Failed with no input and no output, open",
+        <Card
+          id="e1"
+          initialOpen
+          steps={[
+            [0, { type: "tool.requested", tool_use_id: "e1", name: "mcp__docs__sync", input: {} }],
+            [4, { type: "tool.result", tool_use_id: "e1", content: "", is_error: true }],
+          ]}
+        />,
+      ],
       ["A long path, cut at its start", <div style={{ maxWidth: "var(--size-bubble-max)" }}><Card steps={[[0, longPathCall], [3, readDone]]} /></div>],
       ["A long command, cut at its end", <div style={{ maxWidth: "var(--size-bubble-max)" }}><Card steps={[[0, longCommandCall]]} id="b1" /></div>],
       ["Read from the record, unfinished", <Card steps={[[0, readCall]]} input="record" />],

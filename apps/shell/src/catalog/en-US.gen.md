@@ -670,6 +670,14 @@ Output
 
 Error
 
+### `transcript.tool.noInputLabel`
+
+No input
+
+### `transcript.tool.noOutputLabel`
+
+No output
+
 ### `transcript.tool.duration.secondsLabel`
 
 {seconds}s

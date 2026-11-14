@@ -172,9 +172,10 @@ export function ToolCard({
       </button>
       <OpenPart id={id} open={open}>
         <div className="tool-open-body">
-          {/* Input, then Output or Error, each under its label whatever it holds (TRANSCRIPT.md, Tool cards). */}
+          {/* Input, then Output or Error, each under its label whatever it holds (TRANSCRIPT.md, Tool cards); a part
+              with nothing in it says so in quiet words, rather than showing an empty box. */}
           <span className="tool-label">{t("transcript.tool.inputLabel")}</span>
-          <InputFields input={item.input} />
+          {Object.keys(item.input).length > 0 ? <InputFields input={item.input} /> : <p className="tool-empty">{t("transcript.tool.noInputLabel")}</p>}
 
           {calls.length > 0 && (
             <div className="tool-calls">
@@ -186,7 +187,11 @@ export function ToolCard({
           {item.result && (
             <>
               <span className="tool-label">{item.result.isError ? t("transcript.tool.errorLabel") : t("transcript.tool.outputLabel")}</span>
-              <pre className="tool-output mono">{item.result.content}</pre>
+              {item.result.content !== "" ? (
+                <pre className="tool-output mono">{item.result.content}</pre>
+              ) : (
+                <p className="tool-empty">{t("transcript.tool.noOutputLabel")}</p>
+              )}
             </>
           )}
         </div>
