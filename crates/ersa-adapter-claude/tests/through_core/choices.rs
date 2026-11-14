@@ -9,7 +9,6 @@ use crate::support::{start_with_adapters, tempdir};
 
 /// The choices are the adapter's knowledge, so they are listed even while
 /// the CLI is missing from the host.
-// was PROTO-CORE-API-R16; R71 replaces it, unbuilt
 #[tokio::test(flavor = "multi_thread")]
 async fn backend_list_offers_claude_codes_choices_with_their_defaults() {
     let claude: Arc<dyn Adapter> = Arc::new(ersa_adapter_claude::ClaudeAdapter::new());
