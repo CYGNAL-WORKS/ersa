@@ -25,15 +25,17 @@ import { PINNED_KEY, RailTree } from "../components/RailTree";
 import { SessionControls } from "../components/SessionControls";
 import { Shelf } from "../components/Shelf";
 import { SessionTitle } from "../components/SessionTitle";
+import { QuestionForm } from "../components/QuestionForm";
 import { Transcript } from "../components/Transcript";
 import type { CoreView, SessionsView } from "../core/connection";
-import type { Envelope, Event } from "../protocol/agent-events.gen";
-import type { CoreHelloResult, Project, Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
+import type { Envelope, Event, QuestionAsked } from "../protocol/agent-events.gen";
+import type { BackendInfo, Choice, CoreHelloResult, Project, Session, Workspace, WorkspaceChanges } from "../protocol/core-api.gen";
 import type { Answer } from "../session/answers";
-import { type BackendChoices, type Choice, branchesMatching } from "../session/controls";
+import { branchesMatching } from "../session/controls";
 import { type DeletePhase, whatGoes } from "../session/deletion";
 import type { SessionView } from "../session/follow";
-import { type ShelfShows, shelfTone } from "../session/shelf";
+import type { Draft } from "../session/questionForm";
+import { type ShelfShows, shelfTone, shownRequest } from "../session/shelf";
 import { tileOf } from "../session/tile";
 import { EVENT_VERSION, apply, emptyTranscript } from "../session/transcript";
 import "./Gallery.css";
@@ -121,6 +123,7 @@ const session = (id: string, title: string, created_at: string, tile: Session["t
   created_at,
   archived: false,
   pinned: false,
+  unseen: false,
   tile,
 });
 
@@ -424,6 +427,32 @@ const sessionView = (events: Event[], more: Partial<SessionView> = {}): SessionV
 // What the user sees of Core's refusal: its message without the method name (describeError).
 const refusal = "the session is a replay of a recording and cannot change";
 
+// Questions as Claude Code asks them (PROTO-AGENT-EVENTS-R18): options with descriptions, and own words beside them.
+type Question = QuestionAsked["questions"][number];
+const retryOptions = [
+  { id: "o1", label: "Windows only", description: "Where the test flakes today" },
+  { id: "o2", label: "Everywhere", description: "Linux and macOS runners too" },
+  { id: "o3", label: "Nowhere", description: "Fix the race instead" },
+];
+const singleQuestion: Question = { id: "q1", header: "Retry", text: "Where should the reconnect test retry?", options: retryOptions, multi_select: false, takes_text: true };
+const multiQuestion: Question = {
+  id: "q2",
+  header: "Runners",
+  text: "Which runners should run the reconnect test?",
+  options: [
+    { id: "w", label: "Windows" },
+    { id: "l", label: "Linux" },
+    { id: "m", label: "macOS", description: "Slowest to start" },
+  ],
+  multi_select: true,
+  takes_text: true,
+};
+const wordsQuestion: Question = { id: "q3", text: "What should the new branch be called?", multi_select: false, takes_text: false };
+const questionAsked: Event[] = [
+  { type: "session.state", state: "waiting_user" },
+  { type: "question.asked", request_id: "rq", questions: [singleQuestion] },
+];
+
 const transcriptStates: [string, SessionView, answers?: Record<string, Answer>][] = [
   ["Loading", sessionView([], { stream: { state: "subscribing" } })],
   ["Empty", sessionView([])],
@@ -432,6 +461,13 @@ const transcriptStates: [string, SessionView, answers?: Record<string, Answer>][
   ["Permission sending", sessionView(asked), { r1: { state: "sending", decision: "allow" } }],
   ["Permission refused", sessionView(asked), { r1: { state: "failed", message: refusal } }],
   ["Permission while Core is away", sessionView(asked, { stream: { state: "offline" } })],
+  ["Question open", sessionView(questionAsked)],
+  ["Question answer on its way", sessionView(questionAsked), { rq: { state: "sending", decision: "decline" } }],
+  ["Question answer refused", sessionView(questionAsked), { rq: { state: "failed", message: refusal } }],
+  ["Question while Core is away", sessionView(questionAsked, { stream: { state: "offline" } })],
+  ["Question answered", sessionView([...questionAsked, { type: "question.answered", request_id: "rq", answers: [{ id: "q1", value: "o2", own_words: false }], declined: false, answered_by: "user" }])],
+  ["Question declined", sessionView([...questionAsked, { type: "question.answered", request_id: "rq", answers: [], declined: true, answered_by: "user" }])],
+  ["Question not answered", sessionView([...questionAsked, { type: "session.ended", reason: "backend_exited" }])],
   ["Hidden characters", sessionView(hiding)],
   ["Answered", sessionView(answered)],
   ["Two turns", sessionView(twoTurns)],
@@ -457,7 +493,7 @@ const draft = "Fix the flaky reconnect test on Windows";
 // What the Claude Code adapter lists for `backend.list` (PROTO-CLAUDE-CODE-STREAM), with the CLI's default marked.
 const choices = (pairs: [string, string][], dflt: string): Choice[] =>
   pairs.map(([id, label]) => ({ id, label, default: id === dflt }));
-const claudeCode: BackendChoices = {
+const claudeCode: BackendInfo = {
   name: "claude-code",
   label: "Claude Code",
   version: "2.1.302",
@@ -470,7 +506,7 @@ const claudeCode: BackendChoices = {
     "default",
   ),
 };
-const copilot = (status: BackendChoices["status"]): BackendChoices => ({
+const copilot = (status: BackendInfo["status"]): BackendInfo => ({
   name: "copilot",
   label: "GitHub Copilot",
   status,
@@ -589,7 +625,7 @@ const menuParts: MenuEntry[] = [
   { kind: "submenu", label: "Sort by", current: "Date created", entries: [{ kind: "item", label: "Date created", checked: true }] },
   { kind: "rule" },
   { kind: "item", label: "Rename", keyHint: "F2" },
-  { kind: "item", label: "Fork", unavailable: "Available once the session has finished its reply" },
+  { kind: "item", label: "Fork", unavailable: "Available once the reply finishes" },
   { kind: "rule" },
   { kind: "item", label: "Delete…", danger: true },
 ];
@@ -602,6 +638,16 @@ function MenuOpen({ entries, submenu }: { entries: MenuEntry[]; submenu?: number
       <span className="gallery-menu-anchor" style={{ anchorName: anchor } as CSSProperties} />
       <Menu label="Menu" entries={entries} open place={{ anchor }} focus="none" onClose={() => {}} initialSubmenu={submenu} />
     </div>
+  );
+}
+
+/** A question's form on an open question card, with `initial` already chosen or written. */
+function QuestionCardOpen({ questions, initial }: { questions: Question[]; initial: Draft }) {
+  const [draft, setDraft] = useState<Draft>(initial);
+  return (
+    <section className="transcript-card transcript-question" data-open>
+      <QuestionForm questions={questions} draft={draft} onDraft={setDraft} live onAnswer={() => {}} />
+    </section>
   );
 }
 
@@ -626,7 +672,7 @@ function ShelfOpen({ shows, more = {} }: { shows: ShelfShows; more?: ShelfMore }
             id: open.id,
             tone: shelfTone(shows),
             render: (domId) => (
-              <Shelf id={domId} tile={tile} shows={shows} onRetry={() => {}} answers={answer && { [shelfRequest.request_id]: answer }} live={live} onDecide={() => {}} force={focus ? "focus" : undefined} />
+              <Shelf id={domId} tile={tile} shows={shows} onRetry={() => {}} answers={answer && { [shownRequest(shows) ?? ""]: answer }} live={live} onDecide={() => {}} onAnswer={() => {}} force={focus ? "focus" : undefined} />
             ),
           }}
         />
@@ -654,7 +700,12 @@ const shelfStates: [string, ShelfShows, more?: ShelfMore][] = [
   ["The last of three, still counted", { state: "permission", request: { ...shelfRequest, description: "Run the reconnect tests again" }, place: { n: 3, m: 3 } }],
   ["Defaulting to no", { state: "permission", request: { ...shelfRequest, blocked_path: undefined, flags: { ...flags, default_to_no: true } } }],
   ["A long input, which scrolls", { state: "permission", request: { ...shelfRequest, description: "Run every reconnect test", input: { command: longCommand } } }],
-  ["A question", { state: "question", requestId: "q1", questions: [{ id: "a", text: "Should the reconnect test retry on Windows only, or everywhere?", multi_select: false, takes_text: false }] }],
+  ["A single-choice question", { state: "question", requestId: "rq", questions: [singleQuestion] }],
+  ["A multiple-choice question", { state: "question", requestId: "rq", questions: [multiQuestion] }],
+  ["A question in the user's own words", { state: "question", requestId: "rq", questions: [wordsQuestion] }],
+  ["A question's answer on its way", { state: "question", requestId: "rq", questions: [singleQuestion] }, { answer: { state: "sending", decision: { answers: [] } } }],
+  ["A question's answer refused", { state: "question", requestId: "rq", questions: [singleQuestion] }, { answer: { state: "failed", message: "the session has ended" } }],
+  ["A question while Ersa reconnects", { state: "question", requestId: "rq", questions: [singleQuestion] }, { live: false }],
   ["Loading", { state: "loading" }],
   ["Reading failed", { state: "failed", message: "the session's events could not be read" }],
   ["A request Ersa can't show", { state: "unknown" }],
@@ -836,6 +887,11 @@ const entries: Entry[] = [
       ],
       ["Tile menu, pinned", room(<RailTree {...pairOnly} sessions={{ state: "ready", sessions: pointerPair.map((s) => ({ ...s, pinned: true })) }} initialTileMenu="p2" />)],
       ["Tile menu, while a pin is saved", room(<RailTree {...pairOnly} initialTileMenu="p2" pinning={{ p2: { state: "sending" } }} />)],
+      ["A fork on its way", <RailTree {...pairOnly} forking={{ p1: { state: "sending" } }} />],
+      [
+        "Fork refused",
+        <RailTree {...pairOnly} forking={{ p1: { state: "failed", message: "the last turn in session p1 was interrupted; it can be forked once a reply finishes" } }} />,
+      ],
       ["Pin refused", <RailTree {...pairOnly} pinning={{ p2: { state: "failed", message: "session.arrange: the session is being deleted" } }} />],
       ["Renaming on the tile", <RailTree {...pairOnly} initialTileDraft={{ id: "p2", draft: "The one in question, renamed" }} />],
       [
@@ -876,6 +932,16 @@ const entries: Entry[] = [
     ],
   },
   {
+    // A question's form with choices made, as the shelf and the transcript's question card hold it.
+    name: "QuestionForm",
+    states: [
+      ["One option chosen", <QuestionCardOpen questions={[singleQuestion]} initial={{ q1: { chosen: ["o2"] } }} />],
+      ["Several options chosen", <QuestionCardOpen questions={[multiQuestion]} initial={{ q2: { chosen: ["w", "m"] } }} />],
+      ["Answered in the user's own words", <QuestionCardOpen questions={[singleQuestion]} initial={{ q1: { words: "Only on the nightly run" } }} />],
+      ["Two questions, one answered", <QuestionCardOpen questions={[singleQuestion, wordsQuestion]} initial={{ q1: { chosen: ["o1"] } }} />],
+    ],
+  },
+  {
     name: "Shelf",
     wide: true,
     states: shelfStates.map(([label, shows, more]) => [label, <ShelfOpen shows={shows} more={more} />]),
@@ -907,7 +973,7 @@ const entries: Entry[] = [
     wide: true,
     states: transcriptStates.map(([label, view, answers]) => [
       label,
-      <Transcript title="Fix the flaky reconnect test" view={view} answers={answers} onDecide={() => {}} onRetry={() => {}} />,
+      <Transcript title="Fix the flaky reconnect test" view={view} answers={answers} onDecide={() => {}} onAnswer={() => {}} onRetry={() => {}} />,
     ]),
   },
   {

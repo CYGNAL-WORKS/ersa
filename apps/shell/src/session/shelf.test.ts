@@ -56,6 +56,7 @@ const session = (id: string, waiting: [Kind, string][] = []): Session => ({
   created_at: "2026-11-06T09:00:00Z",
   archived: false,
   pinned: false,
+  unseen: false,
   tile: { state: "waiting_user", pending: pending(...waiting) },
 });
 

@@ -302,6 +302,22 @@ Rename
 
 F2
 
+### `rail.tile.forkButton`
+
+Fork
+
+### `rail.tile.forkBusyReason`
+
+Available once the reply finishes
+
+### `rail.tile.forkingProgress`
+
+Forking…
+
+### `rail.tile.forkError`
+
+Ersa can't fork this session.
+
 ### `rail.tile.offlineReason`
 
 Available once Ersa reaches your sessions
@@ -556,6 +572,18 @@ Deny
 
 Allow
 
+### `rail.shelf.declineButton`
+
+Decline
+
+### `rail.shelf.answerButton`
+
+Answer
+
+### `rail.shelf.ownWordsPlaceholder`
+
+Answer in your own words
+
 ### `rail.shelf.answerRefusedError`
 
 Your answer wasn't accepted.
@@ -565,6 +593,22 @@ Your answer wasn't accepted.
 Reconnecting to Core…
 
 ## `transcript`
+
+### `transcript.question.name`
+
+Question
+
+### `transcript.question.answeredTitle`
+
+Question, answered
+
+### `transcript.question.declinedTitle`
+
+Question, declined
+
+### `transcript.question.unansweredStatus`
+
+Not answered
 
 ### `transcript.attachment.listLabel`
 

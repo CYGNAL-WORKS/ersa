@@ -12,8 +12,8 @@ import {
   useState,
 } from "react";
 import { t } from "../catalog";
-import type { Session } from "../protocol/core-api.gen";
-import type { BackendChoices } from "../session/controls";
+import type { BackendInfo, Session } from "../protocol/core-api.gen";
+
 import { type TileView, tileOf } from "../session/tile";
 import { reducedMotion } from "../theme/motion";
 import { ContextRing } from "./ContextRing";
@@ -22,7 +22,7 @@ import { SessionRoot, type TileActions, useTileMenu } from "./TileMenu";
 import "./SessionTile.css";
 
 /** Each host's backends, by host id, as `backend.list` gives them. */
-export type Backends = Readonly<Record<string, readonly BackendChoices[]>>;
+export type Backends = Readonly<Record<string, readonly BackendInfo[]>>;
 
 /** The open shelf, as the rail draws it beside its tile. `render` is given the element id the chevron controls. */
 export interface OpenShelf {
@@ -50,10 +50,12 @@ export function SessionTile({
   onChevron,
   rename,
   pin,
+  fork,
   archive,
   remove,
   initialMenu,
   initialDraft,
+  forking,
 }: TileActions & {
   session: Session;
   backends?: Backends;
@@ -67,13 +69,15 @@ export function SessionTile({
   /** For the gallery: the tile's menu shown open, and the title being edited with this text. */
   initialMenu?: boolean;
   initialDraft?: string;
+  /** A fork of this session is on its way: it says so in place of its state. */
+  forking?: boolean;
 }) {
-  const view = tileOf(session, backends);
+  const view = tileOf(session, backends, forking);
   const needsYou = view.mark === "needsYou";
   const { root, editing, rootHandlers, titleField, moreAndMenu } = useTileMenu({
     session,
     title: view.title,
-    actions: { rename, pin, archive, remove },
+    actions: { rename, pin, fork, archive, remove },
     beforeChevron: needsYou,
     initialMenu,
     initialDraft,
