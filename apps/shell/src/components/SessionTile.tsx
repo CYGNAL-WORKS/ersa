@@ -12,8 +12,8 @@ import {
   useState,
 } from "react";
 import { t } from "../catalog";
-import type { Session } from "../protocol/core-api.gen";
-import type { BackendChoices } from "../session/controls";
+import type { BackendInfo, Session } from "../protocol/core-api.gen";
+
 import { type TileView, tileOf } from "../session/tile";
 import { reducedMotion } from "../theme/motion";
 import { ContextRing } from "./ContextRing";
@@ -22,7 +22,7 @@ import { SessionRoot, type TileActions, useTileMenu } from "./TileMenu";
 import "./SessionTile.css";
 
 /** Each host's backends, by host id, as `backend.list` gives them. */
-export type Backends = Readonly<Record<string, readonly BackendChoices[]>>;
+export type Backends = Readonly<Record<string, readonly BackendInfo[]>>;
 
 /** The open shelf, as the rail draws it beside its tile. `render` is given the element id the chevron controls. */
 export interface OpenShelf {

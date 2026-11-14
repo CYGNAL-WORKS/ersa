@@ -3,7 +3,7 @@
   "$id": "https://github.com/CYGNAL-WORKS/ersa/protocol/schema/core-api.schema.json",
   "title": "Ersa Core API",
   "description": "The Core request/response API (PROTO-CORE-API): newline-delimited JSON-RPC 2.0 between the Interface and Core. Each method has a `<method>.params` and a `<method>.result` definition; each notification a `<method>.notification` definition. Objects are closed (additionalProperties: false) except settings and the shapes reserved for later milestones. Agent events are not copied here: session.event carries an envelope from agent-events.schema.json by reference.",
-  "x-api-version": 4,
+  "x-api-version": 5,
   "$ref": "#/$defs/message",
   "$defs": {
     "message": {
@@ -1529,6 +1529,24 @@
           "type": "integer",
           "minimum": 0,
           "description": "With attachment_refused: the place in session.send's attachments of the attachment refused."
+        },
+        "reason": {
+          "enum": [
+            "session_busy",
+            "session_deleting",
+            "session_archived",
+            "session_not_running",
+            "send_in_progress",
+            "send_stopped",
+            "folder_gone",
+            "backend_unnamed",
+            "record_gone",
+            "open_elsewhere",
+            "open_unknown",
+            "no_finished_reply",
+            "backend_cannot_fork"
+          ],
+          "description": "On invalid_state: names a refusal the user meets, so the Interface can say it in the string catalog's words."
         }
       }
     },
@@ -1649,7 +1667,7 @@
         "models": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/choice"
+            "$ref": "#/$defs/model_choice"
           },
           "description": "The models a session can start with."
         },
@@ -1690,6 +1708,41 @@
         "default": {
           "type": "boolean",
           "description": "Whether a new session starts with this one when none is named."
+        }
+      }
+    },
+    "model_choice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "default"
+      ],
+      "description": "One model a session can start with, as the backend reports it on the host.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "What session.create takes and session.list reports."
+        },
+        "label": {
+          "type": "string",
+          "description": "What the Interface shows."
+        },
+        "default": {
+          "type": "boolean",
+          "description": "Whether the backend chooses this model on its own."
+        },
+        "resolved": {
+          "type": "string",
+          "description": "The model id a session of this choice reports, so the session controls can name it."
+        },
+        "efforts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Ids of the efforts this model takes, from the backend's efforts; absent when the model takes none."
         }
       }
     },
@@ -1855,11 +1908,16 @@
         "created_at",
         "archived",
         "pinned",
+        "unseen",
         "tile"
       ],
       "properties": {
         "id": {
           "$ref": "#/$defs/id"
+        },
+        "backend_session_id": {
+          "type": "string",
+          "description": "The session's id in its backend; absent until the backend has reported it."
         },
         "workspace_id": {
           "$ref": "#/$defs/id"
@@ -1918,6 +1976,10 @@
         "section_id": {
           "$ref": "#/$defs/id",
           "description": "The section the user put the session in, from section.list; absent when in none. Core stores it; session.arrange sets it, and section.remove clears it."
+        },
+        "unseen": {
+          "type": "boolean",
+          "description": "Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it."
         },
         "last_activity_at": {
           "type": "string",
@@ -2002,6 +2064,11 @@
               }
             }
           }
+        },
+        "waiting": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many messages the backend holds behind the running turn; absent when none, or when the session is not live."
         }
       },
       "description": "What the rail renders for a session; Core keeps it current from events. Usage fields are absent until known."
@@ -2615,6 +2682,10 @@
             }
           ],
           "description": "Puts the session in this section, or in none when null; left as it was when absent. A section that does not exist answers not_found."
+        },
+        "unseen": {
+          "type": "boolean",
+          "description": "Marks the session unseen or seen; left as it was when absent."
         }
       },
       "description": "Changes the fields given and leaves the others. A session marked deleting answers invalid_state."
@@ -3288,6 +3359,10 @@
           "type": "string",
           "format": "date-time",
           "description": "The session's last_activity_at as session.list has it: when its latest turn ended; absent until one has. Every tile carries it, and a turn's end sends a tile even when the tile itself is unchanged."
+        },
+        "title": {
+          "type": "string",
+          "description": "The session's current title, as session.list has it; absent while the session has none."
         }
       }
     },
