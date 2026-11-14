@@ -74,7 +74,7 @@ Recorded on 2.1.316 for `Read` and `Bash` (fixture 00-session-tools), `Edit`, `W
 | `WebSearch`, `ToolSearch` | `query` | none |
 | `Task`, `Agent` | `description` | none |
 
-Any other tool, an MCP server's included, carries neither. A field missing from the input, or not a string, leaves `target` or that edit out.
+A target's `target_kind` follows its tool: `path` for `Read`, `Write`, `Edit`, `MultiEdit` and `NotebookEdit`; `command` for `Bash` and `PowerShell`; `search` for `Grep`, `Glob`, `WebSearch` and `ToolSearch`; `address` for `WebFetch`; `task` for `Task` and `Agent` (PROTO-CLAUDE-CODE-STREAM-R61). Any other tool, an MCP server's included, carries neither. A field missing from the input, or not a string, leaves `target` or that edit out.
 
 ### user
 
@@ -300,6 +300,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R53**: When a live session's `system/init` has none of `scratchpad_path`, `memory_paths` and `messaging_socket_path` and its turn then fails as not signed in, the adapter shall project the failure as an `error` with `code: backend_error`, `recoverable: false`, no `action`, and a message saying Claude Code started in its minimal mode, which Ersa can't use, instead of `authentication_failed`.
 - **PROTO-CLAUDE-CODE-STREAM-R54**: The adapter's conformance tests shall fail when a fixture at the newest tested version whose recorded arguments are the adapter's own invocation has a `system/init` with none of `scratchpad_path`, `memory_paths` and `messaging_socket_path`.
 - **PROTO-CLAUDE-CODE-STREAM-R48**: The adapter shall project each `tool_use` block of a tool named in Tool targets and edits to a `tool.requested` carrying the `target` and `edits` that table gives, and any other tool's to one carrying neither.
+- **PROTO-CLAUDE-CODE-STREAM-R61**: A `tool.requested` the adapter gives a `target` shall carry the `target_kind` Tool targets and edits names for its tool.
 
 ## Out of scope
 
@@ -317,6 +318,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 ## Changes
 
+- 2026-11-14: from #360 inbox: each tool's target has a kind, which the adapter states (PROTO-AGENT-EVENTS-R26). PROTO-CLAUDE-CODE-STREAM-R61 added.
 - 2026-11-14: planning pass for the two-week review's defects: a record deletion can be called off, and then begins no further deletion, so a delete that gave up never takes the record later (PROTO-CORE-API-R91). PROTO-CLAUDE-CODE-STREAM-R55 added.
 - 2026-11-13: from #353 inbox: a fork with no record is resumed by forking its original again as it is by then, under `session.fork`'s own conditions (FLOW-RESUME-SESSION-R10). No requirement IDs changed.
 - 2026-11-13: from #350 inbox: Bare mode's signal narrowed to all three of `scratchpad_path`, `memory_paths` and `messaging_socket_path` missing: a signed-out session with auto-memory off lacks the first two (fixture 2.1.316/38-signed-out-no-auto-memory) and was told signing in can't help. Bare mode cites fixture 2.1.316/37-bare-mode in place of the summary it replaced. PROTO-CLAUDE-CODE-STREAM-R51 and R52 retired for R53 and R54.

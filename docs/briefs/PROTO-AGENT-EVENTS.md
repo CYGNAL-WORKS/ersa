@@ -55,7 +55,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 
 ### Tool
 
-- `tool.requested`: `tool_use_id`, `name`, `display_name` (optional), `input` (object), `parent_tool_use_id` (optional, for subagent trees), `target` (optional: the one thing the call acts on, as the user would name it: a path, a command, a search, an address), `edits` (optional: for a call that changes files, one `{ path, old_text (optional), new_text, every_occurrence (optional) }` per change in the order the call makes them, where `old_text` is the text replaced and is absent when the call writes the whole file, and `every_occurrence` is true when the change replaces that text everywhere it occurs in the file, not once). The adapter fills `target` and `edits` from its backend's own tools, so the Interface never reads a backend's tool input to draw a card.
+- `tool.requested`: `tool_use_id`, `name`, `display_name` (optional), `input` (object), `parent_tool_use_id` (optional, for subagent trees), `target` (optional: the one thing the call acts on, as the user would name it: a path, a command, a search, an address, a subagent's task), `target_kind` (present with `target`: `path`, `command`, `search`, `address` or `task`, so the Interface knows a path without guessing from its spelling), `edits` (optional: for a call that changes files, one `{ path, old_text (optional), new_text, every_occurrence (optional) }` per change in the order the call makes them, where `old_text` is the text replaced and is absent when the call writes the whole file, and `every_occurrence` is true when the change replaces that text everywhere it occurs in the file, not once). The adapter fills `target`, `target_kind` and `edits` from its backend's own tools, so the Interface never reads a backend's tool input to draw a card.
 - `tool.result`: `tool_use_id`, `content` (string or structured), `is_error`, `duration_ms` (optional).
 - `tool.progress`: `tool_use_id`, `detail` (optional string). Projected from backend progress and task-summary lines.
 
@@ -146,6 +146,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - **PROTO-AGENT-EVENTS-R23**: An entry of `edits` whose change replaces its text everywhere it occurs in the file shall carry `every_occurrence` true; any other entry shall carry no `every_occurrence`.
 - **PROTO-AGENT-EVENTS-R24**: When Core resumes a session whose view has a subscriber, it shall keep that view and append the resumed run's events to it, numbered on from the view's last `seq`, without projecting the session record again.
 - **PROTO-AGENT-EVENTS-R25**: A resumed session's `session.state` shall go from `starting` to `idle` when its backend process answers Core's first request.
+- **PROTO-AGENT-EVENTS-R26**: A `tool.requested` that carries `target` shall carry `target_kind`, one of `path`, `command`, `search`, `address` or `task`, saying which the target is; one without `target` shall carry none.
 
 ## Out of scope
 
@@ -162,6 +163,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 ## Changes
 
+- 2026-11-14: from #360 inbox: `tool.requested` gains `target_kind`, since a target's spelling does not say whether it is a path: a command can begin with a path, and a search pattern can look like one. A shape change, so the ticket that builds it bumps `v`. PROTO-AGENT-EVENTS-R26 added.
 - 2026-11-13: from #353 inbox: a view with a subscriber when its session is resumed stays and takes the resumed run's events, so Sequencing's order holds within one run of the backend; a resumed session goes to `idle` when its backend is ready, as a fork does, a new lifecycle fact; the open question on merging record and live input is closed by the resume fixtures, with no exception to R02, and one on turns taken elsewhere before a resume replaces it. `v` is not bumped: no event changes shape or value, as when the fork's ready fact was added (2026-11-08). PROTO-AGENT-EVENTS-R24 and R25 added.
 - 2026-11-13: from #350 inbox: R22 points at PROTO-CLAUDE-CODE-STREAM-R53, which replaced R51. Reworded, its ID unchanged.
 - 2026-11-13: from #351 inbox: an entry of `edits` gains `every_occurrence`, so a diff card can say a change is made in more places than the one it shows. Part of the same shape change as `edits`, so `v` is not bumped again. PROTO-AGENT-EVENTS-R23 added.
