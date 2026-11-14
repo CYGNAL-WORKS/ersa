@@ -36,7 +36,7 @@ use crate::{BACKEND, MAX_TESTED_VERSION};
 
 /// The version of this projection. Bump it whenever the events produced for
 /// some raw log would change, so Core re-projects cached sessions.
-pub const PROJECTOR_VERSION: u32 = 7;
+pub const PROJECTOR_VERSION: u32 = 8;
 
 /// The `model` the CLI gives the messages it writes itself rather than
 /// receiving from the API.
@@ -456,10 +456,12 @@ impl ClaudeProjector {
                     }),
                 ..
             } => {
-                if let Some(message_id) = message_id {
-                    let mut out = self.ensure_turn(line);
-                    out.push(self.turn_output(line, message_id, tokens));
-                    return out;
+                // Usage counts toward the open turn only: a stray one after
+                // `result` opens no turn of its own.
+                if let Some(message_id) = message_id
+                    && self.turn_open
+                {
+                    return vec![self.turn_output(line, message_id, tokens)];
                 }
             }
             _ => {}
@@ -479,7 +481,13 @@ impl ClaudeProjector {
         at(
             line,
             Event::UsageUpdated(UsageUpdated {
-                turn_output_tokens: Some(self.output_tokens.values().sum()),
+                // Saturating: absurd counts from the CLI must not wrap the
+                // sum (or panic a debug build).
+                turn_output_tokens: Some(
+                    self.output_tokens
+                        .values()
+                        .fold(0u64, |sum, n| sum.saturating_add(*n)),
+                ),
                 ..UsageUpdated::default()
             }),
         )
@@ -872,7 +880,7 @@ impl ClaudeProjector {
         // and folders as blocks of their own, never as its text (R26).
         let (text, attachments) = match value.pointer("/message/content") {
             Some(Value::Array(blocks)) => crate::attachments::split(blocks),
-            Some(content) => (input_text(content), Vec::new()),
+            Some(content) => (content.as_str().map(String::from), Vec::new()),
             None => (None, Vec::new()),
         };
         if text.is_none() && attachments.is_empty() {
@@ -1121,7 +1129,6 @@ pub(crate) fn tool_result_events(content: MessageContent) -> Vec<Event> {
 // ---------------------------------------------------------------------------
 // Helpers
 
-/// An event that came from `line` alone.
 /// How a prompt the user never answered ends when the backend drops it (a
 /// `control_cancel_request`, or the turn ending): a permission request is
 /// denied by the backend, and a question answered by it with no answers.
@@ -1143,6 +1150,7 @@ fn withdrawn(request_id: String, asks: &Asks) -> Event {
     }
 }
 
+/// An event that came from `line` alone.
 fn at(line: &RawLine, event: Event) -> Projected {
     Projected::from_line(line, event)
 }
@@ -1276,7 +1284,7 @@ fn drift_error(line: &RawLine, kind: &str) -> Projected {
 }
 
 /// The text of a message's text blocks, if it has any.
-pub(crate) fn plain_text(blocks: &[ContentBlock]) -> Option<String> {
+fn plain_text(blocks: &[ContentBlock]) -> Option<String> {
     let texts: Vec<&str> = blocks
         .iter()
         .filter_map(|block| match block {
@@ -1285,12 +1293,6 @@ pub(crate) fn plain_text(blocks: &[ContentBlock]) -> Option<String> {
         })
         .collect();
     (!texts.is_empty()).then(|| texts.join("\n"))
-}
-
-/// The text of a host user message's `content` given as a plain string;
-/// content blocks go through [`crate::attachments::split`].
-fn input_text(content: &Value) -> Option<String> {
-    content.as_str().map(String::from)
 }
 
 /// A tool's output: plain text when it is only text, else the blocks as they
