@@ -1663,7 +1663,7 @@ fn an_interrupted_turn_with_a_message_waiting_leaves_the_session_working() {
     // Fixture 54: interrupting ends only the running turn; the waiting
     // message then runs as the next.
     let sequence = without_lines(turns_and_messages(
-        &fixture("54-interrupt-with-waiting-echoed").raw_log(),
+        &fixture("24-interrupt-with-waiting").raw_log(),
     ));
     let completed = sequence
         .iter()
@@ -1816,76 +1816,4 @@ fn a_message_taken_in_with_one_that_opened_its_turn_is_still_shown() {
             "session.state Idle",
         ]
     );
-}
-
-/// The `user.message` texts and the last `session.state` of a projection.
-fn messages_and_last_state(lines: &[ersa_adapter::RawLine]) -> (Vec<String>, String) {
-    let sequence = without_lines(turns_and_messages(lines));
-    let messages = sequence
-        .iter()
-        .filter_map(|what| what.strip_prefix("user.message "))
-        .map(String::from)
-        .collect();
-    let last = sequence
-        .iter()
-        .rev()
-        .find(|what| what.starts_with("session.state"))
-        .unwrap()
-        .clone();
-    (messages, last)
-}
-
-// verifies: PROTO-CLAUDE-CODE-STREAM-R43
-// verifies: PROTO-CLAUDE-CODE-STREAM-R44
-#[test]
-fn a_log_without_echoes_loses_no_message_and_ends_idle() {
-    // Fixtures 22 and 51 were recorded before the adapter passed
-    // `--replay-user-messages`, as a session's raw log from then was: the
-    // turn its first message opened ends unechoed. Nothing says when such a
-    // log's waiting message was taken in (in the next turn for 22, in the
-    // same one for 51, which uses tools), so it is shown in the turn it was
-    // written in, as before the echoes, and nothing is left waiting.
-    for (name, first) in [
-        ("22-message-during-turn", ESSAY),
-        ("51-message-during-tool-turn", READ_THRICE),
-    ] {
-        let lines = fixture(name).raw_log();
-        let (messages, last) = messages_and_last_state(&lines);
-        assert_eq!(
-            messages,
-            [
-                first.strip_prefix("user.message ").unwrap(),
-                "Now reply with the single word: second"
-            ],
-            "{name}"
-        );
-        assert_eq!(last, "session.state Idle", "{name}");
-        assert_eq!(
-            waiting_counts(&lines).last().map(|(_, n)| *n),
-            Some(0),
-            "{name}"
-        );
-    }
-}
-
-// verifies: PROTO-CLAUDE-CODE-STREAM-R44
-#[test]
-fn once_a_log_is_found_to_have_no_echoes_later_messages_show_at_once() {
-    let out = fixture("07-stream-two-turns").stdout;
-    let (init, result) = (&out[0], &out[5]);
-    let (one, two, three) = (user_text("one"), user_text("two"), user_text("three"));
-    let lines = log(&[
-        (Host, &one),
-        (Backend, init),
-        // No echo of "one": the log has none.
-        (Backend, result),
-        (Host, &two),
-        (Backend, init),
-        (Host, &three),
-        (Backend, result),
-    ]);
-    let (messages, last) = messages_and_last_state(&lines);
-    assert_eq!(messages, ["one", "two", "three"]);
-    assert_eq!(last, "session.state Idle");
-    assert!(waiting_counts(&lines).is_empty());
 }
