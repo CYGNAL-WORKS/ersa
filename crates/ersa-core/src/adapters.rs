@@ -1,7 +1,7 @@
 //! Adapter registry: which backends are installed on which hosts, their
 //! versions and capabilities, and how to start them. The adapters themselves
-//! live in their own crates, such as `ersa-adapter-claude`, and the
-//! `ersa-core` binary registers them: the registered adapters are the only
+//! live in their own crates, one per backend, and the `ersa-core` binary
+//! registers them: the registered adapters are the only
 //! backends Core knows, and it names none of them (ADR 0031).
 //!
 //! So far this detects backends by running each adapter's version command
@@ -135,60 +135,44 @@ pub async fn detect(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ersa_adapter::ProcessSpec;
+
+    /// A backend with nothing but a name and the default version command.
+    struct Probe;
+
+    #[ersa_adapter::async_trait]
+    impl Adapter for Probe {
+        fn backend(&self) -> &str {
+            "probe"
+        }
+        fn title_rules(&self) -> ersa_adapter::TitleRules {
+            ersa_adapter::TitleRules {
+                max_chars: 10,
+                one_line: true,
+            }
+        }
+        async fn start(
+            &self,
+            _: Arc<dyn Transport>,
+            _: ersa_adapter::SessionConfig,
+            _: Arc<dyn ersa_adapter::AdapterSink>,
+        ) -> Result<Box<dyn ersa_adapter::AdapterSession>, ersa_adapter::AdapterError> {
+            unreachable!("detection never starts a session")
+        }
+        fn projector(&self) -> Box<dyn ersa_adapter::Projector> {
+            unreachable!("detection projects nothing")
+        }
+    }
 
     #[tokio::test]
     async fn a_missing_program_is_reported_missing() {
-        let claude: Arc<dyn Adapter> = Arc::new(ersa_adapter_claude::ClaudeAdapter::new());
+        let probe: Arc<dyn Adapter> = Arc::new(Probe);
         let found = detect(
             &ersa_adapter::LocalTransport,
             Some("ersa-no-such-program-xyz"),
-            &[claude],
+            &[probe],
         )
         .await;
         assert_eq!(found.len(), 1);
         assert!(found.iter().all(|d| d.state == BackendState::Missing));
-    }
-
-    // verifies: PROTO-CLAUDE-CODE-STREAM-R19
-    #[tokio::test]
-    async fn the_version_check_runs_with_the_adapters_environment() {
-        let transport = ersa_adapter::fake::FakeTransport::new(["2.1.316 (Claude Code)"]);
-        let claude: Arc<dyn Adapter> = Arc::new(ersa_adapter_claude::ClaudeAdapter::new());
-        let found = detect(&transport, None, std::slice::from_ref(&claude)).await;
-        assert_eq!(found[0].version.as_deref(), Some("2.1.316"));
-        // The tested range and the choices are the adapter's own.
-        let info = found[0].info();
-        assert_eq!(
-            (info.tested.min.as_str(), info.tested.max.as_str()),
-            (
-                ersa_adapter_claude::MIN_TESTED_VERSION,
-                ersa_adapter_claude::MAX_TESTED_VERSION
-            )
-        );
-        let ids = |ids: Vec<String>| ids;
-        assert_eq!(
-            ids(info.models.iter().map(|m| m.id.clone()).collect()),
-            ids(claude
-                .choices()
-                .models
-                .iter()
-                .map(|m| m.id.clone())
-                .collect())
-        );
-        assert_eq!(info.label, "Claude Code");
-
-        let mut session = ProcessSpec::default();
-        claude.set_environment(&mut session);
-        let check = &transport.spawned()[0];
-        assert_eq!(check.args, ["--version"]);
-        assert_eq!(check.env, session.env);
-        assert_eq!(check.env_remove, session.env_remove);
-        assert!(
-            check
-                .env_remove
-                .iter()
-                .any(|n| n == "CLAUDE_CODE_SESSION_ID")
-        );
     }
 }
