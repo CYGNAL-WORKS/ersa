@@ -67,7 +67,7 @@ export function Transcript({ title, untitled, view, answers = {}, onDecide, onAn
   const live = stream.state !== "offline";
 
   return (
-    <section className="transcript" aria-label="Transcript">
+    <section className="transcript" aria-label={t("transcript.name")}>
       <header className="transcript-header">
         <SessionTitle title={title} untitled={untitled} onRename={onRename} renaming={renaming} onReset={onRenameReset} disabled={renameDisabled}>
           <span className="transcript-state" data-needs-you={transcript.state === "waiting_user" || undefined}>
@@ -80,14 +80,14 @@ export function Transcript({ title, untitled, view, answers = {}, onDecide, onAn
           {stream.state === "failed" && (
             <div className="transcript-actions">
               <p className="problem" role="alert">
-                Not receiving this session's events: {stream.message}
+                {t("transcript.streamFailedLabel", { message: stream.message })}
               </p>
-              {onRetry && <Button onClick={onRetry}>Retry</Button>}
+              {onRetry && <Button onClick={onRetry}>{t("transcript.retryButton")}</Button>}
             </div>
           )}
-          {stream.state === "offline" && <p className="transcript-note">Reconnecting to Core…</p>}
+          {stream.state === "offline" && <p className="transcript-note">{t("transcript.reconnectingProgress")}</p>}
           {transcript.items.length === 0 && (stream.state === "subscribing" || stream.state === "live") && (
-            <p className="transcript-note">{stream.state === "subscribing" ? "Loading…" : "Nothing yet. Write to the agent below."}</p>
+            <p className="transcript-note">{stream.state === "subscribing" ? t("transcript.loadingProgress") : t("transcript.nothingYetEmpty")}</p>
           )}
           {transcript.items.map((item) => (
             <Block
@@ -182,7 +182,7 @@ function AttachedImage({ image }: { image: Extract<MessageAttachment, { kind: "i
 function UserBubble({ item }: { item: Extract<Item, { kind: "user" }> }) {
   return (
     // A bubble with no label: its place says who wrote it, and assistive technology hears "You" (DESIGN.md, Layout).
-    <div className="transcript-user" role="group" aria-label="You">
+    <div className="transcript-user" role="group" aria-label={t("transcript.userLabel")}>
       {item.attachments && <MessageAttachments attachments={item.attachments} />}
       {item.text !== "" && <p className="transcript-text">{item.text}</p>}
     </div>
@@ -202,7 +202,7 @@ const Block = memo(function Block({ item, answer, waiting, live, onDecide, onAns
     case "thinking":
       return (
         <p className="transcript-note">
-          {item.final ? "Thought" : "Thinking…"}
+          {item.final ? t("transcript.thoughtLabel") : t("transcript.thinkingProgress")}
           {item.summary ? `: ${item.summary}` : ""}
         </p>
       );
@@ -238,14 +238,14 @@ function Status({ tone, children }: { tone?: "positive" | "pending" | "danger" |
 function ToolCard({ item, waiting }: { item: Extract<Item, { kind: "tool" }>; waiting: boolean }) {
   const status = item.result ? (
     item.result.isError ? (
-      <Status tone="danger">Failed</Status>
+      <Status tone="danger">{t("transcript.tool.failedStatus")}</Status>
     ) : (
-      <Status tone="positive">Done</Status>
+      <Status tone="positive">{t("transcript.tool.doneStatus")}</Status>
     )
   ) : waiting ? (
-    <Status tone="attention">Waiting for you</Status>
+    <Status tone="attention">{t("transcript.tool.waitingLabel")}</Status>
   ) : (
-    <Status tone="pending">{item.progress === undefined ? "Running…" : <Revealed text={item.progress} />}</Status>
+    <Status tone="pending">{item.progress === undefined ? t("transcript.tool.runningProgress") : <Revealed text={item.progress} />}</Status>
   );
   return (
     <div className="transcript-card">
@@ -279,12 +279,10 @@ function PermissionCard({
   const open = isOpen(item);
   return (
     // Focusable outside the tab order, so focus moves to the card as an answer makes its answers unavailable.
-    <section tabIndex={-1} className="transcript-card transcript-permission" data-open={open || undefined} aria-label={`Permission: ${name}`}>
+    <section tabIndex={-1} className="transcript-card transcript-permission" data-open={open || undefined} aria-label={t("transcript.permission.nameLabel", { tool: name })}>
       <div className="transcript-card-head">
         <span className="transcript-card-title">
-          {open ? "Allow " : ""}
-          <Revealed text={name} />
-          {open ? "?" : ""}
+          {open ? t("transcript.permission.openTitle", { tool: <Revealed text={name} /> }) : <Revealed text={name} />}
           {/* The tool's own name, when the backend shows another, so the user knows what they approve. */}
           {name !== request.tool_name && (
             <span className="transcript-card-status mono">
@@ -296,7 +294,7 @@ function PermissionCard({
         {decision && (
           <Status tone={decision.behavior === "allow" ? "positive" : undefined}>{decisionText(decision.behavior, decision.decided_by)}</Status>
         )}
-        {item.unanswered && <Status>Not answered</Status>}
+        {item.unanswered && <Status>{t("transcript.permission.unansweredStatus")}</Status>}
       </div>
       {request.description && (
         <p className="transcript-card-detail">
@@ -307,7 +305,7 @@ function PermissionCard({
       <PermissionInput request={request} />
       {request.blocked_path && (
         <p className="transcript-card-detail">
-          Path:{" "}
+          {t("transcript.permission.pathLabel")}{" "}
           <span className="mono">
             <Revealed text={request.blocked_path} />
           </span>
@@ -450,8 +448,8 @@ export function Revealed({ text }: { text: string }) {
           more++;
           return "\uFFFD";
         }),
-        <span key="more" className="transcript-hidden" title="Invisible characters">
-          {more} more invisible characters, each shown as {"\uFFFD"}
+        <span key="more" className="transcript-hidden" title={t("transcript.hidden.manyLabel")}>
+          {t("transcript.hidden.moreLabel", { count: more, mark: "\uFFFD" })}
         </span>,
       );
       return <>{parts}</>;
@@ -460,8 +458,8 @@ export function Revealed({ text }: { text: string }) {
     if (at > last) parts.push(text.slice(last, at));
     const code = (match[0].codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0");
     parts.push(
-      <span key={at} className="transcript-hidden" title="An invisible character">
-        U+{code}
+      <span key={at} className="transcript-hidden" title={t("transcript.hidden.oneLabel")}>
+        {t("transcript.hidden.codePointLabel", { code })}
       </span>,
     );
     last = at + match[0].length;
@@ -480,6 +478,8 @@ function inputSummary(input: ToolInput): string {
 }
 
 function decisionText(behavior: "allow" | "deny", by: "user" | "rule" | "backend" | "timeout"): string {
-  const what = behavior === "allow" ? "Allowed" : "Denied";
-  return by === "user" ? what : `${what} (${by === "timeout" ? "timed out" : `by ${by}`})`;
+  const decision = behavior === "allow" ? t("transcript.permission.allowedStatus") : t("transcript.permission.deniedStatus");
+  if (by === "user") return decision;
+  const how = by === "rule" ? "byRuleLabel" : by === "backend" ? "byBackendLabel" : "timedOutLabel";
+  return t(`transcript.permission.${how}`, { decision });
 }
