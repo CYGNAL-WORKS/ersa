@@ -2,7 +2,7 @@
 // Records a Claude Code session the way Ersa runs one, as a protocol fixture
 // pair: the live stream and the CLI's own session record for the same run.
 //
-//   node scripts/record-claude-session.mjs <name> [--keep] [--bare] [--cwd <dir>] [--resume <session id> [--fork-session [--cut-original <lines>] [--original-cwd <dir>]]] [--session-id] "<message 1>" ["<message 2>" ...]
+//   node scripts/record-claude-session.mjs <name> [--keep] [--bare] [--signed-out] [--settings <json>] [--cwd <dir>] [--resume <session id> [--fork-session [--cut-original <lines>] [--original-cwd <dir>]]] [--session-id] "<message 1>" ["<message 2>" ...]
 //
 // A message of the form `control:<json>` is sent as a host control request
 // instead, with `<json>` as its `request` object, and the recorder waits for
@@ -73,6 +73,12 @@
 // With --bare, the CLI also gets `--bare`, its minimal mode, which Ersa never
 // passes: the recording shows what a session looks like if a future CLI starts
 // that way by default (PROTO-CLAUDE-CODE-STREAM, Bare mode).
+//
+// With --signed-out, the CLI runs against a new scratch configuration folder
+// (CLAUDE_CONFIG_DIR), signed in nowhere, so the run shows a signed-out
+// session; the folder holds the session record and is deleted afterwards.
+// With --settings <json>, the CLI also gets `--settings <json>`, say
+// '{"autoMemoryEnabled":false}' for a user who turned auto-memory off.
 //
 // With --trust, `initialize` attests the user's trust in the working
 // directory (`workspaceTrust`), as Ersa does for a trusted project's session,
@@ -190,6 +196,8 @@ const flag = (name) => {
 const keep = flag("--keep");
 const trust = flag("--trust");
 const bare = flag("--bare");
+const signedOut = flag("--signed-out");
+const settings = option("--settings");
 const givenCwd = option("--cwd");
 const resume = option("--resume");
 const chooseId = flag("--session-id");
@@ -254,6 +262,7 @@ const args = [
   ...(fork ? ["--fork-session"] : []),
   ...(chosenId ? ["--session-id", chosenId] : []),
   ...(bare ? ["--bare"] : []),
+  ...(settings ? ["--settings", settings] : []),
 ];
 
 // The original's record, as a fork must leave it.
@@ -271,7 +280,7 @@ const originalBefore = originalPath ? recordState(originalPath) : null;
 const env = { ...process.env };
 for (const key of ENV_REMOVED) delete env[key];
 Object.assign(env, ENV_SET);
-const configDir = trust ? mkdtempSync(join(tmpdir(), "ersa-rec-config-")) : null;
+const configDir = trust || signedOut ? mkdtempSync(join(tmpdir(), "ersa-rec-config-")) : null;
 if (configDir) env.CLAUDE_CONFIG_DIR = configDir;
 
 const started = Date.now();
@@ -480,7 +489,7 @@ const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 const recordId = init?.session_id ?? chosenId;
 const recordCwd = typeof init?.cwd === "string" ? init.cwd : cwd;
 if (SESSION_ID_RE.test(recordId ?? "")) {
-  recordPath = join(homedir(), ".claude", "projects", encodeCwd(recordCwd), `${recordId}.jsonl`);
+  recordPath = join(configDir ?? join(homedir(), ".claude"), "projects", encodeCwd(recordCwd), `${recordId}.jsonl`);
   if (existsSync(recordPath)) recordLines = readFileSync(recordPath, "utf8");
 }
 
@@ -497,7 +506,7 @@ writeFileSync(
       env_set: ENV_SET,
       env_removed: ENV_REMOVED,
       bidirectional: true,
-      scratch_config_dir: trust,
+      scratch_config_dir: trust || signedOut,
       cwd_was_scratch_git_repo: givenCwd === undefined,
       session_id: init?.session_id ?? null,
       ...(originalBefore && {

@@ -1,0 +1,86 @@
+{
+  "recorded_at": "2026-11-14T04:30:28.057Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--settings",
+    "{\"autoMemoryEnabled\":false}"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": true,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "fc64c4bd-cf73-461d-b300-0ee8973c3825",
+  "session_record": "record/38-signed-out-no-auto-memory.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command",
+    "queue-operation",
+    "system/compact_boundary"
+  ],
+  "exit_code": 1,
+  "signal": null,
+  "elapsed_ms": 1885,
+  "stderr": "",
+  "stdout_lines": 5,
+  "stdout_timing_ms": [
+    1308,
+    1494,
+    1506,
+    1599,
+    1645
+  ],
+  "sent": [
+    {
+      "t": 15,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 1309,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with the single word OK.\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Reply with the single word OK.",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": true
+    }
+  ]
+}

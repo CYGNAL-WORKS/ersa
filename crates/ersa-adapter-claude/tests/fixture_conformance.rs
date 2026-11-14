@@ -881,12 +881,22 @@ fn the_newest_version_does_not_start_in_minimal_mode_as_the_adapter_runs_it() {
     // looks like. It is left out because it was not run as the adapter runs
     // the CLI; the check would catch it otherwise.
     assert!(
-        not_counted.contains(&"28-bare-mode".to_string()),
+        not_counted.contains(&"37-bare-mode".to_string()),
         "{not_counted:?}"
     );
-    let bare = first_init(&fixtures_root().join("2.1.316/28-bare-mode.jsonl")).unwrap();
+    let bare = first_init(&fixtures_root().join("2.1.316/37-bare-mode.jsonl")).unwrap();
     assert!(ersa_adapter_claude::started_in_minimal_mode(&bare));
     // A signed-out session (2.1.302/00-not-logged-in) is not minimal mode.
     let signed_out = first_init(&fixtures_root().join("2.1.302/00-not-logged-in.jsonl")).unwrap();
     assert!(!ersa_adapter_claude::started_in_minimal_mode(&signed_out));
+    // Nor is a signed-out one with auto-memory off, which lacks two of the
+    // three fields; its `--settings` leaves it out of the count above.
+    assert!(
+        not_counted.contains(&"38-signed-out-no-auto-memory".to_string()),
+        "{not_counted:?}"
+    );
+    let no_memory =
+        first_init(&fixtures_root().join("2.1.316/38-signed-out-no-auto-memory.jsonl")).unwrap();
+    assert!(no_memory.get("scratchpad_path").is_none() && no_memory.get("memory_paths").is_none());
+    assert!(!ersa_adapter_claude::started_in_minimal_mode(&no_memory));
 }
