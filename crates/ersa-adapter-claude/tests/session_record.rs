@@ -129,7 +129,7 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
                 .collect();
             let value: Value = serde_json::from_str(&line.line).unwrap();
             let is_message = matches!(value["type"].as_str(), Some("user" | "assistant"));
-            if line.dir == Direction::Backend && is_message {
+            if line.dir == Direction::Backend && is_message && !from_a_subagent(&value) {
                 live.push((value["uuid"].as_str().unwrap().to_string(), events));
             }
         }
@@ -191,6 +191,35 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
                 assert!(!events.is_empty(), "{}: {uuid}", stream.name);
                 assert_eq!(recorded, &events, "{}: {uuid}", stream.name);
                 local_commands += 1;
+                continue;
+            }
+            // A session the CLI started in its minimal mode: only the live
+            // stream shows the mode, so live its sign-in failure is the
+            // minimal-mode error (PROTO-CLAUDE-CODE-STREAM-R53) and read back
+            // it is a sign-in failure (PROTO-AGENT-EVENTS-R22).
+            if (stream.name.as_str(), uuid.as_str())
+                == (
+                    "2.1.316/37-bare-mode",
+                    "e1632d1e-dd8e-4819-bf67-b98092b915b9",
+                )
+            {
+                assert!(
+                    matches!(
+                        (events.as_slice(), recorded.as_slice()),
+                        (
+                            [Event::Error(ErrorEvent {
+                                code: ErrorCode::BackendError,
+                                ..
+                            })],
+                            [Event::Error(ErrorEvent {
+                                code: ErrorCode::AuthenticationFailed,
+                                ..
+                            })]
+                        )
+                    ),
+                    "{}: {uuid}: {events:?} live, {recorded:?} from the record",
+                    stream.name
+                );
                 continue;
             }
             // Known divergences, named one by one so a new one still fails:
@@ -275,9 +304,13 @@ fn every_record_fixture_projects_to_its_golden_file_and_validates() {
                     record.name
                 )
             });
-            // A projection that could not read an entry fails the fixture.
+            // A projection that could not read an entry fails the fixture;
+            // a sign-in failure the CLI wrote into the record is history.
             assert!(
-                !matches!(event.event, Event::Error(_)),
+                !matches!(
+                    event.event,
+                    Event::Error(ErrorEvent { ref code, .. }) if *code != ErrorCode::AuthenticationFailed
+                ),
                 "{}: {:?}",
                 record.name,
                 event.event
@@ -947,6 +980,13 @@ fn a_session_with_no_record_has_no_history_and_a_bad_id_is_refused() {
     assert_eq!(refused.kind(), std::io::ErrorKind::InvalidInput);
 }
 
+/// Whether a stream line is a subagent's own message. Its entries are a
+/// sidechain, kept outside the conversation's record (R20), so the record has
+/// no match for it.
+fn from_a_subagent(line: &Value) -> bool {
+    line["parent_tool_use_id"].is_string()
+}
+
 /// The merge key against the real CLI: every message event the projector
 /// tags on a recorded stream carries a `uuid` the session record of the same
 /// run gives a message with the same events, so Core can match them
@@ -965,13 +1005,21 @@ fn live_message_ids_are_the_record_uuids_of_the_same_messages() {
         let live: BTreeSet<String> = stream
             .raw_log()
             .iter()
-            .flat_map(|line| projector.project(line))
+            .flat_map(|line| {
+                let projected = projector.project(line);
+                let subagent = serde_json::from_str::<Value>(&line.line)
+                    .is_ok_and(|value| from_a_subagent(&value));
+                if subagent { Vec::new() } else { projected }
+            })
             .filter(|p| {
                 matches!(
                     p.event,
                     Event::AssistantText(AssistantText { is_final: true, .. })
                         | Event::ToolRequested(_)
                         | Event::ToolResult(_)
+                        // A failure the CLI reports as a message, which a
+                        // minimal-mode session has instead of a reply.
+                        | Event::Error(_)
                 )
             })
             .filter_map(|p| p.message_id)
@@ -981,7 +1029,10 @@ fn live_message_ids_are_the_record_uuids_of_the_same_messages() {
             .filter(|e| {
                 matches!(
                     e.event,
-                    Event::AssistantText(_) | Event::ToolRequested(_) | Event::ToolResult(_)
+                    Event::AssistantText(_)
+                        | Event::ToolRequested(_)
+                        | Event::ToolResult(_)
+                        | Event::Error(_)
                 )
             })
             .filter_map(|e| e.message_id)
@@ -1354,4 +1405,32 @@ fn a_recorded_prompt_of_a_file_list_alone_leaves_the_title_at_the_prompt_before(
             "What colour is the attached image? Then say which attachment paths you were given. Do not open or read them, and do not use any tools."
         )
     );
+}
+
+// A record has no `system/init`, so a session Claude Code started in its
+// minimal mode reads back as signed out (PROTO-CLAUDE-CODE-STREAM, Bare mode).
+// verifies: PROTO-AGENT-EVENTS-R22
+#[test]
+fn a_minimal_mode_failure_read_from_the_record_is_a_sign_in_failure() {
+    let fixture = record_fixtures()
+        .into_iter()
+        .find(|f| f.name == "2.1.316/37-bare-mode")
+        .expect("the bare-mode record fixture");
+    let events: Vec<Event> = project_record(&fixture.text)
+        .into_iter()
+        .map(|e| e.event)
+        .collect();
+    assert!(!events.iter().any(|e| matches!(e, Event::AssistantText(_))));
+    let errors: Vec<&ErrorEvent> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Error(e) => Some(e),
+            _ => None,
+        })
+        .collect();
+    let [error] = errors.as_slice() else {
+        panic!("expected one error, got {errors:?}");
+    };
+    assert_eq!(error.code, ErrorCode::AuthenticationFailed);
+    assert_eq!(error.action, Some(ErrorAction::LogIn));
 }

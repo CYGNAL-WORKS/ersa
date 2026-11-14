@@ -83,6 +83,23 @@ fn examples() -> Vec<Event> {
             display_name: Some("Run command".into()),
             input: object(json!({ "command": "cargo test" })),
             parent_tool_use_id: Some("t-0".into()),
+            target: Some("cargo test".into()),
+            // Not what Bash carries (PROTO-AGENT-EVENTS-R20), but the example
+            // fills every optional field so the schema sees each shape.
+            edits: Some(vec![
+                FileEdit {
+                    path: "src/lib.rs".into(),
+                    old_text: Some("fn old()".into()),
+                    new_text: "fn new()".into(),
+                    every_occurrence: true,
+                },
+                FileEdit {
+                    path: "NOTES.md".into(),
+                    old_text: None,
+                    new_text: "Whole file.\n".into(),
+                    every_occurrence: false,
+                },
+            ]),
         }),
         Event::ToolResult(ToolResult {
             tool_use_id: "t-1".into(),
@@ -270,6 +287,15 @@ fn every_example_validates_as_a_payload_and_in_an_envelope() {
 #[test]
 fn minimal_examples_validate_with_every_optional_field_absent() {
     let minimal = [
+        Event::ToolRequested(ToolRequested {
+            tool_use_id: "t-1".into(),
+            name: "mcp__docs__search".into(),
+            display_name: None,
+            input: object(json!({})),
+            parent_tool_use_id: None,
+            target: None,
+            edits: None,
+        }),
         Event::SessionState(SessionState {
             state: LifecycleState::Idle,
             reason: None,
@@ -425,6 +451,8 @@ fn an_extra_field_on_any_payload_fails() {
 fn an_extra_field_in_a_nested_protocol_object_fails() {
     let cases = [
         ("tool.requested", "/source"),
+        ("tool.requested", "/event/edits/0"),
+        ("tool.requested", "/event/edits/1"),
         ("permission.requested", "/event/flags"),
         ("permission.requested", "/event/reason"),
         ("permission.requested", "/event/suggestions/0"),
@@ -454,6 +482,40 @@ fn the_two_open_payloads_accept_backend_fields() {
     let passthrough = serde_json::to_value(example("backend.passthrough")).expect("serialize");
     let passthrough = with_extra_field(passthrough, "/payload");
     validate_event(&passthrough).unwrap_or_else(|e| panic!("{e}"));
+}
+
+// verifies: PROTO-AGENT-EVENTS-R20
+// verifies: PROTO-AGENT-EVENTS-R21
+// verifies: PROTO-AGENT-EVENTS-R23
+#[test]
+fn a_tool_request_carries_its_target_and_edits_on_the_wire() {
+    let wire = serde_json::to_value(example("tool.requested")).expect("serialize");
+    assert_eq!(wire["target"], "cargo test");
+    // A text replaced keeps `old_text`; a whole file written has none. Only a
+    // change made everywhere says `every_occurrence`, and only as true.
+    assert_eq!(
+        wire["edits"],
+        json!([
+            { "path": "src/lib.rs", "old_text": "fn old()", "new_text": "fn new()", "every_occurrence": true },
+            { "path": "NOTES.md", "new_text": "Whole file.\n" },
+        ])
+    );
+
+    // An edit needs its path and new text, and `edits` is never empty: a call
+    // that changes no file carries none rather than an empty list.
+    for bad in [
+        json!([{ "path": "a.rs", "old_text": "x" }]),
+        json!([{ "new_text": "x" }]),
+        json!([{ "path": "a.rs", "new_text": "x", "every_occurrence": false }]),
+        json!([]),
+    ] {
+        let mut payload = wire.clone();
+        payload["edits"] = bad.clone();
+        assert!(validate_event(&payload).is_err(), "accepted edits {bad}");
+    }
+    let mut payload = wire;
+    payload["target"] = json!(["not", "a", "string"]);
+    assert!(validate_event(&payload).is_err());
 }
 
 #[test]

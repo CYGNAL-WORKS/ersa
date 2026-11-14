@@ -415,6 +415,81 @@ fn authentication_failure_is_a_session_error_not_transcript_text() {
     )));
 }
 
+// A session Claude Code started in its minimal mode (`--bare`) fails its first
+// message as if signed out, but signing in can't help: its `system/init` has
+// none of `scratchpad_path`, `memory_paths` and `messaging_socket_path`
+// (2.1.316/37-bare-mode).
+// verifies: PROTO-CLAUDE-CODE-STREAM-R53
+// verifies: PROTO-AGENT-EVENTS-R22
+#[test]
+fn a_session_started_in_minimal_mode_fails_with_its_own_reason_not_a_sign_in() {
+    let events = events(&fixture("37-bare-mode").raw_log());
+    assert!(!events.iter().any(|e| matches!(e, Event::AssistantText(_))));
+    let errors: Vec<&ErrorEvent> = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Error(e) => Some(e),
+            _ => None,
+        })
+        .collect();
+    let [error] = errors.as_slice() else {
+        panic!("expected one error, got {errors:?}");
+    };
+    // The words are the adapter's; the fields are the requirement.
+    assert_eq!(error.code, ErrorCode::BackendError);
+    assert!(!error.recoverable);
+    assert_eq!(error.action, None);
+    assert!(!error.message.is_empty());
+}
+
+/// The one `error` a log projects to.
+fn only_error(log: &[ersa_adapter::RawLine]) -> ErrorEvent {
+    let errors: Vec<ErrorEvent> = events(log)
+        .into_iter()
+        .filter_map(|e| match e {
+            Event::Error(e) => Some(e),
+            _ => None,
+        })
+        .collect();
+    let [error] = errors.as_slice() else {
+        panic!("expected one error, got {errors:?}");
+    };
+    error.clone()
+}
+
+// A signed-out user with auto-memory off lacks `scratchpad_path` and
+// `memory_paths` but keeps `messaging_socket_path`: signing in helps them.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R53
+// verifies: PROTO-AGENT-EVENTS-R22
+#[test]
+fn a_signed_out_user_with_auto_memory_off_is_asked_to_sign_in() {
+    let error = only_error(&fixture("38-signed-out-no-auto-memory").raw_log());
+    assert_eq!(error.code, ErrorCode::AuthenticationFailed);
+    assert_eq!(error.action, Some(ErrorAction::LogIn));
+}
+
+// Any one of the three fields says the CLI did not start in minimal mode: the
+// bare fixture with one of them put back fails as a sign-in failure.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R53
+// verifies: PROTO-AGENT-EVENTS-R22
+#[test]
+fn any_one_of_the_three_fields_means_not_minimal_mode() {
+    for field in ["scratchpad_path", "memory_paths", "messaging_socket_path"] {
+        let mut log = fixture("37-bare-mode").raw_log();
+        let init = log
+            .iter_mut()
+            .find(|l| l.line.contains(r#""subtype":"init""#))
+            .expect("the fixture has a system/init");
+        let mut value: Value = serde_json::from_str(&init.line).unwrap();
+        value[field] = json!("C:/somewhere");
+        init.line = value.to_string();
+
+        let error = only_error(&log);
+        assert_eq!(error.code, ErrorCode::AuthenticationFailed, "{field}");
+        assert_eq!(error.action, Some(ErrorAction::LogIn), "{field}");
+    }
+}
+
 const INIT_REQUEST: &str = r#"{"type":"control_request","request_id":"ersa-init-1","request":{"subtype":"initialize","hooks":{}}}"#;
 
 fn init_response(version: &str) -> String {
@@ -1313,4 +1388,132 @@ fn a_question_without_questions_still_reaches_the_user_with_an_error() {
         ]
     );
     assert!(the_question(&events).questions.is_empty());
+}
+
+/// The `tool.requested` events a fixture's live stream projects, by tool name.
+fn tool_requests(fixture_name: &str) -> Vec<ToolRequested> {
+    events(&fixture(fixture_name).raw_log())
+        .into_iter()
+        .filter_map(|event| match event {
+            Event::ToolRequested(request) => Some(request),
+            _ => None,
+        })
+        .collect()
+}
+
+fn the_request<'a>(requests: &'a [ToolRequested], name: &str) -> &'a ToolRequested {
+    let mut named = requests.iter().filter(|r| r.name == name);
+    let request = named.next().unwrap_or_else(|| panic!("no {name} call"));
+    assert!(named.next().is_none(), "more than one {name} call");
+    request
+}
+
+// Recorded on 2.1.316: each tool in Tool targets and edits that the CLI
+// offers, and the tools its deferred ones load through.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R48
+// verifies: PROTO-AGENT-EVENTS-R20
+// verifies: PROTO-AGENT-EVENTS-R21
+// verifies: PROTO-AGENT-EVENTS-R23
+#[test]
+fn recorded_tool_calls_carry_the_target_and_edits_the_table_gives() {
+    const SCRATCH: &str = r"C:/Users/user\AppData\Local\Temp";
+    let edit = |path: &str, old: Option<&str>, new: &str| FileEdit {
+        path: path.into(),
+        old_text: old.map(Into::into),
+        new_text: new.into(),
+        every_occurrence: false,
+    };
+
+    let requests = tool_requests("2.1.316/28-tool-edit");
+    let notes = format!(r"{SCRATCH}\ersa-rec-tEzd1M\NOTES.md");
+    let call = the_request(&requests, "Edit");
+    assert_eq!(call.target.as_deref(), Some(notes.as_str()));
+    assert_eq!(
+        call.edits,
+        Some(vec![edit(
+            &notes,
+            Some("Notes for the scratch repository."),
+            "Notes, edited."
+        )])
+    );
+
+    // A whole file written: no replaced text.
+    let requests = tool_requests("2.1.316/29-tool-write");
+    let hello = format!(r"{SCRATCH}\ersa-rec-QII59F\hello.txt");
+    let call = the_request(&requests, "Write");
+    assert_eq!(call.target.as_deref(), Some(hello.as_str()));
+    assert_eq!(call.edits, Some(vec![edit(&hello, None, "Hello\nWorld\n")]));
+
+    // An Edit with `replace_all` true: one edit, made everywhere.
+    let requests = tool_requests("2.1.316/36-tool-edit-replace-all");
+    let notes = format!(r"{SCRATCH}\ersa-rec-o32uKM\NOTES.md");
+    let call = the_request(&requests, "Edit");
+    assert_eq!(call.target.as_deref(), Some(notes.as_str()));
+    assert_eq!(
+        call.edits,
+        Some(vec![FileEdit {
+            every_occurrence: true,
+            ..edit(&notes, Some("scratch"), "draft")
+        }])
+    );
+
+    // NotebookEdit edits cells, not text: a target and no edits. ToolSearch
+    // loads the deferred tool first, and targets its query.
+    let requests = tool_requests("2.1.316/30-tool-notebook-edit");
+    let notebook = format!(r"{SCRATCH}\ersa-rec-9CpFGX\nb.ipynb");
+    let call = the_request(&requests, "NotebookEdit");
+    assert_eq!(call.target.as_deref(), Some(notebook.as_str()));
+    assert_eq!(call.edits, None);
+    let call = the_request(&requests, "Read");
+    assert_eq!(
+        (call.target.as_deref(), &call.edits),
+        (Some(notebook.as_str()), &None)
+    );
+    let call = the_request(&requests, "ToolSearch");
+    assert_eq!(
+        (call.target.as_deref(), &call.edits),
+        (Some("select:NotebookEdit"), &None)
+    );
+
+    let requests = tool_requests("2.1.316/00-session-tools");
+    let call = the_request(&requests, "Read");
+    let readme = format!(r"{SCRATCH}\ersa-rec-m4YrBk\README.md");
+    assert_eq!(
+        (call.target.as_deref(), &call.edits),
+        (Some(readme.as_str()), &None)
+    );
+
+    for (fixture_name, tool, target) in [
+        ("2.1.316/31-tool-grep", "Grep", "scratch"),
+        ("2.1.316/32-tool-glob", "Glob", "*.md"),
+        (
+            "2.1.316/33-tool-web-search",
+            "WebSearch",
+            "Tauri 2 release notes",
+        ),
+        (
+            "2.1.302/05-bash-write-default",
+            "Bash",
+            "echo probe > probe.txt",
+        ),
+        (
+            "2.1.316/33-tool-web-search",
+            "ToolSearch",
+            "select:WebSearch",
+        ),
+        (
+            "2.1.316/35-tool-powershell",
+            "PowerShell",
+            "Get-ChildItem -Name",
+        ),
+        // The CLI lists `Task` in `system/init` but names the call `Agent`.
+        ("2.1.316/34-tool-agent", "Agent", "Count files"),
+        // The subagent's own call, inside the Agent call.
+        ("2.1.316/34-tool-agent", "Glob", "*"),
+    ] {
+        let requests = tool_requests(fixture_name);
+        let call = the_request(&requests, tool);
+        assert_eq!(call.target.as_deref(), Some(target), "{fixture_name}");
+        assert_eq!(call.edits, None, "{fixture_name}");
+    }
 }

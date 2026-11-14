@@ -27,6 +27,7 @@ use serde_json::Value;
 
 use crate::questions::{self, QUESTION_TOOL};
 use crate::suggestions;
+use crate::tools;
 use crate::wire::{
     ApiMessage, AssistantMessage, CliMessage, CliResponse, ContentBlock, Delta, InitializeResponse,
     MessageContent, RateLimitInfo, StreamEvent, StreamEventMessage, SystemMessage, Usage,
@@ -35,7 +36,7 @@ use crate::{BACKEND, MAX_TESTED_VERSION};
 
 /// The version of this projection. Bump it whenever the events produced for
 /// some raw log would change, so Core re-projects cached sessions.
-pub const PROJECTOR_VERSION: u32 = 6;
+pub const PROJECTOR_VERSION: u32 = 7;
 
 /// The `model` the CLI gives the messages it writes itself rather than
 /// receiving from the API.
@@ -76,6 +77,10 @@ pub struct ClaudeProjector {
     /// it, never for a title it generated (PROTO-CLAUDE-CODE-STREAM-R36),
     /// after how many such lines.
     announced_title: Option<(u64, String)>,
+    /// Whether the latest `system/init` shows the CLI started in its minimal
+    /// mode (`--bare`): it has none of `scratchpad_path`, `memory_paths` and
+    /// `messaging_socket_path` (PROTO-CLAUDE-CODE-STREAM-R53).
+    minimal_mode: bool,
 }
 
 /// A `can_use_tool` request the CLI is waiting on.
@@ -233,6 +238,7 @@ impl ClaudeProjector {
         if let Some(kind) = &drifted {
             out.push(drift_error(line, kind));
         }
+        self.minimal_mode = started_in_minimal_mode(&value);
         // The CLI repeats `init` at the start of every turn; only the first
         // announces the session (PROTO-CLAUDE-CODE-STREAM-R06).
         if !self.session_started {
@@ -304,7 +310,10 @@ impl ClaudeProjector {
                 passthrough(line, value).event,
             ));
         }
-        for event in events {
+        for mut event in events {
+            if self.minimal_mode {
+                event = minimal_mode_failure(event);
+            }
             // The complete block ends its stream.
             if let Event::AssistantText(text) = &event {
                 self.streaming.remove(&text.block_id);
@@ -896,6 +905,40 @@ impl ClaudeProjector {
     }
 }
 
+/// Whether a `system/init` shows the CLI started in its minimal mode
+/// (`--bare`): a signed-out session lacks `scratchpad_path` and one with
+/// auto-memory off lacks `memory_paths`, so a signed-out user with
+/// auto-memory off lacks both (2.1.316/38-signed-out-no-auto-memory); only
+/// minimal mode also lacks `messaging_socket_path`
+/// (PROTO-CLAUDE-CODE-STREAM-R53). The conformance tests use it too, so the
+/// projection and the check of each new version read the same signal (R54).
+pub fn started_in_minimal_mode(init: &Value) -> bool {
+    ["scratchpad_path", "memory_paths", "messaging_socket_path"]
+        .iter()
+        .all(|field| init.get(field).is_none())
+}
+
+/// A sign-in failure in a session the CLI started in its minimal mode: there
+/// the CLI never reads the user's sign-in, so signing in can't help, and the
+/// session can't go on (PROTO-CLAUDE-CODE-STREAM-R53). Only the live stream
+/// shows the mode; a session record has no `system/init`, so read back, the
+/// failure stays a sign-in failure (PROTO-AGENT-EVENTS-R22). Any other event
+/// passes through unchanged.
+fn minimal_mode_failure(event: Event) -> Event {
+    match event {
+        Event::Error(ErrorEvent {
+            code: ErrorCode::AuthenticationFailed,
+            ..
+        }) => Event::Error(ErrorEvent {
+            code: ErrorCode::BackendError,
+            message: "Claude Code started in its minimal mode, which Ersa can't use.".into(),
+            recoverable: false,
+            action: None,
+        }),
+        other => other,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Messages, from either input
 
@@ -959,13 +1002,18 @@ pub(crate) fn reply_events(
             ContentBlock::ToolUse {
                 id, name, input, ..
             } => match input {
-                Value::Object(input) => events.push(Event::ToolRequested(ToolRequested {
-                    tool_use_id: id,
-                    name,
-                    display_name: None,
-                    input,
-                    parent_tool_use_id: parent_tool_use_id.clone(),
-                })),
+                Value::Object(input) => {
+                    let (target, edits) = tools::target_and_edits(&name, &input);
+                    events.push(Event::ToolRequested(ToolRequested {
+                        tool_use_id: id,
+                        name,
+                        display_name: None,
+                        input,
+                        parent_tool_use_id: parent_tool_use_id.clone(),
+                        target,
+                        edits,
+                    }))
+                }
                 _ => events.push(Event::Error(ErrorEvent {
                     code: ErrorCode::Protocol,
                     message: format!("tool_use {id} has an input that is not an object"),
