@@ -1,7 +1,7 @@
 import { Image } from "lucide-react";
 import { type CSSProperties, type ReactNode, memo, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { t } from "../catalog";
-import type { PermissionRequested, ToolInput } from "../protocol/agent-events.gen";
+import type { PermissionRequested } from "../protocol/agent-events.gen";
 import type { Answer, Decision, Reply } from "../session/answers";
 import type { SessionView, Sending } from "../session/follow";
 import { pathName } from "../session/attachments";
@@ -15,6 +15,8 @@ import { Icon } from "./Icon";
 import { PermissionAnswers } from "./PermissionAnswers";
 import type { Draft } from "../session/questionForm";
 import { QuestionForm } from "./QuestionForm";
+import { Revealed } from "./Revealed";
+import { InputFields, ThinkingRow, ToolCard, type ToolContext } from "./ToolCard";
 import { SessionTitle } from "./SessionTitle";
 import "./Transcript.css";
 
@@ -41,10 +43,29 @@ interface TranscriptProps {
   renameDisabled?: boolean;
   /** Opens a link in the agent's words through the Shell (FLOW-READ-TRANSCRIPT-R03); kept stable, as `onDecide` is. */
   onOpenLink?: OpenLink;
+  /** The session's workspace folder, against which a tool card's path shows relative (FLOW-READ-TRANSCRIPT-R08). */
+  workspace?: string;
+  /** Now, for the gallery's running cards; the window reads the clock. */
+  now?: number;
 }
 
 /** The active session as a document: the user's and the agent's words, tool cards, and permission requests to answer. */
-export function Transcript({ title, untitled, view, answers = {}, onDecide, onAnswer, onRetry, onRename, renaming, onRenameReset, renameDisabled, onOpenLink }: TranscriptProps) {
+export function Transcript({
+  title,
+  untitled,
+  view,
+  answers = {},
+  onDecide,
+  onAnswer,
+  onRetry,
+  onRename,
+  renaming,
+  onRenameReset,
+  renameDisabled,
+  onOpenLink,
+  workspace,
+  now,
+}: TranscriptProps) {
   const { transcript, stream } = view;
   const scroller = useRef<HTMLDivElement>(null);
   // Whether the reader is at the end; new content keeps them there, and
@@ -61,10 +82,7 @@ export function Transcript({ title, untitled, view, answers = {}, onDecide, onAn
     if (el) atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < el.clientHeight / 8;
   };
 
-  // Tools whose request waits for the user: their cards say so rather than "Running".
-  const awaiting = new Set(
-    transcript.items.flatMap((i) => (i.kind === "permission" && isOpen(i) ? [i.request.tool_use_id] : [])),
-  );
+  const tools = useToolContext(transcript.items, workspace, now);
   // Answers go to Core whenever the window is connected, whether or not the
   // event subscription is up: a failed subscribe must not strand a request.
   const live = stream.state !== "offline";
@@ -92,18 +110,21 @@ export function Transcript({ title, untitled, view, answers = {}, onDecide, onAn
           {transcript.items.length === 0 && (stream.state === "subscribing" || stream.state === "live") && (
             <p className="transcript-note">{stream.state === "subscribing" ? t("transcript.loadingProgress") : t("transcript.nothingYetEmpty")}</p>
           )}
-          {transcript.items.map((item) => (
+          {transcript.items.map((item) =>
+            // A subagent's call is shown inside the card of the call that started it (FLOW-READ-TRANSCRIPT-R10).
+            item.kind === "tool" && tools.nested.has(item.key) ? null : (
             <Block
               key={item.key}
               item={item}
               answer={answerTo(item, answers)}
-              waiting={item.kind === "tool" && awaiting.has(item.key.slice("tool:".length))}
+              tools={tools}
               live={live}
               onDecide={onDecide}
               onAnswer={onAnswer}
               onOpenLink={onOpenLink}
             />
-          ))}
+            ),
+          )}
           {transcript.refused && (
             <p className="problem" role="alert">
               {transcript.refused}
@@ -115,11 +136,44 @@ export function Transcript({ title, untitled, view, answers = {}, onDecide, onAn
   );
 }
 
+/** What tool cards share, and which calls sit inside another's card rather than in the turn. */
+interface Tools extends ToolContext {
+  nested: ReadonlySet<string>;
+}
+
+/**
+ * The tool cards' shared context, rebuilt only when a tool call or an open permission request changes: streamed text
+ * leaves it as it was, so it doesn't re-render every card it reaches (Block is memoised on it).
+ */
+function useToolContext(items: readonly Item[], workspace: string | undefined, now: number | undefined): Tools {
+  const tools = items.filter((i): i is Extract<Item, { kind: "tool" }> => i.kind === "tool");
+  // Calls whose request waits for the user: their cards say so rather than running.
+  const awaiting = items.flatMap((i) => (i.kind === "permission" && isOpen(i) ? [`tool:${i.request.tool_use_id}`] : []));
+  const last = useRef<{ tools: readonly Item[]; awaiting: string; workspace?: string; now?: number; context: Tools }>(undefined);
+  const key = awaiting.join(" ");
+  const prev = last.current;
+  if (prev && prev.awaiting === key && prev.workspace === workspace && prev.now === now && same(prev.tools, tools)) return prev.context;
+  const known = new Set(tools.map((tool) => tool.key));
+  const calls = new Map<string, Extract<Item, { kind: "tool" }>[]>();
+  const nested = new Set<string>();
+  for (const tool of tools) {
+    // A call whose parent isn't in the transcript stays a block of the turn, rather than being lost.
+    if (tool.parent === undefined || !known.has(tool.parent)) continue;
+    nested.add(tool.key);
+    calls.set(tool.parent, [...(calls.get(tool.parent) ?? []), tool]);
+  }
+  const context: Tools = { awaiting: new Set(awaiting), calls, nested, workspace, now };
+  last.current = { tools, awaiting: key, workspace, now, context };
+  return context;
+}
+
+const same = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+
 interface BlockProps {
   item: Item;
   answer?: Answer;
-  /** A tool card whose permission request waits for the user. */
-  waiting: boolean;
+  /** What tool cards share; unchanged while only text streams. */
+  tools: Tools;
   /** Whether answers can reach Core now. */
   live: boolean;
   onDecide: Decide;
@@ -198,7 +252,7 @@ function UserBubble({ item }: { item: Extract<Item, { kind: "user" }> }) {
  * One block. Memoised: items keep their identity until their own event
  * changes them, so a streamed delta re-renders one block, not the page.
  */
-const Block = memo(function Block({ item, answer, waiting, live, onDecide, onAnswer, onOpenLink }: BlockProps) {
+const Block = memo(function Block({ item, answer, tools, live, onDecide, onAnswer, onOpenLink }: BlockProps) {
   switch (item.kind) {
     case "user":
       return <UserBubble item={item} />;
@@ -206,14 +260,9 @@ const Block = memo(function Block({ item, answer, waiting, live, onDecide, onAns
       // Formatted text, never HTML (FLOW-READ-TRANSCRIPT-R01).
       return <AgentText text={item.text} onOpenLink={onOpenLink} />;
     case "thinking":
-      return (
-        <p className="transcript-note">
-          {item.final ? t("transcript.thoughtLabel") : t("transcript.thinkingProgress")}
-          {item.summary ? `: ${item.summary}` : ""}
-        </p>
-      );
+      return <ThinkingRow item={item} />;
     case "tool":
-      return <ToolCard item={item} waiting={waiting} />;
+      return <ToolCard item={item} context={tools} />;
     case "permission":
       return <PermissionCard item={item} answer={answer} live={live} onDecide={onDecide} />;
     case "question":
@@ -232,40 +281,12 @@ const Block = memo(function Block({ item, answer, waiting, live, onDecide, onAns
 });
 
 /** A card's state: the shared glyph and a word. */
-function Status({ tone, children }: { tone?: "positive" | "pending" | "danger" | "attention"; children: ReactNode }) {
+function Status({ tone, children }: { tone?: "positive"; children: ReactNode }) {
   return (
     <span className="transcript-card-status transcript-status">
       <span className="glyph" data-tone={tone} aria-hidden="true" />
       {children}
     </span>
-  );
-}
-
-function ToolCard({ item, waiting }: { item: Extract<Item, { kind: "tool" }>; waiting: boolean }) {
-  const status = item.result ? (
-    item.result.isError ? (
-      <Status tone="danger">{t("transcript.tool.failedStatus")}</Status>
-    ) : (
-      <Status tone="positive">{t("transcript.tool.doneStatus")}</Status>
-    )
-  ) : waiting ? (
-    <Status tone="attention">{t("transcript.tool.waitingLabel")}</Status>
-  ) : (
-    <Status tone="pending">{item.progress === undefined ? t("transcript.tool.runningProgress") : <Revealed text={item.progress} />}</Status>
-  );
-  return (
-    <div className="transcript-card">
-      <div className="transcript-card-head">
-        <span className="transcript-card-title">
-          <Revealed text={item.name} />
-        </span>
-        {status}
-      </div>
-      <code className="transcript-input mono">
-        <Revealed text={inputSummary(item.input)} />
-      </code>
-      {item.result && item.result.content !== "" && <pre className="transcript-output mono">{item.result.content}</pre>}
-    </div>
   );
 }
 
@@ -376,111 +397,14 @@ function QuestionCard({ item, answer, live, onAnswer }: { item: Extract<Item, { 
  * own detail, not again as a field.
  */
 export function PermissionInput({ request }: { request: PermissionRequested }) {
-  const fields = Object.entries(request.input as Record<string, unknown>).filter(
-    ([key, value]) => !(key === "description" && value === request.description),
-  );
   return (
-    <dl className="transcript-fields">
-      {fields.map(([key, value]) => (
-        <div key={key} className="transcript-field">
-          <dt>
-            <Revealed text={key} />
-          </dt>
-          <dd className="mono">
-            <Revealed text={typeof value === "string" ? value : JSON.stringify(value, null, 2)} />
-          </dd>
-        </div>
-      ))}
-    </dl>
+    <InputFields
+      input={request.input}
+      omit={(key, value) => key === "description" && value === request.description}
+      className="transcript-fields"
+      fieldClassName="transcript-field"
+    />
   );
-}
-
-/**
- * Characters that change what text appears to say without showing
- * themselves: every control (other than tab, newline, and a carriage return
- * before a newline), every format character (bidirectional marks, overrides
- * and isolates, zero-width characters, tag characters), every default-
- * ignorable code point (fillers, variation selectors), line and paragraph
- * separators, and the blank braille pattern. An agent could use them to make
- * a command read as something else.
- */
-const HIDDEN =
-  /\r(?!\n)|(?![\t\n\r])[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\p{Zl}\p{Zp}\u2800]/gu;
-
-/** Letters of the scripts whose spelling uses joiners. Never Latin: there a joiner only hides a split word. */
-const JOINING = /^[\p{Script=Arabic}\p{Script=Syriac}\p{Script=Devanagari}\p{Script=Bengali}\p{Script=Gurmukhi}\p{Script=Gujarati}\p{Script=Oriya}\p{Script=Tamil}\p{Script=Telugu}\p{Script=Kannada}\p{Script=Malayalam}\p{Script=Sinhala}]$/u;
-
-/**
- * Joiners and the emoji presentation selector do real work inside emoji
- * (a warning sign drawn as emoji, family sequences) and between letters of
- * scripts that need them (Arabic, Indic); there they hide nothing and are
- * left as they are. Anywhere else, they are marked.
- */
-function benign(text: string, at: number, hidden: string): boolean {
-  const code = hidden.codePointAt(0);
-  const prev = text.slice(Math.max(0, at - 2), at);
-  const after = text.slice(at + hidden.length, at + hidden.length + 2);
-  if (code === 0xfe0f) return /\p{Extended_Pictographic}$/u.test(prev);
-  if (code === 0x200d && /(\p{Extended_Pictographic}|\p{Emoji_Modifier}|\uFE0F)$/u.test(prev)) {
-    return /^\p{Extended_Pictographic}/u.test(after);
-  }
-  if (code === 0x200c || code === 0x200d) {
-    // The letter before, past any marks on it (harakat, vowel signs).
-    const base = text.slice(0, at).replace(/\p{M}+$/u, "").slice(-1);
-    return JOINING.test(base) && JOINING.test(after.slice(0, 1));
-  }
-  return false;
-}
-
-/** Past this many, hidden characters are counted rather than each marked, so a flood of them cannot stall the window. */
-const MARKED = 64;
-
-/** `text` with every hidden character shown as a marked code point, so what the user reads is what the agent sent. */
-export function Revealed({ text }: { text: string }) {
-  const parts: ReactNode[] = [];
-  let last = 0;
-  let marked = 0;
-  for (const match of text.matchAll(HIDDEN)) {
-    const at = match.index;
-    if (benign(text, at, match[0])) continue;
-    if (marked === MARKED) {
-      // Past the cap each hidden character stays where it was, as the
-      // replacement character in one plain run of text (cheap however many
-      // there are), and a note at the end says how many there were.
-      const rest = text.slice(last);
-      let more = 0;
-      parts.push(
-        rest.replace(HIDDEN, () => {
-          more++;
-          return "\uFFFD";
-        }),
-        <span key="more" className="transcript-hidden" title={t("transcript.hidden.manyLabel")}>
-          {t("transcript.hidden.moreLabel", { count: more, mark: "\uFFFD" })}
-        </span>,
-      );
-      return <>{parts}</>;
-    }
-    marked++;
-    if (at > last) parts.push(text.slice(last, at));
-    const code = (match[0].codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0");
-    parts.push(
-      <span key={at} className="transcript-hidden" title={t("transcript.hidden.oneLabel")}>
-        {t("transcript.hidden.codePointLabel", { code })}
-      </span>,
-    );
-    last = at + match[0].length;
-  }
-  if (parts.length === 0) return text;
-  if (last < text.length) parts.push(text.slice(last));
-  return <>{parts}</>;
-}
-
-/** A tool card's one-line view of its arguments: its command or path when it has one, else them all as JSON. */
-function inputSummary(input: ToolInput): string {
-  const fields = input as Record<string, unknown>;
-  if (typeof fields.command === "string") return fields.command;
-  if (typeof fields.file_path === "string") return fields.file_path;
-  return JSON.stringify(input);
 }
 
 function decisionText(behavior: "allow" | "deny", by: "user" | "rule" | "backend" | "timeout"): string {

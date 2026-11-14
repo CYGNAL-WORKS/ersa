@@ -873,6 +873,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onRenameReset={() => resetRename(shown.id)}
               renameDisabled={view.phase !== "connected"}
               onOpenLink={shell?.openLink}
+              workspace={listedWorkspace?.path}
             />
           </ErrorBoundary>
           <ErrorBoundary what="The composer" resetKey={shown.id}>
