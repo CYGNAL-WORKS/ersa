@@ -340,3 +340,90 @@ async fn a_session_live_when_core_died_ends_its_transcript_and_resumes() {
         ]
     );
 }
+
+/// A fork stopped before its first message has no record of its own: it
+/// starts again as a fork of its original, under its own id.
+// verifies: FLOW-RESUME-SESSION-R01
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_with_no_record_yet_is_forked_from_its_original_again() {
+    let records = Records::default();
+    let (core, stats) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
+    let mut client = core.client().await;
+    let original = stopped_session(&core, &mut client).await;
+    let original_backend_id = only_record(&records);
+    let fork = client
+        .result("session.fork", json!({ "id": original }))
+        .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    started(&stats, 2).await;
+    // Ready, then stopped before its first message: as Claude Code, which
+    // writes a fork's record with that message, it has none.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while records.lock().unwrap().len() < 2 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the fork never started"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let fork_backend_id = records
+        .lock()
+        .unwrap()
+        .keys()
+        .find(|k| **k != original_backend_id)
+        .unwrap()
+        .clone();
+    records.lock().unwrap().remove(&fork_backend_id);
+    client.result("session.stop", json!({ "id": fork })).await;
+
+    client.result("session.resume", json!({ "id": fork })).await;
+    let configs = started(&stats, 3).await;
+    let again = &configs[2];
+    assert_eq!(
+        again.fork_of.as_ref().map(|f| f.original.as_str()),
+        Some(original_backend_id.as_str())
+    );
+    assert_eq!(
+        again.backend_session_id.as_deref(),
+        Some(fork_backend_id.as_str())
+    );
+    assert_eq!(again.resume, None);
+}
+
+/// A message with attachments to a session whose folder is gone is refused
+/// before anything is copied or the backend is said to be starting.
+// verifies: FLOW-RESUME-SESSION-R03
+#[tokio::test(flavor = "multi_thread")]
+async fn a_send_with_attachments_to_a_session_whose_folder_is_gone_copies_nothing() {
+    let (core, stats) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = stopped_session(&core, &mut client).await;
+    let folder = stats.configs.lock().unwrap()[0].cwd.clone();
+    std::fs::remove_dir_all(&folder).unwrap();
+    let notes = core.dir.path().join("notes.txt");
+    std::fs::write(&notes, "notes").unwrap();
+    client.clear_notifications();
+
+    let error = client
+        .error(
+            "session.send",
+            json!({
+                "id": id,
+                "text": "again",
+                "attachments": [{ "kind": "file", "path": notes.display().to_string() }],
+            }),
+        )
+        .await;
+    assert_eq!(error["data"]["reason"], "folder_gone", "{error:#}");
+    // Nothing made the folder again by copying into it.
+    assert!(!std::path::Path::new(&folder).exists());
+    assert_eq!(stats.starts.load(Ordering::SeqCst), 1);
+    // And no progress said the backend was starting.
+    while let Ok(Some(n)) =
+        tokio::time::timeout(std::time::Duration::from_millis(200), client.notification()).await
+    {
+        assert_ne!(n["params"]["phase"], "starting", "{n:#}");
+    }
+}
