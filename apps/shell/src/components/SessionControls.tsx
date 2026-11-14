@@ -1,10 +1,8 @@
 import { Folder, GitBranch, Monitor, Plus } from "lucide-react";
 import { t } from "../catalog";
-import type { CoreHelloResult, Project } from "../protocol/core-api.gen";
+import type { BackendInfo, Choice, CoreHelloResult, Project } from "../protocol/core-api.gen";
 import {
-  type BackendChoices,
   type Branches,
-  type Choice,
   type SessionValues,
   type WorkspaceKind,
   available,
@@ -28,7 +26,7 @@ interface SessionControlsProps {
   /** Most recently used first: the project chip lists them in this order (FLOW-NEW-SESSION-R14). */
   projects: readonly Project[];
   /** The backends on the values' host, from `backend.list`; absent while Core is still detecting them. */
-  backends?: readonly BackendChoices[];
+  backends?: readonly BackendInfo[];
   values: SessionValues;
   /** The project's branches, for a new workspace's base branch (FLOW-NEW-SESSION-R21); absent for a project without git. */
   branches?: Branches;
@@ -83,7 +81,7 @@ function baseSection(branches: Branches, base: string | undefined, onChoose: (id
   };
 }
 
-const backendOption = (b: BackendChoices): ChipOption => ({
+const backendOption = (b: BackendInfo): ChipOption => ({
   id: b.name,
   label: b.label,
   status: b.status === "missing" ? "Not installed" : b.status === "error" ? "Detection failed" : b.version,

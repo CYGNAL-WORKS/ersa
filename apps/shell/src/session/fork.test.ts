@@ -13,6 +13,7 @@ const session = (more: Partial<Session> = {}, tile: Partial<Session["tile"]> = {
   last_activity_at: "2026-11-01T09:05:00Z",
   archived: false,
   pinned: false,
+  unseen: false,
   ...more,
   tile: { state: "idle", pending: [], ...tile },
 });

@@ -13,6 +13,7 @@ const inState = (id: string, state: Session["tile"]["state"]): Session => ({
   created_at: "2026-11-01T09:00:00.000Z",
   archived: false,
   pinned: false,
+  unseen: false,
   tile: { state, pending: [] },
 });
 
