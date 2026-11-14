@@ -366,6 +366,7 @@ async fn a_session_in_an_isolated_workspace_needs_a_token() {
 
 // verifies: FLOW-ARCHIVE-DELETE-SESSION-R05
 // verifies: PROTO-CORE-API-R35
+// verifies: PROTO-CORE-API-R79
 #[tokio::test(flavor = "multi_thread")]
 async fn refused_while_the_session_is_starting_or_a_turn_is_running() {
     // Starting: the backend takes a while to become ready.
@@ -384,6 +385,7 @@ async fn refused_while_the_session_is_starting_or_a_turn_is_running() {
         .error("session.delete", json!({ "id": starting["id"] }))
         .await;
     assert_eq!(kind(&error), "invalid_state", "{error}");
+    assert_eq!(error["data"]["reason"], "session_busy", "{error}");
     assert!(
         error["data"].get("detail").is_none(),
         "refused before any claim"
@@ -404,6 +406,7 @@ async fn refused_while_the_session_is_starting_or_a_turn_is_running() {
         }
         let error = client.error("session.delete", json!({ "id": id })).await;
         assert_eq!(kind(&error), "invalid_state", "{state}: {error}");
+        assert_eq!(error["data"]["reason"], "session_busy", "{state}: {error}");
         let row = listed(&mut client, &id).await.expect("still listed");
         assert!(row.get("deleting").is_none());
         assert_ne!(row["state"], "ended", "{state}: not stopped");
@@ -478,6 +481,7 @@ async fn the_claim_holds_off_other_requests_until_the_delete_ends() {
 /// claim.
 // verifies: PROTO-CORE-API-R52
 // verifies: PROTO-CORE-API-R56
+// verifies: PROTO-CORE-API-R79
 #[tokio::test(flavor = "multi_thread")]
 async fn refused_with_nothing_deleted_when_another_process_has_the_session_open() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -496,7 +500,15 @@ async fn refused_with_nothing_deleted_when_another_process_has_the_session_open(
             .error("session.delete", json!({ "id": id, "token": shown }))
             .await;
         assert_eq!(kind(&error), "invalid_state", "{error}");
-        if answer != OpenElsewhere::Unknown {
+        if answer == OpenElsewhere::Unknown {
+            assert_eq!(error["data"]["reason"], "open_unknown", "{error}");
+        } else {
+            assert_eq!(error["data"]["reason"], "open_elsewhere", "{error}");
+            // `detail` names the processes, for the Interface to show.
+            assert!(
+                error["data"]["detail"].as_str().unwrap().contains("4242"),
+                "{error}"
+            );
             assert!(
                 error["message"].as_str().unwrap().contains("4242"),
                 "{error}"
@@ -548,6 +560,7 @@ async fn a_stop_that_times_out_ends_the_delete() {
 /// with a fresh token finishes it.
 // verifies: FLOW-ARCHIVE-DELETE-SESSION-R07
 // verifies: PROTO-CORE-API-R35
+// verifies: PROTO-CORE-API-R79
 #[tokio::test(flavor = "multi_thread")]
 async fn a_failed_step_reads_failed_and_a_fresh_token_finishes_it() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -581,6 +594,10 @@ async fn a_failed_step_reads_failed_and_a_fresh_token_finishes_it() {
     ] {
         let error = client.error(method, params).await;
         assert_eq!(kind(&error), "invalid_state", "{method}: {error}");
+        assert_eq!(
+            error["data"]["reason"], "session_deleting",
+            "{method}: {error}"
+        );
     }
 
     // The old token is stale now, since the session is no longer counted.
@@ -613,6 +630,7 @@ async fn a_failed_step_reads_failed_and_a_fresh_token_finishes_it() {
 /// delete after the files went; trying again with what is left finishes it.
 // verifies: FLOW-ARCHIVE-DELETE-SESSION-R07
 // verifies: FLOW-ARCHIVE-DELETE-SESSION-R09
+// verifies: PROTO-CORE-API-R79
 #[tokio::test(flavor = "multi_thread")]
 async fn a_record_opened_elsewhere_part_way_fails_the_delete_until_tried_again() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -627,6 +645,11 @@ async fn a_record_opened_elsewhere_part_way_fails_the_delete_until_tried_again()
         .error("session.delete", json!({ "id": id, "token": shown }))
         .await;
     assert_eq!(kind(&error), "invalid_state", "{error}");
+    assert_eq!(error["data"]["reason"], "open_elsewhere", "{error}");
+    assert!(
+        error["data"]["detail"].as_str().unwrap().contains("777"),
+        "{error}"
+    );
     assert!(
         error["message"].as_str().unwrap().contains("777"),
         "{error}"
@@ -659,6 +682,7 @@ async fn a_record_opened_elsewhere_part_way_fails_the_delete_until_tried_again()
     // Nor a fork of the session marked deleting in it.
     let error = client.error("session.fork", json!({ "id": id })).await;
     assert_eq!(kind(&error), "invalid_state", "{error}");
+    assert_eq!(error["data"]["reason"], "session_deleting", "{error}");
     assert!(
         error["message"].as_str().unwrap().contains("being deleted"),
         "{error}"
