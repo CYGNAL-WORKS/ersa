@@ -8,7 +8,5 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-13 PROTO-CLAUDE-CODE-STREAM: Bare mode's signal misreads a signed-out user who has auto-memory off. Claude Code 2.1.316 run as Ersa runs it, with an empty `CLAUDE_CONFIG_DIR` and `--settings '{"autoMemoryEnabled":false}'` (2026-11-13, not kept), wrote a `system/init` with neither `scratchpad_path` nor `memory_paths` and then failed with `authentication_failed`, so R51 tells that user Claude Code started in its minimal mode instead of asking them to sign in. Fields that differed from the bare fixture: `messaging_socket_path` was present (absent in 2.1.316/28-bare-mode, present in 06) and 28 tools were listed (4 in bare). Meanwhile the adapter implements R51 as written.
-- [ ] 2026-11-13 PROTO-CLAUDE-CODE-STREAM: Bare mode cites the summary `2.1.316/bare-mode-2026-11-13.txt`, which #148 replaced with the numbered fixture `2.1.316/28-bare-mode` (stream, record, and meta with `--bare` in its arguments) and deleted. Meanwhile the brief's citation points at a missing file.
 
 ## Resolved recently (optional, trimmed in planning passes)

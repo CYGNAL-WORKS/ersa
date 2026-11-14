@@ -142,7 +142,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - **PROTO-AGENT-EVENTS-R19**: The host's answer to a Claude Code question shall project to one `question.answered` with `answered_by` `user`, `declined` when it was a deny, and no `permission.decided`, matching each answer to its question by text and to options by label as PROTO-CLAUDE-CODE-STREAM (Questions) says; the CLI withdrawing a pending question, or the turn ending with it unanswered, shall project to `question.answered` with `answered_by` `backend` and no answers.
 - **PROTO-AGENT-EVENTS-R20**: A `tool.requested` for a call that replaces text in a file or writes a whole file shall carry `edits`, one entry per change with the file's path, the text replaced (absent for a whole file written) and the new text; any other call shall carry none.
 - **PROTO-AGENT-EVENTS-R21**: A `tool.requested` for a call the adapter knows to act on one path, command, search or address shall carry it as `target`; any other call shall carry none.
-- **PROTO-AGENT-EVENTS-R22**: A Claude Code `authentication_failed` synthetic message shall project to one `error`, and no `assistant.text`: with `code: authentication_failed` and `action: log_in`, except in a live session the CLI started in its minimal mode, which PROTO-CLAUDE-CODE-STREAM-R51 governs; read from a session record, it always projects this way.
+- **PROTO-AGENT-EVENTS-R22**: A Claude Code `authentication_failed` synthetic message shall project to one `error`, and no `assistant.text`: with `code: authentication_failed` and `action: log_in`, except in a live session the CLI started in its minimal mode, which PROTO-CLAUDE-CODE-STREAM-R53 governs; read from a session record, it always projects this way.
 
 ## Out of scope
 
@@ -159,6 +159,7 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 ## Changes
 
+- 2026-11-13: from #350 inbox: R22 points at PROTO-CLAUDE-CODE-STREAM-R53, which replaced R51. Reworded, its ID unchanged.
 - 2026-11-13: from #148: PROTO-AGENT-EVENTS-R06 retired for R22, which excepts a session Claude Code started in its minimal mode (PROTO-CLAUDE-CODE-STREAM-R51).
 - 2026-11-13: for FLOW-READ-TRANSCRIPT: `tool.requested` gains `target` and `edits`, filled by the adapter, so tool and diff cards are drawn without reading a backend's tool input. A shape change, so `v` is bumped. PROTO-AGENT-EVENTS-R20 and R21 added.
 - 2026-11-09: `user.message` for a message written during a turn is emitted when its own turn starts (PROTO-CLAUDE-CODE-STREAM-R43). No requirement IDs changed.
