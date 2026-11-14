@@ -15,7 +15,7 @@ import { type Attached, pathName } from "../session/attachments";
 import type { Sending } from "../session/follow";
 import type { AttachWhat } from "./AttachMenu";
 import { Composer, type Unavailable } from "./Composer";
-import { type ControlKey, type Host, SessionControls } from "./SessionControls";
+import { type ControlKey, DEFAULT_EFFORT, type Host, SessionControls } from "./SessionControls";
 import { TrustQuestion } from "./TrustQuestion";
 import "./NewSessionScreen.css";
 
@@ -272,6 +272,9 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     } else if (key === "backend") {
       // A model or effort chosen for one backend means nothing to another.
       setWanted({ ...values, backend: id, model: undefined, effort: undefined, permission_mode: undefined });
+    } else if (key === "effort") {
+      // The Default row chooses no level: the backend's own effort (docs/design/COMPOSER.md).
+      setWanted({ ...values, effort: id === DEFAULT_EFFORT ? undefined : id });
     } else {
       setWanted({ ...values, [key]: id });
     }
