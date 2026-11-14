@@ -1777,3 +1777,89 @@ fn a_stray_message_delta_between_turns_opens_no_turn() {
     ]));
     assert_eq!(started(&events), 2);
 }
+
+fn echo_of_blocks(texts: &[&str], uuid: &str) -> String {
+    let content: Vec<Value> = texts
+        .iter()
+        .map(|text| json!({"type": "text", "text": text}))
+        .collect();
+    json!({
+        "type": "user",
+        "message": {"role": "user", "content": content},
+        "isReplay": true,
+        "uuid": uuid,
+        "session_id": "s",
+        "parent_tool_use_id": null,
+    })
+    .to_string()
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R43
+// verifies: PROTO-CLAUDE-CODE-STREAM-R44
+// verifies: PROTO-CLAUDE-CODE-STREAM-R46
+#[test]
+fn a_message_taken_in_with_one_that_opened_its_turn_is_still_shown() {
+    // Written a moment after a message to an idle CLI, before the CLI took
+    // that one in: the CLI takes both into the turn and echoes them joined,
+    // the first's blocks first (as fixture 53 joins two).
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let (first, second) = (user_text("one"), user_text("two"));
+    let lines = log(&[
+        (Host, &first),
+        (Host, &second),
+        (Backend, init),
+        (Backend, &echo_of_blocks(&["one\n", "two"], "u-1")),
+        (Backend, result),
+    ]);
+    assert_eq!(waiting_counts(&lines), [(1, 1), (3, 0)]);
+    assert_eq!(
+        without_lines(turns_and_messages(&lines)),
+        [
+            "turn.started 1",
+            "session.state Running",
+            "user.message one",
+            "user.message two",
+            "turn.completed 1",
+            "session.state Idle",
+        ]
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R43
+// verifies: PROTO-CLAUDE-CODE-STREAM-R44
+#[test]
+fn a_log_without_echoes_shows_a_waiting_message_at_its_turns_start() {
+    // Fixture 22 was recorded before the adapter passed
+    // `--replay-user-messages`, as a session's raw log from then was: the
+    // turn its first message opened ends unechoed, so the message written
+    // during it is shown when its own turn starts.
+    let lines = fixture("22-message-during-turn").raw_log();
+    let sequence = turns_and_messages(&lines);
+    assert_eq!(
+        without_lines(sequence.clone()),
+        [
+            "turn.started 1",
+            "session.state Running",
+            ESSAY,
+            "turn.completed 1",
+            "session.state Running",
+            "turn.started 2",
+            "session.state Running",
+            "user.message Now reply with the single word: second",
+            "turn.completed 2",
+            "session.state Idle",
+        ]
+    );
+    let init = lines
+        .iter()
+        .filter(|l| common::is_kind(l, "system/init"))
+        .nth(1)
+        .unwrap()
+        .index;
+    let second = sequence
+        .iter()
+        .find(|(_, w)| w.ends_with("second"))
+        .unwrap();
+    assert_eq!(second.0, init);
+}
