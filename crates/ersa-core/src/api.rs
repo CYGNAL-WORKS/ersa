@@ -15,7 +15,7 @@ pub mod server;
 mod sessions;
 
 use ersa_protocol::core_api::rpc::{ErrorObject, Request, Response, code};
-use ersa_protocol::core_api::{ErrorKind, Method};
+use ersa_protocol::core_api::{ErrorKind, ErrorReason, Method};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -60,6 +60,12 @@ impl ApiError {
 
     pub fn with_detail(self, detail: impl Into<String>) -> Self {
         ApiError(self.0.with_detail(detail))
+    }
+
+    /// The same error naming the refusal the user meets (PROTO-CORE-API,
+    /// Errors).
+    pub fn with_reason(self, reason: ErrorReason) -> Self {
+        ApiError(self.0.with_reason(reason))
     }
 }
 
@@ -126,6 +132,9 @@ impl From<SessionError> for ApiError {
             }
             SessionError::Busy(message) => ApiError::invalid_state(message).with_detail("busy"),
             SessionError::NoSection(id) => ApiError::not_found(format!("no section {id}")),
+            SessionError::FolderGone(message) => {
+                ApiError::invalid_state(message).with_reason(ErrorReason::FolderGone)
+            }
         }
     }
 }

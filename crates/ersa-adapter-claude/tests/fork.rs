@@ -449,7 +449,7 @@ fn a_subagents_entries_are_not_the_conversations_end() {
 fn a_fork_is_not_also_a_resume() {
     let config = SessionConfig {
         fork_of: fork_of(ORIGINAL).fork_of,
-        extra: json!({ "resume": ORIGINAL }),
+        resume: Some(ORIGINAL.into()),
         ..SessionConfig::default()
     };
     assert!(matches!(fork_args(&config), Err(AdapterError::Protocol(_))));
