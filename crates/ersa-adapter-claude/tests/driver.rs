@@ -292,6 +292,7 @@ async fn models_come_from_the_initialize_answer_of_a_cli_sent_no_message() {
 }
 
 /// A CLI that never answers is one that cannot report its models.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R56
 #[tokio::test]
 async fn a_cli_that_never_answers_is_an_error() {
     let transport = FakeTransport::new(Vec::<String>::new()).hold_open();
@@ -305,6 +306,7 @@ async fn a_cli_that_never_answers_is_an_error() {
 
 /// A CLI that exits before answering, or answers with no models, is an
 /// error too.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R56
 #[tokio::test]
 async fn a_cli_that_exits_or_lists_nothing_is_an_error() {
     let exits = FakeTransport::new(Vec::<String>::new()).with_exit_code(1);
