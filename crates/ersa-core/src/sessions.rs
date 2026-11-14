@@ -40,7 +40,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
@@ -51,7 +51,7 @@ use ersa_adapter::{
 };
 use ersa_protocol::core_api::rpc::Notification;
 use ersa_protocol::core_api::{
-    Deleting, Section, Session, SessionEventParams, SessionTileParams, Tile,
+    Deleting, ErrorReason, Section, Session, SessionEventParams, SessionTileParams, Tile,
 };
 use ersa_protocol::events::{
     Envelope, ErrorCode, ErrorEvent, Event, LifecycleState, NoticeCode, NoticeLevel, SessionNotice,
@@ -164,10 +164,14 @@ pub enum SessionError {
     /// A `session.arrange` named a section that does not exist.
     #[error("no section {0}")]
     NoSection(String),
-    /// The session's folder no longer exists, so it can't be resumed
-    /// (FLOW-RESUME-SESSION-R03).
-    #[error("{0}")]
-    FolderGone(String),
+    /// A refusal the user meets: answered `invalid_state` with `reason`, so
+    /// the Interface can say it in its own words; `message` is for the log
+    /// (PROTO-CORE-API, Errors).
+    #[error("{message}")]
+    Refused {
+        reason: ErrorReason,
+        message: String,
+    },
 }
 
 /// Every session Core knows, and the adapters it can start them with.
@@ -217,6 +221,37 @@ impl Drop for WorkspaceClaim {
     }
 }
 
+/// Keeps a session's `archiving` count raised while an archive is under way.
+struct ArchiveHold<'a>(&'a AtomicUsize);
+
+impl<'a> ArchiveHold<'a> {
+    fn raise(handle: &'a Handle) -> Self {
+        handle.archiving.fetch_add(1, Ordering::SeqCst);
+        ArchiveHold(&handle.archiving)
+    }
+}
+
+impl Drop for ArchiveHold<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// Whether the session is starting, a turn is running in it (one waiting
+/// on the user included), or a message is being sent to it: what Delete and
+/// Archive wait for (PROTO-CORE-API, `session_busy`).
+fn in_turn(handle: &Handle) -> bool {
+    let session = handle.describe();
+    let working = matches!(
+        session.state,
+        LifecycleState::Starting | LifecycleState::Running | LifecycleState::WaitingUser
+    );
+    // A pending permission or question is a turn waiting on the user,
+    // whatever state the backend last reported.
+    let waiting = !session.tile.pending.is_empty();
+    (handle.live().is_some() && (working || waiting)) || session.sending.is_some()
+}
+
 /// The refusal for a request a delete under way holds back.
 fn busy(workspace_id: &str) -> SessionError {
     SessionError::Busy(format!(
@@ -231,6 +266,11 @@ struct Handle {
     /// is stuck on a disk that hangs, however often the user tries again, and
     /// `session.send` refuses: the CLI has yet to copy the record.
     forking: Arc<AtomicBool>,
+    /// How many `session.set_archived { archived: true }` are between their
+    /// busy check and their mark. While any is, `session.send` refuses, so
+    /// no send starts after the check only to be stopped by the archive
+    /// (PROTO-CORE-API-R85).
+    archiving: AtomicUsize,
     id: String,
     backend: String,
     /// The session's row as last written.
@@ -584,6 +624,7 @@ impl Handle {
     fn new(row: SessionRow, created_at: String) -> Self {
         Handle {
             forking: Arc::default(),
+            archiving: AtomicUsize::new(0),
             id: row.id.clone(),
             backend: row.backend.clone(),
             row: Mutex::new(row),
@@ -1267,7 +1308,22 @@ impl SessionManager {
     pub async fn set_archived(&self, id: &str, archived: bool) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
         self.refuse_if_deleting(&handle)?;
+        // Raised before the busy check, and `session.send` reads it under the
+        // lock it sets `sending` with, while the check reads `sending`
+        // through that lock: either the check sees the send, or the send
+        // sees this archive and refuses. Lowered when this call returns.
+        let _archiving = archived.then(|| ArchiveHold::raise(&handle));
         if archived {
+            // Refused before the stop, so a busy session is left exactly as
+            // it was (PROTO-CORE-API-R77).
+            if in_turn(&handle) {
+                return Err(SessionError::Refused {
+                    reason: ErrorReason::SessionBusy,
+                    message: format!(
+                        "session {id} is starting or working; stop it before archiving it"
+                    ),
+                });
+            }
             self.stop(id).await?;
         }
         // Taken after the stop, which takes it itself. Held while marking,
@@ -1360,21 +1416,13 @@ impl SessionManager {
     /// once it holds the claim, so a send cannot start in between.
     pub fn check_deletable(&self, id: &str) -> Result<(), SessionError> {
         let handle = self.handle(id)?;
-        let session = handle.describe();
-        let working = matches!(
-            session.state,
-            LifecycleState::Starting | LifecycleState::Running | LifecycleState::WaitingUser
-        );
-        // A pending permission or question is a turn waiting on the user,
-        // whatever state the backend last reported.
-        let waiting = !session.tile.pending.is_empty();
         // The fork's CLI has yet to read the record a delete would take.
         if handle.forking.load(Ordering::SeqCst) {
             return Err(SessionError::InvalidState(format!(
                 "session {id} is being forked; delete it once the fork has started"
             )));
         }
-        if (handle.live().is_some() && (working || waiting)) || session.sending.is_some() {
+        if in_turn(&handle) {
             return Err(SessionError::InvalidState(format!(
                 "session {id} is starting or working; stop it before deleting it"
             )));

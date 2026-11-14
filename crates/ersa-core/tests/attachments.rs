@@ -1030,3 +1030,74 @@ async fn many_inspects_of_one_workspace_at_once_each_judge_where_the_path_lies()
         assert_eq!(ask.await.unwrap(), json!(false));
     }
 }
+
+/// Archiving is refused while a message is being sent, here while its
+/// attachment copies, and the refusal changes nothing.
+// verifies: PROTO-CORE-API-R77
+#[tokio::test]
+async fn archiving_is_refused_while_a_message_is_being_sent() {
+    // Each 64 KiB chunk takes 30 ms, so this 16 MiB copy takes about 8 s.
+    const SIZE: usize = 16 * 1024 * 1024;
+    let mut s = setup_with(FakeAdapter::new(1), |config| {
+        config.copy_pause = Duration::from_millis(30);
+    })
+    .await;
+    let id = s.session().await;
+    // Started and idle, so only the send makes it busy.
+    s.client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    s.client.events_until("session.started").await;
+    s.client
+        .result("session.send", json!({ "id": id, "text": "idle" }))
+        .await;
+    assert!(eventually(|| s.stats.messages.lock().unwrap().len() == 1).await);
+    let row = |sessions: &Value| {
+        sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == id.as_str())
+            .cloned()
+            .unwrap()
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while row(&s.client.result("session.list", json!({})).await)["state"] != "idle" {
+        assert!(tokio::time::Instant::now() < deadline, "never idle");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let big = path(&file(&s.outside, "big.bin", &vec![7u8; SIZE]));
+    let send = s
+        .client
+        .request(
+            "session.send",
+            json!({ "id": id, "text": "hi", "attachments": [{ "kind": "file", "path": big }] }),
+        )
+        .await;
+    s.client
+        .notification_where(|n| {
+            n["method"] == "session.send_progress" && n["params"]["phase"] == "copying"
+        })
+        .await;
+    let response = s
+        .client
+        .call(
+            "session.set_archived",
+            json!({ "id": id, "archived": true }),
+        )
+        .await;
+    support::assert_valid("session.set_archived", &response);
+    assert_eq!(kind(&response["error"]), "invalid_state", "{response:#}");
+    assert_eq!(response["error"]["data"]["reason"], "session_busy");
+    let listed = row(&s.client.result("session.list", json!({})).await);
+    assert_eq!(listed["archived"], false);
+    assert_eq!(listed["state"], "idle", "not stopped");
+    assert_eq!(s.stats.stops.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    // The send is let go of; the session is as it was.
+    s.client
+        .result("session.interrupt", json!({ "id": id }))
+        .await;
+    s.client.response(send).await;
+}
