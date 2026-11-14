@@ -33,6 +33,7 @@ The user reopens Ersa, opens a session that is not running, and writes to it; or
 - **The backend's record is gone** (its retention removed it): a session started in the backend's own tools leaves the list the next time Ersa lists sessions. A session Ersa started stays, since a new session or a fork has no record until its first message.
 - **Removing a workspace or project** with sessions started in the backend's own tools: Ersa forgets those sessions and leaves their records, so they show again in the backend's own tools and if the folder is added again.
 - **The backend fails to start**: the message stays in the composer with the reason, as a refused message does (`FLOW-SEND-MESSAGE`), and the session stays stopped.
+- **A message sent while the session is being archived** is refused, not resumed (PROTO-CORE-API-R85); the user sends again.
 - **A session whose backend has no adapter in this build** is dormant until the adapter is back (ADR 0031).
 
 ## Requirements
@@ -59,6 +60,7 @@ The user reopens Ersa, opens a session that is not running, and writes to it; or
 
 ## Changes
 
+- 2026-11-13: from #352 inbox: a message sent while the session is being archived is refused before any resume (PROTO-CORE-API-R85). No requirement IDs changed.
 - 2026-11-13: ready, from the owner's decisions of 2026-11-13: a project's sessions cover the project's folder and its workspaces' folders, and a session started outside Ersa resumes in its own folder, refused with a reason when the folder is gone. Writing to a stopped session resumes it, as in Claude Desktop, and Resume on the archived note resumes with no message. FLOW-RESUME-SESSION-R01 to R09 added; sessions found in the backend's record don't hold back removing a workspace or project (PROTO-CORE-API, Projects and Workspaces). The tests asserting that resume is a milestone away change with the resume ticket. Today Core refuses every resume; the adapter already lists a folder's sessions and builds `--resume`, and Core already marks a session Core's restart interrupted. Unreachable remote hosts move to `FLOW-REMOTE-SESSION`.
 - 2026-11-09: a session whose backend has no adapter in this build is dormant until the adapter is back (ADR 0031).
 - 2026-11-01: rewritten for ADR 0017: history is the backend's session record; sessions started elsewhere are listed and resumable; resume by backend id, shown so the user can resume elsewhere; retention is the backend's; live-elsewhere check. Open questions on resume semantics and on which record is replayed answered.

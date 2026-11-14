@@ -2,6 +2,7 @@ import { Ellipsis } from "lucide-react";
 import { type CSSProperties, type HTMLAttributes, type KeyboardEvent, type MouseEvent, type ReactNode, type Ref, useCallback, useEffect, useId, useRef, useState } from "react";
 import { t } from "../catalog";
 import type { Session } from "../protocol/core-api.gen";
+import { archiveUnavailable } from "../session/archive";
 import { deleteUnavailable } from "../session/deletion";
 import { forkUnavailable } from "../session/fork";
 import type { Sending } from "../session/follow";
@@ -111,7 +112,10 @@ export function tileActions(s: Session, h: TileHandlers): TileActions {
       unavailable: offlineReason ?? (saving ? t("rail.tile.savingProgress") : undefined),
     },
     fork: onFork && { onChoose: () => onFork(s.id), unavailable: forkUnavailable(s, offline, h.forking?.[s.id]) },
-    archive: onArchive && { onChoose: (archived) => onArchive(s.id, archived), unavailable: offlineReason },
+    archive: onArchive && {
+      onChoose: (archived) => onArchive(s.id, archived),
+      unavailable: archiveUnavailable(s, offline, h.archiving?.[s.id]),
+    },
     remove: onDelete && { onAsk: () => onDelete(s.id), unavailable: deleteUnavailable(s, offline) },
   };
 }

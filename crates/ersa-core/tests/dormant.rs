@@ -56,6 +56,24 @@ async fn a_session_without_its_adapter_is_hidden_and_returns_with_it() {
     client
         .result("session.send", json!({ "id": id, "text": "hello" }))
         .await;
+    // Idle, since a busy session can't be archived (PROTO-CORE-API-R77).
+    client
+        .result("session.send", json!({ "id": id, "text": "idle" }))
+        .await;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let listed = client.result("session.list", json!({})).await;
+        if listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["id"] == id.as_str() && s["state"] == "idle")
+        {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{id} never idle");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
     // Arranged, so its arrangement can be seen to come back with it.
     let section = client
         .result("section.create", json!({ "name": "Kept" }))
