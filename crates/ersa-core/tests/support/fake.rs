@@ -524,6 +524,7 @@ impl Adapter for FakeAdapter {
         Ok(Some(RecordSummary {
             title,
             created_at: record.iter().find_map(|e| e.ts.clone()),
+            settings: Default::default(),
         }))
     }
 }
