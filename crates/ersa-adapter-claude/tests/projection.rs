@@ -1732,3 +1732,42 @@ fn a_stray_message_delta_between_turns_opens_no_turn() {
     ]));
     assert_eq!(started(&events), 2);
 }
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R43
+// verifies: PROTO-CLAUDE-CODE-STREAM-R44
+#[test]
+fn a_message_the_cli_folds_into_a_turn_that_uses_tools_joins_it_at_the_next_model_call() {
+    // Fixture 51: written while the turn's first tool call ran, the message
+    // reaches the model at the turn's next call, after the tool's result;
+    // no turn of its own follows, and the record writes `remove` with
+    // `absorbed_mid_turn`. The stream marks that call with `system/status`
+    // `requesting`.
+    let lines = fixture("51-message-during-tool-turn").raw_log();
+    let sequence = turns_and_messages(&lines);
+    assert_eq!(
+        without_lines(sequence.clone()),
+        [
+            "turn.started 1",
+            "session.state Running",
+            "user.message Use the Read tool to read README.md. After that, read it again with the \
+             Read tool. After that, read it a third time with the Read tool. Do these one at a \
+             time, one tool call per reply, then say done.",
+            "user.message Now reply with the single word: second",
+            "turn.completed 1",
+            // Nothing waits once the turn has taken it in.
+            "session.state Idle",
+        ]
+    );
+    let requesting: Vec<u64> = lines
+        .iter()
+        .filter(|l| l.line.contains(r#""status":"requesting""#))
+        .map(|l| l.index)
+        .collect();
+    let second = sequence
+        .iter()
+        .find(|(_, what)| what.ends_with("second"))
+        .unwrap();
+    // At the first model call after the message was written: the second of
+    // the turn, the one after the first tool's result.
+    assert_eq!(second.0, requesting[1]);
+}

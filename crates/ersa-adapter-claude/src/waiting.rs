@@ -3,9 +3,11 @@
 //! (PROTO-CORE-API-R81).
 //!
 //! The count comes from the CLI's own record ([`WaitingCount`]). It is read
-//! at the two moments it changes in a way Ersa can see: when the adapter
-//! hands the CLI a message while a turn runs (the message waits), and when a
-//! turn starts (the CLI has taken every waiting message into it). Each read
+//! when it can have changed: when the adapter hands the CLI a message while
+//! a turn runs (the message waits), when a turn starts (the CLI has taken
+//! every waiting message into it), and, while messages wait, at the running
+//! turn's next model call and at its end (a turn that uses tools takes them
+//! in at its next model call, with no new turn). Each read
 //! runs on a blocking thread, one at a time per session, and the sink hears
 //! the count only when it differs from the last one it heard.
 
@@ -71,7 +73,12 @@ impl WaitingReader {
     /// Whether a message handed over now will wait in the CLI: a turn is
     /// running, or messages already wait for the next one.
     pub(crate) fn busy(&self) -> bool {
-        self.turn_running.load(Ordering::SeqCst) || self.reported.load(Ordering::SeqCst) > 0
+        self.turn_running.load(Ordering::SeqCst) || self.holds_some()
+    }
+
+    /// Whether the sink was last told some messages wait.
+    pub(crate) fn holds_some(&self) -> bool {
+        self.reported.load(Ordering::SeqCst) > 0
     }
 
     /// A user message was written to the CLI. It starts a turn if none was
