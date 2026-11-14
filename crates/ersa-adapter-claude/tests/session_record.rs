@@ -178,7 +178,10 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
                     "0e92c368-3943-4a95-afb9-13c839dfe21b",
                 )
             {
-                assert!(!record_kinds.contains_key(&uuid), "{}: {uuid}", stream.name);
+                assert!(
+                    !record_kinds.contains_key(&uuid),
+                    "fixture 52's message taken in mid-turn now has a record entry"
+                );
                 continue;
             }
             let kind = record_kinds
