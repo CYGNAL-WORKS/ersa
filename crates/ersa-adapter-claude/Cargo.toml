@@ -38,6 +38,8 @@ ersa-adapter = { path = "../ersa-adapter", features = ["test-support"] }
 ersa-core = { path = "../ersa-core" }
 # Golden-file tests validate every projected event against the schema.
 ersa-protocol = { path = "../ersa-protocol", features = ["schema-validation"] }
+# A paused clock, so the model probe's 60-second limit is tested without waiting.
+tokio = { workspace = true, features = ["test-util"] }
 # Scratch Claude homes for the session-record listing and registry tests.
 tempfile.workspace = true
 # Captures the adapter's warnings, to check they are logged.
