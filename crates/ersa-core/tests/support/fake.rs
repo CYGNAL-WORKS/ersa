@@ -162,6 +162,8 @@ pub struct FakeAdapter {
     pub read_gate: Arc<tokio::sync::Mutex<()>>,
     /// A backend that takes a stop and never exits.
     stop_hangs: bool,
+    /// How long a backend takes to exit once stopped.
+    stop_delay: std::time::Duration,
     /// The backend's name: [`BACKEND`] unless a test registers more than
     /// one fake.
     pub name: &'static str,
@@ -186,6 +188,7 @@ impl FakeAdapter {
             conversation_end_fails: Arc::default(),
             read_gate: Arc::default(),
             stop_hangs: false,
+            stop_delay: std::time::Duration::ZERO,
             name: BACKEND,
             title_rules: TitleRules {
                 max_chars: 200,
@@ -206,6 +209,14 @@ impl FakeAdapter {
     pub fn unstoppable() -> Self {
         FakeAdapter {
             stop_hangs: true,
+            ..FakeAdapter::new(1)
+        }
+    }
+
+    /// An adapter whose backend takes `delay` to exit once stopped.
+    pub fn slow_stop(delay: std::time::Duration) -> Self {
+        FakeAdapter {
+            stop_delay: delay,
             ..FakeAdapter::new(1)
         }
     }
@@ -307,6 +318,7 @@ impl Adapter for FakeAdapter {
             records: Arc::clone(&self.records),
             session_id,
             stop_hangs: self.stop_hangs,
+            stop_delay: self.stop_delay,
             inner: Mutex::default(),
         }))
     }
@@ -454,6 +466,8 @@ struct FakeSession {
     session_id: String,
     /// Takes a stop and never exits.
     stop_hangs: bool,
+    /// Takes this long to exit once stopped.
+    stop_delay: std::time::Duration,
     inner: Mutex<Inner>,
 }
 
@@ -628,6 +642,7 @@ impl AdapterSession for FakeSession {
 
     async fn stop(&self) -> Result<(), AdapterError> {
         self.stats.stops.fetch_add(1, Ordering::SeqCst);
+        tokio::time::sleep(self.stop_delay).await;
         if !self.stop_hangs {
             self.exit(Some(0));
         }
