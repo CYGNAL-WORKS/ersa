@@ -197,13 +197,34 @@ async fn backend_list_lists_the_models_the_backend_reports() {
 }
 
 /// A detection that found every backend available is kept: listing again
-/// and starting a session ask the backend for nothing more.
+/// and starting a session ask the backend for nothing more. The reuse of a
+/// failed detection is turned off, so only that rule can keep it; a
+/// backend that fails is asked again each time.
 // verifies: PROTO-CORE-API-R96
 #[tokio::test(flavor = "multi_thread")]
 async fn a_detection_that_found_every_backend_is_not_run_again() {
+    let no_reuse = |config: &mut ersa_core::CoreConfig| {
+        support::detecting(config);
+        config.failed_detection_ttl = std::time::Duration::ZERO;
+    };
+    let probes =
+        |stats: &support::fake::Stats| stats.model_probes.load(std::sync::atomic::Ordering::SeqCst);
+
+    let failing = FakeAdapter::new(1);
+    *failing.models.lock().unwrap() = ModelsAnswer::Fails;
+    let stats = Arc::clone(&failing.stats);
+    let core = start_with_adapters(tempdir(), no_reuse, vec![Arc::new(failing)]).await;
+    let mut client = core.client().await;
+    for _ in 0..2 {
+        client
+            .result("backend.list", json!({ "host_id": "local" }))
+            .await;
+    }
+    assert_eq!(probes(&stats), 2);
+
     let fake = FakeAdapter::new(1);
     let stats = Arc::clone(&fake.stats);
-    let core = start_with_adapters(tempdir(), support::detecting, vec![Arc::new(fake)]).await;
+    let core = start_with_adapters(tempdir(), no_reuse, vec![Arc::new(fake)]).await;
     let mut client = core.client().await;
     for _ in 0..2 {
         let infos = client
