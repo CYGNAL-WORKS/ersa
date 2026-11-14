@@ -73,6 +73,7 @@ Assistive technology
 
 ## Open questions
 
+- Whether a turn's end closes a request of that turn still open. Claude Code withdraws its own when a turn is interrupted (`control_cancel_request`), so the case needs a backend that ends a turn while still asking; today only an answer, a withdrawal or the session's end closes a request, so such a request stays answerable while its tool card says it stopped (FLOW-READ-TRANSCRIPT-R16).
 - Whether Ersa should take Claude Desktop's shape for a lasting answer: one short answer, with a note in the request that lists what it covers (`claude-desktop/permission-2026-11-14.txt`), in place of one answer per suggestion with the reach in its label (R12). The owner's call, since R12 was the owner's.
 - How much of each backend's native permission vocabulary is surfaced versus normalized: a reason with Deny (`message`) and editing the input before allowing (`updated_input`) are not offered yet.
 - Keyboard-only path: a shortcut that opens the oldest pending shelf across sessions, and moves to the next session's once one is done.
@@ -81,6 +82,7 @@ Assistive technology
 
 ## Changes
 
+- 2026-11-14: from #385 inbox: an open question on a request left open when its turn ends. No requirement IDs changed.
 - 2026-11-14: triage of #291: a suggestion's label was cut to one line, so a lasting rule could be granted without its reach in view. The label is shown whole (R30 added), as Claude Desktop shows what its lasting answer covers; whether to take Desktop's one short answer and note is an open question.
 - 2026-11-06: from #222 inbox: R09's n counts only requests whose details the shelf showed, so one answered elsewhere before it was shown takes one from m and adds none to n (R09 reworded).
 - 2026-11-06: from #215 inbox: where a request the shelf can't show falls in the order (R29 added; R01 reworded to place such a request as R29 says).
