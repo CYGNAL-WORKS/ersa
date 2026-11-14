@@ -1706,15 +1706,7 @@ fn user_text(text: &str) -> String {
 }
 
 fn echo_of(text: &str, uuid: &str) -> String {
-    json!({
-        "type": "user",
-        "message": {"role": "user", "content": [{"type": "text", "text": text}]},
-        "isReplay": true,
-        "uuid": uuid,
-        "session_id": "s",
-        "parent_tool_use_id": null,
-    })
-    .to_string()
+    echo_of_blocks(&[text], uuid)
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R43
@@ -1826,40 +1818,74 @@ fn a_message_taken_in_with_one_that_opened_its_turn_is_still_shown() {
     );
 }
 
+/// The `user.message` texts and the last `session.state` of a projection.
+fn messages_and_last_state(lines: &[ersa_adapter::RawLine]) -> (Vec<String>, String) {
+    let sequence = without_lines(turns_and_messages(lines));
+    let messages = sequence
+        .iter()
+        .filter_map(|what| what.strip_prefix("user.message "))
+        .map(String::from)
+        .collect();
+    let last = sequence
+        .iter()
+        .rev()
+        .find(|what| what.starts_with("session.state"))
+        .unwrap()
+        .clone();
+    (messages, last)
+}
+
 // verifies: PROTO-CLAUDE-CODE-STREAM-R43
 // verifies: PROTO-CLAUDE-CODE-STREAM-R44
 #[test]
-fn a_log_without_echoes_shows_a_waiting_message_at_its_turns_start() {
-    // Fixture 22 was recorded before the adapter passed
+fn a_log_without_echoes_loses_no_message_and_ends_idle() {
+    // Fixtures 22 and 51 were recorded before the adapter passed
     // `--replay-user-messages`, as a session's raw log from then was: the
-    // turn its first message opened ends unechoed, so the message written
-    // during it is shown when its own turn starts.
-    let lines = fixture("22-message-during-turn").raw_log();
-    let sequence = turns_and_messages(&lines);
-    assert_eq!(
-        without_lines(sequence.clone()),
-        [
-            "turn.started 1",
-            "session.state Running",
-            ESSAY,
-            "turn.completed 1",
-            "session.state Running",
-            "turn.started 2",
-            "session.state Running",
-            "user.message Now reply with the single word: second",
-            "turn.completed 2",
-            "session.state Idle",
-        ]
-    );
-    let init = lines
-        .iter()
-        .filter(|l| common::is_kind(l, "system/init"))
-        .nth(1)
-        .unwrap()
-        .index;
-    let second = sequence
-        .iter()
-        .find(|(_, w)| w.ends_with("second"))
-        .unwrap();
-    assert_eq!(second.0, init);
+    // turn its first message opened ends unechoed. Nothing says when such a
+    // log's waiting message was taken in (in the next turn for 22, in the
+    // same one for 51, which uses tools), so it is shown in the turn it was
+    // written in, as before the echoes, and nothing is left waiting.
+    for (name, first) in [
+        ("22-message-during-turn", ESSAY),
+        ("51-message-during-tool-turn", READ_THRICE),
+    ] {
+        let lines = fixture(name).raw_log();
+        let (messages, last) = messages_and_last_state(&lines);
+        assert_eq!(
+            messages,
+            [
+                first.strip_prefix("user.message ").unwrap(),
+                "Now reply with the single word: second"
+            ],
+            "{name}"
+        );
+        assert_eq!(last, "session.state Idle", "{name}");
+        assert_eq!(
+            waiting_counts(&lines).last().map(|(_, n)| *n),
+            Some(0),
+            "{name}"
+        );
+    }
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R44
+#[test]
+fn once_a_log_is_found_to_have_no_echoes_later_messages_show_at_once() {
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let (one, two, three) = (user_text("one"), user_text("two"), user_text("three"));
+    let lines = log(&[
+        (Host, &one),
+        (Backend, init),
+        // No echo of "one": the log has none.
+        (Backend, result),
+        (Host, &two),
+        (Backend, init),
+        (Host, &three),
+        (Backend, result),
+    ]);
+    let (messages, last) = messages_and_last_state(&lines);
+    assert_eq!(messages, ["one", "two", "three"]);
+    assert_eq!(last, "session.state Idle");
+    assert!(waiting_counts(&lines).is_empty());
 }

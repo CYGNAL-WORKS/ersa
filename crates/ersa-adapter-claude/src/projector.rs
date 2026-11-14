@@ -98,8 +98,7 @@ pub struct ClaudeProjector {
     /// message at once, at the next turn's start or, in a turn that uses
     /// tools, at the turn's next model call, and the echo is their
     /// `user.message` (PROTO-CLAUDE-CODE-STREAM-R43, R46). They are kept for
-    /// a log without echoes, where each is projected at the next turn's
-    /// `system/init` instead.
+    /// a log without echoes, which shows them when it is found to be one.
     waiting: Vec<UserMessage>,
     /// For each message written to an idle CLI whose echo has not come yet,
     /// how many content blocks it has. Each was projected from its host
@@ -327,15 +326,6 @@ impl ClaudeProjector {
         // given on the command line. Either way a user's message started it.
         if !self.turn_open {
             out.extend(self.open_turn(line, TurnTrigger::User));
-            // Without echoes, the turn after one that had messages written
-            // during it is theirs (2.1.316/22-message-during-turn).
-            if self.no_echoes {
-                out.extend(
-                    self.waiting
-                        .drain(..)
-                        .map(|message| at(line, Event::UserMessage(message))),
-                );
-            }
         }
         if out.is_empty() || drifted.is_some() {
             out.push(passthrough(line, value));
@@ -534,6 +524,22 @@ impl ClaudeProjector {
         out.extend(self.ensure_turn(line));
         out.extend(self.finish_streams());
         out.extend(self.settle_prompts(line));
+        // The CLI echoes a message as its turn starts, so a turn that ends
+        // with its own message unechoed is from a log without echoes, such as
+        // a session's raw log from before the adapter passed
+        // `--replay-user-messages`. Nothing in such a log says when a waiting
+        // message was taken in (in this turn, if it used tools, or in the
+        // next), so the messages written during the turn are shown in it, as
+        // the projection did then, and are never left waiting.
+        if !self.unechoed.is_empty() {
+            self.no_echoes = true;
+            self.unechoed.clear();
+            out.extend(
+                self.waiting
+                    .drain(..)
+                    .map(|message| at(line, Event::UserMessage(message))),
+            );
+        }
 
         let is_error = value["is_error"].as_bool();
         let outcome = match drifted {
@@ -588,12 +594,6 @@ impl ClaudeProjector {
                 LifecycleState::Running
             },
         ));
-        // The CLI echoes a message as its turn starts, so a turn that ends
-        // with its own message unechoed is from a log without echoes.
-        if !self.unechoed.is_empty() {
-            self.no_echoes = true;
-            self.unechoed.clear();
-        }
 
         // Message ids and streams never span turns.
         self.turn_open = false;
@@ -930,6 +930,11 @@ impl ClaudeProjector {
         let Some(message) = user_message(&value) else {
             return vec![passthrough(line, value)];
         };
+        // In a log without echoes, a message written during a turn is shown
+        // in it at once, as the projection did before the echoes.
+        if self.no_echoes && self.turn_open {
+            return vec![at(line, Event::UserMessage(message))];
+        }
         if self.turn_open || !self.waiting.is_empty() {
             self.waiting.push(message);
             return vec![passthrough(line, value)];
