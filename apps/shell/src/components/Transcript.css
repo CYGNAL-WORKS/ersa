@@ -208,12 +208,6 @@
   overflow-wrap: anywhere;
 }
 
-.transcript-input {
-  display: block;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-}
-
 /* A permission request's input, field by field. While the request is open every value is shown whole:
    nothing the user approves may sit below a scrollbar. Once decided, a long value scrolls. */
 .transcript-fields {
@@ -257,18 +251,6 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
-}
-
-.transcript-output {
-  margin: 0;
-  max-height: var(--size-card-max);
-  overflow: auto;
-  padding: var(--space-sm);
-  color: var(--color-ink-muted);
-  background: var(--color-canvas);
-  border-radius: var(--radius-sm);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 .transcript-actions {
