@@ -26,6 +26,7 @@
 //!   the confirmation and returns whether it was hidden; `shell_hide` puts it
 //!   back when the user cancels.
 //!   - [`quit`]: shutting Core down, and ending it when it will not stop.
+//!   - [`startup`]: which Core a build reaches, and its window's claim.
 //!   - [`instance`]: one Shell per user; a second launch shows the first's
 //!     window.
 
@@ -34,6 +35,7 @@ pub mod instance;
 pub mod launch;
 pub mod process;
 pub mod quit;
+pub mod startup;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -342,20 +344,6 @@ fn open_in_browser(url: &Url) {
         .spawn();
 }
 
-/// The endpoint label a debug build attaches to instead of the user's own
-/// Core, from `ERSA_ATTACH`: for developing the Interface against a replay
-/// server (`ersa-core replay` serves the label `replay`) or a second Core.
-/// The window never launches Core there. A release build ignores it, so
-/// nothing in the environment can point the installed app at another Core.
-fn attach_label() -> Option<String> {
-    if !cfg!(debug_assertions) {
-        return None;
-    }
-    std::env::var("ERSA_ATTACH")
-        .ok()
-        .filter(|label| !label.is_empty())
-}
-
 /// Whether a label-attached debug window opens without taking focus, from
 /// `ERSA_BACKGROUND=1`: the live checks set it so a run does not pull the
 /// owner away from what they are doing. A window the user opens takes focus.
@@ -366,12 +354,25 @@ fn opens_unfocused(label: Option<&str>, background: Option<&str>) -> bool {
 /// Opens the window, or shows the window of the Shell already running.
 /// Called by `main`.
 pub fn run() {
-    let label = attach_label();
+    // Which Core this build reaches, and its window's claim (ADR 0035,
+    // FLOW-CLOSE-AND-QUIT-R08). Only a development build reads ERSA_ATTACH.
+    let build = startup::Build::current();
+    let attach = match build {
+        startup::Build::Development => std::env::var("ERSA_ATTACH").ok(),
+        startup::Build::Daily => None,
+    };
+    let startup = startup::startup(
+        build,
+        attach.as_deref(),
+        ersa_core::platform::default_data_dir().as_deref(),
+    );
+    let label = startup.attached.clone();
     let background = std::env::var("ERSA_BACKGROUND").ok();
     let focused = !opens_unfocused(label.as_deref(), background.as_deref());
-    // One Shell per user (FLOW-CLOSE-AND-QUIT-R02). An endpoint that cannot
-    // be claimed (another user's process holds its name) costs only that.
-    let claimed = ersa_core::platform::labelled_endpoint(&instance::label_for(label.as_deref()))
+    // One Shell per user and build (FLOW-CLOSE-AND-QUIT-R02). An endpoint
+    // that cannot be claimed (another user's process holds its name) costs
+    // only that.
+    let claimed = ersa_core::platform::labelled_endpoint(&startup.claim)
         .and_then(|endpoint| tauri::async_runtime::block_on(instance::claim(&endpoint)));
     let listener = match claimed {
         Ok(instance::Instance::Running) => return,
@@ -381,12 +382,9 @@ pub fn run() {
             None
         }
     };
-    let location = match &label {
-        Some(label) => CoreLocation::attach_only(label),
-        None => CoreLocation::default_for_user(),
-    };
+    let location = startup.core.location();
     let shell = Shell {
-        location: location.map_err(|e| format!("Ersa can't work out where to connect. {e}")),
+        location,
         label,
         link: Mutex::new(None),
         sink: Arc::new(std::sync::Mutex::new(None)),
