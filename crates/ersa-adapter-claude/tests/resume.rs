@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 
 const SESSION_ID: &str = "d34f0c1b-64ee-437e-a4e3-3487df29a506";
 
-fn config(extra: Value) -> SessionConfig {
+fn config(resume: Option<&str>) -> SessionConfig {
     SessionConfig {
         cwd: "C:/work".into(),
         permission_mode: "default".into(),
@@ -28,7 +28,8 @@ fn config(extra: Value) -> SessionConfig {
         project_path: String::new(),
         backend_session_id: None,
         fork_of: None,
-        extra,
+        resume: resume.map(String::from),
+        extra: Value::Null,
     }
 }
 
@@ -75,7 +76,7 @@ async fn resuming_passes_the_init_session_id_to_resume() {
     let session = adapter()
         .start(
             Arc::new(transport.clone()),
-            config(json!({ "resume": id })),
+            config(Some(&id)),
             Arc::new(RecordingSink::new()),
         )
         .await
@@ -98,25 +99,20 @@ async fn resuming_passes_the_init_session_id_to_resume() {
 // verifies: PROTO-CLAUDE-CODE-STREAM-R14
 #[test]
 fn a_new_session_passes_no_resume() {
-    for extra in [Value::Null, json!({}), json!({ "resume": null })] {
-        assert!(
-            resume_args(&config(extra.clone())).unwrap().is_empty(),
-            "{extra}"
-        );
-        assert_eq!(
-            flag_value(&invocation_args(&config(extra)), "--resume"),
-            None
-        );
-    }
+    assert!(resume_args(&config(None)).unwrap().is_empty());
+    assert_eq!(
+        flag_value(&invocation_args(&config(None)), "--resume"),
+        None
+    );
 }
 
 #[tokio::test]
-async fn a_null_resume_starts_a_new_session() {
+async fn no_resume_starts_a_new_session() {
     let transport = ready_stub();
     let session = adapter()
         .start(
             Arc::new(transport.clone()),
-            config(json!({ "resume": null })),
+            config(None),
             Arc::new(RecordingSink::new()),
         )
         .await
@@ -140,7 +136,7 @@ async fn a_resume_id_that_is_not_a_session_id_fails_start_without_spawning() {
         let result = adapter()
             .start(
                 Arc::new(transport.clone()),
-                config(json!({ "resume": bad })),
+                config(Some(bad)),
                 Arc::new(RecordingSink::new()),
             )
             .await;
@@ -149,19 +145,8 @@ async fn a_resume_id_that_is_not_a_session_id_fails_start_without_spawning() {
             "{bad:?} was accepted"
         );
         assert!(transport.spawned().is_empty(), "{bad:?} spawned the CLI");
-        assert!(resume_args(&config(json!({ "resume": bad }))).is_err());
+        assert!(resume_args(&config(Some(bad))).is_err());
     }
-    // A resume value that is not a string at all is refused too.
-    let transport = ready_stub();
-    let result = adapter()
-        .start(
-            Arc::new(transport.clone()),
-            config(json!({ "resume": 42 })),
-            Arc::new(RecordingSink::new()),
-        )
-        .await;
-    assert!(matches!(result, Err(AdapterError::Protocol(_))));
-    assert!(transport.spawned().is_empty());
 }
 
 /// A pid no process can have: far above Linux's highest (2^22), and Windows,

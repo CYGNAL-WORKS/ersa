@@ -33,6 +33,8 @@ The user reopens Ersa, opens a session that is not running, and writes to it; or
 - **The backend's record is gone** (its retention removed it): a session started in the backend's own tools leaves the list the next time Ersa lists sessions. A session Ersa started stays, since a new session or a fork has no record until its first message.
 - **Removing a workspace or project** with sessions started in the backend's own tools: Ersa forgets those sessions and leaves their records, so they show again in the backend's own tools and if the folder is added again.
 - **The backend fails to start**: the message stays in the composer with the reason, as a refused message does (`FLOW-SEND-MESSAGE`), and the session stays stopped.
+- **Stop while a message waits for the session to start** cancels the message and leaves the session resumed and idle (PROTO-CORE-API-R86).
+- **A fork closed before its first message** has no record of its own, so resuming it forks its original again, under the conditions a fork has (R10). The agent's conversation in the fork then includes what the original did since, though Ersa shows the fork up to its fork point until its first message gives it a record.
 - **A message sent while the session is being archived** is refused, not resumed (PROTO-CORE-API-R85); the user sends again.
 - **A session whose backend has no adapter in this build** is dormant until the adapter is back (ADR 0031).
 
@@ -47,6 +49,11 @@ The user reopens Ersa, opens a session that is not running, and writes to it; or
 - **FLOW-RESUME-SESSION-R07**: `session.list` shall carry each session's `backend_session_id` once the backend has reported it, and the tile's menu shall offer Copy session ID, which puts it on the clipboard.
 - **FLOW-RESUME-SESSION-R08**: When Core starts and finds a session that was live when it last stopped, the session's transcript shall end with its `session.ended` (PROTO-AGENT-EVENTS, Core's lifecycle facts), and the session shall be stopped and resumable.
 - **FLOW-RESUME-SESSION-R09**: Sessions started in the backend's own tools shall not hold back removing their workspace or project: Core shall forget them, leaving their records.
+- **FLOW-RESUME-SESSION-R10**: When a resume, by `session.resume` or by a send, names a fork that has no record of its own, Core shall fork the fork's original again as `session.fork` does, refusing the resume with `session.fork`'s answer whenever `session.fork` of the original would be refused and holding sends to the original until the fork's backend is ready.
+
+## Built so far
+
+Core resumes a stopped session on `session.resume` and on a send to it (R01, R02), refuses when its folder is gone (R03), and ends the transcript of a session that was live when Core last stopped (R08). A resumed session starts with the model, effort and permission mode Core last gave it; the record's newer values (PROTO-CORE-API-R71) are still to build, as are a recordless fork's conditions (R10) and the sessions started outside Ersa (R04 to R07, R09).
 
 ## Out of scope
 
@@ -56,10 +63,11 @@ The user reopens Ersa, opens a session that is not running, and writes to it; or
 
 ## Open questions
 
-- How record and live input merge in one view once a session resumes while it is open (PROTO-AGENT-EVENTS, Open questions); the resume ticket settles it with a recorded fixture.
+- Whether a transcript that is open when its session resumes shows turns taken in the backend's own tools since it was opened; today they show when the session is next opened (PROTO-AGENT-EVENTS, Open questions).
 
 ## Changes
 
+- 2026-11-13: from #353 inbox: Stop while a message waits for a resumed session to start leaves the session resumed; resuming a fork that has no record forks its original again under `session.fork`'s conditions (FLOW-RESUME-SESSION-R10 added); the open question on merging record and live input is closed (PROTO-AGENT-EVENTS-R24), and one on turns taken elsewhere replaces it; Built so far added, saying a resumed session starts with Core's last values until PROTO-CORE-API-R71's relaunch rule is built.
 - 2026-11-13: from #352 inbox: a message sent while the session is being archived is refused before any resume (PROTO-CORE-API-R85). No requirement IDs changed.
 - 2026-11-13: ready, from the owner's decisions of 2026-11-13: a project's sessions cover the project's folder and its workspaces' folders, and a session started outside Ersa resumes in its own folder, refused with a reason when the folder is gone. Writing to a stopped session resumes it, as in Claude Desktop, and Resume on the archived note resumes with no message. FLOW-RESUME-SESSION-R01 to R09 added; sessions found in the backend's record don't hold back removing a workspace or project (PROTO-CORE-API, Projects and Workspaces). The tests asserting that resume is a milestone away change with the resume ticket. Today Core refuses every resume; the adapter already lists a folder's sessions and builds `--resume`, and Core already marks a session Core's restart interrupted. Unreachable remote hosts move to `FLOW-REMOTE-SESSION`.
 - 2026-11-09: a session whose backend has no adapter in this build is dormant until the adapter is back (ADR 0031).
