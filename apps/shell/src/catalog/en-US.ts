@@ -424,5 +424,29 @@ export const enUS = {
       cancelButton: "Cancel",
     },
   },
-  errors: {},
+  // Errors more than one area shows.
+  errors: {
+    // Why Core refused a request, by the refusal's reason (PROTO-CORE-API, Errors), wherever the refusal is shown:
+    // beneath a tile or row, after its lead, or on the composer's status line.
+    refusal: {
+      sessionBusyError: "This session is busy. Stop it or let it finish, then try again.",
+      sessionDeletingError: "This session is being deleted. If it's still here, delete it again.",
+      sessionArchivedError: "This session is archived. Resume it to send a message.",
+      sessionNotRunningError: "This session isn't running. Resume it, then try again.",
+      sendInProgressError: "A message is already on its way to this session from another window. Try again once it's sent.",
+      sendStoppedError: "You stopped this message before it was sent.",
+      backendUnnamedError: "This session is still starting. Try again in a moment.",
+      recordGoneError: "The backend no longer has a record of this session. Start a new session to go on.",
+      // {ids}: the processes that have the session open, as "4242" or "4242, 4343".
+      openElsewhereError: {
+        one: "This session is open in another program, process {ids}. Close it there, then try again.",
+        other: "This session is open in other programs, processes {ids}. Close them there, then try again.",
+      },
+      // The same, when the processes can't be named.
+      openElsewhereUnnamedError: "This session is open in another program. Close it there, then try again.",
+      openUnknownError: "Ersa can't tell whether another program has this session open. Close any that might, then try again.",
+      noFinishedReplyError: "This session can be forked once a reply finishes.",
+      backendCannotForkError: "This session's backend can't fork sessions. Updating the backend may help.",
+    },
+  },
 } as const satisfies Section;
