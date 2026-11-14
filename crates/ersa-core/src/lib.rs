@@ -37,4 +37,4 @@ pub mod workspace;
 pub use api::server::{ServeError, Server, connect};
 // What a binary needs to register adapters with `Server::bind_with`.
 pub use ersa_adapter::Adapter;
-pub use state::{Core, CoreConfig};
+pub use state::{Core, CoreConfig, RemoveGate};
