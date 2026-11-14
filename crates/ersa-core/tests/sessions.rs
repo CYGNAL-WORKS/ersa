@@ -1646,6 +1646,65 @@ async fn a_message_sent_while_an_archive_stops_the_session_is_refused() {
     assert_eq!(archived["result"]["archived"], true, "{archived}");
 }
 
+/// A message sent to a session that is not running, while an archive of
+/// it is under way, is refused as being archived, not taken down the path
+/// that resumes a session that is not running.
+// verifies: PROTO-CORE-API-R85
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_to_a_stopped_session_being_archived_is_refused_before_any_resume() {
+    let fake = Arc::new(FakeAdapter::new(1));
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(&fake) as Arc<dyn Adapter>];
+    let core = start_with_adapters(tempdir(), |_| {}, adapters).await;
+    let mut client = core.client().await;
+    let id = idle_session(&core, &mut client).await;
+    client.result("session.stop", json!({ "id": id })).await;
+    client
+        .result("session.unsubscribe", json!({ "id": id }))
+        .await;
+    let sent = fake.stats.messages.lock().unwrap().len();
+
+    // A subscriber opens the stopped session's record, holding the session
+    // while the read hangs, so the archive waits there: under way, its busy
+    // check passed, the session not running.
+    let gate = fake.read_gate.lock().await;
+    let mut reader = core.client().await;
+    let subscribe = reader
+        .request("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let archive = client
+        .request(
+            "session.set_archived",
+            json!({ "id": id, "archived": true }),
+        )
+        .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    let mut other = core.client().await;
+    let error = other
+        .error("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    assert_eq!(kind(&error), "invalid_state", "{error}");
+    assert!(error["data"].get("reason").is_none(), "{error}");
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("being archived"),
+        "{error}"
+    );
+    assert_eq!(
+        fake.stats.messages.lock().unwrap().len(),
+        sent,
+        "nothing sent"
+    );
+
+    drop(gate);
+    reader.response(subscribe).await;
+    let archived = client.response(archive).await;
+    assert_eq!(archived["result"]["archived"], true, "{archived}");
+}
+
 /// What `session.set_archived` sets outlives Core, and `session.list`
 /// reports it: `session.set_archived`'s half of R34 (`arrangement.rs` has
 /// `session.arrange`'s).
