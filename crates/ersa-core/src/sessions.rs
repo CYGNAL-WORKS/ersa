@@ -70,7 +70,7 @@ mod send;
 
 pub use fork::{Beginning, ForkHold, Forkable};
 pub use resume::Resumption;
-pub use send::Pacer;
+pub use send::{Pacer, Waiting};
 
 /// How many events may wait for one subscriber before it counts as unable
 /// to keep up. Streaming text produces many small events, so this is

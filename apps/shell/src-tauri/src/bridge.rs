@@ -23,10 +23,14 @@ use tokio::task::AbortHandle;
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long requests that run git, start a backend or probe a host may
-/// wait: those can legitimately take minutes on a large repository. A
-/// session's first message waits for its backend to start, so
-/// `session.send` is one of them.
+/// wait: those can legitimately take minutes on a large repository.
 pub const LONG_REQUEST_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+/// How long a `session.send` waits with neither its answer nor a
+/// `session.send_progress` for its session (PROTO-CORE-API-R89). Core
+/// reports at least every 5 seconds, so this is six reports missed; while
+/// they keep arriving the send waits however long it runs.
+pub const SEND_SILENCE: Duration = Duration::from_secs(30);
 
 /// How long the liveness probe may take to connect and complete a handshake.
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -41,8 +45,10 @@ const MAX_LINE_BYTES: usize = ersa_core::state::MAX_LINE_BYTES;
 pub fn timeout_for(method: &str) -> Duration {
     match method {
         "workspace.create" | "workspace.remove" | "session.create" | "session.start"
-        | "session.resume" | "session.stop" | "session.remove" | "session.send" | "host.probe"
-        | "core.shutdown" | "attachment.inspect" => LONG_REQUEST_TIMEOUT,
+        | "session.resume" | "session.stop" | "session.remove" | "host.probe" | "core.shutdown"
+        | "attachment.inspect" => LONG_REQUEST_TIMEOUT,
+        // A silence, not a limit: see [`SEND_SILENCE`].
+        "session.send" => SEND_SILENCE,
         _ => REQUEST_TIMEOUT,
     }
 }
@@ -109,9 +115,14 @@ pub struct LinkOptions {
     /// cannot answer the probe either is wedged, and the link closes. `None`
     /// never probes: a timeout fails only its own request.
     pub probe_endpoint: Option<String>,
-    /// Replaces every method's timeout. For tests.
+    /// Replaces every method's timeout, and a send's silence. For tests.
     pub timeout: Option<Duration>,
 }
+
+/// The method whose wait each `session.send_progress` for its session
+/// extends (PROTO-CORE-API-R89).
+const SEND: &str = "session.send";
+const SEND_PROGRESS: &str = "session.send_progress";
 
 type Pending = Mutex<HashMap<i64, oneshot::Sender<Result<Value, ErrorObject>>>>;
 
@@ -124,6 +135,9 @@ struct Shared {
     closed: AtomicBool,
     on_event: OnEvent,
     options: LinkOptions,
+    /// When the latest `session.send_progress` arrived, by session id. A
+    /// send waiting for its answer reads it when its silence runs out.
+    progress: Mutex<HashMap<String, tokio::time::Instant>>,
     /// The reader and writer, stopped when the link closes so a link that
     /// was given up delivers nothing more.
     tasks: Mutex<Vec<AbortHandle>>,
@@ -155,6 +169,7 @@ impl CoreLink {
             closed: AtomicBool::new(false),
             on_event: Box::new(on_event),
             options,
+            progress: Mutex::new(HashMap::new()),
             tasks: Mutex::new(Vec::new()),
         });
 
@@ -227,6 +242,10 @@ impl CoreLink {
             self.forget(id);
             return Err(BridgeError::unavailable("The connection is closed."));
         }
+        // A send waits while its session's progress arrives: which session.
+        let reports_progress = (method == SEND)
+            .then(|| params.as_ref()?.get("id")?.as_str().map(str::to_owned))
+            .flatten();
         let mut request = Request::new(RequestId::Number(id), method, Value::Null);
         request.params = params;
         let line = serde_json::to_string(&request).expect("requests always serialize");
@@ -248,14 +267,15 @@ impl CoreLink {
         // that stops reading fills the queue, and the send would wait forever.
         // Whether the line was queued, so a failure after it says Core may have it, even if a close then drops it.
         let written = std::sync::atomic::AtomicBool::new(false);
-        let answer = tokio::time::timeout(timeout, async {
-            if self.shared.outbound.send(line).await.is_err() {
-                return None;
-            }
-            written.store(true, Ordering::SeqCst);
-            rx.await.ok()
-        })
-        .await;
+        let answer = self
+            .within(timeout, reports_progress.as_deref(), async {
+                if self.shared.outbound.send(line).await.is_err() {
+                    return None;
+                }
+                written.store(true, Ordering::SeqCst);
+                rx.await.ok()
+            })
+            .await;
         let failed = |message: &str| {
             if written.load(Ordering::SeqCst) {
                 BridgeError::unanswered(message)
@@ -283,6 +303,35 @@ impl CoreLink {
                     close(&self.shared, Some(NO_ANSWER_ANYWHERE.to_owned()));
                 }
                 Err(failed(NO_ANSWER))
+            }
+        }
+    }
+
+    /// Runs `work` until it finishes or `limit` passes, `Err` then. With a
+    /// `session`, `limit` is a silence: each `session.send_progress` for that
+    /// session restarts it, so the work waits as long as they keep arriving
+    /// (PROTO-CORE-API-R89).
+    async fn within<T>(
+        &self,
+        limit: Duration,
+        session: Option<&str>,
+        work: impl Future<Output = T>,
+    ) -> Result<T, ()> {
+        let mut work = std::pin::pin!(work);
+        let mut deadline = tokio::time::Instant::now() + limit;
+        loop {
+            if let Ok(done) = tokio::time::timeout_at(deadline, &mut work).await {
+                return Ok(done);
+            }
+            // Looked at only when the silence runs out, so a report costs
+            // the waiting send nothing.
+            let heard = session.and_then(|session| {
+                let progress = self.shared.progress.lock().expect("progress lock");
+                progress.get(session).copied()
+            });
+            match heard {
+                Some(heard) if heard + limit > deadline => deadline = heard + limit,
+                _ => return Err(()),
             }
         }
     }
@@ -375,6 +424,15 @@ fn dispatch(shared: &Shared, line: &str) {
         }
         (None, Some(Value::String(method))) => {
             let params = message.remove("params").unwrap_or(Value::Null);
+            if method == SEND_PROGRESS
+                && let Some(session) = params.get("session_id").and_then(Value::as_str)
+            {
+                shared
+                    .progress
+                    .lock()
+                    .expect("progress lock")
+                    .insert(session.to_owned(), tokio::time::Instant::now());
+            }
             (shared.on_event)(LinkEvent::Notification { method, params });
         }
         _ => {}
@@ -530,7 +588,8 @@ mod link_tests {
     fn long_methods_get_long_timeouts() {
         assert_eq!(timeout_for("workspace.create"), LONG_REQUEST_TIMEOUT);
         assert_eq!(timeout_for("session.create"), LONG_REQUEST_TIMEOUT);
-        assert_eq!(timeout_for("session.send"), LONG_REQUEST_TIMEOUT);
+        // A send's limit is a silence that its progress restarts.
+        assert_eq!(timeout_for("session.send"), SEND_SILENCE);
         assert_eq!(timeout_for("host.probe"), LONG_REQUEST_TIMEOUT);
         // Longer than Core's own limit on an inspect, so Core's reason reaches the window.
         assert_eq!(timeout_for("attachment.inspect"), LONG_REQUEST_TIMEOUT);
@@ -618,6 +677,152 @@ mod link_tests {
             "{result:?}"
         );
         assert!(!link.is_closed());
+    }
+
+    /// Core's report that a send to `session` is still under way.
+    async fn progress(core: &mut BufReader<DuplexStream>, session: &str) {
+        let line = json!({
+            "jsonrpc": "2.0",
+            "method": "session.send_progress",
+            "params": { "session_id": session, "phase": "copying" },
+        });
+        core.get_mut()
+            .write_all(format!("{line}\n").as_bytes())
+            .await
+            .expect("progress");
+    }
+
+    fn send_to(session: &str) -> Option<Value> {
+        Some(json!({ "id": session, "text": "hello" }))
+    }
+
+    const EVERY: Duration = Duration::from_secs(5);
+
+    /// A send Core reports on for longer than any fixed limit still gets
+    /// its answer. On a paused clock, so fifteen minutes pass at once.
+    // verifies: PROTO-CORE-API-R89
+    #[tokio::test(start_paused = true)]
+    async fn a_send_waits_while_its_progress_keeps_arriving() {
+        let (link, mut core, _events) = open_fake(LinkOptions::default()).await;
+        let core_side = async {
+            let mut send = String::new();
+            core.read_line(&mut send).await.expect("the send");
+            for _ in 0..(15 * 60 / 5) {
+                tokio::time::sleep(EVERY).await;
+                progress(&mut core, "s1").await;
+            }
+            reply_to(&mut core, &send, json!({ "turn": 1 })).await;
+        };
+        let (answer, ()) = tokio::join!(link.request("session.send", send_to("s1")), core_side);
+        assert_eq!(answer, Ok(json!({ "turn": 1 })));
+    }
+
+    /// A send Core says nothing more about counts as unanswered after 30
+    /// seconds of silence, not after a longer fixed limit.
+    // verifies: PROTO-CORE-API-R89
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_send_is_unanswered_after_thirty_seconds() {
+        let (link, _core, _events) = open_fake(LinkOptions::default()).await;
+        let began = tokio::time::Instant::now();
+        let answer = link.request("session.send", send_to("s1")).await;
+        assert_eq!(
+            answer,
+            Err(BridgeError::unanswered("Ersa got no answer in time."))
+        );
+        let waited = began.elapsed();
+        assert!(
+            waited >= Duration::from_secs(30) && waited < Duration::from_secs(31),
+            "{waited:?}"
+        );
+        assert!(!link.is_closed(), "one silent send must not drop the link");
+    }
+
+    /// The silence counts from the last report: a send that heard progress
+    /// for a while, then nothing, is unanswered 30 seconds after the last one.
+    // verifies: PROTO-CORE-API-R89
+    #[tokio::test(start_paused = true)]
+    async fn a_send_is_unanswered_thirty_seconds_after_its_last_progress() {
+        let (link, mut core, _events) = open_fake(LinkOptions::default()).await;
+        let began = tokio::time::Instant::now();
+        let core_side = async {
+            let mut send = String::new();
+            core.read_line(&mut send).await.expect("the send");
+            for _ in 0..20 {
+                tokio::time::sleep(EVERY).await;
+                progress(&mut core, "s1").await;
+            }
+            core
+        };
+        let (answer, _core) = tokio::join!(link.request("session.send", send_to("s1")), core_side);
+        assert_eq!(
+            answer,
+            Err(BridgeError::unanswered("Ersa got no answer in time."))
+        );
+        // The last report came at 100 seconds.
+        let waited = began.elapsed();
+        assert!(
+            waited >= Duration::from_secs(130) && waited < Duration::from_secs(131),
+            "{waited:?}"
+        );
+    }
+
+    /// A second send queued behind a first on the same session waits while
+    /// the session's progress arrives, though it is all for the first.
+    // verifies: PROTO-CORE-API-R89
+    #[tokio::test(start_paused = true)]
+    async fn a_queued_send_waits_while_its_session_reports_progress() {
+        let (link, mut core, _events) = open_fake(LinkOptions::default()).await;
+        let core_side = async {
+            let (mut first, mut second) = (String::new(), String::new());
+            core.read_line(&mut first).await.expect("the first send");
+            core.read_line(&mut second).await.expect("the second send");
+            for tick in 1..=(24 * 60 / 5) {
+                tokio::time::sleep(EVERY).await;
+                progress(&mut core, "s1").await;
+                if tick == 12 * 60 / 5 {
+                    reply_to(&mut core, &first, json!({ "turn": 1 })).await;
+                }
+            }
+            reply_to(&mut core, &second, json!({ "turn": 2 })).await;
+        };
+        let (first, second, ()) = tokio::join!(
+            link.request("session.send", send_to("s1")),
+            link.request("session.send", send_to("s1")),
+            core_side
+        );
+        assert_eq!(first, Ok(json!({ "turn": 1 })));
+        assert_eq!(second, Ok(json!({ "turn": 2 })));
+    }
+
+    /// Progress for another session does not keep a send waiting.
+    // verifies: PROTO-CORE-API-R89
+    #[tokio::test(start_paused = true)]
+    async fn progress_for_another_session_does_not_keep_a_send_waiting() {
+        let (link, mut core, _events) = open_fake(LinkOptions::default()).await;
+        let began = tokio::time::Instant::now();
+        let core_side = async {
+            let mut send = String::new();
+            core.read_line(&mut send).await.expect("the send");
+            for _ in 0..24 {
+                tokio::time::sleep(EVERY).await;
+                progress(&mut core, "s2").await;
+            }
+        };
+        let ((answer, waited), ()) = tokio::join!(
+            async {
+                let answer = link.request("session.send", send_to("s1")).await;
+                (answer, began.elapsed())
+            },
+            core_side
+        );
+        assert_eq!(
+            answer,
+            Err(BridgeError::unanswered("Ersa got no answer in time."))
+        );
+        assert!(
+            waited >= Duration::from_secs(30) && waited < Duration::from_secs(31),
+            "{waited:?}"
+        );
     }
 
     #[tokio::test]
