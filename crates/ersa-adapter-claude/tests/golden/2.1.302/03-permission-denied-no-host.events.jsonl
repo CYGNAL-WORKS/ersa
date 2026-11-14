@@ -3,7 +3,7 @@
 {"raw":0,"event":{"type":"session.state","state":"running"}}
 {"raw":1,"message_id":"cdaea738-27ec-4456-8b42-050c27883fc0","event":{"type":"assistant.text","block_id":"msg_011CgbD21Nxt34NiGyGZ8CiP/0","text":"Running the echo command now.","final":true}}
 {"raw":1,"event":{"type":"usage.updated","turn_output_tokens":3}}
-{"raw":2,"message_id":"9519ae55-0ac1-4427-889e-22c6b0fe25c7","event":{"type":"tool.requested","tool_use_id":"toolu_01FVRvyzDpPfnqkkrFoNnRmt","name":"Bash","input":{"command":"echo hello-from-bash","description":"Print a test string"}}}
+{"raw":2,"message_id":"9519ae55-0ac1-4427-889e-22c6b0fe25c7","event":{"type":"tool.requested","tool_use_id":"toolu_01FVRvyzDpPfnqkkrFoNnRmt","name":"Bash","input":{"command":"echo hello-from-bash","description":"Print a test string"},"target":"echo hello-from-bash"}}
 {"raw":2,"event":{"type":"usage.updated","turn_output_tokens":3}}
 {"raw":3,"event":{"type":"usage.updated","rate_limit":{"status":"allowed","resets_at":"2026-11-04T20:00:00Z","detail":"seven_day"}}}
 {"raw":4,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"system/task_summary","payload":{"detail":"Printing a test string","session_id":"d4e04ec4-fd1b-454d-9f16-3bced80b8199","subtype":"task_summary","type":"system","uuid":"ed88cbfd-c552-4806-bb20-41370cbb07b9"}}}
