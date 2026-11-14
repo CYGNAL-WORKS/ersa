@@ -77,8 +77,8 @@ pub struct ClaudeProjector {
     /// after how many such lines.
     announced_title: Option<(u64, String)>,
     /// Whether the latest `system/init` shows the CLI started in its minimal
-    /// mode (`--bare`): it has neither `scratchpad_path` nor `memory_paths`
-    /// (PROTO-CLAUDE-CODE-STREAM-R51).
+    /// mode (`--bare`): it has none of `scratchpad_path`, `memory_paths` and
+    /// `messaging_socket_path` (PROTO-CLAUDE-CODE-STREAM-R53).
     minimal_mode: bool,
 }
 
@@ -906,16 +906,20 @@ impl ClaudeProjector {
 
 /// Whether a `system/init` shows the CLI started in its minimal mode
 /// (`--bare`): a signed-out session lacks `scratchpad_path` and one with
-/// auto-memory off lacks `memory_paths`; minimal mode lacks both
-/// (PROTO-CLAUDE-CODE-STREAM-R51). The conformance tests use it too, so the
-/// projection and the check of each new version read the same signal (R52).
+/// auto-memory off lacks `memory_paths`, so a signed-out user with
+/// auto-memory off lacks both (2.1.316/38-signed-out-no-auto-memory); only
+/// minimal mode also lacks `messaging_socket_path`
+/// (PROTO-CLAUDE-CODE-STREAM-R53). The conformance tests use it too, so the
+/// projection and the check of each new version read the same signal (R54).
 pub fn started_in_minimal_mode(init: &Value) -> bool {
-    init.get("scratchpad_path").is_none() && init.get("memory_paths").is_none()
+    ["scratchpad_path", "memory_paths", "messaging_socket_path"]
+        .iter()
+        .all(|field| init.get(field).is_none())
 }
 
 /// A sign-in failure in a session the CLI started in its minimal mode: there
 /// the CLI never reads the user's sign-in, so signing in can't help, and the
-/// session can't go on (PROTO-CLAUDE-CODE-STREAM-R51). Only the live stream
+/// session can't go on (PROTO-CLAUDE-CODE-STREAM-R53). Only the live stream
 /// shows the mode; a session record has no `system/init`, so read back, the
 /// failure stays a sign-in failure (PROTO-AGENT-EVENTS-R22). Any other event
 /// passes through unchanged.

@@ -1,0 +1,23 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-14T04:30:29.393Z","sessionId":"fc64c4bd-cf73-461d-b300-0ee8973c3825"}
+{"type":"queue-operation","operation":"dequeue","timestamp":"2026-11-14T04:30:29.396Z","sessionId":"fc64c4bd-cf73-461d-b300-0ee8973c3825"}
+{"parentUuid":null,"isSidechain":false,"promptId":"3cec7ac1-69e4-4c7a-83fe-ca30d22cc635","type":"user","message":{"role":"user","content":[{"type":"text","text":"Reply with the single word OK."}]},"uuid":"d1411a64-297c-44e9-93e3-6ffa97b0c06e","timestamp":"2026-11-14T04:30:29.511Z","permissionMode":"default","promptSource":"sdk","turnOrigin":"sdk","turnPosition":{"promptIndex":0,"turnIndex":1},"userType":"external","entrypoint":"ersa","cwd":"C:/Users/user\\AppData\\Local\\Temp\\ersa-rec-0F5zJx","sessionId":"fc64c4bd-cf73-461d-b300-0ee8973c3825","version":"2.1.316","gitBranch":"master"}
+{"type":"attachment","uuid":"6898afc8-d9a4-4d49-b422-b97c24f438ac","parentUuid":"d1411a64-297c-44e9-93e3-6ffa97b0c06e","isSidechain":false,"attachment":{"type":"environment"},"ersa_elided":true}
+{"type":"attachment","uuid":"93a51d42-2c27-4f78-99c4-c3218e9fffcf","parentUuid":"6898afc8-d9a4-4d49-b422-b97c24f438ac","isSidechain":false,"attachment":{"type":"model"},"ersa_elided":true}
+{"type":"attachment","uuid":"25f85f8e-f8ee-439d-ad4e-26462dd91dd2","parentUuid":"93a51d42-2c27-4f78-99c4-c3218e9fffcf","isSidechain":false,"attachment":{"type":"deferred_tools_delta"},"ersa_elided":true}
+{"type":"attachment","uuid":"0263730c-5596-4d08-ab89-14fd0c0c6ac4","parentUuid":"25f85f8e-f8ee-439d-ad4e-26462dd91dd2","isSidechain":false,"attachment":{"type":"agent_listing_delta"},"ersa_elided":true}
+{"type":"attachment","uuid":"2bb6bebb-8d17-449c-9db7-31b1fb7704ce","parentUuid":"0263730c-5596-4d08-ab89-14fd0c0c6ac4","isSidechain":false,"attachment":{"type":"skill_listing"},"ersa_elided":true}
+{"type":"file-history-snapshot","ersa_elided":true}
+{"type":"atis-latch","ersa_elided":true}
+{"type":"attachment","uuid":"afb00e13-ee5d-47d3-95ff-b368920124f0","parentUuid":"2bb6bebb-8d17-449c-9db7-31b1fb7704ce","isSidechain":false,"attachment":{"type":"session_context"},"ersa_elided":true}
+{"type":"attachment","uuid":"533db176-5e8d-4de4-8604-c2afbf72ed04","parentUuid":"afb00e13-ee5d-47d3-95ff-b368920124f0","isSidechain":false,"attachment":{"type":"date"},"ersa_elided":true}
+{"type":"attachment","uuid":"8d7cc949-dfde-4aac-9806-ed9399e91599","parentUuid":"533db176-5e8d-4de4-8604-c2afbf72ed04","isSidechain":false,"attachment":{"type":"credential_org"},"ersa_elided":true}
+{"type":"attachment","uuid":"d613c844-27d7-471e-b3b3-62c78a2e3f84","parentUuid":"8d7cc949-dfde-4aac-9806-ed9399e91599","isSidechain":false,"attachment":{"type":"remote_session_change"},"ersa_elided":true}
+{"type":"attachment","uuid":"e114b396-9a9e-40d2-aeb5-886c0a102e05","parentUuid":"d613c844-27d7-471e-b3b3-62c78a2e3f84","isSidechain":false,"attachment":{"type":"prompt_snapshot"},"ersa_elided":true}
+{"type":"api-request-shape","ersa_elided":true}
+{"type":"api-request-blob","ersa_elided":true}
+{"type":"api-request-blob","ersa_elided":true}
+{"type":"api-request","ersa_elided":true}
+{"parentUuid":"e114b396-9a9e-40d2-aeb5-886c0a102e05","isSidechain":false,"type":"assistant","uuid":"51ec6ab0-8ffa-41c5-81aa-f1199d78a990","timestamp":"2026-11-14T04:30:29.652Z","message":{"diagnostics":null,"id":"6ff074b9-7f35-47b9-a75a-2079deeeb124","container":null,"model":"<synthetic>","role":"assistant","stop_details":null,"stop_reason":"stop_sequence","stop_sequence":"","type":"message","usage":{"output_tokens_details":null,"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":null,"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":0},"inference_geo":null,"iterations":null,"speed":null,"fallback_credit":null},"content":[{"type":"text","text":"Not logged in · Please run /login"}],"context_management":null},"error":"authentication_failed","isApiErrorMessage":true,"perTurnEffort":"medium","userType":"external","entrypoint":"ersa","cwd":"C:/Users/user\\AppData\\Local\\Temp\\ersa-rec-0F5zJx","sessionId":"fc64c4bd-cf73-461d-b300-0ee8973c3825","version":"2.1.316","gitBranch":"master"}
+{"type":"last-prompt","lastPrompt":"Reply with the single word OK.","leafUuid":"51ec6ab0-8ffa-41c5-81aa-f1199d78a990","sessionId":"fc64c4bd-cf73-461d-b300-0ee8973c3825"}
+{"type":"atis-latch","ersa_elided":true}
+{"type":"cost-state","ersa_elided":true}
