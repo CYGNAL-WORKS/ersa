@@ -811,13 +811,6 @@ fn invocation_flags(args: &[String]) -> BTreeSet<String> {
         .collect()
 }
 
-/// Whether a `system/init` shows the CLI started in its minimal mode: a
-/// signed-out session lacks `scratchpad_path`, one with auto-memory off lacks
-/// `memory_paths`, and only minimal mode lacks both.
-fn started_minimal(init: &Value) -> bool {
-    init.get("scratchpad_path").is_none() && init.get("memory_paths").is_none()
-}
-
 /// The first `system/init` of a stream fixture.
 fn first_init(stream: &Path) -> Option<Value> {
     fs::read_to_string(stream)
@@ -859,7 +852,7 @@ fn minimal_mode_at_newest_version() -> (Vec<String>, Vec<String>, usize) {
         }
         counted += 1;
         if let Some(init) = first_init(&newest.join(format!("{stem}.jsonl")))
-            && started_minimal(&init)
+            && ersa_adapter_claude::started_in_minimal_mode(&init)
         {
             minimal.push(stem);
         }
@@ -892,8 +885,8 @@ fn the_newest_version_does_not_start_in_minimal_mode_as_the_adapter_runs_it() {
         "{not_counted:?}"
     );
     let bare = first_init(&fixtures_root().join("2.1.316/28-bare-mode.jsonl")).unwrap();
-    assert!(started_minimal(&bare));
+    assert!(ersa_adapter_claude::started_in_minimal_mode(&bare));
     // A signed-out session (2.1.302/00-not-logged-in) is not minimal mode.
     let signed_out = first_init(&fixtures_root().join("2.1.302/00-not-logged-in.jsonl")).unwrap();
-    assert!(!started_minimal(&signed_out));
+    assert!(!ersa_adapter_claude::started_in_minimal_mode(&signed_out));
 }
