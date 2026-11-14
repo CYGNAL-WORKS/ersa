@@ -54,28 +54,27 @@ describe("describeError over a refusal with a reason", () => {
   });
 
   // verifies: PROTO-CORE-API-R80
-  // verifies: PROTO-CORE-API-R87
   it("names the one process that has the session open, in its own words", () => {
     expect(describeError(refused("open_elsewhere", "4242"))).toBe(
       "This session is open in another program, process 4242. Close it there, then try again.",
     );
   });
 
-  // verifies: PROTO-CORE-API-R87
+  // verifies: PROTO-CORE-API-R80
   it("names every process that has the session open, as Core lists them", () => {
     expect(describeError(refused("open_elsewhere", "4242, 4343"))).toBe(
       "This session is open in other programs, processes 4242, 4343. Close them there, then try again.",
     );
   });
 
-  // verifies: PROTO-CORE-API-R87
+  // verifies: PROTO-CORE-API-R80
   it("shows no detail that isn't a list of process ids", () => {
     const words = describeError(refused("open_elsewhere", "4242; rm -rf"));
     expect(words).toBe(t("errors.refusal.openElsewhereUnnamedError"));
     expect(words).not.toContain("4242");
   });
 
-  // verifies: PROTO-CORE-API-R88
+  // Core's side of a failed start carrying no reason is PROTO-CORE-API-R88, verified in Core's tests.
   it("shows the adapter's message for a send that could not start its backend, which has no reason", () => {
     const error = {
       kind: "rpc" as const,

@@ -1772,7 +1772,7 @@ describe("a refused send App's composer says", () => {
     expect(line).toBe("A message is already on its way to this session from another window. Try again once it's sent.");
   });
 
-  // verifies: PROTO-CORE-API-R88
+  // Core's side of a failed start carrying no reason is PROTO-CORE-API-R88, verified in Core's tests.
   it("says why the backend could not be started, from the adapter, when the refusal has no reason", async () => {
     const line = await sendRefused(refuseWith("session.send: the backend could not be started: Claude Code is not signed in"));
     expect(line).toBe("the backend could not be started: Claude Code is not signed in");
