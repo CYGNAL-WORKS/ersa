@@ -234,3 +234,135 @@ describe("the thinking row", () => {
     expect(part?.textContent).toBe("Checked the glossary first.");
   });
 });
+
+// Diff cards and the stopped state (issue #333, Test seams).
+const ws = "D:\\Projects\\ersa";
+const editCall: Event = {
+  type: "tool.requested",
+  tool_use_id: "e1",
+  name: "Edit",
+  input: { file_path: "D:\\Projects\\ersa\\src\\app.ts", old_string: "let a = 1;", new_string: "let a = 2;\nlet b = 3;" },
+  target: "D:\\Projects\\ersa\\src\\app.ts",
+  edits: [{ path: "D:\\Projects\\ersa\\src\\app.ts", old_text: "keep\nlet a = 1;", new_text: "keep\nlet a = 2;\nlet b = 3;" }],
+};
+const editPermission: Event = {
+  type: "permission.requested",
+  request_id: "p1",
+  tool_use_id: "e1",
+  tool_name: "Edit",
+  input: {},
+  suggestions: [],
+  flags: { default_to_no: false, suppress_always_allow: false, requires_user_interaction: false, classifier_approvable: false },
+};
+
+/** The lines of the diff under `row`, as "+text", "−text" or " text". */
+const diffLines = (row: HTMLElement) =>
+  [...openPart(row).querySelectorAll(".diff-line")].map((l) => `${l.querySelector(".diff-sign")?.textContent}${l.querySelector(".diff-text")?.textContent}`);
+
+describe("a diff card", () => {
+  // verifies: FLOW-READ-TRANSCRIPT-R09
+  it("is open at first on its change, with the lines added and removed on its row", () => {
+    show([editCall, { type: "tool.result", tool_use_id: "e1", content: "Updated.", is_error: false }], ws);
+    const row = screen.getByRole("button", { name: "Edit src\\app.ts, Done, 2 lines added, 1 line removed" });
+    expect(row.getAttribute("aria-expanded")).toBe("true");
+    expect(openPart(row).hasAttribute("data-open")).toBe(true);
+    expect(diffLines(row)).toEqual([" keep", "\u2212let a = 1;", "+let a = 2;", "+let b = 3;"]);
+    const marks = [...openPart(row).querySelectorAll(".diff-line")].map((l) => l.getAttribute("data-sign"));
+    expect(marks).toEqual(["kept", "removed", "added", "added"]);
+    expect(row.querySelector(".diff-added")?.textContent).toBe("+2");
+    expect(row.querySelector(".diff-removed")?.textContent).toBe("\u22121");
+    // Not the call's input fields: the change is what it asks.
+    expect(openPart(row).querySelector(".tool-fields")).toBeNull();
+    fireEvent.click(row);
+    expect(row.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  // verifies: FLOW-READ-TRANSCRIPT-R09
+  it("shows a file written whole as all added lines", () => {
+    show(
+      [{ type: "tool.requested", tool_use_id: "w1", name: "Write", input: {}, target: "D:\\Projects\\ersa\\new.md", edits: [{ path: "D:\\Projects\\ersa\\new.md", new_text: "# New\n\nText\n" }] }],
+      ws,
+    );
+    const row = screen.getByRole("button", { name: /^Write new\.md, Running, 3 lines added, 0 lines removed$/ });
+    expect(diffLines(row)).toEqual(["+# New", "+", "+Text"]);
+  });
+
+  // verifies: FLOW-READ-TRANSCRIPT-R09
+  it("says it waits for the user and still shows the change and its counts while its permission request is open", () => {
+    show([editCall, editPermission], ws);
+    const row = screen.getByRole("button", { name: "Edit src\\app.ts, Waiting for you, 2 lines added, 1 line removed" });
+    expect(row.querySelector('.tool-mark[data-state="waiting"] .glyph[data-tone="caution"]')).not.toBeNull();
+    expect(row.querySelector(".tool-detail")?.textContent).toBe("+2\u22121");
+    expect(diffLines(row)).toHaveLength(4);
+  });
+
+  // verifies: FLOW-READ-TRANSCRIPT-R09
+  it("keeps the change it proposed when it fails, with Failed as its detail and its error beneath", () => {
+    show([editCall, { type: "tool.result", tool_use_id: "e1", content: "String not found in file.", is_error: true }], ws);
+    const row = screen.getByRole("button", { name: /^Edit src\\app\.ts, Failed/ });
+    expect(row.querySelector(".tool-detail")?.textContent).toBe("Failed");
+    expect(diffLines(row)).toEqual([" keep", "\u2212let a = 1;", "+let a = 2;", "+let b = 3;"]);
+    expect(within(openPart(row)).getByText("Error")).toBeTruthy();
+    expect(within(openPart(row)).getByText("String not found in file.")).toBeTruthy();
+  });
+
+  // verifies: FLOW-READ-TRANSCRIPT-R09
+  it("names its first file and how many more, and heads each file's diff with its path", () => {
+    show(
+      [
+        {
+          type: "tool.requested",
+          tool_use_id: "m1",
+          name: "Apply",
+          input: {},
+          edits: [
+            { path: "D:\\Projects\\ersa\\a.ts", old_text: "a", new_text: "b" },
+            { path: "D:\\Projects\\ersa\\b.ts", new_text: "c" },
+            { path: "D:\\Projects\\ersa\\c.ts", new_text: "d" },
+          ],
+        },
+      ],
+      ws,
+    );
+    const row = screen.getByRole("button", { name: /^Apply a\.ts and 2 more, Running/ });
+    expect([...openPart(row).querySelectorAll(".diff-path")].map((p) => p.textContent)).toEqual(["a.ts", "b.ts", "c.ts"]);
+  });
+
+  // verifies: FLOW-READ-TRANSCRIPT-R13
+  it("says above its lines that a change is made everywhere its text occurs, and only then", () => {
+    const everywhere: Event = { ...editCall, tool_use_id: "e2", edits: [{ path: "D:\\Projects\\ersa\\src\\app.ts", old_text: "foo", new_text: "bar", every_occurrence: true }] } as Event;
+    show([editCall, everywhere], ws);
+    const [once, every] = screen.getAllByRole("button", { name: /^Edit src/ });
+    if (!once || !every) throw new Error("two cards expected");
+    expect(openPart(once).querySelector(".diff-note")).toBeNull();
+    const note = openPart(every).querySelector(".diff-change > .diff-note");
+    expect(note?.textContent).toBe("Replaces every occurrence");
+    // Above the first line of the change.
+    expect(note?.nextElementSibling?.querySelector(".diff-line")).not.toBeNull();
+  });
+});
+
+describe("a call that never finished", () => {
+  const turnEnd: Event = { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 4000, is_error: false };
+
+  // verifies: FLOW-READ-TRANSCRIPT-R16
+  it("shows as stopped when its turn ends without its result, with no ring and no clock", () => {
+    show([read, turnEnd], ws);
+    const row = screen.getByRole("button", { name: "Read docs\\GLOSSARY.md, Stopped" });
+    expect(row.querySelector(".tool-mark")?.getAttribute("data-state")).toBe("stopped");
+    expect(row.querySelector(".tool-mark .icon")).toBeNull();
+    expect(row.querySelector(".tool-mark .glyph")).not.toBeNull();
+    expect(row.querySelector(".tool-detail")?.textContent).toBe("Stopped");
+  });
+
+  // verifies: FLOW-READ-TRANSCRIPT-R16
+  it("shows as stopped when its session ends, a diff card keeping its change", () => {
+    show([read, editCall, { type: "session.ended", reason: "backend_exited" }], ws);
+    const tool = screen.getByRole("button", { name: "Read docs\\GLOSSARY.md, Stopped" });
+    expect(tool.querySelector(".tool-mark .icon")).toBeNull();
+    const diff = screen.getByRole("button", { name: "Edit src\\app.ts, Stopped, 2 lines added, 1 line removed" });
+    expect(diff.querySelector(".tool-mark .icon")).toBeNull();
+    expect(diff.querySelector(".tool-detail")?.textContent).toBe("Stopped");
+    expect(diffLines(diff)).toHaveLength(4);
+  });
+});

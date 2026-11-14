@@ -654,6 +654,10 @@ Done
 
 Failed
 
+### `transcript.tool.stoppedStatus`
+
+Stopped
+
 ### `transcript.tool.waitingLabel`
 
 Waiting for you
@@ -697,6 +701,52 @@ No output
 ### `transcript.tool.duration.hoursMinutesLabel`
 
 {hours}h {minutes}m
+
+### `transcript.diff.addedDetail`
+
++{count}
+
+### `transcript.diff.removedDetail`
+
+−{count}
+
+### `transcript.diff.filesLabel`
+
+#### `one`
+
+{path} and {count} more
+
+#### `other`
+
+{path} and {count} more
+
+### `transcript.diff.countsLabel`
+
+{row}, {added}, {removed}
+
+### `transcript.diff.addedPart`
+
+#### `one`
+
+{count} line added
+
+#### `other`
+
+{count} lines added
+
+### `transcript.diff.removedPart`
+
+#### `one`
+
+{count} line removed
+
+#### `other`
+
+{count} lines removed
+
+### `transcript.diff.everyOccurrenceLabel`
+
+Replaces every occurrence
 
 ### `transcript.permission.nameLabel`
 
