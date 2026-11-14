@@ -62,11 +62,11 @@ const isPath = (text: string) => WINDOWS_PATH.test(text) || (text.startsWith("/"
 /**
  * The target as the row shows it. The event says only what the call acts on, not what kind of thing that is, and the
  * Interface never reads a tool's input to draw a card (PROTO-AGENT-EVENTS). A target inside the session's workspace
- * folder, with no space in the part after the folder, is a path, shown relative to it (FLOW-READ-TRANSCRIPT-R08),
- * compared with `\` and `/` alike, as the backend and Core may each write them, and, for a Windows folder, without
- * case, as Windows compares them; the rest keeps the target's own spelling. The folder's own name may hold a space;
- * past it, a space reads as a command's arguments (`scripts/run.sh --flag`), which stays whole. Any other target is
- * taken for a path when it is spelled as an absolute one, so a command or a search that names a path stays as it is.
+ * folder is a path, shown relative to it (FLOW-READ-TRANSCRIPT-R08), compared with `\` and `/` alike, as the backend
+ * and Core may each write them, and, for a Windows folder, without case, as Windows compares them; the rest keeps the
+ * target's own spelling, spaces included ("docs/Meeting notes.md"). A command that runs a program from the workspace
+ * is shown so too, as the event can't tell it from a path (docs/briefs/INBOX.md). Any other target is taken for a path
+ * when it is spelled as an absolute one, so a command or a search that names a path stays as it is.
  */
 export function shownTarget(target: string, workspace: string | undefined): ShownTarget {
   if (workspace) {
@@ -78,7 +78,7 @@ export function shownTarget(target: string, workspace: string | undefined): Show
     const root = norm(workspace).replace(/\/+$/, "");
     // Inside means past the folder and a separator: a sibling sharing its prefix ("ersa-old") is outside.
     const rest = target.slice(root.length + 1);
-    if (root !== "" && norm(target).startsWith(`${root}/`) && rest !== "" && !/\s/.test(rest)) return { text: rest, path: true };
+    if (root !== "" && norm(target).startsWith(`${root}/`) && rest !== "") return { text: rest, path: true };
   }
   return { text: target, path: isPath(target) };
 }

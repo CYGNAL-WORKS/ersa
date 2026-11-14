@@ -126,6 +126,9 @@ describe("a tool card's target", () => {
     });
     expect(shownTarget("d:\\projects\\Ersa\\a.txt", "D:/Projects/ersa")).toEqual({ text: "a.txt", path: true });
     expect(shownTarget("/home/me/ersa/src/main.rs", "/home/me/ersa")).toEqual({ text: "src/main.rs", path: true });
+    // A file whose name has a space, in Windows and POSIX folders.
+    expect(shownTarget("D:\\Projects\\ersa\\docs\\Meeting notes.md", "D:\\Projects\\ersa")).toEqual({ text: "docs\\Meeting notes.md", path: true });
+    expect(shownTarget("/home/me/ersa/docs/Meeting notes.md", "/home/me/ersa")).toEqual({ text: "docs/Meeting notes.md", path: true });
     // A folder with a space in its name: inside it is a path whatever its spelling.
     expect(shownTarget("/Users/jane/My Projects/app/src/main.rs", "/Users/jane/My Projects/app")).toEqual({ text: "src/main.rs", path: true });
   });
@@ -147,8 +150,6 @@ describe("a tool card's target", () => {
       path: false,
     });
     expect(shownTarget("**/*.md", "D:\\Projects\\ersa")).toEqual({ text: "**/*.md", path: false });
-    // A program in the workspace, run with arguments, is a command and stays whole.
-    expect(shownTarget("/home/me/ersa/scripts/run.sh --flag", "/home/me/ersa")).toEqual({ text: "/home/me/ersa/scripts/run.sh --flag", path: false });
     expect(shownTarget("https://example.com/a", "D:\\Projects\\ersa")).toEqual({ text: "https://example.com/a", path: false });
   });
 

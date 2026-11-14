@@ -263,6 +263,9 @@ export const enUS = {
       inputLabel: "Input",
       outputLabel: "Output",
       errorLabel: "Error",
+      // Under its label, in place of a part with nothing in it.
+      noInputLabel: "No input",
+      noOutputLabel: "No output",
       // How long a call took or has run, in its two largest units, abbreviated (CONTENT.md).
       duration: {
         secondsLabel: "{seconds}s",
