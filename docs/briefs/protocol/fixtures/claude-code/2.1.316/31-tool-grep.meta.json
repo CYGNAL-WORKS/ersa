@@ -1,0 +1,114 @@
+{
+  "recorded_at": "2026-11-14T03:42:00.186Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "2d2fded7-be42-422f-9ea7-fabbcf122b08",
+  "session_record": "record/31-tool-grep.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command",
+    "queue-operation",
+    "system/compact_boundary"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 4077,
+  "stderr": "",
+  "stdout_lines": 35,
+  "stdout_timing_ms": [
+    728,
+    1032,
+    1036,
+    1657,
+    1657,
+    1657,
+    2099,
+    2099,
+    2106,
+    2146,
+    2155,
+    2155,
+    2157,
+    2285,
+    2297,
+    2814,
+    3047,
+    3194,
+    3194,
+    3394,
+    3394,
+    3394,
+    3395,
+    3395,
+    3395,
+    3396,
+    3396,
+    3396,
+    3396,
+    3396,
+    3398,
+    3398,
+    3402,
+    3402,
+    3410
+  ],
+  "sent": [
+    {
+      "t": 10,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 728,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Use the Grep tool once to search for the pattern 'scratch' in this repository. Make exactly that one tool call, then say done.\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Use the Grep tool once to search for the pattern 'scratch' in this repository. Make exactly that one tool call, then say done.",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    }
+  ]
+}
