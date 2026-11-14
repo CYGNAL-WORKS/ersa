@@ -1,0 +1,6 @@
+{"backend_version":"2.1.316","event":{"origin":"human","text":"Write an essay of about 400 words on the history of lighthouses. Do not use any tools.","type":"user.message"},"message_id":"99daf833-0a68-482c-bb20-550d2a4eec4e","ts":"2026-11-14T01:06:23.701Z"}
+{"backend_version":"2.1.316","event":{"block_id":"msg_011Ch1vY7LMWtvjDTsco3RAk/0","final":true,"type":"assistant.thinking"},"message_id":"220fa196-b235-4768-9963-39648f892ea3","ts":"2026-11-14T01:06:24.865Z"}
+{"backend_version":"2.1.316","event":{"block_id":"msg_011Ch1vY7LMWtvjDTsco3RAk/1","final":true,"text":"#","type":"assistant.text"},"message_id":"668bf5b7-438b-4342-92f4-349f7bf0e0d8","ts":"2026-11-14T01:06:24.884Z"}
+{"backend_version":"2.1.316","event":{"origin":"system","text":"[Request interrupted by user]","type":"user.message"},"message_id":"4548e4be-9dbc-440f-beb9-0a9421f94eb8","ts":"2026-11-14T01:06:24.886Z"}
+{"backend_version":"2.1.316","event":{"origin":"human","text":"Now reply with the single word: second","type":"user.message"},"message_id":"5f8dbf53-a41f-465b-b8bd-44227768e0c1","ts":"2026-11-14T01:06:24.907Z"}
+{"backend_version":"2.1.316","event":{"block_id":"msg_011Ch1vYB3b4zedds7Ew6yLo/0","final":true,"text":"second","type":"assistant.text"},"message_id":"6f431d50-3f0f-4f96-9433-aa9b80408560","ts":"2026-11-14T01:06:25.921Z"}
