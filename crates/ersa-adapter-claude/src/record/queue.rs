@@ -27,7 +27,7 @@ use time::format_description::well_known::Rfc3339;
 /// a piece at a time: each read goes on from where the last one stopped, so
 /// a long record is read whole only once.
 #[derive(Debug, Clone)]
-pub struct WaitingCount {
+pub(crate) struct WaitingCount {
     /// When the adapter started the CLI process: entries stamped earlier
     /// belong to an earlier process.
     since: OffsetDateTime,
@@ -42,7 +42,7 @@ pub struct WaitingCount {
 impl WaitingCount {
     /// A count for a CLI process started at `since`, before any of its
     /// record is read.
-    pub fn new(since: OffsetDateTime) -> Self {
+    pub(crate) fn new(since: OffsetDateTime) -> Self {
         WaitingCount {
             since,
             read_to: 0,
@@ -52,7 +52,7 @@ impl WaitingCount {
     }
 
     /// How many messages the CLI holds, as of the last read.
-    pub fn waiting(&self) -> u32 {
+    pub(crate) fn waiting(&self) -> u32 {
         // Never below zero, whatever the record holds.
         self.enqueued.saturating_sub(self.taken)
     }
@@ -60,14 +60,14 @@ impl WaitingCount {
     /// How many messages the CLI has taken since it started, as of the last
     /// read: grows when the CLI writes the `enqueue` for a message just
     /// handed over.
-    pub fn enqueued(&self) -> u32 {
+    pub(crate) fn enqueued(&self) -> u32 {
         self.enqueued
     }
 
     /// Reads what the record at `path` has gained since the last read and
     /// returns the messages waiting. A record shorter than what was already
     /// read is a new file, so it is counted again from its start.
-    pub fn read(&mut self, path: &Path) -> io::Result<u32> {
+    pub(crate) fn read(&mut self, path: &Path) -> io::Result<u32> {
         let mut file = File::open(path)?;
         if file.metadata()?.len() < self.read_to {
             *self = WaitingCount::new(self.since);
@@ -78,7 +78,7 @@ impl WaitingCount {
 
     /// Reads the record's lines from `reader`, which starts where the last
     /// read stopped, and returns the messages waiting.
-    pub fn read_from(&mut self, mut reader: impl BufRead) -> io::Result<u32> {
+    pub(crate) fn read_from(&mut self, mut reader: impl BufRead) -> io::Result<u32> {
         let mut line = Vec::new();
         loop {
             line.clear();
