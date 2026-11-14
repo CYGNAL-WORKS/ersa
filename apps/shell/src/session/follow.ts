@@ -8,7 +8,7 @@
 import type { Envelope } from "../protocol/agent-events.gen";
 import type { Attachment, SessionSendProgressNotification } from "../protocol/core-api.gen";
 import { hasSeq } from "../core/checks";
-import { type BridgeError, type CoreClient, describeError } from "../core/client";
+import { type BridgeError, type CoreClient, describeError, refusalOf, stoppedBeforeSent } from "../core/client";
 import { type Transcript, apply, emptyTranscript } from "./transcript";
 
 /** The key that starts the notice saying Core no longer holds a session's earliest events. */
@@ -43,7 +43,7 @@ export function progressOf(notification: SessionSendProgressNotification): SendP
 export function sendFailure(error: unknown): Exclude<Sending, { state: "sending" }> {
   const bridge = error as BridgeError | undefined;
   if (bridge?.kind === "unavailable" && bridge.sent) return { state: "unknown" };
-  const data = bridge?.kind === "rpc" ? bridge.error.data : undefined;
+  const data = refusalOf(error);
   if (data?.kind === "delivery_unknown") return { state: "unknown" };
   const index = data?.kind === "attachment_refused" && Number.isInteger(data.index) ? data.index : undefined;
   return index === undefined ? { state: "failed", message: describeError(error) } : { state: "failed", message: describeError(error), index };
@@ -235,8 +235,8 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         set((v) => ({ ...v, message: undefined, turnPending: pending || undefined }));
         return true;
       } catch (error) {
-        // Only Core's cancel, answered as an invalid state, is the stop's doing; any other failure is still shown.
-        const stopped = stopping && (error as BridgeError | undefined)?.kind === "rpc" && (error as Extract<BridgeError, { kind: "rpc" }>).error.data?.kind === "invalid_state";
+        // Only Core's cancel is the stop's doing; any other failure, even after a stop, is still shown.
+        const stopped = stopping && stoppedBeforeSent(error);
         set((v) => ({ ...v, message: stopped ? undefined : sendFailure(error) }));
         return false;
       } finally {
