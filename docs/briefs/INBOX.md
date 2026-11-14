@@ -8,6 +8,8 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-14 PROTO-CLAUDE-CODE-STREAM-R47: R47 does not say which entries mark "a turn that began after a time" nor whether a subagent's entries count. Built meanwhile: a turn's start is a `user` entry carrying `permissionMode` (only prompts carry it, stamped when their turn starts, fixtures 22, 23), a reply's turn began at the latest such entry not after it, and `isSidechain` entries are skipped, since a subagent's model is not the session's.
+- [ ] 2026-11-14 PROTO-CLAUDE-CODE-STREAM-R47: R47 gives one time, but PROTO-CORE-API-R71 keeps a time per value and counts a value Core never requested from any turn. Built meanwhile: a time per value; a relaunch reads back until each value is found or the record reaches Core's request for it, and a listing whose tail holds a value but not its turn's start reports it only when Core made no request for it.
 
 
 ## Resolved recently (optional, trimmed in planning passes)

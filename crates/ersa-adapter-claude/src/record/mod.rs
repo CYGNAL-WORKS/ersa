@@ -12,6 +12,9 @@
 //!   finds a session's record and does that to it.
 //! - [`list_sessions`] lists a directory's sessions, reading only the head and
 //!   tail of each record.
+//! - [`record_settings`] reads back what a record says of its session's
+//!   model, effort and permission mode, for a relaunch; a listing reads
+//!   them from the tail.
 //! - [`live_session`] says whether a running CLI has a session open.
 //! - [`append_title`] renames a session no CLI of Ersa's has open, and
 //!   [`delete_record`] deletes one for the user's Delete: the only writes
@@ -23,6 +26,7 @@
 mod listing;
 mod projection;
 mod registry;
+mod settings;
 
 use std::collections::VecDeque;
 use std::fs;
@@ -39,6 +43,25 @@ pub(crate) use listing::MAX_TITLE_CHARS;
 pub use listing::{SessionList, SessionSummary, list_sessions, summarize_session};
 pub use projection::{RecordEvent, conversation_end_from, project_record, project_record_from};
 pub use registry::{LiveCheck, LiveSession, live_session};
+
+/// What session `session_id`'s record says of its model, effort and
+/// permission mode, read back from its end as far as Core's request for
+/// each (PROTO-CLAUDE-CODE-STREAM-R47). A session with no record has none.
+pub fn record_settings(
+    claude_home: &Path,
+    cwd: &str,
+    session_id: &str,
+    requested: ersa_adapter::Requested,
+) -> io::Result<ersa_adapter::RecordedSettings> {
+    let Some(path) = find_record(claude_home, cwd, session_id)? else {
+        return Ok(Default::default());
+    };
+    match settings::read_back(&path, requested) {
+        // The CLI's retention deleted it since it was found.
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Default::default()),
+        read => read,
+    }
+}
 
 /// The longest encoded directory name the CLI uses whole; a longer one is cut
 /// and given a hash of the full path. Verified on 2.1.316: a 222-character
