@@ -129,6 +129,7 @@ async fn starts_the_cli_with_every_flag_explicit() {
             "stdio",
             "--await-initialize",
             "--include-partial-messages",
+            "--replay-user-messages",
             "--model",
             "haiku",
         ]
