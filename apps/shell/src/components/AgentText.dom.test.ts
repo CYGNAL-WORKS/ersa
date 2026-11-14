@@ -100,11 +100,19 @@ describe("what Ersa does not show as itself", () => {
 
   // verifies: FLOW-READ-TRANSCRIPT-R02
   it("shows an image as its alternative text linked to its address, never loaded", () => {
-    const page = show("![The build graph](https://example.com/graph.png) and ![](https://example.com/bare.png)");
+    const page = show("![The build graph](https://example.com/graph.png)");
     expect(page.querySelector("img")).toBeNull();
     expect(screen.getByRole("link", { name: "The build graph" }).getAttribute("href")).toBe("https://example.com/graph.png");
-    // With no alternative text, its address is the text.
-    expect(screen.getByRole("link", { name: "https://example.com/bare.png" }).getAttribute("href")).toBe("https://example.com/bare.png");
+  });
+
+  // verifies: FLOW-READ-TRANSCRIPT-R14
+  it("shows an image with no alternative text as its address, linked to it", () => {
+    const page = show("![](https://example.com/bare.png)");
+    expect(page.querySelector("img")).toBeNull();
+    // The visible text, not only the name: a link without text would take its name from its tooltip.
+    const link = page.querySelector("a");
+    expect(link?.textContent).toBe("https://example.com/bare.png");
+    expect(link?.getAttribute("href")).toBe("https://example.com/bare.png");
   });
 });
 
@@ -183,6 +191,22 @@ describe("Copy on a code block", () => {
     expect(copy.getAttribute("title")).toBe("Copied");
     fireEvent.pointerLeave(copy);
     expect(copy.getAttribute("aria-label")).toBe("Copy code");
+  });
+
+  // verifies: FLOW-READ-TRANSCRIPT-R15
+  it("stays as it was, and doesn't say it copied, when the clipboard refuses the write", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new DOMException("Write permission denied.", "NotAllowedError")) },
+    });
+    show("```\nx\n```");
+    const copy = screen.getByRole("button", { name: "Copy code" });
+    await act(async () => {
+      fireEvent.click(copy);
+    });
+    expect(copy.getAttribute("aria-label")).toBe("Copy code");
+    expect(copy.getAttribute("title")).toBe("Copy code");
+    expect(copy.hasAttribute("data-copied")).toBe(false);
   });
 
   // verifies: FLOW-READ-TRANSCRIPT-R04
