@@ -287,7 +287,8 @@
 /* The summary, in prose and ink-muted, beneath the row. */
 .thinking-summary {
   margin: 0;
-  padding-top: var(--space-xs);
+  /* Under the words, past the mark's place. */
+  padding: var(--space-xs) 0 0 calc(var(--size-icon) + var(--space-sm));
   font-family: var(--type-prose-family);
   font-size: var(--type-prose-size);
   line-height: var(--type-prose-leading);
