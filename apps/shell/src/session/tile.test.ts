@@ -2,8 +2,8 @@
 // Context; docs/design/RAIL.md, A tile). LAY-SHELL is a layout brief and carries no requirement IDs.
 
 import { describe, expect, it } from "vitest";
-import type { Session } from "../protocol/core-api.gen";
-import type { BackendChoices } from "./controls";
+import type { BackendInfo, Session } from "../protocol/core-api.gen";
+
 import { contextUsed, nearFull, tileOf } from "./tile";
 
 type Tile = Session["tile"];
@@ -20,6 +20,7 @@ const session = (tile: Partial<Tile> = {}, rest: Partial<Session> = {}): Session
   created_at: "2026-11-01T09:00:00Z",
   archived: false,
   pinned: false,
+  unseen: false,
   tile: { state: "running", pending: [], ...tile },
   ...rest,
 });
@@ -127,7 +128,7 @@ describe("a tile's values as reported", () => {
   });
 
   it("names the backend by its own name, or its id while its name isn't known", () => {
-    const backends = { local: [{ name: "claude-code", label: "Claude Code" } as BackendChoices] };
+    const backends = { local: [{ name: "claude-code", label: "Claude Code" } as BackendInfo] };
     expect(tileOf(session(), backends).backend).toBe("Claude Code");
     expect(tileOf(session()).backend).toBe("claude-code");
     expect(tileOf(session({}, { host_id: "devbox" }), backends).backend).toBe("claude-code");
@@ -165,5 +166,22 @@ describe("a tile while its session is being deleted (LAY-SHELL, Being deleted)",
   it("reads Couldn't delete with the error mark once the deletion failed", () => {
     const view = tileOf(session({ state: "idle" }, { deleting: "failed" }));
     expect(view).toMatchObject({ mark: "error", tone: "danger", phrase: "Couldn't delete", titleMuted: false });
+  });
+});
+
+describe("a tile while a fork of its session is on its way (FLOW-FORK-SESSION, step 2)", () => {
+  it("reads Forking with the starting arc in ink-muted over a state with no mark of its own", () => {
+    for (const state of ["idle", "ended"] as const) {
+      const view = tileOf(session({ state }), {}, true);
+      expect(view.phrase).toBe("Forking…");
+      expect(view.mark).toBe("starting");
+      expect(view.tone).toBe("muted");
+    }
+  });
+
+  it("keeps a state that has a mark, since the original keeps its state (step 4)", () => {
+    expect(tileOf(session({ state: "running" }), {}, true).mark).toBe("working");
+    expect(tileOf(session({ state: "error" }), {}, true).phrase).toBe("Error");
+    expect(tileOf(session({ pending: [question] }), {}, true).mark).toBe("needsYou");
   });
 });

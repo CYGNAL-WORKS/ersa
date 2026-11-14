@@ -95,6 +95,26 @@ impl CoreLocation {
         })
     }
 
+    /// A Core of the window's own on the user's endpoint labelled `label`,
+    /// keeping its data and log in `data_dir`: the daily build's (ADR 0035).
+    /// Launched when nothing serves it, as the default one is.
+    pub fn own(label: &str, data_dir: &Path) -> io::Result<CoreLocation> {
+        Ok(CoreLocation {
+            program: default_program()?,
+            endpoint: ersa_core::platform::labelled_endpoint(label)?,
+            serve_args: vec![
+                "--endpoint".into(),
+                label.into(),
+                "--data-dir".into(),
+                data_dir.as_os_str().to_owned(),
+            ],
+            env: Vec::new(),
+            log_file: Some(data_dir.join("core.log")),
+            start_timeout: START_TIMEOUT,
+            launch: true,
+        })
+    }
+
     /// A Core someone else runs on the user's endpoint labelled `label`
     /// (`ersa-core serve` or `replay --endpoint <label>`): attach only,
     /// never launch.

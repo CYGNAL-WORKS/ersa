@@ -17,6 +17,7 @@ const s = (id: string, state: string, pending: Tile["pending"] = []): Session =>
   created_at: "2026-11-01T09:00:00Z",
   archived: false,
   pinned: false,
+  unseen: false,
   tile: { state: state as Tile["state"], pending },
 });
 

@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
+import { Component, type CSSProperties, type ReactNode, type RefObject, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { ChevronDown, Ellipsis, Pin, Plus, ShieldAlert } from "lucide-react";
 import { t } from "../catalog";
 import type { ProjectsView, SessionsView } from "../core/connection";
@@ -7,7 +7,7 @@ import type { Sending } from "../session/follow";
 import { type ArrangeProblem, DEFAULT_ARRANGEMENT, type GroupBy, type Show, type SortBy } from "../session/arrangement";
 import { type Collapsed, type DateKey, collapsedOf, sortValueOf, treeOf } from "../session/tree";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { type Place, arrive, placesOf, regroup, slideFrom } from "../theme/motion";
+import { HeightEase, type Place, arrive, placesOf, rearrange } from "../theme/motion";
 import { Icon, IconButton } from "./Icon";
 import { Menu, type MenuClose } from "./Menu";
 import { type Backends, type ForcedTile, type OpenShelf, SessionTile, TileItem } from "./SessionTile";
@@ -87,19 +87,16 @@ export function RailTree(props: RailTreeProps) {
   const { projects, sessions, workspaces, placing, reading, activeId, onSelect, backends, unseen, force, shelf, onChevron, onCloseShelf } = props;
   const { archiving, pinning, initialTileMenu, initialTileDraft, arrangeProblem } = props;
   const root = useRef<HTMLElement>(null);
-  // The pin on its way: where every tile and heading sat when it was chosen, and whether focus was in the rail then.
-  // One at a time: while it is saved, Pin and Unpin are unavailable on every tile, so each move is measured from the
-  // rail as the last one left it.
-  const pending = useRef<{ id: string; places: Map<string, Place>; focused: boolean }>(undefined);
+  // The pin on its way, and whether focus was in the rail when it was chosen. One at a time: while it is saved, Pin
+  // and Unpin are unavailable on every tile.
+  const pending = useRef<{ id: string; focused: boolean }>(undefined);
   useLayoutEffect(() => {
     const pin = pending.current;
     const el = root.current;
     if (!pin || !el || pinning?.[pin.id]?.state === "sending") return;
     pending.current = undefined;
-    // Core refused it: nothing moved, so nothing slides.
+    // Core refused it: nothing moved. Once Core has it, the tile moves as the rail rearranges (below).
     if (pinning?.[pin.id]?.state === "failed") return;
-    // Once Core has the pin, each tile and heading slides from where it sat to its new place (DESIGN.md, Motion).
-    slideFrom(el, pin.places);
     // The tile is drawn afresh in its new group, so the focus its menu gave back is lost: it goes to the tile in its
     // new place or, when that group is collapsed, to the group's heading.
     const lost = document.activeElement === null || document.activeElement === document.body;
@@ -130,7 +127,7 @@ export function RailTree(props: RailTreeProps) {
     for (const item of items) arriving.current.delete(item.dataset.sessionId ?? "");
     arrive(el, items);
   });
-  // Pin and Unpin first measure the rail, so each tile slides from where it sat once Core has the pin.
+  // Pin and Unpin note whether focus is in the rail, to give it back to the moved tile once Core has the pin.
   const actionsOf = (s: Session): TileActions => {
     const actions = tileActions(s, props);
     const { pin } = actions;
@@ -138,35 +135,40 @@ export function RailTree(props: RailTreeProps) {
     const onChoose = () => {
       const el = root.current;
       // Only a choice made with focus in the rail (in the tile's menu) has focus to give back.
-      if (el) pending.current = { id: s.id, places: placesOf(el), focused: el.contains(document.activeElement) };
+      if (el) pending.current = { id: s.id, focused: el.contains(document.activeElement) };
       pin.onChoose();
     };
     return { ...actions, pin: { ...pin, onChoose } };
   };
   const leaving = useLeavingFocus(root, (section) => section.closest(".rail")?.querySelector<HTMLElement>(".rail-new-session"));
   const { groupBy = DEFAULT_ARRANGEMENT.groupBy, sortBy = DEFAULT_ARRANGEMENT.sortBy, show = DEFAULT_ARRANGEMENT.show, now = new Date() } = props;
-  // A new grouping or filter: where every tile and heading sat before it, taken while the page still shows the old
-  // one (this render has not reached it yet), so each slides to its new place once it has (FLOW-ORGANIZE-SESSIONS,
-  // step 4). So too when what the sort reads of a session differs from the listing before, as it does when the user
-  // chooses another sort or a turn ends while sorted by last activity (DESIGN.md, Motion); a tile's state is no part
-  // of it (R10).
-  const arranged = `${groupBy}/${show}`;
+  // The rail rearranges when the grouping or filter changes, when the day turns while grouped by date, when Core has a
+  // session's pin, or when what the sort reads of a session differs from the listing before, as it does when the
+  // user chooses another sort or a turn ends while sorted by last activity (FLOW-ORGANIZE-SESSIONS, step 4;
+  // DESIGN.md, Motion); a tile's state is no part of it (R10). Then each tile and heading slides from where it sat
+  // just before this commit, and what the commit takes away fades out there. Only what this commit takes away: one
+  // that went earlier, as a tile archived while a pin saves, is long gone and stays gone.
+  const arranged = `${groupBy}/${show}/${groupBy === "date" ? now.toDateString() : ""}`;
   const lastArranged = useRef(arranged);
-  const sortValues = sessions.state === "ready" ? new Map(sessions.sessions.map((s) => [s.id, sortValueOf(s, sortBy)])) : undefined;
-  const lastSortValues = useRef(sortValues);
-  const wereSorted = lastSortValues.current;
-  lastSortValues.current = sortValues;
-  const moves = useRef<{ from: Map<string, Place>; slide: typeof regroup }>(undefined);
+  const placings = sessions.state === "ready" ? new Map(sessions.sessions.map((s) => [s.id, `${s.pinned}/${sortValueOf(s, sortBy)}`])) : undefined;
+  const lastPlacings = useRef(placings);
+  const werePlaced = lastPlacings.current;
+  lastPlacings.current = placings;
+  // Kept until the commit's layout effect uses it, so a render React throws away does not lose it.
+  const rearranging = useRef(false);
   if (lastArranged.current !== arranged) {
     lastArranged.current = arranged;
-    if (root.current) moves.current = { from: placesOf(root.current), slide: regroup };
-  } else if (root.current && wereSorted && sortValues && [...sortValues].some(([id, value]) => wereSorted.has(id) && wereSorted.get(id) !== value)) {
-    moves.current = { from: placesOf(root.current), slide: slideFrom };
+    rearranging.current = true;
+  } else if (werePlaced && placings && [...placings].some(([id, placing]) => werePlaced.has(id) && werePlaced.get(id) !== placing)) {
+    rearranging.current = true;
   }
+  const before = useRef<Map<string, Place>>(undefined);
   useLayoutEffect(() => {
-    const move = moves.current;
-    moves.current = undefined;
-    if (move && root.current) move.slide(root.current, move.from);
+    const from = before.current;
+    before.current = undefined;
+    if (!rearranging.current) return;
+    rearranging.current = false;
+    if (from && root.current) rearrange(root.current, from);
   });
   const listed = projects.state === "ready" ? projects.projects : [];
   const all = sessions.state === "ready" ? sessions.sessions : [];
@@ -177,18 +179,19 @@ export function RailTree(props: RailTreeProps) {
   const looseShown = groupBy !== "project" || projects.state === "error" || (projects.state === "ready" && !placing);
   // Nothing the filter shows (FLOW-ORGANIZE-SESSIONS, Nothing to show; LAY-SHELL, Loading, empty and failed). Showing
   // active with no sessions at all, project headings say enough where there are any, and with no projects their own
-  // note does. Showing all, it waits for the projects, so the note is not drawn beneath Loading and then jumps up.
+  // note does. None is drawn while the projects load, so no note sits beneath Loading and then jumps up.
   const nothing = sessions.state === "ready" && tree.pinned.length === 0 && tree.groups.every((g) => g.sessions.length === 0) && tree.loose.length === 0;
   const blank = projects.state === "ready" && listed.length > 0 && tree.groups.length === 0;
-  const noneShown = !nothing
-    ? undefined
-    : show === "archived"
-      ? t("rail.tree.noArchivedEmpty")
-      : show === "active" && (all.length > 0 || blank)
-        ? t("rail.tree.noActiveEmpty")
-        : show === "all" && projects.state !== "loading"
-          ? t("rail.tree.noSessionsEmpty")
-          : undefined;
+  const noneShown =
+    !nothing || projects.state === "loading"
+      ? undefined
+      : show === "archived"
+        ? t("rail.tree.noArchivedEmpty")
+        : show === "active" && (all.length > 0 || blank)
+          ? t("rail.tree.noActiveEmpty")
+          : show === "all"
+            ? t("rail.tree.noSessionsEmpty")
+            : undefined;
   // A new session whose workspace is being read waits too, so it slides in once, at its place. Tiles already drawn stay.
   const isNew = (s: Session) => seen.current !== undefined && (!seen.current.has(s.id) || arriving.current.has(s.id));
   const loose = tree.loose.filter((s) => !(reading && workspaces[s.workspace_id] === undefined && isNew(s)));
@@ -222,11 +225,12 @@ export function RailTree(props: RailTreeProps) {
               shelf={open && { tone: open.tone, domId: shelfDomId }}
               onChevron={onChevron}
               {...actionsOf(s)}
+              forking={props.forking?.[s.id]?.state === "sending"}
               initialMenu={initialTileMenu === s.id}
               initialDraft={initialTileDraft?.id === s.id ? initialTileDraft.draft : undefined}
             />
           </ErrorBoundary>
-          <Refusals session={s} pinning={pinning} archiving={archiving} />
+          <Refusals session={s} pinning={pinning} archiving={archiving} forking={props.forking} />
           </>
         )}
       </TileItem>
@@ -241,69 +245,92 @@ export function RailTree(props: RailTreeProps) {
   const pinned = folded(PINNED_KEY, tree.pinned);
   const pinnedEmpty = tree.pinned.length === 0;
   return (
-    <section ref={root} className="rail-tree" aria-label={t("rail.tree.label")} {...leaving}>
-      {projects.state === "loading" && <p className="rail-note">{t("rail.tree.loadingProgress")}</p>}
-      {projects.state === "error" && <Problem lead={t("rail.tree.projectsError")} reason={projects.message} />}
-      {sessions.state === "error" && <Problem lead={t("rail.tree.sessionsError")} reason={sessions.message} />}
-      {projects.state === "ready" && listed.length === 0 && (
-        <p className="rail-note">
-          {t("rail.tree.noProjectsEmpty")}
-          <span className="rail-note-detail">{t("rail.tree.noProjectsHint")}</span>
-        </p>
-      )}
-      {arrangeProblem && (
-        <Problem lead={arrangeProblem.kind === "read" ? t("rail.tree.arrangeReadError") : t("rail.tree.arrangeSaveError")} reason={arrangeProblem.message} />
-      )}
-      {/* Drawn once the sessions are read even with nothing in it, so the Pinned group's frame is there to open. */}
-      {(sessions.state === "ready" || tree.groups.length > 0) && (
-        <ul className="rail-projects">
-          {/* Always drawn, so it can open and fade in as the first session is pinned and close and fade out as the
-              last is unpinned (DESIGN.md: nothing pops in). Empty, it is closed, out of reach and not read. */}
-          <li className="rail-pinned" data-empty={pinnedEmpty || undefined} inert={pinnedEmpty || undefined} aria-hidden={pinnedEmpty || undefined}>
-            <div className="rail-project" data-collapsed={pinned.folded || undefined}>
-              <div className="rail-heading" data-slide={headingSlide(PINNED_KEY)}>
-                <GroupToggle
-                  folded={pinned.folded}
-                  controls={pinnedTiles}
-                  summary={collapsedOf(tree.pinned)}
-                  toggle={pinned.toggle}
-                  name={t("rail.group.pinnedHeading")}
-                >
-                  <span className="rail-heading-pin">
-                    <Icon icon={Pin} size="icon-sm" />
-                  </span>
-                </GroupToggle>
+    <BeforeCommit root={root} measure={rearranging.current} places={before}>
+      <section ref={root} className="rail-tree" aria-label={t("rail.tree.label")} {...leaving}>
+        {projects.state === "loading" && <p className="rail-note">{t("rail.tree.loadingProgress")}</p>}
+        {projects.state === "error" && <Problem lead={t("rail.tree.projectsError")} reason={projects.message} />}
+        {sessions.state === "error" && <Problem lead={t("rail.tree.sessionsError")} reason={sessions.message} />}
+        {projects.state === "ready" && listed.length === 0 && (
+          <p className="rail-note">
+            {t("rail.tree.noProjectsEmpty")}
+            <span className="rail-note-detail">{t("rail.tree.noProjectsHint")}</span>
+          </p>
+        )}
+        {arrangeProblem && (
+          <Problem lead={arrangeProblem.kind === "read" ? t("rail.tree.arrangeReadError") : t("rail.tree.arrangeSaveError")} reason={arrangeProblem.message} />
+        )}
+        {/* Drawn once the sessions are read even with nothing in it, so the Pinned group's frame is there to open. */}
+        {(sessions.state === "ready" || tree.groups.length > 0) && (
+          <ul className="rail-projects">
+            {/* Always drawn, so it can open and fade in as the first session is pinned and close and fade out as the
+                last is unpinned (DESIGN.md: nothing pops in). Empty, it is closed, out of reach and not read. */}
+            <li className="rail-pinned" data-empty={pinnedEmpty || undefined} inert={pinnedEmpty || undefined} aria-hidden={pinnedEmpty || undefined}>
+              <div className="rail-project" data-collapsed={pinned.folded || undefined}>
+                <div className="rail-heading" data-slide={headingSlide(PINNED_KEY)}>
+                  <GroupToggle
+                    folded={pinned.folded}
+                    controls={pinnedTiles}
+                    summary={collapsedOf(tree.pinned)}
+                    toggle={pinned.toggle}
+                    name={t("rail.group.pinnedHeading")}
+                  >
+                    <span className="rail-heading-pin">
+                      <Icon icon={Pin} size="icon-sm" />
+                    </span>
+                  </GroupToggle>
+                </div>
+                <GroupTiles id={pinnedTiles} folded={pinned.folded}>
+                  {tiles(tree.pinned)}
+                </GroupTiles>
               </div>
-              <GroupTiles id={pinnedTiles} folded={pinned.folded}>
-                {tiles(tree.pinned)}
-              </GroupTiles>
-            </div>
-          </li>
-          {tree.groups.map((group) => {
-            const closed = folded(group.key, group.sessions);
-            const held = group.sessions.length > 0 && tiles(group.sessions);
-            if (group.kind === "date")
+            </li>
+            {tree.groups.map((group) => {
+              const closed = folded(group.key, group.sessions);
+              const held = group.sessions.length > 0 && tiles(group.sessions);
+              if (group.kind === "date")
+                return (
+                  <DateGroup key={group.key} name={t(DATE_NAMES[group.key])} slide={headingSlide(group.key)} folded={closed.folded} summary={collapsedOf(group.sessions)} toggle={closed.toggle}>
+                    {held}
+                  </DateGroup>
+                );
               return (
-                <DateGroup key={group.key} name={t(DATE_NAMES[group.key])} slide={headingSlide(group.key)} folded={closed.folded} summary={collapsedOf(group.sessions)} toggle={closed.toggle}>
+                <ProjectGroup key={group.key} project={group.project} {...props} folded={closed.folded} summary={collapsedOf(group.sessions)} toggle={closed.toggle}>
                   {held}
-                </DateGroup>
+                </ProjectGroup>
               );
-            return (
-              <ProjectGroup key={group.key} project={group.project} {...props} folded={closed.folded} summary={collapsedOf(group.sessions)} toggle={closed.toggle}>
-                {held}
-              </ProjectGroup>
-            );
-          })}
-        </ul>
-      )}
-      {looseShown && loose.length > 0 && tiles(loose)}
-      {noneShown && (
-        <p key={noneShown} className="rail-note" data-slide={`note:${noneShown}`}>
-          {noneShown}
-        </p>
-      )}
-    </section>
+            })}
+          </ul>
+        )}
+        {looseShown && loose.length > 0 && tiles(loose)}
+        {noneShown && (
+          <p key={noneShown} className="rail-note" data-slide={`note:${noneShown}`}>
+            {noneShown}
+          </p>
+        )}
+      </section>
+    </BeforeCommit>
   );
+}
+
+/**
+ * Takes where every marked element under `root` sits just before React changes the page, when `measure` says the
+ * commit rearranges the rail, and leaves it in `places` for the commit's layout effects. Only a class component can
+ * read the page at that moment (React's `getSnapshotBeforeUpdate`): by a layout effect, the page has changed and what
+ * the commit took away is gone.
+ */
+class BeforeCommit extends Component<{ root: RefObject<HTMLElement | null>; measure: boolean; places: { current: Map<string, Place> | undefined }; children: ReactNode }> {
+  getSnapshotBeforeUpdate(): null {
+    const el = this.props.root.current;
+    if (this.props.measure && el) this.props.places.current = placesOf(el);
+    return null;
+  }
+
+  // React asks for this alongside getSnapshotBeforeUpdate; the snapshot is already in `places`.
+  componentDidUpdate(): void {}
+
+  render(): ReactNode {
+    return this.props.children;
+  }
 }
 
 /**
@@ -354,23 +381,43 @@ export function Problem({ lead, reason }: { lead: string; reason: string }) {
   );
 }
 
-/** Why Core refused a session's pin, archive or unarchive, beneath its tile or row, which stays as Core has it (R15). */
+/**
+ * Why Core refused a session's pin, archive, unarchive or fork, beneath its tile or row, which stays as Core has it
+ * (R15; FLOW-FORK-SESSION, Variations).
+ */
 export function Refusals({
   session,
   pinning,
   archiving,
+  forking,
 }: {
   session: Session;
   pinning?: Readonly<Record<string, Sending>>;
   archiving?: Readonly<Record<string, Sending>>;
+  forking?: Readonly<Record<string, Sending>>;
 }) {
   const pin = pinning?.[session.id];
   const archive = archiving?.[session.id];
+  const fork = forking?.[session.id];
+  // A note opens growing and fading in (docs/design/RAIL.md, notes), pushing the tiles beneath it down over
+  // motion-settle: the box's height eases whenever which notes show changes, and is measured afresh on every other
+  // render, so a reason rewrapped meanwhile is where the next ease starts from.
+  const box = useRef<HTMLDivElement>(null);
+  const ease = useRef(new HeightEase()).current;
+  const shown = `${fork?.state}/${archive?.state}/${pin?.state}`;
+  const lastShown = useRef(shown);
+  useLayoutEffect(() => {
+    if (!box.current) return;
+    if (lastShown.current === shown) ease.hold(box.current);
+    else ease.change(box.current);
+    lastShown.current = shown;
+  });
   return (
-    <>
+    <div ref={box} className="rail-refusals">
+      {fork?.state === "failed" && <Problem lead={t("rail.tile.forkError")} reason={fork.message} />}
       {archive?.state === "failed" && <Problem lead={session.archived ? t("rail.tile.unarchiveError") : t("rail.tile.archiveError")} reason={archive.message} />}
       {pin?.state === "failed" && <Problem lead={session.pinned ? t("rail.tile.unpinError") : t("rail.tile.pinError")} reason={pin.message} />}
-    </>
+    </div>
   );
 }
 

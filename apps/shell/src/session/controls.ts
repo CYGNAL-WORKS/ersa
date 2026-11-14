@@ -3,33 +3,7 @@
 // and `backend.list`; the starting values from what the user last chose for the project, else the brief's defaults.
 
 import { t } from "../catalog";
-import type { Branch, Project, Session, Workspace } from "../protocol/core-api.gen";
-
-/** One choice a backend offers: a model, an effort or a permission mode (PROTO-CORE-API, `backend.list`). */
-export interface Choice {
-  id: string;
-  /** What the interface shows. */
-  label: string;
-  /** The one a new session starts with. */
-  default: boolean;
-}
-
-/**
- * One entry of `backend.list { host_id }` (PROTO-CORE-API, Backends and modes). Typed by hand until Core serves
- * it and the generated types carry it; the shape is the brief's.
- */
-export interface BackendChoices {
-  name: string;
-  /** What the interface shows: the backend's own name, such as "Claude Code". */
-  label: string;
-  /** Present when available. */
-  version?: string;
-  status: "available" | "missing" | "error";
-  tested: { min: string; max: string };
-  models: Choice[];
-  efforts: Choice[];
-  permission_modes: Choice[];
-}
+import type { BackendInfo, Branch, Choice, Project, Session, Workspace } from "../protocol/core-api.gen";
 
 /** A new isolated workspace (a git worktree for a git project), or the project's own folder. */
 export type WorkspaceKind = "isolated" | "root";
@@ -168,7 +142,7 @@ export function startingProject(ordered: readonly Project[], hostId: string, pro
 }
 
 /** The backends a session can start with: those detected as available. */
-export function available(backends: readonly BackendChoices[]): BackendChoices[] {
+export function available(backends: readonly BackendInfo[]): BackendInfo[] {
   return backends.filter((b) => b.status === "available");
 }
 
@@ -176,7 +150,7 @@ export function available(backends: readonly BackendChoices[]): BackendChoices[]
  * Whether the backend chip shows: when the host has more than one backend (LAY-SHELL), and also when it has none
  * to run, so a single missing backend is shown with its status rather than hidden (FLOW-NEW-SESSION-R07).
  */
-export function showsBackend(backends: readonly BackendChoices[]): boolean {
+export function showsBackend(backends: readonly BackendInfo[]): boolean {
   return backends.length > 1 || available(backends).length === 0;
 }
 
@@ -197,7 +171,7 @@ function pick(choices: readonly Choice[], wanted: string | undefined): string | 
  * else the root; the first available backend; that backend's default model, effort and permission mode, which for
  * permission mode is the one that asks before every action outside the allow rules (FLOW-NEW-SESSION-R02, R06).
  */
-export function valuesFor(project: Project, backends: readonly BackendChoices[], wanted?: Partial<SessionValues>): SessionValues {
+export function valuesFor(project: Project, backends: readonly BackendInfo[], wanted?: Partial<SessionValues>): SessionValues {
   const kinds = workspaceKinds(project);
   const workspace = wanted?.workspace && kinds.includes(wanted.workspace) ? wanted.workspace : (kinds[0] ?? "root");
   return { host_id: project.host_id, project_id: project.id, workspace, ...howFor(backends, wanted) };
@@ -210,7 +184,7 @@ type HowValues = Pick<SessionValues, "backend" | "model" | "effort" | "permissio
  * The how values alone, from the host's backends: what `valuesFor` gives, and what the session controls show while
  * the host has no project yet (FLOW-NEW-SESSION-R19).
  */
-export function howFor(backends: readonly BackendChoices[], wanted?: Partial<SessionValues>): HowValues {
+export function howFor(backends: readonly BackendInfo[], wanted?: Partial<SessionValues>): HowValues {
   const runnable = available(backends);
   const backend = runnable.find((b) => b.name === wanted?.backend) ?? runnable[0];
   // A value chosen for another backend means nothing to this one.
@@ -227,7 +201,7 @@ export function howFor(backends: readonly BackendChoices[], wanted?: Partial<Ses
 export interface SessionShown {
   values: SessionValues;
   /** The session's backend as `backend.list` lists it, holding every value the session reports. */
-  backend: BackendChoices;
+  backend: BackendInfo;
   /** The workspace as the session runs in it: its branch, or the project folder. */
   workspaceLabel: string;
 }
@@ -245,12 +219,12 @@ function holding(choices: readonly Choice[], id: string | undefined): Choice[] {
 export function sessionShown(
   session: Pick<Session, "host_id" | "backend" | "model" | "effort" | "permission_mode">,
   workspace: Pick<Workspace, "project_id" | "kind" | "vcs_ref">,
-  hostBackends: readonly BackendChoices[],
+  hostBackends: readonly BackendInfo[],
 ): SessionShown {
   const listed = hostBackends.find((b) => b.name === session.backend);
   const model = session.model ?? (listed && defaultOf(listed.models));
   const effort = session.effort ?? (listed && defaultOf(listed.efforts));
-  const backend: BackendChoices = {
+  const backend: BackendInfo = {
     ...(listed ?? { name: session.backend, label: session.backend, status: "available", tested: { min: "", max: "" }, models: [], efforts: [], permission_modes: [] }),
   };
   backend.models = holding(backend.models, model);

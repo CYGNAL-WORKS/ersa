@@ -21,10 +21,10 @@ import { Transcript } from "./components/Transcript";
 import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
-import type { Project, Session, Workspace } from "./protocol/core-api.gen";
-import { type BackendChoices, type Branches, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
+import type { BackendInfo, Project, Session, Workspace } from "./protocol/core-api.gen";
+import { type Branches, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
 import { contextUsed, tileOf } from "./session/tile";
-import { type Answers, type Decision, answering } from "./session/answers";
+import { type Answers, type Decision, type Reply, answering } from "./session/answers";
 import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./session/shelf";
 import { sharedSubscriptions } from "./session/subscriptions";
 import { type DeletePhase, Deletion } from "./session/deletion";
@@ -92,7 +92,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const follower = useRef<Follower | null>(null);
 
   // What the screen offers: each host's backends, and the values each project last started a session with.
-  const [backends, setBackends] = useState<Record<string, BackendChoices[]>>({});
+  const [backends, setBackends] = useState<Record<string, BackendInfo[]>>({});
   const [lastUsed, setLastUsed] = useState<Record<string, SessionValues>>({});
   // Every project's workspaces, by id: the rail puts a session under its workspace's project, and the session
   // controls read a session's workspace from them. Each project's last read: null once read, else why it failed.
@@ -109,6 +109,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Archives and unarchives on their way from a tile, and resumes from the archived note, by session id.
   const [archiving, setArchiving] = useState<Record<string, Sending>>({});
   const [resuming, setResuming] = useState<Record<string, Sending>>({});
+  // Forks on their way from a tile or row, and why the last was refused, by the original's id.
+  const [forking, setForking] = useState<Record<string, Sending>>({});
   // How the rail is arranged (FLOW-ORGANIZE-SESSIONS): kept in Core's settings and read on each connection.
   const saveArrangement = useCallback((patch: object) => client.call("settings.set", { patch }), [client]);
   const {
@@ -339,6 +341,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // Stable for each session, so the transcript's memoised blocks do not re-render for it.
   const decide = useCallback((id: string, requestId: string, decision: Decision) => sending.decide(id, requestId, decision), [sending]);
   const decideShown = useMemo(() => (requestId: string, decision: Decision) => shownId !== undefined && decide(shownId, requestId, decision), [decide, shownId]);
+  const answer = useCallback((id: string, requestId: string, reply: Reply) => sending.answer(id, requestId, reply), [sending]);
+  const answerShown = useMemo(() => (requestId: string, reply: Reply) => shownId !== undefined && answer(shownId, requestId, reply), [answer, shownId]);
 
   // New session shows the screen; leaving it, by choosing a session, leaves nothing behind (FLOW-NEW-SESSION-R03).
   const newSession = (project: Project) => dispatch({ type: "newSession", projectId: project.id });
@@ -431,6 +435,24 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       connection.current?.reload("sessions");
     } catch (error) {
       setArchiving((a) => ({ ...a, [id]: { state: "failed", message: describeError(error) } }));
+    }
+  };
+
+  // Fork from a tile or row (FLOW-FORK-SESSION): Core starts the fork and answers with it as listed; it becomes the
+  // active session (R04), and its tile slides in at its place once the list is read again. A refusal, or a workspace
+  // Core can't make, leaves the original as it was and says why beneath its tile until the next try.
+  const fork = async (id: string) => {
+    setForking((f) => ({ ...f, [id]: { state: "sending" } }));
+    try {
+      const forked = await client.call("session.fork", { id });
+      setForking(({ [id]: _, ...rest }) => rest);
+      // A fork is never archived: showing archived sessions only, the rail switches to active ones, so its tile is
+      // in view, as after a new session's start (FLOW-ORGANIZE-SESSIONS-R21).
+      if (showing.current === "archived") arrange(choicePatch({ show: "active" }));
+      connection.current?.reload("sessions");
+      dispatch({ type: "select", id: forked.id });
+    } catch (error) {
+      setForking((f) => ({ ...f, [id]: { state: "failed", message: describeError(error) } }));
     }
   };
 
@@ -721,6 +743,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           answers={answers[shelfSession.id]}
           live={connected}
           onDecide={(requestId, decision) => decide(shelfSession.id, requestId, decision)}
+          onAnswer={(requestId, reply) => answer(shelfSession.id, requestId, reply)}
         />
       ),
     };
@@ -769,6 +792,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onRename={rename}
               renaming={renaming}
               onRenameReset={resetRename}
+              onFork={fork}
+              forking={forking}
               onArchive={archive}
               archiving={archiving}
               onDelete={askDelete}
@@ -819,6 +844,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onRename={rename}
               renaming={renaming}
               onRenameReset={resetRename}
+              onFork={fork}
+              forking={forking}
               onArchive={archive}
               archiving={archiving}
               onDelete={(id) => askDelete(id, true)}
@@ -838,6 +865,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               view={shown}
               answers={answers[shown.id]}
               onDecide={decideShown}
+              onAnswer={answerShown}
               onRetry={retrySubscribe}
               onRename={(title) => rename(shown.id, title)}
               renaming={renaming[shown.id]}

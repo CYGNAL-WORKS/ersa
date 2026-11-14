@@ -124,6 +124,12 @@ export const enUS = {
       renameButton: "Rename",
       // The key that does the same as Rename, at the item's trailing edge.
       renameKey: "F2",
+      // A new session from this one's conversation (FLOW-FORK-SESSION), and why it can't be chosen now.
+      forkButton: "Fork",
+      forkBusyReason: "Available once the reply finishes",
+      forkingProgress: "Forking…",
+      // Beneath the tile, before Core's reason, when Core refuses or the fork can't be made.
+      forkError: "Ersa can't fork this session.",
       // Why an item that goes through Core, such as Rename, Pin, Archive or Delete, is unavailable.
       offlineReason: "Available once Ersa reaches your sessions",
       // In the tile's menu, apart in its own group. It asks first, so it ends in an ellipsis.
@@ -217,12 +223,25 @@ export const enUS = {
       // A permission request's answers: the transcript's permission card offers the same ones (R27).
       denyButton: "Deny",
       allowButton: "Allow",
+      // A question's answers (R16, R28): the transcript's question card offers the same ones (R17).
+      declineButton: "Decline",
+      answerButton: "Answer",
+      // The text field for the user's own words, beneath a question's options; named by its placeholder.
+      ownWordsPlaceholder: "Answer in your own words",
       // Followed by Core's reason, beneath.
       answerRefusedError: "Your answer wasn't accepted.",
       reconnectingNote: "Reconnecting to Core…",
     },
   },
   transcript: {
+    // A question's card: its name, its title once answered or declined, and its state once the session ended without
+    // an answer.
+    question: {
+      name: "Question",
+      answeredTitle: "Question, answered",
+      declinedTitle: "Question, declined",
+      unansweredStatus: "Not answered",
+    },
     attachment: {
       listLabel: "Attachments",
       imageLabel: "Attached image",

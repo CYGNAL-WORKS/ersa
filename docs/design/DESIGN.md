@@ -141,6 +141,9 @@ material:
   # Under the pointer, and while pressed: a veil of ink over whatever is beneath.
   hover: "color-mix(in oklab, {colors.ink} 4%, transparent)"
   pressed: "color-mix(in oklab, {colors.ink} 9%, transparent)"
+  # A diff card's added and removed lines: a faint tint of the role, so `ink` text keeps its contrast and the sign in the gutter carries the meaning.
+  diff-added: "color-mix(in oklab, {colors.positive} 12%, transparent)"
+  diff-removed: "color-mix(in oklab, {colors.danger} 12%, transparent)"
 glow:
   # Custom group. Accent glows as box shadows, built from color roles like `material`.
   # In dark a glow is a soft blur; in light a wide blur reads as a shadow, so light draws a tight tinted ring.
@@ -200,7 +203,7 @@ Principles that resolve trade-offs:
 
 ## Colors
 
-Two token sets, `light` and `dark`, with identical names, so components name a role and never a value. `canvas` is the window background; `surface` is a pane or card; `surface-raised` is a hovered or focused card. `ink` levels carry text hierarchy. `line` is the only border color. `accent` marks what can be acted on, an agent at work, and a question waiting for the user. `caution` is yellow and marks a permission request and a gauge near full; `danger` marks a failure; `positive` marks success. Semantic colors appear on glyphs, icons and inline status, never as large fills.
+Two token sets, `light` and `dark`, with identical names, so components name a role and never a value. `canvas` is the window background; `surface` is a pane or card; `surface-raised` is a hovered or focused card. `ink` levels carry text hierarchy. `line` is the only border color. `accent` marks what can be acted on, an agent at work, and a question waiting for the user. `caution` is yellow and marks a permission request and a gauge near full; `danger` marks a failure; `positive` marks success. Semantic colors appear on glyphs, icons and inline status, never as large fills; the one tint is a diff line's (`material-diff-added`, `material-diff-removed`), faint enough that its text keeps `ink`.
 
 Text meets 4.5:1 against its background; a control's edge and a state glyph meet 3:1. Every `ink` level, `ink-faint` included, meets 4.5:1 against `canvas`, `surface`, and `surface-raised`, so `ink-faint` is safe for placeholders and disabled text, and `ink-muted` stays a clear step above it. Generate the palette from these targets (the Leonardo method: name each role's contrast against the canvas and derive both themes from it) rather than picking hex values by eye. `caution` is the one role set by eye: the owner chose yellow, and its light value is as light as keeps 4.5:1 on every fill a tile can take (`docs/design/RAIL.md`).
 
@@ -267,6 +270,7 @@ Component style tokens are added here as component briefs reach `ready`. Each co
 
 - **The rail, a project heading and a tile**: `docs/design/RAIL.md`. Read it before changing any of them.
 - **The composer and the session controls**: `docs/design/COMPOSER.md`. Read it before changing either.
+- **The transcript's formatted text, tool cards and diff cards**: `docs/design/TRANSCRIPT.md`. Read it before changing any of them.
 
 ## Do's and Don'ts
 

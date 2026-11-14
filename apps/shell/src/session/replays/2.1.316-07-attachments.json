@@ -1,5 +1,5 @@
 {
-  "ersa_commit": "096283fc0da847eb066b8db5473231e38b1fbdb0-dirty",
+  "ersa_commit": "3af3763facdd9d6a06d52751185d6363ae69f304",
   "notifications": [
     {
       "kind": "notification",
@@ -3576,6 +3576,7 @@
         "state": "starting"
       },
       "title": "07-attachments",
+      "unseen": false,
       "workspace_id": "w-replay"
     }
   ],
@@ -3599,6 +3600,7 @@
         "state": "idle"
       },
       "title": "07-attachments",
+      "unseen": false,
       "workspace_id": "w-replay"
     }
   ]

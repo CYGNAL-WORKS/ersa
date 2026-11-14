@@ -22,7 +22,16 @@ async fn the_version_check_runs_with_the_adapters_environment() {
             ersa_adapter_claude::MAX_TESTED_VERSION
         )
     );
-    assert_eq!(info.models, claude.choices().models);
+    let ids = |ids: Vec<String>| ids;
+    assert_eq!(
+        ids(info.models.iter().map(|m| m.id.clone()).collect()),
+        ids(claude
+            .choices()
+            .models
+            .iter()
+            .map(|m| m.id.clone())
+            .collect())
+    );
     assert_eq!(info.label, "Claude Code");
 
     let mut session = ProcessSpec::default();

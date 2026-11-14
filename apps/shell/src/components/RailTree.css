@@ -27,6 +27,11 @@
   transition: none;
 }
 
+/* Nor does a note beneath a leaving tile fade in again. */
+.rail-tree > [data-leaving] .rail-refusals > * {
+  animation: none;
+}
+
 /* Projects sit space-sm apart, and the tiles inside one space-xs apart. */
 .rail-projects,
 .rail-tiles {
@@ -376,5 +381,27 @@
   .rail-heading-tip,
   .rail-heading-actions {
     transition: none;
+  }
+}
+
+/* The notes beneath a tile or row: the room they take eases (HeightEase), clipped while it does, and a note fades
+   in as it opens (docs/design/RAIL.md, notes). */
+.rail-refusals {
+  overflow: clip;
+}
+
+.rail-refusals > * {
+  animation: rail-refusal-in var(--motion-settle) var(--motion-ease-out);
+}
+
+@keyframes rail-refusal-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail-refusals > * {
+    animation: none;
   }
 }
