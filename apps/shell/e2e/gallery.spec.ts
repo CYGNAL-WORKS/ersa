@@ -16,6 +16,7 @@ const components = [
   "AgentText",
   "Transcript",
   "ToolCard",
+  "DiffCard",
   "ThinkingRow",
   "SessionTitle",
   "ErrorBoundary",

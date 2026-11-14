@@ -31,7 +31,7 @@ The user opens a session, or sends a message (`FLOW-SEND-MESSAGE`) and watches t
 
 - **A call that fails** says so on its card, and its output is the error. A diff card that fails keeps the change it proposed, so the user sees what was not applied.
 - **An edit that replaces every occurrence** of its text shows the change once, and the diff says it is made everywhere that text occurs: the call carries the text, not how many places hold it, so the row's counts are of the change shown.
-- **A call that never finished**: one with no result when its turn or its session ends, as when the backend exits part way through it, shows as stopped, with no running mark and no clock (R16).
+- **A call that never finished**: one with no result when its turn or its session ends, as when the backend exits part way through it, shows as stopped, with no running mark and no clock (R16). Stopped wins over waiting: a call whose turn ended with its permission request still open shows as stopped, and the request itself stays `FLOW-APPROVE-PERMISSION`'s (Open questions there).
 - **A call waiting for the user's permission** says so on its card; the request itself is `FLOW-APPROVE-PERMISSION`'s.
 - **Markdown Ersa does not show as itself**: raw HTML shows as its text, and an image shows as its alternative text linked to its address, or as the address itself when it has no alternative text, never loaded (ADR 0034).
 - **A line that turns out to open a construct**: a table's header row reads as a line of the paragraph before it until its delimiter row arrives, then moves into the table. That is the table arriving; the text before that row does not change (R05).
@@ -60,7 +60,7 @@ The user opens a session, or sends a message (`FLOW-SEND-MESSAGE`) and watches t
 
 ## Built so far
 
-Formatted text (R01 to R05, R14, R15), tool cards and the thinking row (R06 to R08, R10 to R12). Until `tool.requested` carries `target_kind` (PROTO-AGENT-EVENTS-R26), the Interface takes a target for a path when it lies inside the workspace folder or is spelled as an absolute path. Diff cards (R09, R13) and the stopped state (R16) are still to build: a call that never finished keeps its running mark, with its clock stopped.
+Formatted text (R01 to R05, R14, R15), tool cards and the thinking row (R06 to R08, R10 to R12), diff cards (R09, R13) and the stopped state (R16). Until `tool.requested` carries `target_kind` (PROTO-AGENT-EVENTS-R26), the Interface takes a target for a path when it lies inside the workspace folder or is spelled as an absolute path.
 
 ## Out of scope
 
@@ -79,6 +79,7 @@ Formatted text (R01 to R05, R14, R15), tool cards and the thinking row (R06 to R
 
 ## Changes
 
+- 2026-11-14: from #385 inbox: Built so far says diff cards and the stopped state are built; a call whose turn ended with its permission request still open shows as stopped, and whether the turn's end closes the request is FLOW-APPROVE-PERMISSION's open question. No requirement IDs changed.
 - 2026-11-14: from #360 inbox: a call with no result when its turn or session ends shows as stopped (FLOW-READ-TRANSCRIPT-R16 added); a call already running when its session is opened shows as running with no clock until its result, which R06 already says; a target is a path when its event says so (PROTO-AGENT-EVENTS-R26), R08 unchanged; Built so far added.
 - 2026-11-13: from #355 inbox: an image with no alternative text shows its address as the link's text; Copy says it copied only once the clipboard has taken the text; a table's header row reads as part of the paragraph before it until its delimiter row arrives, which is the table arriving and not earlier text changing (R05 unchanged). FLOW-READ-TRANSCRIPT-R14 and R15 added.
 - 2026-11-13: from #351 inbox: a diff says when its change is made at every occurrence of the text, so the user sees a change's reach before allowing it. An open question on a subagent's calls in a session opened from its record. FLOW-READ-TRANSCRIPT-R13 added.
