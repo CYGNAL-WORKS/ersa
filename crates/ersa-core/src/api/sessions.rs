@@ -348,7 +348,7 @@ fn check_choice(field: &str, value: &Option<String>, offered: &[Choice]) -> Resu
 
 pub(super) async fn start(core: &Core, params: IdParams) -> Result<Session, ApiError> {
     find(core, &params.id).await?;
-    if core.sessions.is_live(&params.id)? {
+    if core.sessions.is_running(&params.id).await? {
         return Err(ApiError::invalid_state(format!(
             "session {} is already running",
             params.id

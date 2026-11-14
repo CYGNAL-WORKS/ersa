@@ -186,6 +186,8 @@ pub struct SessionManager {
     tiles: Arc<TileHub>,
     /// A pause after each chunk an attachment's copy writes, for tests.
     copy_pause: Duration,
+    /// A pause before Core lets go of a run that has ended, for tests.
+    wind_down_pause: Duration,
     /// Set by [`SessionManager::stop_all`]; no session starts after it.
     /// Read and written under the `sessions` lock.
     closing: AtomicBool,
@@ -310,7 +312,8 @@ async fn read_unless_removed<T>(
     value
 }
 
-/// One read of a session's record that may still be running.
+/// One look at a session's files (its record, or its folder) that may
+/// still be running.
 type ReadSlot<T> = tokio::sync::Mutex<Option<tokio::task::JoinHandle<T>>>;
 
 /// The result of a read of the session's record, started with `start`
@@ -385,7 +388,7 @@ async fn wait<T>(slot: &mut Option<tokio::task::JoinHandle<T>>, timeout: Duratio
             match result {
                 Ok(value) => Some(value),
                 Err(e) => {
-                    tracing::error!(error = %e, "a session record read failed");
+                    tracing::error!(error = %e, "a look at a session's files failed");
                     None
                 }
             }
@@ -704,6 +707,7 @@ impl SessionManager {
             sessions: Mutex::new(HashMap::new()),
             tiles: Arc::default(),
             copy_pause: Duration::ZERO,
+            wind_down_pause: Duration::ZERO,
             closing: AtomicBool::new(false),
             claims: Arc::default(),
             arrangement: tokio::sync::Mutex::new(()),
@@ -714,6 +718,13 @@ impl SessionManager {
     /// writes ([`crate::CoreConfig::copy_pause`]).
     pub fn with_copy_pause(mut self, copy_pause: Duration) -> Self {
         self.copy_pause = copy_pause;
+        self
+    }
+
+    /// The same manager, pausing before it lets go of a run that has ended
+    /// ([`crate::CoreConfig::wind_down_pause`]).
+    pub fn with_wind_down_pause(mut self, pause: Duration) -> Self {
+        self.wind_down_pause = pause;
         self
     }
 
@@ -863,11 +874,6 @@ impl SessionManager {
 
     fn live(&self, id: &str) -> Result<Arc<Live>, SessionError> {
         self.handle(id)?.live().ok_or_else(not_running)
-    }
-
-    /// Whether the session's backend is running (or starting).
-    pub fn is_live(&self, id: &str) -> Result<bool, SessionError> {
-        Ok(self.handle(id)?.live().is_some())
     }
 
     /// Every session, oldest first.
@@ -1027,6 +1033,7 @@ impl SessionManager {
             started: started_tx,
             finished: finished_tx,
             pipeline,
+            wind_down_pause: self.wind_down_pause,
         }));
     }
 
@@ -2335,6 +2342,7 @@ struct SessionTask {
     started: watch::Sender<Started>,
     finished: watch::Sender<bool>,
     pipeline: tokio::task::JoinHandle<()>,
+    wind_down_pause: Duration,
 }
 
 async fn run_session(task: SessionTask) {
@@ -2350,6 +2358,7 @@ async fn run_session(task: SessionTask) {
         started,
         finished,
         pipeline,
+        wind_down_pause,
     } = task;
     // Ready with no turn to report one: a fork, and a session started again,
     // whose backend reports nothing until its next message.
@@ -2448,6 +2457,9 @@ async fn run_session(task: SessionTask) {
     }
     if let Some(view) = lock(&handle.hub).view.as_mut() {
         view.finish_live();
+    }
+    if !wind_down_pause.is_zero() {
+        tokio::time::sleep(wind_down_pause).await;
     }
     *lock(&handle.live) = None;
     // Nobody reading it: nothing more will be added, so it goes.

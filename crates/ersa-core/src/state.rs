@@ -42,6 +42,10 @@ pub struct CoreConfig {
     /// A pause after each chunk an attachment's copy writes. Zero, except
     /// in tests that need a copy to be under way long enough to cancel it.
     pub copy_pause: Duration,
+    /// A pause between a session's end being announced and Core letting go
+    /// of its run. Zero, except in tests that need a request to land while
+    /// a run winds down.
+    pub wind_down_pause: Duration,
 }
 
 /// The default for [`CoreConfig::max_line_bytes`]: 16 MiB, far above any
@@ -69,6 +73,7 @@ impl CoreConfig {
             max_line_bytes: MAX_LINE_BYTES,
             replay: false,
             copy_pause: Duration::ZERO,
+            wind_down_pause: Duration::ZERO,
         })
     }
 
@@ -118,7 +123,8 @@ impl Core {
         app_log: Arc<AppLog>,
     ) -> Core {
         let sessions = SessionManager::new(store.clone(), adapters, app_log)
-            .with_copy_pause(config.copy_pause);
+            .with_copy_pause(config.copy_pause)
+            .with_wind_down_pause(config.wind_down_pause);
         Core {
             config,
             sessions,

@@ -31,6 +31,14 @@ pub struct Resumption {
     pub project_path: String,
 }
 
+/// Whether the caller has just looked at the session's folder itself, so a
+/// resume need not look again.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum FolderChecked {
+    Yes,
+    No,
+}
+
 /// How the backend is started again, from what its record says.
 struct HowToStart {
     /// The id a new session, or a fork made again, starts under.
@@ -46,7 +54,7 @@ impl SessionManager {
     /// A session already running is left as it is.
     pub async fn resume(&self, id: &str, how: Resumption) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
-        self.start_again(&handle, how).await?;
+        self.start_again(&handle, how, FolderChecked::No).await?;
         Ok(handle.describe())
     }
 
@@ -63,6 +71,7 @@ impl SessionManager {
         &self,
         handle: &Arc<Handle>,
         how: Resumption,
+        folder: FolderChecked,
     ) -> Result<(), SessionError> {
         // Waited for before taking `op`, so nothing else on the session
         // queues behind the wait.
@@ -84,7 +93,9 @@ impl SessionManager {
                 "Core is shutting down; no session can start".into(),
             ));
         }
-        check_folder(handle).await?;
+        if folder == FolderChecked::No {
+            check_folder(handle).await?;
+        }
         let adapter = self.adapter_of(&row.backend)?;
         let start = self
             .how_to_start(handle, &adapter, &how.transport, &row)
