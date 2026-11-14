@@ -5,6 +5,7 @@ use ersa_protocol::core_api::{Empty, IdParams, Section, SectionCreateParams, Sec
 
 use super::ApiError;
 use crate::persistence;
+use crate::sessions::SessionError;
 use crate::state::Core;
 
 /// The most characters a section's name may have, once trimmed.
@@ -28,7 +29,7 @@ pub(super) async fn rename(core: &Core, params: SectionRenameParams) -> Result<S
         .rename_section(params.id.clone(), name, key)
         .await
         .map_err(name_taken)?
-        .ok_or_else(|| ApiError::not_found(format!("no section {}", params.id)))
+        .ok_or_else(|| SessionError::NoSection(params.id.clone()).into())
 }
 
 /// Removes the section and puts its sessions in no section
@@ -37,7 +38,7 @@ pub(super) async fn remove(core: &Core, params: IdParams) -> Result<Section, Api
     core.sessions
         .remove_section(&params.id)
         .await?
-        .ok_or_else(|| ApiError::not_found(format!("no section {}", params.id)))
+        .ok_or_else(|| SessionError::NoSection(params.id.clone()).into())
 }
 
 /// The name as one line, as a session's title is taken, and its key: the

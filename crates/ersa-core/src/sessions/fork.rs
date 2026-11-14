@@ -99,8 +99,9 @@ impl SessionManager {
         refuse_if_turn_running(&handle)?;
 
         let Some(backend_id) = row.backend_session_id else {
-            return Err(SessionError::InvalidState(
-                "the session's backend has not named it yet, so there is nothing to fork".into(),
+            return Err(SessionError::refused(
+                ErrorReason::BackendUnnamed,
+                "the session's backend has not named it yet, so there is nothing to fork",
             ));
         };
         let adapter = self.adapter_of(&row.backend)?;
@@ -167,10 +168,13 @@ fn refuse_if_turn_running(handle: &Handle) -> Result<(), SessionError> {
     if (handle.live().is_some() && (turn_running || !session.tile.pending.is_empty()))
         || session.sending.is_some()
     {
-        return Err(SessionError::InvalidState(format!(
-            "a turn is running in session {}; it can be forked once the reply finishes",
-            handle.id
-        )));
+        return Err(SessionError::refused(
+            ErrorReason::SessionBusy,
+            format!(
+                "a turn is running in session {}; it can be forked once the reply finishes",
+                handle.id
+            ),
+        ));
     }
     Ok(())
 }
@@ -199,26 +203,32 @@ async fn read_for_fork(
         .conversation_end(Arc::clone(&transport), &cwd, &backend_id)
         .await
         .map_err(unreadable)?;
+    // Every unfinished end is the same refusal to the user; the message says
+    // which, for the log.
+    let unfinished = |message: String| Some((ErrorReason::NoFinishedReply, message));
     let refused = match end {
         Some(ConversationEnd::Finished) => None,
-        None => Some(format!("the {backend} backend cannot fork a session")),
-        Some(ConversationEnd::NoReply) if is_fork => Some(format!(
+        None => Some((
+            ErrorReason::BackendCannotFork,
+            format!("the {backend} backend cannot fork a session"),
+        )),
+        Some(ConversationEnd::NoReply) if is_fork => unfinished(format!(
             "session {id} is a fork with no message of its own yet; it can be forked after its \
              first reply"
         )),
-        Some(ConversationEnd::NoReply) => Some(format!(
+        Some(ConversationEnd::NoReply) => unfinished(format!(
             "no reply has finished in session {id} yet; it can be forked after the first one"
         )),
-        Some(ConversationEnd::Interrupted) => Some(format!(
+        Some(ConversationEnd::Interrupted) => unfinished(format!(
             "the last turn in session {id} was interrupted; it can be forked once a reply finishes"
         )),
-        Some(ConversationEnd::Unfinished) => Some(format!(
+        Some(ConversationEnd::Unfinished) => unfinished(format!(
             "the record of session {id} ends part way through a turn; it can be forked once a \
              reply finishes"
         )),
     };
-    if let Some(refused) = refused {
-        return Err(SessionError::InvalidState(refused));
+    if let Some((reason, message)) = refused {
+        return Err(SessionError::refused(reason, message));
     }
 
     // The registry can't tell Core's own process from another, so it is
@@ -238,10 +248,13 @@ async fn read_for_fork(
         } else {
             "another process has"
         };
-        return Err(SessionError::InvalidState(format!(
-            "{whose} session {id} open ({}); close it there to fork it",
-            pids_named(&pids)
-        )));
+        return Err(SessionError::open_elsewhere(
+            &pids,
+            format!(
+                "{whose} session {id} open ({}); close it there to fork it",
+                pids_named(&pids)
+            ),
+        ));
     }
     adapter
         .read_record(transport, &cwd, &backend_id)
