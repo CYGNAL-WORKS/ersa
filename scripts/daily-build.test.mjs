@@ -88,3 +88,14 @@ test("the owner's working tree is untouched", () => {
   assert.equal(git(owner, "rev-parse", "HEAD"), before);
   assert.equal(git(owner, "status", "--porcelain"), "M a.txt");
 });
+
+test("run from another clone, a checkout made by the first one still moves to the new origin/main", () => {
+  const { root, origin, owner, checkout } = repos();
+  const second = join(root, "second");
+  git(root, "clone", "-q", origin, second);
+  prepareCheckout(owner, checkout);
+  commit(origin, "b.txt", "two");
+  prepareCheckout(second, checkout);
+  assert.equal(git(checkout, "rev-parse", "HEAD"), git(origin, "rev-parse", "main"));
+  assert.doesNotThrow(() => verifyAtMain(checkout));
+});
