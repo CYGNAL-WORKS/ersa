@@ -29,7 +29,7 @@ mod tools;
 pub mod wire;
 
 pub use driver::{ClaudeAdapter, fork_args, invocation_args, resume_args, session_id_args};
-pub use projector::ClaudeProjector;
+pub use projector::{ClaudeProjector, started_in_minimal_mode};
 
 /// The backend's name in `source.backend`, `session.started`, and the Core API.
 pub const BACKEND: &str = "claude-code";
