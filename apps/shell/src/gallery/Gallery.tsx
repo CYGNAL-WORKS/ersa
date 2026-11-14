@@ -9,6 +9,7 @@ import { Button } from "../components/Button";
 import { Chip } from "../components/Chip";
 import { ContextRing } from "../components/ContextRing";
 import { ArchivedNote } from "../components/ArchivedNote";
+import { AgentLink, AgentText, CodeBlock } from "../components/AgentText";
 import { AttachmentChip } from "../components/AttachmentChip";
 import { Composer } from "../components/Composer";
 import { DeleteQuestion } from "../components/DeleteQuestion";
@@ -453,6 +454,42 @@ const questionAsked: Event[] = [
   { type: "question.asked", request_id: "rq", questions: [singleQuestion] },
 ];
 
+// The agent's words with every construct the transcript formats (docs/design/TRANSCRIPT.md, Formatted text).
+const formatted = [
+  "## What changed",
+  "",
+  "The reconnect test was **flaky** because the fake Core answered *before* the window subscribed. I moved the",
+  "subscription ahead of the handshake in `connection.ts`; the ~~sleep~~ is gone.",
+  "",
+  "```ts",
+  "const events = new Channel<CoreEvent>();",
+  "events.onmessage = onEvent;",
+  "return invoke<Attachment>(\"core_attach\", { events });",
+  "```",
+  "",
+  "### Checks",
+  "",
+  "- [x] `pnpm test` passes",
+  "- [ ] The live check, once Core is built",
+  "",
+  "1. Start Core.",
+  "2. Open a session and drop the pipe.",
+  "",
+  "> The window must hear every event Core sends during the attach.",
+  "",
+  "| Run | Before | After |",
+  "| --- | --- | --- |",
+  "| Windows | 3 of 10 failed | 0 of 50 failed |",
+  "| Linux | 1 of 10 failed | 0 of 50 failed |",
+  "",
+  "---",
+  "",
+  "See [the bridge notes](https://example.com/bridge) or write to team@example.com. The diagram is ![the attach sequence](https://example.com/attach.png).",
+  "Raw HTML such as <b>this</b> shows as its text, and [a file link](file:///C:/notes.txt) as plain words.",
+].join("\n");
+
+const formattedStreaming = ["Here is the fix:", "", "```rust", "fn reconnect(&mut self) {", "    self.subscribe();"].join("\n");
+
 const transcriptStates: [string, SessionView, answers?: Record<string, Answer>][] = [
   ["Loading", sessionView([], { stream: { state: "subscribing" } })],
   ["Empty", sessionView([])],
@@ -470,6 +507,7 @@ const transcriptStates: [string, SessionView, answers?: Record<string, Answer>][
   ["Question not answered", sessionView([...questionAsked, { type: "session.ended", reason: "backend_exited" }])],
   ["Hidden characters", sessionView(hiding)],
   ["Answered", sessionView(answered)],
+  ["Formatted text", sessionView([{ type: "user.message", origin: "human", text: "What did you change?" }, { type: "assistant.text", block_id: "m1/0", text: formatted, final: true }])],
   ["Two turns", sessionView(twoTurns)],
   ["Long path", sessionView(longPath)],
   ["Attachments", sessionView(withAttachments)],
@@ -966,6 +1004,26 @@ const entries: Entry[] = [
       ["Keyboard focus, its path shown", room(<ul className="transcript-attachments"><AttachmentChip kind="file" name="COMPOSER.md" path="docs/design/COMPOSER.md" force="focus" /></ul>)],
       ["A folder", <ul className="transcript-attachments"><AttachmentChip kind="folder" name="components" path="apps/shell/src/components" /></ul>],
       ["An image the window can't show", <ul className="transcript-attachments"><AttachmentChip kind="image" name="Attached image" /></ul>],
+    ],
+  },
+  {
+    name: "AgentText",
+    wide: true,
+    states: [
+      ["Every construct", <AgentText text={formatted} />],
+      ["Streaming, its code block still open", <AgentText text={formattedStreaming} />],
+      ["Copy under the pointer", <CodeBlock language="bash" text="pnpm test" force="hover" />],
+      ["Copy pressed", <CodeBlock language="bash" text="pnpm test" force="pressed" />],
+      ["Copy with keyboard focus", <CodeBlock language="bash" text="pnpm test" force="focus" />],
+      ["Copied", <CodeBlock language="bash" text="pnpm test" copied />],
+      ["A block that names no language", <CodeBlock text="plain text" />],
+      [
+        "A link at rest, under the pointer, with keyboard focus",
+        <p className="agent-text">
+          <AgentLink href="https://example.com/a">At rest</AgentLink>, <AgentLink href="https://example.com/b" force="hover">under the pointer</AgentLink>,{" "}
+          <AgentLink href="https://example.com/c" force="focus">with focus</AgentLink>
+        </p>,
+      ],
     ],
   },
   {

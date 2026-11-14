@@ -94,6 +94,7 @@ function fakeShell() {
     show: async () => false,
     hide: async () => {},
     quit: async () => {},
+    openLink: () => {},
     pickFolder: vi.fn(async () => null),
     pickFiles: async () => [] as string[],
     onDragDrop: () => stopped,
