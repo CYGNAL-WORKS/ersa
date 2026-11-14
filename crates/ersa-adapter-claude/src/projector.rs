@@ -11,7 +11,7 @@
 //! between lines (the turn number, text streamed so far, which requests are
 //! pending) is all derived from earlier lines.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use ersa_adapter::{Direction, Projected, Projector, RawLine};
 use ersa_protocol::events::{
@@ -36,7 +36,7 @@ use crate::{BACKEND, MAX_TESTED_VERSION};
 
 /// The version of this projection. Bump it whenever the events produced for
 /// some raw log would change, so Core re-projects cached sessions.
-pub const PROJECTOR_VERSION: u32 = 8;
+pub const PROJECTOR_VERSION: u32 = 9;
 
 /// The `model` the CLI gives the messages it writes itself rather than
 /// receiving from the API.
@@ -92,6 +92,11 @@ pub struct ClaudeProjector {
     /// answer before the first turn, then each `system/init` and each
     /// `system/status` that carries one (PROTO-CLAUDE-CODE-STREAM-R40).
     permission_mode: Option<String>,
+    /// Messages the host wrote while a turn ran, in the order written. The
+    /// CLI holds them and runs them, all together, as the next turn, so
+    /// each is projected when that turn's `system/init` arrives, never as
+    /// part of the turn that was running (PROTO-CLAUDE-CODE-STREAM-R43).
+    waiting: VecDeque<UserMessage>,
 }
 
 /// A `can_use_tool` request the CLI is waiting on.
@@ -304,6 +309,14 @@ impl ClaudeProjector {
         // given on the command line. Either way a user's message started it.
         if !self.turn_open {
             out.extend(self.open_turn(line, TurnTrigger::User));
+            // The messages written during the last turn are this turn's:
+            // the CLI runs every one it holds in it, in the order written
+            // (2.1.316/50-two-messages-during-turn).
+            out.extend(
+                self.waiting
+                    .drain(..)
+                    .map(|message| at(line, Event::UserMessage(message))),
+            );
         }
         if out.is_empty() || drifted.is_some() {
             out.push(passthrough(line, value));
@@ -546,7 +559,17 @@ impl ClaudeProjector {
                 ..UsageUpdated::default()
             }),
         ));
-        out.push(state(line, LifecycleState::Idle));
+        // A message written during the turn waits in the CLI, which runs it
+        // next: the session is still working until then
+        // (PROTO-CLAUDE-CODE-STREAM-R44).
+        out.push(state(
+            line,
+            if self.waiting.is_empty() {
+                LifecycleState::Idle
+            } else {
+                LifecycleState::Running
+            },
+        ));
 
         // Message ids and streams never span turns.
         self.turn_open = false;
@@ -873,8 +896,11 @@ impl ClaudeProjector {
         }
     }
 
-    /// A user message the host sent. It starts a turn: the CLI's `system/init`
-    /// for the turn only arrives after it.
+    /// A user message the host sent. Written to an idle CLI, it starts a
+    /// turn: the CLI's `system/init` for the turn only arrives after it.
+    /// Written while a turn runs, or while messages already wait for the
+    /// next one, it waits in the CLI too, and is projected when its turn
+    /// starts (PROTO-CLAUDE-CODE-STREAM-R43).
     fn host_user(&mut self, line: &RawLine, value: Value) -> Vec<Projected> {
         // A message with attachments carries its images and its list of files
         // and folders as blocks of their own, never as its text (R26).
@@ -886,23 +912,20 @@ impl ClaudeProjector {
         if text.is_none() && attachments.is_empty() {
             return vec![passthrough(line, value)];
         }
-        let text = text.unwrap_or_default();
-        // A message sent while a turn runs joins that turn rather than
-        // starting one the CLI has not started.
-        let mut out = if self.turn_open {
-            Vec::new()
-        } else {
-            self.open_turn(line, TurnTrigger::User)
+        let message = UserMessage {
+            text: text.unwrap_or_default(),
+            origin: MessageOrigin::Human,
+            peer: None,
+            attachments,
         };
-        out.push(at(
-            line,
-            Event::UserMessage(UserMessage {
-                text,
-                origin: MessageOrigin::Human,
-                peer: None,
-                attachments,
-            }),
-        ));
+        // The line itself stays in the log as a passthrough until the turn
+        // that answers it starts.
+        if self.turn_open || !self.waiting.is_empty() {
+            self.waiting.push_back(message);
+            return vec![passthrough(line, value)];
+        }
+        let mut out = self.open_turn(line, TurnTrigger::User);
+        out.push(at(line, Event::UserMessage(message)));
         out
     }
 

@@ -1529,3 +1529,207 @@ fn recorded_tool_calls_carry_the_target_and_edits_the_table_gives() {
         assert_eq!(call.edits, None, "{fixture_name}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Messages written during a turn (PROTO-CLAUDE-CODE-STREAM, Sequencing)
+
+/// The turn boundaries, states and user messages of a projection, each with
+/// the raw line it was projected at.
+fn turns_and_messages(lines: &[ersa_adapter::RawLine]) -> Vec<(u64, String)> {
+    project(lines)
+        .into_iter()
+        .filter_map(|(at, projected)| {
+            let what = match projected.event {
+                Event::TurnStarted(t) => format!("turn.started {}", t.turn),
+                Event::TurnCompleted(t) => format!("turn.completed {}", t.turn),
+                Event::SessionState(s) => format!("session.state {:?}", s.state),
+                Event::UserMessage(m) => format!("user.message {}", m.text),
+                _ => return None,
+            };
+            Some((at, what))
+        })
+        .collect()
+}
+
+/// The raw line index of each `system/init` the CLI wrote.
+fn inits(lines: &[ersa_adapter::RawLine]) -> Vec<u64> {
+    lines
+        .iter()
+        .filter(|line| common::is_kind(line, "system/init"))
+        .map(|line| line.index)
+        .collect()
+}
+
+fn without_lines(sequence: Vec<(u64, String)>) -> Vec<String> {
+    sequence.into_iter().map(|(_, what)| what).collect()
+}
+
+const ESSAY: &str =
+    "user.message Write an essay of about 400 words on the history of lighthouses. Do not use any tools.";
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R43
+// verifies: PROTO-CLAUDE-CODE-STREAM-R44
+#[test]
+fn a_message_written_during_a_turn_starts_its_own_turn_at_that_turns_init() {
+    let lines = fixture("22-message-during-turn").raw_log();
+    let sequence = turns_and_messages(&lines);
+    assert_eq!(
+        without_lines(sequence.clone()),
+        [
+            "turn.started 1",
+            "session.state Running",
+            ESSAY,
+            "turn.completed 1",
+            // The second message waits in the CLI, so the session is still
+            // working between the turns (R44).
+            "session.state Running",
+            "turn.started 2",
+            "session.state Running",
+            // Its message opens its own turn, not the one running when it
+            // was written (R43).
+            "user.message Now reply with the single word: second",
+            "turn.completed 2",
+            "session.state Idle",
+        ]
+    );
+    // It is projected at the second turn's `system/init`.
+    let second = sequence
+        .iter()
+        .find(|(_, what)| what.ends_with("second"))
+        .unwrap();
+    assert_eq!(second.0, inits(&lines)[1]);
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R43
+// verifies: PROTO-CLAUDE-CODE-STREAM-R44
+#[test]
+fn messages_written_during_one_turn_start_the_next_one_in_the_order_written() {
+    // The CLI runs both in one turn (fixture 50): one `system/init`, and the
+    // record's prompt holds both texts.
+    let lines = fixture("50-two-messages-during-turn").raw_log();
+    let sequence = turns_and_messages(&lines);
+    assert_eq!(
+        without_lines(sequence.clone()),
+        [
+            "turn.started 1",
+            "session.state Running",
+            ESSAY,
+            "turn.completed 1",
+            "session.state Running",
+            "turn.started 2",
+            "session.state Running",
+            "user.message Now reply with the single word: second",
+            "user.message Now reply with the single word: third",
+            "turn.completed 2",
+            "session.state Idle",
+        ]
+    );
+    let second_init = inits(&lines)[1];
+    for (at, what) in &sequence {
+        if what.ends_with("second") || what.ends_with("third") {
+            assert_eq!(*at, second_init, "{what}");
+        }
+    }
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R44
+#[test]
+fn an_interrupted_turn_with_a_message_waiting_leaves_the_session_working() {
+    // Interrupting ends only the running turn; the waiting message then runs
+    // (fixture 24).
+    let sequence = without_lines(turns_and_messages(
+        &fixture("24-interrupt-with-waiting").raw_log(),
+    ));
+    let completed = sequence
+        .iter()
+        .position(|what| what == "turn.completed 1")
+        .unwrap();
+    assert_eq!(
+        sequence[completed + 1..],
+        [
+            "session.state Running",
+            "turn.started 2",
+            "session.state Running",
+            "user.message Now reply with the single word: second",
+            "turn.completed 2",
+            "session.state Idle",
+        ]
+    );
+}
+
+fn user_text(text: &str) -> String {
+    json!({"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}})
+        .to_string()
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R43
+// verifies: PROTO-CLAUDE-CODE-STREAM-R44
+#[test]
+fn a_message_written_between_turns_while_one_waits_waits_too() {
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let (first, second, third) = (user_text("one"), user_text("two"), user_text("three"));
+    let events = events(&log(&[
+        (Host, &first),
+        (Backend, init),
+        (Host, &second),
+        (Backend, result),
+        // After the `result`, but before the CLI has started the waiting
+        // message's turn: the CLI holds this one too.
+        (Host, &third),
+        (Backend, init),
+        (Backend, result),
+    ]));
+    let sequence: Vec<String> = summary(&events)
+        .into_iter()
+        .zip(&events)
+        .filter_map(|(what, event)| match event {
+            Event::UserMessage(m) => Some(format!("user.message {}", m.text)),
+            Event::TurnStarted(_) | Event::TurnCompleted(_) | Event::SessionState(_) => Some(what),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sequence,
+        [
+            "turn.started 1 User",
+            "session.state Running",
+            "user.message one",
+            "turn.completed 1 Success",
+            "session.state Running",
+            "turn.started 2 User",
+            "session.state Running",
+            "user.message two",
+            "user.message three",
+            "turn.completed 2 Success",
+            "session.state Idle",
+        ]
+    );
+}
+
+#[test]
+fn a_stray_message_delta_between_turns_opens_no_turn() {
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let (first, second) = (user_text("one"), user_text("two"));
+    let delta = stream(
+        None,
+        json!({"type": "message_delta", "delta": {}, "usage": {"output_tokens": 7}}),
+    );
+    let started = |events: &[Event]| {
+        events
+            .iter()
+            .filter(|e| matches!(e, Event::TurnStarted(_)))
+            .count()
+    };
+    let events = events(&log(&[
+        (Host, &first),
+        (Backend, init),
+        (Host, &second),
+        (Backend, result),
+        // Between the `result` and the waiting message's `system/init`.
+        (Backend, &delta),
+        (Backend, init),
+    ]));
+    assert_eq!(started(&events), 2);
+}
