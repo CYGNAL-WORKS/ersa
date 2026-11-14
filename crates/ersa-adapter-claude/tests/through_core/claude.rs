@@ -1,7 +1,7 @@
 //! The real Claude adapter against a stub CLI that replays recorded fixture
 //! 11: a prompt, a permission request, the user's allow, the reply.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use ersa_adapter::fake::FakeTransport;
@@ -11,11 +11,11 @@ use ersa_adapter::{
     RecordSummary, SessionConfig, Transport, async_trait,
 };
 use ersa_adapter_claude::ClaudeAdapter;
+use ersa_core::CoreConfig;
 use ersa_core::replay::{Pace, Replay};
-use ersa_core::{CoreConfig, Server};
 use serde_json::Value;
 
-use super::{TestCore, tempdir, test_config, unique_endpoint};
+use crate::support::{TestCore, start_replay_of};
 
 pub const FIXTURE: &str = "11-stream-permission-prompt-tool-stdio";
 
@@ -149,12 +149,7 @@ pub fn fixture_dir() -> PathBuf {
 
 /// The recorded fixtures of Claude Code `version`.
 pub fn fixtures_of(version: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .unwrap()
-        .join("docs/briefs/protocol/fixtures/claude-code")
-        .join(version)
+    crate::common::fixtures_root().join(version)
 }
 
 /// Fixture 11 as a recording.
@@ -171,10 +166,6 @@ pub fn fixture() -> (Vec<String>, Vec<String>) {
 /// A replay server for fixture 11 in a temporary data directory, with
 /// `configure` applied to its configuration.
 pub async fn start_replay_with(configure: impl FnOnce(&mut CoreConfig), pace: Pace) -> TestCore {
-    let dir = tempdir();
-    let endpoint = unique_endpoint();
-    let mut config = test_config(&dir.path().join("data"), &endpoint);
-    configure(&mut config);
     let replay = Replay {
         adapter: Arc::new(isolated_claude()),
         recording: recording(),
@@ -184,13 +175,7 @@ pub async fn start_replay_with(configure: impl FnOnce(&mut CoreConfig), pace: Pa
         backend_version: String::new(),
         pace,
     };
-    let server = Server::bind_replay(config, replay).await.expect("bind");
-    let task = tokio::spawn(server.run());
-    TestCore {
-        dir,
-        endpoint,
-        task,
-    }
+    start_replay_of(replay, configure).await
 }
 
 pub fn parse(line: &str) -> Value {

@@ -90,6 +90,11 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --locked -- -D warnings
 
+      # The binary with no adapter, so whatever stops compiling without one
+      # is caught here (ARCH-CORE-R13).
+      - name: Clippy without adapters
+        run: cargo clippy -p ersa-cli --no-default-features --all-targets --locked -- -D warnings
+
       - name: Test
         run: cargo test --locked
 
