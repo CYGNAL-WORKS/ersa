@@ -1212,6 +1212,7 @@ const entries: Entry[] = [
       ["Running", <Card steps={[[0, editCall]]} id="e1" />],
       ["Waiting for the user", <Card steps={[[0, editCall]]} id="e1" waiting />],
       ["Under the pointer", <Card steps={[[0, editCall], [1, editDone]]} id="e1" force="hover" />],
+      ["Pressed", <Card steps={[[0, editCall], [1, editDone]]} id="e1" force="pressed" />],
       ["Keyboard focus", <Card steps={[[0, editCall], [1, editDone]]} id="e1" force="focus" />],
       ["Closed", <Card steps={[[0, editCall], [1, editDone]]} id="e1" initialOpen={false} />],
       [
