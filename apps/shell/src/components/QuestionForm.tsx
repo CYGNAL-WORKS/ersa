@@ -6,7 +6,7 @@ import type { Answer, Reply } from "../session/answers";
 import { type Draft, answersOf, choose, chosenOf, hasOptions, takesWords, wordsOf, write } from "../session/questionForm";
 import { Button } from "./Button";
 import { Icon } from "./Icon";
-import { Revealed } from "./Transcript";
+import { Revealed } from "./Revealed";
 // The answers' row, notes and ring are the ones a permission request's answers use.
 import "./PermissionAnswers.css";
 import "./QuestionForm.css";

@@ -1,0 +1,322 @@
+/* A tool card and the thinking row (docs/design/TRANSCRIPT.md, Tool cards and Thinking). `data-force` lets the gallery
+   show a state without a pointer. */
+
+/* The card: material-tile with a line edge, radius-md. Its row is the control; the edge is the card's, so the row's
+   states reach it through :has(). */
+.tool-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--material-tile);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color var(--motion-quick) var(--motion-ease-out);
+}
+
+/* One row, padded space-sm by space-md, its parts space-sm apart, in ui and ink. */
+.tool-row,
+.thinking-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  margin: 0;
+  font: inherit;
+  text-align: start;
+  color: inherit;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.tool-row {
+  padding: var(--space-sm) var(--space-md);
+  font-family: var(--type-ui-family);
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+  color: var(--color-ink);
+  transition: background var(--motion-quick) var(--motion-ease-out);
+}
+
+/* Under the pointer the edge turns ink-faint and the fill steps up to surface-raised; pressed it sinks to canvas;
+   with keyboard focus the edge turns ink (DESIGN.md, Pointer and press). */
+.tool-card:has(> .tool-row:hover:where(:not(:focus-visible))),
+.tool-card:has(> .tool-row[data-force="hover"]) {
+  border-color: var(--color-ink-faint);
+}
+
+.tool-row:hover:where(:not(:focus-visible)),
+.tool-row[data-force="hover"] {
+  background: var(--color-surface-raised);
+}
+
+.tool-row:active,
+.tool-row[data-force="pressed"] {
+  background: var(--color-canvas);
+}
+
+.tool-row:focus-visible,
+.thinking-toggle:focus-visible {
+  outline: none;
+}
+
+.tool-card:has(> .tool-row:focus-visible),
+.tool-card:has(> .tool-row[data-force="focus"]) {
+  border-color: var(--color-ink);
+}
+
+/* The state mark's place, size-icon square, the same whatever the state, so the row never moves. */
+.tool-mark {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--size-icon);
+  height: var(--size-icon);
+}
+
+/* Each new mark fades in where the last one was, over motion-quick. */
+.tool-mark-face {
+  display: inline-flex;
+  animation: tool-mark-in var(--motion-quick) var(--motion-ease-out);
+}
+
+@keyframes tool-mark-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Running: the ring at size-icon, one turn per motion-loop-ring at constant speed. */
+.tool-mark[data-state="running"] .icon {
+  color: var(--color-ink-muted);
+  animation: tool-mark-turn var(--motion-loop-ring) var(--motion-linear) infinite;
+}
+
+@keyframes tool-mark-turn {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* Done: a check in ink-muted. Waiting and failed are the shared glyph at size-glyph, caution and danger. */
+.tool-mark[data-state="done"] .icon {
+  color: var(--color-ink-muted);
+}
+
+.tool-name {
+  flex: none;
+}
+
+/* The target, in mono, cut with an ellipsis where it would overflow: at its end, or, for a path, at its start so the
+   file's own name stays in view (the box runs right to left; the text, isolated, left to right). */
+.tool-target {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--type-mono-family);
+  font-size: var(--type-mono-size);
+}
+
+.tool-target[data-path] {
+  direction: rtl;
+  text-align: left;
+}
+
+.tool-target bdi {
+  direction: ltr;
+}
+
+/* The detail at the trailing edge: progress, a clock or the duration, in ui-small, ink-faint and tabular figures, so a
+   ticking clock keeps its width. Failed, it reads in danger. */
+.tool-detail {
+  flex: none;
+  margin-inline-start: auto;
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  color: var(--color-ink-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.tool-detail[data-failed] {
+  color: var(--color-danger);
+}
+
+/* The chevron after the detail, in ink-faint, turned a quarter while the card is open. */
+.tool-chevron {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-ink-faint);
+  transition: transform var(--motion-settle) var(--motion-ease-out);
+}
+
+[aria-expanded="true"] > .tool-chevron {
+  transform: rotate(90deg);
+}
+
+/* What opens beneath a row grows open and shrinks closed over motion-settle with motion-ease-out, fading as it goes,
+   as the rail's groups do: its one grid row eases between its content's height and none. */
+.tool-open {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--motion-settle) var(--motion-ease-out),
+    opacity var(--motion-settle) var(--motion-ease-out);
+}
+
+.tool-open[data-open] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.tool-open-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The open card: the input, a subagent's calls, then the output, space-sm apart, padded space-sm by space-md, under
+   a line hairline. The padding and the hairline sit inside the part that folds, so they fold with it, open or
+   closing, rather than coming and going at once. */
+.tool-open-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-top: var(--line-hairline) solid var(--color-line);
+}
+
+.tool-label {
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  color: var(--color-ink-muted);
+}
+
+/* A part with nothing in it: quiet words in ui-small and ink-faint, no box, so it reads as empty rather than as
+   content still to load. */
+.tool-empty {
+  margin: 0;
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  color: var(--color-ink-faint);
+}
+
+/* The input, each field's name in ui-small and ink-muted above its value in mono. */
+.tool-fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  margin: 0;
+}
+
+.tool-field dt {
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  color: var(--color-ink-muted);
+}
+
+.tool-field dd {
+  margin: 0;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A subagent's calls: tool cards of their own, space-xs apart. */
+.tool-calls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+/* The output: mono in ink on surface with radius-sm, padded space-sm, its lines kept and wrapping, scrolling past
+   size-card-max. */
+.tool-output {
+  margin: 0;
+  max-height: var(--size-card-max);
+  overflow: auto;
+  padding: var(--space-sm);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The thinking row: no card, the state mark and its words in ui-small and ink-muted. */
+.thinking-row {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  color: var(--color-ink-muted);
+}
+
+/* With no summary, nothing opens: the mark and the words sit in one line. */
+.thinking-row:not(:has(> .thinking-toggle)) {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+/* With a summary the row is a control, quiet as a link: under the pointer and pressed it reads ink, with keyboard
+   focus it takes an ink edge. */
+.thinking-toggle {
+  align-self: flex-start;
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
+  color: var(--color-ink-muted);
+  border-radius: var(--radius-sm);
+  transition: color var(--motion-quick) var(--motion-ease-out);
+}
+
+.thinking-toggle:hover,
+.thinking-toggle:active,
+.thinking-toggle[data-force="hover"],
+.thinking-toggle[data-force="pressed"] {
+  color: var(--color-ink);
+}
+
+.thinking-toggle:focus-visible,
+.thinking-toggle[data-force="focus"] {
+  box-shadow: 0 0 0 var(--line-hairline) var(--color-ink);
+}
+
+/* The summary, in prose and ink-muted, beneath the row. */
+.thinking-summary {
+  margin: 0;
+  /* Under the words, past the mark's place. */
+  padding: var(--space-xs) 0 0 calc(var(--size-icon) + var(--space-sm));
+  font-family: var(--type-prose-family);
+  font-size: var(--type-prose-size);
+  line-height: var(--type-prose-leading);
+  color: var(--color-ink-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* With reduced motion on, cards open and close at once, nothing fades, and the ring holds still at full tone. */
+@media (prefers-reduced-motion: reduce) {
+  .tool-card,
+  .tool-row,
+  .tool-chevron,
+  .tool-open,
+  .thinking-toggle {
+    transition: none;
+  }
+
+  .tool-mark-face,
+  .tool-mark[data-state="running"] .icon {
+    animation: none;
+  }
+}

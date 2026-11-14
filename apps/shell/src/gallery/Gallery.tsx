@@ -28,6 +28,7 @@ import { SessionControls } from "../components/SessionControls";
 import { Shelf } from "../components/Shelf";
 import { SessionTitle } from "../components/SessionTitle";
 import { QuestionForm } from "../components/QuestionForm";
+import { ThinkingRow, ToolCard, type ToolContext } from "../components/ToolCard";
 import { Transcript } from "../components/Transcript";
 import type { CoreView, SessionsView } from "../core/connection";
 import type { Envelope, Event, QuestionAsked } from "../protocol/agent-events.gen";
@@ -516,6 +517,83 @@ const transcriptStates: [string, SessionView, answers?: Record<string, Answer>][
   ["Failed", sessionView(failing)],
   ["Not receiving events", sessionView([], { stream: { state: "failed", message: "Core closed the connection" } })],
 ];
+
+// The transcript's events all carry one time; its running cards read the clock 12 seconds after it.
+const transcriptNow = Date.parse("2026-11-01T09:00:12Z");
+
+/** Transcript items built as the window builds them, each event at its own second. */
+function itemsAt(steps: [seconds: number, Event][], input: "live" | "record" = "live") {
+  return steps
+    .map(
+      ([seconds, event], seq): Envelope => ({
+        v: EVENT_VERSION,
+        session_id: "s1",
+        seq,
+        ts: new Date(Date.UTC(2026, 10, 1, 9, 0, seconds)).toISOString(),
+        source: { backend: "claude-code", backend_version: "2.1.316", input },
+        event,
+      }),
+    )
+    .reduce(apply, emptyTranscript).items;
+}
+type ToolItem = Extract<ReturnType<typeof itemsAt>[number], { kind: "tool" }>;
+type ThinkingItem = Extract<ReturnType<typeof itemsAt>[number], { kind: "thinking" }>;
+// Running cards read the clock three minutes and five seconds after their calls began.
+const toolNow = Date.UTC(2026, 10, 1, 9, 0, 0) + 185_000;
+const toolWorkspace = "D:\\Projects\\ersa";
+const designPage = "D:\\Projects\\ersa\\docs\\design\\TRANSCRIPT.md";
+const readCall: Event = { type: "tool.requested", tool_use_id: "r1", name: "Read", input: { file_path: designPage, limit: 80 }, target: designPage };
+const readDone: Event = { type: "tool.result", tool_use_id: "r1", content: "# The transcript", is_error: false, duration_ms: 2400 };
+const bashCall: Event = {
+  type: "tool.requested",
+  tool_use_id: "b1",
+  name: "Bash",
+  input: { command: "cargo test -p ersa-core", description: "Run the core's tests" },
+  target: "cargo test -p ersa-core",
+};
+const testOutput = "running 48 tests\ntest session::tests::resumes ... ok\ntest session::tests::ends ... ok\n\ntest result: ok. 48 passed; 0 failed";
+const subagent: [number, Event][] = [
+  [0, { type: "tool.requested", tool_use_id: "a1", name: "Agent", input: { description: "Count files", prompt: "Count the files in docs." }, target: "Count files" }],
+  [1, { type: "tool.requested", tool_use_id: "g1", name: "Glob", input: { pattern: "docs/**/*.md" }, parent_tool_use_id: "a1", target: "docs/**/*.md" }],
+  [2, { type: "tool.result", tool_use_id: "g1", content: "docs/GLOSSARY.md", is_error: false }],
+  [3, { type: "tool.requested", tool_use_id: "g2", name: "Read", input: { file_path: "D:\\Projects\\ersa\\docs\\GLOSSARY.md" }, parent_tool_use_id: "a1", target: "D:\\Projects\\ersa\\docs\\GLOSSARY.md" }],
+  [5, { type: "tool.result", tool_use_id: "g2", content: "# Glossary", is_error: false }],
+  [8, { type: "tool.result", tool_use_id: "a1", content: "One file: docs/GLOSSARY.md.", is_error: false, duration_ms: 7804 }],
+];
+const longPathCall: Event = {
+  type: "tool.requested",
+  tool_use_id: "r1",
+  name: "Read",
+  input: {},
+  target: "C:\\Users\\me\\AppData\\Local\\ersa\\target\\debug\\build\\ersa-core-5f3c2a9e1b7d4c08\\out\\generated_protocol_bindings.rs",
+};
+const longCommandCall: Event = {
+  type: "tool.requested",
+  tool_use_id: "b1",
+  name: "Bash",
+  input: {},
+  target: "pnpm --filter shell exec vitest run src/components/ToolCard.dom.test.ts src/session/toolCard.test.ts --reporter verbose",
+};
+
+/** One call's card as the transcript shows it, with its subagent's calls, against the gallery's clock and workspace. */
+function Card({
+  steps,
+  id = "r1",
+  waiting,
+  input,
+  ...rest
+}: { steps: [number, Event][]; id?: string; waiting?: boolean; input?: "live" | "record" } & Omit<Parameters<typeof ToolCard>[0], "item" | "context">) {
+  const items = itemsAt(steps, input);
+  const item = items.find((i): i is ToolItem => i.key === `tool:${id}`);
+  if (!item) return null;
+  const calls = new Map<string, ToolItem[]>();
+  for (const i of items) if (i.kind === "tool" && i.parent) calls.set(i.parent, [...(calls.get(i.parent) ?? []), i]);
+  const context: ToolContext = { awaiting: new Set(waiting ? [item.key] : []), calls, workspace: toolWorkspace, now: toolNow };
+  return <ToolCard item={item} context={context} {...rest} />;
+}
+const thought = (final: boolean, summary?: string) =>
+  itemsAt([[0, { type: "assistant.thinking", block_id: "m/0", final, ...(summary ? { summary } : {}) }]])[0] as ThinkingItem;
+const thinkingSummary = "The reconnect test races the subscription. Check the order in connection.ts before touching the fake Core.";
 
 /** The session title as the transcript header holds it, beside the session's state. */
 function Titled(props: Omit<Parameters<typeof SessionTitle>[0], "title" | "onRename" | "children">) {
@@ -1042,8 +1120,54 @@ const entries: Entry[] = [
     wide: true,
     states: transcriptStates.map(([label, view, answers]) => [
       label,
-      <Transcript title="Fix the flaky reconnect test" view={view} answers={answers} onDecide={() => {}} onAnswer={() => {}} onRetry={() => {}} />,
+      <Transcript title="Fix the flaky reconnect test" view={view} answers={answers} onDecide={() => {}} onAnswer={() => {}} onRetry={() => {}} now={transcriptNow} />,
     ]),
+  },
+  {
+    name: "ToolCard",
+    wide: true,
+    states: [
+      ["Running, its clock", <Card steps={[[0, bashCall]]} id="b1" />],
+      ["Running, its progress", <Card steps={[[0, readCall], [1, { type: "tool.progress", tool_use_id: "r1", detail: "Reading TRANSCRIPT.md" }]]} />],
+      ["Waiting for the user", <Card steps={[[0, bashCall]]} id="b1" waiting />],
+      ["Done", <Card steps={[[0, readCall], [2, readDone]]} />],
+      ["Under the pointer", <Card steps={[[0, readCall], [2, readDone]]} force="hover" />],
+      ["Pressed", <Card steps={[[0, readCall], [2, readDone]]} force="pressed" />],
+      ["Keyboard focus", <Card steps={[[0, readCall], [2, readDone]]} force="focus" />],
+      ["Open", <Card steps={[[0, bashCall], [42, { type: "tool.result", tool_use_id: "b1", content: testOutput, is_error: false }]]} id="b1" initialOpen />],
+      [
+        "Failed, open",
+        <Card steps={[[0, bashCall], [185, { type: "tool.result", tool_use_id: "b1", content: "error[E0425]: cannot find value `seq` in this scope", is_error: true }]]} id="b1" initialOpen />,
+      ],
+      ["A subagent's calls, open", <Card steps={subagent} id="a1" initialOpen />],
+      // As narrow as a bubble, so the target overflows.
+      [
+        "Failed with no input and no output, open",
+        <Card
+          id="e1"
+          initialOpen
+          steps={[
+            [0, { type: "tool.requested", tool_use_id: "e1", name: "mcp__docs__sync", input: {} }],
+            [4, { type: "tool.result", tool_use_id: "e1", content: "", is_error: true }],
+          ]}
+        />,
+      ],
+      ["A long path, cut at its start", <div style={{ maxWidth: "var(--size-bubble-max)" }}><Card steps={[[0, longPathCall], [3, readDone]]} /></div>],
+      ["A long command, cut at its end", <div style={{ maxWidth: "var(--size-bubble-max)" }}><Card steps={[[0, longCommandCall]]} id="b1" /></div>],
+      ["Read from the record, unfinished", <Card steps={[[0, readCall]]} input="record" />],
+    ],
+  },
+  {
+    name: "ThinkingRow",
+    wide: true,
+    states: [
+      ["Thinking", <ThinkingRow item={thought(false)} />],
+      ["Thought", <ThinkingRow item={thought(true)} />],
+      ["Thought, with a summary", <ThinkingRow item={thought(true, thinkingSummary)} />],
+      ["Under the pointer", <ThinkingRow item={thought(true, thinkingSummary)} force="hover" />],
+      ["Keyboard focus", <ThinkingRow item={thought(true, thinkingSummary)} force="focus" />],
+      ["Open", <ThinkingRow item={thought(true, thinkingSummary)} initialOpen />],
+    ],
   },
   {
     name: "SessionTitle",
