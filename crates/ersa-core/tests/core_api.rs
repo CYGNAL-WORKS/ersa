@@ -196,6 +196,34 @@ async fn backend_list_lists_the_models_the_backend_reports() {
     assert_eq!(info["models"], json!([]));
 }
 
+/// A detection that found every backend available is kept: listing again
+/// and starting a session ask the backend for nothing more.
+// verifies: PROTO-CORE-API-R96
+#[tokio::test(flavor = "multi_thread")]
+async fn a_detection_that_found_every_backend_is_not_run_again() {
+    let fake = FakeAdapter::new(1);
+    let stats = Arc::clone(&fake.stats);
+    let core = start_with_adapters(tempdir(), support::detecting, vec![Arc::new(fake)]).await;
+    let mut client = core.client().await;
+    for _ in 0..2 {
+        let infos = client
+            .result("backend.list", json!({ "host_id": "local" }))
+            .await;
+        assert_eq!(infos[0]["status"], json!("available"));
+    }
+    let workspace_id = support::workspace(&mut client, core.dir.path()).await;
+    client
+        .result(
+            "session.create",
+            json!({ "workspace_id": workspace_id, "backend": support::fake::BACKEND, "model": "model-b" }),
+        )
+        .await;
+    assert_eq!(
+        stats.model_probes.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+}
+
 // verifies: PROTO-CORE-API-R06
 #[tokio::test(flavor = "multi_thread")]
 async fn settings_are_patch_merged_and_persisted() {

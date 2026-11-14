@@ -63,6 +63,8 @@ pub const IMAGE_MAX: u64 = 1024;
 #[derive(Debug, Default)]
 pub struct Stats {
     pub starts: AtomicUsize,
+    /// How many times Core asked the backend for its models.
+    pub model_probes: AtomicUsize,
     pub stops: AtomicUsize,
     /// The configuration of every session started, in order.
     pub configs: Mutex<Vec<SessionConfig>>,
@@ -374,6 +376,7 @@ impl Adapter for FakeAdapter {
         &self,
         _transport: Arc<dyn Transport>,
     ) -> Result<Vec<ModelChoice>, AdapterError> {
+        self.stats.model_probes.fetch_add(1, Ordering::SeqCst);
         match &*self.models.lock().unwrap() {
             ModelsAnswer::Listed(models) => Ok(models.clone()),
             ModelsAnswer::Missing => Err(AdapterError::Io(std::io::Error::new(
