@@ -95,9 +95,7 @@ fn examples() -> Vec<Event> {
                 FileEdit {
                     path: "NOTES.md".into(),
                     old_text: None,
-                    new_text: "Whole file.
-"
-                    .into(),
+                    new_text: "Whole file.\n".into(),
                 },
             ]),
         }),
@@ -495,8 +493,7 @@ fn a_tool_request_carries_its_target_and_edits_on_the_wire() {
         wire["edits"],
         json!([
             { "path": "src/lib.rs", "old_text": "fn old()", "new_text": "fn new()" },
-            { "path": "NOTES.md", "new_text": "Whole file.
-        " },
+            { "path": "NOTES.md", "new_text": "Whole file.\n" },
         ])
     );
 
