@@ -1606,7 +1606,7 @@ async fn archiving_is_refused_while_the_session_is_starting_or_a_turn_runs() {
 
 /// A message sent while an archive is stopping the session is refused, so
 /// the archive never stops a send that started after its busy check.
-// verifies: PROTO-CORE-API-R77
+// verifies: PROTO-CORE-API-R85
 #[tokio::test(flavor = "multi_thread")]
 async fn a_message_sent_while_an_archive_stops_the_session_is_refused() {
     let (core, stats) = start_fake(FakeAdapter::slow_stop(Duration::from_secs(2))).await;
@@ -1632,6 +1632,14 @@ async fn a_message_sent_while_an_archive_stops_the_session_is_refused() {
         .error("session.send", json!({ "id": id, "text": "hello" }))
         .await;
     assert_eq!(kind(&error), "invalid_state", "{error}");
+    assert!(error["data"].get("reason").is_none(), "{error}");
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("being archived"),
+        "{error}"
+    );
     assert_eq!(stats.messages.lock().unwrap().len(), sent, "nothing sent");
 
     let archived = client.response(archive).await;
