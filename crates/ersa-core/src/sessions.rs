@@ -265,7 +265,7 @@ struct Handle {
     /// How many `session.set_archived { archived: true }` are between their
     /// busy check and their mark. While any is, `session.send` refuses, so
     /// no send starts after the check only to be stopped by the archive
-    /// (PROTO-CORE-API-R77).
+    /// (PROTO-CORE-API-R85).
     archiving: AtomicUsize,
     id: String,
     backend: String,
