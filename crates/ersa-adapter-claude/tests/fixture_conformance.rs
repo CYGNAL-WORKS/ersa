@@ -448,6 +448,43 @@ fn host_messages_serialise_to_the_recorded_stdin_lines() {
                     },
                 )
             }
+            // Session controls, recorded between turns and during one
+            // (fixtures 2.1.316/23 to 26).
+            (Some("control_request"), Some(subtype)) if subtype == "set_model" => {
+                HostMessage::control_request(
+                    line["request_id"].as_str().unwrap(),
+                    HostRequest::SetModel {
+                        model: line.pointer("/request/model").and_then(Value::as_str).map(String::from),
+                    },
+                )
+            }
+            (Some("control_request"), Some(subtype)) if subtype == "set_permission_mode" => {
+                HostMessage::control_request(
+                    line["request_id"].as_str().unwrap(),
+                    HostRequest::SetPermissionMode {
+                        mode: serde_json::from_value(line["request"]["mode"].clone())
+                            .unwrap_or_else(|e| panic!("{at}: not a permission mode: {e}")),
+                    },
+                )
+            }
+            // No host message models `apply_flag_settings` yet: the ticket
+            // that builds changing effort adds one. Until then the recorded
+            // line must keep the shape the recordings settled.
+            (Some("control_request"), Some(subtype)) if subtype == "apply_flag_settings" => {
+                assert_eq!(
+                    line,
+                    json!({
+                        "type": "control_request",
+                        "request_id": line["request_id"],
+                        "request": {
+                            "subtype": "apply_flag_settings",
+                            "settings": { "effortLevel": line["request"]["settings"]["effortLevel"] },
+                        },
+                    }),
+                    "{at}"
+                );
+                continue;
+            }
             (Some("control_response"), _) => HostMessage::permission_decision(
                 line.pointer("/response/request_id")
                     .unwrap()

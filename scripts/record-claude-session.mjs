@@ -24,6 +24,13 @@
 // a process killed part way through a turn leaves. --original-cwd names where
 // the original ran, for a fork that starts in another folder.
 //
+// To write during a turn: `nowait:<text>` sends a user message without
+// waiting for its `result`; `until:<text>` waits for a stdout line, after the
+// latest user message was sent, that contains <text> (say
+// `"type":"tool_use"`), so what follows lands part way through a turn; and
+// `sleep:<ms>` pauses. A plain message, and the end of the run, first wait for
+// every `result` owed so far.
+//
 // A message of the form `content:<json>` is sent as a user message whose
 // content blocks are `<json>`, an array, as a message with attachments goes
 // (PROTO-CLAUDE-CODE-STREAM, User message).
@@ -117,6 +124,13 @@ const ENV_REMOVED = [
 // The session record entries the adapter reads (PROTO-CLAUDE-CODE-STREAM, Session record).
 // A `system` entry is read only for the subtypes named here, as "system/<subtype>".
 const READ_ENTRIES = new Set(["user", "assistant", "custom-title", "ai-title", "last-prompt", "system/local_command"]);
+// Entries the adapter does not read yet but a recording is made to show, kept
+// verbatim too: the queue of messages written during a turn
+// (PROTO-CLAUDE-CODE-STREAM-R46) and a compaction's boundary. Neither carries
+// the CLI's system prompt or the machine's configuration.
+const SHOWN_ENTRIES = new Set(["queue-operation", "system/compact_boundary"]);
+const VERBATIM = (entry) =>
+  [READ_ENTRIES, SHOWN_ENTRIES].some((set) => set.has(entry.type) || set.has(`${entry.type}/${entry.subtype}`));
 
 const USER_NAME = userInfo().username;
 function scrub(text) {
@@ -142,7 +156,7 @@ function elide(recordText) {
       if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
         return JSON.stringify({ type: "not-an-object", ersa_elided: true });
       }
-      if (READ_ENTRIES.has(entry.type) || READ_ENTRIES.has(`${entry.type}/${entry.subtype}`)) return line;
+      if (VERBATIM(entry)) return line;
       const kept = { type: entry.type };
       if (entry.subtype !== undefined) kept.subtype = entry.subtype;
       // The links that make the conversation's chain, which runs through
@@ -287,6 +301,12 @@ const sent = [];
 let stderr = "";
 let buffer = "";
 let waiting = null; // { want: (msg) => bool, resolve }
+// Turns owed: user messages sent, against `result` lines seen. Counted here,
+// not in a wait, since a `result` may come while nothing waits for it.
+let messagesSent = 0;
+let resultsSeen = 0;
+// Where in stdout the latest user message was sent, for `until:`.
+let sinceMessage = 0;
 
 function send(obj) {
   const line = JSON.stringify(obj);
@@ -326,6 +346,7 @@ child.stdout.on("data", (d) => {
     } catch {
       continue;
     }
+    if (msg.type === "result") resultsSeen++;
     if (msg.type === "control_request" && msg.request?.subtype === "can_use_tool") {
       // Allow with the input as asked, the way Ersa answers an unedited allow.
       send({
@@ -350,6 +371,20 @@ send({ type: "control_request", request_id: "ersa-init-1", request: initialize }
 const initialized = !!(await initAnswer);
 
 const turns = [];
+// Waits until every turn owed so far has its `result`; false on the deadline.
+async function drain() {
+  while (resultsSeen < messagesSent) {
+    const res = await waitFor((m) => m.type === "result" && resultsSeen >= messagesSent, 300_000);
+    if (!res) return false;
+  }
+  return true;
+}
+function sendMessage(text) {
+  const content = text.startsWith("content:") ? JSON.parse(text.slice("content:".length)) : [{ type: "text", text }];
+  sinceMessage = stdoutLines.length;
+  messagesSent++;
+  send({ type: "user", message: { role: "user", content } });
+}
 if (initialized) {
   let controls = 0;
   for (const [n, text] of messages.entries()) {
@@ -372,13 +407,32 @@ if (initialized) {
       if (!res) break;
       continue;
     }
-    const result = waitFor((m) => m.type === "result", 300_000);
-    const content = text.startsWith("content:") ? JSON.parse(text.slice("content:".length)) : [{ type: "text", text }];
-    send({ type: "user", message: { role: "user", content } });
-    const res = await result;
+    if (text.startsWith("sleep:")) {
+      await new Promise((r) => setTimeout(r, Number(text.slice("sleep:".length))));
+      continue;
+    }
+    if (text.startsWith("until:")) {
+      const needle = text.slice("until:".length);
+      const seen = stdoutLines.slice(sinceMessage).some((l) => l.line.includes(needle));
+      const res = seen || (await waitFor((m) => JSON.stringify(m).includes(needle), 300_000));
+      turns.push({ turn: n + 1, until: needle, seen: !!res });
+      if (!res) break;
+      continue;
+    }
+    if (text.startsWith("nowait:")) {
+      sendMessage(text.slice("nowait:".length));
+      turns.push({ turn: n + 1, text: text.slice("nowait:".length), waited: false });
+      continue;
+    }
+    if (!(await drain())) break;
+    sendMessage(text);
+    const ok = await drain();
+    // The latest `result`: this message's own.
+    const res = ok ? stdoutLines.map((l) => { try { return JSON.parse(l.line); } catch { return null; } }).findLast((m) => m?.type === "result") : null;
     turns.push({ turn: n + 1, text, got_result: !!res, subtype: res?.subtype ?? null, is_error: res?.is_error ?? null });
     if (!res) break;
   }
+  await drain();
 }
 child.stdin.end();
 let exit = await Promise.race([exited, new Promise((r) => setTimeout(() => r(null), 30_000))]);
@@ -440,7 +494,7 @@ writeFileSync(
         fork_original: { session_id: resume, cut_to_lines: cutOriginal === undefined ? null : Number(cutOriginal), before: originalBefore, after: recordState(originalPath) },
       }),
       session_record: recordLines === null ? null : `record/${stem}.jsonl`,
-      session_record_verbatim_entries: [...READ_ENTRIES],
+      session_record_verbatim_entries: [...READ_ENTRIES, ...SHOWN_ENTRIES],
       exit_code: exit.code,
       signal: exit.signal,
       elapsed_ms,
@@ -494,7 +548,9 @@ if (killed) {
 console.log(`recorded ${stem} (${version}) in ${cwd}${keep ? " (kept)" : " (cleaned up)"}`);
 console.log(`  session ${init?.session_id ?? "?"}: exit ${exit.code ?? exit.signal}, ${stdoutLines.length} lines out, ${sent.length} in, ${elapsed_ms} ms, record ${recordLines === null ? "NOT FOUND" : "copied"}`);
 for (const t of turns) {
-  if (t.control) console.log(`  turn ${t.turn}: ${t.control} ${t.got_response ? t.subtype : "NO RESPONSE"}`);
+  if (t.until !== undefined) console.log(`  turn ${t.turn}: until ${t.until} ${t.seen ? "seen" : "NOT SEEN"}`);
+  else if (t.waited === false) console.log(`  turn ${t.turn}: written without waiting`);
+  else if (t.control) console.log(`  turn ${t.turn}: ${t.control} ${t.got_response ? t.subtype : "NO RESPONSE"}`);
   else console.log(`  turn ${t.turn}: ${t.got_result ? t.subtype : "NO RESULT"}${t.is_error ? " (error)" : ""}`);
 }
 if (stderr) console.log("stderr:", stderr.trim().slice(0, 400));

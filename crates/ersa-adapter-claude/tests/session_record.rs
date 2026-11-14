@@ -193,6 +193,18 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
                 local_commands += 1;
                 continue;
             }
+            // A message the CLI wrote itself mid-session (the interrupt
+            // marker, a session control's local-command output: fixtures
+            // 2.1.316/24 to 27) is a passthrough on the stream, which carries
+            // no user message of Ersa's (R43), and a `system` user message
+            // from the record. Which one live should show is open (inbox).
+            if let ([Event::BackendPassthrough(live)], [Event::UserMessage(from_record)]) =
+                (events.as_slice(), recorded.as_slice())
+                && live.kind == "user"
+                && from_record.origin == MessageOrigin::System
+            {
+                continue;
+            }
             assert_eq!(recorded, &events, "{}: {uuid}", stream.name);
             for event in events {
                 let kind = serde_json::to_value(&event).unwrap()["type"].clone();
