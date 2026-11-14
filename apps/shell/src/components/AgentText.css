@@ -1,0 +1,207 @@
+/* The agent's words as formatted text (docs/design/TRANSCRIPT.md, Formatted text): prose in ink, no bubble. */
+
+.agent-text {
+  min-width: 0;
+  font-family: var(--type-prose-family);
+  font-size: var(--type-prose-size);
+  line-height: var(--type-prose-leading);
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+
+/* Blocks sit space-md apart; the spacing is the gap between them, never around the message. */
+.agent-text :is(p, ul, ol, blockquote, pre, table, h1, h2, h3, h4, h5, h6, hr) {
+  margin: 0;
+}
+.agent-text > * + *,
+.agent-text blockquote > * + *,
+.agent-text li > * + * {
+  margin-top: var(--space-md);
+}
+
+/* Headings are rare and quiet, in the prose face: levels 1 and 2 at heading size, the rest at prose size. */
+.agent-text :is(h1, h2, h3, h4, h5, h6) {
+  font-family: var(--type-prose-family);
+  font-size: var(--type-prose-size);
+  font-weight: var(--type-heading-weight);
+  line-height: var(--type-heading-leading);
+}
+.agent-text :is(h1, h2) {
+  font-size: var(--type-heading-size);
+}
+.agent-text > * + :is(h1, h2, h3, h4, h5, h6) {
+  margin-top: var(--space-lg);
+}
+.agent-text > :is(h1, h2, h3, h4, h5, h6) + * {
+  margin-top: var(--space-xs);
+}
+
+.agent-text strong {
+  font-weight: var(--type-heading-weight);
+}
+
+/* Inline code: mono on surface-raised. */
+.agent-text :not(pre) > code {
+  padding: 0 var(--space-xs);
+  font-family: var(--type-mono-family);
+  font-size: var(--type-mono-size);
+  background: var(--color-surface-raised);
+  border-radius: var(--radius-sm);
+}
+
+/* Lists indent space-xl, their items space-xs apart, the bullet or number in ink-muted. */
+.agent-text :is(ul, ol) {
+  padding-inline-start: var(--space-xl);
+}
+.agent-text li + li {
+  margin-top: var(--space-xs);
+}
+.agent-text li::marker {
+  color: var(--color-ink-muted);
+}
+/* A task item: its drawn box in place of the bullet. */
+.agent-text li.task-list-item {
+  list-style: none;
+}
+.agent-task-box {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-inline-end: var(--space-sm);
+  color: var(--color-ink-muted);
+}
+
+/* A quotation: a line hairline at its leading edge, its words in ink-muted. */
+.agent-text blockquote {
+  padding-inline-start: var(--space-md);
+  color: var(--color-ink-muted);
+  border-inline-start: var(--line-hairline) solid var(--color-line);
+}
+
+/* A rule: a line hairline with space-lg above and below. */
+.agent-text hr {
+  height: 0;
+  border: none;
+  border-top: var(--line-hairline) solid var(--color-line);
+}
+.agent-text > hr,
+.agent-text > hr + * {
+  margin-top: var(--space-lg);
+}
+
+/* A table, in ui type, scrolling sideways when wider than the column. */
+.agent-table {
+  min-width: 0;
+  overflow-x: auto;
+}
+.agent-text > * + .agent-table {
+  margin-top: var(--space-md);
+}
+.agent-table table {
+  border-collapse: collapse;
+  font-family: var(--type-ui-family);
+  font-size: var(--type-ui-size);
+  line-height: var(--type-ui-leading);
+  overflow-wrap: normal;
+}
+.agent-table :is(th, td) {
+  padding: var(--space-xs) var(--space-sm);
+  text-align: start;
+}
+.agent-table th {
+  font-weight: var(--type-heading-weight);
+}
+.agent-table tr + tr,
+.agent-table tbody tr {
+  border-top: var(--line-hairline) solid var(--color-line);
+}
+
+/* A link: accent, underlined at hairline so it never depends on color alone. Under the pointer its underline turns
+   ink; with keyboard focus it takes an ink edge. */
+.agent-link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-thickness: var(--line-hairline);
+  text-decoration-color: currentColor;
+  border-radius: var(--radius-sm);
+  transition: text-decoration-color var(--motion-quick) var(--motion-ease-out);
+}
+.agent-link:hover,
+.agent-link[data-force="hover"] {
+  text-decoration-color: var(--color-ink);
+}
+.agent-link:focus-visible,
+.agent-link[data-force="focus"] {
+  outline: var(--line-hairline) solid var(--color-ink);
+}
+
+/* A code block: mono on surface with a line edge; a head row with its language and Copy; code unwrapped. */
+.code-block {
+  min-width: 0;
+  font-family: var(--type-mono-family);
+  font-size: var(--type-mono-size);
+  line-height: var(--type-mono-leading);
+  color: var(--color-ink);
+  background: var(--color-surface);
+  border: var(--line-hairline) solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+.agent-text > * + .code-block {
+  margin-top: var(--space-md);
+}
+.code-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-sizing: border-box;
+  height: var(--size-control);
+  padding: var(--space-xs) var(--space-md);
+}
+.code-block-language {
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  color: var(--color-ink-faint);
+}
+.code-block-code {
+  margin: 0;
+  padding: 0 var(--space-md) var(--space-md);
+  overflow-x: auto;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.code-block-code code {
+  font: inherit;
+}
+
+/* Copy: the quiet icon button (Icon.css) at size-control-sm, its icon in ink-faint; once copied, a check in
+   ink-muted. The two icons sit one over the other and crossfade. */
+.code-block-copy {
+  box-sizing: border-box;
+  width: var(--size-control-sm);
+  height: var(--size-control-sm);
+  color: var(--color-ink-faint);
+}
+.code-block-copy[data-copied] {
+  color: var(--color-ink-muted);
+}
+.code-block-copy-icons {
+  display: grid;
+}
+.code-block-copy-icons > .icon {
+  grid-area: 1 / 1;
+  transition: opacity var(--motion-quick) var(--motion-ease-out);
+}
+.code-block-copy-icons > .icon:last-child,
+.code-block-copy[data-copied] .code-block-copy-icons > .icon:first-child {
+  opacity: 0;
+}
+.code-block-copy[data-copied] .code-block-copy-icons > .icon:last-child {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-link,
+  .code-block-copy-icons > .icon {
+    transition: none;
+  }
+}

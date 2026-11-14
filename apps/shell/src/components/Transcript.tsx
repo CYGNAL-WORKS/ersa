@@ -9,6 +9,7 @@ import { imageSize } from "../session/imageSize";
 import { stateText } from "../session/states";
 import { type Item, type MessageAttachment, isOpen, isOpenQuestion } from "../session/transcript";
 import { Button } from "./Button";
+import { AgentText, type OpenLink } from "./AgentText";
 import { AttachmentChip } from "./AttachmentChip";
 import { Icon } from "./Icon";
 import { PermissionAnswers } from "./PermissionAnswers";
@@ -38,10 +39,12 @@ interface TranscriptProps {
   renaming?: Sending;
   onRenameReset?: () => void;
   renameDisabled?: boolean;
+  /** Opens a link in the agent's words through the Shell (FLOW-READ-TRANSCRIPT-R03); kept stable, as `onDecide` is. */
+  onOpenLink?: OpenLink;
 }
 
 /** The active session as a document: the user's and the agent's words, tool cards, and permission requests to answer. */
-export function Transcript({ title, untitled, view, answers = {}, onDecide, onAnswer, onRetry, onRename, renaming, onRenameReset, renameDisabled }: TranscriptProps) {
+export function Transcript({ title, untitled, view, answers = {}, onDecide, onAnswer, onRetry, onRename, renaming, onRenameReset, renameDisabled, onOpenLink }: TranscriptProps) {
   const { transcript, stream } = view;
   const scroller = useRef<HTMLDivElement>(null);
   // Whether the reader is at the end; new content keeps them there, and
@@ -98,6 +101,7 @@ export function Transcript({ title, untitled, view, answers = {}, onDecide, onAn
               live={live}
               onDecide={onDecide}
               onAnswer={onAnswer}
+              onOpenLink={onOpenLink}
             />
           ))}
           {transcript.refused && (
@@ -120,6 +124,7 @@ interface BlockProps {
   live: boolean;
   onDecide: Decide;
   onAnswer: AnswerQuestion;
+  onOpenLink?: OpenLink;
 }
 
 /** The answer on its way or refused for a request still open, if any. */
@@ -193,12 +198,13 @@ function UserBubble({ item }: { item: Extract<Item, { kind: "user" }> }) {
  * One block. Memoised: items keep their identity until their own event
  * changes them, so a streamed delta re-renders one block, not the page.
  */
-const Block = memo(function Block({ item, answer, waiting, live, onDecide, onAnswer }: BlockProps) {
+const Block = memo(function Block({ item, answer, waiting, live, onDecide, onAnswer, onOpenLink }: BlockProps) {
   switch (item.kind) {
     case "user":
       return <UserBubble item={item} />;
     case "assistant":
-      return <p className="transcript-text">{item.text}</p>;
+      // Formatted text, never HTML (FLOW-READ-TRANSCRIPT-R01).
+      return <AgentText text={item.text} onOpenLink={onOpenLink} />;
     case "thinking":
       return (
         <p className="transcript-note">
