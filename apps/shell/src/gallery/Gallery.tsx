@@ -530,17 +530,26 @@ function Titled(props: Omit<Parameters<typeof SessionTitle>[0], "title" | "onRen
 
 const draft = "Fix the flaky reconnect test on Windows";
 
-// What the Claude Code adapter lists for `backend.list` (PROTO-CLAUDE-CODE-STREAM), with the CLI's default marked.
+// What `backend.list` lists for Claude Code (PROTO-CLAUDE-CODE-STREAM): the models the CLI reports, its own `default`
+// entry first and one model that takes no effort, no effort marked, and the permission modes with the CLI's default.
 const choices = (pairs: [string, string][], dflt: string): Choice[] =>
   pairs.map(([id, label]) => ({ id, label, default: id === dflt }));
+const allEfforts = ["low", "medium", "high", "xhigh", "max"];
 const claudeCode: BackendInfo = {
   name: "claude-code",
   label: "Claude Code",
-  version: "2.1.302",
+  version: "2.1.316",
   status: "available",
   tested: { min: "2.1.0", max: "2.1.400" },
-  models: choices([["fable", "Fable"], ["opus", "Opus"], ["sonnet", "Sonnet"], ["haiku", "Haiku"]], "opus"),
-  efforts: choices([["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], "high"),
+  models: [
+    { id: "default", label: "Default (recommended)", default: true, resolved: "claude-opus-5-5", efforts: allEfforts },
+    { id: "opus", label: "Opus 5.5", default: false, resolved: "claude-opus-5-5", efforts: allEfforts },
+    { id: "claude-fable-5-2", label: "Fable 5.2", default: false, resolved: "claude-fable-5-2", efforts: allEfforts },
+    { id: "sonnet", label: "Sonnet 5.5", default: false, resolved: "claude-sonnet-5-5", efforts: allEfforts },
+    { id: "haiku", label: "Haiku 5.5", default: false, resolved: "claude-haiku-5-5", efforts: allEfforts },
+    { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5", default: false, resolved: "claude-haiku-4-5-20251001" },
+  ],
+  efforts: choices([["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], ""),
   permission_modes: choices(
     [["default", "Ask before acting"], ["acceptEdits", "Accept edits"], ["plan", "Plan only"], ["auto", "Auto"]],
     "default",
@@ -1087,6 +1096,18 @@ const entries: Entry[] = [
       ["No backend available", <NewSessionScreen {...newSession} backends={{ local: [{ ...claudeCode, status: "error" }] }} />],
       ["Detecting backends", <NewSessionScreen {...newSession} backends={{}} />],
       ["A chip open", room(<NewSessionScreen {...newSession} backends={oneBackend} open="permission_mode" />)],
+      // docs/design/COMPOSER.md: with no level chosen the effort reads Default, the first row of its list.
+      ["The effort chip open, at Default", room(<NewSessionScreen {...newSession} backends={oneBackend} open="effort" />)],
+      // A model that takes no effort leaves the effort chip in its place, unavailable, reading None.
+      [
+        "A model that takes no effort",
+        <NewSessionScreen
+          {...newSession}
+          backends={oneBackend}
+          projectId="p1"
+          lastUsed={{ p1: { host_id: "local", project_id: "p1", workspace: "isolated", backend: "claude-code", model: "claude-haiku-4-5-20251001", permission_mode: "default" } }}
+        />,
+      ],
       // FLOW-NEW-SESSION-R14: most recently used first, with path, kind and trust, the chosen one marked.
       ["The project chip open", room(<NewSessionScreen {...newSession} backends={oneBackend} projectId="p2" open="project" />)],
       ["The workspace chip open", tallRoom(<NewSessionScreen {...newSession} backends={oneBackend} open="workspace" />)],

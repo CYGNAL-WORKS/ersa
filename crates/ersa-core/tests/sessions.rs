@@ -1328,7 +1328,9 @@ async fn a_session_nobody_reads_lets_its_view_go_and_reopens_under_a_new_identit
 // was PROTO-CORE-API-R16; R71 replaces it, unbuilt
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_starts_with_the_model_effort_and_permission_mode_it_names() {
-    let (core, stats) = start_fake(FakeAdapter::new(1)).await;
+    let adapter = FakeAdapter::new(1);
+    let stats = Arc::clone(&adapter.stats);
+    let core = start_with_adapters(tempdir(), support::detecting, vec![Arc::new(adapter)]).await;
     let mut client = core.client().await;
     let workspace_id = workspace(&mut client, core.dir.path()).await;
     let created = client
