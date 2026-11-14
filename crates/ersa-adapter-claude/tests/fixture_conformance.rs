@@ -784,3 +784,116 @@ fn record_tool_results_carry_the_permission_decision() {
             .any(|d| d.reason_type.as_deref() == Some("mode"))
     );
 }
+
+// ---------------------------------------------------------------------------
+// Minimal mode (PROTO-CLAUDE-CODE-STREAM, Bare mode)
+
+/// The flags the adapter adds for one session rather than for every one:
+/// which session to resume or fork, the id it chooses, the fork's name, and
+/// the model and effort when the user named them.
+const PER_SESSION_FLAGS: &[&str] = &[
+    "--resume",
+    "--fork-session",
+    "--session-id",
+    "--name",
+    "--model",
+    "--effort",
+];
+
+/// The flag names in a command line, without their values and without the
+/// per-session ones. Values vary with the session (its permission mode, the
+/// setting sources trust allows), so two command lines are the same
+/// invocation when they pass the same flags.
+fn invocation_flags(args: &[String]) -> BTreeSet<String> {
+    args.iter()
+        .filter(|a| a.starts_with('-') && !PER_SESSION_FLAGS.contains(&a.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// Whether a `system/init` shows the CLI started in its minimal mode: a
+/// signed-out session lacks `scratchpad_path`, one with auto-memory off lacks
+/// `memory_paths`, and only minimal mode lacks both.
+fn started_minimal(init: &Value) -> bool {
+    init.get("scratchpad_path").is_none() && init.get("memory_paths").is_none()
+}
+
+/// The first `system/init` of a stream fixture.
+fn first_init(stream: &Path) -> Option<Value> {
+    fs::read_to_string(stream)
+        .unwrap()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|v| v["type"] == "system" && v["subtype"] == "init")
+}
+
+/// The stream fixtures of the newest tested version recorded with the
+/// adapter's own invocation whose CLI started in its minimal mode, and the
+/// ones left out because they were recorded with some other command line.
+fn minimal_mode_at_newest_version() -> (Vec<String>, Vec<String>, usize) {
+    // The newest version the adapter is tested against (PROTO-CLAUDE-CODE-STREAM-R10).
+    let newest = fixtures_root().join(ersa_adapter_claude::MAX_TESTED_VERSION);
+    let ours = invocation_flags(&ersa_adapter_claude::invocation_args(
+        &ersa_adapter::SessionConfig::default(),
+    ));
+    let (mut minimal, mut not_counted, mut counted) = (Vec::new(), Vec::new(), 0);
+    for meta in fs::read_dir(&newest).unwrap() {
+        let meta = meta.unwrap().path();
+        let name = meta.file_name().unwrap().to_string_lossy().into_owned();
+        let Some(stem) = name.strip_suffix(".meta.json").map(String::from) else {
+            continue;
+        };
+        let recorded: Value = serde_json::from_str(&fs::read_to_string(&meta).unwrap()).unwrap();
+        let args: Vec<String> = recorded["args"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if invocation_flags(&args) != ours {
+            not_counted.push(stem);
+            continue;
+        }
+        counted += 1;
+        if let Some(init) = first_init(&newest.join(format!("{stem}.jsonl")))
+            && started_minimal(&init)
+        {
+            minimal.push(stem);
+        }
+    }
+    minimal.sort();
+    not_counted.sort();
+    (minimal, not_counted, counted)
+}
+
+// A CLI version that starts in its minimal mode by default (no flag turns it
+// off) shows up here as soon as its fixtures are recorded.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R52
+#[test]
+fn the_newest_version_does_not_start_in_minimal_mode_as_the_adapter_runs_it() {
+    let (minimal, not_counted, counted) = minimal_mode_at_newest_version();
+    assert!(
+        counted > 0,
+        "no fixture at the newest version was recorded as the adapter runs the CLI"
+    );
+    assert!(
+        minimal.is_empty(),
+        "Claude Code started in its minimal mode, which Ersa can't use, \
+         in fixtures recorded with the adapter's own invocation: {minimal:?}"
+    );
+    // The fixture recorded with `--bare` is the evidence of what minimal mode
+    // looks like. It is left out because it was not run as the adapter runs
+    // the CLI; the check would catch it otherwise.
+    assert!(
+        not_counted.contains(&"28-bare-mode".to_string()),
+        "{not_counted:?}"
+    );
+    let bare = first_init(&fixtures_root().join("2.1.316/28-bare-mode.jsonl")).unwrap();
+    assert!(started_minimal(&bare));
+    // A signed-out session (2.1.302/00-not-logged-in) is not minimal mode.
+    let signed_out = first_init(&fixtures_root().join("2.1.302/00-not-logged-in.jsonl")).unwrap();
+    assert!(!started_minimal(&signed_out));
+}
