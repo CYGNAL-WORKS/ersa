@@ -658,7 +658,7 @@ impl Adapter for ClaudeAdapter {
     }
 
     /// The record's model, effort and permission mode, read back from its
-    /// end on this machine (PROTO-CLAUDE-CODE-STREAM-R47).
+    /// end on this machine (PROTO-CLAUDE-CODE-STREAM-R59).
     async fn record_settings(
         &self,
         _transport: Arc<dyn Transport>,

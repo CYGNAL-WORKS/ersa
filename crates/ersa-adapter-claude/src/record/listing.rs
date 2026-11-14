@@ -51,7 +51,7 @@ pub struct SessionSummary {
     /// that has one, as the record gives it.
     pub created_at: Option<String>,
     /// The model, effort and permission mode the tail holds; a value only
-    /// the rest of the record holds is none (PROTO-CLAUDE-CODE-STREAM-R47).
+    /// the rest of the record holds is none (PROTO-CLAUDE-CODE-STREAM-R59).
     pub settings: RecordedSettings,
 }
 

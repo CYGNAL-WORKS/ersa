@@ -46,7 +46,7 @@ pub use registry::{LiveCheck, LiveSession, live_session};
 
 /// What session `session_id`'s record says of its model, effort and
 /// permission mode, read back from its end as far as Core's request for
-/// each (PROTO-CLAUDE-CODE-STREAM-R47). A session with no record has none.
+/// each (PROTO-CLAUDE-CODE-STREAM-R57). A session with no record has none.
 pub fn record_settings(
     claude_home: &Path,
     cwd: &str,
