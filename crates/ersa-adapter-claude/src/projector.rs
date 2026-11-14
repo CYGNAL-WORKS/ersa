@@ -237,10 +237,7 @@ impl ClaudeProjector {
         if let Some(kind) = &drifted {
             out.push(drift_error(line, kind));
         }
-        // A signed-out session lacks `scratchpad_path` and one with
-        // auto-memory off lacks `memory_paths`; minimal mode lacks both.
-        self.minimal_mode =
-            value.get("scratchpad_path").is_none() && value.get("memory_paths").is_none();
+        self.minimal_mode = started_in_minimal_mode(&value);
         // The CLI repeats `init` at the start of every turn; only the first
         // announces the session (PROTO-CLAUDE-CODE-STREAM-R06).
         if !self.session_started {
@@ -905,6 +902,15 @@ impl ClaudeProjector {
         out.extend(self.running_unless_waiting(line));
         out
     }
+}
+
+/// Whether a `system/init` shows the CLI started in its minimal mode
+/// (`--bare`): a signed-out session lacks `scratchpad_path` and one with
+/// auto-memory off lacks `memory_paths`; minimal mode lacks both
+/// (PROTO-CLAUDE-CODE-STREAM-R51). The conformance tests use it too, so the
+/// projection and the check of each new version read the same signal (R52).
+pub fn started_in_minimal_mode(init: &Value) -> bool {
+    init.get("scratchpad_path").is_none() && init.get("memory_paths").is_none()
 }
 
 /// A sign-in failure in a session the CLI started in its minimal mode: there

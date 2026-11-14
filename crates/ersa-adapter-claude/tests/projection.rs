@@ -441,6 +441,38 @@ fn a_session_started_in_minimal_mode_fails_with_its_own_reason_not_a_sign_in() {
     assert!(!error.message.is_empty());
 }
 
+// Each field alone is not minimal mode: a signed-out session lacks only
+// `scratchpad_path` (2.1.302/00-not-logged-in, above), and one with
+// auto-memory off lacks only `memory_paths`. The bare fixture with
+// `scratchpad_path` put back stands in for the second, whose credentials
+// then fail.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R51
+// verifies: PROTO-AGENT-EVENTS-R22
+#[test]
+fn a_sign_in_failure_with_auto_memory_off_still_asks_to_sign_in() {
+    let mut log = fixture("28-bare-mode").raw_log();
+    let init = log
+        .iter_mut()
+        .find(|l| l.line.contains(r#""subtype":"init""#))
+        .expect("the fixture has a system/init");
+    let mut value: Value = serde_json::from_str(&init.line).unwrap();
+    value["scratchpad_path"] = json!("C:/scratchpad");
+    init.line = value.to_string();
+
+    let errors: Vec<ErrorEvent> = events(&log)
+        .into_iter()
+        .filter_map(|e| match e {
+            Event::Error(e) => Some(e),
+            _ => None,
+        })
+        .collect();
+    let [error] = errors.as_slice() else {
+        panic!("expected one error, got {errors:?}");
+    };
+    assert_eq!(error.code, ErrorCode::AuthenticationFailed);
+    assert_eq!(error.action, Some(ErrorAction::LogIn));
+}
+
 const INIT_REQUEST: &str = r#"{"type":"control_request","request_id":"ersa-init-1","request":{"subtype":"initialize","hooks":{}}}"#;
 
 fn init_response(version: &str) -> String {
