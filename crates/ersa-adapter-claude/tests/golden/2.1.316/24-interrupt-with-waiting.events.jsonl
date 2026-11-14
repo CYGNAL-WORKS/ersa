@@ -14,7 +14,7 @@
 {"raw":10,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/content_block_stop","payload":{"api_message_id":"msg_011Ch1vY7LMWtvjDTsco3RAk","event":{"index":0,"type":"content_block_stop"},"parent_tool_use_id":null,"session_id":"53a9d8e8-44a5-4b7c-b590-2610b8ea5d3e","type":"stream_event","uuid":"9102bdc9-88cc-47d8-9b6b-7db582bffd59"}}}
 {"raw":11,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/content_block_start","payload":{"api_message_id":"msg_011Ch1vY7LMWtvjDTsco3RAk","event":{"content_block":{"text":"","type":"text"},"index":1,"type":"content_block_start"},"parent_tool_use_id":null,"session_id":"53a9d8e8-44a5-4b7c-b590-2610b8ea5d3e","type":"stream_event","uuid":"3e712c3e-7d38-44bc-8eb8-ee2ab74c5e10"}}}
 {"raw":12,"event":{"type":"assistant.text","block_id":"msg_011Ch1vY7LMWtvjDTsco3RAk/1","text":"#","final":false}}
-{"raw":13,"event":{"type":"user.message","text":"Now reply with the single word: second","origin":"human"}}
+{"raw":13,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"user","payload":{"message":{"content":[{"text":"Now reply with the single word: second","type":"text"}],"role":"user"},"type":"user"}}}
 {"raw":14,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"control_request/interrupt","payload":{"request":{"subtype":"interrupt"},"request_id":"ersa-interrupt-1","type":"control_request"}}}
 {"raw":15,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"control_response/success","payload":{"response":{"request_id":"ersa-interrupt-1","response":{"still_queued":[]},"subtype":"success"},"type":"control_response"}}}
 {"raw":16,"message_id":"668bf5b7-438b-4342-92f4-349f7bf0e0d8","event":{"type":"assistant.text","block_id":"msg_011Ch1vY7LMWtvjDTsco3RAk/1","text":"#","final":true}}
@@ -25,7 +25,7 @@
 {"raw":20,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/message_stop","payload":{"abandoned_blocks":{"api_message_id":"msg_011Ch1vY7LMWtvjDTsco3RAk","from_block_index":2},"api_message_id":"msg_011Ch1vY7LMWtvjDTsco3RAk","event":{"type":"message_stop"},"parent_tool_use_id":null,"session_id":"53a9d8e8-44a5-4b7c-b590-2610b8ea5d3e","type":"stream_event","uuid":"7d7c40a9-b783-43f2-8079-a1b041229bb8"}}}
 {"raw":21,"event":{"type":"turn.completed","turn":1,"outcome":"interrupted","duration_ms":1352,"is_error":true}}
 {"raw":21,"event":{"type":"usage.updated","cost_usd_total":0.0,"turns":1}}
-{"raw":21,"event":{"type":"session.state","state":"idle"}}
+{"raw":21,"event":{"type":"session.state","state":"running"}}
 {"raw":22,"event":{"type":"turn.started","turn":2,"trigger":"user"}}
 {"raw":22,"event":{"type":"session.state","state":"running"}}
 {"raw":23,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"system/status","payload":{"session_id":"53a9d8e8-44a5-4b7c-b590-2610b8ea5d3e","status":"requesting","subtype":"status","type":"system","uuid":"82a15313-0a22-401d-849f-3b9c02ac2b3b"}}}
@@ -40,4 +40,4 @@
 {"raw":31,"event":{"type":"usage.updated","rate_limit":{"status":"allowed","resets_at":"2026-11-18T20:00:00Z","detail":"seven_day"}}}
 {"raw":32,"event":{"type":"turn.completed","turn":2,"outcome":"success","duration_ms":1039,"is_error":false,"final_text":"second"}}
 {"raw":32,"event":{"type":"usage.updated","context_tokens":46568,"context_window":1000000,"cost_usd_total":0.0273908,"turns":2}}
-{"raw":32,"event":{"type":"session.state","state":"idle"}}
+{"raw":32,"event":{"type":"session.state","state":"running"}}

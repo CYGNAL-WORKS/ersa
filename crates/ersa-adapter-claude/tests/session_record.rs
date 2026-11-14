@@ -129,7 +129,15 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
                 .collect();
             let value: Value = serde_json::from_str(&line.line).unwrap();
             let is_message = matches!(value["type"].as_str(), Some("user" | "assistant"));
-            if line.dir == Direction::Backend && is_message && !from_a_subagent(&value) {
+            // The echo of a message written to an idle CLI repeats one shown
+            // from its host line, and projects to nothing more; the echo of
+            // messages that waited is their `user.message` (R43).
+            let repeats = value["isReplay"] == true
+                && events
+                    .iter()
+                    .all(|e| matches!(e, Event::BackendPassthrough(_)));
+            if line.dir == Direction::Backend && is_message && !repeats && !from_a_subagent(&value)
+            {
                 live.push((value["uuid"].as_str().unwrap().to_string(), events));
             }
         }
@@ -160,6 +168,22 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
             .filter_map(|e| e["uuid"].as_str().map(String::from))
             .collect();
         for (uuid, events) in live {
+            // A message a turn that uses tools took in mid-turn: the CLI
+            // echoes it live, but its record keeps no prompt entry for it,
+            // only a `queue-operation` `remove` and a `queued_command`
+            // attachment, which the record reader does not read yet (inbox).
+            if (stream.name.as_str(), uuid.as_str())
+                == (
+                    "2.1.316/52-replay-message-during-tool-turn",
+                    "0e92c368-3943-4a95-afb9-13c839dfe21b",
+                )
+            {
+                assert!(
+                    !record_kinds.contains_key(&uuid),
+                    "fixture 52's message taken in mid-turn now has a record entry"
+                );
+                continue;
+            }
             let kind = record_kinds
                 .get(&uuid)
                 .unwrap_or_else(|| panic!("{}: {uuid} is not in the record", stream.name));
@@ -228,10 +252,14 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
             // output) is a passthrough on the stream, which carries no user
             // message of Ersa's (R43), and a `system` user message from the
             // record. Which one live should show is open (inbox, #311).
-            const LIVE_DIFFERS: [(&str, &str); 5] = [
+            const LIVE_DIFFERS: [(&str, &str); 6] = [
                 (
                     "2.1.316/24-interrupt-with-waiting",
                     "4548e4be-9dbc-440f-beb9-0a9421f94eb8",
+                ),
+                (
+                    "2.1.316/54-interrupt-with-waiting-echoed",
+                    "81ed5a84-2659-408a-8579-9fd3bd5e552a",
                 ),
                 (
                     "2.1.316/25-controls-between-turns",

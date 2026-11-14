@@ -147,6 +147,10 @@ pub fn invocation_args(config: &SessionConfig) -> Vec<String> {
         "--await-initialize",
         // Token-level `stream_event` lines, so replies stream.
         "--include-partial-messages",
+        // Each user message echoed back when the CLI takes it into a turn,
+        // which says when a message written during a turn stops waiting
+        // (PROTO-CLAUDE-CODE-STREAM-R43).
+        "--replay-user-messages",
     ]
     .into_iter()
     .map(String::from)
