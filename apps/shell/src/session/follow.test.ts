@@ -286,9 +286,30 @@ describe("stop", () => {
     await follower.interrupt();
     expect(calls.at(-1)).toEqual({ method: "session.interrupt", params: { id: "s-replay" } });
     // Core answers the canceled send with an error.
-    refuse({ kind: "rpc", error: { code: -32000, message: "the message was stopped before it was sent", data: { kind: "invalid_state" } } } as never);
+    refuse({
+      kind: "rpc",
+      error: { code: -32000, message: "the message was stopped before it was sent", data: { kind: "invalid_state", reason: "send_stopped" } },
+    } as never);
     expect(await sent).toBe(false);
     expect(last().message).toBeUndefined();
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("shows a refusal that isn't the cancel, even after a stop", async () => {
+    let refuse: (error: BridgeError) => void = () => {};
+    const { follower, last } = following({
+      "session.send": () => new Promise((_, reject) => (refuse = reject)),
+      "session.interrupt": () => Promise.resolve({}),
+    });
+    const sent = follower.send("hello");
+    await settle();
+    await follower.interrupt();
+    refuse({
+      kind: "rpc",
+      error: { code: -32000, message: "session.send: the backend could not be started: Claude Code is not signed in", data: { kind: "invalid_state" } },
+    } as never);
+    expect(await sent).toBe(false);
+    expect(last().message).toEqual({ state: "failed", message: "the backend could not be started: Claude Code is not signed in" });
   });
 
   // verifies: FLOW-SEND-MESSAGE-R03

@@ -96,6 +96,16 @@ function refusalWords(data: ErrorData | undefined): string | undefined {
   return Object.hasOwn(REFUSAL_WORDS, reason) ? REFUSAL_WORDS[reason]?.() : undefined;
 }
 
+/**
+ * Whether a refused `session.send` is the stop's cancel: Core canceled the message before it reached the backend,
+ * which it answers `invalid_state` with reason `send_stopped` (PROTO-CORE-API, Errors). Any other refusal after a stop,
+ * as a backend that could not be started, is a failure the user is shown (FLOW-NEW-SESSION-R08).
+ */
+export function stoppedBeforeSent(error: unknown): boolean {
+  const data = refusalOf(error);
+  return data?.kind === "invalid_state" && data.reason === "send_stopped";
+}
+
 /** A readable message for anything a client call rejected with: a refusal Core names in the catalog's words. */
 export function describeError(error: unknown): string {
   const words = refusalWords(refusalOf(error));
