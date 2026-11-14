@@ -29,10 +29,12 @@ use crate::BACKEND;
 use crate::projector::{SYNTHETIC_MODEL, kind_of, reply_events, tool_result_events};
 use crate::wire::{LocalCommandOutput, MessageContent, RecordEntry, RecordUser};
 
-/// The longest record line read as an entry. A tool result can run to
-/// megabytes (an image, a large file); anything far beyond is not an entry
-/// the transcript can use, and parsing it would cost more than it is worth.
-const MAX_ENTRY_BYTES: usize = 16 * 1024 * 1024;
+/// The longest record line read as an entry: as long as the longest line
+/// Core reads from a backend (its transport's line limit), well above a
+/// prompt Core can send (16 MiB at most, its images included), so such a
+/// prompt and a tool result the stream carried reopen from the record.
+/// Anything longer is not an entry the transcript can use.
+const MAX_ENTRY_BYTES: usize = 64 * 1024 * 1024;
 
 /// How much of a line that could not be read a passthrough event keeps.
 const PASSTHROUGH_PREFIX_BYTES: usize = 4 * 1024;
