@@ -5,22 +5,20 @@
 //! shows the record, then the new run, each message once
 //! (FLOW-RESUME-SESSION-R01, PROTO-AGENT-EVENTS-R12).
 
-mod support;
-
 use std::collections::VecDeque;
 use std::io;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::claude::{OnTransport, fixtures_of, parse};
+use crate::support::{start_with_adapters, tempdir, workspace};
 use ersa_adapter::fake::FakeTransport;
 use ersa_adapter::recording::Recording;
 use ersa_adapter::{Adapter, Process, ProcessSpec, Transport, async_trait};
 use ersa_adapter_claude::ClaudeAdapter;
 use ersa_adapter_claude::record::encoded_cwd;
 use serde_json::{Value, json};
-use support::claude::{OnTransport, fixtures_of, parse};
-use support::{start_with_adapters, tempdir, workspace};
 
 /// The id the recorded session ran under.
 const RECORDED_ID: &str = "c40e1ae0-6180-4454-acae-6cbc509f659b";
