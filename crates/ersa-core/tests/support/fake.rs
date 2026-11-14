@@ -37,13 +37,13 @@ use std::sync::{Arc, Mutex};
 use ersa_adapter::recording::Recording;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
-    ImageLimits, OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit, Projected,
-    Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary, SessionConfig, TitleRules,
-    Transport, async_trait,
+    ImageLimits, OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit, ProcessSpec,
+    Projected, Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary, SessionConfig,
+    TitleRules, Transport, async_trait,
 };
 use ersa_core::CoreConfig;
 use ersa_core::replay::{Pace, Replay};
-use ersa_protocol::core_api::Choice;
+use ersa_protocol::core_api::{Choice, ModelChoice};
 use ersa_protocol::events::{
     AssistantText, BackendPassthrough, DecidedBy, Event, LifecycleState, MessageOrigin,
     PermissionBehavior, PermissionDecided, PermissionFlags, PermissionRequested, Question,
@@ -194,6 +194,37 @@ pub fn recorded_reply(id: &str, text: &str) -> RecordEvent {
     }
 }
 
+/// What the fake backend answers when asked for its models.
+#[derive(Debug, Clone)]
+pub enum ModelsAnswer {
+    Listed(Vec<ModelChoice>),
+    /// It is no longer on the host.
+    Missing,
+    /// It is there but cannot report them.
+    Fails,
+}
+
+/// The fake backend's models: its default first, then one that names the
+/// model a session of it reports and the efforts it takes.
+pub fn fake_models() -> Vec<ModelChoice> {
+    vec![
+        ModelChoice {
+            id: "model-a".into(),
+            label: "MODEL-A".into(),
+            default: true,
+            resolved: None,
+            efforts: None,
+        },
+        ModelChoice {
+            id: "model-b".into(),
+            label: "MODEL-B".into(),
+            default: false,
+            resolved: Some("model-b-1".into()),
+            efforts: Some(vec!["low".into()]),
+        },
+    ]
+}
+
 pub struct FakeAdapter {
     projector_version: u32,
     fail_start: bool,
@@ -220,6 +251,8 @@ pub struct FakeAdapter {
     stop_hangs: bool,
     /// How long a backend takes to exit once stopped.
     stop_delay: std::time::Duration,
+    /// What the backend reports when asked for its models.
+    pub models: Arc<Mutex<ModelsAnswer>>,
     /// The backend's name: [`BACKEND`] unless a test registers more than
     /// one fake.
     pub name: &'static str,
@@ -241,6 +274,7 @@ impl FakeAdapter {
             open_check_gate: Arc::default(),
             delete_refusal: Arc::default(),
             conversation_end: Arc::new(Mutex::new(Some(ConversationEnd::Finished))),
+            models: Arc::new(Mutex::new(ModelsAnswer::Listed(fake_models()))),
             conversation_end_fails: Arc::default(),
             read_gate: Arc::default(),
             stop_hangs: false,
@@ -320,6 +354,36 @@ impl Adapter for FakeAdapter {
         self.title_rules
     }
 
+    /// A version command that runs on any host and prints `1.0.0`, so a test
+    /// Core that detects with no program override finds the fake available
+    /// ([`super::detecting`]). With the override, the program does not exist.
+    fn version_command(&self) -> ProcessSpec {
+        let (program, args) = if cfg!(windows) {
+            ("cmd", vec!["/C".to_string(), "echo 1.0.0".to_string()])
+        } else {
+            ("sh", vec!["-c".to_string(), "echo 1.0.0".to_string()])
+        };
+        ProcessSpec {
+            program: program.into(),
+            args,
+            ..ProcessSpec::default()
+        }
+    }
+
+    async fn models(
+        &self,
+        _transport: Arc<dyn Transport>,
+    ) -> Result<Vec<ModelChoice>, AdapterError> {
+        match &*self.models.lock().unwrap() {
+            ModelsAnswer::Listed(models) => Ok(models.clone()),
+            ModelsAnswer::Missing => Err(AdapterError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "the fake backend is gone",
+            ))),
+            ModelsAnswer::Fails => Err(AdapterError::Protocol("the fake lists no models".into())),
+        }
+    }
+
     /// Two of each, with a default marked in each list as Claude Code's are.
     fn choices(&self) -> BackendChoices {
         let list = |ids: [&str; 2], default: &str| -> Vec<Choice> {
@@ -332,7 +396,6 @@ impl Adapter for FakeAdapter {
                 .collect()
         };
         BackendChoices {
-            models: list(["model-a", "model-b"], "model-a"),
             efforts: list(["low", "high"], "high"),
             permission_modes: list(["ask", "auto"], "ask"),
         }
