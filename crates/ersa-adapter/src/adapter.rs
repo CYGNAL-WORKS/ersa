@@ -571,6 +571,12 @@ pub struct SessionConfig {
     /// reports.
     #[serde(default)]
     pub fork_of: Option<ForkOf>,
+    /// To continue a session the backend already has a record of: the
+    /// backend's id for it. The backend keeps that id and appends to the
+    /// same record (FLOW-RESUME-SESSION-R01). `None` for a new session or a
+    /// fork, which have [`SessionConfig::backend_session_id`] instead.
+    #[serde(default)]
+    pub resume: Option<String>,
     /// Backend-specific settings, read only by that backend's adapter. `null`
     /// when there are none.
     pub extra: Value,

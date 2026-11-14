@@ -291,12 +291,22 @@ impl Adapter for FakeAdapter {
             sink.process_exited(Ok(ProcessExit { code: Some(1) }));
             return Err(AdapterError::Protocol("the fake refused to start".into()));
         }
-        // Announces its own id for the session, as Claude Code's `init` does.
-        let session_id = format!("fake-{}", NEXT_SESSION.fetch_add(1, Ordering::SeqCst));
-        self.records
+        // Announces its id for the session, as Claude Code's `init` does: the
+        // one it resumes, keeping that record, else the one Core chose, else
+        // its own.
+        let session_id = config
+            .resume
+            .clone()
+            .or_else(|| config.backend_session_id.clone())
+            .unwrap_or_else(|| format!("fake-{}", NEXT_SESSION.fetch_add(1, Ordering::SeqCst)));
+        // Message ids go on from the record's, so a resumed session's are new.
+        let kept = self
+            .records
             .lock()
             .unwrap()
-            .insert(session_id.clone(), Vec::new());
+            .entry(session_id.clone())
+            .or_default()
+            .len();
         sink.record(
             Direction::Backend,
             json!({ "t": "ready", "session_id": session_id }).to_string(),
@@ -307,7 +317,10 @@ impl Adapter for FakeAdapter {
             records: Arc::clone(&self.records),
             session_id,
             stop_hangs: self.stop_hangs,
-            inner: Mutex::default(),
+            inner: Mutex::new(Inner {
+                next_message: u32::try_from(kept).unwrap(),
+                ..Inner::default()
+            }),
         }))
     }
 

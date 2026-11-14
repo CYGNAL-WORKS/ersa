@@ -1,0 +1,2 @@
+{"backend_version":"2.1.316","event":{"origin":"human","text":"Reply with only the word one.","type":"user.message"},"message_id":"5fe3366a-6528-42f1-a673-ea011d7506a5","ts":"2026-11-14T03:40:56.549Z"}
+{"backend_version":"2.1.316","event":{"block_id":"msg_011Ch28KdHCapmyvze44o67j/0","final":true,"text":"one","type":"assistant.text"},"message_id":"f146c2c4-f0a2-4d3e-84ad-96455ab643fb","ts":"2026-11-14T03:40:57.719Z"}

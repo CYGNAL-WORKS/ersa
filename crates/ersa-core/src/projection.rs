@@ -276,10 +276,12 @@ impl View {
                 vec![state(LifecycleState::Starting, None)]
             }
             // Only from `starting`, so a turn already reported is left alone.
-            LifecycleFact::ForkReady if self.state == LifecycleState::Starting => {
+            LifecycleFact::ForkReady | LifecycleFact::Resumed
+                if self.state == LifecycleState::Starting =>
+            {
                 vec![state(LifecycleState::Idle, None)]
             }
-            LifecycleFact::ForkReady => Vec::new(),
+            LifecycleFact::ForkReady | LifecycleFact::Resumed => Vec::new(),
             LifecycleFact::ProcessExited {
                 code,
                 stopped_by_user,
@@ -373,6 +375,20 @@ impl View {
             state(final_state, why),
             Event::SessionEnded(SessionEnded { reason, exit_code }),
         ]
+    }
+
+    /// Continues this view for a session whose backend Core starts again
+    /// (FLOW-RESUME-SESSION-R01): live lines are projected with `projector`
+    /// after the events already in the view, numbered on from them, and the
+    /// run that follows ends with a `session.ended` of its own. The record's
+    /// message ids stay, so a live line repeating one adds nothing.
+    pub fn resume(&mut self, projector: Box<dyn Projector>) {
+        self.projector = Some(projector);
+        self.ended = false;
+        // Starting from now, as a view opened for a new session is, so the
+        // answer to the resume says so before the start is projected.
+        self.state = LifecycleState::Starting;
+        self.tile.state = LifecycleState::Starting;
     }
 
     /// Drops the projector once the backend has gone: no more live lines
