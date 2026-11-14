@@ -97,13 +97,14 @@ pub struct ClaudeProjector {
     /// CLI echoes what it takes in (`--replay-user-messages`): every waiting
     /// message at once, at the next turn's start or, in a turn that uses
     /// tools, at the turn's next model call, and the echo is their
-    /// `user.message` (PROTO-CLAUDE-CODE-STREAM-R43, R46).
-    waiting: Vec<UserMessage>,
-    /// For each message written to an idle CLI whose echo has not come yet,
-    /// how many content blocks it has. Each was projected from its host
-    /// line, which opened its turn, so its echo repeats it; an echo with
-    /// more blocks also took in the messages written just after it.
-    unechoed: VecDeque<usize>,
+    /// `user.message` (PROTO-CLAUDE-CODE-STREAM-R43, R46). Each is kept as
+    /// its content blocks, to know its echo by.
+    waiting: Vec<Vec<Value>>,
+    /// Messages written to an idle CLI whose echo has not come yet, as their
+    /// content blocks. Each was projected from its host line, which opened
+    /// its turn, so its echo repeats it; an echo with more blocks also took
+    /// in the messages written just after it.
+    unechoed: VecDeque<Vec<Value>>,
 }
 
 /// A `can_use_tool` request the CLI is waiting on.
@@ -910,10 +911,10 @@ impl ClaudeProjector {
             return vec![passthrough(line, value)];
         };
         if self.turn_open || !self.waiting.is_empty() {
-            self.waiting.push(message);
+            self.waiting.push(blocks(&value));
             return vec![passthrough(line, value)];
         }
-        self.unechoed.push_back(blocks(&value).len());
+        self.unechoed.push_back(blocks(&value));
         let mut out = self.open_turn(line, TurnTrigger::User);
         out.push(at(line, Event::UserMessage(message)));
         out
@@ -926,10 +927,22 @@ impl ClaudeProjector {
     /// a message written to an idle CLI repeats one already projected from
     /// its host line, and projects to nothing more, unless the CLI took in
     /// messages written a moment after it with it: their blocks follow its
-    /// own. Echoes come in the order the messages were written.
+    /// own. Echoes come in the order the messages were written. The CLI
+    /// also marks a local command's output as an echo (a model change's, a
+    /// compaction's: 2.1.316/25 to 27); an echo whose first block is not
+    /// the first of the message it should repeat is no host message's, and
+    /// stays a passthrough.
     fn echo(&mut self, line: &RawLine, uuid: String, value: Value) -> Vec<Projected> {
         let blocks = blocks(&value);
-        let shown = self.unechoed.pop_front().unwrap_or(0);
+        let starts_as = |message: &[Value]| match (blocks.first(), message.first()) {
+            (Some(echoed), Some(sent)) => same_block(echoed, sent),
+            _ => false,
+        };
+        let shown = match self.unechoed.front() {
+            Some(sent) if starts_as(sent) => self.unechoed.pop_front().map_or(0, |sent| sent.len()),
+            _ if self.waiting.first().is_some_and(|sent| starts_as(sent)) => 0,
+            _ => return vec![passthrough(line, value)],
+        };
         let message = (!self.waiting.is_empty() && blocks.len() > shown)
             .then(|| user_message_of(&blocks[shown..]))
             .flatten();
@@ -1329,6 +1342,16 @@ fn blocks(value: &Value) -> Vec<Value> {
         Some(Value::Array(blocks)) => blocks.clone(),
         Some(Value::String(text)) => vec![serde_json::json!({ "type": "text", "text": text })],
         _ => Vec::new(),
+    }
+}
+
+/// Whether an echoed content block is the one sent: the CLI ends a text
+/// block with a newline when it joins messages taken in together
+/// (2.1.316/53-replay-two-messages-during-turn).
+fn same_block(echoed: &Value, sent: &Value) -> bool {
+    match (echoed["text"].as_str(), sent["text"].as_str()) {
+        (Some(echoed), Some(sent)) => echoed.trim_end_matches('\n') == sent.trim_end_matches('\n'),
+        _ => echoed == sent,
     }
 }
 

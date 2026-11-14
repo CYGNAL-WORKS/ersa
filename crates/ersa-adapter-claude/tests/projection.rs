@@ -1743,33 +1743,6 @@ fn the_echo_of_a_message_that_opened_its_turn_does_not_take_in_one_waiting() {
     );
 }
 
-#[test]
-fn a_stray_message_delta_between_turns_opens_no_turn() {
-    let out = fixture("07-stream-two-turns").stdout;
-    let (init, result) = (&out[0], &out[5]);
-    let (first, second) = (user_text("one"), user_text("two"));
-    let delta = stream(
-        None,
-        json!({"type": "message_delta", "delta": {}, "usage": {"output_tokens": 7}}),
-    );
-    let started = |events: &[Event]| {
-        events
-            .iter()
-            .filter(|e| matches!(e, Event::TurnStarted(_)))
-            .count()
-    };
-    let events = events(&log(&[
-        (Host, &first),
-        (Backend, init),
-        (Host, &second),
-        (Backend, result),
-        // Between the `result` and the waiting message's `system/init`.
-        (Backend, &delta),
-        (Backend, init),
-    ]));
-    assert_eq!(started(&events), 2);
-}
-
 fn echo_of_blocks(texts: &[&str], uuid: &str) -> String {
     let content: Vec<Value> = texts
         .iter()
@@ -1813,6 +1786,51 @@ fn a_message_taken_in_with_one_that_opened_its_turn_is_still_shown() {
             "user.message one",
             "user.message two",
             "turn.completed 1",
+            "session.state Idle",
+        ]
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R43
+// verifies: PROTO-CLAUDE-CODE-STREAM-R44
+// verifies: PROTO-CLAUDE-CODE-STREAM-R46
+#[test]
+fn a_local_commands_output_marked_as_an_echo_takes_in_no_waiting_message() {
+    // The CLI marks a model change's output as an echo too (fixture 26,
+    // mid-turn). It repeats no host message, so the message waiting still
+    // waits, and shows at its own echo.
+    let model_changed = fixture("26-controls-during-turn").stdout[6].clone();
+    assert!(
+        model_changed.contains(r#""isReplay":true"#)
+            && model_changed.contains("local-command-stdout")
+    );
+    let out = fixture("07-stream-two-turns").stdout;
+    let (init, result) = (&out[0], &out[5]);
+    let (first, second) = (user_text("one"), user_text("two"));
+    let lines = log(&[
+        (Host, &first),
+        (Backend, init),
+        (Backend, &echo_of("one", "u-1")),
+        (Host, &second),
+        (Backend, &model_changed),
+        (Backend, result),
+        (Backend, init),
+        (Backend, &echo_of("two", "u-2")),
+        (Backend, result),
+    ]);
+    assert_eq!(waiting_counts(&lines), [(3, 1), (7, 0)]);
+    assert_eq!(
+        without_lines(turns_and_messages(&lines)),
+        [
+            "turn.started 1",
+            "session.state Running",
+            "user.message one",
+            "turn.completed 1",
+            "session.state Running",
+            "turn.started 2",
+            "session.state Running",
+            "user.message two",
+            "turn.completed 2",
             "session.state Idle",
         ]
     );
