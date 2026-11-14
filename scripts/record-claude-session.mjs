@@ -2,7 +2,7 @@
 // Records a Claude Code session the way Ersa runs one, as a protocol fixture
 // pair: the live stream and the CLI's own session record for the same run.
 //
-//   node scripts/record-claude-session.mjs <name> [--keep] [--cwd <dir>] [--resume <session id> [--fork-session [--cut-original <lines>] [--original-cwd <dir>]]] [--session-id] "<message 1>" ["<message 2>" ...]
+//   node scripts/record-claude-session.mjs <name> [--keep] [--bare] [--cwd <dir>] [--resume <session id> [--fork-session [--cut-original <lines>] [--original-cwd <dir>]]] [--session-id] "<message 1>" ["<message 2>" ...]
 //
 // A message of the form `control:<json>` is sent as a host control request
 // instead, with `<json>` as its `request` object, and the recorder waits for
@@ -69,6 +69,10 @@
 // marked `"ersa_elided": true`, because those bodies are internal to the CLI
 // and carry its system prompt and the recording machine's configuration.
 // Set ERSA_CLAUDE to the claude executable if it is not on PATH.
+//
+// With --bare, the CLI also gets `--bare`, its minimal mode, which Ersa never
+// passes: the recording shows what a session looks like if a future CLI starts
+// that way by default (PROTO-CLAUDE-CODE-STREAM, Bare mode).
 //
 // With --trust, `initialize` attests the user's trust in the working
 // directory (`workspaceTrust`), as Ersa does for a trusted project's session,
@@ -185,6 +189,7 @@ const flag = (name) => {
 };
 const keep = flag("--keep");
 const trust = flag("--trust");
+const bare = flag("--bare");
 const givenCwd = option("--cwd");
 const resume = option("--resume");
 const chooseId = flag("--session-id");
@@ -248,6 +253,7 @@ const args = [
   ...(resume ? ["--resume", resume] : []),
   ...(fork ? ["--fork-session"] : []),
   ...(chosenId ? ["--session-id", chosenId] : []),
+  ...(bare ? ["--bare"] : []),
 ];
 
 // The original's record, as a fork must leave it.
