@@ -251,6 +251,101 @@
   overflow-wrap: anywhere;
 }
 
+/* A diff card's counts (docs/design/TRANSCRIPT.md, Diff cards): the added count in positive, the removed in danger,
+   space-xs apart; each figure after its sign, so they never depend on color alone. */
+.diff-counts {
+  display: inline-flex;
+  gap: var(--space-xs);
+}
+
+.diff-added {
+  color: var(--color-positive);
+}
+
+.diff-removed {
+  color: var(--color-danger);
+}
+
+/* The change, one diff per file. */
+.diff-body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* With several files, each file's path heads its diff, in mono at ui-small size and ink-muted, under a line hairline. */
+.diff-path {
+  padding: var(--space-xs) var(--space-md);
+  font-size: var(--type-ui-small-size);
+  color: var(--color-ink-muted);
+  border-top: var(--line-hairline) solid var(--color-line);
+  overflow-wrap: anywhere;
+}
+
+/* A file's change: on surface, under a line hairline. */
+.diff-change {
+  background: var(--color-surface);
+  border-top: var(--line-hairline) solid var(--color-line);
+}
+
+/* "Replaces every occurrence", in ui-small and ink-muted above the first line, set in from the edge as the text is. */
+.diff-note {
+  margin: 0;
+  padding: var(--space-xs) var(--space-md) 0 var(--space-lg);
+  font-family: var(--type-ui-small-family);
+  font-size: var(--type-ui-small-size);
+  line-height: var(--type-ui-small-leading);
+  color: var(--color-ink-muted);
+}
+
+/* The lines scroll past size-card-max, and sideways when one is wider than the column. */
+.diff-scroll {
+  display: grid;
+  /* One column as wide as the widest line and at least the card, so every line's tint runs the whole width as it
+     scrolls. */
+  grid-template-columns: minmax(max-content, 1fr);
+  max-height: var(--size-card-max);
+  overflow: auto;
+  padding-block: var(--space-xs);
+}
+
+.diff-lines {
+  display: flex;
+  flex-direction: column;
+}
+
+/* A line: its sign in a gutter space-lg wide, then its text, kept as it is and never wrapped. */
+.diff-line {
+  display: flex;
+  padding-inline-end: var(--space-md);
+  white-space: pre;
+}
+
+.diff-sign {
+  flex: none;
+  width: var(--space-lg);
+  text-align: center;
+  color: var(--color-ink);
+  user-select: none;
+}
+
+/* An added or removed line's text is ink on its tint; a kept line's is ink-muted, with no fill. The tints carry the
+   color, the signs the meaning. */
+.diff-text {
+  color: var(--color-ink-muted);
+}
+
+.diff-line[data-sign="added"] {
+  background: var(--material-diff-added);
+}
+
+.diff-line[data-sign="removed"] {
+  background: var(--material-diff-removed);
+}
+
+.diff-line:not([data-sign="kept"]) .diff-text {
+  color: var(--color-ink);
+}
+
 /* The thinking row: no card, the state mark and its words in ui-small and ink-muted. */
 .thinking-row {
   display: flex;

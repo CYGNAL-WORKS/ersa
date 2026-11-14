@@ -6,11 +6,15 @@ import type { Item } from "./transcript";
 
 type Tool = Extract<Item, { kind: "tool" }>;
 
-export type ToolState = "running" | "waiting" | "done" | "failed";
+export type ToolState = "running" | "waiting" | "done" | "failed" | "stopped";
 
-/** The card's state: `waiting` when its permission request is open for the user. */
+/**
+ * The card's state: `waiting` when its permission request is open for the user; `stopped` once its turn or session
+ * ended without its result (R16), whatever request is still open, since nothing will come of it now.
+ */
 export function toolState(item: Tool, waiting: boolean): ToolState {
   if (item.result) return item.result.isError ? "failed" : "done";
+  if (item.stopped) return "stopped";
   return waiting ? "waiting" : "running";
 }
 
@@ -19,8 +23,8 @@ export function toolState(item: Tool, waiting: boolean): ToolState {
  * - once the call has a result, its duration, from `duration_ms` when the backend gives one, else from its request's
  *   `ts` to its result's;
  * - while it runs live, its latest progress, else the time since it was requested;
- * - a call read from the record, or one the session ended without, shows no clock: its progress was live only.
- * A failed call's "Failed" is the component's, not this.
+ * - a call read from the record shows no clock: its progress was live only; nor does a stopped one (R16).
+ * A failed or stopped call's words ("Failed", "Stopped") are the component's, not this.
  */
 export function toolDetail(item: Tool, now: number): string | undefined {
   if (item.result) {

@@ -45,6 +45,38 @@ describe("a tool card's state", () => {
     const failed = play([[at(0), requested], [at(2), { type: "tool.result", tool_use_id: "t1", content: "boom", is_error: true }]]);
     expect(toolState(tool(failed), false)).toBe("failed");
   });
+
+  // verifies: FLOW-READ-TRANSCRIPT-R16
+  it("is stopped, with no clock, when its turn ends without its result", () => {
+    const t = play([
+      [at(0), requested],
+      [at(4), { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 4000, is_error: false }],
+    ]);
+    expect(toolState(tool(t), false)).toBe("stopped");
+    // A permission request left open does not keep it waiting: nothing will come of it now.
+    expect(toolState(tool(t), true)).toBe("stopped");
+    expect(toolDetail(tool(t), ms(185))).toBeUndefined();
+  });
+
+  // verifies: FLOW-READ-TRANSCRIPT-R16
+  it("is stopped when its session ends without its result", () => {
+    const t = play([
+      [at(0), requested],
+      [at(4), { type: "session.ended", reason: "backend_exited" }],
+    ]);
+    expect(toolState(tool(t), false)).toBe("stopped");
+  });
+
+  // verifies: FLOW-READ-TRANSCRIPT-R16
+  it("is not stopped by the end of a turn it finished in", () => {
+    const t = play([
+      [at(0), requested],
+      [at(2), { type: "tool.result", tool_use_id: "t1", content: "ok", is_error: false }],
+      [at(4), { type: "turn.completed", turn: 1, outcome: "success", duration_ms: 4000, is_error: false }],
+    ]);
+    expect(toolState(tool(t), false)).toBe("done");
+    expect(tool(t).stopped).toBeUndefined();
+  });
 });
 
 describe("a tool card's detail", () => {
@@ -169,6 +201,19 @@ describe("a request seen again", () => {
     ]);
     expect(tool(t)).toMatchObject({ target: "cargo test --all", requestedAt: at(0), result: { content: "ok", at: at(5) } });
     expect(toolDetail(tool(t), ms(100))).toBe("5s");
+  });
+
+  // verifies: FLOW-READ-TRANSCRIPT-R09
+  it("keeps the edits its event carries, for its diff card", () => {
+    const edit: Event = {
+      type: "tool.requested",
+      tool_use_id: "e1",
+      name: "Edit",
+      input: {},
+      target: "a.ts",
+      edits: [{ path: "a.ts", old_text: "a", new_text: "b" }],
+    };
+    expect(tool(play([[at(0), edit]]), "e1").edits).toEqual([{ path: "a.ts", old_text: "a", new_text: "b" }]);
   });
 });
 

@@ -5,6 +5,7 @@
 import { eventProblem, hasSeq } from "../core/checks";
 import type {
   Envelope,
+  FileEdit,
   PermissionDecided,
   PermissionRequested,
   QuestionAsked,
@@ -33,6 +34,8 @@ export type Item =
       input: ToolInput;
       /** The one thing the call acts on, when the event names it. */
       target?: string;
+      /** For a call that changes files, its changes in the order it makes them: it shows as a diff card (FLOW-READ-TRANSCRIPT-R09). */
+      edits?: readonly FileEdit[];
       /** The key of the call that started the subagent making this one (FLOW-READ-TRANSCRIPT-R10). */
       parent?: string;
       /** Whether the call came from the live stream: only a live call has progress or a running clock. */
@@ -42,7 +45,7 @@ export type Item =
       progress?: string;
       /** `at` is its `tool.result` event's `ts`; `durationMs` the backend's own measure, when it gives one. */
       result?: { content: string; isError: boolean; at: string; durationMs?: number };
-      /** The session ended with the call unfinished: its clock stops. */
+      /** Its turn or its session ended with the call unfinished: it shows as stopped (FLOW-READ-TRANSCRIPT-R16). */
       stopped?: true;
     }
   /** A permission request, answered once `decision` is set; `unanswered` once the session ended without one. */
@@ -97,14 +100,9 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
     case "session.state":
       return { ...next, state: event.state };
     case "session.ended": {
-      // Nobody can answer a request once the session has ended.
-      // ...and a call it left unfinished stops its clock.
-      const items = next.items.map((i) =>
-        (i.kind === "permission" && isOpen(i)) || (i.kind === "question" && isOpenQuestion(i))
-          ? { ...i, unanswered: true as const }
-          : i.kind === "tool" && !i.result && !i.stopped
-            ? { ...i, stopped: true as const }
-            : i,
+      // Nobody can answer a request once the session has ended, and a call it left unfinished has stopped (R16).
+      const items = stopUnfinished(next.items).map((i) =>
+        (i.kind === "permission" && isOpen(i)) || (i.kind === "question" && isOpenQuestion(i)) ? { ...i, unanswered: true as const } : i,
       );
       return add({ ...next, items, working: false }, { kind: "ended", key: `ended:${envelope.seq}`, reason: endedReason[event.reason] ?? "Ended." });
     }
@@ -137,6 +135,7 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
         name: event.display_name ?? event.name,
         input: event.input,
         ...(event.target !== undefined ? { target: event.target } : {}),
+        ...(event.edits !== undefined ? { edits: event.edits } : {}),
         ...(event.parent_tool_use_id !== undefined ? { parent: `tool:${event.parent_tool_use_id}` } : {}),
         live: seen?.live ?? envelope.source.input === "live",
         requestedAt: seen?.requestedAt ?? envelope.ts,
@@ -173,12 +172,16 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
       return add(next, { kind: "problem", key: `problem:${envelope.seq}`, message: event.message });
     // Shown elsewhere (the tile carries usage), or nowhere outside the
     // developer pane (passthrough), or implied by the items around them.
-    case "turn.completed":
+    case "turn.completed": {
+      // A call with no result when its turn ends never will have one: it has stopped (FLOW-READ-TRANSCRIPT-R16). The
+      // backend sends every result of a turn before the turn's end, which only the live stream carries.
+      const ended = { ...next, items: stopUnfinished(next.items), working: false };
       // A turn that ended other than by finishing says so; one that
       // succeeded needs no mark, its last words are on the page.
       return event.outcome === "success"
-        ? { ...next, working: false }
-        : add({ ...next, working: false }, { kind: "notice", key: `turn:${envelope.seq}`, message: turnOutcome[event.outcome] ?? "The turn ended early." });
+        ? ended
+        : add(ended, { kind: "notice", key: `turn:${envelope.seq}`, message: turnOutcome[event.outcome] ?? "The turn ended early." });
+    }
     case "turn.started":
       return { ...next, working: true };
     case "session.started":
@@ -194,6 +197,12 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
         message: `An event this window does not show (${String((event as { type?: unknown }).type)}).`,
       });
   }
+}
+
+/** Every call still without a result, marked stopped; the rest as they were, the same objects when nothing changes. */
+function stopUnfinished(items: Item[]): Item[] {
+  if (!items.some((i) => i.kind === "tool" && !i.result && !i.stopped)) return items;
+  return items.map((i) => (i.kind === "tool" && !i.result && !i.stopped ? { ...i, stopped: true as const } : i));
 }
 
 /** Whether the request still waits for an answer. */
