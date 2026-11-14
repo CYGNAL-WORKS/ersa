@@ -74,7 +74,7 @@ Recorded on 2.1.316 for `Read` and `Bash` (fixture 00-session-tools), `Edit`, `W
 | `WebSearch`, `ToolSearch` | `query` | none |
 | `Task`, `Agent` | `description` | none |
 
-Any other tool, an MCP server's included, carries neither. A field missing from the input, or not a string, leaves `target` or that edit out.
+A target's `target_kind` follows its tool: `path` for `Read`, `Write`, `Edit`, `MultiEdit` and `NotebookEdit`; `command` for `Bash` and `PowerShell`; `search` for `Grep`, `Glob`, `WebSearch` and `ToolSearch`; `address` for `WebFetch`; `task` for `Task` and `Agent` (PROTO-CLAUDE-CODE-STREAM-R61). Any other tool, an MCP server's included, carries neither. A field missing from the input, or not a string, leaves `target` or that edit out.
 
 ### user
 
@@ -301,6 +301,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 - **PROTO-CLAUDE-CODE-STREAM-R53**: When a live session's `system/init` has none of `scratchpad_path`, `memory_paths` and `messaging_socket_path` and its turn then fails as not signed in, the adapter shall project the failure as an `error` with `code: backend_error`, `recoverable: false`, no `action`, and a message saying Claude Code started in its minimal mode, which Ersa can't use, instead of `authentication_failed`.
 - **PROTO-CLAUDE-CODE-STREAM-R54**: The adapter's conformance tests shall fail when a fixture at the newest tested version whose recorded arguments are the adapter's own invocation has a `system/init` with none of `scratchpad_path`, `memory_paths` and `messaging_socket_path`.
 - **PROTO-CLAUDE-CODE-STREAM-R48**: The adapter shall project each `tool_use` block of a tool named in Tool targets and edits to a `tool.requested` carrying the `target` and `edits` that table gives, and any other tool's to one carrying neither.
+- **PROTO-CLAUDE-CODE-STREAM-R61**: A `tool.requested` the adapter gives a `target` shall carry the `target_kind` Tool targets and edits names for its tool.
 - **PROTO-CLAUDE-CODE-STREAM-R57**: The adapter shall report a session's model and effort from the `assistant` entry with the latest `timestamp` that is not a subagent's (`isSidechain`) and whose model is not `<synthetic>`, and its permission mode from the `user` entry with the latest `timestamp` that carries `permissionMode`; a session with no record shall report none.
 - **PROTO-CLAUDE-CODE-STREAM-R58**: The adapter shall report with each value when its turn began, which is the `timestamp` of the latest `user` entry carrying `permissionMode` that is not after the value's entry; given a time for a value, it shall report that value only from a turn that began after that time, and a value whose turn's start it did not read only when no time was given for it.
 - **PROTO-CLAUDE-CODE-STREAM-R59**: When listing, the adapter shall read only the tail and report none for a value the tail does not hold; before a relaunch it shall read back until each value is found or the record reaches the time Core gave for it.
@@ -323,6 +324,7 @@ A conforming adapter replays every fixture in `protocol/fixtures/claude-code/<ve
 
 ## Changes
 
+- 2026-11-14: from #360 inbox: each tool's target has a kind, which the adapter states (PROTO-AGENT-EVENTS-R26). PROTO-CLAUDE-CODE-STREAM-R61 added.
 - 2026-11-14: from #358 inbox: a subagent's entries are not the session's model; a turn begins at a prompt, the only entry that carries `permissionMode`; Core gives a time per value, as PROTO-CORE-API-R71 keeps one, and a value from a turn whose start the tail does not hold counts only when Core made no request for it. One time became a time per value, a change of meaning, so PROTO-CLAUDE-CODE-STREAM-R47 is retired for R57 (which entries), R58 (the time rule) and R59 (how far it reads). R60 added: for PROTO-CORE-API-R71's relaunch rule the adapter also reports what the first turn after a request ran with.
 - 2026-11-14: from #361 inbox: the model probe starts as a new session with the user's settings alone, has 60 seconds, and fails when the CLI does not answer, exits first or lists no models; an open question on a project whose settings narrow the models. PROTO-CLAUDE-CODE-STREAM-R56 added.
 - 2026-11-14: planning pass for the two-week review's defects: a record deletion can be called off, and then begins no further deletion, so a delete that gave up never takes the record later (PROTO-CORE-API-R91). PROTO-CLAUDE-CODE-STREAM-R55 added.

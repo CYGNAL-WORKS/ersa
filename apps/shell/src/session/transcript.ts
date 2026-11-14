@@ -25,13 +25,25 @@ export type Item =
   /** The agent's words. Several events share a block and grow its text until one is `final`. */
   | { kind: "assistant"; key: string; text: string; final: boolean }
   | { kind: "thinking"; key: string; summary?: string; final: boolean }
+  /** A tool call (FLOW-READ-TRANSCRIPT-R06): what it acts on, when it was asked for, and how it ended. */
   | {
       kind: "tool";
       key: string;
       name: string;
       input: ToolInput;
+      /** The one thing the call acts on, when the event names it. */
+      target?: string;
+      /** The key of the call that started the subagent making this one (FLOW-READ-TRANSCRIPT-R10). */
+      parent?: string;
+      /** Whether the call came from the live stream: only a live call has progress or a running clock. */
+      live: boolean;
+      /** Its `tool.requested` event's `ts`. */
+      requestedAt: string;
       progress?: string;
-      result?: { content: string; isError: boolean };
+      /** `at` is its `tool.result` event's `ts`; `durationMs` the backend's own measure, when it gives one. */
+      result?: { content: string; isError: boolean; at: string; durationMs?: number };
+      /** The session ended with the call unfinished: its clock stops. */
+      stopped?: true;
     }
   /** A permission request, answered once `decision` is set; `unanswered` once the session ended without one. */
   | { kind: "permission"; key: string; request: PermissionRequested; decision?: PermissionDecided; unanswered?: true }
@@ -86,8 +98,13 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
       return { ...next, state: event.state };
     case "session.ended": {
       // Nobody can answer a request once the session has ended.
+      // ...and a call it left unfinished stops its clock.
       const items = next.items.map((i) =>
-        (i.kind === "permission" && isOpen(i)) || (i.kind === "question" && isOpenQuestion(i)) ? { ...i, unanswered: true as const } : i,
+        (i.kind === "permission" && isOpen(i)) || (i.kind === "question" && isOpenQuestion(i))
+          ? { ...i, unanswered: true as const }
+          : i.kind === "tool" && !i.result && !i.stopped
+            ? { ...i, stopped: true as const }
+            : i,
       );
       return add({ ...next, items, working: false }, { kind: "ended", key: `ended:${envelope.seq}`, reason: endedReason[event.reason] ?? "Ended." });
     }
@@ -109,19 +126,33 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
         summary: event.summary,
         final: event.final,
       });
-    case "tool.requested":
+    case "tool.requested": {
+      // A request seen again (the record and the live stream both carry it) updates what it says, never what has
+      // happened since: its progress, its result and when it was first asked for stay.
+      const seen = next.items.find((i): i is Extract<Item, { kind: "tool" }> => i.kind === "tool" && i.key === `tool:${event.tool_use_id}`);
       return put(next, {
+        ...seen,
         kind: "tool",
         key: `tool:${event.tool_use_id}`,
         name: event.display_name ?? event.name,
         input: event.input,
+        ...(event.target !== undefined ? { target: event.target } : {}),
+        ...(event.parent_tool_use_id !== undefined ? { parent: `tool:${event.parent_tool_use_id}` } : {}),
+        live: seen?.live ?? envelope.source.input === "live",
+        requestedAt: seen?.requestedAt ?? envelope.ts,
       });
+    }
     case "tool.progress":
       return patch(next, `tool:${event.tool_use_id}`, "tool", (item) => ({ ...item, progress: event.detail }));
     case "tool.result":
       return patch(next, `tool:${event.tool_use_id}`, "tool", (item) => ({
         ...item,
-        result: { content: contentText(event.content), isError: event.is_error },
+        result: {
+          content: contentText(event.content),
+          isError: event.is_error,
+          at: envelope.ts,
+          ...(event.duration_ms !== undefined ? { durationMs: event.duration_ms } : {}),
+        },
       }));
     case "permission.requested":
       // A request is shown once: a repeat must not change what the user is

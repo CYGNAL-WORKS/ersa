@@ -6,7 +6,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { PermissionAnswers } from "../components/PermissionAnswers";
-import { Revealed, Transcript as TranscriptView } from "../components/Transcript";
+import { Revealed } from "../components/Revealed";
+import { Transcript as TranscriptView } from "../components/Transcript";
 import type { Envelope, Event } from "../protocol/agent-events.gen";
 import type { Answer } from "./answers";
 import { events } from "./replays";
@@ -96,7 +97,7 @@ describe("a permission request (replay 11-stream-permission-prompt-tool-stdio)",
     const permission = done.items.find((i) => i.kind === "permission");
     expect(permission?.kind === "permission" && permission.decision?.behavior).toBe("allow");
     const tool = done.items.find((i) => i.kind === "tool");
-    expect(tool?.kind === "tool" && tool.result).toEqual({ content: "(Bash completed with no output)", isError: false });
+    expect(tool?.kind === "tool" && tool.result).toMatchObject({ content: "(Bash completed with no output)", isError: false });
     const html = render(done);
     expect(html).not.toMatch(/<button[^>]*>Allow<\/button>/);
     expect(html).toContain("Allowed");
