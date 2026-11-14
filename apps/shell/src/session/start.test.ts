@@ -21,7 +21,10 @@ function fakeClient(answers: Partial<Record<Method, (params: never) => unknown>>
   return { client, calls, methods: () => calls.map((c) => c.method) };
 }
 
-const refusal = (message: string, kind = "invalid_state"): BridgeError => ({ kind: "rpc", error: { code: -32000, message, data: { kind } } as never });
+const refusal = (message: string, kind = "invalid_state", reason?: string): BridgeError => ({
+  kind: "rpc",
+  error: { code: -32000, message, data: { kind, ...(reason ? { reason } : {}) } } as never,
+});
 
 const values = (workspace: SessionValues["workspace"]): SessionValues => ({
   host_id: "local",
@@ -239,7 +242,7 @@ describe("stop while a new session starts", () => {
     const started = startSession(client, values("isolated"), "Fix the build", stop);
     await new Promise((r) => setTimeout(r, 0));
     stop.stop();
-    refuse(refusal("the message was stopped before it was sent"));
+    refuse(refusal("the message was stopped before it was sent", "invalid_state", "send_stopped"));
     expect(await started).toEqual({ ok: false, stopped: true });
     expect(methods()).toEqual([
       "workspace.create",
@@ -250,6 +253,31 @@ describe("stop while a new session starts", () => {
       "session.remove",
       "workspace.remove",
     ]);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R08
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("says why the backend failed to start when the send is refused after a stop for another reason", async () => {
+    let refuse: (error: BridgeError) => void = () => {};
+    const { client, methods } = fakeClient({
+      ...working,
+      "session.send": () => new Promise((_, reject) => (refuse = reject)),
+      "session.interrupt": () => ({}),
+      "session.list": () => [{ ...session, state: "error" }],
+      "session.stop": () => ({}),
+      "session.remove": () => ({}),
+      "workspace.remove": () => ({}),
+    });
+    const stop = new StartStop(client);
+    const started = startSession(client, values("isolated"), "Fix the build", stop);
+    await new Promise((r) => setTimeout(r, 0));
+    stop.stop();
+    // Core's answer for a backend that could not be started: invalid_state with no reason (PROTO-CORE-API, Errors).
+    refuse(refusal("session.send: the backend could not be started: Claude Code is not signed in"));
+    // Not a stop: the failure is shown with the backend's own message, which the screen shows beside the kept text.
+    expect(await started).toEqual({ ok: false, message: "the backend could not be started: Claude Code is not signed in" });
+    expect(methods()).toContain("session.remove");
+    expect(methods()).toContain("workspace.remove");
   });
 
   // verifies: FLOW-SEND-MESSAGE-R03
