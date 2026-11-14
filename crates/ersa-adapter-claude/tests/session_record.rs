@@ -252,13 +252,9 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
             // output) is a passthrough on the stream, which carries no user
             // message of Ersa's (R43), and a `system` user message from the
             // record. Which one live should show is open (inbox, #311).
-            const LIVE_DIFFERS: [(&str, &str); 6] = [
+            const LIVE_DIFFERS: [(&str, &str); 5] = [
                 (
                     "2.1.316/24-interrupt-with-waiting",
-                    "4548e4be-9dbc-440f-beb9-0a9421f94eb8",
-                ),
-                (
-                    "2.1.316/54-interrupt-with-waiting-echoed",
                     "81ed5a84-2659-408a-8579-9fd3bd5e552a",
                 ),
                 (
