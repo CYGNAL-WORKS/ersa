@@ -50,6 +50,13 @@ impl SessionManager {
         Ok(handle.describe())
     }
 
+    /// Whether the session's backend is running, once a run that has ended
+    /// has wound down.
+    pub async fn is_running(&self, id: &str) -> Result<bool, SessionError> {
+        let handle = self.handle(id)?;
+        Ok(current_run(&handle).await?.is_some())
+    }
+
     /// Starts the backend of `handle` again unless it is running. Returns
     /// once the session is live; the start itself shows up as events.
     pub(super) async fn start_again(
@@ -57,6 +64,9 @@ impl SessionManager {
         handle: &Arc<Handle>,
         how: Resumption,
     ) -> Result<(), SessionError> {
+        // Waited for before taking `op`, so nothing else on the session
+        // queues behind the wait.
+        current_run(handle).await?;
         // Held throughout, so a stop, a removal or a view opened meanwhile
         // waits for the session to be live, and two resumes start it once.
         let _op = handle.op.lock().await;
@@ -74,7 +84,7 @@ impl SessionManager {
                 "Core is shutting down; no session can start".into(),
             ));
         }
-        check_folder(&row.cwd).await?;
+        check_folder(handle).await?;
         let adapter = self.adapter_of(&row.backend)?;
         let start = self
             .how_to_start(handle, &adapter, &how.transport, &row)
@@ -199,30 +209,56 @@ impl SessionManager {
     }
 }
 
-/// Refuses with `folder_gone` when the session's folder `cwd` is not an
-/// existing folder (FLOW-RESUME-SESSION-R03). Core looks for itself, before
-/// the backend starts. Only the local host has sessions today.
-pub(super) async fn check_folder(cwd: &str) -> Result<(), SessionError> {
-    let path = PathBuf::from(cwd);
-    let gone = || {
-        SessionError::FolderGone(format!(
-            "the session's folder {cwd} no longer exists, so the session can't be resumed"
-        ))
+/// What looking at a session's folder found: whether it is a folder, or
+/// why it could not be looked at.
+pub(super) type FolderLook = Result<bool, String>;
+
+/// Refuses with `folder_gone` when the session's folder is not an existing
+/// folder (FLOW-RESUME-SESSION-R03). Core looks for itself, before the
+/// backend starts. Only the local host has sessions today. One look per
+/// session at a time: a look stuck on a drive that stopped answering is
+/// joined, never started again beside it ([`read_once`]).
+pub(super) async fn check_folder(handle: &Handle) -> Result<(), SessionError> {
+    let cwd = lock(&handle.row).cwd.clone();
+    let path = PathBuf::from(&cwd);
+    let start = move || {
+        tokio::task::spawn_blocking(move || match std::fs::metadata(&path) {
+            Ok(meta) => Ok(meta.is_dir()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e.to_string()),
+        })
     };
-    let looked = tokio::task::spawn_blocking(move || std::fs::metadata(&path));
-    match tokio::time::timeout(FOLDER_CHECK, looked).await {
-        Ok(Ok(Ok(meta))) if meta.is_dir() => Ok(()),
-        Ok(Ok(Ok(_))) => Err(gone()),
-        Ok(Ok(Err(e))) if e.kind() == io::ErrorKind::NotFound => Err(gone()),
+    // A look that finished a moment ago is as good as a new one.
+    match read_once(&handle.folder_check, FOLDER_CHECK, start, async |_| true).await {
+        Some(Ok(true)) => Ok(()),
+        Some(Ok(false)) => Err(SessionError::FolderGone(format!(
+            "the session's folder {cwd} no longer exists, so the session can't be resumed"
+        ))),
         // There, perhaps, but not readable: say why rather than call it gone.
-        Ok(Ok(Err(e))) => Err(SessionError::InvalidState(format!(
+        Some(Err(e)) => Err(SessionError::InvalidState(format!(
             "the session's folder {cwd} can't be read: {e}"
         ))),
-        Ok(Err(e)) => Err(SessionError::Internal(format!(
-            "checking the session's folder failed: {e}"
-        ))),
-        Err(_) => Err(SessionError::InvalidState(format!(
+        None => Err(SessionError::InvalidState(format!(
             "the session's folder {cwd} did not answer within {FOLDER_CHECK:?}"
         ))),
+    }
+}
+
+/// The session's run, unless it has ended and is only winding down, which
+/// is waited for first, as `session.remove` waits: a client may have seen
+/// `session.ended` before Core let go of the run, and a resume or a send
+/// then starts the session again rather than finding it still running.
+pub(super) async fn current_run(handle: &Handle) -> Result<Option<Arc<Live>>, SessionError> {
+    match handle.live() {
+        Some(live) if live.sink.has_ended() => {
+            if wait_finished(&live, STOP_TIMEOUT).await.is_err() {
+                return Err(SessionError::Internal(format!(
+                    "session {} has ended, but Core has not finished with it within {STOP_TIMEOUT:?}",
+                    handle.id
+                )));
+            }
+            Ok(handle.live())
+        }
+        run => Ok(run),
     }
 }

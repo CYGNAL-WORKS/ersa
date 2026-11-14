@@ -145,7 +145,8 @@ impl SessionManager {
                 "the session is archived; unarchive or resume it to send it a message".into(),
             ));
         }
-        if handle.live().is_none() && resumption.is_none() {
+        let resuming = resume::current_run(&handle).await?.is_none();
+        if resuming && resumption.is_none() {
             return Err(handle.not_running());
         }
         let (cancel, mut canceled) = watch::channel(false);
@@ -189,10 +190,10 @@ impl SessionManager {
         admitted();
 
         // A session to resume is refused for a folder that is gone before
-        // anything is copied into it (FLOW-RESUME-SESSION-R03).
-        if handle.live().is_none() {
-            let cwd = lock(&handle.row).cwd.clone();
-            resume::check_folder(&cwd).await?;
+        // anything is copied into it (FLOW-RESUME-SESSION-R03). Without
+        // attachments, the resume's own look is the only one.
+        if resuming && !attachments.is_empty() {
+            resume::check_folder(&handle).await?;
         }
 
         let mut copies = Copies(None);
