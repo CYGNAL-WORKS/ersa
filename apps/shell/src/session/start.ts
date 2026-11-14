@@ -4,7 +4,7 @@
 // Kept free of React so the tests drive it with a fake client.
 
 import { t } from "../catalog";
-import { type BridgeError, type CoreClient, describeError } from "../core/client";
+import { type CoreClient, describeError, refusalOf } from "../core/client";
 import type { Attachment, BackendInfo, Session, SessionCreateParams, Workspace } from "../protocol/core-api.gen";
 import { type Sending, sendFailure } from "./follow";
 import type { SessionValues, WorkspaceKind } from "./controls";
@@ -117,13 +117,13 @@ export async function startSession(
     } catch (error) {
       // A stop canceled the message before it reached the agent, which Core answers as an invalid state: take back
       // what was made. Any other failure is judged below, so a session the backend already ran is kept.
-      const canceled = (error as BridgeError | undefined)?.kind === "rpc" && (error as Extract<BridgeError, { kind: "rpc" }>).error.data?.kind === "invalid_state";
+      const canceled = refusalOf(error)?.kind === "invalid_state";
       if (stop?.stopped && canceled) throw STOPPED;
       // Core answers a message to a backend that failed to start once the session's run has ended, so its state
       // already says so. A session Core cannot be asked about is kept: removing a live one loses its work. After
       // an `internal` answer the backend already has the message, so the session ran: it is kept whatever its
       // state says now, since a backend that started and then exited reads as `error` too.
-      const internal = (error as BridgeError | undefined)?.kind === "rpc" && (error as Extract<BridgeError, { kind: "rpc" }>).error.data?.kind === "internal";
+      const internal = refusalOf(error)?.kind === "internal";
       const listed = await client.call("session.list").then(
         (all) => all.find((s) => s.id === created.id),
         () => undefined,
