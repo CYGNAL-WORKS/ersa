@@ -93,9 +93,10 @@ pub struct ClaudeProjector {
     /// `system/status` that carries one (PROTO-CLAUDE-CODE-STREAM-R40).
     permission_mode: Option<String>,
     /// Messages the host wrote while a turn ran, in the order written. The
-    /// CLI holds them and runs them, all together, as the next turn, so
-    /// each is projected when that turn's `system/init` arrives, never as
-    /// part of the turn that was running (PROTO-CLAUDE-CODE-STREAM-R43).
+    /// CLI holds them until it takes them all in: as the next turn, so each
+    /// is projected when that turn's `system/init` arrives
+    /// (PROTO-CLAUDE-CODE-STREAM-R43), or, in a turn that uses tools, at the
+    /// running turn's next model call.
     waiting: VecDeque<UserMessage>,
 }
 
@@ -206,6 +207,22 @@ impl ClaudeProjector {
             (Some("system"), Some("status"), _) => {
                 if let Some(mode) = field("/permissionMode") {
                     self.permission_mode = Some(mode.to_string());
+                }
+                // The running turn's next model call. A turn that uses tools
+                // hands every waiting message to the model at it, after the
+                // tool's result, and runs no turn for them
+                // (2.1.316/51-message-during-tool-turn): they join this one.
+                if field("/status") == Some("requesting")
+                    && self.turn_open
+                    && !self.waiting.is_empty()
+                {
+                    let mut out: Vec<Projected> = self
+                        .waiting
+                        .drain(..)
+                        .map(|message| at(line, Event::UserMessage(message)))
+                        .collect();
+                    out.push(passthrough(line, value));
+                    return out;
                 }
             }
             _ => {}
