@@ -536,7 +536,7 @@ function itemsAt(steps: [seconds: number, Event][], input: "live" | "record" = "
 }
 type ToolItem = Extract<ReturnType<typeof itemsAt>[number], { kind: "tool" }>;
 type ThinkingItem = Extract<ReturnType<typeof itemsAt>[number], { kind: "thinking" }>;
-// Running cards read the clock 3m 5s after their calls began.
+// Running cards read the clock three minutes and five seconds after their calls began.
 const toolNow = Date.UTC(2026, 10, 1, 9, 0, 0) + 185_000;
 const toolWorkspace = "D:\\Projects\\ersa";
 const designPage = "D:\\Projects\\ersa\\docs\\design\\TRANSCRIPT.md";
