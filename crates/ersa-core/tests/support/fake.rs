@@ -604,6 +604,10 @@ impl AdapterSession for FakeSession {
                 "the backend stopped reading",
             )));
         }
+        // The backend exited before the write, while Core still holds its run.
+        if message.text == "stopped before the write" {
+            return Err(AdapterError::NotRunning);
+        }
         if message.text == "stopped mid-write" {
             self.sink.record(
                 Direction::Host,

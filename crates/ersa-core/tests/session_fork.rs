@@ -134,9 +134,17 @@ async fn restarted(core: TestCore, client: &mut Client, fake: &FakeAdapter) -> (
 
 /// The refusal of a fork asked for now.
 async fn refused_now(client: &mut Client, id: &str) -> String {
+    refusal_now(client, id).await["message"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// The whole error refusing a fork asked for now.
+async fn refusal_now(client: &mut Client, id: &str) -> Value {
     let error = client.error("session.fork", json!({ "id": id })).await;
     assert_eq!(kind(&error), "invalid_state", "{error:#}");
-    error["message"].as_str().unwrap().to_string()
+    error
 }
 
 /// How long a fork answers that an earlier one has not finished starting.
@@ -144,11 +152,21 @@ const STILL_STARTING: Duration = Duration::from_secs(10);
 
 /// The refusal of a fork, once any earlier fork has finished starting.
 async fn refused(client: &mut Client, id: &str) -> String {
+    refusal(client, id).await["message"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// The whole error refusing a fork, once any earlier fork has finished
+/// starting.
+async fn refusal(client: &mut Client, id: &str) -> Value {
     let deadline = tokio::time::Instant::now() + STILL_STARTING;
     loop {
-        let message = refused_now(client, id).await;
+        let error = refusal_now(client, id).await;
+        let message = error["message"].as_str().unwrap();
         if !message.contains("has not finished starting") {
-            return message;
+            return error;
         }
         assert!(tokio::time::Instant::now() < deadline, "{message}");
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -292,20 +310,35 @@ async fn a_fork_of_an_archived_session_is_not_archived() {
 }
 
 // verifies: FLOW-FORK-SESSION-R03
+// verifies: PROTO-CORE-API-R79
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_is_refused_unless_the_record_ends_with_a_finished_reply() {
     let fake = Arc::new(FakeAdapter::new(1));
     let (core, mut client) = start(&fake).await;
     let id = idle(&core, &mut client, json!({})).await;
     let mut messages = Vec::new();
-    for (end, says) in [
-        (Some(ConversationEnd::NoReply), "no reply has finished"),
-        (Some(ConversationEnd::Interrupted), "was interrupted"),
-        (Some(ConversationEnd::Unfinished), "part way through a turn"),
-        (None, "cannot fork"),
+    for (end, says, reason) in [
+        (
+            Some(ConversationEnd::NoReply),
+            "no reply has finished",
+            "no_finished_reply",
+        ),
+        (
+            Some(ConversationEnd::Interrupted),
+            "was interrupted",
+            "no_finished_reply",
+        ),
+        (
+            Some(ConversationEnd::Unfinished),
+            "part way through a turn",
+            "no_finished_reply",
+        ),
+        (None, "cannot fork", "backend_cannot_fork"),
     ] {
         *fake.conversation_end.lock().unwrap() = end;
-        let message = refused(&mut client, &id).await;
+        let error = refusal(&mut client, &id).await;
+        assert_eq!(error["data"]["reason"], reason, "{error:#}");
+        let message = error["message"].as_str().unwrap().to_string();
         assert!(message.contains(says), "{message}");
         messages.push(message);
     }
@@ -327,6 +360,7 @@ async fn a_fork_is_refused_unless_the_record_ends_with_a_finished_reply() {
 }
 
 // verifies: FLOW-FORK-SESSION-R03
+// verifies: PROTO-CORE-API-R79
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_is_refused_while_a_turn_runs() {
     for text in ["work", "ask"] {
@@ -341,12 +375,15 @@ async fn a_fork_is_refused_while_a_turn_runs() {
         } else {
             wait_for_state(&mut client, &id, "running").await;
         }
-        let message = refused(&mut client, &id).await;
+        let error = refusal(&mut client, &id).await;
+        assert_eq!(error["data"]["reason"], "session_busy", "{error:#}");
+        let message = error["message"].as_str().unwrap();
         assert!(message.contains("a turn is running"), "{text}: {message}");
     }
 }
 
 // verifies: FLOW-FORK-SESSION-R03
+// verifies: PROTO-CORE-API-R79
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_is_refused_before_the_backend_has_named_the_session() {
     let fake = Arc::new(FakeAdapter::slow_start(Duration::from_secs(2)));
@@ -355,11 +392,15 @@ async fn a_fork_is_refused_before_the_backend_has_named_the_session() {
         .as_str()
         .unwrap()
         .to_string();
-    let message = refused(&mut client, &id).await;
+    let error = refusal(&mut client, &id).await;
+    assert_eq!(error["data"]["reason"], "backend_unnamed", "{error:#}");
+    let message = error["message"].as_str().unwrap();
     assert!(message.contains("has not named it"), "{message}");
 }
 
 // verifies: FLOW-FORK-SESSION-R03
+// verifies: PROTO-CORE-API-R79
+// verifies: PROTO-CORE-API-R87
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_counts_the_registrys_processes_against_cores_own() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -374,7 +415,11 @@ async fn a_fork_counts_the_registrys_processes_against_cores_own() {
     *fake.open_elsewhere.lock().unwrap() = OpenElsewhere::Yes {
         pids: vec![4242, 4343],
     };
-    let message = refused(&mut client, &id).await;
+    let error = refusal(&mut client, &id).await;
+    assert_eq!(error["data"]["reason"], "open_elsewhere", "{error:#}");
+    // `detail` is the processes' ids alone, for the Interface to name.
+    assert_eq!(error["data"]["detail"], "4242, 4343", "{error:#}");
+    let message = error["message"].as_str().unwrap();
     assert!(
         message.contains("4242") && message.contains("4343"),
         "{message}"
@@ -748,6 +793,7 @@ async fn a_fork_whose_conversation_is_gone_says_so() {
 }
 
 // verifies: FLOW-FORK-SESSION-R03
+// verifies: PROTO-CORE-API-R79
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_before_its_first_message_is_told_so_when_forked() {
     let fake = Arc::new(FakeAdapter::new(1));
@@ -768,7 +814,9 @@ async fn a_fork_before_its_first_message_is_told_so_when_forked() {
         .await;
     wait_for_state(&mut client, fork["id"].as_str().unwrap(), "idle").await;
     *fake.conversation_end.lock().unwrap() = Some(ConversationEnd::NoReply);
-    let message = refused(&mut client, fork["id"].as_str().unwrap()).await;
+    let error = refusal(&mut client, fork["id"].as_str().unwrap()).await;
+    assert_eq!(error["data"]["reason"], "no_finished_reply", "{error:#}");
+    let message = error["message"].as_str().unwrap();
     assert!(message.contains("no message of its own"), "{message}");
 }
 

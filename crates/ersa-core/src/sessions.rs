@@ -171,7 +171,31 @@ pub enum SessionError {
     Refused {
         reason: ErrorReason,
         message: String,
+        /// What the reason names, when it names something: the processes
+        /// for `open_elsewhere`.
+        detail: Option<String>,
     },
+}
+
+impl SessionError {
+    /// A refusal the user meets, for `reason`, with `message` for the log.
+    pub fn refused(reason: ErrorReason, message: impl Into<String>) -> Self {
+        SessionError::Refused {
+            reason,
+            message: message.into(),
+            detail: None,
+        }
+    }
+
+    /// The refusal for a session other processes have open: `detail` lists
+    /// their pids, so the Interface can name them in its own words.
+    pub fn open_elsewhere(pids: &[u32], message: impl Into<String>) -> Self {
+        SessionError::Refused {
+            reason: ErrorReason::OpenElsewhere,
+            message: message.into(),
+            detail: Some(pid_list(pids)),
+        }
+    }
 }
 
 /// Every session Core knows, and the adapters it can start them with.
@@ -614,8 +638,9 @@ impl Live {
     }
 }
 
-fn not_running() -> SessionError {
-    SessionError::InvalidState("the session is not running".into())
+/// The refusal for a request that needs a backend the session does not have.
+pub(crate) fn not_running() -> SessionError {
+    SessionError::refused(ErrorReason::SessionNotRunning, "the session is not running")
 }
 
 impl Handle {
@@ -654,7 +679,10 @@ impl Handle {
     }
 
     /// The error for a request that needs the backend running when it is
-    /// not: the reason it failed to start, when it did.
+    /// not: the reason it failed to start, when it did. That one carries no
+    /// `reason`, so the Interface shows the backend's own words (not being
+    /// signed in, say) rather than its words for a stopped session
+    /// (FLOW-NEW-SESSION-R08).
     fn not_running(&self) -> SessionError {
         match &*lock(&self.start_failure) {
             Some(message) => {
@@ -1216,8 +1244,9 @@ impl SessionManager {
     ) -> Result<Session, SessionError> {
         let handle = self.handle(id)?;
         let unnamed = || {
-            SessionError::InvalidState(
-                "the session's backend has not named it yet, so there is nothing to rename".into(),
+            SessionError::refused(
+                ErrorReason::BackendUnnamed,
+                "the session's backend has not named it yet, so there is nothing to rename",
             )
         };
         if let Some(live) = handle.live() {
@@ -1283,8 +1312,9 @@ impl SessionManager {
                     if e.kind() == io::ErrorKind::NotFound =>
                 {
                     // Never written, or deleted by the backend's retention.
-                    return Err(SessionError::InvalidState(
-                        "the backend has no record of this session to rename".into(),
+                    return Err(SessionError::refused(
+                        ErrorReason::RecordGone,
+                        "the backend has no record of this session to rename",
                     ));
                 }
                 Err(SessionError::Adapter(AdapterError::Io(e)))
@@ -1317,12 +1347,10 @@ impl SessionManager {
             // Refused before the stop, so a busy session is left exactly as
             // it was (PROTO-CORE-API-R77).
             if in_turn(&handle) {
-                return Err(SessionError::Refused {
-                    reason: ErrorReason::SessionBusy,
-                    message: format!(
-                        "session {id} is starting or working; stop it before archiving it"
-                    ),
-                });
+                return Err(SessionError::refused(
+                    ErrorReason::SessionBusy,
+                    format!("session {id} is starting or working; stop it before archiving it"),
+                ));
             }
             self.stop(id).await?;
         }
@@ -1423,9 +1451,10 @@ impl SessionManager {
             )));
         }
         if in_turn(&handle) {
-            return Err(SessionError::InvalidState(format!(
-                "session {id} is starting or working; stop it before deleting it"
-            )));
+            return Err(SessionError::refused(
+                ErrorReason::SessionBusy,
+                format!("session {id} is starting or working; stop it before deleting it"),
+            ));
         }
         Ok(())
     }
@@ -1468,10 +1497,13 @@ impl SessionManager {
             return Err(busy(&workspace_id));
         }
         if deleting.is_some() {
-            return Err(SessionError::InvalidState(format!(
-                "session {} is being deleted; delete it again to finish",
-                handle.id
-            )));
+            return Err(SessionError::refused(
+                ErrorReason::SessionDeleting,
+                format!(
+                    "session {} is being deleted; delete it again to finish",
+                    handle.id
+                ),
+            ));
         }
         Ok(())
     }
@@ -2043,11 +2075,17 @@ fn up_to(record: Arc<Vec<RecordEvent>>, last: &str) -> Arc<Vec<RecordEvent>> {
 /// The processes a registry named, as a message says them: `pid 7`, or
 /// `pids 7, 9`.
 pub(crate) fn pids_named(pids: &[u32]) -> String {
-    let list: Vec<String> = pids.iter().map(u32::to_string).collect();
-    match list.len() {
-        1 => format!("pid {}", list[0]),
-        _ => format!("pids {}", list.join(", ")),
+    match pids.len() {
+        1 => format!("pid {}", pid_list(pids)),
+        _ => format!("pids {}", pid_list(pids)),
     }
+}
+
+/// The pids alone, as `7, 9`: `open_elsewhere`'s `detail`, and what
+/// [`pids_named`] says.
+fn pid_list(pids: &[u32]) -> String {
+    let list: Vec<String> = pids.iter().map(u32::to_string).collect();
+    list.join(", ")
 }
 
 /// Asks `adapter` whether another process has session `backend_id` open,
