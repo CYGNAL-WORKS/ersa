@@ -1077,14 +1077,26 @@ fn the_turns_output_tokens_never_decrease_and_start_again_each_turn() {
         (Backend, reply("m2", 5)),
         (Backend, delta("m2", 7)),
         (Backend, result.clone()),
+        // A stray count between turns opens no turn and counts toward none.
+        (Backend, delta("m9", 99)),
         (Host, USER_MESSAGE.to_string()),
         // The same message id in a later turn is a new count.
         (Backend, delta("m1", 3)),
+        // Absurd counts saturate rather than wrap.
+        (Backend, delta("m3", u64::MAX)),
     ];
     let entries: Vec<(ersa_adapter::Direction, &str)> =
         lines.iter().map(|(d, l)| (*d, l.as_str())).collect();
     let events = events(&log(&entries));
-    assert_eq!(turn_output_tokens(&events), [vec![50, 50, 55, 57], vec![3]]);
+    assert_eq!(
+        turn_output_tokens(&events),
+        [vec![50, 50, 55, 57], vec![3, u64::MAX]]
+    );
+    let started = events
+        .iter()
+        .filter(|e| matches!(e, Event::TurnStarted(_)))
+        .count();
+    assert_eq!(started, 2);
 }
 
 // ---------------------------------------------------------------------------
