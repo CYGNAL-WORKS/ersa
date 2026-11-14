@@ -161,7 +161,7 @@ fn only_set_models_answer_and_status_lines_with_a_mode_change_the_report() {
 }
 
 // ---------------------------------------------------------------------------
-// The record (PROTO-CLAUDE-CODE-STREAM-R47)
+// The record (PROTO-CLAUDE-CODE-STREAM-R57 to R59)
 
 const SESSION: &str = "0b4ac7de-1f6e-4a39-9d52-5f1e0c3a7b11";
 const CWD: &str = r"C:\work\repo";
@@ -226,7 +226,8 @@ fn every(time: &str) -> Requested {
 
 /// Fixture 25: controls sent between turns; the second turn ran with them,
 /// and every value carries when that turn began (its prompt's time).
-// verifies: PROTO-CLAUDE-CODE-STREAM-R47
+// verifies: PROTO-CLAUDE-CODE-STREAM-R57
+// verifies: PROTO-CLAUDE-CODE-STREAM-R58
 #[test]
 fn the_record_reports_the_latest_turns_model_effort_and_mode() {
     let settings = listed(&record_lines("25-controls-between-turns"));
@@ -253,7 +254,7 @@ fn the_record_reports_the_latest_turns_model_effort_and_mode() {
 /// Fixture 26: `set_model` during the first turn applied at once, so that
 /// turn's later replies are haiku and stamped after the request; but the
 /// turn began before it, so nothing counts until the next turn begins.
-// verifies: PROTO-CLAUDE-CODE-STREAM-R47
+// verifies: PROTO-CLAUDE-CODE-STREAM-R58
 #[test]
 fn a_reply_after_the_request_in_a_turn_that_began_before_it_does_not_count() {
     let lines = record_lines("26-controls-during-turn");
@@ -279,7 +280,7 @@ fn a_reply_after_the_request_in_a_turn_that_began_before_it_does_not_count() {
 
 /// Each value is weighed against Core's request for it alone; one Core
 /// never requested counts from any turn.
-// verifies: PROTO-CLAUDE-CODE-STREAM-R47
+// verifies: PROTO-CLAUDE-CODE-STREAM-R58
 #[test]
 fn each_value_is_weighed_against_its_own_request() {
     let settings = listed(&record_lines("25-controls-between-turns"));
@@ -310,7 +311,7 @@ fn reply(ts: &str, model: &str, effort: &str) -> String {
 /// Latest by `timestamp`, not by place in the file; a synthetic reply (a
 /// local command's output, a failed sign-in) and a subagent's reply are not
 /// the session's model.
-// verifies: PROTO-CLAUDE-CODE-STREAM-R47
+// verifies: PROTO-CLAUDE-CODE-STREAM-R57
 #[test]
 fn the_latest_by_time_of_the_sessions_own_replies_counts() {
     let mut sidechain: Value =
@@ -343,7 +344,7 @@ fn filler(count: usize) -> Vec<String> {
 
 /// A listing reads only the tail: what only the rest of the record holds is
 /// none there, and a relaunch reads back for it.
-// verifies: PROTO-CLAUDE-CODE-STREAM-R47
+// verifies: PROTO-CLAUDE-CODE-STREAM-R59
 #[test]
 fn a_listing_reports_none_beyond_the_tail_and_a_relaunch_reads_back() {
     let mut lines = vec![
@@ -358,7 +359,7 @@ fn a_listing_reports_none_beyond_the_tail_and_a_relaunch_reads_back() {
 
 /// Before a relaunch, a value Core never requested is read back past the
 /// turns after Core's other requests, as far as the record holds it.
-// verifies: PROTO-CLAUDE-CODE-STREAM-R47
+// verifies: PROTO-CLAUDE-CODE-STREAM-R59
 #[test]
 fn a_relaunch_reads_back_as_far_as_each_request() {
     let mut lines = vec![
@@ -382,7 +383,7 @@ fn a_relaunch_reads_back_as_far_as_each_request() {
 }
 
 /// A session with no record has none.
-// verifies: PROTO-CLAUDE-CODE-STREAM-R47
+// verifies: PROTO-CLAUDE-CODE-STREAM-R57
 #[test]
 fn a_session_with_no_record_reports_none() {
     let home = tempfile::tempdir().unwrap();
