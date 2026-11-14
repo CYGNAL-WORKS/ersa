@@ -20,10 +20,10 @@ pub(crate) fn target_and_edits(
     let target_field = match name {
         "Read" | "Write" | "Edit" | "MultiEdit" => "file_path",
         "NotebookEdit" => "notebook_path",
-        "Bash" => "command",
+        "Bash" | "PowerShell" => "command",
         "Grep" | "Glob" => "pattern",
         "WebFetch" => "url",
-        "WebSearch" => "query",
+        "WebSearch" | "ToolSearch" => "query",
         "Task" | "Agent" => "description",
         _ => return (None, None),
     };
@@ -32,16 +32,8 @@ pub(crate) fn target_and_edits(
     let edits: Vec<FileEdit> = match name {
         // A whole file written: the new text is the file's content, and
         // nothing was replaced.
-        "Write" => edit(&target, None, string(input, "content"))
-            .into_iter()
-            .collect(),
-        "Edit" => edit(
-            &target,
-            Some(string(input, "old_string")),
-            string(input, "new_string"),
-        )
-        .into_iter()
-        .collect(),
+        "Write" => whole_file(&target, input).into_iter().collect(),
+        "Edit" => replacement(&target, input).into_iter().collect(),
         // One edit per entry, in the order the call makes them; an entry
         // missing a field is left out on its own.
         "MultiEdit" => input
@@ -50,13 +42,7 @@ pub(crate) fn target_and_edits(
             .into_iter()
             .flatten()
             .filter_map(Value::as_object)
-            .filter_map(|entry| {
-                edit(
-                    &target,
-                    Some(string(entry, "old_string")),
-                    string(entry, "new_string"),
-                )
-            })
+            .filter_map(|entry| replacement(&target, entry))
             .collect(),
         // NotebookEdit changes cells, not text, so it carries no edits; every
         // other tool in the table changes no file.
@@ -70,22 +56,28 @@ fn string(input: &Map<String, Value>, field: &str) -> Option<String> {
     input.get(field).and_then(Value::as_str).map(str::to_owned)
 }
 
-/// One edit to `path`, or none when a field it needs is missing. `old_text`
-/// is `None` for a whole file written and `Some(None)` for a replacement whose
-/// old text is missing, which leaves the edit out.
-fn edit(
-    path: &Option<String>,
-    old_text: Option<Option<String>>,
-    new_text: Option<String>,
-) -> Option<FileEdit> {
-    let old_text = match old_text {
-        None => None,
-        Some(old) => Some(old?),
-    };
+/// A `Write` call's one edit: the whole file, so no text replaced. None when
+/// the path or the content is missing.
+fn whole_file(path: &Option<String>, input: &Map<String, Value>) -> Option<FileEdit> {
     Some(FileEdit {
         path: path.clone()?,
-        old_text,
-        new_text: new_text?,
+        old_text: None,
+        new_text: string(input, "content")?,
+        every_occurrence: false,
+    })
+}
+
+/// An `Edit` call's edit, or one entry of a `MultiEdit`'s: `old_string`
+/// replaced by `new_string`, everywhere in the file when `replace_all` is true
+/// (PROTO-AGENT-EVENTS-R23). None when the path or either string is missing.
+fn replacement(path: &Option<String>, fields: &Map<String, Value>) -> Option<FileEdit> {
+    Some(FileEdit {
+        path: path.clone()?,
+        old_text: Some(string(fields, "old_string")?),
+        new_text: string(fields, "new_string")?,
+        // Only a boolean true counts; anything else is the CLI's default,
+        // which replaces one occurrence.
+        every_occurrence: fields.get("replace_all") == Some(&Value::Bool(true)),
     })
 }
 
@@ -106,6 +98,14 @@ mod tests {
             path: path.into(),
             old_text: old.map(Into::into),
             new_text: new.into(),
+            every_occurrence: false,
+        }
+    }
+
+    fn everywhere(edit: FileEdit) -> FileEdit {
+        FileEdit {
+            every_occurrence: true,
+            ..edit
         }
     }
 
@@ -144,7 +144,17 @@ mod tests {
                 json!({ "url": "https://example.com", "prompt": "Summarize" }),
                 "https://example.com",
             ),
+            (
+                "PowerShell",
+                json!({ "command": "Get-ChildItem -Name", "description": "List" }),
+                "Get-ChildItem -Name",
+            ),
             ("WebSearch", json!({ "query": "tauri 2" }), "tauri 2"),
+            (
+                "ToolSearch",
+                json!({ "query": "select:WebSearch", "max_results": 1 }),
+                "select:WebSearch",
+            ),
             (
                 "Task",
                 json!({ "description": "Count files", "prompt": "Count them" }),
@@ -176,7 +186,7 @@ mod tests {
             ),
             (
                 Some("/w/a.md".into()),
-                Some(vec![file_edit("/w/a.md", Some("old"), "new")])
+                Some(vec![everywhere(file_edit("/w/a.md", Some("old"), "new"))])
             )
         );
         // A whole file written keeps no replaced text.
@@ -202,10 +212,33 @@ mod tests {
                 Some("/w/c.rs".into()),
                 Some(vec![
                     file_edit("/w/c.rs", Some("a"), "b"),
-                    file_edit("/w/c.rs", Some("c"), "d"),
+                    everywhere(file_edit("/w/c.rs", Some("c"), "d")),
                 ])
             )
         );
+    }
+
+    // verifies: PROTO-AGENT-EVENTS-R23
+    #[test]
+    fn only_a_change_made_everywhere_says_every_occurrence() {
+        let edit = |input: Value| project("Edit", input).1.expect("an edit");
+        let base = json!({ "file_path": "/w/a", "old_string": "x", "new_string": "y" });
+        let with = |replace_all: Value| {
+            let mut input = base.clone();
+            input["replace_all"] = replace_all;
+            input
+        };
+        assert!(edit(with(json!(true)))[0].every_occurrence);
+        // Absent, false, or not a boolean: one occurrence, the CLI's default.
+        for input in [base.clone(), with(json!(false)), with(json!("true"))] {
+            assert!(!edit(input.clone())[0].every_occurrence, "{input}");
+        }
+        // A whole file written is not a replacement.
+        let written = project(
+            "Write",
+            json!({ "file_path": "/w/a", "content": "x", "replace_all": true }),
+        );
+        assert!(!written.1.expect("an edit")[0].every_occurrence);
     }
 
     // verifies: PROTO-CLAUDE-CODE-STREAM-R48
@@ -213,14 +246,7 @@ mod tests {
     // verifies: PROTO-AGENT-EVENTS-R21
     #[test]
     fn a_tool_the_table_does_not_name_carries_neither() {
-        for name in [
-            "PowerShell",
-            "ToolSearch",
-            "mcp__docs__search",
-            "edit",
-            "TodoWrite",
-            "AskUserQuestion",
-        ] {
+        for name in ["mcp__docs__search", "edit", "TodoWrite", "AskUserQuestion"] {
             assert_eq!(
                 project(
                     name,
