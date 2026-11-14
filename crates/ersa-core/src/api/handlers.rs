@@ -653,12 +653,12 @@ pub(super) async fn workspace_remove(
     Ok(workspace)
 }
 
-/// Sleeps for [`crate::CoreConfig::remove_claim_pause`], zero outside
-/// tests: once before `workspace.remove`'s claim and once after it, so a
-/// test can land another request on either side.
+/// Stops at [`crate::CoreConfig::remove_gate`] until the test lets it go,
+/// once before `workspace.remove`'s claim and once after it, so a test can
+/// land another request on either side. Nothing outside tests.
 async fn pause_for_tests(core: &Core) {
-    if !core.config.remove_claim_pause.is_zero() {
-        tokio::time::sleep(core.config.remove_claim_pause).await;
+    if let Some(gate) = &core.config.remove_gate {
+        gate.stop().await;
     }
 }
 
