@@ -1,0 +1,2 @@
+{"backend_version":"2.1.316","event":{"origin":"human","text":"Reply with the single word OK.","type":"user.message"},"message_id":"d1411a64-297c-44e9-93e3-6ffa97b0c06e","ts":"2026-11-14T04:30:29.511Z"}
+{"backend_version":"2.1.316","event":{"action":"log_in","code":"authentication_failed","message":"Not logged in · Please run /login","recoverable":true,"type":"error"},"message_id":"51ec6ab0-8ffa-41c5-81aa-f1199d78a990","ts":"2026-11-14T04:30:29.652Z"}

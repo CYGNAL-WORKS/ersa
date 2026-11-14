@@ -367,6 +367,7 @@ pub fn run() {
         ersa_core::platform::default_data_dir().as_deref(),
     );
     let label = startup.attached.clone();
+    let web_data = startup.web_data.clone();
     let background = std::env::var("ERSA_BACKGROUND").ok();
     let focused = !opens_unfocused(label.as_deref(), background.as_deref());
     // One Shell per user and build (FLOW-CLOSE-AND-QUIT-R02). An endpoint
@@ -409,17 +410,23 @@ pub fn run() {
         // The window is built here rather than in tauri.conf.json so it can
         // carry the navigation guard.
         .setup(move |app| {
-            let window =
-                WebviewWindowBuilder::new(app, WINDOW, WebviewUrl::App("index.html".into()))
-                    .title("Ersa")
-                    .inner_size(1200.0, 800.0)
-                    .min_inner_size(640.0, 400.0)
-                    .focused(focused)
-                    // WebView2 activates its window as it starts, even an
-                    // unfocused one, unless the window cannot take focus yet.
-                    .focusable(focused)
-                    .on_navigation(guard_navigation)
-                    .build()?;
+            let mut builder =
+                WebviewWindowBuilder::new(app, WINDOW, WebviewUrl::App("index.html".into()));
+            // The daily build's web data stays in its own folder, apart from
+            // a development build's (FLOW-CLOSE-AND-QUIT-R09).
+            if let Some(dir) = web_data {
+                builder = builder.data_directory(dir);
+            }
+            let window = builder
+                .title("Ersa")
+                .inner_size(1200.0, 800.0)
+                .min_inner_size(640.0, 400.0)
+                .focused(focused)
+                // WebView2 activates its window as it starts, even an
+                // unfocused one, unless the window cannot take focus yet.
+                .focusable(focused)
+                .on_navigation(guard_navigation)
+                .build()?;
             if !focused {
                 window.set_focusable(true)?;
             }

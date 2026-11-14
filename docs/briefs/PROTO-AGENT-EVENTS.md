@@ -55,7 +55,7 @@ Names are `family.verb`. Fields listed are required unless marked optional.
 
 ### Tool
 
-- `tool.requested`: `tool_use_id`, `name`, `display_name` (optional), `input` (object), `parent_tool_use_id` (optional, for subagent trees), `target` (optional: the one thing the call acts on, as the user would name it: a path, a command, a search, an address), `edits` (optional: for a call that changes files, one `{ path, old_text (optional), new_text }` per change in the order the call makes them, where `old_text` is the text replaced and is absent when the call writes the whole file). The adapter fills `target` and `edits` from its backend's own tools, so the Interface never reads a backend's tool input to draw a card.
+- `tool.requested`: `tool_use_id`, `name`, `display_name` (optional), `input` (object), `parent_tool_use_id` (optional, for subagent trees), `target` (optional: the one thing the call acts on, as the user would name it: a path, a command, a search, an address), `edits` (optional: for a call that changes files, one `{ path, old_text (optional), new_text, every_occurrence (optional) }` per change in the order the call makes them, where `old_text` is the text replaced and is absent when the call writes the whole file, and `every_occurrence` is true when the change replaces that text everywhere it occurs in the file, not once). The adapter fills `target` and `edits` from its backend's own tools, so the Interface never reads a backend's tool input to draw a card.
 - `tool.result`: `tool_use_id`, `content` (string or structured), `is_error`, `duration_ms` (optional).
 - `tool.progress`: `tool_use_id`, `detail` (optional string). Projected from backend progress and task-summary lines.
 
@@ -142,7 +142,8 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 - **PROTO-AGENT-EVENTS-R19**: The host's answer to a Claude Code question shall project to one `question.answered` with `answered_by` `user`, `declined` when it was a deny, and no `permission.decided`, matching each answer to its question by text and to options by label as PROTO-CLAUDE-CODE-STREAM (Questions) says; the CLI withdrawing a pending question, or the turn ending with it unanswered, shall project to `question.answered` with `answered_by` `backend` and no answers.
 - **PROTO-AGENT-EVENTS-R20**: A `tool.requested` for a call that replaces text in a file or writes a whole file shall carry `edits`, one entry per change with the file's path, the text replaced (absent for a whole file written) and the new text; any other call shall carry none.
 - **PROTO-AGENT-EVENTS-R21**: A `tool.requested` for a call the adapter knows to act on one path, command, search or address shall carry it as `target`; any other call shall carry none.
-- **PROTO-AGENT-EVENTS-R22**: A Claude Code `authentication_failed` synthetic message shall project to one `error`, and no `assistant.text`: with `code: authentication_failed` and `action: log_in`, except in a live session the CLI started in its minimal mode, which PROTO-CLAUDE-CODE-STREAM-R51 governs; read from a session record, it always projects this way.
+- **PROTO-AGENT-EVENTS-R22**: A Claude Code `authentication_failed` synthetic message shall project to one `error`, and no `assistant.text`: with `code: authentication_failed` and `action: log_in`, except in a live session the CLI started in its minimal mode, which PROTO-CLAUDE-CODE-STREAM-R53 governs; read from a session record, it always projects this way.
+- **PROTO-AGENT-EVENTS-R23**: An entry of `edits` whose change replaces its text everywhere it occurs in the file shall carry `every_occurrence` true; any other entry shall carry no `every_occurrence`.
 
 ## Out of scope
 
@@ -159,6 +160,8 @@ The implementing crate projects every fixture in `docs/briefs/protocol/fixtures/
 
 ## Changes
 
+- 2026-11-13: from #350 inbox: R22 points at PROTO-CLAUDE-CODE-STREAM-R53, which replaced R51. Reworded, its ID unchanged.
+- 2026-11-13: from #351 inbox: an entry of `edits` gains `every_occurrence`, so a diff card can say a change is made in more places than the one it shows. Part of the same shape change as `edits`, so `v` is not bumped again. PROTO-AGENT-EVENTS-R23 added.
 - 2026-11-13: from #148: PROTO-AGENT-EVENTS-R06 retired for R22, which excepts a session Claude Code started in its minimal mode (PROTO-CLAUDE-CODE-STREAM-R51).
 - 2026-11-13: for FLOW-READ-TRANSCRIPT: `tool.requested` gains `target` and `edits`, filled by the adapter, so tool and diff cards are drawn without reading a backend's tool input. A shape change, so `v` is bumped. PROTO-AGENT-EVENTS-R20 and R21 added.
 - 2026-11-09: `user.message` for a message written during a turn is emitted when its own turn starts (PROTO-CLAUDE-CODE-STREAM-R43). No requirement IDs changed.
