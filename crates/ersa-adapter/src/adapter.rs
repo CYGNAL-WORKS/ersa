@@ -9,6 +9,7 @@ use ersa_protocol::core_api::Choice;
 use ersa_protocol::events::{Answer, Event, PermissionBehavior};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use time::OffsetDateTime;
 
 use crate::raw::{Direction, RawLine};
 use crate::recording::Recording;
@@ -166,6 +167,22 @@ pub trait Adapter: Send + Sync {
         Ok(None)
     }
 
+    /// What session `backend_session_id`'s record says of its model, effort
+    /// and permission mode, read for a relaunch: back from the record's end
+    /// until each value is found or the record reaches the time Core last
+    /// gave the backend that value. Core picks the values of the turns after
+    /// its requests with [`RecordedSettings::since`]. A session with no
+    /// record has none, which is also the default.
+    async fn record_settings(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        _backend_session_id: &str,
+        _requested: Requested,
+    ) -> Result<RecordedSettings, AdapterError> {
+        Ok(RecordedSettings::default())
+    }
+
     /// Renames session `backend_session_id`, which no process of Ersa's has
     /// open, in the backend's own session record, so the backend's own tools
     /// show the new title too (PROTO-CORE-API-R12). A live session is renamed
@@ -317,6 +334,59 @@ pub struct RecordSummary {
     pub title: Option<String>,
     /// When the session began, RFC 3339, as the record gives it.
     pub created_at: Option<String>,
+    /// The model, effort and permission mode the part of the record read
+    /// for the summary holds, each with when its turn began; Core picks
+    /// those of the turns after its own request with
+    /// [`RecordedSettings::since`].
+    pub settings: RecordedSettings,
+}
+
+/// What a session's record says of its model, effort and permission mode,
+/// each from the latest turn that holds it (PROTO-CORE-API-R71). `None` for
+/// a value the part of the record read does not hold.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RecordedSettings {
+    pub model: Option<Recorded>,
+    pub effort: Option<Recorded>,
+    pub permission_mode: Option<Recorded>,
+}
+
+/// One value from a session's record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recorded {
+    /// The backend's own id for it, such as `claude-opus-5-5` or `plan`.
+    pub value: String,
+    /// When the turn it is from began, on the host's clock; `None` when the
+    /// part of the record read does not say.
+    pub turn_began: Option<OffsetDateTime>,
+}
+
+/// When Core last gave the backend each value, on the host's clock
+/// (PROTO-CORE-API-R71); `None` for a value it never gave.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Requested {
+    pub model: Option<OffsetDateTime>,
+    pub effort: Option<OffsetDateTime>,
+    pub permission_mode: Option<OffsetDateTime>,
+}
+
+impl RecordedSettings {
+    /// Only the values from a turn that began after Core's request for
+    /// each, or from any turn for a value Core never requested. A value
+    /// whose turn's start is unknown counts only then.
+    pub fn since(self, requested: Requested) -> RecordedSettings {
+        let after = |recorded: Option<Recorded>, request: Option<OffsetDateTime>| {
+            recorded.filter(|r| match request {
+                None => true,
+                Some(request) => r.turn_began.is_some_and(|began| began > request),
+            })
+        };
+        RecordedSettings {
+            model: after(self.model, requested.model),
+            effort: after(self.effort, requested.effort),
+            permission_mode: after(self.permission_mode, requested.permission_mode),
+        }
+    }
 }
 
 /// One event projected from an entry of a session record.
