@@ -3,6 +3,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -41,4 +42,19 @@ test("allows the inbox, fixtures and ordinary paths in an implementing session",
 
 test("allows planning-only paths in a planning session", () => {
   assert.equal(exitCode(".claude/agents/a.md", "planning"), 0);
+});
+
+// The hook as Claude Code runs it: the command .claude/settings.json gives,
+// through a shell whose folder is a subfolder (a `cd` earlier in the session).
+test("blocks from a subfolder of the project, as the settings command runs it", () => {
+  const root = join(fileURLToPath(import.meta.url), "..", "..");
+  const settings = JSON.parse(readFileSync(join(root, ".claude", "settings.json"), "utf8"));
+  const { command } = settings.hooks.PreToolUse.find((h) => h.matcher.includes("Edit")).hooks[0];
+  const r = spawnSync("bash", ["-c", command], {
+    cwd: join(root, "docs"),
+    input: JSON.stringify({ tool_input: { file_path: join(root, "docs", "adr", "0001-x.md") } }),
+    env: { ...process.env, ERSA_ROLE: "implementing", CLAUDE_PROJECT_DIR: root },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 2, r.stderr);
 });
