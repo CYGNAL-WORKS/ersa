@@ -128,8 +128,6 @@ pub struct RecordingSink {
     lines: Mutex<Vec<RawLine>>,
     exits: Mutex<Vec<io::Result<ProcessExit>>>,
     stderr: Mutex<Vec<String>>,
-    /// Each count of waiting messages the adapter reported, in order.
-    waiting: Mutex<Vec<u32>>,
     /// Bumped on every record and exit, so waiters wake to re-check.
     changed: watch::Sender<u64>,
 }
@@ -140,7 +138,6 @@ impl RecordingSink {
             lines: Mutex::default(),
             exits: Mutex::default(),
             stderr: Mutex::default(),
-            waiting: Mutex::default(),
             changed: watch::channel(0).0,
         }
     }
@@ -187,30 +184,6 @@ impl RecordingSink {
         })
     }
 
-    /// Each count of waiting messages reported so far.
-    pub fn waiting(&self) -> Vec<u32> {
-        self.waiting.lock().unwrap().clone()
-    }
-
-    /// Waits until `reports` counts of waiting messages have been reported
-    /// and returns them all, failing the test after `timeout`.
-    pub async fn wait_for_waiting(&self, timeout: Duration, reports: usize) -> Vec<u32> {
-        let mut changed = self.changed.subscribe();
-        let reported = tokio::time::timeout(timeout, async {
-            while self.waiting().len() < reports {
-                changed.changed().await.expect("sink alive");
-            }
-        })
-        .await;
-        reported.unwrap_or_else(|_| {
-            panic!(
-                "{reports} report(s) of waiting messages expected within {timeout:?}, got {:?}",
-                self.waiting()
-            )
-        });
-        self.waiting()
-    }
-
     /// Waits until the process exit has been reported.
     pub async fn wait_for_exit(&self, timeout: Duration) {
         let mut changed = self.changed.subscribe();
@@ -245,11 +218,6 @@ impl AdapterSink for RecordingSink {
 
     fn process_exited(&self, exit: io::Result<ProcessExit>) {
         self.exits.lock().unwrap().push(exit);
-        self.changed.send_modify(|n| *n += 1);
-    }
-
-    fn waiting(&self, count: u32) {
-        self.waiting.lock().unwrap().push(count);
         self.changed.send_modify(|n| *n += 1);
     }
 }

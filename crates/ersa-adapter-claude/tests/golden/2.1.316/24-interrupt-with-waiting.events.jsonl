@@ -28,7 +28,6 @@
 {"raw":21,"event":{"type":"session.state","state":"running"}}
 {"raw":22,"event":{"type":"turn.started","turn":2,"trigger":"user"}}
 {"raw":22,"event":{"type":"session.state","state":"running"}}
-{"raw":22,"event":{"type":"user.message","text":"Now reply with the single word: second","origin":"human"}}
 {"raw":23,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"system/status","payload":{"session_id":"53a9d8e8-44a5-4b7c-b590-2610b8ea5d3e","status":"requesting","subtype":"status","type":"system","uuid":"82a15313-0a22-401d-849f-3b9c02ac2b3b"}}}
 {"raw":24,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/message_start","payload":{"api_message_id":"msg_011Ch1vYB3b4zedds7Ew6yLo","event":{"message":{"container":null,"content":[],"context_management":null,"diagnostics":null,"id":"msg_011Ch1vYB3b4zedds7Ew6yLo","input_transformations":[],"model":"claude-opus-5-5","role":"assistant","stop_details":null,"stop_reason":null,"stop_sequence":null,"type":"message","usage":{"cache_creation":{"ephemeral_1h_input_tokens":2309,"ephemeral_5m_input_tokens":0},"cache_creation_input_tokens":2309,"cache_read_input_tokens":44254,"inference_geo":"global","input_tokens":2,"output_tokens":3,"service_tier":"standard","speed":"standard"}},"type":"message_start"},"parent_tool_use_id":null,"session_id":"53a9d8e8-44a5-4b7c-b590-2610b8ea5d3e","thinking_display":"updates","ttft_ms":995,"type":"stream_event","uuid":"7ff6c7d2-b253-47c1-abed-1d437945c9cc"}}}
 {"raw":25,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/content_block_start","payload":{"api_message_id":"msg_011Ch1vYB3b4zedds7Ew6yLo","event":{"content_block":{"text":"","type":"text"},"index":0,"type":"content_block_start"},"parent_tool_use_id":null,"session_id":"53a9d8e8-44a5-4b7c-b590-2610b8ea5d3e","type":"stream_event","uuid":"38d6f6df-82c6-4614-9415-7f43161d9657"}}}
@@ -41,4 +40,4 @@
 {"raw":31,"event":{"type":"usage.updated","rate_limit":{"status":"allowed","resets_at":"2026-11-18T20:00:00Z","detail":"seven_day"}}}
 {"raw":32,"event":{"type":"turn.completed","turn":2,"outcome":"success","duration_ms":1039,"is_error":false,"final_text":"second"}}
 {"raw":32,"event":{"type":"usage.updated","context_tokens":46568,"context_window":1000000,"cost_usd_total":0.0273908,"turns":2}}
-{"raw":32,"event":{"type":"session.state","state":"idle"}}
+{"raw":32,"event":{"type":"session.state","state":"running"}}

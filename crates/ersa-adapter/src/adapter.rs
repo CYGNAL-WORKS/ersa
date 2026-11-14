@@ -549,13 +549,6 @@ pub trait AdapterSink: Send + Sync {
     /// the transport lost track of it. Called exactly once per session, after
     /// the last `record`.
     fn process_exited(&self, exit: io::Result<ProcessExit>);
-
-    /// How many messages the backend now holds behind its running turn,
-    /// for the tile's `waiting` (PROTO-CORE-API-R81): told when the count
-    /// changes, from none waiting when the process starts. Not part of the
-    /// raw log, since it is read from the backend's record rather than its
-    /// stdio. The default ignores it, for a sink with no tile.
-    fn waiting(&self, _count: u32) {}
 }
 
 /// Turns one live session's raw lines into Ersa events
@@ -604,6 +597,15 @@ pub trait Projector: Send {
     /// like [`Projector::reported_model`].
     fn reported_permission_mode(&self) -> Option<&str> {
         None
+    }
+
+    /// How many messages the backend holds behind its running turn, from
+    /// the lines projected so far: messages handed over during a turn that
+    /// the backend has not yet taken in. Core shows it as the tile's
+    /// `waiting` while the session is live (PROTO-CORE-API-R81). 0, the
+    /// default, for a backend that holds none.
+    fn waiting(&self) -> u32 {
+        0
     }
 }
 

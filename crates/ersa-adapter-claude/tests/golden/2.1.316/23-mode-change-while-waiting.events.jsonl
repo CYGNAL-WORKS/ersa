@@ -219,7 +219,6 @@
 {"raw":212,"event":{"type":"session.state","state":"running"}}
 {"raw":213,"event":{"type":"turn.started","turn":2,"trigger":"user"}}
 {"raw":213,"event":{"type":"session.state","state":"running"}}
-{"raw":213,"event":{"type":"user.message","text":"Now reply with the single word: second","origin":"human"}}
 {"raw":214,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"system/status","payload":{"session_id":"c18e5ac9-f567-4154-89ad-9da93a601b4e","status":"requesting","subtype":"status","type":"system","uuid":"eb371d2c-74cb-4c21-9f06-f3d77e98bc55"}}}
 {"raw":215,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/message_start","payload":{"api_message_id":"msg_011Ch1vVYjyefygcCmhokU26","event":{"message":{"container":null,"content":[],"context_management":null,"diagnostics":null,"id":"msg_011Ch1vVYjyefygcCmhokU26","input_transformations":[],"model":"claude-opus-5-5","role":"assistant","stop_details":null,"stop_reason":null,"stop_sequence":null,"type":"message","usage":{"cache_creation":{"ephemeral_1h_input_tokens":3204,"ephemeral_5m_input_tokens":0},"cache_creation_input_tokens":3204,"cache_read_input_tokens":44249,"inference_geo":"global","input_tokens":2,"output_tokens":3,"service_tier":"standard","speed":"standard"}},"type":"message_start"},"parent_tool_use_id":null,"session_id":"c18e5ac9-f567-4154-89ad-9da93a601b4e","thinking_display":"updates","ttft_ms":856,"type":"stream_event","uuid":"70a7a033-6a2d-4832-9f12-51226e8a1cdb"}}}
 {"raw":216,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/content_block_start","payload":{"api_message_id":"msg_011Ch1vVYjyefygcCmhokU26","event":{"content_block":{"text":"","type":"text"},"index":0,"type":"content_block_start"},"parent_tool_use_id":null,"session_id":"c18e5ac9-f567-4154-89ad-9da93a601b4e","type":"stream_event","uuid":"9a8b0cd4-c255-4a45-8e68-9c0e87205cd1"}}}
@@ -231,4 +230,4 @@
 {"raw":221,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/message_stop","payload":{"api_message_id":"msg_011Ch1vVYjyefygcCmhokU26","event":{"type":"message_stop"},"parent_tool_use_id":null,"session_id":"c18e5ac9-f567-4154-89ad-9da93a601b4e","type":"stream_event","uuid":"80f3c9c9-dd12-42c5-b2d2-0d5b7aeaaa21"}}}
 {"raw":222,"event":{"type":"turn.completed","turn":2,"outcome":"success","duration_ms":892,"is_error":false,"final_text":"second"}}
 {"raw":222,"event":{"type":"usage.updated","context_tokens":47458,"context_window":1000000,"cost_usd_total":0.40716979999999997,"turns":2}}
-{"raw":222,"event":{"type":"session.state","state":"idle"}}
+{"raw":222,"event":{"type":"session.state","state":"running"}}
