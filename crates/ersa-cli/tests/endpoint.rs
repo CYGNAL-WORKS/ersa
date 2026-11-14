@@ -57,7 +57,7 @@ async fn exchange(endpoint: &str, request: Option<&str>) -> Value {
     let (read, mut write) = tokio::io::split(stream);
     let mut lines = BufReader::new(read).lines();
     let mut messages = vec![json!({ "jsonrpc": "2.0", "id": 1, "method": "core.hello",
-        "params": { "client": "ersa-cli-tests", "client_version": "0", "api_versions": [4] } })];
+        "params": { "client": "ersa-cli-tests", "client_version": "0", "api_versions": [5] } })];
     if let Some(method) = request {
         messages.push(json!({ "jsonrpc": "2.0", "id": 2, "method": method }));
     }
@@ -197,11 +197,11 @@ async fn a_core_on_an_explicit_endpoint_runs_beside_the_default_one() {
     // Both answer `core.hello`, each on its own endpoint.
     for core in [&default, &explicit] {
         let hello = core.hello().await;
-        assert_eq!(hello["api_version"], json!(4), "{hello}");
+        assert_eq!(hello["api_version"], json!(5), "{hello}");
     }
     // They are two Cores, not one reached twice: stopping the explicit one
     // leaves the default one serving.
     explicit.stop().await;
-    assert_eq!(default.hello().await["api_version"], json!(4));
+    assert_eq!(default.hello().await["api_version"], json!(5));
     default.stop().await;
 }

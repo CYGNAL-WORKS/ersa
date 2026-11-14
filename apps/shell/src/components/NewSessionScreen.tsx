@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Project } from "../protocol/core-api.gen";
+import type { BackendInfo, Project } from "../protocol/core-api.gen";
 import {
-  type BackendChoices,
   type Branches,
   type SessionValues,
   available,
@@ -33,7 +32,7 @@ interface NewSessionScreenProps {
   /** Most recently used first (FLOW-NEW-SESSION-R14). */
   projects: readonly Project[];
   /** Each host's backends from `backend.list`, by host id; a host absent here is still being detected. */
-  backends: Readonly<Record<string, readonly BackendChoices[]>>;
+  backends: Readonly<Record<string, readonly BackendInfo[]>>;
   /** The values the user last started a session with, by project id. */
   lastUsed?: Readonly<Record<string, SessionValues>>;
   /** The project the user chose New session for; else the local host's most recently used (FLOW-NEW-SESSION-R15). */
