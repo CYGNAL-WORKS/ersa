@@ -195,11 +195,11 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
             }
             // A session the CLI started in its minimal mode: only the live
             // stream shows the mode, so live its sign-in failure is the
-            // minimal-mode error (PROTO-CLAUDE-CODE-STREAM-R51) and read back
+            // minimal-mode error (PROTO-CLAUDE-CODE-STREAM-R53) and read back
             // it is a sign-in failure (PROTO-AGENT-EVENTS-R22).
             if (stream.name.as_str(), uuid.as_str())
                 == (
-                    "2.1.316/28-bare-mode",
+                    "2.1.316/37-bare-mode",
                     "e1632d1e-dd8e-4819-bf67-b98092b915b9",
                 )
             {
@@ -1402,7 +1402,7 @@ fn a_recorded_prompt_of_a_file_list_alone_leaves_the_title_at_the_prompt_before(
 fn a_minimal_mode_failure_read_from_the_record_is_a_sign_in_failure() {
     let fixture = record_fixtures()
         .into_iter()
-        .find(|f| f.name == "2.1.316/28-bare-mode")
+        .find(|f| f.name == "2.1.316/37-bare-mode")
         .expect("the bare-mode record fixture");
     let events: Vec<Event> = project_record(&fixture.text)
         .into_iter()

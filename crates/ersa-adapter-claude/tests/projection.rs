@@ -417,12 +417,13 @@ fn authentication_failure_is_a_session_error_not_transcript_text() {
 
 // A session Claude Code started in its minimal mode (`--bare`) fails its first
 // message as if signed out, but signing in can't help: its `system/init` has
-// neither `scratchpad_path` nor `memory_paths` (2.1.316/28-bare-mode).
+// none of `scratchpad_path`, `memory_paths` and `messaging_socket_path`
+// (2.1.316/37-bare-mode).
 // verifies: PROTO-CLAUDE-CODE-STREAM-R53
 // verifies: PROTO-AGENT-EVENTS-R22
 #[test]
 fn a_session_started_in_minimal_mode_fails_with_its_own_reason_not_a_sign_in() {
-    let events = events(&fixture("28-bare-mode").raw_log());
+    let events = events(&fixture("37-bare-mode").raw_log());
     assert!(!events.iter().any(|e| matches!(e, Event::AssistantText(_))));
     let errors: Vec<&ErrorEvent> = events
         .iter()
@@ -441,25 +442,9 @@ fn a_session_started_in_minimal_mode_fails_with_its_own_reason_not_a_sign_in() {
     assert!(!error.message.is_empty());
 }
 
-// Each field alone is not minimal mode: a signed-out session lacks only
-// `scratchpad_path` (2.1.302/00-not-logged-in, above), and one with
-// auto-memory off lacks only `memory_paths`. The bare fixture with
-// `scratchpad_path` put back stands in for the second, whose credentials
-// then fail.
-// verifies: PROTO-CLAUDE-CODE-STREAM-R53
-// verifies: PROTO-AGENT-EVENTS-R22
-#[test]
-fn a_sign_in_failure_with_auto_memory_off_still_asks_to_sign_in() {
-    let mut log = fixture("28-bare-mode").raw_log();
-    let init = log
-        .iter_mut()
-        .find(|l| l.line.contains(r#""subtype":"init""#))
-        .expect("the fixture has a system/init");
-    let mut value: Value = serde_json::from_str(&init.line).unwrap();
-    value["scratchpad_path"] = json!("C:/scratchpad");
-    init.line = value.to_string();
-
-    let errors: Vec<ErrorEvent> = events(&log)
+/// The one `error` a log projects to.
+fn only_error(log: &[ersa_adapter::RawLine]) -> ErrorEvent {
+    let errors: Vec<ErrorEvent> = events(log)
         .into_iter()
         .filter_map(|e| match e {
             Event::Error(e) => Some(e),
@@ -469,8 +454,40 @@ fn a_sign_in_failure_with_auto_memory_off_still_asks_to_sign_in() {
     let [error] = errors.as_slice() else {
         panic!("expected one error, got {errors:?}");
     };
+    error.clone()
+}
+
+// A signed-out user with auto-memory off lacks `scratchpad_path` and
+// `memory_paths` but keeps `messaging_socket_path`: signing in helps them.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R53
+// verifies: PROTO-AGENT-EVENTS-R22
+#[test]
+fn a_signed_out_user_with_auto_memory_off_is_asked_to_sign_in() {
+    let error = only_error(&fixture("38-signed-out-no-auto-memory").raw_log());
     assert_eq!(error.code, ErrorCode::AuthenticationFailed);
     assert_eq!(error.action, Some(ErrorAction::LogIn));
+}
+
+// Any one of the three fields says the CLI did not start in minimal mode: the
+// bare fixture with one of them put back fails as a sign-in failure.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R53
+// verifies: PROTO-AGENT-EVENTS-R22
+#[test]
+fn any_one_of_the_three_fields_means_not_minimal_mode() {
+    for field in ["scratchpad_path", "memory_paths", "messaging_socket_path"] {
+        let mut log = fixture("37-bare-mode").raw_log();
+        let init = log
+            .iter_mut()
+            .find(|l| l.line.contains(r#""subtype":"init""#))
+            .expect("the fixture has a system/init");
+        let mut value: Value = serde_json::from_str(&init.line).unwrap();
+        value[field] = json!("C:/somewhere");
+        init.line = value.to_string();
+
+        let error = only_error(&log);
+        assert_eq!(error.code, ErrorCode::AuthenticationFailed, "{field}");
+        assert_eq!(error.action, Some(ErrorAction::LogIn), "{field}");
+    }
 }
 
 const INIT_REQUEST: &str = r#"{"type":"control_request","request_id":"ersa-init-1","request":{"subtype":"initialize","hooks":{}}}"#;
