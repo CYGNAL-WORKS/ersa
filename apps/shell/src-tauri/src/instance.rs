@@ -2,22 +2,12 @@
 //! endpoint of its own, and a second launch finds it there, asks it to show
 //! its window, and exits instead of opening another.
 //!
-//! The endpoint is one of the user's labelled endpoints, with the same
-//! guarantees as Core's: only this user's processes can serve or reach it.
+//! The endpoint is one of the user's labelled endpoints, named by
+//! [`crate::startup`] for each build, with the same guarantees as Core's: only this user's processes can serve or reach it.
 
 use std::io;
 
 use ersa_core::platform::Listener;
-
-/// The label of the window's endpoint, beside the user's own Core endpoint.
-/// A debug window attached to another endpoint (`ERSA_ATTACH`) is a Shell
-/// of its own, beside the user's window: its label adds that endpoint's.
-pub fn label_for(attach: Option<&str>) -> String {
-    match attach {
-        None => "window".to_string(),
-        Some(label) => format!("window-{label}"),
-    }
-}
 
 /// What a launch found.
 pub enum Instance {
