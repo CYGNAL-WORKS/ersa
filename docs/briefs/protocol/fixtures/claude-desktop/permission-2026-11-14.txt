@@ -1,0 +1,17 @@
+Claude Desktop's tool approval, read 2026-11-14 from the installed app, version 5.11492.5 (Windows).
+
+Read from the strings and layout of the app's own interface files, not from a card on screen.
+
+The answers are short buttons: Deny, Allow once, and a lasting answer labeled Always allow, or Allow for this session where the app names it that way. No answer's label names a rule, a command, a folder or a settings file.
+
+What the lasting answer reaches is said in a note in the card, in body text beside the request's details, before the answers:
+
+  Case                                      The note
+  the lasting answer saves one thing        one sentence: that the answer lasts for this session and covers, then the thing
+  it saves several                          the same opening, then a list, one thing per line
+  it switches the session's mode            a sentence naming the mode and what stops asking
+  it is not offered for this request        a sentence saying it isn't available for this command
+
+Each thing the answer covers is set as code that wraps and breaks anywhere. None is cut short, and the note's text can be selected.
+
+Not observed: a rendered card, how the card orders the notes when more than one applies, and which of a request's suggestions the lasting answer applies.
