@@ -46,14 +46,57 @@ pub struct CoreConfig {
     /// of its run. Zero, except in tests that need a request to land while
     /// a run winds down.
     pub wind_down_pause: Duration,
-    /// A pause `workspace.remove` takes before claiming the workspace and
-    /// again after. Zero, except in tests that need another request to land
-    /// between its read and its claim, or while it holds the claim.
-    pub remove_claim_pause: Duration,
+    /// Where `workspace.remove` stops, before claiming the workspace and
+    /// again after, until a test lets it go. `None`, except in tests that
+    /// need another request to land between its read and its claim, or
+    /// while it holds the claim.
+    pub remove_gate: Option<Arc<RemoveGate>>,
     /// How long a backend detection that found anything other than
     /// `available` is reused. [`FAILED_DETECTION_TTL`], except in tests
     /// that need every detection after a failed one to run again.
     pub failed_detection_ttl: Duration,
+}
+
+/// A point a request stops at in tests until the test lets it go
+/// ([`CoreConfig::remove_gate`]). Each stop is one [`RemoveGate::reached`]
+/// for the test and one [`RemoveGate::go`] from it, in order.
+#[derive(Debug)]
+pub struct RemoveGate {
+    reached: tokio::sync::Semaphore,
+    go: tokio::sync::Semaphore,
+}
+
+impl Default for RemoveGate {
+    /// Closed: the request stops at the first point it reaches.
+    fn default() -> Self {
+        RemoveGate {
+            reached: tokio::sync::Semaphore::new(0),
+            go: tokio::sync::Semaphore::new(0),
+        }
+    }
+}
+
+impl RemoveGate {
+    /// Called by the request: says it got here, then waits to be let go.
+    pub(crate) async fn stop(&self) {
+        self.reached.add_permits(1);
+        // The semaphore is never closed, so acquiring cannot fail.
+        if let Ok(permit) = self.go.acquire().await {
+            permit.forget();
+        }
+    }
+
+    /// Waits until the request has stopped at the next point.
+    pub async fn reached(&self) {
+        if let Ok(permit) = self.reached.acquire().await {
+            permit.forget();
+        }
+    }
+
+    /// Lets the request go on from where it stopped.
+    pub fn go(&self) {
+        self.go.add_permits(1);
+    }
 }
 
 /// The default for [`CoreConfig::max_line_bytes`]: 16 MiB, far above any
@@ -82,7 +125,7 @@ impl CoreConfig {
             replay: false,
             copy_pause: Duration::ZERO,
             wind_down_pause: Duration::ZERO,
-            remove_claim_pause: Duration::ZERO,
+            remove_gate: None,
             failed_detection_ttl: FAILED_DETECTION_TTL,
         })
     }
