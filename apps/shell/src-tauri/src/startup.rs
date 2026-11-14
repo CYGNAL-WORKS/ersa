@@ -79,10 +79,12 @@ pub struct Startup {
     pub attached: Option<String>,
     pub core: Core,
     /// The folder the window's webview keeps its own data in (cookies,
-    /// local storage, caches), or `None` for the webview's default. Both
-    /// builds share one bundle identifier, and the default folder is named
-    /// after it, so the daily build moves its own into `daily`
-    /// (FLOW-CLOSE-AND-QUIT-R09).
+    /// local storage, caches), or `None` for the webview's default, which a
+    /// development build uses. Both builds share one bundle identifier, and
+    /// the default folder is named after it, so the daily build keeps its
+    /// own in `daily` (FLOW-CLOSE-AND-QUIT-R09), or, when Ersa's application
+    /// data folder can't be found, in a folder of its own in the system's
+    /// temporary folder (R12).
     pub web_data: Option<PathBuf>,
 }
 
@@ -211,13 +213,6 @@ mod tests {
             why.starts_with("This development build can't attach to daily"),
             "{why}"
         );
-    }
-
-    // verifies: FLOW-CLOSE-AND-QUIT-R08
-    #[test]
-    fn the_daily_build_without_a_data_folder_never_uses_the_default_one() {
-        let daily = startup(Build::Daily, None, None);
-        assert!(matches!(daily.core, Core::Refused(_)), "{daily:?}");
     }
 
     // verifies: FLOW-CLOSE-AND-QUIT-R08
