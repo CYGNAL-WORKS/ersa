@@ -530,6 +530,7 @@ async fn a_backend_that_fails_to_start_ends_the_session_with_an_error() {
 }
 
 // verifies: FLOW-NEW-SESSION-R08
+// verifies: PROTO-CORE-API-R88
 /// The first message of a session whose backend failed to start is answered
 /// with the backend's own reason, whether it arrives while the start is
 /// still under way or after the session has ended, so the new-session
@@ -544,6 +545,9 @@ async fn a_message_to_a_backend_that_failed_to_start_is_answered_with_its_reason
         .error("session.send", json!({ "id": early, "text": "hello" }))
         .await;
     assert_eq!(kind(&error), "invalid_state");
+    // No `reason`: the Interface shows the backend's own words, such as
+    // not being signed in, rather than its words for a stopped session.
+    assert!(error["data"].get("reason").is_none(), "{error:#}");
     let message = error["message"].as_str().unwrap();
     assert!(
         message.contains("the backend could not be started")
@@ -572,6 +576,7 @@ async fn a_message_to_a_backend_that_failed_to_start_is_answered_with_its_reason
     let error = client
         .error("session.send", json!({ "id": late, "text": "hello" }))
         .await;
+    assert!(error["data"].get("reason").is_none(), "{error:#}");
     let message = error["message"].as_str().unwrap();
     assert!(
         message.contains("the fake refused to start"),
@@ -1137,6 +1142,7 @@ async fn renaming_a_running_session_asks_no_registry() {
     assert!(stats.open_checks.lock().unwrap().is_empty());
 }
 
+// verifies: PROTO-CORE-API-R79
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_its_backend_never_named_cannot_be_renamed() {
     let (core, _) = start_fake(FakeAdapter::failing()).await;
@@ -1150,6 +1156,7 @@ async fn a_session_its_backend_never_named_cannot_be_renamed() {
         .error("session.set_title", json!({ "id": id, "title": "Renamed" }))
         .await;
     assert_eq!(kind(&error), "invalid_state", "{error:#}");
+    assert_eq!(error["data"]["reason"], "backend_unnamed", "{error:#}");
     let error = client
         .error(
             "session.set_title",
@@ -1739,6 +1746,7 @@ async fn an_archived_session_is_still_archived_after_core_restarts() {
 /// Core refuses to send an archived session a message: it is read-only
 /// until it is unarchived, or a resume is accepted.
 // verifies: FLOW-ARCHIVE-DELETE-SESSION-R02
+// verifies: PROTO-CORE-API-R79
 #[tokio::test(flavor = "multi_thread")]
 async fn a_message_to_an_archived_session_is_refused() {
     let (core, stats) = start_fake(FakeAdapter::new(1)).await;
@@ -1758,6 +1766,7 @@ async fn a_message_to_an_archived_session_is_refused() {
     support::assert_valid("session.send", &response);
     let error = &response["error"];
     assert_eq!(kind(error), "invalid_state");
+    assert_eq!(error["data"]["reason"], "session_archived", "{error:#}");
     // Refused because it is archived, not only because it has stopped.
     assert!(
         error["message"].as_str().unwrap().contains("archived"),
@@ -1778,6 +1787,102 @@ async fn a_message_to_an_archived_session_is_refused() {
     );
 }
 
+/// A request that needs the backend running, to a session that has
+/// stopped, is refused `session_not_running`.
+// verifies: PROTO-CORE-API-R79
+#[tokio::test(flavor = "multi_thread")]
+async fn a_request_to_a_stopped_session_says_it_is_not_running() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = idle_session(&core, &mut client).await;
+    client.result("session.stop", json!({ "id": id })).await;
+    let error = client.error("session.interrupt", json!({ "id": id })).await;
+    assert_eq!(kind(&error), "invalid_state", "{error:#}");
+    assert_eq!(error["data"]["reason"], "session_not_running", "{error:#}");
+    assert_eq!(error["message"], "the session is not running");
+}
+
+/// A backend that says it is not running, having exited before a write
+/// while Core still held its run, is refused `session_not_running` too.
+// verifies: PROTO-CORE-API-R79
+#[tokio::test(flavor = "multi_thread")]
+async fn a_backend_that_exited_before_a_write_says_it_is_not_running() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = idle_session(&core, &mut client).await;
+    let error = client
+        .error(
+            "session.send",
+            json!({ "id": id, "text": "stopped before the write" }),
+        )
+        .await;
+    assert_eq!(kind(&error), "invalid_state", "{error:#}");
+    assert_eq!(error["data"]["reason"], "session_not_running", "{error:#}");
+    assert_eq!(error["message"], "the session is not running");
+}
+
+/// A second message while one is still being sent is refused
+/// `send_in_progress`; the first goes on.
+// verifies: PROTO-CORE-API-R79
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_while_another_is_being_sent_is_refused_send_in_progress() {
+    let (core, _) = start_fake(FakeAdapter::slow_start(Duration::from_secs(5))).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    // Waits for the backend to start.
+    let first = client
+        .request("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    let mut second = core.client().await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let error = loop {
+        let response = second
+            .call("session.send", json!({ "id": id, "text": "again" }))
+            .await;
+        let error = response["error"].clone();
+        // The first may not have taken the session's slot yet.
+        if error["data"]["reason"] == "send_in_progress" {
+            break error;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{response:#}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(kind(&error), "invalid_state", "{error:#}");
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("already being sent"),
+        "{error:#}"
+    );
+    client
+        .result("session.interrupt", json!({ "id": id }))
+        .await;
+    client.response(first).await;
+}
+
+/// Renaming a stopped session whose backend has no record of it is refused
+/// `record_gone`.
+// verifies: PROTO-CORE-API-R79
+#[tokio::test(flavor = "multi_thread")]
+async fn renaming_a_session_whose_record_is_gone_is_refused_record_gone() {
+    let adapter = FakeAdapter::new(1);
+    let records = Arc::clone(&adapter.records);
+    let (core, _) = start_fake(adapter).await;
+    let mut client = core.client().await;
+    let id = idle_session(&core, &mut client).await;
+    client.result("session.stop", json!({ "id": id })).await;
+    records.lock().unwrap().clear();
+    let error = client
+        .error("session.set_title", json!({ "id": id, "title": "Renamed" }))
+        .await;
+    assert_eq!(kind(&error), "invalid_state", "{error:#}");
+    assert_eq!(error["data"]["reason"], "record_gone", "{error:#}");
+    assert!(
+        error["message"].as_str().unwrap().contains("no record"),
+        "{error:#}"
+    );
+}
 /// Unarchiving clears the mark, for good, and leaves the session stopped;
 /// a message is no longer refused for being archived.
 // verifies: FLOW-ARCHIVE-DELETE-SESSION-R03

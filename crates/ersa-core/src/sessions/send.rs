@@ -79,7 +79,10 @@ pub(super) fn cancel(handle: &Handle) -> bool {
 }
 
 fn stopped() -> SessionError {
-    SessionError::InvalidState("the message was stopped before it was sent".into())
+    SessionError::refused(
+        ErrorReason::SendStopped,
+        "the message was stopped before it was sent",
+    )
 }
 
 /// Ends a send when dropped, however it ends: the session can send again,
@@ -180,16 +183,18 @@ impl SessionManager {
             // the reason, and an archive that finished while this send waited
             // for a run winding down is never undone by the resume below.
             if lock(&handle.row).archived {
-                return Err(SessionError::InvalidState(
-                    "the session is archived; unarchive or resume it to send it a message".into(),
+                return Err(SessionError::refused(
+                    ErrorReason::SessionArchived,
+                    "the session is archived; unarchive or resume it to send it a message",
                 ));
             }
             if resuming && resumption.is_none() {
                 return Err(handle.not_running());
             }
             if sending.is_some() {
-                return Err(SessionError::InvalidState(
-                    "a message is already being sent to this session; wait for its answer".into(),
+                return Err(SessionError::refused(
+                    ErrorReason::SendInProgress,
+                    "a message is already being sent to this session; wait for its answer",
                 ));
             }
             *sending = Some(Sending {
@@ -253,7 +258,10 @@ impl SessionManager {
         }
         let session = match ready {
             Ok(session) => session,
-            Err(SessionError::InvalidState(_)) if lock(&handle.start_failure).is_some() => {
+            Err(SessionError::Refused {
+                reason: ErrorReason::SessionNotRunning,
+                ..
+            }) if lock(&handle.start_failure).is_some() => {
                 // The session's run ends just after; answer once it has, so
                 // `session.list` already says the session failed and the
                 // sender can tell a failed start from a slow one by its

@@ -23,7 +23,9 @@
 //! token finishes it.
 
 use ersa_adapter::{OpenElsewhere, RecordDeletion};
-use ersa_protocol::core_api::{SessionDeleteParams, SessionDeleteResult, Workspace, WorkspaceKind};
+use ersa_protocol::core_api::{
+    ErrorReason, SessionDeleteParams, SessionDeleteResult, Workspace, WorkspaceKind,
+};
 
 use super::{ApiError, handlers};
 use crate::sessions::SessionError;
@@ -184,13 +186,27 @@ async fn files_taken(core: &Core, workspace: &Workspace) -> bool {
 /// The refusal for a session another process has open, or may have.
 fn open_elsewhere(id: &str, answer: OpenElsewhere) -> ApiError {
     match answer {
-        OpenElsewhere::Yes { pids } => ApiError::invalid_state(format!(
-            "another process ({}) has session {id} open; close it there, then delete it",
-            crate::sessions::pids_named(&pids)
-        )),
-        OpenElsewhere::Unknown | OpenElsewhere::No => ApiError::invalid_state(format!(
-            "Ersa could not tell whether another process has session {id} open, \
-             so it deleted nothing"
+        OpenElsewhere::Yes { pids } => SessionError::open_elsewhere(
+            &pids,
+            format!(
+                "another process ({}) has session {id} open; close it there, then delete it",
+                crate::sessions::pids_named(&pids)
+            ),
+        )
+        .into(),
+        OpenElsewhere::Unknown => SessionError::refused(
+            ErrorReason::OpenUnknown,
+            format!(
+                "Ersa could not tell whether another process has session {id} open, \
+                 so it deleted nothing"
+            ),
+        )
+        .into(),
+        // A backend that refused while saying nothing has the session open
+        // broke its contract: not a reason the user can act on.
+        OpenElsewhere::No => ApiError::internal(format!(
+            "the backend refused to delete session {id}'s record, \
+             though it says no process has the session open"
         )),
     }
 }

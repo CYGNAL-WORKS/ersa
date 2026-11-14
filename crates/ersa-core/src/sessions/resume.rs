@@ -242,12 +242,10 @@ pub(super) async fn check_folder(handle: &Handle) -> Result<(), SessionError> {
     // A look that finished a moment ago is as good as a new one.
     match read_once(&handle.folder_check, FOLDER_CHECK, start, async |_| true).await {
         Some(Ok(true)) => Ok(()),
-        Some(Ok(false)) => Err(SessionError::Refused {
-            reason: ErrorReason::FolderGone,
-            message: format!(
-                "the session's folder {cwd} no longer exists, so the session can't be resumed"
-            ),
-        }),
+        Some(Ok(false)) => Err(SessionError::refused(
+            ErrorReason::FolderGone,
+            format!("the session's folder {cwd} no longer exists, so the session can't be resumed"),
+        )),
         // There, perhaps, but not readable: say why rather than call it gone.
         Some(Err(e)) => Err(SessionError::InvalidState(format!(
             "the session's folder {cwd} can't be read: {e}"
