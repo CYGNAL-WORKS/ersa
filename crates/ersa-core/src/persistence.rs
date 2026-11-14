@@ -327,24 +327,31 @@ impl Store {
     }
 
     /// Moves a workspace from `from` to `to` only if it is currently in one of
-    /// the `from` states, as one statement, so two removals racing on
-    /// different connections cannot both start. Returns whether it moved.
+    /// the `from` states, in one transaction, so two removals racing on
+    /// different connections cannot both start. Returns the state it
+    /// replaced, or `None` when it was in none of `from` and stayed as it was.
     pub async fn transition_workspace(
         &self,
         id: String,
         from: &'static [WorkspaceState],
         to: WorkspaceState,
-    ) -> Result<bool> {
+    ) -> Result<Option<WorkspaceState>> {
         self.call(move |conn| {
-            let from: Vec<String> = from.iter().map(to_sql_enum).collect();
-            // `json_each` turns a JSON array into rows, which lets one bound
-            // parameter stand for the whole list.
-            let changed = conn.execute(
-                "UPDATE workspaces SET state = ?2
-                 WHERE id = ?1 AND state IN (SELECT value FROM json_each(?3))",
-                params![id, to_sql_enum(&to), serde_json::to_string(&from)?],
+            let tx = conn.transaction()?;
+            let current: Option<WorkspaceState> = tx
+                .query_row("SELECT state FROM workspaces WHERE id = ?1", [&id], |row| {
+                    from_sql_enum(row, 0)
+                })
+                .optional()?;
+            let Some(current) = current.filter(|state| from.contains(state)) else {
+                return Ok(None);
+            };
+            tx.execute(
+                "UPDATE workspaces SET state = ?2 WHERE id = ?1",
+                params![id, to_sql_enum(&to)],
             )?;
-            Ok(changed == 1)
+            tx.commit()?;
+            Ok(Some(current))
         })
         .await
     }
@@ -826,18 +833,48 @@ mod tests {
             .expect("workspace");
 
         let ready: &[WorkspaceState] = &[WorkspaceState::Ready];
-        assert!(
+        // The first claim says the state it replaced; the second is refused.
+        assert_eq!(
             store
                 .transition_workspace("w".into(), ready, WorkspaceState::Removing)
                 .await
-                .expect("first")
+                .expect("first"),
+            Some(WorkspaceState::Ready)
         );
-        assert!(
-            !store
+        assert_eq!(
+            store
                 .transition_workspace("w".into(), ready, WorkspaceState::Removing)
                 .await
-                .expect("second")
+                .expect("second"),
+            None
         );
+        // Put back only while still claimed: a state another request set
+        // since (here `error`) stays.
+        store
+            .set_workspace_state("w".into(), WorkspaceState::Error)
+            .await
+            .expect("mark");
+        let claimed: &[WorkspaceState] = &[WorkspaceState::Removing];
+        assert_eq!(
+            store
+                .transition_workspace("w".into(), claimed, WorkspaceState::Ready)
+                .await
+                .expect("put back"),
+            None
+        );
+        assert_eq!(
+            store
+                .workspace("w".into())
+                .await
+                .expect("get")
+                .expect("row")
+                .state,
+            WorkspaceState::Error
+        );
+        store
+            .set_workspace_state("w".into(), WorkspaceState::Removing)
+            .await
+            .expect("claim again");
 
         // A project with a workspace cannot be deleted: a conflict.
         assert!(matches!(
