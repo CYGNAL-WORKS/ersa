@@ -79,6 +79,7 @@ async fn the_version_check_runs_with_the_adapters_environment() {
 /// A CLI found lists the models it reports, its `default` entry marked; one
 /// that cannot answer is `error` with no models, its version kept.
 // verifies: PROTO-CORE-API-R72
+// verifies: PROTO-CORE-API-R95
 // verifies: PROTO-CLAUDE-CODE-STREAM-R39
 #[tokio::test]
 async fn a_cli_found_lists_the_models_it_reports() {
