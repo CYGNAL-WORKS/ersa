@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BridgeError, CoreClient, Method, Params } from "../core/client";
 import type { SessionValues } from "./controls";
-import { StartStop, lastUsedFrom, readChoices, rememberPatch, remembered, startSession } from "./start";
+import { StartStop, lastUsedFrom, readChoices, rememberPatch, startSession } from "./start";
 
 /** A client that records each call and answers from `answers`; a method without an answer fails the test. */
 function fakeClient(answers: Partial<Record<Method, (params: never) => unknown>> = {}) {
@@ -79,10 +79,10 @@ describe("starting a session from the new-session screen", () => {
   });
 
   // verifies: FLOW-NEW-SESSION-R21
-  it("creates the workspace from the chosen base branch", async () => {
+  it("names no base branch, so Core makes the workspace from the repository's default branch (issue 412)", async () => {
     const { client, calls } = fakeClient(working);
-    await startSession(client, { ...values("isolated"), base: "release/1.0" }, "Fix the build");
-    expect(calls[0]).toEqual({ method: "workspace.create", params: { project_id: "p1", base: "release/1.0" } });
+    await startSession(client, values("isolated"), "Fix the build");
+    expect(calls[0]).toEqual({ method: "workspace.create", params: { project_id: "p1" } });
   });
 
   // verifies: FLOW-NEW-SESSION-R05
@@ -343,10 +343,9 @@ describe("the values remembered for a project", () => {
   });
 
   // verifies: FLOW-NEW-SESSION-R21
-  it("never hold the base branch: each new session starts at the default branch", () => {
-    const patch = rememberPatch({ ...values("isolated"), base: "release/1.0" });
-    expect(patch.new_session.last_used.p1).not.toHaveProperty("base");
-    expect(remembered({ ...values("isolated"), base: "release/1.0" })).toEqual(values("isolated"));
+  it("hold whether the session ran in a worktree, and never a base branch an older Ersa stored (issue 412)", () => {
+    expect(rememberPatch(values("isolated")).new_session.last_used.p1).toMatchObject({ workspace: "isolated" });
+    expect(lastUsedFrom(rememberPatch(values("root"))).p1).toMatchObject({ workspace: "root" });
     expect(lastUsedFrom({ new_session: { last_used: { p1: { ...values("isolated"), base: "release/1.0" } } } }).p1).toEqual(values("isolated"));
   });
 

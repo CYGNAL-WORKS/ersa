@@ -1,10 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { BackendInfo, Project } from "../protocol/core-api.gen";
 import {
-  type Branches,
   type SessionValues,
   available,
-  baseFor,
   howFor,
   seedScreen,
   startingProject,
@@ -63,11 +61,6 @@ interface NewSessionScreenProps {
   onStop?: () => void;
   /** Ersa can't reach the sessions: trying again, or no longer trying (FLOW-SEND-MESSAGE-R06). */
   away?: Extract<Unavailable, "reconnecting" | "unreachable">;
-  /**
-   * Reads a git project's local branches, for the base branch a new workspace starts from (FLOW-NEW-SESSION-R21);
-   * resolves to why they could not be read rather than failing. Absent, the workspace chip offers no base branch.
-   */
-  onListBranches?: (projectId: string) => Promise<Branches>;
   /** Choosing or adding a folder: on its way, or why it failed. */
   adding?: Sending;
   /** For the gallery: focus not taken, the composer shown focused, a chip shown open or in a state. */
@@ -239,37 +232,11 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  // A git project's branches, read afresh each time the screen shows it, so a new session's base branch starts at the
-  // repository's default branch (FLOW-NEW-SESSION-R21). The latest reader is used, so a new function each render
-  // reads nothing again.
-  const gitProject = project?.vcs === "git" ? project.id : undefined;
-  const [read, setRead] = useState<{ projectId: string; branches: Branches }>();
-  const lister = useRef(props.onListBranches);
-  lister.current = props.onListBranches;
-  const listing = props.onListBranches !== undefined;
-  useEffect(() => {
-    // A list read for this project before is not shown while it is read again: its branches may have changed.
-    setRead(undefined);
-    if (gitProject === undefined || !lister.current) return;
-    let current = true;
-    void lister.current(gitProject).then((branches) => {
-      if (current) setRead({ projectId: gitProject, branches });
-    });
-    return () => {
-      current = false;
-    };
-  }, [gitProject, listing]);
-  const branches: Branches | undefined =
-    gitProject === undefined || !listing ? undefined : read?.projectId === gitProject ? read.branches : { state: "reading" };
-
   const hostBackends = backends[hostId];
   // With no project yet, the where values are the local host's alone; the how values still show (R19).
-  const chosen: SessionValues = project
+  const values: SessionValues = project
     ? valuesFor(project, hostBackends ?? [], wanted)
     : { host_id: localHostId, project_id: "", workspace: "root", ...howFor(hostBackends ?? [], wanted) };
-  // A new workspace starts from the base branch the chip shows: the one chosen, else the default (R21, R29).
-  const base = chosen.workspace === "isolated" && branches?.state === "read" ? baseFor(branches.branches, wanted.base) : undefined;
-  const values: SessionValues = base === undefined ? chosen : { ...chosen, base };
   // Attachments are judged against the project folder's root workspace when it is chosen, and against none for a new
   // workspace, which is not made yet and holds nothing (FLOW-SEND-MESSAGE-R17).
   const attachTo = project && values.workspace === "root" ? props.rootWorkspaces?.[project.id] : undefined;
@@ -290,7 +257,8 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
     } else if (key === "model" || key === "permission_mode") {
       pickHow(key, { ...values, [key]: id });
     } else {
-      setWanted({ ...values, [key]: id });
+      // The Worktree checkbox: checked, a new isolated workspace; unchecked, the project folder.
+      setWanted({ ...values, workspace: id === "isolated" ? "isolated" : "root" });
     }
   };
 
@@ -370,7 +338,6 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
           backends={hostBackends}
           detectionFailed={listingFailed !== undefined}
           values={values}
-          branches={branches}
           onChoose={onChoose}
           onAddProject={canAdd ? () => void addProject() : undefined}
           disabled={busy || adding?.state === "sending"}
