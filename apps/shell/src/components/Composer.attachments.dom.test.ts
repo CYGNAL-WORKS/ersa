@@ -216,7 +216,7 @@ describe("pasting and dropping attachments", () => {
     expect(fireEvent.paste(words(), { clipboardData: { files: [], getData: () => "Words" } })).toBe(true);
   });
 
-  // verifies: FLOW-SEND-MESSAGE-R08
+  // verifies: FLOW-SEND-MESSAGE-R22
   it("attaches the image of a clipboard that holds text too, and pastes the text as well", async () => {
     render(draw({ onRead: async () => [] }));
     const png = new File([new Uint8Array([1, 2, 3])], "image.png", { type: "image/png" });

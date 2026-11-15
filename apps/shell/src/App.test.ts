@@ -1488,12 +1488,13 @@ describe("sending while the agent works under a session App draws", () => {
   });
 
   // verifies: FLOW-SEND-MESSAGE-R19
-  it("names the one message this window sent while it waits, by its first words, until the backend takes it in", async () => {
+  it("names the one message this window sent while it waits, by its first line, until the backend takes it in", async () => {
     const core = await open({ "session.list": () => running(), "session.send": () => ({}) });
     await core.emit(on(0, { type: "turn.started", turn: 1, trigger: "user" }));
-    await enter("Then update   the changelog and the release notes");
+    await enter("\n  Then update   the changelog and the release notes\nThen tag the release");
     await core.emit(tile({ waiting: 1 }));
-    expect(statusText()).toBe("Waiting: Then update the changelog and the");
+    // Its first line, whole: the status line cuts it with an ellipsis where the line ends.
+    expect(statusText()).toBe("Waiting: Then update the changelog and the release notes");
     // Another window sends one too: two wait, said as a count.
     await core.emit(tile({ waiting: 2 }));
     expect(statusText()).toBe("2 messages waiting");
@@ -1547,6 +1548,7 @@ describe("sending while the agent works under a session App draws", () => {
   });
 
   // verifies: FLOW-SEND-MESSAGE-R20
+  // verifies: FLOW-SEND-MESSAGE-R21
   it("interrupts only the running turn when stop is chosen while a message waits, once until that turn ends", async () => {
     const core = await open({ "session.list": () => running(1), "session.interrupt": () => ({}) });
     await core.emit(on(0, { type: "turn.started", turn: 1, trigger: "user" }));

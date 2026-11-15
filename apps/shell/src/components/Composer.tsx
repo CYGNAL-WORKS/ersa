@@ -411,10 +411,13 @@ function StatusLine({ unavailable, sending, marked, waiting }: { unavailable?: U
   // Last, a message waiting in the backend: by its name in the window that sent it, else how many wait (R19).
   if (waiting !== undefined && waiting.count > 0) {
     return (
-      <p className="composer-status-line">
-        {waiting.count === 1 && waiting.name !== undefined
-          ? t("composer.waiting.namedNote", { name: waiting.name })
-          : t("composer.waiting.countNote", { count: waiting.count })}
+      <p className="composer-status-line" data-one-line>
+        {/* One line, cut with an ellipsis where the line ends: a long first line is not the whole message. */}
+        <span className="composer-status-cut">
+          {waiting.count === 1 && waiting.name !== undefined
+            ? t("composer.waiting.namedNote", { name: waiting.name })
+            : t("composer.waiting.countNote", { count: waiting.count })}
+        </span>
       </p>
     );
   }

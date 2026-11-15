@@ -129,15 +129,15 @@ export async function pastedImage(file: Blob): Promise<Attached> {
   }
 }
 
-/** How many of a message's first words name it on the status line while it waits (FLOW-SEND-MESSAGE-R19). */
-const NAME_WORDS = 6;
-
 /**
  * The name the status line gives a message waiting in the backend (FLOW-SEND-MESSAGE-R19, docs/design/COMPOSER.md):
- * its first words, else its first attachment's name, which for a pasted image is "Pasted image".
+ * its first line, which the status line cuts with an ellipsis where it ends, else its first attachment's name, which
+ * for a pasted image is "Pasted image".
  */
 export function waitingName(text: string, attachments: readonly Attached[]): string | undefined {
-  const words = text.trim().split(/\s+/).filter((w) => w !== "");
-  if (words.length > 0) return words.slice(0, NAME_WORDS).join(" ");
-  return attachments[0]?.name;
+  const line = text
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .find((l) => l !== "");
+  return line ?? attachments[0]?.name;
 }
