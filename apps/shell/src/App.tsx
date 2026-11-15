@@ -959,6 +959,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                   // Nothing reaches Core while Ersa can't reach it.
                   disabled={away !== undefined}
                   used={used}
+                  windows={shown.transcript.windows}
                   />
                 )
               }

@@ -3,6 +3,7 @@
 // free of React so the tests feed it the replay server's captures.
 
 import { eventProblem, hasSeq } from "../core/checks";
+import type { UsageWindow } from "./limits";
 import type {
   Envelope,
   FileEdit,
@@ -72,6 +73,11 @@ export interface Transcript {
   state?: SessionState["state"];
   /** The agent is working on a turn: from `turn.started` until the turn completes or the session ends (FLOW-SEND-MESSAGE-R03). */
   working?: boolean;
+  /**
+   * The usage windows the backend last reported for the session, in its order (PROTO-AGENT-EVENTS, usage.updated):
+   * a report's list replaces the last one, and a report without one leaves it. None until the first report.
+   */
+  windows?: UsageWindow[];
   /** Set when an event came with a schema version this Interface does not know; nothing after it is applied. */
   refused?: string;
 }
@@ -191,8 +197,11 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
     }
     case "turn.started":
       return { ...next, working: true };
-    case "session.started":
     case "usage.updated":
+      // The rest of a report is the tile's (Core carries it); the windows are read only here, for the session
+      // controls' ring (LAY-SHELL, Context).
+      return Array.isArray(event.rate_limit?.windows) ? { ...next, windows: event.rate_limit.windows } : next;
+    case "session.started":
     case "backend.passthrough":
       return next;
     // An event type this window does not know, under a version it does:
