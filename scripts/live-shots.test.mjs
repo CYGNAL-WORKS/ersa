@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -140,4 +140,11 @@ test("publishShots refuses any backend but the stand-in", () => {
   const { bare, work } = mixedResults("copilot");
   assert.throws(() => publishShots({ root: work }), /tools\/01-tool-call\.png: ran the real backend \(copilot\)/);
   assertNothingPushed(bare, work);
+});
+
+// The harness writes the record this script reads; the two must agree on its name and on the stand-in's value.
+test("the live-check harness writes the backend record under the name the script reads", () => {
+  const harness = readFileSync(join(import.meta.dirname, "..", "apps", "shell", "live", "harness.ts"), "utf8");
+  assert.ok(harness.includes(`writeFileSync(testInfo.outputPath("${BACKEND_RECORD}"), backend)`), "the harness writes the record");
+  assert.ok(harness.includes(`backend: ["stand-in", { option: true }]`), "the stand-in is named as the script names it");
 });
