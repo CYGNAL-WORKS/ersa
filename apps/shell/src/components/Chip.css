@@ -39,6 +39,16 @@
   color: var(--color-ink-faint);
 }
 
+/* It fades in and out as its session starts and stops. */
+.chip-chevron {
+  transition: opacity var(--motion-quick) var(--motion-ease-out);
+}
+
+/* A session's model, effort and permission mode chips keep the chevron's width while the session is not running. */
+.chip-chevron[data-hidden] {
+  opacity: 0;
+}
+
 /* :where() adds no specificity, so the pressed and open states below still win. */
 .chip:hover:not(:disabled):not([data-open]):where(:not(:focus-visible)),
 .chip[data-force="hover"] {
@@ -87,7 +97,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chip {
+  .chip,
+  .chip-chevron {
     transition: none;
   }
 }

@@ -8,7 +8,8 @@
 //!   variable's value to stderr, as a CLI says why it cannot run, and exits 1.
 //! - With `ERSA_STAND_IN_ANSWER` set, it answers the host's `initialize`
 //!   request with one model, the CLI's own `default` entry, so detection
-//!   lists it and the session starts and takes messages.
+//!   lists it and the session starts and takes messages; it then accepts
+//!   each change of model, permission mode or effort as the CLI does.
 //! - Otherwise it starts that grandchild, writes `<own pid> <grandchild pid>`
 //!   to the file named by `ERSA_STAND_IN_PIDS`, and reads its input until
 //!   the input closes, which is how Core tells the CLI to stop. Its
@@ -59,9 +60,10 @@ fn main() {
     let _ = std::io::stdin().lock().read_to_end(&mut input);
 }
 
-/// Reads the host's lines until `initialize`, and answers it with success
-/// and the CLI's `default` model entry (PROTO-CLAUDE-CODE-STREAM, the
-/// handshake); what follows is read and ignored by the caller.
+/// Reads the host's lines, answering `initialize` with success and the
+/// CLI's `default` model entry (PROTO-CLAUDE-CODE-STREAM, the handshake),
+/// and each change of model, permission mode or effort with success, the
+/// mode echoed as the CLI answers it; anything else is read and ignored.
 fn answer_initialize() {
     let stdin = std::io::stdin();
     for line in stdin.lock().lines() {
@@ -69,7 +71,27 @@ fn answer_initialize() {
         let Ok(message) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
-        if message["type"] == "control_request" && message["request"]["subtype"] == "initialize" {
+        if message["type"] != "control_request" {
+            continue;
+        }
+        let response = match message["request"]["subtype"].as_str() {
+            Some("set_permission_mode") => {
+                serde_json::json!({ "mode": message["request"]["mode"] })
+            }
+            Some("set_model" | "apply_flag_settings") => serde_json::json!({}),
+            _ => serde_json::Value::Null,
+        };
+        if !response.is_null() {
+            let answer = serde_json::json!({
+                "type": "control_response",
+                "response": { "subtype": "success", "request_id": message["request_id"], "response": response },
+            });
+            let mut out = std::io::stdout().lock();
+            let _ = writeln!(out, "{answer}");
+            let _ = out.flush();
+            continue;
+        }
+        if message["request"]["subtype"] == "initialize" {
             let answer = serde_json::json!({
                 "type": "control_response",
                 "response": {
@@ -88,7 +110,6 @@ fn answer_initialize() {
             let mut out = std::io::stdout().lock();
             let _ = writeln!(out, "{answer}");
             let _ = out.flush();
-            return;
         }
     }
 }

@@ -13,6 +13,8 @@ import type { SessionValues, WorkspaceKind } from "./controls";
 export interface Choices {
   /** None when `backend.list` failed. */
   backends: BackendInfo[];
+  /** Why `backend.list` failed, in the user's terms: the screen says detection failed, not that none is available (FLOW-NEW-SESSION-R11). */
+  failed?: string;
   lastUsed: Record<string, SessionValues>;
 }
 
@@ -24,6 +26,7 @@ export async function readChoices(client: Pick<CoreClient, "call">, hostId: stri
   const [backends, read] = await Promise.allSettled([client.call("backend.list", { host_id: hostId }), settings]);
   return {
     backends: backends.status === "fulfilled" ? backends.value : [],
+    ...(backends.status === "rejected" && { failed: describeError(backends.reason) }),
     lastUsed: read.status === "fulfilled" ? lastUsedFrom(read.value) : {},
   };
 }
