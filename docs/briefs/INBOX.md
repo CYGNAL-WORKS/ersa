@@ -8,7 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-15 LAY-SHELL: COMPOSER.md says what an empty context ring says only on a session (context isn't reported yet); the new-session screen's ring keeps "Context: none used yet", since nothing exists to report. The bands are read on the whole percent the ring shows, so 50.4 percent (reading 50 percent) is quiet. #410 builds both; confirm or change.
 
 
 
