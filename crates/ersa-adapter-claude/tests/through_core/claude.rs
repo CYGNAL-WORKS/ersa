@@ -8,7 +8,7 @@ use ersa_adapter::fake::FakeTransport;
 use ersa_adapter::recording::Recording;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, OpenElsewhere, Projector, RecordEvent,
-    RecordSummary, RecordedSettings, Requested, SessionConfig, Transport, async_trait,
+    RecordSummary, RelaunchSettings, Requested, SessionConfig, Transport, async_trait,
 };
 use ersa_adapter_claude::ClaudeAdapter;
 use ersa_core::CoreConfig;
@@ -107,7 +107,7 @@ impl Adapter for OnTransport {
         cwd: &str,
         backend_session_id: &str,
         requested: Requested,
-    ) -> Result<RecordedSettings, AdapterError> {
+    ) -> Result<RelaunchSettings, AdapterError> {
         self.adapter
             .record_settings(transport, cwd, backend_session_id, requested)
             .await
