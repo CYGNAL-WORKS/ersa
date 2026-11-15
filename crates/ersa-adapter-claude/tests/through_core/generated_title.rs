@@ -125,7 +125,7 @@ fn no_stub_failures(transport: &FakeTransport) {
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R50
 // verifies: PROTO-CORE-API-R83
-// verifies: PROTO-CORE-API-R84
+// verifies: PROTO-CORE-API-R83
 #[tokio::test(flavor = "multi_thread")]
 async fn the_generated_name_is_the_title_and_a_tile_carries_it() {
     let transport = naming_cli(&first_turn(None)).hold_open();

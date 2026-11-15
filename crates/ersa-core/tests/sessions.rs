@@ -1074,6 +1074,34 @@ async fn a_rename_sends_every_client_a_tile_carrying_the_title() {
     assert_eq!(tile["params"]["title"], "Renamed", "{tile:#}");
 }
 
+/// The record read at a session's end gives it a title its tiles never
+/// carried (the fake backend announces none), and every window is sent it.
+// verifies: PROTO-CORE-API-R103
+#[tokio::test(flavor = "multi_thread")]
+async fn a_title_read_from_the_record_at_the_end_is_sent_as_a_tile() {
+    let records = Records::default();
+    let (core, _stats) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
+    let mut client = core.client().await;
+    let mut other = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    assert_eq!(session_row(&mut client, &id).await["title"], Value::Null);
+    client.result("session.stop", json!({ "id": id })).await;
+    let tile = tokio::time::timeout(
+        Duration::from_secs(10),
+        other.notification_where(|n| {
+            n["method"] == "session.tile"
+                && n["params"]["session_id"] == id
+                && n["params"]["title"] == "hello"
+        }),
+    )
+    .await
+    .expect("a tile carrying the record's title within 10 s");
+    assert_eq!(tile["params"]["title"], "hello");
+}
+
 /// Opening a stopped session's view tells every window of its tile, and
 /// that tile carries the title its record gives it.
 // verifies: PROTO-CORE-API-R83
