@@ -760,6 +760,37 @@ describe("arranging the rail", () => {
     expect(tiles()).toEqual(["s2", "s1"]);
   });
 
+  // verifies: PROTO-CORE-API-R84
+  it("shows a title a tile carries on the tile, in the header and on the sessions page, sorted to its place, reading no list", async () => {
+    const named = (id: string, title: string, at: string) => ({ ...session(id, "alpha", at), title });
+    // s2 is the newest, so it is the active session, its title in the transcript header.
+    const core = await open({
+      "session.list": () => [named("s1", "Beta", "2026-11-01T09:00:00Z"), named("s2", "Gamma", "2026-11-01T10:00:00Z"), named("s3", "Delta", "2026-11-01T08:00:00Z")],
+      "settings.get": () => ({ rail: { sort_by: "name" } }),
+    });
+    expect(tiles()).toEqual(["s1", "s3", "s2"]);
+    expect(screen.getByRole("heading", { name: "Gamma" })).toBeTruthy();
+    const reads = () => core.calls.filter((c) => c.method === "session.list").length;
+    const before = reads();
+    // A name the backend generated reaches the window on the tile that ends the turn.
+    await act(async () =>
+      core.emit({
+        kind: "notification",
+        method: "session.tile",
+        params: { session_id: "s2", tile: { state: "idle", pending: [] }, last_activity_at: "2026-11-01T13:00:00.000Z", title: "Alpha" },
+      } as CoreEvent),
+    );
+    await settle();
+    expect(tiles()).toEqual(["s2", "s1", "s3"]);
+    expect(rail().querySelector('[data-session-id="s2"]')?.textContent).toContain("Alpha");
+    expect(screen.getByRole("heading", { name: "Alpha" })).toBeTruthy();
+    fireEvent.click(within(rail()).getByRole("button", { name: "Arrange sessions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "All sessions" }));
+    await settle();
+    expect([...document.querySelectorAll(".sessions-page-title")].map((el) => el.textContent)).toContain("Alpha");
+    expect(reads()).toBe(before);
+  });
+
   // verifies: FLOW-ORGANIZE-SESSIONS-R12
   it("keeps a collapsed group to the grouping it was collapsed in", async () => {
     const core = await open();
