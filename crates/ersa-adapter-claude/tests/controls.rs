@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use common::{RecordingSink, fixture};
 use ersa_adapter::fake::FakeTransport;
-use ersa_adapter::{Adapter, AdapterError, AdapterSession, SessionConfig, SessionControl};
+use ersa_adapter::{Adapter, AdapterError, SessionConfig, SessionControl};
 use ersa_adapter_claude::ClaudeAdapter;
 use serde_json::{Value, json};
 
