@@ -153,12 +153,17 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
                 from_record.entry(id).or_default().push(event.event);
             }
         }
-        // The kind each record entry has, by uuid.
+        // The kind each record entry has, by uuid; a message a turn took in
+        // part way is a `queue-operation` under its echo's id, `commandUuid`
+        // (PROTO-CLAUDE-CODE-STREAM-R77).
         let record_kinds: HashMap<String, String> = record
             .text
             .lines()
             .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-            .filter_map(|e| Some((e["uuid"].as_str()?.into(), e["type"].as_str()?.into())))
+            .filter_map(|e| {
+                let id = e["uuid"].as_str().or(e["commandUuid"].as_str())?;
+                Some((id.into(), e["type"].as_str()?.into()))
+            })
             .collect();
         let elided: HashSet<String> = record
             .text
@@ -168,22 +173,6 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
             .filter_map(|e| e["uuid"].as_str().map(String::from))
             .collect();
         for (uuid, events) in live {
-            // A message a turn that uses tools took in mid-turn: the CLI
-            // echoes it live, but its record keeps no prompt entry for it,
-            // only a `queue-operation` `remove` and a `queued_command`
-            // attachment, which the record reader does not read yet (inbox).
-            if (stream.name.as_str(), uuid.as_str())
-                == (
-                    "2.1.316/52-replay-message-during-tool-turn",
-                    "0e92c368-3943-4a95-afb9-13c839dfe21b",
-                )
-            {
-                assert!(
-                    !record_kinds.contains_key(&uuid),
-                    "fixture 52's message taken in mid-turn now has a record entry"
-                );
-                continue;
-            }
             // A compaction that kept a preserved segment: the entries after
             // it chain to the segment, not to the summary, so the record
             // reader, which follows the chain, never reaches the summary
@@ -1488,4 +1477,184 @@ fn a_minimal_mode_failure_read_from_the_record_is_a_sign_in_failure() {
     };
     assert_eq!(error.code, ErrorCode::AuthenticationFailed);
     assert_eq!(error.action, Some(ErrorAction::LogIn));
+}
+
+/// The record of a recorded run, as `project_record` reads it.
+fn recorded(name: &str) -> Vec<RecordEvent> {
+    let path = fixtures_root().join(format!("2.1.316/record/{name}.jsonl"));
+    project_record(&fs::read_to_string(path).unwrap().replace("\r\n", "\n"))
+}
+
+/// Where in `events` the message under `id` is, checking it is there once.
+fn only_place_of(events: &[RecordEvent], id: &str) -> usize {
+    let at: Vec<usize> = events
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.message_id.as_deref() == Some(id))
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(
+        at.len(),
+        1,
+        "the message is read back exactly once: {events:?}"
+    );
+    at[0]
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R77
+#[test]
+fn a_message_taken_in_mid_turn_is_read_back_where_the_turn_took_it_in() {
+    // Fixture 52: a message written while the first tool call ran. The record
+    // has no prompt entry for it, only a `queue-operation` `remove` with
+    // reason `absorbed_mid_turn`, between the first tool result and the reply
+    // that answers it; its `commandUuid` is the id the live echo gave it.
+    let events = recorded("52-replay-message-during-tool-turn");
+    let echo_uuid = "0e92c368-3943-4a95-afb9-13c839dfe21b";
+    let at = only_place_of(&events, echo_uuid);
+    assert_eq!(
+        events[at],
+        RecordEvent {
+            message_id: Some(echo_uuid.into()),
+            ts: Some("2026-11-14T20:09:15.456Z".into()),
+            backend_version: None,
+            event: Event::UserMessage(UserMessage {
+                text: "Now reply with the single word: second".into(),
+                origin: MessageOrigin::Human,
+                peer: None,
+                attachments: Vec::new(),
+            }),
+        }
+    );
+    let first_result = events
+        .iter()
+        .position(|e| {
+            matches!(&e.event, Event::ToolResult(r)
+                if r.tool_use_id == "toolu_01CbmAbqcweia7etWwfxH9vX")
+        })
+        .expect("the first tool result");
+    let reply = events
+        .iter()
+        .position(|e| matches!(&e.event, Event::AssistantText(t) if t.text == "second"))
+        .expect("the reply to the message");
+    assert!(
+        first_result < at && at < reply,
+        "the message sits between the first tool result ({first_result}) and its reply ({reply}), not at {at}"
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R77
+#[test]
+fn other_queue_operations_are_not_messages() {
+    let queued = |operation: &str, reason: Option<&str>| {
+        let mut entry = json!({"type": "queue-operation", "operation": operation,
+            "timestamp": "2026-11-14T20:09:15.456Z", "sessionId": "s"});
+        if let Some(reason) = reason {
+            entry["reason"] = json!(reason);
+            entry["content"] = json!("words");
+            entry["commandUuid"] = json!("c1");
+        }
+        entry
+    };
+    let entries = [
+        prompt("u1", None, "Hello"),
+        queued("enqueue", None),
+        queued("dequeue", None),
+        queued("remove", Some("cancelled")),
+        queued("remove", Some("absorbed_mid_turn")),
+    ];
+    assert_eq!(
+        texts(&events_of(&entries)),
+        ["user: Hello", "user: words"],
+        "only the `remove` the turn absorbed is a message"
+    );
+    assert_eq!(texts(&events_of(&entries[..4])), ["user: Hello"]);
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R77
+#[test]
+fn a_message_taken_in_mid_turn_keeps_its_attachments_when_read_back() {
+    // Fixture 54: the message has words, an image and a file. The `remove`
+    // entry's `content` holds only the words and the file list as text; the
+    // `queued_command` attachment before it holds the blocks as sent.
+    let events = recorded("54-replay-attachments-during-tool-turn");
+    let echo_uuid = "efb93296-1625-42a9-821c-48654f45e299";
+    let at = only_place_of(&events, echo_uuid);
+    let Event::UserMessage(message) = &events[at].event else {
+        panic!("{:?}", events[at]);
+    };
+    assert_eq!(
+        message.text,
+        "Now reply with one word: the color of the attached image."
+    );
+    assert_eq!(message.origin, MessageOrigin::Human);
+    assert!(
+        matches!(message.attachments.as_slice(), [
+            MessageAttachment::Image { media_type, .. },
+            MessageAttachment::File { path },
+        ] if media_type == "image/png" && path == "README.md"),
+        "{:?}",
+        message.attachments
+    );
+    assert_eq!(events[at].ts.as_deref(), Some("2026-11-15T22:01:40.121Z"));
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+#[test]
+fn a_message_taken_in_mid_turn_on_an_abandoned_branch_is_not_read_back() {
+    // A message taken in part way through the first reply's turn, then a
+    // rewind in the terminal to the first prompt with a new second prompt.
+    // The `remove` entry has no chain fields of its own; its attachment does,
+    // and lies on the abandoned branch.
+    let taken_in = |parent: &str| {
+        json!({"type": "attachment", "uuid": "q1", "parentUuid": parent, "isSidechain": false,
+            "attachment": {"type": "queued_command", "source_uuid": "c1",
+                "prompt": [{"type": "text", "text": "Taken in"}]}})
+    };
+    let remove = json!({"type": "queue-operation", "operation": "remove",
+        "reason": "absorbed_mid_turn", "content": "Taken in", "commandUuid": "c1"});
+    let entries = [
+        prompt("u1", None, "Hello"),
+        reply("a1", "u1", "m1", "Working"),
+        taken_in("a1"),
+        remove.clone(),
+        reply("a2", "q1", "m2", "Done"),
+        prompt("u2", Some("u1"), "Edited"),
+    ];
+    assert_eq!(texts(&events_of(&entries)), ["user: Hello", "user: Edited"]);
+    // Kept when its branch is the conversation.
+    assert_eq!(
+        texts(&events_of(&entries[..5])),
+        [
+            "user: Hello",
+            "assistant: Working",
+            "user: Taken in",
+            "assistant: Done"
+        ]
+    );
+}
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R77
+#[test]
+fn a_message_taken_in_just_before_the_record_ends_is_read_back() {
+    // The CLI took a message in and stopped before the next reply: the
+    // attachment ends the record, after the conversation's last message.
+    let entries = [
+        prompt("u1", None, "Hello"),
+        reply("a1", "u1", "m1", "Working"),
+        json!({"type": "attachment", "uuid": "q1", "parentUuid": "a1", "isSidechain": false,
+            "attachment": {"type": "queued_command", "source_uuid": "c1",
+                "prompt": [{"type": "text", "text": "Taken in"},
+                    {"type": "text", "text": "<ersa-attachments>\nfile: a.txt\n</ersa-attachments>"}]}}),
+        json!({"type": "queue-operation", "operation": "remove", "reason": "absorbed_mid_turn",
+            "content": "Taken in\n<ersa-attachments>\nfile: a.txt\n</ersa-attachments>",
+            "commandUuid": "c1"}),
+    ];
+    let events = events_of(&entries);
+    assert_eq!(
+        texts(&events),
+        ["user: Hello", "assistant: Working", "user: Taken in"]
+    );
+    // Its blocks come from the attachment, so the file is an attachment.
+    assert!(events.iter().any(|e| matches!(e, Event::UserMessage(m)
+        if m.attachments == [MessageAttachment::File { path: "a.txt".into() }])));
 }

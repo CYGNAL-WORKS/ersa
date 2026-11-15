@@ -6,8 +6,9 @@
 //! Messages API message the live stream carries, so it reuses the stream's
 //! types; the wrapper around it is internal to the CLI and changes between
 //! versions, so every wrapper field is optional or kept in `extra`. Every
-//! other kind of entry (attachments, snapshots, queue operations and the like)
-//! parses into [`RecordEntry::Other`] and is ignored.
+//! other kind of entry (attachments, snapshots and the like) parses into
+//! [`RecordEntry::Other`] and is ignored, except a `queued_command`
+//! attachment, read through [`queued_command`].
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -33,6 +34,9 @@ pub enum RecordEntry {
     LastPrompt(LastPrompt),
     /// Something the CLI noted itself; only `local_command` is read.
     System(RecordSystem),
+    /// A change to the CLI's queue of messages written during a turn; only a
+    /// message a turn took in part way is read.
+    QueueOperation(QueueOperation),
     #[serde(untagged)]
     Other(Value),
 }
@@ -202,6 +206,77 @@ pub struct RecordAssistant {
     pub effort: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+/// A `queue-operation` entry. A message written during a turn has an
+/// `enqueue` when written; a turn that takes it in part way leaves a `remove`
+/// whose `reason` is `absorbed_mid_turn`, with the message's `content` and,
+/// in `commandUuid`, the id the live stream's echo gave it
+/// (PROTO-CLAUDE-CODE-STREAM, Sequencing). The other entries carry no message.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QueueOperation {
+    /// `enqueue`, `dequeue` or `remove`. Absent only from older fixtures
+    /// that cut the entry to its kind.
+    #[serde(default)]
+    pub operation: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// The message: its words as a string, or its content blocks.
+    #[serde(default)]
+    pub content: Option<Value>,
+    #[serde(default, rename = "commandUuid")]
+    pub command_uuid: Option<String>,
+    #[serde(default)]
+    pub timestamp: Option<String>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl QueueOperation {
+    /// The message a turn took in part way: its id, the echo's, and the
+    /// blocks `content` holds. `content` is the message's text blocks joined
+    /// by newlines, without its images; the `queued_command` attachment keeps
+    /// the blocks as sent (fixture 2.1.316/54).
+    pub fn absorbed_mid_turn(&self) -> Option<(&str, Vec<Value>)> {
+        if self.operation.as_deref() != Some("remove")
+            || self.reason.as_deref() != Some("absorbed_mid_turn")
+        {
+            return None;
+        }
+        Some((
+            self.command_uuid.as_deref()?,
+            as_blocks(self.content.as_ref()?)?,
+        ))
+    }
+}
+
+/// An `attachment` entry of type `queued_command`: a message a turn takes in
+/// part way, as the model was given it. `prompt` holds the message's content
+/// blocks as the host sent them, images included, and `source_uuid` the id
+/// the live stream's echo gave it. Returns that id and those blocks; any
+/// other entry gives `None`.
+pub fn queued_command(entry: &Value) -> Option<(&str, Vec<Value>)> {
+    if entry.get("type")?.as_str()? != "attachment" {
+        return None;
+    }
+    let attachment = entry.get("attachment")?;
+    if attachment.get("type")?.as_str()? != "queued_command" {
+        return None;
+    }
+    Some((
+        attachment.get("source_uuid")?.as_str()?,
+        as_blocks(attachment.get("prompt")?)?,
+    ))
+}
+
+/// A message's content as blocks, the way the live stream reads it: a string
+/// is one text block.
+fn as_blocks(content: &Value) -> Option<Vec<Value>> {
+    match content {
+        Value::String(text) => Some(vec![serde_json::json!({ "type": "text", "text": text })]),
+        Value::Array(blocks) => Some(blocks.clone()),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

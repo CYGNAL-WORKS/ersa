@@ -26,8 +26,10 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::BACKEND;
-use crate::projector::{SYNTHETIC_MODEL, kind_of, reply_events, tool_result_events};
-use crate::wire::{LocalCommandOutput, MessageContent, RecordEntry, RecordUser};
+use crate::projector::{
+    SYNTHETIC_MODEL, kind_of, reply_events, tool_result_events, user_message_of,
+};
+use crate::wire::{LocalCommandOutput, MessageContent, RecordEntry, RecordUser, queued_command};
 
 /// The longest record line read as an entry: as long as the longest line
 /// Core reads from a backend (its transport's line limit), well above a
@@ -68,7 +70,11 @@ pub fn project_record_from<R: BufRead + Seek>(
     limit: u64,
 ) -> io::Result<Vec<RecordEvent>> {
     let lines = scan_lines(reader, limit)?.lines;
-    let Conversation { chain, problem } = conversation_of(&lines);
+    let Conversation {
+        chain,
+        trailing,
+        problem,
+    } = conversation_of(&lines);
 
     let mut projector = RecordProjector::default();
     let mut out = Vec::new();
@@ -92,7 +98,23 @@ pub fn project_record_from<R: BufRead + Seek>(
                 // An entry written twice (a resume can repeat one) counts once.
                 let repeated =
                     uuid(&fields).is_some_and(|id| !projected_ids.insert(id.to_string()));
-                if !on_conversation(&chain, &fields) || repeated {
+                // An entry after the last message on the conversation's own
+                // branch yields no event, but a message a turn took in part
+                // way may need its `queued_command` attachment.
+                let trails = uuid(&fields).is_some_and(|id| trailing.contains(id));
+                if !on_conversation(&chain, &fields) && !trails {
+                    // A message taken in part way has a `remove` entry with no
+                    // chain fields; its `queued_command` attachment has them.
+                    // One on an abandoned branch marks the message as on it
+                    // too (PROTO-CLAUDE-CODE-STREAM-R20).
+                    if fields.get("type").and_then(Value::as_str) == Some("attachment")
+                        && let Some(value) = entry_at(reader, offset, len)?
+                    {
+                        projector.abandon(&value);
+                    }
+                    continue;
+                }
+                if repeated {
                     continue;
                 }
                 if let Some(value) = entry_at(reader, offset, len)? {
@@ -398,6 +420,11 @@ struct Conversation {
     /// The ids of the entries on its chain, or `None` when every
     /// main-thread entry counts, in file order.
     chain: Option<HashSet<String>>,
+    /// The entries after the chain's last message on the same branch, which
+    /// are not messages (attachments the CLI wrote before the next reply).
+    /// They are not on the chain, but they are not on an abandoned branch
+    /// either.
+    trailing: HashSet<String>,
     /// Why the chain could not be followed whole, for an error event.
     problem: Option<String>,
 }
@@ -416,6 +443,7 @@ struct Conversation {
 fn conversation(entries: &[&Value]) -> Conversation {
     let every_entry = |problem| Conversation {
         chain: None,
+        trailing: HashSet::new(),
         problem,
     };
     // A record that links no entries at all (an older or hand-made one).
@@ -460,8 +488,10 @@ fn conversation(entries: &[&Value]) -> Conversation {
     // so each entry is walked at most once (and a cycle ends the walk).
     let mut walked = HashSet::new();
     let mut last_message = None;
+    let mut trailing = HashSet::new();
     'leaves: for (leaf, _) in leaves {
         let mut at = Some(leaf);
+        let mut walked_here = HashSet::new();
         while let Some(id) = at {
             let Some(node) = nodes.get(id) else {
                 break;
@@ -471,8 +501,10 @@ fn conversation(entries: &[&Value]) -> Conversation {
             }
             if node.message {
                 last_message = Some(id);
+                trailing = walked_here;
                 break 'leaves;
             }
+            walked_here.insert(id.to_string());
             at = node.parent;
         }
     }
@@ -504,6 +536,7 @@ fn conversation(entries: &[&Value]) -> Conversation {
                 }
                 return Conversation {
                     chain: Some(chain),
+                    trailing,
                     problem: Some(format!(
                         "the record's chain names entry {parent}, which it does not have; \
                          the entries before the break are shown in file order"
@@ -514,6 +547,7 @@ fn conversation(entries: &[&Value]) -> Conversation {
     }
     Conversation {
         chain: Some(chain),
+        trailing,
         problem: None,
     }
 }
@@ -524,9 +558,24 @@ fn conversation(entries: &[&Value]) -> Conversation {
 #[derive(Debug, Default)]
 struct RecordProjector {
     blocks_seen: HashMap<String, u64>,
+    /// The blocks of each message a turn took in part way, from its
+    /// `queued_command` attachment, by the echo's id, until its `remove`
+    /// entry reads them.
+    taken_in: HashMap<String, Vec<Value>>,
+    /// The echo ids of messages taken in part way on an abandoned branch,
+    /// whose `remove` entries project to nothing.
+    abandoned: HashSet<String>,
 }
 
 impl RecordProjector {
+    /// Notes an entry off the conversation that may be a message's
+    /// `queued_command` attachment.
+    fn abandon(&mut self, value: &Value) {
+        if let Some((echo_id, _)) = queued_command(value) {
+            self.abandoned.insert(echo_id.to_string());
+        }
+    }
+
     /// The events of one entry. Entries that carry no message (titles,
     /// snapshots, attachments, and whatever else the CLI keeps) yield none.
     fn project(&mut self, value: Value) -> Vec<RecordEvent> {
@@ -585,7 +634,38 @@ impl RecordProjector {
                         .collect()
                 }
             },
+            // A message a turn took in part way has no prompt entry of its
+            // own: this `remove` is the message, read as the live stream read
+            // its echo and under the echo's id, so the transcript shows it
+            // where the turn took it in (PROTO-CLAUDE-CODE-STREAM-R77).
+            // Every other queue operation carries no message.
+            RecordEntry::QueueOperation(queued) => {
+                let Some((echo_id, content)) = queued.absorbed_mid_turn() else {
+                    return Vec::new();
+                };
+                if self.abandoned.contains(echo_id) {
+                    return Vec::new();
+                }
+                // `content` holds the words alone, its file list among them
+                // and its images left out; the attachment, when the record
+                // has it, holds the message as sent, so it shows as it did
+                // live (inbox).
+                let blocks = self.taken_in.remove(echo_id).unwrap_or(content);
+                return user_message_of(&blocks)
+                    .map(|message| RecordEvent {
+                        message_id: Some(echo_id.to_string()),
+                        ts,
+                        backend_version: version,
+                        event: Event::UserMessage(message),
+                    })
+                    .into_iter()
+                    .collect();
+            }
             RecordEntry::Other(_) => {
+                if let Some((echo_id, blocks)) = queued_command(&value) {
+                    self.taken_in.insert(echo_id.to_string(), blocks);
+                    return Vec::new();
+                }
                 let kind = value.get("type").and_then(Value::as_str);
                 if matches!(kind, Some("user" | "assistant")) {
                     // A message entry whose shape has drifted: say so, and
