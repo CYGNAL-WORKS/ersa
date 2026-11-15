@@ -8,7 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-15 none (docs/design/RAIL.md, DESIGN.md Iconography): RAIL.md says every backend shows one neutral icon until the vendors' terms are checked, and DESIGN.md says icons are stroked Lucide; per the owner's 2026-11-15 decision in #399, a Claude Code tile now draws the Claude spark and a Copilot tile Copilot's icon as filled ink-toned glyphs, any other backend a Lucide terminal. Built to the issue meanwhile.
 
 
 
