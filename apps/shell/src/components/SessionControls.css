@@ -31,3 +31,41 @@
 .session-controls-how > .context-ring {
   flex: none;
 }
+
+/* The Worktree checkbox (issue 412): a chip (Chip.css) that is the label of its own checkbox, so it takes the chip's
+   pill and every state from there; here only the hidden box and the drawn one. */
+.worktree {
+  position: relative;
+  user-select: none;
+}
+
+/* The native box lies over the whole pill, unseen, so a press anywhere on it toggles and the keyboard reaches it. */
+.worktree-input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+/* Unchecked, the box is ink-faint like a chip's icon; checked, it is the accent, the colour of the active choice;
+   unavailable, ink-faint again. */
+.worktree-box {
+  display: inline-flex;
+  color: var(--color-ink-faint);
+  transition: color var(--motion-quick) var(--motion-ease-out);
+}
+
+.worktree-box[data-checked] {
+  color: var(--color-accent);
+}
+
+.worktree[data-disabled] .worktree-box {
+  color: var(--color-ink-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .worktree-box {
+    transition: none;
+  }
+}

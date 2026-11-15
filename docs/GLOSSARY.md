@@ -16,8 +16,8 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Project**: a repository or root folder the user has added to Ersa, on a particular host.
 - **Trusted project**: a project whose own configuration (settings, hooks, MCP servers, permission rules) the user has agreed may run in its sessions. A project is trusted when the user adds it, after the trust question; the user can withdraw trust later, and an untrusted project's sessions run with the user's own configuration only.
 - **Workspace**: a checkout belonging to a project where one or more sessions do their work: an isolated workspace (a git worktree is one kind; a Perforce workspace is another) or the project's root workspace.
-- **Root workspace**: a project's own folder as a workspace. Every project has one. It is not isolated: its sessions share its files with each other and with the user. A session runs there when the user chooses it over a new workspace. The session controls call it the project folder.
-- **Base branch**: the branch a new isolated workspace is made from. Starts at the repository's default branch: the one `origin/HEAD` names, else main or master, else what the project's folder has checked out.
+- **Root workspace**: a project's own folder as a workspace. Every project has one. It is not isolated: its sessions share its files with each other and with the user. A session runs there when the user unchecks Worktree, or when the project's version control gives Ersa no isolated workspaces.
+- **Base branch**: the branch a new isolated workspace is made from: the repository's default branch, which is the one `origin/HEAD` names, else main or master, else what the project's folder has checked out.
 - **Scratch folder**: the folder inside a workspace where Ersa puts copies of attachments from outside it, ignored by version control.
 - **Effort**: how much reasoning a backend spends per turn, in the backend's own levels. Chosen when a session starts.
 - **Permission mode**: a backend's rule for which of the agent's actions ask the user first, in the backend's own names. Chosen when a session starts.
@@ -68,7 +68,8 @@ One term per concept. Use these words in briefs, identifiers, and UI copy. Add a
 - **Usage window**: a span of time over which a backend counts an account's use against a limit, such as a plan's five-hour and weekly limits. The backend reports each window's share used and when it resets.
 - **Transcript**: the main area rendering the active session's projection as a document with cards. *Not: chat history, chat log.*
 - **Composer**: the input area beneath the transcript where the user writes to the agent. *Not: chat box, input box, prompt box.*
-- **Session controls**: the row of chips beneath the composer naming where and how a session runs: host, project, workspace, backend, model, effort and permission mode, with the context ring. Set before the first message; shown during the session, where the model, effort and permission mode can still change.
+- **Session controls**: the row beneath the composer naming where and how a session runs: the host and project chips, the Worktree checkbox, then the backend, model, effort and permission mode chips, with the context ring. Set before the first message; shown during the session, where the model, effort and permission mode can still change.
+- **Worktree checkbox**: the checkbox in the session controls, labeled Worktree, that gives a new session an isolated workspace of its own. Unchecked, the session runs in the root workspace. "Worktree" is the label; the thing it makes is an isolated workspace.
 - **Sessions page**: what the transcript area shows after View all: every session in one list, active or archived, with search. Choosing one opens it.
 - **New-session screen**: what the transcript area shows while no session is active: the composer and the session controls, ready for the first message, which starts the session.
 - **Workbench**: the right-hand area holding panes.

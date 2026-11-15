@@ -25,8 +25,8 @@ test("a pasted image and files dropped on the box attach, and the agent reads th
   await added;
   await page.getByRole("button", { name: "Trust", exact: true }).click();
   await expect(rail.getByRole("button", { name: /^New session in / })).toBeVisible();
-  await page.getByRole("button", { name: /^Workspace:/ }).click();
-  await page.getByRole("option", { name: /Project folder/ }).click();
+  // A folder without git runs in the project folder itself, with no Worktree checkbox.
+  await expect(page.getByRole("checkbox", { name: "Worktree" })).toHaveCount(0);
 
   // Paste an image into the words, as the clipboard holds one after a screenshot.
   const words = page.getByRole("textbox", { name: "Message" });
