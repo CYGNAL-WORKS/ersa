@@ -60,7 +60,7 @@ The user opens a session, or sends a message (`FLOW-SEND-MESSAGE`) and watches t
 
 ## Built so far
 
-Formatted text (R01 to R05, R14, R15), tool cards and the thinking row (R06 to R08, R10 to R12), diff cards (R09, R13) and the stopped state (R16). Until `tool.requested` carries `target_kind` (PROTO-AGENT-EVENTS-R26), the Interface takes a target for a path when it lies inside the workspace folder or is spelled as an absolute path.
+Formatted text (R01 to R05, R14, R15), tool cards and the thinking row (R06 to R08, R10 to R12), diff cards (R09, R13) and the stopped state (R16).
 
 ## Out of scope
 
@@ -79,6 +79,7 @@ Formatted text (R01 to R05, R14, R15), tool cards and the thinking row (R06 to R
 
 ## Changes
 
+- 2026-11-14: from #394 inbox: Built so far no longer describes the guess from a target's spelling, since `tool.requested` carries `target_kind` (PROTO-AGENT-EVENTS-R26). No requirement IDs changed.
 - 2026-11-14: from #385 inbox: Built so far says diff cards and the stopped state are built; a call whose turn ended with its permission request still open shows as stopped, and whether the turn's end closes the request is FLOW-APPROVE-PERMISSION's open question. No requirement IDs changed.
 - 2026-11-14: from #360 inbox: a call with no result when its turn or session ends shows as stopped (FLOW-READ-TRANSCRIPT-R16 added); a call already running when its session is opened shows as running with no clock until its result, which R06 already says; a target is a path when its event says so (PROTO-AGENT-EVENTS-R26), R08 unchanged; Built so far added.
 - 2026-11-13: from #355 inbox: an image with no alternative text shows its address as the link's text; Copy says it copied only once the clipboard has taken the text; a table's header row reads as part of the paragraph before it until its delimiter row arrives, which is the table arriving and not earlier text changing (R05 unchanged). FLOW-READ-TRANSCRIPT-R14 and R15 added.
