@@ -37,8 +37,10 @@ describe("the Worktree checkbox", () => {
     expect(box()?.getAttribute("aria-description")).toBe("The session works in an isolated copy of the repository.");
     expect(box()?.closest("label")?.getAttribute("title")).toBe("The session works in an isolated copy of the repository.");
     expect(screen.queryByRole("button", { name: /^Workspace:/ })).toBeNull();
-    // Where the session runs leads the row: host, project, then the checkbox.
-    expect(box()?.closest(".session-controls-where")).not.toBeNull();
+    // Where the session runs leads the row: host, project, then the checkbox, straight after the project chip.
+    const where = box()?.closest(".session-controls-where");
+    const order = [...(where?.querySelectorAll("button.chip, label.worktree") ?? [])].map((el) => el.getAttribute("aria-label") ?? el.textContent);
+    expect(order).toEqual(["Host: Local", "Project: alpha", "Worktree"]);
   });
 
   // verifies: FLOW-NEW-SESSION-R37
