@@ -598,6 +598,15 @@ pub trait Projector: Send {
     fn reported_permission_mode(&self) -> Option<&str> {
         None
     }
+
+    /// How many messages the backend holds behind its running turn, from
+    /// the lines projected so far: messages handed over during a turn that
+    /// the backend has not yet taken in. Core shows it as the tile's
+    /// `waiting` while the session is live (PROTO-CORE-API-R81). 0, the
+    /// default, for a backend that holds none.
+    fn waiting(&self) -> u32 {
+        0
+    }
 }
 
 /// One event a projector produced, with the backend's id for the message it
