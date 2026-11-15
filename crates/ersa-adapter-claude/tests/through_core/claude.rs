@@ -194,6 +194,26 @@ pub fn parse(line: &str) -> Value {
     serde_json::from_str(line).unwrap()
 }
 
+/// Whether `line` is the request to name a new session, which Ersa sends
+/// after a new session's first message (PROTO-CLAUDE-CODE-STREAM-R49) and
+/// the recordings made before it was built do not hold.
+pub fn is_title_request(line: &str) -> bool {
+    parse(line)["request"]["subtype"] == "generate_session_title"
+}
+
+/// What a stub CLI was sent, but the request to name the session, to
+/// compare with a recording made before Ersa asked; asserts the request was
+/// there.
+pub fn sent_but_title(transport: &FakeTransport) -> Vec<String> {
+    let lines = transport.stdin_lines();
+    assert_eq!(
+        lines.iter().filter(|l| is_title_request(l)).count(),
+        1,
+        "{lines:#?}"
+    );
+    lines.into_iter().filter(|l| !is_title_request(l)).collect()
+}
+
 /// A stub CLI that answers each of Ersa's lines with the recording's next
 /// stdout lines: `initialize`, then the prompt, then the permission answer.
 pub fn stub(stdout: &[String]) -> FakeTransport {
@@ -201,8 +221,9 @@ pub fn stub(stdout: &[String]) -> FakeTransport {
 }
 
 /// A stub CLI for a recording whose `can_use_tool` request is stdout line
-/// `ask`: it answers `initialize`, takes the prompt, asks, and finishes the
-/// turn once it has an answer.
+/// `ask`: it answers `initialize`, takes the prompt and the request to name
+/// the new session (which it leaves unanswered, as a CLI that declines in
+/// silence would), asks, and finishes the turn once it has an answer.
 pub fn stub_asking_at(stdout: &[String], ask: usize) -> FakeTransport {
     let is = |kind: &'static str| {
         move |line: &str| {
@@ -210,6 +231,7 @@ pub fn stub_asking_at(stdout: &[String], ask: usize) -> FakeTransport {
             let ok = match kind {
                 "initialize" => v["request"]["subtype"] == "initialize",
                 "user" => v["type"] == "user",
+                "title" => v["request"]["subtype"] == "generate_session_title",
                 _ => v["type"] == "control_response",
             };
             if ok {
@@ -223,6 +245,7 @@ pub fn stub_asking_at(stdout: &[String], ask: usize) -> FakeTransport {
         .wait_for_stdin(is("initialize"))
         .then_stdout([&stdout[0]])
         .wait_for_stdin(is("user"))
+        .wait_for_stdin(is("title"))
         .then_stdout(&stdout[1..=ask])
         .wait_for_stdin(is("answer"))
         .then_stdout(&stdout[ask + 1..])

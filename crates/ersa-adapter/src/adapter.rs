@@ -591,10 +591,11 @@ pub trait Projector: Send {
     /// taking `ts` from `line`.
     fn project(&mut self, line: &RawLine) -> Vec<Projected>;
 
-    /// The latest title the backend announced on the live stream for the
-    /// session, from the lines projected so far: a name the user gave it,
-    /// which its record may not hold yet, with how many announcements there
-    /// have been, so that one repeating the last title still counts as one.
+    /// The latest title the live stream gave the session, from the lines
+    /// projected so far: a name the user gave it, or one the backend
+    /// generated when asked, which its record may not hold yet, with how
+    /// many such titles there have been, so that one repeating the last
+    /// title still counts as one.
     /// Core shows it as the session's title, in memory only, as it does any
     /// detail only the live stream carries. `None`, the default, before any
     /// announcement, and for a backend that makes none.

@@ -19,6 +19,7 @@ mod common;
 mod choices;
 mod claude;
 mod detection;
+mod generated_title;
 mod naming;
 mod replay;
 mod resume;
