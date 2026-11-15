@@ -2494,8 +2494,9 @@ enum Launched {
     /// A new session, or a fork with its hold on the original, let go once
     /// the start is over.
     New { fork_hold: Option<Arc<ForkHold>> },
-    /// A stopped session started again (FLOW-RESUME-SESSION).
-    Resumed,
+    /// A stopped session started again (FLOW-RESUME-SESSION), and when it
+    /// is a fork made again, its hold on the original, let go likewise.
+    Resumed { fork_hold: Option<Arc<ForkHold>> },
 }
 
 struct SessionTask {
@@ -2539,7 +2540,7 @@ async fn run_session(task: SessionTask) {
             let fact = fork_hold.is_some().then_some(LifecycleFact::ForkReady);
             (fork_hold, fact)
         }
-        Launched::Resumed => (None, Some(LifecycleFact::Resumed)),
+        Launched::Resumed { fork_hold } => (fork_hold, Some(LifecycleFact::Resumed)),
     };
     let sink = Arc::clone(&live.sink);
     sink.record_fact(LifecycleFact::ProcessStarted {

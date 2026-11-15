@@ -2,6 +2,7 @@
 //! what its fork begins with.
 
 use ersa_adapter::ConversationEnd;
+use ersa_protocol::core_api::WorkspaceState;
 
 use super::*;
 
@@ -96,6 +97,15 @@ impl SessionManager {
         self.refuse_if_deleting(&handle)?;
         let row = lock(&handle.row).clone();
         self.refuse_if_claimed(&row.workspace_id)?;
+        // A session is forked only from a ready workspace (PROTO-CORE-API,
+        // Workspaces).
+        let workspace = self.store.workspace(row.workspace_id.clone()).await?;
+        if let Some(workspace) = workspace.filter(|w| w.state != WorkspaceState::Ready) {
+            return Err(SessionError::InvalidState(format!(
+                "workspace {} is not ready",
+                workspace.id
+            )));
+        }
         refuse_if_turn_running(&handle)?;
 
         let Some(backend_id) = row.backend_session_id else {
