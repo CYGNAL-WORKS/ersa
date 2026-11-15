@@ -38,7 +38,9 @@ use serde_json::{Map, Value};
 /// answer's `own_words`, and `answered_by: backend`.
 ///
 /// 6: `tool.requested` carries `target` and `edits`.
-pub const PROJECTION_VERSION: u32 = 6;
+///
+/// 7: `tool.requested` carries `target_kind` with its `target`.
+pub const PROJECTION_VERSION: u32 = 7;
 
 /// One event as Core streams it: a typed payload plus where it came from.
 ///
@@ -399,11 +401,34 @@ pub struct ToolRequested {
     /// backend's tool input to draw a card.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+    /// What kind of thing `target` is, so the Interface knows a path without
+    /// guessing from its spelling (PROTO-AGENT-EVENTS-R26). Present exactly
+    /// when `target` is; the schema refuses one without the other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_kind: Option<TargetKind>,
     /// For a call that changes files, one entry per change in the order the
     /// call makes them (PROTO-AGENT-EVENTS-R20). Never an empty list: a call
     /// that changes no file carries none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edits: Option<Vec<FileEdit>>,
+}
+
+/// What kind of thing a tool call's `target` is (PROTO-AGENT-EVENTS-R26).
+/// A command can begin with a path and a search can look like one, so only
+/// the adapter, which knows the tool, can say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetKind {
+    /// A file or folder the call reads or changes.
+    Path,
+    /// A shell command the call runs.
+    Command,
+    /// A pattern or query the call searches with.
+    Search,
+    /// A web address the call fetches.
+    Address,
+    /// The task a subagent is given.
+    Task,
 }
 
 /// One change a tool call makes to a file.
