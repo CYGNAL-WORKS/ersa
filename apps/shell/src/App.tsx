@@ -28,8 +28,8 @@ import { type Answers, type Decision, type Reply, answering } from "./session/an
 import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./session/shelf";
 import { sharedSubscriptions } from "./session/subscriptions";
 import { type DeletePhase, Deletion } from "./session/deletion";
-import { type Attached, attached, sendable, unreadable } from "./session/attachments";
-import { type Follower, type SendProgress, type SessionView, type Sending, follow, progressOf } from "./session/follow";
+import { type Attached, attached, sendable, unreadable, waitingName } from "./session/attachments";
+import { type Follower, type SendProgress, type SessionView, type Sending, type WaitingHere, follow, progressOf, waitingOf } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangement } from "./session/arrangement";
 import { StartStop, readChoices, rememberPatch, remembered, startSession } from "./session/start";
@@ -90,6 +90,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const [{ activeId, composing, starting, firstSend, sessionsPage }, dispatch] = useReducer(stage, initialStage);
   const [session, setSession] = useState<SessionView>();
   const follower = useRef<Follower | null>(null);
+  // What this window sent that still waits in the backend, by session, kept while another session is shown, so the
+  // status line names it again on coming back (FLOW-SEND-MESSAGE-R19). In memory only: a reload names none.
+  const waitingKept = useRef<Record<string, readonly WaitingHere[] | undefined>>({});
 
   // What the screen offers: each host's backends, and the values each project last started a session with.
   const [backends, setBackends] = useState<Record<string, BackendInfo[]>>({});
@@ -178,7 +181,15 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   useEffect(() => {
     if (activeId === undefined) return;
-    const following = follow(shared(), activeId, setSession);
+    const following = follow(
+      shared(),
+      activeId,
+      (view) => {
+        waitingKept.current[view.id] = view.waitingHere;
+        setSession(view);
+      },
+      waitingKept.current[activeId],
+    );
     follower.current = following;
     dispatch({ type: "followed", id: activeId });
     return () => {
@@ -894,10 +905,16 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onRead={read && ((paths) => read(paths, listed?.workspace_id))}
               dragDrop={dragDrop}
               workspace={listed?.workspace_id}
-              onSend={(text, attachments) => follower.current?.send(text, sendable(attachments)) ?? Promise.resolve(false)}
+              onSend={(text, attachments) =>
+                follower.current?.send(text, sendable(attachments), waitingName(text, attachments)) ?? Promise.resolve(false)
+              }
               // Stop, from sending until the turn ends: cancels the message on its way, or interrupts the turn (FLOW-SEND-MESSAGE-R03).
+              // While it works, Enter still sends, and the message waits in the backend (R18).
               working={shown.transcript.working || shown.turnPending}
               onStop={() => void follower.current?.interrupt()}
+              // Once chosen, stop takes no second choice until the turn ends, which would stop what waits (R20).
+              stopping={shown.stopChosen}
+              waiting={waitingOf(listed?.tile.waiting, shown.waitingHere)}
               controls={
                 sessionControls &&
                 listedProject &&

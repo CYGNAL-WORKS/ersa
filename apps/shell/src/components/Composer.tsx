@@ -6,6 +6,7 @@ import { type Attached, addAll, pastedImage, same, willCopy } from "../session/a
 import type { Sending } from "../session/follow";
 import { type AttachWhat, AttachMenu } from "./AttachMenu";
 import { AttachmentChip } from "./AttachmentChip";
+import { reducedMotion } from "../theme/motion";
 import { ContextRing } from "./ContextRing";
 import { Icon, IconButton } from "./Icon";
 import "./Composer.css";
@@ -17,6 +18,9 @@ import "./Composer.css";
  * detection (FLOW-NEW-SESSION-R07).
  */
 export type Unavailable = "reconnecting" | "unreachable" | "detecting" | "no-backend" | { failedBackend: string };
+
+/** How many messages wait in the backend, and, when one waits and this window sent it, its name (FLOW-SEND-MESSAGE-R19). */
+export type Waiting = { count: number; name?: string };
 
 interface ComposerProps {
   /** Why the user cannot send now; absent when they can. */
@@ -51,10 +55,20 @@ interface ComposerProps {
   statusTaken?: boolean;
   /** The session controls, beneath the box in the same column, space-xs below it (docs/design/COMPOSER.md). */
   controls?: ReactNode;
-  /** The agent is working on a turn: Enter does not send, and what is written stays for when it ends (FLOW-SEND-MESSAGE-R04). */
+  /**
+   * The agent is working on a turn: stop is offered, and Enter still sends, the message waiting in the backend
+   * (FLOW-SEND-MESSAGE-R18).
+   */
   working?: boolean;
   /** Stop: offered in send's place from the moment the user sends until the turn ends (FLOW-SEND-MESSAGE-R03). */
   onStop?: () => void;
+  /** Stop was chosen and the turn has not ended yet: stop shows it, and takes no second choice (FLOW-SEND-MESSAGE-R20). */
+  stopping?: boolean;
+  /**
+   * Messages waiting in the backend, from the session's tile, and the one's name when this window sent it
+   * (FLOW-SEND-MESSAGE-R19).
+   */
+  waiting?: Waiting;
   /** For the gallery: send or stop shown under the pointer, pressed, or with keyboard focus. */
   forceSend?: "hover" | "pressed" | "focus";
   /** A permission request is open and holds the focal glow, so focus shows on the box's edge alone. */
@@ -72,15 +86,21 @@ interface ComposerProps {
  * Where the user writes to the agent (docs/design/COMPOSER.md): the status line above the box, and the box holding
  * attach, the words and send. Enter sends; Shift+Enter starts a new line (FLOW-SEND-MESSAGE-R01).
  */
-export function Composer({ unavailable, sending, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, tall, statusTaken, controls, forceSend, working, onStop, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
+export function Composer({ unavailable, sending, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, tall, statusTaken, controls, forceSend, working, onStop, stopping, waiting, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const [attachments, setAttachments] = useState<Attached[]>(initialAttachments ?? []);
   const words = useRef<HTMLTextAreaElement>(null);
   useImperativeHandle(inputRef, () => words.current as HTMLTextAreaElement);
   const busy = sending?.state === "sending";
+  // Attachments being removed fade out before they go (docs/design/COMPOSER.md, Attachments); they are no longer
+  // part of the message.
+  const [leaving, setLeaving] = useState<ReadonlySet<Attached>>(new Set());
+  const live = attachments.filter((a) => !leaving.has(a));
   // An attachment Ersa can't send holds the message until it is removed (FLOW-SEND-MESSAGE-R10).
-  const held = attachments.some((a) => a.problem !== undefined);
-  const canSend = !unavailable && !busy && !working && !held && (text.trim() !== "" || attachments.length > 0);
+  const held = live.some((a) => a.problem !== undefined);
+  // While the agent works, Enter still sends: the message waits in the backend (FLOW-SEND-MESSAGE-R18). Only a
+  // message still on its way holds the next one back (R02).
+  const canSend = !unavailable && !busy && !held && (text.trim() !== "" || live.length > 0);
 
   // The attachments last sent, so a refusal naming one by its place marks that one (R10), even if others went since.
   const sent = useRef<readonly Attached[]>([]);
@@ -105,12 +125,23 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, onRe
     const at = focusAfter.current;
     if (at === undefined) return;
     focusAfter.current = undefined;
-    const removes = list.current?.querySelectorAll<HTMLButtonElement>(".composer-attachment-remove");
+    const removes = list.current?.querySelectorAll<HTMLButtonElement>(".composer-attachment:not([data-leaving]) .composer-attachment-remove");
     (removes?.[at] ?? words.current)?.focus({ preventScroll: true });
-  }, [attachments]);
-  const remove = (at: number) => {
-    focusAfter.current = at;
-    setAttachments((now) => now.filter((_, i) => i !== at));
+  }, [attachments, leaving]);
+  const drop = (gone: Attached) => {
+    setAttachments((now) => now.filter((a) => a !== gone));
+    setLeaving((now) => {
+      const next = new Set(now);
+      next.delete(gone);
+      return next;
+    });
+  };
+  const remove = (gone: Attached) => {
+    // Focus goes to the remove of the attachment that takes its place among those staying.
+    focusAfter.current = live.indexOf(gone);
+    // With reduced motion, or where nothing animates, it goes at once; else it fades out, then goes.
+    if (!fades()) return drop(gone);
+    setLeaving((now) => new Set(now).add(gone));
   };
 
   const add = (more: readonly Attached[]) => {
@@ -151,23 +182,16 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, onRe
   }, [dragDrop]);
 
   // An image pasted into the words is attached inline (R08), where the composer takes attachments. A clipboard that
-  // holds text too, as a copied range of cells with its picture, pastes its text, as it would.
+  // holds text too, as a copied range of cells with its picture, pastes its text as well.
   const paste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     if (!onRead) return;
     const images = Array.from(event.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
-    if (images.length === 0 || (event.clipboardData?.getData("text/plain") ?? "") !== "") return;
-    event.preventDefault();
+    if (images.length === 0) return;
+    if ((event.clipboardData?.getData("text/plain") ?? "") === "") event.preventDefault();
     void Promise.all(images.map(pastedImage)).then(add);
   };
   // From the moment of sending until the turn ends, the button is stop.
-  const stopping = (busy || !!working) && onStop !== undefined && !unavailable;
-  // The icon fades in only when send and stop trade places, not as the composer appears.
-  const [traded, setTraded] = useState(false);
-  const wasStopping = useRef(stopping);
-  if (wasStopping.current !== stopping) {
-    wasStopping.current = stopping;
-    if (!traded) setTraded(true);
-  }
+  const stop = (busy || !!working) && onStop !== undefined && !unavailable;
 
   // When the box becomes unavailable while the user is in it, focus goes back where it was, the words or the
   // send-or-stop button, once it is available again. Read as the box turns unavailable, before they are disabled.
@@ -192,7 +216,7 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, onRe
   const send = async () => {
     if (!canSend) return;
     const written = text;
-    const going = attachments;
+    const going = live;
     sent.current = going;
     // Clear only what was sent: anything typed or attached meanwhile is the next message (FLOW-SEND-MESSAGE-R02).
     if (await onSend(written, going)) {
@@ -213,7 +237,7 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, onRe
     <div className="composer">
       {/* Takes no height and grows upward, so the box and the session controls stay where they are. */}
       <div className="composer-status">
-        {!statusTaken && <StatusLine unavailable={unavailable} sending={sending} marked={refusedHere} />}
+        {!statusTaken && <StatusLine unavailable={unavailable} sending={sending} marked={refusedHere} waiting={waiting} />}
       </div>
       <form
         ref={box}
@@ -230,8 +254,15 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, onRe
       >
         {attachments.length > 0 && (
           <ul ref={list} className="composer-attachments" aria-label={t("composer.attachment.listLabel")}>
-            {attachments.map((a, i) => (
-              <Attachment key={a.path} attachment={a} copied={willCopy(a, workspace)} onRemove={() => remove(i)} />
+            {attachments.map((a) => (
+              <Attachment
+                key={a.path}
+                attachment={a}
+                copied={willCopy(a, workspace)}
+                leaving={leaving.has(a)}
+                onRemove={() => remove(a)}
+                onLeft={() => drop(a)}
+              />
             ))}
           </ul>
         )}
@@ -262,25 +293,23 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, onRe
             send it stays focusable, so focus on stop survives the turn ending; unavailable, it is disabled. */}
         <button
           ref={button}
-          type={stopping ? "button" : "submit"}
+          type={stop ? "button" : "submit"}
           className="composer-send"
-          data-stop={stopping || undefined}
+          data-stop={stop || undefined}
+          data-stopping={(stop && stopping) || undefined}
           data-force={forceSend}
-          aria-label={t(stopping ? "composer.stopButton" : "composer.sendButton")}
-          aria-disabled={(!stopping && !canSend) || undefined}
+          aria-label={t(!stop ? "composer.sendButton" : stopping ? "composer.stoppingProgress" : "composer.stopButton")}
+          aria-disabled={(stop ? stopping : !canSend) || undefined}
           disabled={unavailable !== undefined}
-          onClick={(event) => {
-            if (stopping) {
-              event.preventDefault();
-              onStop?.();
-            } else if (!canSend) {
-              event.preventDefault();
-            }
-          }}
+          // Send submits the form, which sends only what can be sent; stop, a plain button, is heard here, once.
+          onClick={stop && !stopping ? onStop : undefined}
         >
-          {/* Keyed, so the icon fades in as send and stop trade places. */}
-          <span key={stopping ? "stop" : "send"} className="composer-send-icon" data-traded={traded || undefined}>
-            <Icon icon={stopping ? Square : ArrowUp} size={stopping ? "icon-sm" : "icon"} />
+          {/* Both icons in one place, the one not shown faded out, so send and stop crossfade as they trade places. */}
+          <span className="composer-send-icon" data-shown={!stop || undefined}>
+            <Icon icon={ArrowUp} size="icon" />
+          </span>
+          <span className="composer-send-icon" data-shown={stop || undefined}>
+            <Icon icon={Square} size="icon-sm" />
           </span>
         </button>
       </form>
@@ -294,9 +323,28 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, onRe
  * workspace when sending copies it (FLOW-SEND-MESSAGE-R17), and remove (R09). One Ersa can't send shows the
  * danger glyph and why in place of its icon and detail (R10).
  */
-function Attachment({ attachment: a, copied, onRemove }: { attachment: Attached; copied: boolean; onRemove: () => void }) {
+function Attachment({
+  attachment: a,
+  copied,
+  leaving,
+  onRemove,
+  onLeft,
+}: {
+  attachment: Attached;
+  copied: boolean;
+  leaving: boolean;
+  onRemove: () => void;
+  onLeft: () => void;
+}) {
   return (
-    <AttachmentChip kind={a.kind} name={a.name} problem={a.problem !== undefined} className="composer-attachment">
+    <AttachmentChip
+      kind={a.kind}
+      name={a.name}
+      problem={a.problem !== undefined}
+      className="composer-attachment"
+      leaving={leaving}
+      onAnimationEnd={leaving ? onLeft : undefined}
+    >
       {a.problem !== undefined ? (
         <span className="composer-attachment-problem" role="alert">
           {a.problem}
@@ -314,11 +362,11 @@ function Attachment({ attachment: a, copied, onRemove }: { attachment: Attached;
 
 /**
  * One message at a time, first that Ersa can't reach the sessions, then a send whose outcome Ersa can't tell, then a
- * refused message, then detecting backends, then a host with no backend, then a send on its way
- * (docs/design/COMPOSER.md, The status line); nothing, and no height, while there is nothing to say. A message refused
+ * refused message, then detecting backends, then a host with no backend, then a send on its way, then a message waiting
+ * in the backend (docs/design/COMPOSER.md, The status line); nothing, and no height, while there is nothing to say. A message refused
  * for one of its attachments says why beside that attachment instead.
  */
-function StatusLine({ unavailable, sending, marked }: { unavailable?: Unavailable; sending?: Sending; marked: boolean }) {
+function StatusLine({ unavailable, sending, marked, waiting }: { unavailable?: Unavailable; sending?: Sending; marked: boolean; waiting?: Waiting }) {
   if (unavailable === "reconnecting" || unavailable === "unreachable") {
     // The rail's foot says the same and is the one that announces it.
     return <p className="composer-status-line">{t(unavailable === "reconnecting" ? "rail.foot.reconnectingError" : "rail.foot.unreachableError")}</p>;
@@ -363,5 +411,20 @@ function StatusLine({ unavailable, sending, marked }: { unavailable?: Unavailabl
       </p>
     );
   }
+  // Last, a message waiting in the backend: by its name in the window that sent it, else how many wait (R19).
+  if (waiting !== undefined && waiting.count > 0) {
+    return (
+      <p className="composer-status-line">
+        {waiting.count === 1 && waiting.name !== undefined
+          ? t("composer.waiting.namedNote", { name: waiting.name })
+          : t("composer.waiting.countNote", { count: waiting.count })}
+      </p>
+    );
+  }
   return null;
+}
+
+/** Whether a removed attachment fades out: not with reduced motion, nor where the window can't say (a test's DOM). */
+function fades(): boolean {
+  return typeof window !== "undefined" && typeof window.matchMedia === "function" && !reducedMotion();
 }

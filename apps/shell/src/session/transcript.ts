@@ -70,7 +70,7 @@ export interface Transcript {
   items: Item[];
   /** The session's lifecycle state, as its latest `session.state` said. */
   state?: SessionState["state"];
-  /** The agent is working on a turn: from `turn.started` until the turn completes or the session ends (FLOW-SEND-MESSAGE-R03, R04). */
+  /** The agent is working on a turn: from `turn.started` until the turn completes or the session ends (FLOW-SEND-MESSAGE-R03). */
   working?: boolean;
   /** Set when an event came with a schema version this Interface does not know; nothing after it is applied. */
   refused?: string;
