@@ -155,3 +155,15 @@
   position-area: block-start span-inline-end;
   position-try-fallbacks: none;
 }
+
+/* Room above the session controls' ring for its list, which opens above it toward the row's start, the ring at the
+   specimen's trailing edge as it sits at the row's. */
+.gallery-ring-room {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: var(--size-card-max);
+}
+
+.gallery-ring-room .context-ring-tip {
+  position-try-fallbacks: none;
+}

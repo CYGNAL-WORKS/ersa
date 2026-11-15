@@ -262,6 +262,12 @@ const pageMarks: SessionsView = {
 const pageArchived: SessionsView = { state: "ready", sessions: pageSessions.map((s) => ({ ...s, archived: true })) };
 
 /** The tree grouped by date, on 7 November 2026: ersa's and runner's sessions, made across the last fortnight. */
+// Usage windows with made-up shares, resetting a few days, an hour and a quarter, and a quarter of an hour after
+// `galleryNow`, so the ring's list shows each way of saying when a window resets.
+const minutesAfter = (minutes: number) => new Date(galleryNow.getTime() + minutes * 60_000).toISOString();
+const weeklyWindow = { id: "seven_day", label: "Weekly · all models", used: 0.62, resets_at: minutesAfter(3 * 24 * 60) };
+const fiveHourWindow = { id: "five_hour", label: "5-hour limit", used: 0.84, resets_at: minutesAfter(75) };
+const overageWindow = { id: "seven_day_overage_included", label: "Weekly · overage", used: 0.1, resets_at: minutesAfter(15) };
 const daysAgo = (days: number, hour: number) => new Date(2026, 10, 7 - days, hour).toISOString();
 const datedTree: Parameters<typeof RailTree>[0] = {
   ...tree,
@@ -1420,6 +1426,15 @@ const entries: Entry[] = [
       ["On a tile, quiet", <ContextRing used={0.42} size="ring-sm" />],
       ["On a tile, caution", <ContextRing used={0.65} size="ring-sm" />],
       ["On a tile, danger", <ContextRing used={0.93} size="ring-sm" />],
+      // In the session controls the ring reads the nearest limit, a usage window here, and names it (issue #422).
+      ["A window in caution", <ContextRing used={0.3} windows={[{ ...weeklyWindow, resets_at: undefined }]} />],
+      ["A window in danger", <ContextRing used={0.3} windows={[{ ...fiveHourWindow, resets_at: undefined }]} />],
+      [
+        "Keyboard focus, every reading listed",
+        <div className="gallery-ring-room">
+          <ContextRing used={0.3} windows={[weeklyWindow, fiveHourWindow, overageWindow]} now={galleryNow} force="focus" />
+        </div>,
+      ],
     ],
   },
   {

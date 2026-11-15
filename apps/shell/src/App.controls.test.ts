@@ -8,7 +8,9 @@ import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { App } from "./App";
 import type { Attachment, CoreClient, CoreEvent, Method } from "./core/client";
+import type { Envelope, Event } from "./protocol/agent-events.gen";
 import type { BackendInfo, CoreHelloResult, Session, Workspace } from "./protocol/core-api.gen";
+import { EVENT_VERSION } from "./session/transcript";
 
 afterEach(cleanup);
 
@@ -98,7 +100,23 @@ function fakeCore(listed: Session | Session[], more: Answers = {}) {
   };
   // Ersa loses Core; attaching again waits, so Core stays away.
   const drop = () => act(() => onEvent({ kind: "lost", reason: "gone" }));
-  return { client, calls, becomes, drop };
+  // Delivers a session's next events, numbered on from its last, to whoever subscribed.
+  const seqs = new Map<string, number>();
+  const play = (sessionId: string, ...events: Event[]) =>
+    events.forEach((e) => {
+      const seq = seqs.get(sessionId) ?? 0;
+      seqs.set(sessionId, seq + 1);
+      const event: Envelope = {
+        v: EVENT_VERSION,
+        session_id: sessionId,
+        seq,
+        ts: "2026-11-15T12:00:00Z",
+        source: { backend: "claude-code", backend_version: "2.1.302", input: "live" },
+        event: e,
+      };
+      act(() => onEvent({ kind: "notification", method: "session.event", params: { event } } as CoreEvent));
+    });
+  return { client, calls, becomes, drop, play };
 }
 
 const settle = () => act(() => new Promise((r) => setTimeout(r, 0)));
@@ -312,5 +330,73 @@ describe("a host whose backends can't be listed", () => {
     expect(document.body.textContent).not.toContain("No backend is available");
     expect(chip("Backend").getAttribute("aria-label")).toBe("Backend: Detection failed");
     expect(chip("Backend").querySelector('.glyph[data-tone="danger"]')).not.toBeNull();
+  });
+});
+
+// LAY-SHELL, Context; docs/design/COMPOSER.md, The context ring (issue #422): the session controls' ring reads the
+// nearest limit, the context or a usage window, and lists every reading; a tile's ring reads the context alone.
+describe("the session controls' ring", () => {
+  // Both sessions at 30 percent of their context; s1, the newer, shows at launch.
+  const thirty = { state: "idle" as const, pending: [], context_tokens: 60_000, context_window: 200_000 };
+  const sessions = [
+    session({ tile: thirty, created_at: "2026-11-02T09:00:00Z" }),
+    session({ id: "s2", title: "Write the docs", tile: thirty, created_at: "2026-11-01T09:00:00Z" }),
+  ];
+  const ring = () => within(controls()).getByRole("img");
+  // The ring beside a tile's title in the rail.
+  const tileRing = (title: string) => {
+    const tile = [...document.querySelectorAll(".session-title")].find((e) => e.textContent === title)?.parentElement?.parentElement;
+    return tile?.querySelector(".session-ring .context-ring") as HTMLElement;
+  };
+  const limits = (...windows: { label: string; used: number; resets_at?: string }[]): Event => ({
+    type: "usage.updated",
+    rate_limit: { status: "allowed", windows: windows.map((w, i) => ({ id: `w${i}`, ...w })) },
+  });
+
+  it("reads a window nearer its limit than the context, in danger, and names it", async () => {
+    const core = fakeCore(sessions);
+    await start(core);
+    core.play("s1", limits({ label: "Weekly · all models", used: 0.2 }, { label: "5-hour limit", used: 0.84 }));
+    expect(ring().getAttribute("aria-label")).toBe("5-hour limit: 84 percent used");
+    expect(ring().getAttribute("data-band")).toBe("danger");
+    expect(ring().textContent).toBe("84%");
+    // The tile's ring for the same session reads the context alone.
+    expect(tileRing("Fix the build").getAttribute("aria-label")).toBe("Context: 30 percent used");
+  });
+
+  it("reads the context when a window is at the same share", async () => {
+    const core = fakeCore(sessions);
+    await start(core);
+    core.play("s1", limits({ label: "5-hour limit", used: 0.3 }));
+    expect(ring().getAttribute("aria-label")).toBe("Context: 30 percent used");
+    expect(ring().hasAttribute("data-band")).toBe(false);
+  });
+
+  it("lists every reading, the context first, then each window in the order reported", async () => {
+    const core = fakeCore(sessions);
+    await start(core);
+    core.play("s1", limits({ label: "Weekly · all models", used: 0.62 }, { label: "5-hour limit", used: 0.84 }));
+    const list = document.getElementById(ring().getAttribute("aria-describedby") ?? "");
+    expect(list?.getAttribute("role")).toBe("tooltip");
+    expect([...(list?.children ?? [])].map((line) => line.firstElementChild?.textContent)).toEqual([
+      "Context: 30 percent used",
+      "Weekly · all models: 62 percent used",
+      "5-hour limit: 84 percent used",
+    ]);
+    // Keyboard focus reaches it, so the list can be read without a pointer.
+    expect(ring().tabIndex).toBe(0);
+  });
+
+  it("reads the context alone on a session with no windows and on the new-session screen", async () => {
+    const core = fakeCore(sessions);
+    await start(core);
+    core.play("s1", limits({ label: "5-hour limit", used: 0.84 }));
+    expect(ring().getAttribute("aria-label")).toBe("5-hour limit: 84 percent used");
+    fireEvent.click(screen.getByText("Write the docs"));
+    await settle();
+    expect(ring().getAttribute("aria-label")).toBe("Context: 30 percent used");
+    fireEvent.click(screen.getByRole("button", { name: "New session in alpha" }));
+    await settle();
+    expect(ring().getAttribute("aria-label")).toBe("Context: none used yet");
   });
 });
