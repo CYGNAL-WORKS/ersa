@@ -54,8 +54,6 @@ interface ComposerProps {
   forceAttachChoice?: { what: AttachWhat; state: "hover" | "pressed" | "focus" };
   /** The user changed the text. */
   onWrite?: () => void;
-  /** Three lines tall, as on the new-session screen; one line otherwise, as under a session. Either grows with the words. */
-  tall?: boolean;
   /** What a screen opens above the box in the status line's place, such as the trust question: the line says nothing meanwhile. */
   statusTaken?: boolean;
   /** The session controls, beneath the box in the same column, space-xs below it (docs/design/COMPOSER.md). */
@@ -91,7 +89,7 @@ interface ComposerProps {
  * Where the user writes to the agent (docs/design/COMPOSER.md): the status line above the box, and the box holding
  * attach, the words and send. Enter sends; Shift+Enter starts a new line (FLOW-SEND-MESSAGE-R01).
  */
-export function Composer({ unavailable, sending, refusedChange, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, tall, statusTaken, controls, forceSend, working, onStop, stopping, waiting, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
+export function Composer({ unavailable, sending, refusedChange, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, statusTaken, controls, forceSend, working, onStop, stopping, waiting, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const [attachments, setAttachments] = useState<Attached[]>(initialAttachments ?? []);
   const words = useRef<HTMLTextAreaElement>(null);
@@ -282,8 +280,7 @@ export function Composer({ unavailable, sending, refusedChange, onSend, onWrite,
           className="composer-words"
           aria-label={t("composer.messageLabel")}
           placeholder={t("composer.writePlaceholder")}
-          rows={tall ? 3 : 1}
-          data-tall={tall || undefined}
+          rows={1}
           autoFocus={autoFocus}
           value={text}
           disabled={unavailable !== undefined}

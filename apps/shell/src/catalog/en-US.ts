@@ -430,6 +430,12 @@ export const enUS = {
       // The project's branches could not be listed; the new workspace starts at the repository's default branch.
       branchesFailedError: "Ersa couldn't read this project's branches. The new workspace will start at the default branch.",
     },
+    // The backend's default model in the model chip and its list: Default, then the model the default
+    // resolves to, as Claude Desktop names it; Default alone when the backend says nothing of what it resolves to.
+    model: {
+      defaultLabel: "Default",
+      defaultOfLabel: "Default ({model})",
+    },
     // The effort chip's value with no level chosen (docs/design/COMPOSER.md, The session controls): the backend's own
     // effort, and the row that goes back to it; and what it reads for a model that takes no effort.
     effort: {
