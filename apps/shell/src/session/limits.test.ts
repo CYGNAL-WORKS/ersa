@@ -131,11 +131,15 @@ describe("when a window resets", () => {
     expect(words("2026-11-15T14:00:00Z")).toBe("Resets in 2 hr");
   });
 
-  it("reads minutes alone under an hour, rounded up, never none", () => {
+  it("reads minutes alone under an hour, rounded up", () => {
     expect(words("2026-11-15T12:15:00Z")).toBe("Resets in 15 min");
     expect(words("2026-11-15T12:14:01Z")).toBe("Resets in 15 min");
     expect(words("2026-11-15T12:00:10Z")).toBe("Resets in 1 min");
-    expect(words("2026-11-15T11:00:00Z")).toBe("Resets in 1 min");
+  });
+
+  it("says nothing once the time has passed, until the backend reports the window again", () => {
+    expect(words("2026-11-15T12:00:00Z")).toBeUndefined();
+    expect(words("2026-11-15T11:00:00Z")).toBeUndefined();
   });
 
   it("says nothing without a time it can read", () => {
