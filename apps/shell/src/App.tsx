@@ -34,7 +34,7 @@ import { initialStage, showsScreen, stage } from "./session/stage";
 import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangement } from "./session/arrangement";
 import { StartStop, readChoices, rememberPatch, remembered, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
-import { type Changeable, type Changing, changeSession, runs } from "./session/change";
+import { type Changeable, type Changes, NO_CHANGES, changeAnswered, changeSent, changeSession, isChangeable, refusalSeen, runs } from "./session/change";
 
 // The same objects every render, so effects and error-boundary keys that
 // depend on a list see no change while Core's phase stays the same.
@@ -427,19 +427,19 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // A running session's model, effort or permission mode, changed from its session controls (FLOW-NEW-SESSION-R30):
   // the chip reads the old value until Core answers with the backend's word on the new one; a refusal keeps it and
   // the status line says why until the user sends or opens a chip.
-  const [changing, setChanging] = useState<Record<string, Changing>>({});
+  const [changing, setChanging] = useState<Record<string, Changes>>({});
+  const changesOf = (id: string, update: (c: Changes) => Changes) => setChanging((all) => ({ ...all, [id]: update(all[id] ?? NO_CHANGES) }));
   const change = async (id: string, key: Changeable, value: string) => {
-    setChanging((c) => ({ ...c, [id]: { key, state: "sending" } }));
+    changesOf(id, (c) => changeSent(c, key));
     try {
       const changed = await changeSession(client, id, key, value);
       connection.current?.changed(id, changed);
-      setChanging(({ [id]: _, ...rest }) => rest);
+      changesOf(id, (c) => changeAnswered(c, key));
     } catch (error) {
-      setChanging((c) => ({ ...c, [id]: { key, state: "failed", message: (error as Error).message } }));
+      changesOf(id, (c) => changeAnswered(c, key, (error as Error).message));
     }
   };
-  // A refusal goes when the user sends or opens a chip; a change still on its way stays, so its answer is shown.
-  const resetChange = (id: string) => setChanging(({ [id]: was, ...rest }) => (was?.state === "sending" ? { ...rest, [id]: was } : rest));
+  const resetChange = (id: string) => changesOf(id, refusalSeen);
 
   // Pin and Unpin on a tile (FLOW-ORGANIZE-SESSIONS-R01): Core stores the pin, and the rail moves the tile once Core
   // has it. A refusal leaves the tile where Core has it and says why beneath it until the next try (R15).
@@ -747,7 +747,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const listedProject = listedWorkspace && projectById.get(listedWorkspace.project_id);
   const sessionControls = listed && listedWorkspace && sessionShown(listed, listedWorkspace, backends[listed.host_id] ?? []);
   const used = listed && contextUsed(listed.tile);
-  const changeHere = shown && changing[shown.id];
+  const changeHere = shown ? (changing[shown.id] ?? NO_CHANGES) : NO_CHANGES;
 
   // The open shelf as the rail draws it: the session's oldest request, with its readouts as its tile shows them.
   const shelfSession = openShelf !== undefined && sessions.state === "ready" ? sessions.sessions.find((s) => s.id === openShelf) : undefined;
@@ -932,7 +932,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                 resetChange(shown.id);
                 return follower.current?.send(text, sendable(attachments), waitingName(text, attachments)) ?? Promise.resolve(false);
               }}
-              refusedChange={changeHere?.state === "failed" ? changeHere.message : undefined}
+              refusedChange={changeHere.refused}
               // Stop, from sending until the turn ends: cancels the message on its way, or interrupts the turn (FLOW-SEND-MESSAGE-R03).
               // While it works, Enter still sends, and the message waits in the backend (R18).
               working={shown.transcript.working || shown.turnPending}
@@ -952,12 +952,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                   values={sessionControls.values}
                   workspaceLabel={sessionControls.workspaceLabel}
                   onChoose={(key, id) => {
-                    if (key === "model" || key === "effort" || key === "permission_mode") void change(shown.id, key, id);
+                    if (isChangeable(key)) void change(shown.id, key, id);
                   }}
                   onOpen={() => resetChange(shown.id)}
                   readOnly
                   changeable={listed !== undefined && runs(listed)}
-                  waiting={changeHere?.state === "sending" ? changeHere.key : undefined}
+                  waiting={changeHere.sending}
                   // Nothing reaches Core while Ersa can't reach it.
                   disabled={away !== undefined}
                   used={used}

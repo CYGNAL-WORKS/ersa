@@ -445,6 +445,9 @@ export const enUS = {
     },
     // The backend chip when the host could not list its backends (FLOW-NEW-SESSION-R11); the status line gives why.
     detectionFailedStatus: "Detection failed",
+    // The backend chip when the host lists none that can run, and while its backends are detected (R07, R23).
+    noBackendStatus: "No backend",
+    detectingBackendsProgress: "Detecting backends…",
     // The context ring's name, in the session controls and on a tile.
     contextRing: {
       noneLabel: "Context: none used yet",
