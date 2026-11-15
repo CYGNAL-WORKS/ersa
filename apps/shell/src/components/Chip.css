@@ -37,6 +37,10 @@
 .chip-chevron {
   display: inline-flex;
   color: var(--color-ink-faint);
+}
+
+/* It fades in and out as its session starts and stops. */
+.chip-chevron {
   transition: opacity var(--motion-quick) var(--motion-ease-out);
 }
 
@@ -93,7 +97,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chip {
+  .chip,
+  .chip-chevron {
     transition: none;
   }
 }

@@ -11,6 +11,7 @@ import {
   showsBackend,
   workspaceKinds,
 } from "../session/controls";
+import { isChangeable } from "../session/change";
 import { Chip, type ChipOption, type ChipSection } from "./Chip";
 import { ContextRing } from "./ContextRing";
 import "./SessionControls.css";
@@ -32,8 +33,7 @@ interface ChipHandlers {
   force?: "hover" | "focus" | "pressed";
 }
 
-/** The chips a running session's controls open (FLOW-NEW-SESSION-R30). */
-const CHANGEABLE: readonly ControlKey[] = ["model", "effort", "permission_mode"];
+
 
 interface SessionControlsProps {
   hosts: readonly Host[];
@@ -59,8 +59,8 @@ interface SessionControlsProps {
   readOnly?: boolean;
   /** Under a session that is running: its model, effort and permission mode chips open (FLOW-NEW-SESSION-R30). */
   changeable?: boolean;
-  /** The chip whose change is on its way to Core: it reads the old value and does not open. */
-  waiting?: ControlKey;
+  /** The chips whose change is on its way to Core: each reads its old value and does not open. */
+  waiting?: readonly ControlKey[];
   /** A chip's list opened. */
   onOpen?: () => void;
   /** The context ring's share used; absent before the session has used any. */
@@ -169,9 +169,9 @@ export function SessionControls({ hosts, localHostId, projects, backends, detect
     onOpen,
     disabled,
     // Under a session, only a running one's model, effort and permission mode open; those keep the chevron's place.
-    readOnly: readOnly && !(changeable && CHANGEABLE.includes(key)),
-    keepsChevron: readOnly && CHANGEABLE.includes(key),
-    waiting: waiting === key,
+    readOnly: readOnly && !(changeable && isChangeable(key)),
+    keepsChevron: readOnly && isChangeable(key),
+    waiting: waiting?.includes(key),
     initialOpen: open === key,
     force: force?.key === key ? force.state : undefined,
   });
@@ -237,7 +237,7 @@ export function SessionControls({ hosts, localHostId, projects, backends, detect
       </div>
       <div className="session-controls-how">
         {backends === undefined ? (
-          <Chip name="Backend" placeholder="Detecting backends…" pending options={[]} onChoose={() => {}} disabled />
+          <Chip name="Backend" placeholder={t("sessionControls.detectingBackendsProgress")} pending options={[]} onChoose={() => {}} disabled />
         ) : (
           <>
             {showsBackend(backends) && (
@@ -245,7 +245,7 @@ export function SessionControls({ hosts, localHostId, projects, backends, detect
                 name="Backend"
                 value={values.backend}
                 // A listing that failed is not a host without backends (FLOW-NEW-SESSION-R11).
-                placeholder={detectionFailed ? t("sessionControls.detectionFailedStatus") : "No backend"}
+                placeholder={t(detectionFailed ? "sessionControls.detectionFailedStatus" : "sessionControls.noBackendStatus")}
                 problem={available(backends).length === 0}
                 options={backends.map(backendOption)}
                 {...chip("backend")}

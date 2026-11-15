@@ -5,11 +5,34 @@ import { t } from "../catalog";
 import { type CoreClient, describeError } from "../core/client";
 import type { Session } from "../protocol/core-api.gen";
 
-/** What a running session's controls can change. */
-export type Changeable = "model" | "effort" | "permission_mode";
+/** What a running session's controls can change: the chips that open under it. */
+export const CHANGEABLE = ["model", "effort", "permission_mode"] as const;
+export type Changeable = (typeof CHANGEABLE)[number];
 
-/** A change on its way to Core, or the one Core refused, by the chip it was made from. */
-export type Changing = { key: Changeable; state: "sending" } | { key: Changeable; state: "failed"; message: string };
+export const isChangeable = (key: string): key is Changeable => (CHANGEABLE as readonly string[]).includes(key);
+
+/**
+ * A session's changes: the chips whose change is on its way to Core, each on its own, and why the last refused one
+ * was refused, which the status line says until the user sends or opens a chip.
+ */
+export interface Changes {
+  sending: readonly Changeable[];
+  refused?: string;
+}
+
+export const NO_CHANGES: Changes = { sending: [] };
+
+/** A change from `key`'s chip is on its way. */
+export const changeSent = (c: Changes, key: Changeable): Changes => ({ ...c, sending: [...c.sending.filter((k) => k !== key), key] });
+
+/** Core answered `key`'s change: accepted, or refused with why. Another change on its way, and its answer, stand. */
+export const changeAnswered = (c: Changes, key: Changeable, refused?: string): Changes => ({
+  sending: c.sending.filter((k) => k !== key),
+  refused: refused ?? c.refused,
+});
+
+/** The user sent or opened a chip: the refusal's line goes; changes on their way stay, so their answers are shown. */
+export const refusalSeen = (c: Changes): Changes => ({ sending: c.sending });
 
 /**
  * Whether the session runs in Core, so a change reaches its backend: Core refuses one for a session that is not live
@@ -26,6 +49,14 @@ const REFUSED = {
   effort: () => t("sessionControls.change.effortError"),
   permission_mode: () => t("sessionControls.change.permissionModeError"),
 } satisfies Record<Changeable, () => string>;
+
+/** Core's reason as a sentence of its own after the catalog's: a capital first, a period last. */
+function sentence(reason: string): string {
+  const text = reason.trim();
+  if (text === "") return text;
+  const capital = text.charAt(0).toUpperCase() + text.slice(1);
+  return /[.!?…]$/.test(capital) ? capital : `${capital}.`;
+}
 
 /** The fields of the session a change can move, as Core answers them: the backend's word on the new value. */
 export type Changed = Pick<Session, "model" | "model_request" | "effort" | "permission_mode">;
@@ -45,6 +76,6 @@ export async function changeSession(client: Pick<CoreClient, "call">, id: string
     // Only what the change moves: the rest of the session, its tile above all, comes from `session.list` as ever.
     return { model: answer.model, model_request: answer.model_request, effort: answer.effort, permission_mode: answer.permission_mode };
   } catch (error) {
-    throw new Error(`${REFUSED[key]()} ${describeError(error)}`);
+    throw new Error(`${REFUSED[key]()} ${sentence(describeError(error))}`);
   }
 }
