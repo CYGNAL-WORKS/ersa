@@ -70,7 +70,11 @@ pub fn project_record_from<R: BufRead + Seek>(
     limit: u64,
 ) -> io::Result<Vec<RecordEvent>> {
     let lines = scan_lines(reader, limit)?.lines;
-    let Conversation { chain, problem } = conversation_of(&lines);
+    let Conversation {
+        chain,
+        trailing,
+        problem,
+    } = conversation_of(&lines);
 
     let mut projector = RecordProjector::default();
     let mut out = Vec::new();
@@ -94,11 +98,15 @@ pub fn project_record_from<R: BufRead + Seek>(
                 // An entry written twice (a resume can repeat one) counts once.
                 let repeated =
                     uuid(&fields).is_some_and(|id| !projected_ids.insert(id.to_string()));
-                if !on_conversation(&chain, &fields) {
+                // An entry after the last message on the conversation's own
+                // branch yields no event, but a message a turn took in part
+                // way may need its `queued_command` attachment.
+                let trails = uuid(&fields).is_some_and(|id| trailing.contains(id));
+                if !on_conversation(&chain, &fields) && !trails {
                     // A message taken in part way has a `remove` entry with no
                     // chain fields; its `queued_command` attachment has them.
-                    // One off the conversation marks the message as on an
-                    // abandoned branch (PROTO-CLAUDE-CODE-STREAM-R20).
+                    // One on an abandoned branch marks the message as on it
+                    // too (PROTO-CLAUDE-CODE-STREAM-R20).
                     if fields.get("type").and_then(Value::as_str) == Some("attachment")
                         && let Some(value) = entry_at(reader, offset, len)?
                     {
@@ -412,6 +420,11 @@ struct Conversation {
     /// The ids of the entries on its chain, or `None` when every
     /// main-thread entry counts, in file order.
     chain: Option<HashSet<String>>,
+    /// The entries after the chain's last message on the same branch, which
+    /// are not messages (attachments the CLI wrote before the next reply).
+    /// They are not on the chain, but they are not on an abandoned branch
+    /// either.
+    trailing: HashSet<String>,
     /// Why the chain could not be followed whole, for an error event.
     problem: Option<String>,
 }
@@ -430,6 +443,7 @@ struct Conversation {
 fn conversation(entries: &[&Value]) -> Conversation {
     let every_entry = |problem| Conversation {
         chain: None,
+        trailing: HashSet::new(),
         problem,
     };
     // A record that links no entries at all (an older or hand-made one).
@@ -474,8 +488,10 @@ fn conversation(entries: &[&Value]) -> Conversation {
     // so each entry is walked at most once (and a cycle ends the walk).
     let mut walked = HashSet::new();
     let mut last_message = None;
+    let mut trailing = HashSet::new();
     'leaves: for (leaf, _) in leaves {
         let mut at = Some(leaf);
+        let mut walked_here = HashSet::new();
         while let Some(id) = at {
             let Some(node) = nodes.get(id) else {
                 break;
@@ -485,8 +501,10 @@ fn conversation(entries: &[&Value]) -> Conversation {
             }
             if node.message {
                 last_message = Some(id);
+                trailing = walked_here;
                 break 'leaves;
             }
+            walked_here.insert(id.to_string());
             at = node.parent;
         }
     }
@@ -518,6 +536,7 @@ fn conversation(entries: &[&Value]) -> Conversation {
                 }
                 return Conversation {
                     chain: Some(chain),
+                    trailing,
                     problem: Some(format!(
                         "the record's chain names entry {parent}, which it does not have; \
                          the entries before the break are shown in file order"
@@ -528,6 +547,7 @@ fn conversation(entries: &[&Value]) -> Conversation {
     }
     Conversation {
         chain: Some(chain),
+        trailing,
         problem: None,
     }
 }
