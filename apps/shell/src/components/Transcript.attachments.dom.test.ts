@@ -58,7 +58,7 @@ describe("a message's attachments in the transcript", () => {
     expect(document.activeElement).toBe(chip);
     expect(chip.tabIndex).toBe(0);
     const tip = chip.nextElementSibling as HTMLElement;
-    expect(tip.className).toBe("attachment-tip");
+    expect(tip.className).toBe("tip attachment-tip");
     expect(tip.textContent).toBe("notes/todo.md");
   });
 
