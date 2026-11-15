@@ -46,6 +46,9 @@ struct HowToStart {
     /// The id of the record the backend continues.
     resume: Option<String>,
     fork_of: Option<ForkOf>,
+    /// For a fork made again: holds sends to its original until the fork's
+    /// backend is ready, as `session.fork` does (FLOW-RESUME-SESSION-R10).
+    fork_hold: Option<Arc<ForkHold>>,
 }
 
 impl SessionManager {
@@ -162,7 +165,9 @@ impl SessionManager {
             how.transport,
             config,
             how.backend_version,
-            Launched::Resumed,
+            Launched::Resumed {
+                fork_hold: start.fork_hold,
+            },
         );
         drop(sessions);
         Ok(())
@@ -227,6 +232,7 @@ impl SessionManager {
                 backend_session_id: chosen,
                 resume: None,
                 fork_of: None,
+                fork_hold: None,
             });
         };
         let version = adapter.record_version(Arc::clone(transport), &row.cwd, &own);
@@ -241,17 +247,51 @@ impl SessionManager {
                 backend_session_id: None,
                 resume: Some(own),
                 fork_of: None,
+                fork_hold: None,
             });
         }
-        let fork_of = row.forked_from.clone().map(|original| ForkOf {
-            original,
-            name: lock(&handle.presented).title.clone(),
-        });
+        let Some(original) = row.forked_from.clone() else {
+            return Ok(HowToStart {
+                backend_session_id: Some(own),
+                resume: None,
+                fork_of: None,
+                fork_hold: None,
+            });
+        };
+        // A fork with no record of its own copies its original again, so it
+        // is made as `session.fork` makes one, through the same checks and
+        // with the same answer when they refuse (FLOW-RESUME-SESSION-R10).
+        // An original Core no longer lists has no checks to pass; the
+        // backend then says what is wrong with copying it (FLOW-RESUME-SESSION-R11).
+        let fork_hold = match self.session_with_backend_id(&original) {
+            Some(original_id) => {
+                let forkable = self
+                    .prepare_fork(&original_id, Arc::clone(transport))
+                    .await?;
+                forkable.beginning.fork_hold
+            }
+            None => None,
+        };
         Ok(HowToStart {
             backend_session_id: Some(own),
             resume: None,
-            fork_of,
+            fork_of: Some(ForkOf {
+                original,
+                name: lock(&handle.presented).title.clone(),
+            }),
+            fork_hold,
         })
+    }
+}
+
+impl SessionManager {
+    /// The id of the session whose backend's id is `backend_id`, if Core
+    /// lists one.
+    fn session_with_backend_id(&self, backend_id: &str) -> Option<String> {
+        lock(&self.sessions)
+            .values()
+            .find(|handle| lock(&handle.row).backend_session_id.as_deref() == Some(backend_id))
+            .map(|handle| handle.id.clone())
     }
 }
 
