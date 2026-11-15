@@ -292,47 +292,66 @@ async fn a_live_session_lists_what_its_stream_reports_and_its_record_once_it_end
     wait_for_values(&mut client, &id, three("model-b", "high", "ask")).await;
 }
 
-// verifies: PROTO-CORE-API-R71
+/// The session's model as the backend reports it and Core's request for it.
+async fn model_and_request(client: &mut Client, id: &str) -> (Value, Value) {
+    let row = row(client, id).await;
+    (row["model"].clone(), row["model_request"].clone())
+}
+
+// verifies: PROTO-CORE-API-R102
 #[tokio::test(flavor = "multi_thread")]
-async fn a_model_the_backend_reports_by_what_the_request_resolves_to_is_listed_as_the_request() {
+async fn session_list_carries_cores_model_request_beside_the_backends_report() {
     let backend = Backend::default();
     let (core, _) = start(&backend, tempdir()).await;
     let mut client = core.client().await;
     // `model-b` is an alias the backend resolves to `model-b-1`, as Claude
-    // Code resolves `opus` to `claude-opus-5-5` (#397).
-    let id = started(
-        &core,
-        &mut client,
-        json!({ "model": "model-b", "effort": "low" }),
-    )
-    .await;
+    // Code resolves `opus` to `claude-opus-5-5`.
+    let id = started(&core, &mut client, json!({ "model": "model-b" })).await;
+    assert_eq!(
+        model_and_request(&mut client, &id).await,
+        (json!("model-b"), json!("model-b"))
+    );
 
-    // The stream reports the resolved id: still the choice the user made.
+    // The stream reports the resolved id: `model` is that report as given,
+    // and the request stays beside it.
     client
         .result(
             "session.send",
             json!({ "id": id, "text": "report model-b-1 plan" }),
         )
         .await;
-    wait_for_values(&mut client, &id, three("model-b", "low", "plan")).await;
+    wait_for_values(
+        &mut client,
+        &id,
+        (json!("model-b-1"), Value::Null, json!("plan")),
+    )
+    .await;
+    assert_eq!(
+        model_and_request(&mut client, &id).await,
+        (json!("model-b-1"), json!("model-b"))
+    );
 
-    // So does the record, once the run ends, and across a restart.
-    backend.record_says("model-b-1", "low", "plan", Some(OffsetDateTime::now_utc()));
-    client.result("session.stop", json!({ "id": id })).await;
-    wait_for_values(&mut client, &id, three("model-b", "low", "plan")).await;
-    let (core, mut client) = restart(core, &backend).await;
+    // `session.set_model` makes a new request, which the list carries.
     client
-        .result("backend.list", json!({ "host_id": "local" }))
+        .result("session.set_model", json!({ "id": id, "model": "model-a" }))
         .await;
-    wait_for_values(&mut client, &id, three("model-b", "low", "plan")).await;
+    assert_eq!(
+        model_and_request(&mut client, &id).await.1,
+        json!("model-a")
+    );
 
-    // Another model is a change, reported as it is.
-    backend.record_says("model-a", "low", "plan", Some(OffsetDateTime::now_utc()));
-    let (_core, mut client) = restart(core, &backend).await;
-    client
-        .result("backend.list", json!({ "host_id": "local" }))
-        .await;
-    wait_for_values(&mut client, &id, three("model-a", "low", "plan")).await;
+    // A model left to the backend is no request.
+    let workspace_id = row(&mut client, &id).await["workspace_id"].clone();
+    let other = client
+        .result(
+            "session.create",
+            json!({ "workspace_id": workspace_id, "backend": fake::BACKEND }),
+        )
+        .await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(model_and_request(&mut client, &other).await.1, Value::Null);
 }
 
 // verifies: PROTO-CORE-API-R71

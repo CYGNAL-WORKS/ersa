@@ -141,6 +141,7 @@ describe("what the user chose on the new-session screen when the project changes
 
   // verifies: FLOW-NEW-SESSION-R02
   // verifies: FLOW-NEW-SESSION-R19
+  // verifies: FLOW-NEW-SESSION-R32
   it("keeps the model, effort and permission mode chosen before the project was added, and starts with them", async () => {
     const beyond = project("beyond");
     const onStart = vi.fn(async () => true);
@@ -165,6 +166,7 @@ describe("what the user chose on the new-session screen when the project changes
   });
 
   // verifies: FLOW-NEW-SESSION-R02
+  // verifies: FLOW-NEW-SESSION-R32
   it("keeps them when another project is chosen, and takes the rest from what that project last used", () => {
     const lastUsed = { beta: { host_id: "local", project_id: "beta", workspace: "root" as const, backend: "claude-code", model: "opus", effort: "high", permission_mode: "default" } };
     render(createElement(NewSessionScreen, props([alpha, beta], { backends: { local: [offering] }, lastUsed })));
@@ -181,6 +183,7 @@ describe("what the user chose on the new-session screen when the project changes
 
 describe("a backend chosen on the new-session screen", () => {
   // verifies: FLOW-NEW-SESSION-R02
+  // verifies: FLOW-NEW-SESSION-R32
   it("drops the model and permission mode chosen for the backend before it, so they don't follow a project change", () => {
     const other: BackendInfo = {
       ...claude,
