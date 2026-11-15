@@ -72,6 +72,22 @@ fn is_initialize(v: &Value) -> bool {
     v["type"] == "control_request" && v["request"]["subtype"] == "initialize"
 }
 
+/// The `get_context_usage` request the driver sends once `initialize` is
+/// answered (PROTO-CLAUDE-CODE-STREAM-R72). Recordings made before it was
+/// built have none.
+fn is_context_request(v: &Value) -> bool {
+    v["type"] == "control_request" && v["request"]["subtype"] == "get_context_usage"
+}
+
+/// `lines` without the driver's `get_context_usage` requests, to compare
+/// with a recording made before the adapter asked.
+fn without_context_requests(lines: Vec<String>) -> Vec<String> {
+    lines
+        .into_iter()
+        .filter(|l| !is_context_request(&parse(l)))
+        .collect()
+}
+
 /// The `initialize` answer from fixture 11, which echoes `ersa-init-1`.
 fn init_answer() -> String {
     fixture("11-stream-permission-prompt-tool-stdio").stdout[0].clone()
@@ -464,16 +480,18 @@ async fn start_returns_only_after_the_initialize_answer_is_recorded() {
         .await
         .expect("start");
 
-    // Before anything else can be sent, the log holds the request and its answer.
+    // Before anything else can be sent, the log holds the request and its
+    // answer, then the question about the session's context (R72).
     let lines = sink.lines();
-    assert_eq!(lines.len(), 2);
+    assert_eq!(lines.len(), 3);
     assert_eq!(lines[0].dir, Direction::Host);
     assert!(is_initialize(&parse(&lines[0].line)));
     assert_eq!(lines[1].dir, Direction::Backend);
     assert_eq!(lines[1].line, init_answer());
+    assert!(is_context_request(&parse(&lines[2].line)));
 
     session.send_message(&text("hi")).await.expect("send");
-    assert_eq!(transport.stdin_lines().len(), 2);
+    assert_eq!(transport.stdin_lines().len(), 3);
     assert!(transport.stub_failures().is_empty());
     session.stop().await.expect("stop");
     sink.wait_for_exit(WAIT).await;
@@ -655,6 +673,7 @@ async fn a_permission_round_trips_against_a_stub_of_fixture_11() {
             is_initialize(v) && v["request_id"] == "ersa-init-1" && seen_init(v)
         }))
         .then_stdout([&out[0]])
+        .wait_for_stdin(expect("get_context_usage", is_context_request))
         .wait_for_stdin(expect("the recorded prompt", move |v| {
             v["type"] == "user" && v["message"]["content"][0]["text"] == PROMPT && seen_user(v)
         }))
@@ -694,12 +713,20 @@ async fn a_permission_round_trips_against_a_stub_of_fixture_11() {
     sink.wait_for_exit(WAIT).await;
 
     assert_eq!(transport.stub_failures(), Vec::<String>::new());
-    // Ersa wrote exactly what the recorded session wrote, byte for byte.
-    assert_eq!(transport.stdin_lines(), fixture.sent());
+    // Ersa wrote exactly what the recorded session wrote, byte for byte,
+    // and asked about the context, which the recording predates.
+    assert_eq!(
+        without_context_requests(transport.stdin_lines()),
+        fixture.sent()
+    );
     // And the raw log is the fixture's, in the order it happened: every
     // answer after the line that caused it.
-    let recorded: Vec<(Direction, String)> =
-        sink.lines().into_iter().map(|l| (l.dir, l.line)).collect();
+    let recorded: Vec<(Direction, String)> = sink
+        .lines()
+        .into_iter()
+        .filter(|l| !is_context_request(&parse(&l.line)))
+        .map(|l| (l.dir, l.line))
+        .collect();
     let expected: Vec<(Direction, String)> = fixture
         .raw_log()
         .into_iter()
@@ -774,7 +801,7 @@ async fn decisions_carry_edits_suggestions_and_denial_messages() {
     ));
 
     let stdin = transport.stdin_lines();
-    let allowed = parse(&stdin[1])["response"].clone();
+    let allowed = parse(&stdin[2])["response"].clone();
     assert_eq!(allowed["request_id"], PERMISSION_ID);
     assert_eq!(
         allowed["response"],
@@ -789,7 +816,7 @@ async fn decisions_carry_edits_suggestions_and_denial_messages() {
             }]
         })
     );
-    let denied = parse(&stdin[2])["response"].clone();
+    let denied = parse(&stdin[3])["response"].clone();
     assert_eq!(denied["request_id"], "second");
     assert_eq!(
         denied["response"],
@@ -819,8 +846,8 @@ async fn a_prompt_the_cli_withdraws_can_no_longer_be_answered() {
         session.decide_permission(PERMISSION_ID, allow()).await,
         Err(AdapterError::UnknownRequest(_))
     ));
-    // Nothing beyond `initialize` was written.
-    assert_eq!(transport.stdin_lines().len(), 1);
+    // Nothing beyond `initialize` and `get_context_usage` was written.
+    assert_eq!(transport.stdin_lines().len(), 2);
     session.stop().await.expect("stop");
 }
 
@@ -834,7 +861,7 @@ async fn interrupt_sends_the_interrupt_control_request() {
         .expect("start");
     session.interrupt().await.expect("interrupt");
 
-    let sent = parse(&transport.stdin_lines()[1]);
+    let sent = parse(&transport.stdin_lines()[2]);
     assert_eq!(sent["type"], "control_request");
     assert_eq!(sent["request"], json!({ "subtype": "interrupt" }));
     assert!(
@@ -867,7 +894,7 @@ async fn a_message_with_attachments_is_sent_as_its_text_its_images_then_its_list
     };
     session.send_message(&message).await.expect("send");
 
-    let sent = parse(&transport.stdin_lines()[1]);
+    let sent = parse(&transport.stdin_lines()[2]);
     assert_eq!(
         sent,
         json!({"type": "user", "message": {"role": "user", "content": [
@@ -1024,8 +1051,9 @@ async fn a_failed_start_ends_even_when_stdout_never_ends() {
 
 #[tokio::test]
 async fn stop_kills_a_cli_that_stopped_reading_without_waiting_on_a_stuck_write() {
-    // `initialize` fits in the pipe; every later write hangs.
-    let transport = ready_stub().wedge_stdin_after(1);
+    // `initialize` and the `get_context_usage` after it (R72) fit in the
+    // pipe; every later write hangs.
+    let transport = ready_stub().wedge_stdin_after(2);
     let sink = Arc::new(RecordingSink::new());
     let session: Arc<dyn ersa_adapter::AdapterSession> = Arc::from(
         adapter()
@@ -1067,9 +1095,13 @@ async fn a_refusal_stuck_on_a_wedged_cli_does_not_stall_the_read_loop() {
     // The refusal to the hook callback is the write that hangs.
     let transport = FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(expect("initialize", is_initialize))
-        .then_stdout([init_answer(), hook])
+        .then_stdout([init_answer()])
+        // The callback comes once `get_context_usage` (R72) is written, so
+        // the refusal is the third line, the first that hangs.
+        .wait_for_stdin(expect("get_context_usage", is_context_request))
+        .then_stdout([hook])
         .hold_open()
-        .wedge_stdin_after(1);
+        .wedge_stdin_after(2);
     let sink = Arc::new(RecordingSink::new());
     let session = adapter()
         .start(Arc::new(transport), config(), sink.clone())
@@ -1178,7 +1210,7 @@ async fn a_prompt_whose_shape_drifted_can_still_be_answered() {
         .decide_permission("r-9", allow())
         .await
         .expect("allow");
-    let answer = parse(&transport.stdin_lines()[1]);
+    let answer = parse(&transport.stdin_lines()[2]);
     assert_eq!(answer["response"]["request_id"], "r-9");
     assert_eq!(
         answer["response"]["response"],
@@ -1196,7 +1228,7 @@ async fn one_prompt_is_answered_once_even_by_concurrent_decisions() {
         .wait_for_stdin(expect("initialize", is_initialize))
         .then_stdout([out[0].clone(), out[4].clone()])
         .hold_open()
-        .wedge_stdin_after(1);
+        .wedge_stdin_after(2);
     let sink = Arc::new(RecordingSink::new());
     let session: Arc<dyn ersa_adapter::AdapterSession> = Arc::from(
         adapter()
@@ -1327,6 +1359,7 @@ async fn question_round_trip(name: &str, reply: QuestionReply) -> (Vec<String>, 
     let transport = FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(expect("initialize", is_initialize))
         .then_stdout([&out[0]])
+        .wait_for_stdin(expect("get_context_usage", is_context_request))
         .wait_for_stdin(expect("the recorded prompt", |v| v["type"] == "user"))
         .then_stdout(&out[1..=ask])
         .wait_for_stdin(expect("the recorded answer", move |v| {
@@ -1360,7 +1393,7 @@ async fn question_round_trip(name: &str, reply: QuestionReply) -> (Vec<String>, 
     session.stop().await.expect("stop");
     sink.wait_for_exit(WAIT).await;
     assert_eq!(transport.stub_failures(), Vec::<String>::new());
-    (transport.stdin_lines(), sent)
+    (without_context_requests(transport.stdin_lines()), sent)
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R29
@@ -1450,8 +1483,9 @@ async fn answers_that_do_not_fit_the_question_are_refused_before_anything_is_wri
             Err(AdapterError::Protocol(_))
         ));
     }
-    // Only `initialize` was written, and the question can still be answered.
-    assert_eq!(transport.stdin_lines().len(), 1);
+    // Only `initialize` and `get_context_usage` were written, and the
+    // question can still be answered.
+    assert_eq!(transport.stdin_lines().len(), 2);
     session
         .answer_question(&request_id, QuestionReply::Declined)
         .await
@@ -1479,6 +1513,6 @@ async fn a_permission_request_is_not_a_question() {
             .await,
         Err(AdapterError::UnknownRequest(_))
     ));
-    assert_eq!(transport.stdin_lines().len(), 1);
+    assert_eq!(transport.stdin_lines().len(), 2);
     session.stop().await.expect("stop");
 }
