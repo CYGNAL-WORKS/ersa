@@ -109,7 +109,17 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   const choosing = useRef(false);
   const words = useRef<HTMLTextAreaElement>(null);
   const backToWords = () => words.current?.focus({ preventScroll: true });
-  const chooseProject = (id: string) => setWanted({ ...lastUsed[id], project_id: id });
+  // A project starts at what it last used, except the how values the user chose on this screen (FLOW-NEW-SESSION-R02).
+  const chooseProject = (id: string) =>
+    setSeed((s) => ({ ...s, touched: true, wanted: { ...lastUsed[id], ...s.picked, project_id: id } }));
+  // A how value chosen here, with the backend it was chosen for; a backend chosen anew drops the rest.
+  const pickHow = (key: "backend" | "model" | "effort" | "permission_mode", id: string | undefined, next: Partial<SessionValues>) =>
+    setSeed((s) => ({
+      ...s,
+      touched: true,
+      wanted: next,
+      picked: key === "backend" ? { backend: id } : { ...s.picked, backend: next.backend, [key]: id },
+    }));
 
   // The trust question opens upward over the room above the box, so the box and the session controls stay where they
   // are (docs/design/COMPOSER.md). It is capped to that room, its explanation scrolling inside; where the room cannot
@@ -271,10 +281,13 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
       chooseProject(id);
     } else if (key === "backend") {
       // A model or effort chosen for one backend means nothing to another.
-      setWanted({ ...values, backend: id, model: undefined, effort: undefined, permission_mode: undefined });
+      pickHow(key, id, { ...values, backend: id, model: undefined, effort: undefined, permission_mode: undefined });
     } else if (key === "effort") {
       // The Default row chooses no level: the backend's own effort (docs/design/COMPOSER.md).
-      setWanted({ ...values, effort: id === DEFAULT_EFFORT ? undefined : id });
+      const effort = id === DEFAULT_EFFORT ? undefined : id;
+      pickHow(key, effort, { ...values, effort });
+    } else if (key === "model" || key === "permission_mode") {
+      pickHow(key, id, { ...values, [key]: id });
     } else {
       setWanted({ ...values, [key]: id });
     }
