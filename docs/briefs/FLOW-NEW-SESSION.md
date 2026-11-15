@@ -50,6 +50,8 @@ The project chip on the new-session screen is the only place a project is added;
 - **FLOW-NEW-SESSION-R30**: While a session is running, the session controls shall let the user change its model, effort and permission mode, taking effect at once (a running turn uses it from its next step); when a change is refused, the chip shall keep its value and the status line shall say why until the user sends or opens a chip.
 - **FLOW-NEW-SESSION-R32**: When the project changes on the new-session screen, a model, effort or permission mode the user already chose on that screen shall stay while the backend it was chosen for stays, and the other values shall come from the new project's last-used values (R02).
 - **FLOW-NEW-SESSION-R33**: The session controls shall name a session's model by the choice `model_request` names, the backend's default choice when there is none, while `model` is absent or is that choice's `resolved` id; otherwise by `model`: the choice with that id, else the choice not marked default whose `resolved` id it is, else the id itself.
+- **FLOW-NEW-SESSION-R34**: A refused change's line shall be kept for its session, through a switch to another session and back, until the user sends or opens a chip in that session.
+- **FLOW-NEW-SESSION-R35**: While Ersa can't reach the sessions, a running session's model, effort and permission mode chips shall be unavailable.
 - **FLOW-NEW-SESSION-R31**: When the user withdraws trust from a project, a note beneath the project's heading shall say, for as long as the window stays open, that the backend's own tools keep trusting the folder.
 
 ## Verification
@@ -58,7 +60,7 @@ The replay server refuses every request that would create or change a session (P
 
 ## Built so far
 
-New session shows the new-session screen and creates nothing until the first message (R01 to R05, R08, R12), and a started session's tile sits under its project (R13). A project is added from the project chip through the system's folder dialog, after the trust question (R14 to R20, R24, R25, R27). A new workspace starts from the base branch the workspace chip offers (R21, R28, R29). Until R30 is built, the session controls under a running session show its values read-only. A host whose backend listing fails reads as having no backend available, which R11 replaces, and the screen does not yet say while backends are being detected (R23). With no session chosen, the window shows the newest.
+New session shows the new-session screen and creates nothing until the first message (R01 to R05, R08, R12), and a started session's tile sits under its project (R13). A project is added from the project chip through the system's folder dialog, after the trust question (R14 to R20, R24, R25, R27). A new workspace starts from the base branch the workspace chip offers (R21, R28, R29). Values chosen on the screen survive a change of project (R32). Under a running session the session controls name its model by the user's choice (R33) and change its model, effort and permission mode (R30, R34, R35). A host whose backend listing fails says that detection failed (R11). The screen does not yet say while backends are being detected (R23). With no session chosen, the window shows the newest.
 
 ## Open questions
 
@@ -70,6 +72,7 @@ New session shows the new-session screen and creates nothing until the first mes
 
 ## Changes
 
+- 2026-11-15: from #406 inbox: a refused change's line belongs to its session and survives switching away and back (R34); a running session's chips are unavailable while Ersa can't reach the sessions (R35); COMPOSER.md gives a failed backend listing its status line and chip; Built so far says R11, R30, R32 and R33 are built. FLOW-NEW-SESSION-R34 and R35 added; R30 unchanged.
 - 2026-11-15: from #401 inbox: values chosen on the new-session screen survive a change of project, which had replaced them with the project's last-used values so the session started at the defaults (R32); a running session's model is named by the user's choice while the backend reports what it resolves to, by owner's decision on #401 (R33, PROTO-CORE-API-R102). FLOW-NEW-SESSION-R32 and R33 added; R02 unchanged.
 - 2026-11-13: from #345 inbox: a change on a running session takes effect at once, as the backend applies it (recordings 22 to 27, PROTO-CLAUDE-CODE-STREAM). R30 reworded.
 - 2026-11-09: owner's decisions from the audit against Claude Desktop: a running session's model, effort and permission mode can change (R30), its models come from the backend (PROTO-CORE-API-R72), and withdrawing trust says that the backend's own tools keep it (R31). Two open questions closed.

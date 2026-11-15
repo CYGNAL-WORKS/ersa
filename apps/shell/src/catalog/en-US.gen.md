@@ -910,6 +910,10 @@ No backend is available on this host. Install a backend on it to start a session
 
 {label} isn't working on this host. Check that it's installed and signed in, then open New session again.
 
+### `composer.detectionFailedError`
+
+Ersa couldn't detect the backends on this host.
+
 ### `composer.copyingProgress`
 
 Copying attachments, {percent} percent done…
@@ -1074,6 +1078,10 @@ Default
 
 No branch matches.
 
+### `sessionControls.workspace.noBranchesEmpty`
+
+This project has no branches yet.
+
 ### `sessionControls.workspace.readingBranchesProgress`
 
 Reading the branches…
@@ -1089,6 +1097,30 @@ Default
 ### `sessionControls.effort.noneLabel`
 
 None
+
+### `sessionControls.change.modelError`
+
+Ersa can't change the model.
+
+### `sessionControls.change.effortError`
+
+Ersa can't change the effort.
+
+### `sessionControls.change.permissionModeError`
+
+Ersa can't change the permission mode.
+
+### `sessionControls.detectionFailedStatus`
+
+Detection failed
+
+### `sessionControls.noBackendStatus`
+
+No backend
+
+### `sessionControls.detectingBackendsProgress`
+
+Detecting backends…
 
 ### `sessionControls.contextRing.noneLabel`
 

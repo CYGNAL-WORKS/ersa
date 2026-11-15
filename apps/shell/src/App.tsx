@@ -34,6 +34,7 @@ import { initialStage, showsScreen, stage } from "./session/stage";
 import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangement } from "./session/arrangement";
 import { StartStop, readChoices, rememberPatch, remembered, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
+import { type Changeable, type Changes, NO_CHANGES, changeAnswered, changeSent, changeSession, isChangeable, refusalSeen, runs } from "./session/change";
 
 // The same objects every render, so effects and error-boundary keys that
 // depend on a list see no change while Core's phase stays the same.
@@ -96,6 +97,8 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
 
   // What the screen offers: each host's backends, and the values each project last started a session with.
   const [backends, setBackends] = useState<Record<string, BackendInfo[]>>({});
+  // Why each host's backends could not be listed, by host id: the screen says detection failed (FLOW-NEW-SESSION-R11).
+  const [backendFailures, setBackendFailures] = useState<Record<string, string>>({});
   const [lastUsed, setLastUsed] = useState<Record<string, SessionValues>>({});
   // Every project's workspaces, by id: the rail puts a session under its workspace's project, and the session
   // controls read a session's workspace from them. Each project's last read: null once read, else why it failed.
@@ -273,8 +276,9 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     );
     readChoices(client, hostId, settings).then((choices) => {
       if (!live) return;
-      // A host whose backends could not be read offers none; the screen says no backend is available.
+      // A host whose backends could not be read offers none, and the screen says why (FLOW-NEW-SESSION-R11).
       setBackends((b) => ({ ...b, [hostId]: choices.backends }));
+      setBackendFailures(({ [hostId]: _, ...rest }) => (choices.failed === undefined ? rest : { ...rest, [hostId]: choices.failed }));
       setLastUsed(choices.lastUsed);
     });
     return () => {
@@ -419,6 +423,23 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       return false;
     }
   };
+
+  // A running session's model, effort or permission mode, changed from its session controls (FLOW-NEW-SESSION-R30):
+  // the chip reads the old value until Core answers with the backend's word on the new one; a refusal keeps it and
+  // the status line says why until the user sends or opens a chip.
+  const [changing, setChanging] = useState<Record<string, Changes>>({});
+  const changesOf = (id: string, update: (c: Changes) => Changes) => setChanging((all) => ({ ...all, [id]: update(all[id] ?? NO_CHANGES) }));
+  const change = async (id: string, key: Changeable, value: string) => {
+    changesOf(id, (c) => changeSent(c, key));
+    try {
+      const changed = await changeSession(client, id, key, value);
+      connection.current?.changed(id, changed);
+      changesOf(id, (c) => changeAnswered(c, key));
+    } catch (error) {
+      changesOf(id, (c) => changeAnswered(c, key, (error as Error).message));
+    }
+  };
+  const resetChange = (id: string) => changesOf(id, refusalSeen);
 
   // Pin and Unpin on a tile (FLOW-ORGANIZE-SESSIONS-R01): Core stores the pin, and the rail moves the tile once Core
   // has it. A refusal leaves the tile where Core has it and says why beneath it until the next try (R15).
@@ -718,14 +739,22 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   const projectById = new Map(projectList?.map((p) => [p.id, p]));
 
   // The session controls under the active session show its own values, as Core lists them (FLOW-NEW-SESSION-R12);
-  // they change nothing during a session. Absent until the session's workspace and project are known.
+  // a running one's model, effort and permission mode change through Core (R30). Absent until its workspace and project are known.
   const listed = sessions.state === "ready" ? sessions.sessions.find((s) => s.id === shown?.id) : undefined;
   // Ersa can't reach the sessions: the composer says so and is unavailable until it does (FLOW-SEND-MESSAGE-R06).
   const away = view.phase === "connected" ? undefined : view.phase === "failed" ? "unreachable" : "reconnecting";
   const listedWorkspace = listed && workspaces[listed.workspace_id];
   const listedProject = listedWorkspace && projectById.get(listedWorkspace.project_id);
-  const sessionControls = listed && listedWorkspace && sessionShown(listed, listedWorkspace, backends[listed.host_id] ?? []);
+  // While Ersa can't reach Core its lists are gone: the controls keep the session's values and project as last listed,
+  // unavailable, rather than leaving the composer (FLOW-NEW-SESSION-R35).
+  const keptControls = useRef<{ session: Session; project: Project }>(undefined);
+  if (listed && listedProject) keptControls.current = { session: listed, project: listedProject };
+  const controlsFor =
+    listed && listedProject ? { session: listed, project: listedProject } : away && keptControls.current?.session.id === shown?.id ? keptControls.current : undefined;
+  const controlsWorkspace = controlsFor && workspaces[controlsFor.session.workspace_id];
+  const sessionControls = controlsFor && controlsWorkspace && sessionShown(controlsFor.session, controlsWorkspace, backends[controlsFor.session.host_id] ?? []);
   const used = listed && contextUsed(listed.tile);
+  const changeHere = shown ? (changing[shown.id] ?? NO_CHANGES) : NO_CHANGES;
 
   // The open shelf as the rail draws it: the session's oldest request, with its readouts as its tile shows them.
   const shelfSession = openShelf !== undefined && sessions.state === "ready" ? sessions.sessions.find((s) => s.id === openShelf) : undefined;
@@ -905,9 +934,12 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               onRead={read && ((paths) => read(paths, listed?.workspace_id))}
               dragDrop={dragDrop}
               workspace={listed?.workspace_id}
-              onSend={(text, attachments) =>
-                follower.current?.send(text, sendable(attachments), waitingName(text, attachments)) ?? Promise.resolve(false)
-              }
+              onSend={(text, attachments) => {
+                // Sending clears a refused change's line (FLOW-NEW-SESSION-R30).
+                resetChange(shown.id);
+                return follower.current?.send(text, sendable(attachments), waitingName(text, attachments)) ?? Promise.resolve(false);
+              }}
+              refusedChange={changeHere.refused}
               // Stop, from sending until the turn ends: cancels the message on its way, or interrupts the turn (FLOW-SEND-MESSAGE-R03).
               // While it works, Enter still sends, and the message waits in the backend (R18).
               working={shown.transcript.working || shown.turnPending}
@@ -917,17 +949,24 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               waiting={waitingOf(listed?.tile.waiting, shown.waitingHere)}
               controls={
                 sessionControls &&
-                listedProject &&
+                controlsFor &&
                 hello && (
                   <SessionControls
                   hosts={[hello.host]}
                   localHostId={hello.host.id}
-                  projects={[listedProject]}
+                  projects={[controlsFor.project]}
                   backends={[sessionControls.backend]}
                   values={sessionControls.values}
                   workspaceLabel={sessionControls.workspaceLabel}
-                  onChoose={() => {}}
+                  onChoose={(key, id) => {
+                    if (isChangeable(key)) void change(shown.id, key, id);
+                  }}
+                  onOpen={() => resetChange(shown.id)}
                   readOnly
+                  changeable={runs(controlsFor.session)}
+                  waiting={changeHere.sending}
+                  // Nothing reaches Core while Ersa can't reach it.
+                  disabled={away !== undefined}
                   used={used}
                   />
                 )
@@ -947,6 +986,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               localHostId={hello.host.id}
               projects={screenProjects}
               backends={backends}
+              backendFailures={backendFailures}
               lastUsed={lastUsed}
               projectId={composing?.projectId}
               onStart={start}
