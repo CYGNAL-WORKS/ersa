@@ -6,7 +6,7 @@ import { type CoreClient, describeError } from "../core/client";
 import type { Session } from "../protocol/core-api.gen";
 
 /** What a running session's controls can change: the chips that open under it. */
-export const CHANGEABLE = ["model", "effort", "permission_mode"] as const;
+const CHANGEABLE = ["model", "effort", "permission_mode"] as const;
 export type Changeable = (typeof CHANGEABLE)[number];
 
 export const isChangeable = (key: string): key is Changeable => (CHANGEABLE as readonly string[]).includes(key);
