@@ -3,7 +3,7 @@
   "$id": "https://github.com/CYGNAL-WORKS/ersa/protocol/schema/core-api.schema.json",
   "title": "Ersa Core API",
   "description": "The Core request/response API (PROTO-CORE-API): newline-delimited JSON-RPC 2.0 between the Interface and Core. Each method has a `<method>.params` and a `<method>.result` definition; each notification a `<method>.notification` definition. Objects are closed (additionalProperties: false) except settings and the shapes reserved for later milestones. Agent events are not copied here: session.event carries an envelope from agent-events.schema.json by reference.",
-  "x-api-version": 5,
+  "x-api-version": 6,
   "$ref": "#/$defs/message",
   "$defs": {
     "message": {
@@ -396,30 +396,6 @@
             },
             "params": {
               "$ref": "#/$defs/workspace.remove.params"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "jsonrpc",
-            "id",
-            "method",
-            "params"
-          ],
-          "properties": {
-            "jsonrpc": {
-              "const": "2.0"
-            },
-            "id": {
-              "$ref": "#/$defs/request_id"
-            },
-            "method": {
-              "const": "branch.list"
-            },
-            "params": {
-              "$ref": "#/$defs/branch.list.params"
             }
           }
         },
@@ -1902,24 +1878,6 @@
         }
       }
     },
-    "branch": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name",
-        "default"
-      ],
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "The local branch's short name, such as main or feature/rail."
-        },
-        "default": {
-          "type": "boolean",
-          "description": "The repository's default branch: the one origin/HEAD points at, else main, else master, else the checked-out branch. At most one is."
-        }
-      }
-    },
     "workspace_changes": {
       "type": "object",
       "additionalProperties": false,
@@ -2551,7 +2509,7 @@
         "base": {
           "type": "string",
           "minLength": 1,
-          "description": "Any revision git resolves (a branch, tag, commit or main~1) that the workspace starts from; the default branch branch.list marks, else the checked-out commit, when absent."
+          "description": "Any revision git resolves (a branch, tag, commit or main~1) that the workspace starts from; the repository's default branch (the one origin/HEAD points at, else main, else master, else the checked-out branch), else the checked-out commit, when absent."
         }
       }
     },
@@ -2576,25 +2534,6 @@
     },
     "workspace.remove.result": {
       "$ref": "#/$defs/workspace"
-    },
-    "branch.list.params": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "project_id"
-      ],
-      "properties": {
-        "project_id": {
-          "$ref": "#/$defs/id"
-        }
-      }
-    },
-    "branch.list.result": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/branch"
-      },
-      "description": "The project's local branches, sorted by name."
     },
     "workspace.changes.params": {
       "type": "object",

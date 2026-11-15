@@ -25,7 +25,7 @@ use crate::events::{Answer, Envelope, LifecycleState, PermissionBehavior};
 /// The Core API version this build speaks. Negotiated in `core.hello`; bumped
 /// only for removals or changes of meaning, never for additions. The schema
 /// file records the same number as `x-api-version`; a test checks they agree.
-pub const API_VERSION: u32 = 5;
+pub const API_VERSION: u32 = 6;
 
 /// Every Core API version this build can speak, for the handshake.
 pub const SUPPORTED_API_VERSIONS: &[u32] = &[API_VERSION];
@@ -78,7 +78,6 @@ methods! {
     WorkspaceList => "workspace.list",
     WorkspaceCreate => "workspace.create",
     WorkspaceRemove => "workspace.remove",
-    BranchList => "branch.list",
     WorkspaceChanges => "workspace.changes",
     SessionList => "session.list",
     SessionCreate => "session.create",
@@ -510,8 +509,9 @@ pub struct WorkspaceCreateParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// Any revision git resolves (a branch, tag, commit, `main~1`) that the
-    /// workspace starts from; the default branch `branch.list` marks, else
-    /// the checked-out commit, when absent.
+    /// workspace starts from; the repository's default branch (the one
+    /// `origin/HEAD` points at, else `main`, else `master`, else the
+    /// checked-out branch), else the checked-out commit, when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base: Option<String>,
 }
@@ -524,22 +524,6 @@ pub struct WorkspaceRemoveParams {
     /// Remove even with uncommitted changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub force: Option<bool>,
-}
-
-/// `branch.list` params.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct BranchListParams {
-    pub project_id: String,
-}
-
-/// One of a project's local branches, as `branch.list` reports it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Branch {
-    pub name: String,
-    /// Whether this is the repository's default branch; at most one is.
-    pub default: bool,
 }
 
 /// `workspace.changes`: what deleting an isolated workspace would lose, for
