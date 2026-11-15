@@ -5,7 +5,7 @@ Ersa's tested range was 2.1.316 when these were checked. Most were seen on older
 ## Stream and usage
 
 - **Interrupt receipt.** After an interrupt the live stream carries a `user` text frame `[Request interrupted by user]`, even without `--replay-user-messages` (seen on 2.1.214). PROTO-CLAUDE-CODE-STREAM's `user` section lists only echoes and tool results. The record-side marker is already in PROTO-AGENT-EVENTS; the record's synthetic `No response requested.` message is not.
-- **Context window.** No brief names the source of `usage.updated.context_window`. The adapter reads `result.modelUsage.contextWindow` (1,000,000 in the 2.1.316 fixtures), and `initialize`'s `models[]` has no window field. Older versions reported the base window in `modelUsage` for `[1m]` model ids, which the 2.1.316 catalog no longer lists; `get_context_usage.maxTokens` reflected the real tier.
+- **Context window.** PROTO-CLAUDE-CODE-STREAM names the source of `usage.updated.context_window`: `get_context_usage`, and `result.modelUsage.contextWindow` (1,000,000 in the 2.1.316 fixtures) only while that has given none (R72, R74). `initialize`'s `models[]` has no window field. Older versions reported the base window in `modelUsage` for `[1m]` model ids, which the 2.1.316 catalog no longer lists; `get_context_usage.maxTokens` reflected the real tier.
 - **Rate-limit units.** In `rate_limit_event`, `resetsAt` is epoch seconds (the adapter converts it), `utilization` is a fraction that can exceed 1 and that Ersa doesn't carry, and `status: "allowed"` is routine, about once per process in the fixtures. `get_usage` uses 0 to 100 and ISO timestamps instead. PROTO-AGENT-EVENTS states no units.
 
 ## Models
