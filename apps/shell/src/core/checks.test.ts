@@ -51,6 +51,13 @@ describe("tiles and sessions from Core", () => {
     expect(html).toContain("Untitled session");
   });
 
+  // verifies: FLOW-SEND-MESSAGE-R19
+  it("keep how many messages wait in the backend, and drop a count that isn't one", () => {
+    expect(checkTile({ state: "running", pending: [], waiting: 2 })).toEqual({ state: "running", pending: [], waiting: 2 });
+    expect(checkTile({ state: "running", pending: [], waiting: "2" })).toEqual({ state: "running", pending: [] });
+    expect(checkTile({ state: "running", pending: [], waiting: -1 })).toEqual({ state: "running", pending: [] });
+  });
+
   it("that are not a list read as an empty list", () => {
     expect(checkSessions({ sessions: [] })).toEqual([]);
   });
