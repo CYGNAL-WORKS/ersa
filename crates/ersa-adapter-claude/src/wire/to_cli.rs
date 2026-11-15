@@ -138,6 +138,14 @@ pub enum HostRequest {
         #[serde(skip_serializing_if = "Option::is_none")]
         session_id: Option<String>,
     },
+    /// Asks the CLI to name the session from its first message's words
+    /// (PROTO-CLAUDE-CODE-STREAM, Naming a new session). With `persist` the
+    /// CLI writes the `ai-title` entry itself, and it answers with
+    /// `{ title }` (2.1.316 fixture `43-session-title`).
+    GenerateSessionTitle {
+        description: String,
+        persist: bool,
+    },
     /// Changes the permission mode at once; the CLI answers
     /// `{"mode": ...}` and follows with a `system/status` line carrying it
     /// (2.1.316 fixtures 25, 26).
