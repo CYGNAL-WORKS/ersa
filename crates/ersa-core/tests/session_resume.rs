@@ -479,6 +479,39 @@ async fn a_recordless_fork_is_resumed_only_when_its_original_can_be_forked() {
     assert_eq!(session_row(&mut client, &fork).await["state"], "ended");
 }
 
+/// A recordless fork whose original Core no longer lists has no original
+/// to check `session.fork`'s conditions on: its backend is asked to fork
+/// the original's record all the same, even while, for instance, the
+/// registry says another process has that record open, which would refuse
+/// a fork of a listed original.
+// verifies: FLOW-RESUME-SESSION-R11
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recordless_fork_whose_original_is_gone_is_forked_without_its_conditions() {
+    let records = Records::default();
+    let fake = FakeAdapter::with_records(Arc::clone(&records));
+    let open_elsewhere = Arc::clone(&fake.open_elsewhere);
+    let (core, stats) = start_fake(fake).await;
+    let mut client = core.client().await;
+    let (original, fork, original_backend_id, _) =
+        recordless_fork(&mut client, &core, &records, &stats).await;
+    let workspace_id = session_row(&mut client, &original).await["workspace_id"].clone();
+    let token = client
+        .result("workspace.changes", json!({ "id": workspace_id }))
+        .await["token"]
+        .clone();
+    client
+        .result("session.delete", json!({ "id": original, "token": token }))
+        .await;
+
+    *open_elsewhere.lock().unwrap() = OpenElsewhere::Yes { pids: vec![4242] };
+    client.result("session.resume", json!({ "id": fork })).await;
+    let configs = started(&stats, 3).await;
+    assert_eq!(
+        configs[2].fork_of.as_ref().map(|f| f.original.as_str()),
+        Some(original_backend_id.as_str())
+    );
+}
+
 /// While a recordless fork's backend starts, copying its original again, a
 /// message to the original is held off, as it is while `session.fork`'s
 /// fork starts, so no turn begins that the copy would take part way.

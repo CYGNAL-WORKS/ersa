@@ -262,7 +262,7 @@ impl SessionManager {
         // is made as `session.fork` makes one, through the same checks and
         // with the same answer when they refuse (FLOW-RESUME-SESSION-R10).
         // An original Core no longer lists has no checks to pass; the
-        // backend then says what is wrong with copying it.
+        // backend then says what is wrong with copying it (FLOW-RESUME-SESSION-R11).
         let fork_hold = match self.session_with_backend_id(&original) {
             Some(original_id) => {
                 let forkable = self
