@@ -115,30 +115,26 @@ describe("connect", () => {
     expect(activity()).toBe("2026-11-01T14:00:00.000Z");
   });
 
-  // verifies: FLOW-ORGANIZE-SESSIONS-R09
-  // verifies: FLOW-ORGANIZE-SESSIONS-R10
-  it("reads the list again when a turn ends, for the title and creation time no notification carries, and not otherwise", async () => {
+  // verifies: PROTO-CORE-API-R84
+  it("takes a session's title from its tile, with none when the tile has none, and reads no list for it or a turn's end", async () => {
     let reads = 0;
-    const titled = { ...session, title: "From the backend", created_at: "2026-10-31T09:00:00.000Z", last_activity_at: "2026-11-01T14:00:00.000Z" };
-    const { client, notify } = fakeClient({ ...answering, "session.list": () => Promise.resolve(reads++ === 0 ? [session] : [titled]) });
+    const { client, notify } = fakeClient({ ...answering, "session.list": () => (reads++, Promise.resolve([session])) });
     const seen: CoreView[] = [];
     connect(client, (v) => seen.push(v));
     await settle();
     expect(reads).toBe(1);
-    notify({ method: "session.tile", params: { session_id: "s1", tile: { state: "running", pending: [] } } });
+    const title = () => {
+      const view = seen.at(-1);
+      return view?.phase === "connected" && view.sessions.state === "ready" ? view.sessions.sessions[0]?.title : "unread";
+    };
+    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z", title: "From the backend" } });
+    expect(title()).toBe("From the backend");
+    notify({ method: "session.tile", params: { session_id: "s1", tile: { state: "running", pending: [] }, title: "Renamed elsewhere" } });
+    expect(title()).toBe("Renamed elsewhere");
+    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T15:00:00.000Z" } });
+    expect(title()).toBeUndefined();
     await settle();
     expect(reads).toBe(1);
-    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
-    await settle();
-    expect(reads).toBe(2);
-    const view = seen.at(-1);
-    const listed = view?.phase === "connected" && view.sessions.state === "ready" ? view.sessions.sessions[0] : undefined;
-    expect([listed?.title, listed?.created_at]).toEqual(["From the backend", "2026-10-31T09:00:00.000Z"]);
-    // The same last activity again is no new turn's end, and neither is a tile with none.
-    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
-    notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile } });
-    await settle();
-    expect(reads).toBe(2);
   });
 
   // verifies: FLOW-ORGANIZE-SESSIONS-R10
@@ -150,15 +146,18 @@ describe("connect", () => {
       "session.list": () => (reads++ === 1 ? new Promise<Session[]>((resolve) => (answer = resolve)) : Promise.resolve([session])),
     });
     const seen: CoreView[] = [];
-    connect(client, (v) => seen.push(v));
+    const connection = connect(client, (v) => seen.push(v));
     await settle();
     const activity = () => {
       const view = seen.at(-1);
       return view?.phase === "connected" && view.sessions.state === "ready" ? view.sessions.sessions[0]?.last_activity_at : "unread";
     };
+    // A read starts (a session made elsewhere, say), then the turn ends before it answers.
+    connection.reload("sessions");
     notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
     notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T15:00:00.000Z" } });
     await settle();
+    expect(reads).toBe(2);
     answer([{ ...session, last_activity_at: "2026-11-01T14:00:00.000Z" }]);
     await settle();
     expect(activity()).toBe("2026-11-01T15:00:00.000Z");
@@ -170,9 +169,10 @@ describe("connect", () => {
     const later = { ...session, last_activity_at: "2026-11-01T15:00:00.000Z" };
     const { client, notify } = fakeClient({ ...answering, "session.list": () => Promise.resolve(reads++ === 0 ? [session] : [later]) });
     const seen: CoreView[] = [];
-    connect(client, (v) => seen.push(v));
+    const connection = connect(client, (v) => seen.push(v));
     await settle();
     notify({ method: "session.tile", params: { session_id: "s1", tile: session.tile, last_activity_at: "2026-11-01T14:00:00.000Z" } });
+    connection.reload("sessions");
     await settle();
     const view = seen.at(-1);
     expect(view?.phase === "connected" && view.sessions.state === "ready" && view.sessions.sessions[0]?.last_activity_at).toBe("2026-11-01T15:00:00.000Z");
