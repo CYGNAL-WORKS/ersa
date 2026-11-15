@@ -1597,3 +1597,38 @@ fn a_message_taken_in_mid_turn_keeps_its_attachments_when_read_back() {
     );
     assert_eq!(events[at].ts.as_deref(), Some("2026-11-15T22:01:40.121Z"));
 }
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R20
+#[test]
+fn a_message_taken_in_mid_turn_on_an_abandoned_branch_is_not_read_back() {
+    // A message taken in part way through the first reply's turn, then a
+    // rewind in the terminal to the first prompt with a new second prompt.
+    // The `remove` entry has no chain fields of its own; its attachment does,
+    // and lies on the abandoned branch.
+    let taken_in = |parent: &str| {
+        json!({"type": "attachment", "uuid": "q1", "parentUuid": parent, "isSidechain": false,
+            "attachment": {"type": "queued_command", "source_uuid": "c1",
+                "prompt": [{"type": "text", "text": "Taken in"}]}})
+    };
+    let remove = json!({"type": "queue-operation", "operation": "remove",
+        "reason": "absorbed_mid_turn", "content": "Taken in", "commandUuid": "c1"});
+    let entries = [
+        prompt("u1", None, "Hello"),
+        reply("a1", "u1", "m1", "Working"),
+        taken_in("a1"),
+        remove.clone(),
+        reply("a2", "q1", "m2", "Done"),
+        prompt("u2", Some("u1"), "Edited"),
+    ];
+    assert_eq!(texts(&events_of(&entries)), ["user: Hello", "user: Edited"]);
+    // Kept when its branch is the conversation.
+    assert_eq!(
+        texts(&events_of(&entries[..5])),
+        [
+            "user: Hello",
+            "assistant: Working",
+            "user: Taken in",
+            "assistant: Done"
+        ]
+    );
+}
