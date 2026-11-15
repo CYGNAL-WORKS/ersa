@@ -132,17 +132,14 @@ const projectOption = (p: Project): ChipOption => ({
 const choiceOptions = (choices: readonly Choice[]): ChipOption[] => choices.map(({ id, label }) => ({ id, label }));
 
 /**
- * The model chip's options: each model by the backend's label, except its default, which reads Default
- * and the model it resolves to, as Claude Desktop's chip does: the listed model, not marked default, with the same
- * resolved id (as FLOW-NEW-SESSION-R33 matches a reported id), else that id itself; with none, Default alone. The
- * backend's own label for its default ("Default (recommended)") says nothing of which model runs.
+ * The model chip's options (FLOW-NEW-SESSION-R36): each model by the backend's label, except a default the backend
+ * says stands for a listed model, which reads Default and that model's label, as Claude Desktop's chip does. A
+ * default the backend says nothing more of keeps the backend's own label: Ersa never renames what it cannot explain.
  */
 export function modelOptions(models: readonly ModelChoice[]): ChipOption[] {
   return models.map(({ id, label, default: isDefault, resolved }) => {
-    if (!isDefault) return { id, label };
-    if (resolved === undefined) return { id, label: t("sessionControls.model.defaultLabel") };
-    const model = listedModelFor(models, resolved)?.label ?? resolved;
-    return { id, label: t("sessionControls.model.defaultOfLabel", { model }) };
+    const listed = isDefault && resolved !== undefined ? listedModelFor(models, resolved) : undefined;
+    return { id, label: listed ? t("sessionControls.model.defaultOfLabel", { model: listed.label }) : label };
   });
 }
 

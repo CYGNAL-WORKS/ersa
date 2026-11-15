@@ -219,7 +219,7 @@ describe("a backend chosen on the new-session screen", () => {
     pick("Permission mode", /Plan/);
     pick("Backend", /Copilot/);
     pick("Project", /beta/);
-    expect([label("Backend"), label("Model"), label("Permission mode")]).toEqual(["Backend: Copilot", "Model: Default", "Permission mode: Ask"]);
+    expect([label("Backend"), label("Model"), label("Permission mode")]).toEqual(["Backend: Copilot", "Model: Auto", "Permission mode: Ask"]);
   });
 });
 

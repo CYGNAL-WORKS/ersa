@@ -180,7 +180,7 @@ const DEFAULT_MODEL: &str = "default";
 /// default effort, so none is marked here: a session given none runs at the
 /// CLI's own. `default` asks before every action outside the allow rules
 /// (FLOW-NEW-SESSION-R02); each mode reads by its name, as Claude
-/// Desktop's chip does, so `default` reads Ask. `bypassPermissions` is not
+/// Desktop's chip does, so `default` reads Ask (R75). `bypassPermissions` is not
 /// offered. The models are the CLI's own report ([`read_models`]).
 fn choices() -> BackendChoices {
     let list = |items: &[(&str, &str)], default: Option<&str>| -> Vec<Choice> {

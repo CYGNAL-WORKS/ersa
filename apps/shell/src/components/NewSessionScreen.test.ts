@@ -67,7 +67,7 @@ describe("the new-session screen", () => {
       "Host: Local",
       "Project: ersa",
       "Workspace: New workspace",
-      "Model: Default (claude-opus-5-5)",
+      "Model: Default (recommended)",
       "Effort: Default",
       "Permission mode: Ask",
     ]);
@@ -210,7 +210,7 @@ describe("the new-session screen", () => {
   it("leaves out the chip for a choice the backend does not offer", () => {
     const html = render({ backends: { local: [{ ...claude(), efforts: [] }] } });
     expect(chips(html).some((c) => c.startsWith("Effort"))).toBe(false);
-    expect(chips(html)).toContain("Model: Default (claude-opus-5-5)");
+    expect(chips(html)).toContain("Model: Default (recommended)");
   });
 
   it("lists a host without projects as one that has nothing to start", () => {
