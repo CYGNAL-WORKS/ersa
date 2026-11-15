@@ -26,46 +26,68 @@ use crate::wire::{Extra, RecordEntry};
 
 /// The settings `entries` hold, each with when its turn began.
 pub fn settings(entries: &[RecordEntry]) -> RecordedSettings {
-    let prompts = prompts(entries);
-    let replies = replies(entries, &prompts);
-    // `max_by_key` keeps the last of equals, so of two entries stamped alike
-    // the one written later wins.
-    let mode = prompts.iter().max_by_key(|(at, _)| *at);
-    let reply = replies.iter().max_by_key(|reply| reply.at);
-    RecordedSettings {
-        model: reply.map(Reply::model),
-        effort: reply.and_then(Reply::effort),
-        permission_mode: mode.map(|(at, mode)| recorded(mode, Some(*at))),
-    }
+    Turns::read(entries).latest()
 }
 
-/// For each value Core gave a time for, what the first turn that began
-/// after that time ran with (PROTO-CLAUDE-CODE-STREAM-R60). A turn begins at
-/// its prompt, which carries the mode; the model and effort are those of the
-/// earliest reply whose turn began after the time, so a turn interrupted
-/// before any reply gives its mode but no model.
-fn first_after(entries: &[RecordEntry], requested: Requested) -> RecordedSettings {
-    let prompts = prompts(entries);
-    let replies = replies(entries, &prompts);
-    // `min_by_key` keeps the first of equals: of two entries stamped alike,
-    // the one written first.
-    let first_reply = |request: Option<OffsetDateTime>| {
-        let request = request?;
-        replies
-            .iter()
-            .filter(|reply| reply.began.is_some_and(|began| began > request))
-            .min_by_key(|reply| reply.at)
-    };
-    let first_mode = requested.permission_mode.and_then(|request| {
-        prompts
-            .iter()
-            .filter(|(began, _)| *began > request)
-            .min_by_key(|(began, _)| *began)
-    });
-    RecordedSettings {
-        model: first_reply(requested.model).map(Reply::model),
-        effort: first_reply(requested.effort).and_then(Reply::effort),
-        permission_mode: first_mode.map(|(at, mode)| recorded(mode, Some(*at))),
+/// The session's own prompts and replies in part of a record, read once.
+struct Turns<'a> {
+    /// Each prompt's time, which is when its turn began, and the permission
+    /// mode it carries.
+    prompts: Vec<(OffsetDateTime, &'a str)>,
+    replies: Vec<Reply<'a>>,
+}
+
+impl<'a> Turns<'a> {
+    fn read(entries: &'a [RecordEntry]) -> Self {
+        let prompts = prompts(entries);
+        let replies = replies(entries, &prompts);
+        Turns { prompts, replies }
+    }
+
+    /// Each value from the latest turn that holds it.
+    fn latest(&self) -> RecordedSettings {
+        // `max_by_key` keeps the last of equals, so of two entries stamped
+        // alike the one written later wins.
+        let mode = self.prompts.iter().max_by_key(|(at, _)| *at);
+        let reply = self.replies.iter().max_by_key(|reply| reply.at);
+        RecordedSettings {
+            model: reply.map(Reply::model),
+            effort: reply.and_then(Reply::effort),
+            permission_mode: mode.map(|(at, mode)| recorded(mode, Some(*at))),
+        }
+    }
+
+    /// For each value Core gave a time for, what the first turn that began
+    /// after that time ran with (PROTO-CLAUDE-CODE-STREAM-R60). A turn begins
+    /// at its prompt, which carries the mode; the model and effort are those
+    /// of the earliest reply whose turn began after the time, so a turn
+    /// interrupted before any reply gives its mode but no model.
+    fn first_after(&self, requested: Requested) -> RecordedSettings {
+        // `min_by_key` keeps the first of equals: of two entries stamped
+        // alike, the one written first.
+        let first_reply = |request: Option<OffsetDateTime>| {
+            let request = request?;
+            self.replies
+                .iter()
+                .filter(|reply| reply.began.is_some_and(|began| began > request))
+                .min_by_key(|reply| reply.at)
+        };
+        let first_mode = requested.permission_mode.and_then(|request| {
+            self.prompts
+                .iter()
+                .filter(|(began, _)| *began > request)
+                .min_by_key(|(began, _)| *began)
+        });
+        RecordedSettings {
+            model: first_reply(requested.model).map(Reply::model),
+            effort: first_reply(requested.effort).and_then(Reply::effort),
+            permission_mode: first_mode.map(|(at, mode)| recorded(mode, Some(*at))),
+        }
+    }
+
+    /// Whether a turn that began at or before `request` has been read.
+    fn reached(&self, request: OffsetDateTime) -> bool {
+        self.prompts.iter().any(|(began, _)| *began <= request)
     }
 }
 
@@ -124,8 +146,8 @@ fn replies<'a>(entries: &'a [RecordEntry], prompts: &[(OffsetDateTime, &str)]) -
         .collect()
 }
 
-/// Each prompt's time, which is when its turn began, and the permission mode
-/// it carries.
+/// Each of the session's own prompts: its time and the permission mode it
+/// carries.
 fn prompts(entries: &[RecordEntry]) -> Vec<(OffsetDateTime, &str)> {
     entries
         .iter()
@@ -168,10 +190,10 @@ pub fn read_back(path: &Path, requested: Requested) -> io::Result<RelaunchSettin
         let mut bytes = Vec::new();
         (&mut file).take(len - start).read_to_end(&mut bytes)?;
         let read = entries(&bytes, start > 0, false);
-        let found = settings(&read);
-        let prompts = prompts(&read);
+        let turns = Turns::read(&read);
+        let found = turns.latest();
         let settled = |found: bool, request: Option<OffsetDateTime>| match request {
-            Some(request) => prompts.iter().any(|(began, _)| *began <= request),
+            Some(request) => turns.reached(request),
             None => found,
         };
         // Model and effort come from the same reply.
@@ -182,7 +204,7 @@ pub fn read_back(path: &Path, requested: Requested) -> io::Result<RelaunchSettin
         if start == 0 || all_settled {
             return Ok(RelaunchSettings {
                 latest: found,
-                first: first_after(&read, requested),
+                first: turns.first_after(requested),
             });
         }
         window = window.saturating_mul(2);

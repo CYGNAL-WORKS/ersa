@@ -185,9 +185,11 @@ pub trait Adapter: Send + Sync {
     /// and permission mode, read for a relaunch: back from the record's end
     /// until each value is found or the record reaches the time Core last
     /// gave the backend that value, and with it what the first turn after
-    /// each of those times ran with. Core picks the values of the turns after
-    /// its requests with [`RecordedSettings::since`]. A session with no
-    /// record has none, which is also the default.
+    /// each of those times ran with. Core passes its request while the
+    /// latest turn after it ([`RecordedSettings::since`]) ran with what that
+    /// first turn did, and the latest once it differs, so `first` must be the
+    /// backend's own report of that turn, named as the latest is. A session
+    /// with no record has none, which is also the default.
     async fn record_settings(
         &self,
         _transport: Arc<dyn Transport>,

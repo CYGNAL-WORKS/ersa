@@ -515,12 +515,12 @@ async fn a_relaunch_after_a_later_turn_changed_a_value_passes_the_records_latest
     );
 }
 
-/// A value Core never gave the backend has no request to weigh: the
-/// relaunch passes the record's latest from any turn, as `session.list`
-/// reports it.
+/// A value left to the backend has no request or first turn to weigh the
+/// record against: the relaunch passes nothing for it, so the backend's own
+/// default stays one, as at `session.create`.
 // verifies: PROTO-CORE-API-R71
 #[tokio::test(flavor = "multi_thread")]
-async fn a_relaunch_passes_the_records_latest_for_a_value_core_never_requested() {
+async fn a_relaunch_leaves_a_value_core_never_requested_to_the_backend() {
     let backend = Backend::default();
     let (core, fake) = start(&backend, tempdir()).await;
     let mut client = core.client().await;
@@ -532,6 +532,6 @@ async fn a_relaunch_passes_the_records_latest_for_a_value_core_never_requested()
     );
     assert_eq!(
         relaunched(&mut client, &fake, &id).await,
-        passed("model-a", "high", "auto")
+        (None, None, "auto".to_string())
     );
 }
