@@ -745,6 +745,7 @@ const MODELLED_RECORD: &[&str] = &[
     "ai-title",
     "last-prompt",
     "system",
+    "queue-operation",
 ];
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R11
@@ -788,7 +789,13 @@ fn every_session_record_entry_parses_and_keeps_its_fields() {
     }
     // `ai-title` arises only in the interactive CLI and the IDE extensions,
     // which the recorder does not drive; the listing tests cover it.
-    for kind in ["user", "assistant", "last-prompt", "custom-title"] {
+    for kind in [
+        "user",
+        "assistant",
+        "last-prompt",
+        "custom-title",
+        "queue-operation",
+    ] {
         assert!(typed.contains(kind), "no record fixture has a {kind} entry");
     }
 }

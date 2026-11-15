@@ -133,15 +133,31 @@ const ENV_REMOVED = [
 ];
 
 // The session record entries the adapter reads (PROTO-CLAUDE-CODE-STREAM, Session record).
-// A `system` entry is read only for the subtypes named here, as "system/<subtype>".
-const READ_ENTRIES = new Set(["user", "assistant", "custom-title", "ai-title", "last-prompt", "system/local_command"]);
+// A `system` entry is read only for the subtypes named here, as "system/<subtype>",
+// and an `attachment` only for the types named, as "attachment/<type>": a
+// message a turn takes in part way is read from its `queue-operation` and its
+// `queued_command` attachment, which holds only the message the recording sent.
+const READ_ENTRIES = new Set([
+  "user",
+  "assistant",
+  "custom-title",
+  "ai-title",
+  "last-prompt",
+  "system/local_command",
+  "queue-operation",
+  "attachment/queued_command",
+]);
 // Entries the adapter does not read yet but a recording is made to show, kept
-// verbatim too: the queue of messages written during a turn
-// (PROTO-CLAUDE-CODE-STREAM-R46) and a compaction's boundary. Neither carries
-// the CLI's system prompt or the machine's configuration.
-const SHOWN_ENTRIES = new Set(["queue-operation", "system/compact_boundary"]);
+// verbatim too: a compaction's boundary. It carries neither the CLI's system
+// prompt nor the machine's configuration.
+const SHOWN_ENTRIES = new Set(["system/compact_boundary"]);
 const VERBATIM = (entry) =>
-  [READ_ENTRIES, SHOWN_ENTRIES].some((set) => set.has(entry.type) || set.has(`${entry.type}/${entry.subtype}`));
+  [READ_ENTRIES, SHOWN_ENTRIES].some(
+    (set) =>
+      set.has(entry.type) ||
+      set.has(`${entry.type}/${entry.subtype}`) ||
+      set.has(`${entry.type}/${entry.attachment?.type}`),
+  );
 
 const USER_NAME = userInfo().username;
 function scrub(text) {

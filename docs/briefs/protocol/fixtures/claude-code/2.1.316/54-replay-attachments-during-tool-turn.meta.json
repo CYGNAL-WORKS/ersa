@@ -1,0 +1,131 @@
+{
+  "recorded_at": "2026-11-15T22:01:37.274Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--replay-user-messages"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "c7aaeb32-7483-4625-aa14-5d833523ef1c",
+  "session_record": "record/54-replay-attachments-during-tool-turn.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command",
+    "queue-operation",
+    "system/compact_boundary",
+    "attachment/queued_command"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 302593,
+  "stderr": "",
+  "stdout_lines": 38,
+  "stdout_timing_ms": [
+    1043,
+    1435,
+    1440,
+    2129,
+    2129,
+    2130,
+    2130,
+    2760,
+    2760,
+    2760,
+    2760,
+    2760,
+    2760,
+    2761,
+    2766,
+    2794,
+    2799,
+    2799,
+    2800,
+    2822,
+    2846,
+    2849,
+    3639,
+    3639,
+    4144,
+    4144,
+    5144,
+    5144,
+    5144,
+    5145,
+    5145,
+    5145,
+    5145,
+    5146,
+    5146,
+    5150,
+    5150,
+    5160
+  ],
+  "sent": [
+    {
+      "t": 11,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 1044,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Use the Read tool to read README.md. After that, read it again with the Read tool. After that, read it a third time with the Read tool. Do these one at a time, one tool call per reply, then say done.\"}]}}"
+    },
+    {
+      "t": 2130,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Now reply with one word: the color of the attached image.\"},{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEElEQVR4nGNgYPiPAw0pCQCpcD/BFMrqcwAAAABJRU5ErkJggg==\"}},{\"type\":\"text\",\"text\":\"<ersa-attachments>\\nfile: README.md\\n</ersa-attachments>\"}]}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Use the Read tool to read README.md. After that, read it again with the Read tool. After that, read it a third time with the Read tool. Do these one at a time, one tool call per reply, then say done.",
+      "waited": false
+    },
+    {
+      "turn": 2,
+      "until": "\"type\":\"tool_use\"",
+      "seen": true
+    },
+    {
+      "turn": 3,
+      "text": "content:[{\"type\":\"text\",\"text\":\"Now reply with one word: the color of the attached image.\"},{\"type\":\"image\",\"source\":{\"type\":\"base64\",\"media_type\":\"image/png\",\"data\":\"iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEElEQVR4nGNgYPiPAw0pCQCpcD/BFMrqcwAAAABJRU5ErkJggg==\"}},{\"type\":\"text\",\"text\":\"<ersa-attachments>\\nfile: README.md\\n</ersa-attachments>\"}]",
+      "waited": false
+    }
+  ]
+}
