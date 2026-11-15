@@ -54,7 +54,7 @@ A tile is two lines with no box at rest, padded `space-sm`. Line two keeps its h
 - **Line two** is `ink-muted`: the phrase, then a middle dot, then the cost. The dot stands only between a phrase and a cost.
 - **The title** is `ink`, and `ink-muted` when the session is idle or has ended. An unseen session's title reads at the heading weight in `ink`.
 - **No text on a tile is `ink-faint`.** A tile's fills under the pointer, pressed and active are darker than the surfaces `ink-faint` is measured against.
-- **The context ring** is the session controls' ring (`COMPOSER.md`, The session controls) at `size-ring-sm`, without its figure: the same track, arc, bands and words.
+- **The context ring** is the session controls' ring (`COMPOSER.md`, The session controls) at `size-ring-sm`, without its figure: the same track, arc and bands. It reads the context alone (`LAY-SHELL`, Context), and says the share of context used.
 - **The backend's icon** is each backend's own mark (ADR 0036): the Claude spark for Claude Code and Copilot's icon for Copilot, each one filled glyph at `size-icon-sm` in the ink line one gives the icon, never a brand color. A backend Ersa doesn't know shows Lucide's terminal icon.
 
 **More** fades in over the state mark, in the same `size-control-sm` square, under the pointer or keyboard focus, over `motion-quick` with `motion-ease-out`; the mark returns when it goes. While the tile's menu is open, More stays, reading `ink` on `material-pressed`. A session that needs the user keeps its chevron, and More sits before it in a second `size-control-sm` square whose place is kept while More is hidden, so the title never shifts.
