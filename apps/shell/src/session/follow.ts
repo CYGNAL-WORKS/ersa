@@ -132,6 +132,9 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
   let turnSeen = false;
   // Each send gets a number, so a stop's late failure clears only its own send's cancel.
   let sends = 0;
+  // The send whose cancel became the turn's stop because Core took the message first, while that stop's own call
+  // is still out: if the call then fails, nothing was stopped, and the stop is undone.
+  let cancelBecameStop: number | undefined;
 
   const set = (change: (view: SessionView) => SessionView) => {
     if (stopped) return;
@@ -283,11 +286,13 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         // turn (PROTO-CORE-API, Turns and attachments). It waits here by name until a user.message after it shows.
         const turn = (answer as { turn?: unknown } | null | undefined)?.turn;
         const waits = name !== undefined && typeof turn !== "number";
+        // A stop chosen to cancel it came too late: Core handed the message over, and the stop meets the running turn.
+        // Unless a stop already held for that turn, this stop is the turn's.
+        if (view.canceling && !view.stopChosen) cancelBecameStop = sends;
         set((v) => ({
           ...v,
           message: undefined,
           turnPending: pending || undefined,
-          // A stop chosen to cancel it came too late: Core handed the message over, and the stop met the running turn.
           ...(v.canceling ? { stopChosen: true as const, canceling: undefined } : {}),
           ...(waits ? { waitingHere: [...(v.waitingHere ?? []), { name, after }] } : {}),
         }));
@@ -319,9 +324,11 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
       // reached Core stopped nothing, so a failure of the send after it is still a refusal to show, and stop is
       // offered again; only what this stop chose is undone.
       await client.call("session.interrupt", { id }).catch(() => {
-        if (onItsWay) set((v) => (send === sends && v.canceling ? { ...v, canceling: undefined } : v));
-        else set((v) => ({ ...v, stopChosen: undefined }));
+        if (!onItsWay) set((v) => ({ ...v, stopChosen: undefined }));
+        else if (cancelBecameStop === send) set((v) => ({ ...v, stopChosen: undefined }));
+        else set((v) => (send === sends && v.canceling ? { ...v, canceling: undefined } : v));
       });
+      if (cancelBecameStop === send) cancelBecameStop = undefined;
     },
 
     stop() {
