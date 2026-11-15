@@ -23,7 +23,6 @@ function show(phase: Exclude<DeletePhase, { kind: "deleted" }>) {
   render(
     createElement(DeleteQuestion, {
       title: "Fix the build",
-      backend: "Claude Code",
       phase,
       onConfirm: () => calls.push("confirm"),
       onTryAgain: () => calls.push("tryAgain"),
@@ -41,8 +40,8 @@ describe("the delete question's words", () => {
   it("names the session, says the conversation goes for good, names the branch, and counts what is lost", () => {
     const dialog = asking(isolated, { uncommitted: 3, ignored: 1, unshared: 2, stranded: 2 });
     expect(dialog.textContent).toContain("Delete Fix the build?");
-    expect(dialog.textContent).toContain("Its conversation is deleted for good, in Claude Code too.");
-    expect(dialog.textContent).toContain("Its folder and its branch ersa/fix-build are deleted with it.");
+    expect(dialog.textContent).toContain("The conversation is permanently deleted.");
+    expect(dialog.textContent).toContain("The session's folder and branch ersa/fix-build are deleted too.");
     expect(dialog.textContent).toContain("3 uncommitted or untracked files, 1 ignored file, and 2 commits no branch holds will be lost.");
     expect(dialog.textContent).not.toContain("is kept");
     // The confirming button says it deletes them too.
@@ -52,7 +51,7 @@ describe("the delete question's words", () => {
   // verifies: FLOW-ARCHIVE-DELETE-SESSION-R04
   it("says the branch is kept and why when it holds commits that exist nowhere else", () => {
     const dialog = asking(isolated, { unshared: 4, stranded: 0 });
-    expect(dialog.textContent).toContain("Its folder is deleted with it. Its branch ersa/fix-build is kept.");
+    expect(dialog.textContent).toContain("The session's folder is deleted too, but its branch ersa/fix-build is kept.");
     expect(dialog.textContent).toContain("The branch holds commits that exist nowhere else.");
     expect(dialog.textContent).not.toContain("will be lost");
     expect(button("Delete")).toBeTruthy();
@@ -130,7 +129,7 @@ describe("the delete question's buttons", () => {
   });
 
   it("keeps focus in the dialog through Try again, and on Cancel each time it asks", () => {
-    const props = { title: "Fix the build", backend: "Claude Code", onConfirm: () => {}, onTryAgain: () => {}, onCancel: () => {} };
+    const props = { title: "Fix the build", onConfirm: () => {}, onTryAgain: () => {}, onCancel: () => {} };
     const at = (phase: Exclude<DeletePhase, { kind: "deleted" }>) => createElement(DeleteQuestion, { ...props, phase });
     const { rerender } = render(at({ kind: "failed", reason: "The folder is in use." }));
     expect(document.activeElement).toBe(button("Try again"));
@@ -157,7 +156,7 @@ describe("the delete question's buttons", () => {
   });
 
   describe("when what it says changes its height", () => {
-    const props = { title: "Fix the build", backend: "Claude Code", onConfirm: () => {}, onTryAgain: () => {}, onCancel: () => {} };
+    const props = { title: "Fix the build", onConfirm: () => {}, onTryAgain: () => {}, onCancel: () => {} };
     const asked = { kind: "asking", goes: whatGoes(isolated, clean), changed: false } as const;
     // A mistyped token reads as nothing, as it does on the page.
     const tokens: Record<string, string> = { "--motion-settle": "260ms", "--motion-ease-out": "cubic-bezier(0, 0, 0.2, 1)", "--motion-ease-in-out": "wrong" };
