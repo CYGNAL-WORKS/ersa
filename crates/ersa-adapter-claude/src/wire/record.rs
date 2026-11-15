@@ -6,8 +6,9 @@
 //! Messages API message the live stream carries, so it reuses the stream's
 //! types; the wrapper around it is internal to the CLI and changes between
 //! versions, so every wrapper field is optional or kept in `extra`. Every
-//! other kind of entry (attachments, snapshots and the like)
-//! parses into [`RecordEntry::Other`] and is ignored.
+//! other kind of entry (attachments, snapshots and the like) parses into
+//! [`RecordEntry::Other`] and is ignored, except a `queued_command`
+//! attachment, read through [`queued_command`].
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

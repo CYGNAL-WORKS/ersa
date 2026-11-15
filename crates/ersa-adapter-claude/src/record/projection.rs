@@ -94,7 +94,19 @@ pub fn project_record_from<R: BufRead + Seek>(
                 // An entry written twice (a resume can repeat one) counts once.
                 let repeated =
                     uuid(&fields).is_some_and(|id| !projected_ids.insert(id.to_string()));
-                if !on_conversation(&chain, &fields) || repeated {
+                if !on_conversation(&chain, &fields) {
+                    // A message taken in part way has a `remove` entry with no
+                    // chain fields; its `queued_command` attachment has them.
+                    // One off the conversation marks the message as on an
+                    // abandoned branch (PROTO-CLAUDE-CODE-STREAM-R20).
+                    if fields.get("type").and_then(Value::as_str) == Some("attachment")
+                        && let Some(value) = entry_at(reader, offset, len)?
+                    {
+                        projector.abandon(&value);
+                    }
+                    continue;
+                }
+                if repeated {
                     continue;
                 }
                 if let Some(value) = entry_at(reader, offset, len)? {
@@ -530,9 +542,20 @@ struct RecordProjector {
     /// `queued_command` attachment, by the echo's id, until its `remove`
     /// entry reads them.
     taken_in: HashMap<String, Vec<Value>>,
+    /// The echo ids of messages taken in part way on an abandoned branch,
+    /// whose `remove` entries project to nothing.
+    abandoned: HashSet<String>,
 }
 
 impl RecordProjector {
+    /// Notes an entry off the conversation that may be a message's
+    /// `queued_command` attachment.
+    fn abandon(&mut self, value: &Value) {
+        if let Some((echo_id, _)) = queued_command(value) {
+            self.abandoned.insert(echo_id.to_string());
+        }
+    }
+
     /// The events of one entry. Entries that carry no message (titles,
     /// snapshots, attachments, and whatever else the CLI keeps) yield none.
     fn project(&mut self, value: Value) -> Vec<RecordEvent> {
@@ -600,6 +623,9 @@ impl RecordProjector {
                 let Some((echo_id, content)) = queued.absorbed_mid_turn() else {
                     return Vec::new();
                 };
+                if self.abandoned.contains(echo_id) {
+                    return Vec::new();
+                }
                 // `content` holds the words alone, its file list among them
                 // and its images left out; the attachment, when the record
                 // has it, holds the message as sent, so it shows as it did
