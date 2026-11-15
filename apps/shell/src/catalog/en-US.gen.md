@@ -880,6 +880,24 @@ Send
 
 Stop
 
+### `composer.stoppingProgress`
+
+Stopping…
+
+### `composer.waiting.namedNote`
+
+Waiting: {name}
+
+### `composer.waiting.countNote`
+
+#### `one`
+
+{count} message waiting
+
+#### `other`
+
+{count} messages waiting
+
 ### `composer.detectingProgress`
 
 Detecting the backends on this host…
