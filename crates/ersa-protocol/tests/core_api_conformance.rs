@@ -321,7 +321,7 @@ fn result_examples() -> Vec<(Method, Value)> {
                 }],
                 permission_modes: vec![Choice {
                     id: "default".into(),
-                    label: "Ask before acting".into(),
+                    label: "Ask".into(),
                     default: true,
                 }],
             }]),

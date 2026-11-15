@@ -180,6 +180,22 @@ fn the_choices_are_the_briefs_efforts_and_permission_modes() {
     for list in [&choices.efforts, &choices.permission_modes] {
         assert!(list.iter().all(|c| !c.label.is_empty()), "{list:?}");
     }
+    // Each permission mode reads by its name, as Claude Desktop's chip does
+    // (issue #411): "Ask" for the mode that asks before acting.
+    let labels: Vec<(&str, &str)> = choices
+        .permission_modes
+        .iter()
+        .map(|c| (c.id.as_str(), c.label.as_str()))
+        .collect();
+    assert_eq!(
+        labels,
+        [
+            ("default", "Ask"),
+            ("acceptEdits", "Accept edits"),
+            ("plan", "Plan"),
+            ("auto", "Auto"),
+        ]
+    );
     // The session's permission mode when none is named is the one that asks
     // before every action outside the allow rules (FLOW-NEW-SESSION-R02).
     assert_eq!(

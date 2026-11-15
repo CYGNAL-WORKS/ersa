@@ -30,7 +30,7 @@ const claude = (status: BackendInfo["status"] = "available"): BackendInfo => ({
   ],
   // The CLI marks no effort as its default.
   efforts: choices([["medium", "Medium"], ["high", "High"]], "none"),
-  permission_modes: choices([["default", "Ask before acting"], ["acceptEdits", "Accept edits"]], "default"),
+  permission_modes: choices([["default", "Ask"], ["acceptEdits", "Accept edits"]], "default"),
 });
 const copilot = (status: BackendInfo["status"]): BackendInfo => ({
   ...claude(),
@@ -66,11 +66,17 @@ describe("the new-session screen", () => {
       "Host: Local",
       "Project: ersa",
       "Workspace: New workspace",
-      "Model: Default (recommended)",
+      "Model: Default (claude-opus-5-5)",
       "Effort: Default",
-      "Permission mode: Ask before acting",
+      "Permission mode: Ask",
     ]);
     expect(html).toContain('aria-label="Context: none used yet"');
+  });
+
+  it("gives the words one line at rest, as in a session, so attach, the words and send read as one row", () => {
+    const box = render({}).match(/<textarea[^>]*>/)?.[0] ?? "";
+    expect(box).toMatch(/rows="1"/);
+    expect(box).not.toMatch(/data-tall/);
   });
 
   // verifies: FLOW-NEW-SESSION-R02
@@ -203,7 +209,7 @@ describe("the new-session screen", () => {
   it("leaves out the chip for a choice the backend does not offer", () => {
     const html = render({ backends: { local: [{ ...claude(), efforts: [] }] } });
     expect(chips(html).some((c) => c.startsWith("Effort"))).toBe(false);
-    expect(chips(html)).toContain("Model: Default (recommended)");
+    expect(chips(html)).toContain("Model: Default (claude-opus-5-5)");
   });
 
   it("lists a host without projects as one that has nothing to start", () => {
