@@ -49,6 +49,15 @@ export function sendFailure(error: unknown): Exclude<Sending, { state: "sending"
   return index === undefined ? { state: "failed", message: describeError(error) } : { state: "failed", message: describeError(error), index };
 }
 
+/**
+ * A message this window sent that the backend holds behind the running turn, by the name the status line gives it
+ * (FLOW-SEND-MESSAGE-R19), with the last event shown when it was sent: the `user.message` that takes it in comes after.
+ */
+export interface WaitingHere {
+  name: string;
+  after: number;
+}
+
 export interface SessionView {
   id: string;
   transcript: Transcript;
@@ -67,9 +76,13 @@ export interface SessionView {
   message?: Sending;
   /**
    * Core accepted the message, and its turn has not shown on the subscription yet: Core can answer the send before
-   * the turn's events reach the window, and stop stays offered meanwhile (FLOW-SEND-MESSAGE-R03, R04).
+   * the turn's events reach the window, and stop stays offered meanwhile (FLOW-SEND-MESSAGE-R03).
    */
   turnPending?: boolean;
+  /** The messages this window sent that wait in the backend, oldest first (FLOW-SEND-MESSAGE-R19). */
+  waitingHere?: readonly WaitingHere[];
+  /** Stop was chosen, and the turn it stops has not ended: a second stop sends nothing (FLOW-SEND-MESSAGE-R20). */
+  stopChosen?: true;
 }
 
 export interface Follower {
@@ -79,21 +92,26 @@ export interface Follower {
   attached(): void;
   /** The window lost its connection to Core. */
   detached(): void;
-  /** Sends the user's message. Resolves true once Core accepted it; false when it was refused, stopped, or may not have arrived. */
-  send(text: string, attachments?: Attachment[]): Promise<boolean>;
+  /**
+   * Sends the user's message, by `name` on the status line while it waits in the backend (FLOW-SEND-MESSAGE-R19).
+   * Resolves true once Core accepted it; false when it was refused, stopped, or may not have arrived.
+   */
+  send(text: string, attachments?: Attachment[], name?: string): Promise<boolean>;
   /** Where Core says this session's send is (FLOW-SEND-MESSAGE-R16). */
   progress(notification: SessionSendProgressNotification): void;
   /**
    * Stop (FLOW-SEND-MESSAGE-R03): cancels a message not yet handed to the agent, which stays with the user and is not
-   * refused, or else interrupts the turn the agent is working on.
+   * refused, or else interrupts the turn the agent is working on. Once per turn: a second stop before that turn ends
+   * would stop the next one, which a waiting message runs (R20).
    */
   interrupt(): Promise<void>;
   /** Stops following; `update` is never called again. */
   stop(): void;
 }
 
-export function follow(client: CoreClient, id: string, update: (view: SessionView) => void): Follower {
-  let view: SessionView = { id, transcript: emptyTranscript, stream: { state: "subscribing" } };
+/** `waitingHere`: what this window sent to the session that still waits, kept from following it before. */
+export function follow(client: CoreClient, id: string, update: (view: SessionView) => void, waitingHere?: readonly WaitingHere[]): Follower {
+  let view: SessionView = { id, transcript: emptyTranscript, stream: { state: "subscribing" }, ...(waitingHere?.length ? { waitingHere } : {}) };
   let stopped = false;
   // Each subscribe gets a number; only the latest one's answer counts.
   let generation = 0;
@@ -214,7 +232,19 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         const type = envelope.event?.type;
         const turned = type === "turn.started" || type === "turn.completed" || type === "session.ended";
         if (turned) turnSeen = true;
-        return { ...v, transcript, stream, turnPending: turned ? undefined : v.turnPending };
+        // The backend took in what waited (one user.message may carry several), or the session ended: every message
+        // sent before this event no longer waits. Events replayed from before a send keep it.
+        const taken = type === "user.message" || type === "session.ended";
+        const waiting = taken ? v.waitingHere?.filter((w) => w.after >= envelope.seq) : v.waitingHere;
+        return {
+          ...v,
+          transcript,
+          stream,
+          turnPending: turned ? undefined : v.turnPending,
+          // A turn that began or ended takes a stop afresh.
+          stopChosen: turned ? undefined : v.stopChosen,
+          waitingHere: waiting?.length ? waiting : undefined,
+        };
       });
     },
 
@@ -225,19 +255,31 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
       set((v) => ({ ...v, stream: { state: "offline" } }));
     },
 
-    async send(text, attachments) {
+    async send(text, attachments, name) {
       stopping = false;
       turnSeen = false;
-      set((v) => ({ ...v, message: { state: "sending" } }));
+      const after = view.transcript.lastSeq;
+      // A stop chosen before belongs to the turn; this send can be stopped on its own (R03).
+      set((v) => ({ ...v, message: { state: "sending" }, stopChosen: undefined }));
       try {
-        await client.call("session.send", attachments?.length ? { id, text, attachments } : { id, text });
+        const answer = await client.call("session.send", attachments?.length ? { id, text, attachments } : { id, text });
         const pending = !turnSeen;
-        set((v) => ({ ...v, message: undefined, turnPending: pending || undefined }));
+        // No turn in the answer: Core has not projected the message, as for one the backend holds behind the running
+        // turn (PROTO-CORE-API, Turns and attachments). It waits here by name until a user.message after it shows.
+        const turn = (answer as { turn?: unknown } | null | undefined)?.turn;
+        const waits = name !== undefined && typeof turn !== "number";
+        set((v) => ({
+          ...v,
+          message: undefined,
+          turnPending: pending || undefined,
+          ...(waits ? { waitingHere: [...(v.waitingHere ?? []), { name, after }] } : {}),
+        }));
         return true;
       } catch (error) {
         // Only Core's cancel is the stop's doing; any other failure, even after a stop, is still shown.
         const stopped = stopping && stoppedBeforeSent(error);
-        set((v) => ({ ...v, message: stopped ? undefined : sendFailure(error) }));
+        // A stop that canceled this send stopped no turn: a turn still running can be stopped.
+        set((v) => ({ ...v, message: stopped ? undefined : sendFailure(error), stopChosen: stopped ? undefined : v.stopChosen }));
         return false;
       } finally {
         stopping = false;
@@ -251,11 +293,15 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
     },
 
     async interrupt() {
+      if (view.stopChosen) return;
       if (view.message?.state === "sending") stopping = true;
+      set((v) => ({ ...v, stopChosen: true }));
       // Best effort: a turn that ended meanwhile, or a lost connection, leaves nothing to stop. A stop that never
-      // reached Core stopped nothing, so a failure of the send after it is still a refusal to show.
+      // reached Core stopped nothing, so a failure of the send after it is still a refusal to show, and stop is
+      // offered again.
       await client.call("session.interrupt", { id }).catch(() => {
         stopping = false;
+        set((v) => ({ ...v, stopChosen: undefined }));
       });
     },
 
@@ -267,4 +313,14 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
       client.call("session.unsubscribe", { id }).catch(() => {});
     },
   };
+}
+
+/**
+ * What the status line says waits (FLOW-SEND-MESSAGE-R19): how many, from the session's tile, so it survives a reload;
+ * and, when one waits and it is the one this window sent, its name. Nothing while nothing waits.
+ */
+export function waitingOf(count: number | undefined, here: readonly WaitingHere[] | undefined): { count: number; name?: string } | undefined {
+  if (count === undefined || count < 1) return undefined;
+  const only = count === 1 && here?.length === 1 ? here[0] : undefined;
+  return only ? { count, name: only.name } : { count };
 }

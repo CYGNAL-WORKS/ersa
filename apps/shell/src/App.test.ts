@@ -8,7 +8,9 @@ import { App } from "./App";
 import { mergePatch } from "./session/arrangement";
 import type { Attachment, CoreClient, CoreEvent, Method } from "./core/client";
 import type { DragDrop, ShellControl } from "./core/shell";
-import type { BackendInfo, CoreHelloResult, Project, Session, Workspace } from "./protocol/core-api.gen";
+import type { BackendInfo, CoreHelloResult, Project, Session, Tile, Workspace } from "./protocol/core-api.gen";
+import type { Envelope } from "./protocol/agent-events.gen";
+import { EVENT_VERSION } from "./session/transcript";
 
 const hello: CoreHelloResult = {
   core_version: "0.1.0",
@@ -1425,34 +1427,135 @@ describe("the composer App draws when Core is lost", () => {
   });
 });
 
-// Stop under a session (FLOW-SEND-MESSAGE-R03, R04): App holds stop from the send until the turn shows.
-describe("stop under a session App draws", () => {
-  // verifies: FLOW-SEND-MESSAGE-R03
-  // was FLOW-SEND-MESSAGE-R04, which R18 replaces once a message can wait
-  it("keeps stop shown and Enter from sending when Core answers the send before the turn shows", async () => {
-    const core = fakeCore({
-      "session.subscribe": () => ({ last_seq: -1 }),
-      "session.send": () => ({ turn: 1 }),
-    });
-    render(createElement(App, { client: core.client }));
-    await settle();
-    await settle();
-    // The newest session shows at launch; its turn.started never arrives.
-    const message = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
-    fireEvent.change(message(), { target: { value: "Fix the build" } });
+// Sending and stopping under a session (FLOW-SEND-MESSAGE-R03, R18 to R20): App holds stop from the send until the
+// turn shows, Enter still sends while the agent works, the status line says what waits, and stop stops one turn.
+describe("sending while the agent works under a session App draws", () => {
+  // An event on s2, the session shown at launch.
+  const on = (seq: number, event: Envelope["event"]): CoreEvent =>
+    ({
+      kind: "notification",
+      method: "session.event",
+      params: {
+        event: { v: EVENT_VERSION, session_id: "s2", seq, ts: "2026-11-14T09:00:00Z", source: { backend: "claude-code", backend_version: "2.1.302", input: "live" }, event },
+      },
+    }) as CoreEvent;
+  const tile = (more: Partial<Tile>): CoreEvent =>
+    ({ kind: "notification", method: "session.tile", params: { session_id: "s2", tile: { state: "running", pending: [], ...more } } }) as CoreEvent;
+  const running = (waiting?: number) => sessions.map((s) => (s.id === "s2" ? { ...s, state: "running" as const, tile: { state: "running" as const, pending: [], ...(waiting ? { waiting } : {}) } } : s));
+  const message = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
+  const statusText = () => document.querySelector(".composer-status-line")?.textContent ?? null;
+  const enter = async (text: string) => {
+    fireEvent.change(message(), { target: { value: text } });
     await act(async () => {
       fireEvent.keyDown(message(), { key: "Enter" });
     });
     await settle();
+  };
+  const open = async (more: Parameters<typeof fakeCore>[0], shell?: ShellControl) => {
+    const core = fakeCore({ "session.subscribe": () => ({ last_seq: -1 }), ...more });
+    render(createElement(App, { client: core.client, shell }));
+    await settle();
+    await settle();
+    return core;
+  };
+
+  // verifies: FLOW-SEND-MESSAGE-R03
+  // verifies: FLOW-SEND-MESSAGE-R18
+  it("keeps stop shown when Core answers the send before the turn shows, and Enter sends the next message", async () => {
+    const core = await open({ "session.send": () => ({ turn: 1 }) });
+    // The turn's turn.started never arrives.
+    await enter("Fix the build");
     const composer = screen.getByRole("form", { name: "Composer" });
     expect(within(composer).getByRole("button", { name: "Stop" })).toBeTruthy();
-    fireEvent.change(message(), { target: { value: "And the tests" } });
+    await enter("And the tests");
+    expect(core.calls.filter((c) => c.method === "session.send").map((c) => c.params)).toEqual([
+      { id: "s2", text: "Fix the build" },
+      { id: "s2", text: "And the tests" },
+    ]);
+    // Cleared once the session accepted it, and stop is still offered.
+    expect(message().value).toBe("");
+    expect(within(composer).getByRole("button", { name: "Stop" })).toBeTruthy();
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R19
+  it("says how many messages wait from the session's tile after a reload, naming none it didn't send", async () => {
+    const core = await open({ "session.list": () => running(1) });
+    expect(statusText()).toBe("1 message waiting");
+    await core.emit(tile({ waiting: 2 }));
+    expect(statusText()).toBe("2 messages waiting");
+    await core.emit(tile({}));
+    expect(statusText()).toBe(null);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R19
+  it("names the one message this window sent while it waits, by its first words, until the backend takes it in", async () => {
+    const core = await open({ "session.list": () => running(), "session.send": () => ({}) });
+    await core.emit(on(0, { type: "turn.started", turn: 1, trigger: "user" }));
+    await enter("Then update   the changelog and the release notes");
+    await core.emit(tile({ waiting: 1 }));
+    expect(statusText()).toBe("Waiting: Then update the changelog and the");
+    // Another window sends one too: two wait, said as a count.
+    await core.emit(tile({ waiting: 2 }));
+    expect(statusText()).toBe("2 messages waiting");
+    // The backend takes both in, in one message: neither is named again.
+    await core.emit(on(1, { type: "user.message", origin: "human", text: "Then update the changelog and the release notes" }));
+    await core.emit(tile({ waiting: 1 }));
+    expect(statusText()).toBe("1 message waiting");
+    await core.emit(tile({}));
+    expect(statusText()).toBe(null);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R19
+  it("names a message with no words by its first attachment", async () => {
+    const shell = fakeShell("D:/code/beta");
+    const core = await open(
+      {
+        "session.list": () => running(),
+        "session.send": () => ({}),
+        "attachment.inspect": () => ({ path: "D:/code/beta/notes.md", name: "notes.md", kind: "file", size_bytes: 900, lines: 12, copied: false }),
+      },
+      shell,
+    );
+    shell.pickFiles.mockImplementation(async () => ["D:/code/beta/notes.md"]);
+    await core.emit(on(0, { type: "turn.started", turn: 1, trigger: "user" }));
+    fireEvent.click(screen.getByRole("button", { name: "Attach" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add files…" }));
+    await settle();
+    await enter("");
+    await core.emit(tile({ waiting: 1 }));
+    expect(statusText()).toBe("Waiting: notes.md");
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R20
+  it("interrupts only the running turn when stop is chosen while a message waits, once until that turn ends", async () => {
+    const core = await open({ "session.list": () => running(1), "session.interrupt": () => ({}) });
+    await core.emit(on(0, { type: "turn.started", turn: 1, trigger: "user" }));
+    const composer = screen.getByRole("form", { name: "Composer" });
+    const before = core.calls.length;
     await act(async () => {
-      fireEvent.keyDown(message(), { key: "Enter" });
+      fireEvent.click(within(composer).getByRole("button", { name: "Stop" }));
     });
     await settle();
-    expect(core.calls.filter((c) => c.method === "session.send")).toHaveLength(1);
-    expect(message().value).toBe("And the tests");
+    // Stop shows it was chosen, and a second choice sends nothing: it would stop the waiting message's turn.
+    const chosen = within(composer).getByRole("button", { name: "Stopping…" });
+    expect(chosen.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => {
+      fireEvent.click(chosen);
+    });
+    await settle();
+    expect(core.calls.slice(before)).toEqual([{ method: "session.interrupt", params: { id: "s2" } }]);
+    // The message still waits, and runs next.
+    expect(statusText()).toBe("1 message waiting");
+    await core.emit(on(1, { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 1, is_error: true }));
+    await core.emit(on(2, { type: "user.message", origin: "human", text: "Then update the changelog" }));
+    await core.emit(on(3, { type: "turn.started", turn: 2, trigger: "user" }));
+    await core.emit(tile({}));
+    // The next turn can be stopped in its turn.
+    await act(async () => {
+      fireEvent.click(within(composer).getByRole("button", { name: "Stop" }));
+    });
+    await settle();
+    expect(core.calls.slice(before).map((c) => c.method)).toEqual(["session.interrupt", "session.interrupt"]);
   });
 });
 

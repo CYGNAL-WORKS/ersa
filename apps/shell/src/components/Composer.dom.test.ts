@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { createElement } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Sending } from "../session/follow";
-import { Composer, type Unavailable } from "./Composer";
+import { Composer, type Unavailable, type Waiting } from "./Composer";
 
 afterEach(cleanup);
 
@@ -16,6 +16,8 @@ type Props = {
   quietFocus?: boolean;
   working?: boolean;
   onStop?: () => void;
+  stopping?: boolean;
+  waiting?: Waiting;
   onSend?: (text: string) => Promise<boolean>;
 };
 const draw = (props: Props = {}) => createElement(Composer, { autoFocus: false, onSend: async () => true, ...props });
@@ -195,20 +197,82 @@ describe("stop, while a message is on its way or the agent works", () => {
     expect(button().getAttribute("aria-disabled")).toBe("true");
   });
 
-  // was FLOW-SEND-MESSAGE-R04, which R18 replaces once a message can wait
-  it("does not send with Enter while the agent works, and keeps what is written for when the turn ends", async () => {
+  // verifies: FLOW-SEND-MESSAGE-R18
+  it("sends with Enter while the agent works, keeps stop offered, and clears once the session accepts", async () => {
     const sent: string[] = [];
-    const { rerender } = render(draw({ working: true, onStop: () => {}, onSend: async (text) => (sent.push(text), true) }));
+    let accept!: (ok: boolean) => void;
+    render(draw({ working: true, onStop: () => {}, onSend: (text) => (sent.push(text), new Promise<boolean>((done) => (accept = done))) }));
     write("Next, run the tests");
     await act(async () => {
       fireEvent.keyDown(words(), { key: "Enter" });
     });
-    expect(sent).toEqual([]);
+    expect(sent).toEqual(["Next, run the tests"]);
+    // Not cleared until the session has accepted it.
     expect(words().value).toBe("Next, run the tests");
-    rerender(draw({ working: false, onStop: () => {}, onSend: async (text) => (sent.push(text), true) }));
+    expect(button().getAttribute("aria-label")).toBe("Stop");
+    await act(async () => accept(true));
+    expect(words().value).toBe("");
+    expect(button().getAttribute("aria-label")).toBe("Stop");
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R18
+  it("sends an attachment alone with Enter while the agent works", async () => {
+    const sent: number[] = [];
+    render(
+      createElement(Composer, {
+        autoFocus: false,
+        working: true,
+        onStop: () => {},
+        initialAttachments: [{ path: "D:/code/notes.md", name: "notes.md", kind: "file", detail: "12 lines" }],
+        onSend: async (_text, attachments) => (sent.push(attachments.length), true),
+      }),
+    );
     await act(async () => {
       fireEvent.keyDown(words(), { key: "Enter" });
     });
-    expect(sent).toEqual(["Next, run the tests"]);
+    expect(sent).toEqual([1]);
+    expect(document.querySelectorAll(".composer-attachment")).toHaveLength(0);
+  });
+});
+
+describe("messages waiting in the backend", () => {
+  // verifies: FLOW-SEND-MESSAGE-R19
+  it("names the one this window sent, else says how many wait, with no mark and the box as at rest", () => {
+    const { rerender } = render(draw({ working: true, onStop: () => {}, waiting: { count: 1, name: "Then update the changelog" } }));
+    expect(statusLine()?.textContent).toBe("Waiting: Then update the changelog");
+    expect(statusLine()?.querySelector(".glyph")).toBeNull();
+    expect(words().disabled).toBe(false);
+    rerender(draw({ working: true, onStop: () => {}, waiting: { count: 1 } }));
+    expect(statusLine()?.textContent).toBe("1 message waiting");
+    rerender(draw({ working: true, onStop: () => {}, waiting: { count: 3, name: "ignored when several wait" } }));
+    expect(statusLine()?.textContent).toBe("3 messages waiting");
+    rerender(draw({ working: true, onStop: () => {}, waiting: { count: 0 } }));
+    expect(statusLine()).toBeNull();
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R19
+  it("comes after a send on its way in the status line's order", () => {
+    render(draw({ onStop: () => {}, sending: { state: "sending", progress: { phase: "starting" } }, waiting: { count: 2 } }));
+    expect(statusLine()?.textContent).toBe("Starting the backend…");
+  });
+});
+
+describe("stop once chosen", () => {
+  const button = () => document.querySelector(".composer-send") as HTMLButtonElement;
+
+  // verifies: FLOW-SEND-MESSAGE-R20
+  it("says it is stopping, keeps focus, and takes no second choice until the turn ends", () => {
+    let stops = 0;
+    const { rerender } = render(draw({ working: true, onStop: () => stops++ }));
+    button().focus();
+    rerender(draw({ working: true, stopping: true, onStop: () => stops++ }));
+    expect(button().getAttribute("aria-label")).toBe("Stopping…");
+    expect(button().getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(button());
+    expect(stops).toBe(0);
+    expect(document.activeElement).toBe(button());
+    rerender(draw({ working: true, onStop: () => stops++ }));
+    fireEvent.click(button());
+    expect(stops).toBe(1);
   });
 });
