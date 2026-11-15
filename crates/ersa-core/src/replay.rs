@@ -212,6 +212,10 @@ pub(crate) async fn start(core: &Core, replay: Replay) -> Result<(), SessionErro
         last_activity_at: None,
         forked_from: None,
         forked_through: None,
+        // A replay gives no backend anything that outlives it.
+        model_at: None,
+        effort_at: None,
+        permission_mode_at: None,
     };
     let transport = core
         .session_transport_for(LOCAL_HOST_ID)
