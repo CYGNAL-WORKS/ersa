@@ -58,8 +58,6 @@ interface ChipProps {
   name: string;
   /** A where chip's icon, leading it (docs/design/COMPOSER.md, The session controls): a folder for the project. */
   icon?: LucideIcon;
-  /** A muted word before the value, where the value alone would not say what it is: "Effort". */
-  prefix?: string;
   /** The chosen option's id; absent when nothing can be chosen. */
   value?: string;
   /** What the chip reads in place of the chosen option's label: "New workspace from main". */
@@ -106,7 +104,7 @@ interface ChipProps {
  * with Enter, Space or the arrows, moves with the arrows, chooses with Enter or Space, and Escape closes it with
  * focus back on the chip.
  */
-export function Chip({ name, icon, prefix, value, reads, placeholder, problem, pending, readOnly, keepsChevron, waiting, onOpen, options, onChoose, action, section, wide, disabled, initialOpen = false, force, forceOption, invites, initialQuery = "" }: ChipProps) {
+export function Chip({ name, icon, value, reads, placeholder, problem, pending, readOnly, keepsChevron, waiting, onOpen, options, onChoose, action, section, wide, disabled, initialOpen = false, force, forceOption, invites, initialQuery = "" }: ChipProps) {
   const [open, setOpen] = useState(initialOpen);
   const chip = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -277,7 +275,6 @@ export function Chip({ name, icon, prefix, value, reads, placeholder, problem, p
             <Icon icon={icon} size="icon-xs" />
           </span>
         )}
-        {prefix && <span className="chip-prefix">{prefix}</span>}
         <span className="chip-value">{shown}</span>
         {/* A chip that opens a list ends with a chevron; one that cannot change, or is waiting, does not, unless it
             keeps the chevron's place for when its session runs. */}

@@ -688,7 +688,7 @@ const claudeCode: BackendInfo = {
   ],
   efforts: choices([["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], ""),
   permission_modes: choices(
-    [["default", "Ask before acting"], ["acceptEdits", "Accept edits"], ["plan", "Plan only"], ["auto", "Auto"]],
+    [["default", "Ask"], ["acceptEdits", "Accept edits"], ["plan", "Plan only"], ["auto", "Auto"]],
     "default",
   ),
 };
@@ -1369,7 +1369,6 @@ const entries: Entry[] = [
       ["Focus", <Chip {...chip} force="focus" />],
       ["Pressed", <Chip {...chip} force="pressed" />],
       ["Disabled", <Chip {...chip} disabled />],
-      ["With a prefix", <Chip name="Effort" prefix="Effort" value="high" options={[{ id: "high", label: "High" }]} onChoose={() => {}} />],
       ["A problem", <Chip name="Backend" placeholder="No backend" problem options={[]} onChoose={() => {}} />],
       // Under a running session: the session's value, without the chevron, unchanged under the pointer.
       ["In a session", <Chip {...chip} readOnly />],
