@@ -11,7 +11,7 @@
 {"raw":6,"event":{"type":"question.answered","request_id":"d7df0a3d-44a7-4570-a8fe-eb171fd6e8c8","answers":[],"declined":true,"answered_by":"user"}}
 {"raw":6,"event":{"type":"session.state","state":"running"}}
 {"raw":7,"message_id":"c1ccb99f-a21b-4496-88ff-26feac5aac08","event":{"type":"tool.result","tool_use_id":"toolu_01DePR2EnjDTPgf4hCtKer7G","content":"The user declined to answer.","is_error":true}}
-{"raw":8,"event":{"type":"usage.updated","rate_limit":{"status":"allowed","resets_at":"2026-11-11T20:00:00Z","detail":"seven_day"}}}
+{"raw":8,"event":{"type":"usage.updated","rate_limit":{"status":"allowed","resets_at":"2026-11-11T20:00:00Z","detail":"seven_day","windows":[{"id":"seven_day","label":"Weekly · all models","used":0.24,"resets_at":"2026-11-11T20:00:00Z"}]}}}
 {"raw":9,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"system/task_summary","payload":{"detail":"Which color do you want?","session_id":"72564bec-2d56-4a64-acd7-80eabb549762","subtype":"task_summary","type":"system","uuid":"4bc132b1-775b-41be-a41c-2c24f75f3d24"}}}
 {"raw":10,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"system/thinking_tokens","payload":{"estimated_tokens":50,"estimated_tokens_delta":50,"session_id":"72564bec-2d56-4a64-acd7-80eabb549762","subtype":"thinking_tokens","type":"system","uuid":"043e74a7-bad4-4cce-a11b-4adb60254829"}}}
 {"raw":11,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"system/thinking_tokens","payload":{"estimated_tokens":181,"estimated_tokens_delta":131,"session_id":"72564bec-2d56-4a64-acd7-80eabb549762","subtype":"thinking_tokens","type":"system","uuid":"e63f7220-5bdb-4d15-8684-5cebe5cf9ce7"}}}

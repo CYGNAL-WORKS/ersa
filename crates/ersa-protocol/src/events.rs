@@ -40,7 +40,9 @@ use serde_json::{Map, Value};
 /// 6: `tool.requested` carries `target` and `edits`.
 ///
 /// 7: `tool.requested` carries `target_kind` with its `target`.
-pub const PROJECTION_VERSION: u32 = 7;
+///
+/// 8: `usage.updated.rate_limit` carries the backend's usage `windows`.
+pub const PROJECTION_VERSION: u32 = 8;
 
 /// One event as Core streams it: a typed payload plus where it came from.
 ///
@@ -680,7 +682,7 @@ pub struct UsageUpdated {
     pub rate_limit: Option<RateLimit>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RateLimit {
     pub status: String,
@@ -689,6 +691,26 @@ pub struct RateLimit {
     pub resets_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// The usage windows the backend counts the login against, in the
+    /// backend's order. A report's list replaces the last one; none means no
+    /// new information.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub windows: Option<Vec<UsageWindow>>,
+}
+
+/// One usage window of a plan, such as its weekly limit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct UsageWindow {
+    /// The backend's key for the window, such as `seven_day`.
+    pub id: String,
+    /// A name to show for it, which the adapter gives where the backend gives none.
+    pub label: String,
+    /// The share of the window used, from 0 to 1; a backend may report above 1.
+    pub used: f64,
+    /// RFC 3339 time at which the window resets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resets_at: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

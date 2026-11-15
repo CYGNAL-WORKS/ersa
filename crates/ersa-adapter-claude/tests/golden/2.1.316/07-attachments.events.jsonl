@@ -44,7 +44,7 @@
 {"raw":39,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/content_block_stop","payload":{"api_message_id":"msg_011CgngXqsVVcJFrVagvaf2V","event":{"index":1,"type":"content_block_stop"},"parent_tool_use_id":null,"session_id":"ebccfb68-effe-4a58-a744-f59cb5e119d1","type":"stream_event","uuid":"c12d187b-b68c-451e-9e41-5a8504231981"}}}
 {"raw":40,"event":{"type":"usage.updated","turn_output_tokens":214}}
 {"raw":41,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/message_stop","payload":{"api_message_id":"msg_011CgngXqsVVcJFrVagvaf2V","event":{"type":"message_stop"},"parent_tool_use_id":null,"session_id":"ebccfb68-effe-4a58-a744-f59cb5e119d1","type":"stream_event","uuid":"73b59f3f-cdb0-4fac-bbe5-eef3df8f5273"}}}
-{"raw":42,"event":{"type":"usage.updated","rate_limit":{"status":"allowed","resets_at":"2026-11-11T20:00:00Z","detail":"seven_day"}}}
+{"raw":42,"event":{"type":"usage.updated","rate_limit":{"status":"allowed","resets_at":"2026-11-11T20:00:00Z","detail":"seven_day","windows":[{"id":"seven_day","label":"Weekly · all models","used":0.41,"resets_at":"2026-11-11T20:00:00Z"}]}}}
 {"raw":43,"event":{"type":"turn.completed","turn":1,"outcome":"success","duration_ms":3363,"is_error":false,"final_text":"The image is solid red.\n\nYou attached two paths:\n- File: `notes/todo.md`\n- Folder: `src`\n\nThe image itself came in from `C:/Users/user\\AppData\\Local\\Temp\\claude\\C--Users-user-AppData-Local-Temp-ersa-rec-hsR5qv\\ebccfb68-effe-4a58-a744-f59cb5e119d1\\images\\1.png`."}}
 {"raw":43,"event":{"type":"usage.updated","context_tokens":44576,"context_window":1000000,"cost_usd_total":0.11502019999999999,"turns":1}}
 {"raw":43,"event":{"type":"session.state","state":"idle"}}
