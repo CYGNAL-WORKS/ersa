@@ -30,10 +30,10 @@ fn recorded() -> Vec<String> {
 }
 
 /// The CLI's answer to the driver's first request after `initialize`, its
-/// rename, which the driver numbers 2.
+/// rename, which the driver numbers 3, after `get_context_usage`.
 fn rename_answer() -> String {
     json!({"type": "control_response",
-        "response": {"subtype": "success", "request_id": "ersa-rename-2"}})
+        "response": {"subtype": "success", "request_id": "ersa-rename-3"}})
     .to_string()
 }
 
@@ -150,6 +150,7 @@ async fn a_starting_session_is_renamed_once_the_cli_answers_initialize() {
         .wait_for_stdin(is("initialize"))
         .then_pause(Duration::from_millis(800))
         .then_stdout([&stdout[0]])
+        .wait_for_stdin(is("get_context_usage"))
         .wait_for_stdin(is("rename_session"))
         .then_stdout([announced(&stdout, NAMED), rename_answer()])
         .wait_for_stdin(is("user"))
@@ -177,10 +178,11 @@ async fn a_starting_session_is_renamed_once_the_cli_answers_initialize() {
     // id, which Core read from the session it stored.
     let session_id = chosen_id(&transport);
     let sent: Vec<Value> = transport.stdin_lines().iter().map(|l| parse(l)).collect();
-    assert_eq!(sent.len(), 2, "{sent:#?}");
+    assert_eq!(sent.len(), 3, "{sent:#?}");
     assert_eq!(sent[0]["request"]["subtype"], "initialize");
+    assert_eq!(sent[1]["request"]["subtype"], "get_context_usage");
     assert_eq!(
-        sent[1]["request"],
+        sent[2]["request"],
         json!({ "subtype": "rename_session", "title": NAMED, "source": "host",
             "session_id": session_id })
     );
@@ -242,6 +244,7 @@ async fn the_name_the_cli_announces_for_a_rename_is_the_one_shown() {
     let transport = FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(is("initialize"))
         .then_stdout([&stdout[0]])
+        .wait_for_stdin(is("get_context_usage"))
         .wait_for_stdin(is("rename_session"))
         .then_stdout([announced(&stdout, &unique)])
         .then_pause(Duration::from_millis(300))
@@ -251,7 +254,7 @@ async fn the_name_the_cli_announces_for_a_rename_is_the_one_shown() {
         .then_stdout([announced(&stdout, &unique)])
         .then_pause(Duration::from_millis(300))
         .then_stdout([json!({"type": "control_response",
-            "response": {"subtype": "success", "request_id": "ersa-rename-3"}})
+            "response": {"subtype": "success", "request_id": "ersa-rename-4"}})
         .to_string()])
         .hold_open();
     let home = tempdir();
@@ -282,6 +285,7 @@ async fn a_title_the_cli_announces_is_the_sessions_until_its_record_holds_one() 
     let transport = FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(is("initialize"))
         .then_stdout([&stdout[0]])
+        .wait_for_stdin(is("get_context_usage"))
         .wait_for_stdin(is("user"))
         .then_stdout([announced(&stdout, "Named in the session")])
         .then_stdout(&stdout[3..])

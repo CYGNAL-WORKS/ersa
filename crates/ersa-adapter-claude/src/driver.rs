@@ -527,7 +527,9 @@ impl Adapter for ClaudeAdapter {
         config: SessionConfig,
         sink: Arc<dyn AdapterSink>,
     ) -> Result<Box<dyn AdapterSession>, AdapterError> {
-        let (session, _answer) = self.launch(transport, config, sink).await?;
+        let (session, _answer) = self
+            .launch(transport, config, sink, AskContext::Yes)
+            .await?;
         Ok(Box::new(session))
     }
 
@@ -546,7 +548,10 @@ impl Adapter for ClaudeAdapter {
             backend_session_id: self.new_session_id(),
             ..SessionConfig::default()
         };
-        let (session, answer) = self.launch(transport, config, Arc::new(ProbeSink)).await?;
+        // The probe is no session: it asks nothing about context.
+        let (session, answer) = self
+            .launch(transport, config, Arc::new(ProbeSink), AskContext::No)
+            .await?;
         let models = read_models(&answer["response"]);
         // Closes stdin, and kills the CLI should it linger.
         let _ = session.stop().await;
@@ -723,6 +728,7 @@ impl ClaudeAdapter {
         transport: Arc<dyn Transport>,
         config: SessionConfig,
         sink: Arc<dyn AdapterSink>,
+        ask_context: AskContext,
     ) -> Result<(ClaudeSession, Value), AdapterError> {
         // A bad resume or session id fails here, before anything starts.
         let resume = resume_args(&config)?;
@@ -799,6 +805,9 @@ impl ClaudeAdapter {
             workspace_trust: trust,
             ..InitializeRequest::default()
         }));
+        // Set once the CLI has answered, so a time-out after it says what
+        // actually stalled: the CLI stopped reading its input.
+        let answered = AtomicBool::new(false);
         let handshake = async {
             // Failing to send it is as much a failed start as a bad answer,
             // and the CLI's stderr usually says why.
@@ -816,6 +825,16 @@ impl ClaudeAdapter {
                             recorded = %answer["response"]["workspace_trust_recorded"],
                             "Claude Code did not record the trusted project's workspace trust"
                         );
+                    }
+                    // A session shows its context before its first turn
+                    // ends, and a resumed one as soon as it starts
+                    // (PROTO-CLAUDE-CODE-STREAM-R72). Written here, under the
+                    // handshake's time limit, so it goes out before anything
+                    // Core sends and a CLI that stopped reading cannot hold
+                    // `start` forever.
+                    answered.store(true, Ordering::SeqCst);
+                    if ask_context == AskContext::Yes {
+                        shared.ask_context().await;
                     }
                     Ok(answer)
                 }
@@ -835,10 +854,17 @@ impl ClaudeAdapter {
             tokio::time::timeout(self.handshake_timeout, handshake)
                 .await
                 .unwrap_or_else(|_| {
-                    Err(AdapterError::Protocol(format!(
-                        "the CLI did not answer initialize within {:?}",
-                        self.handshake_timeout
-                    )))
+                    Err(AdapterError::Protocol(if answered.load(Ordering::SeqCst) {
+                        format!(
+                            "the CLI answered initialize but stopped reading its input within {:?}",
+                            self.handshake_timeout
+                        )
+                    } else {
+                        format!(
+                            "the CLI did not answer initialize within {:?}",
+                            self.handshake_timeout
+                        )
+                    }))
                 })
         };
         match handshake.await {
@@ -954,6 +980,20 @@ impl Shared {
         }
     }
 
+    /// Asks the CLI for the session's context in use and its window with
+    /// `get_context_usage` (PROTO-CLAUDE-CODE-STREAM-R72). Nothing waits on
+    /// the answer: it arrives on stdout like any line and the projector
+    /// reads it, so a refusal or no answer at all leaves the session as it
+    /// was (R73). A write that fails means the CLI is going away, which its
+    /// exit reports.
+    async fn ask_context(&self) {
+        let request_id = self.request_id("context");
+        let request = HostRequest::GetContextUsage { detail: None };
+        let _ = self
+            .write(&HostMessage::control_request(request_id, request))
+            .await;
+    }
+
     /// Handles one stdout line: records it, and keeps the driver's view of
     /// pending requests in step with it.
     async fn on_backend_line(&self, line: String) {
@@ -986,6 +1026,11 @@ impl Shared {
             Some("control_response") => field("/response/request_id").map(String::from),
             _ => None,
         };
+        // A compaction changes what the model holds; its own `post_tokens`
+        // understates it (2.1.316 fixture `27-compact-between-turns`), so the
+        // CLI is asked (PROTO-CLAUDE-CODE-STREAM-R72).
+        let compacted =
+            field("/type") == Some("system") && field("/subtype") == Some("compact_boundary");
 
         self.sink.record(Direction::Backend, line);
 
@@ -1012,6 +1057,11 @@ impl Shared {
             });
             // A failed write means the process is going away; the exit says so.
             let _ = self.write(&refusal).await;
+        }
+        // Written after the line is recorded, so the request follows the
+        // boundary in the log.
+        if compacted {
+            self.ask_context().await;
         }
     }
 }
@@ -1162,6 +1212,15 @@ impl Drop for Reservation<'_> {
     fn drop(&mut self) {
         lock(self.deciding).remove(&self.request_id);
     }
+}
+
+/// Whether a launch asks the CLI for the session's context once it has
+/// answered `initialize` (PROTO-CLAUDE-CODE-STREAM-R72): a session does, the
+/// `backend.list` probe does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AskContext {
+    Yes,
+    No,
 }
 
 /// A running CLI session.
@@ -1442,7 +1501,14 @@ impl AdapterSession for ClaudeSession {
                 },
             ),
         };
-        self.ask(what, request).await
+        let changed_model = what == "set_model";
+        self.ask(what, request).await?;
+        // The new model may have another window, and the CLI's answer is the
+        // one Ersa reports (PROTO-CLAUDE-CODE-STREAM-R72, R74).
+        if changed_model {
+            self.shared.ask_context().await;
+        }
+        Ok(())
     }
 
     async fn stop(&self) -> Result<(), AdapterError> {

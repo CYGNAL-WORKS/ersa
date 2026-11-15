@@ -184,6 +184,22 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
                 );
                 continue;
             }
+            // A compaction that kept a preserved segment: the entries after
+            // it chain to the segment, not to the summary, so the record
+            // reader, which follows the chain, never reaches the summary
+            // (follow-up in #398's pull request).
+            if (stream.name.as_str(), uuid.as_str())
+                == (
+                    "2.1.316/44-context-usage",
+                    "d6ad44a0-b4d7-40d9-80fe-03e6b14a3198",
+                )
+            {
+                assert!(
+                    record_kinds.contains_key(&uuid) && !from_record.contains_key(&uuid),
+                    "fixture 44's compaction summary now projects from the record"
+                );
+                continue;
+            }
             let kind = record_kinds
                 .get(&uuid)
                 .unwrap_or_else(|| panic!("{}: {uuid} is not in the record", stream.name));
@@ -252,7 +268,7 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
             // output) is a passthrough on the stream, which carries no user
             // message of Ersa's (R43), and a `system` user message from the
             // record. Which one live should show is open (inbox, #311).
-            const LIVE_DIFFERS: [(&str, &str); 5] = [
+            const LIVE_DIFFERS: [(&str, &str); 6] = [
                 (
                     "2.1.316/24-interrupt-with-waiting",
                     "81ed5a84-2659-408a-8579-9fd3bd5e552a",
@@ -272,6 +288,10 @@ fn record_messages_project_to_the_same_events_as_the_stream_messages() {
                 (
                     "2.1.316/27-compact-between-turns",
                     "4a38e294-a743-40c9-88f3-5bb34f74eaae",
+                ),
+                (
+                    "2.1.316/46-context-usage-during-compact",
+                    "b71e802e-b469-49f4-b181-a80e628d5f34",
                 ),
             ];
             if LIVE_DIFFERS.contains(&(stream.name.as_str(), uuid.as_str())) {
