@@ -112,7 +112,7 @@ describe("Delete on a tile", () => {
     fireEvent.click(deleteItem("Fix the build"));
     await settle();
     const dialog = screen.getByRole("dialog", { name: "Delete Fix the build?" });
-    expect(dialog.textContent).toContain("Its folder and its branch ersa/fix are deleted with it.");
+    expect(dialog.textContent).toContain("The session's folder and branch ersa/fix are deleted too.");
     expect(dialog.textContent).toContain("2 uncommitted or untracked files will be lost.");
     expect(core.calls.filter((c) => c.method === "workspace.changes").map((c) => c.params)).toEqual([{ id: "w-fix" }]);
     expect(document.activeElement?.textContent).toBe("Cancel");
