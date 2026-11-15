@@ -25,14 +25,16 @@ export const BASELINES = join("apps", "shell", "e2e", "__screenshots__");
 // long wait (`show`) has no limit of its own: the workflow's jobs have theirs,
 // and its output passes through to the terminal.
 const TIMEOUT_MS = 2 * 60 * 1000;
-function defaultRun(cmd, args, { show = false } = {}) {
+// live-shots.mjs runs its git commands through it too, in its own checkout
+// (`cwd`) and with extra variables (`env`).
+export function defaultRun(cmd, args, { show = false, cwd = ROOT, env = {} } = {}) {
   const r = spawnSync(cmd, args, {
-    cwd: ROOT,
+    cwd,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
     timeout: show ? undefined : TIMEOUT_MS,
     stdio: show ? "inherit" : "pipe",
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" },
+    env: { ...process.env, ...env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" },
   });
   if (r.error) return { status: 1, stdout: "", stderr: String(r.error.message) };
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
