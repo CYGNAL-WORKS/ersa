@@ -420,19 +420,19 @@ Delete {title}?
 
 ### `rail.delete.conversationDetail`
 
-Its conversation is deleted for good, in {backend} too.
+The conversation is permanently deleted.
 
 ### `rail.delete.folderAndBranchDetail`
 
-Its folder and its branch {branch} are deleted with it.
+The session's folder and branch {branch} are deleted too.
 
 ### `rail.delete.folderDetail`
 
-Its folder is deleted with it.
+The session's folder is deleted too.
 
 ### `rail.delete.folderBranchKeptDetail`
 
-Its folder is deleted with it. Its branch {branch} is kept.
+The session's folder is deleted too, but its branch {branch} is kept.
 
 ### `rail.delete.branchKeptDetail`
 
