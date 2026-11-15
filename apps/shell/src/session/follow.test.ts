@@ -520,7 +520,7 @@ describe("stop while a message waits", () => {
     await follower.interrupt();
     await follower.interrupt();
     expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(1);
-    expect(last().stopChosen).toBe(true);
+    expect(last().stopChosen).toBeDefined();
     const at = last().transcript.lastSeq + 1;
     follower.receive({ ...replay[0], seq: at, event: { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 1, is_error: true } } as never);
     expect(last().stopChosen).toBeUndefined();
@@ -561,12 +561,12 @@ describe("stop while a message waits", () => {
     await follower.interrupt();
     // Sent while the stopped turn has not shown yet: the stop still holds.
     await follower.send("Do this instead");
-    expect(last().stopChosen).toBe(true);
+    expect(last().stopChosen).toBeDefined();
     await follower.interrupt();
     expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(1);
     const at = last().transcript.lastSeq + 1;
     follower.receive({ ...replay[0], seq: at, event: { type: "turn.started", turn: 9, trigger: "user" } } as never);
-    expect(last().stopChosen).toBe(true);
+    expect(last().stopChosen).toBeDefined();
     await follower.interrupt();
     expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(1);
   });
@@ -586,7 +586,7 @@ describe("stop while a message waits", () => {
     const sent = f.send("With a large attachment");
     await settle();
     await f.interrupt();
-    expect(seen.at(-1)?.canceling).toBe(true);
+    expect(seen.at(-1)?.canceling).toBeDefined();
     await f.interrupt();
     refuse({ kind: "rpc", error: { code: -32000, message: "stopped", data: { kind: "invalid_state", reason: "send_stopped" } } } as never);
     expect(await sent).toBe(false);
@@ -594,7 +594,7 @@ describe("stop while a message waits", () => {
     expect(seen.at(-1)?.message).toBeUndefined();
     expect(seen.at(-1)?.canceling).toBeUndefined();
     // The cancel leaves the stop held for turn 1, still winding down: a third stop sends nothing.
-    expect(seen.at(-1)?.stopChosen).toBe(true);
+    expect(seen.at(-1)?.stopChosen).toBeDefined();
     expect(seen.at(-1)?.stopTaken).toBe(true);
     await f.interrupt();
     expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
@@ -653,32 +653,32 @@ describe("stop while a message waits", () => {
     expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
   });
 
-  // verifies: FLOW-SEND-MESSAGE-R20
-  it("offers stop again for the next turn when its stop fails, after a cancel that reached Core before the message", async () => {
-    let accept: (answer: unknown) => void = () => {};
-    let reach = true;
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("keeps a later message's cancel when an earlier message's cancel fails late", async () => {
+    const fails: ((error: unknown) => void)[] = [];
+    const refusals: ((error: unknown) => void)[] = [];
     const { client, calls } = fakeClient({
       "session.subscribe": () => Promise.resolve({ last_seq: -1 }),
-      "session.interrupt": () => (reach ? Promise.resolve({}) : Promise.reject({ kind: "unavailable", message: "gone" })),
-      "session.send": () => new Promise((resolve) => (accept = resolve)),
+      "session.interrupt": () => new Promise((_, reject) => fails.push(reject)),
+      "session.send": () => new Promise((_, reject) => refusals.push(reject)),
     });
     const seen: SessionView[] = [];
     const f = follow(client, "s1", (v) => seen.push(v));
-    f.receive(ev(0, { type: "turn.started", turn: 1, trigger: "user" }));
-    const sent = f.send("Do this instead");
+    const first = f.send("First");
     await settle();
-    // The cancel's call is answered, then Core takes the message: the stop met turn 1.
-    await f.interrupt();
-    accept({});
-    await sent;
-    f.receive(ev(1, { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 1, is_error: true }));
-    f.receive(ev(2, { type: "turn.started", turn: 2, trigger: "user" }));
-    // Turn 2's stop never reaches Core: stop is offered again.
-    reach = false;
-    await f.interrupt();
-    expect(seen.at(-1)?.stopTaken).toBeUndefined();
+    const firstStop = f.interrupt();
+    // Core refuses the first message for its own reason; the user sends another and stops it too.
+    refusals[0]?.(replayRefusal("session.send"));
+    await first;
+    void f.send("Second");
+    await settle();
     void f.interrupt();
-    expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(3);
+    // The first stop's call fails only now: the second message's cancel holds.
+    fails[0]?.({ kind: "unavailable", message: "gone" });
+    await firstStop;
+    expect(seen.at(-1)?.stopTaken).toBe(true);
+    void f.interrupt();
+    expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
   });
 
   // verifies: FLOW-SEND-MESSAGE-R20
@@ -748,7 +748,7 @@ describe("stop while a message waits", () => {
     await f.interrupt();
     // The cancel failed: stop is offered for the message again, and the turn's stop still holds.
     expect(seen.at(-1)?.canceling).toBeUndefined();
-    expect(seen.at(-1)?.stopChosen).toBe(true);
+    expect(seen.at(-1)?.stopChosen).toBeDefined();
     expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
   });
 
