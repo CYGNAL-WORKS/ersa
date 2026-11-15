@@ -640,6 +640,7 @@ fn notification_examples() -> Vec<Notification> {
                 tile: Tile::starting(),
                 last_activity_at: Some("2026-10-31T12:05:00.250Z".into()),
                 title: Some("Rename the module".into()),
+                created_at: "2026-10-31T12:00:00.000Z".into(),
             },
         )
         .expect("serialize"),

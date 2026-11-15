@@ -8,6 +8,7 @@ import type { BackendInfo, Choice, Project } from "../protocol/core-api.gen";
 
 import { ContextRing } from "./ContextRing";
 import { NewSessionScreen } from "./NewSessionScreen";
+import { SessionControls } from "./SessionControls";
 
 const host = { id: "local", name: "WORKSTATION", platform: "windows" as const };
 const ersa: Project = { id: "p1", host_id: "local", path: "C:\\Users\\me\\ersa", name: "ersa", vcs: "git", trusted: true };
@@ -220,9 +221,26 @@ describe("the new-session screen", () => {
 });
 
 describe("the context ring", () => {
-  it("reads a value it cannot measure as none used", () => {
+  it("reads a value it cannot measure as no reading", () => {
     const html = renderToStaticMarkup(createElement(ContextRing, { used: Number.NaN }));
-    expect(html).toContain("Context: none used yet");
+    expect(html).toContain("Context isn&#x27;t reported yet");
     expect(html).not.toContain("NaN");
+  });
+
+  // LAY-SHELL, Context; docs/design/COMPOSER.md, The context ring: on a session, an empty ring says context isn't
+  // reported yet, where before one it says none is used.
+  it("under a session with no reading says context isn't reported yet", () => {
+    const html = renderToStaticMarkup(
+      createElement(SessionControls, {
+        hosts: [host],
+        localHostId: "local",
+        projects: [ersa],
+        backends: [claude()],
+        values: { host_id: "local", project_id: "p1", workspace: "isolated" },
+        onChoose: () => {},
+        readOnly: true,
+      }),
+    );
+    expect(html).toContain('aria-label="Context isn&#x27;t reported yet"');
   });
 });
