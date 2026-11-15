@@ -9,25 +9,6 @@ import { SessionControls, modelOptions } from "./SessionControls";
 const project: Project = { id: "p1", host_id: "local", path: "D:/code/alpha", name: "alpha", vcs: "git", trusted: true };
 const host = { id: "local", name: "devbox", platform: "windows" } as const;
 
-describe("the workspace list's base branch", () => {
-  it("says the project has no branches, not that none matches, when the repository lists none", () => {
-    const shown = renderToStaticMarkup(
-      createElement(SessionControls, {
-        hosts: [host],
-        localHostId: "local",
-        projects: [project],
-        backends: [],
-        values: { host_id: "local", project_id: "p1", workspace: "isolated" },
-        branches: { state: "read", branches: [] },
-        onChoose: () => {},
-        open: "workspace",
-      }),
-    );
-    expect(shown).toContain("This project has no branches yet.");
-    expect(shown).not.toContain("No branch matches.");
-  });
-});
-
 // The default model's name, as Claude Desktop's model chip gives it: Default, then the model the default resolves to.
 describe("the model chip's default", () => {
   const fallback: ModelChoice = { id: "default", label: "Default (recommended)", default: true, resolved: "claude-opus-5-5" };

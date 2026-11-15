@@ -22,7 +22,7 @@ import { type CoreClient, describeError } from "./core/client";
 import { type Connection, type CoreView, type ProjectsView, type SessionsView, connect } from "./core/connection";
 import { type QuitAsk, type ShellControl, answerQuit, busySessions, cancelQuit } from "./core/shell";
 import type { BackendInfo, Project, Session, Workspace } from "./protocol/core-api.gen";
-import { type Branches, type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
+import { type SessionValues, newestFirst, projectOrder, sessionShown } from "./session/controls";
 import { contextUsed, tileOf } from "./session/tile";
 import { type Answers, type Decision, type Reply, answering } from "./session/answers";
 import { type ShelfShown, shelfAfter, shelfFollowing, shelfOf, shelfTone, shownAfter, shownRequest } from "./session/shelf";
@@ -32,7 +32,7 @@ import { type Attached, attached, sendable, unreadable, waitingName } from "./se
 import { type Follower, type SendProgress, type SessionView, type Sending, type WaitingHere, follow, progressOf, waitingOf } from "./session/follow";
 import { initialStage, showsScreen, stage } from "./session/stage";
 import { RESET_PATCH, choicePatch, collapsePatch, useLocalDay, useRailArrangement } from "./session/arrangement";
-import { StartStop, readChoices, rememberPatch, remembered, startSession } from "./session/start";
+import { StartStop, readChoices, rememberPatch, startSession } from "./session/start";
 import { mergeWorkspaces } from "./session/workspaces";
 import { type Changeable, type Changes, NO_CHANGES, changeAnswered, changeSent, changeSession, isChangeable, refusalSeen, runs } from "./session/change";
 
@@ -401,7 +401,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     // Showing archived sessions only, the rail switches to active ones, so the new tile is in view (FLOW-ORGANIZE-SESSIONS-R21).
     // As it is now, not as it was when the start began: the user can change it while the session starts.
     if (showing.current === "archived") arrange(choicePatch({ show: "active" }));
-    setLastUsed((l) => ({ ...l, [values.project_id]: remembered(values) }));
+    setLastUsed((l) => ({ ...l, [values.project_id]: values }));
     // Best effort: a failure only means the screen starts at these values in this window alone.
     client.call("settings.set", { patch: rememberPatch(values) }).catch(() => {});
     connection.current?.reload("sessions");
@@ -651,14 +651,6 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
           return read(paths, workspace);
         }
       : undefined;
-
-  // A git project's local branches, for the base branch a new workspace starts from (FLOW-NEW-SESSION-R21). Branches
-  // that cannot be listed leave the base to Core, which starts the workspace at the default branch.
-  const listBranches = (projectId: string): Promise<Branches> =>
-    client.call("branch.list", { project_id: projectId }).then(
-      (branches) => ({ state: "read", branches }),
-      () => ({ state: "failed" }),
-    );
 
   // Every project the Interface adds is trusted: Trust is the trust question's one answer that adds (FLOW-NEW-SESSION-R25).
   const addProject = async (path: string) => {
@@ -957,7 +949,6 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
                   projects={[controlsFor.project]}
                   backends={[sessionControls.backend]}
                   values={sessionControls.values}
-                  workspaceLabel={sessionControls.workspaceLabel}
                   onChoose={(key, id) => {
                     if (isChangeable(key)) void change(shown.id, key, id);
                   }}
@@ -996,7 +987,6 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               rootWorkspaces={rootWorkspaces}
               starting={starting?.state === "sending" ? { state: "sending", progress: startProgress } : starting}
               onChooseFolder={chooseFolder}
-              onListBranches={listBranches}
               onAddProject={addProject}
               away={away}
               onStop={() => startStop.current?.stop()}

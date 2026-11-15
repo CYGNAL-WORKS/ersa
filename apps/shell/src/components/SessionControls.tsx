@@ -1,26 +1,24 @@
-import { Folder, GitBranch, Monitor, Plus } from "lucide-react";
+import { Folder, Monitor, Plus, Square, SquareCheck } from "lucide-react";
 import { t } from "../catalog";
 import type { BackendInfo, Choice, CoreHelloResult, ModelChoice, Project } from "../protocol/core-api.gen";
 import {
-  type Branches,
   type SessionValues,
-  type WorkspaceKind,
   available,
-  branchesMatching,
   effortsFor,
   listedModelFor,
   showsBackend,
   workspaceKinds,
 } from "../session/controls";
 import { isChangeable } from "../session/change";
-import { Chip, type ChipOption, type ChipSection } from "./Chip";
+import { Chip, type ChipOption } from "./Chip";
+import { Icon } from "./Icon";
 import { ContextRing } from "./ContextRing";
 import "./SessionControls.css";
 
 export type Host = CoreHelloResult["host"];
 
 /** The chips, by the value each sets. */
-export type ControlKey = "host" | "project" | "workspace" | "base" | "backend" | "model" | "effort" | "permission_mode";
+export type ControlKey = "host" | "project" | "workspace" | "backend" | "model" | "effort" | "permission_mode";
 
 /** What every chip takes from the session controls. */
 interface ChipHandlers {
@@ -47,10 +45,6 @@ interface SessionControlsProps {
   /** Why the host could not list its backends: the backend chip says detection failed (FLOW-NEW-SESSION-R11). */
   detectionFailed?: boolean;
   values: SessionValues;
-  /** The project's branches, for a new workspace's base branch (FLOW-NEW-SESSION-R21); absent for a project without git. */
-  branches?: Branches;
-  /** The workspace as a running session's controls name it: its branch, or the root. */
-  workspaceLabel?: string;
   onChoose: (key: ControlKey, id: string) => void;
   /** Add project…, which ends the project chip's list; absent while it cannot be taken, as on a remote host (FLOW-NEW-SESSION-R27). */
   onAddProject?: () => void;
@@ -69,44 +63,6 @@ interface SessionControlsProps {
   /** For the gallery: one chip shown open, or in a pointer or keyboard state. */
   open?: ControlKey;
   force?: { key: ControlKey; state: "hover" | "focus" | "pressed" };
-}
-
-/** The workspace list's two options, each with what it means (docs/design/COMPOSER.md, The workspace list). */
-const workspaceOption = (kind: WorkspaceKind): ChipOption =>
-  kind === "isolated"
-    ? { id: kind, label: t("sessionControls.workspace.newWorkspaceLabel"), status: t("sessionControls.workspace.isolatedStatus") }
-    : { id: kind, label: t("sessionControls.workspace.projectFolderLabel"), status: t("sessionControls.workspace.sharedStatus") };
-
-/**
- * The base branch beneath a new workspace (FLOW-NEW-SESSION-R21): the project's branches narrowed by the search box,
- * the default one marked, or what is said while they are read or could not be.
- */
-function baseSection(branches: Branches, base: string | undefined, onChoose: (id: string) => void): ChipSection {
-  const listed = branches.state === "read" ? branches.branches : [];
-  return {
-    heading: t("sessionControls.workspace.baseBranchHeading"),
-    placeholder: t("sessionControls.workspace.searchBranchesPlaceholder"),
-    narrow: (query) =>
-      branchesMatching(listed, query).map((b) => ({
-        id: b.name,
-        label: b.name,
-        status: b.default ? t("sessionControls.workspace.defaultBranchStatus") : undefined,
-      })),
-    value: base,
-    onChoose,
-    // While they are read or when they cannot be, there is nothing to search (FLOW-NEW-SESSION-R28).
-    unavailable: branches.state !== "read",
-    problem: branches.state === "failed",
-    empty:
-      branches.state === "reading"
-        ? t("sessionControls.workspace.readingBranchesProgress")
-        : branches.state === "failed"
-          ? t("sessionControls.workspace.branchesFailedError")
-          : // A repository with no commits lists no branch at all: nothing was searched.
-            listed.length === 0
-            ? t("sessionControls.workspace.noBranchesEmpty")
-            : t("sessionControls.workspace.noBranchMatchesEmpty"),
-  };
 }
 
 const backendOption = (b: BackendInfo): ChipOption => ({
@@ -170,11 +126,38 @@ function EffortChip({ backend, values, readOnly, chip }: { backend: BackendInfo;
 }
 
 /**
- * The session controls (GLOSSARY): a chip for each of host, project, workspace, backend, model, effort and
- * permission mode, with the context ring at the row's end (LAY-SHELL). The backend chip shows only when the host
+ * The Worktree checkbox (issue 412), in the row as Claude Desktop's: checked, the session runs in a new isolated workspace
+ * made from the repository's default branch; unchecked, in the project's own folder. A native checkbox inside its
+ * label, so Space toggles it and assistive technology hears a checkbox; the box is drawn with Lucide's square, as the
+ * agent's task lists are, and the label is itself a chip.
+ */
+function WorktreeCheckbox({ checked, onChange, disabled, force }: { checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean; force?: "hover" | "focus" | "pressed" }) {
+  const description = t("sessionControls.worktree.description");
+  return (
+    <label className="chip worktree" title={description} data-force={force} data-disabled={disabled || undefined}>
+      <input
+        className="worktree-input"
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        aria-description={description}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span className="worktree-box" data-checked={checked || undefined} aria-hidden="true">
+        <Icon icon={checked ? SquareCheck : Square} size="icon-xs" />
+      </span>
+      {t("sessionControls.worktree.label")}
+    </label>
+  );
+}
+
+/**
+ * The session controls (GLOSSARY): a chip for each of host and project, the Worktree checkbox for a project Ersa
+ * can make worktrees for, and a chip for each of backend, model, effort and permission mode, with the context ring at
+ * the row's end (LAY-SHELL). The backend chip shows only when the host
  * has more than one backend, or none to run, and lists a missing backend with its status (FLOW-NEW-SESSION-R07).
  */
-export function SessionControls({ hosts, localHostId, projects, backends, detectionFailed, values, branches, workspaceLabel, onChoose, onAddProject, disabled, readOnly, changeable, waiting, onOpen, used, open, force }: SessionControlsProps) {
+export function SessionControls({ hosts, localHostId, projects, backends, detectionFailed, values, onChoose, onAddProject, disabled, readOnly, changeable, waiting, onOpen, used, open, force }: SessionControlsProps) {
   const project = projects.find((p) => p.id === values.project_id);
   const backend = backends?.find((b) => b.name === values.backend);
   const chip = (key: ControlKey): ChipHandlers => ({
@@ -222,31 +205,16 @@ export function SessionControls({ hosts, localHostId, projects, backends, detect
           }}
           {...chip("project")}
         />
-        {project &&
-          (workspaceLabel === undefined ? (
-            <Chip
-              name="Workspace"
-              icon={GitBranch}
-              value={values.workspace}
-              // It names the workspace the session will start in: a new one with its base branch, or the project folder (R29).
-              reads={
-                values.workspace === "isolated" && values.base !== undefined
-                  ? t("sessionControls.workspace.newFromLabel", { branch: values.base })
-                  : undefined
-              }
-              options={workspaceKinds(project).map(workspaceOption)}
-              section={values.workspace === "isolated" && branches ? baseSection(branches, values.base, (id) => onChoose("base", id)) : undefined}
-              {...chip("workspace")}
-            />
-          ) : (
-            <Chip
-              name="Workspace"
-              icon={GitBranch}
-              value={values.workspace}
-              options={[{ id: values.workspace, label: workspaceLabel }]}
-              {...chip("workspace")}
-            />
-          ))}
+        {/* Only where Ersa can make an isolated workspace for the project (FLOW-NEW-SESSION-R06). */}
+        {project && workspaceKinds(project).includes("isolated") && (
+          <WorktreeCheckbox
+            checked={values.workspace === "isolated"}
+            onChange={(checked) => onChoose("workspace", checked ? "isolated" : "root")}
+            // Under a session it shows where the session runs, and does not change.
+            disabled={disabled || readOnly}
+            force={force?.key === "workspace" ? force.state : undefined}
+          />
+        )}
       </div>
       <div className="session-controls-how">
         {backends === undefined ? (
