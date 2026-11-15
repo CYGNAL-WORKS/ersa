@@ -12,7 +12,7 @@
       "properties": {
         "v": {
           "description": "Event schema version. Bumped when any event's meaning or shape changes, including the lifecycle events Core emits itself.",
-          "const": 7
+          "const": 8
         },
         "session_id": { "type": "string", "minLength": 1 },
         "seq": {
@@ -485,7 +485,22 @@
           "properties": {
             "status": { "type": "string" },
             "resets_at": { "type": "string", "format": "date-time" },
-            "detail": { "type": "string" }
+            "detail": { "type": "string" },
+            "windows": {
+              "description": "The usage windows the backend counts the login against, in the backend's order. A report's list replaces the last one.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "label", "used"],
+                "properties": {
+                  "id": { "type": "string" },
+                  "label": { "description": "A name to show for the window, which the adapter gives where the backend gives none.", "type": "string" },
+                  "used": { "description": "The share of the window used, from 0 to 1; a backend may report above 1.", "type": "number", "minimum": 0 },
+                  "resets_at": { "type": "string", "format": "date-time" }
+                }
+              }
+            }
           }
         }
       }

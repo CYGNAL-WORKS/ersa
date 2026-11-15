@@ -13,7 +13,7 @@
 {"raw":9,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/content_block_stop","payload":{"api_message_id":"msg_011Ch1vkXwHakHGETmZR5V2w","event":{"index":0,"type":"content_block_stop"},"parent_tool_use_id":null,"session_id":"1b1d3858-7ae9-44b2-a782-006baec0b197","type":"stream_event","uuid":"4c620e1c-5acd-49fd-a8fd-99e4fc8c6cd0"}}}
 {"raw":10,"event":{"type":"usage.updated","turn_output_tokens":3}}
 {"raw":11,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"stream_event/message_stop","payload":{"api_message_id":"msg_011Ch1vkXwHakHGETmZR5V2w","event":{"type":"message_stop"},"parent_tool_use_id":null,"session_id":"1b1d3858-7ae9-44b2-a782-006baec0b197","type":"stream_event","uuid":"6e7b09b7-9de4-4573-a9f8-7c8bdbd39e24"}}}
-{"raw":12,"event":{"type":"usage.updated","rate_limit":{"status":"allowed","resets_at":"2026-11-18T20:00:00Z","detail":"seven_day"}}}
+{"raw":12,"event":{"type":"usage.updated","rate_limit":{"status":"allowed","resets_at":"2026-11-18T20:00:00Z","detail":"seven_day","windows":[{"id":"seven_day","label":"Weekly · all models","used":0.09,"resets_at":"2026-11-18T20:00:00Z"}]}}}
 {"raw":13,"event":{"type":"turn.completed","turn":1,"outcome":"success","duration_ms":1292,"is_error":false,"final_text":"first"}}
 {"raw":13,"event":{"type":"usage.updated","context_tokens":44232,"context_window":1000000,"cost_usd_total":0.1097362,"turns":1}}
 {"raw":13,"event":{"type":"session.state","state":"idle"}}
