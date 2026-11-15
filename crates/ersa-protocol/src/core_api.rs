@@ -96,6 +96,9 @@ methods! {
     SessionDecidePermission => "session.decide_permission",
     SessionAnswerQuestion => "session.answer_question",
     SessionSetTitle => "session.set_title",
+    SessionSetModel => "session.set_model",
+    SessionSetEffort => "session.set_effort",
+    SessionSetPermissionMode => "session.set_permission_mode",
     SessionSetMode => "session.set_mode",
     SessionSubscribe => "session.subscribe",
     SessionUnsubscribe => "session.unsubscribe",
@@ -588,6 +591,14 @@ pub struct Session {
     /// Core always states one to the backend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Core's latest request for the session's model, a `backend.list` id
+    /// given at `session.create`, `session.fork` or `session.set_model`,
+    /// beside `model`, which stays the backend's report: the session controls
+    /// name the model by the choice the user made, where an alias and the
+    /// backend's default can resolve to the same id (PROTO-CORE-API-R102).
+    /// `None` when the model was left to the backend or Core made no request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_request: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
     pub permission_mode: String,
@@ -841,6 +852,32 @@ pub struct AnswerQuestionParams {
 pub struct SetTitleParams {
     pub id: String,
     pub title: String,
+}
+
+/// `session.set_model` params: `model` is a model id from `backend.list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetModelParams {
+    pub id: String,
+    pub model: String,
+}
+
+/// `session.set_effort` params: `effort` is an effort id `backend.list`
+/// lists for the session's model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetEffortParams {
+    pub id: String,
+    pub effort: String,
+}
+
+/// `session.set_permission_mode` params: `permission_mode` is a permission
+/// mode id from `backend.list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetPermissionModeParams {
+    pub id: String,
+    pub permission_mode: String,
 }
 
 /// `session.set_archived` params. Archiving stops a live session first, as

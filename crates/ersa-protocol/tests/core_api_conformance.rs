@@ -91,7 +91,8 @@ fn session() -> Session {
         workspace_id: "w-5e6f7a8b".into(),
         host_id: "local".into(),
         backend: "claude-code".into(),
-        model: Some("opus".into()),
+        model: Some("claude-opus-5-5".into()),
+        model_request: Some("opus".into()),
         effort: Some("high".into()),
         permission_mode: "acceptEdits".into(),
         mode: Some("default".into()),
@@ -210,6 +211,9 @@ fn result_examples() -> Vec<(Method, Value)> {
         (Method::SessionSetArchived, to_value(&session())),
         (Method::SessionFork, to_value(&session())),
         (Method::SessionArrange, to_value(&session())),
+        (Method::SessionSetModel, to_value(&session())),
+        (Method::SessionSetEffort, to_value(&session())),
+        (Method::SessionSetPermissionMode, to_value(&session())),
         (Method::SectionList, to_value(&vec![section()])),
         (Method::SectionCreate, to_value(&section())),
         (Method::SectionRename, to_value(&section())),
@@ -502,6 +506,27 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&SetTitleParams {
                 id: "s-1".into(),
                 title: "t".into(),
+            }),
+        ),
+        (
+            Method::SessionSetModel,
+            to_value(&SetModelParams {
+                id: "s-1".into(),
+                model: "haiku".into(),
+            }),
+        ),
+        (
+            Method::SessionSetEffort,
+            to_value(&SetEffortParams {
+                id: "s-1".into(),
+                effort: "low".into(),
+            }),
+        ),
+        (
+            Method::SessionSetPermissionMode,
+            to_value(&SetPermissionModeParams {
+                id: "s-1".into(),
+                permission_mode: "acceptEdits".into(),
             }),
         ),
         (

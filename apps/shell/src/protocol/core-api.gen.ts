@@ -214,6 +214,24 @@ export type Request =
   | {
       jsonrpc: "2.0";
       id: RequestId;
+      method: "session.set_model";
+      params: SessionSetModelParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
+      method: "session.set_effort";
+      params: SessionSetEffortParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
+      method: "session.set_permission_mode";
+      params: SessionSetPermissionModeParams;
+    }
+  | {
+      jsonrpc: "2.0";
+      id: RequestId;
       method: "session.set_mode";
       params: SessionSetModeParams;
     }
@@ -644,6 +662,18 @@ export interface SessionSetTitleParams {
   id: Id;
   title: string;
 }
+export interface SessionSetModelParams {
+  id: Id;
+  model: string;
+}
+export interface SessionSetEffortParams {
+  id: Id;
+  effort: string;
+}
+export interface SessionSetPermissionModeParams {
+  id: Id;
+  permission_mode: string;
+}
 export interface SessionSetModeParams {
   id: Id;
   mode: string;
@@ -1014,9 +1044,13 @@ export interface Session {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1248,9 +1282,13 @@ export interface Session1 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1301,9 +1339,13 @@ export interface Session2 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1354,9 +1396,13 @@ export interface Session3 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1407,9 +1453,13 @@ export interface Session4 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1460,9 +1510,13 @@ export interface Session5 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1513,9 +1567,13 @@ export interface Session6 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1566,9 +1624,13 @@ export interface Session7 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1619,9 +1681,13 @@ export interface Session8 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1689,9 +1755,13 @@ export interface Session9 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1767,9 +1837,13 @@ export interface Session10 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1820,9 +1894,13 @@ export interface Session11 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1873,9 +1951,13 @@ export interface Session12 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -1926,9 +2008,184 @@ export interface Session13 {
   host_id: Id;
   backend: string;
   /**
-   * The model session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
    */
   model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
+  /**
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   */
+  effort?: string;
+  /**
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
+   */
+  permission_mode: string;
+  mode?: string;
+  title?: string;
+  state: AgentEvents.SessionState["state"];
+  created_at: string;
+  /**
+   * Absent when the session has no events yet.
+   */
+  last_event_seq?: number;
+  tile: Tile;
+  sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
+  /**
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
+}
+export interface Session14 {
+  id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
+  workspace_id: Id;
+  host_id: Id;
+  backend: string;
+  /**
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
+   */
+  model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
+  /**
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   */
+  effort?: string;
+  /**
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
+   */
+  permission_mode: string;
+  mode?: string;
+  title?: string;
+  state: AgentEvents.SessionState["state"];
+  created_at: string;
+  /**
+   * Absent when the session has no events yet.
+   */
+  last_event_seq?: number;
+  tile: Tile;
+  sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
+  /**
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
+}
+export interface Session15 {
+  id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
+  workspace_id: Id;
+  host_id: Id;
+  backend: string;
+  /**
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
+   */
+  model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
+  /**
+   * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
+   */
+  effort?: string;
+  /**
+   * The permission mode the session started with: the one session.create was given, else the backend's default, which is always stated to it.
+   */
+  permission_mode: string;
+  mode?: string;
+  title?: string;
+  state: AgentEvents.SessionState["state"];
+  created_at: string;
+  /**
+   * Absent when the session has no events yet.
+   */
+  last_event_seq?: number;
+  tile: Tile;
+  sending?: SendPhase1;
+  /**
+   * Whether the user archived the session. session.send to an archived session answers invalid_state; a refused session.resume leaves it archived; Core clears it only once it accepts a resume.
+   */
+  archived: boolean;
+  /**
+   * Whether the user pinned the session. Core stores it; session.arrange sets it.
+   */
+  pinned: boolean;
+  section_id?: Id3;
+  /**
+   * Whether the session is unseen: the user's arrangement, which Core stores. session.arrange sets it.
+   */
+  unseen: boolean;
+  /**
+   * When the session's latest turn ended. Core records it as a turn ends and changes it at no other time; absent until a turn has ended.
+   */
+  last_activity_at?: string;
+  /**
+   * Absent unless the session is marked deleting: running while Core works on its delete, failed after a step failed, until a new session.delete finishes it. session.resume, session.send, session.set_archived, session.arrange and session.remove answer invalid_state while it is set.
+   */
+  deleting?: "running" | "failed";
+}
+export interface Session16 {
+  id: Id;
+  /**
+   * The session's id in its backend; absent until the backend has reported it.
+   */
+  backend_session_id?: string;
+  workspace_id: Id;
+  host_id: Id;
+  backend: string;
+  /**
+   * The backend's newest report of the session's model, as the backend gave it (PROTO-CORE-API-R71, R102): an alias may be reported by the id it resolved to. Absent while unknown: the backend's own default.
+   */
+  model?: string;
+  /**
+   * Core's latest request for the session's model, an id from backend.list, given at session.create, session.fork or session.set_model (PROTO-CORE-API-R102). Absent when the model was left to the backend or Core made no request.
+   */
+  model_request?: string;
   /**
    * The effort session.create was given, an id from backend.list. Absent when left out: the backend's own default.
    */
@@ -2081,6 +2338,9 @@ export type SessionInterruptResult = Session;
 export type SessionDecidePermissionResult = Session;
 export type SessionAnswerQuestionResult = Session;
 export type SessionSetTitleResult = Session;
+export type SessionSetModelResult = Session;
+export type SessionSetEffortResult = Session;
+export type SessionSetPermissionModeResult = Session;
 export type SessionSetModeResult = Session;
 export type SectionCreateResult = Section;
 export type SectionRenameResult = Section;
@@ -2121,6 +2381,9 @@ export interface CoreApiMethods {
   "session.decide_permission": { params: SessionDecidePermissionParams; result: SessionDecidePermissionResult };
   "session.answer_question": { params: SessionAnswerQuestionParams; result: SessionAnswerQuestionResult };
   "session.set_title": { params: SessionSetTitleParams; result: SessionSetTitleResult };
+  "session.set_model": { params: SessionSetModelParams; result: SessionSetModelResult };
+  "session.set_effort": { params: SessionSetEffortParams; result: SessionSetEffortResult };
+  "session.set_permission_mode": { params: SessionSetPermissionModeParams; result: SessionSetPermissionModeResult };
   "session.set_mode": { params: SessionSetModeParams; result: SessionSetModeResult };
   "session.subscribe": { params: SessionSubscribeParams; result: SessionSubscribeResult };
   "session.unsubscribe": { params: SessionUnsubscribeParams; result: SessionUnsubscribeResult };

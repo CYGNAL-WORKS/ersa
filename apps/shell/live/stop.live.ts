@@ -2,11 +2,12 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "./harness";
 
-// Stop in the running window with real Claude Code (#188; FLOW-SEND-MESSAGE-R03, R04): send becomes stop while the
-// agent works, Enter does not send meanwhile, and stop ends the turn as interrupted with the words kept.
+// Stop in the running window with real Claude Code (#188, #338; FLOW-SEND-MESSAGE-R03, R18 to R20): send becomes stop
+// while the agent works, Enter sends meanwhile and the message waits, named on the status line, and stop ends only the
+// running turn, as interrupted, the waiting message running next.
 test.use({ backend: "claude" });
 
-test("stop ends a working turn as interrupted, and what was written meanwhile stays in the composer", async ({ ersa }) => {
+test("a message sent while the agent works waits, and stop ends only the running turn, the message running next", async ({ ersa }) => {
   test.setTimeout(300_000);
   const { page } = ersa;
   const folder = path.join(ersa.dir, "stop-check");
@@ -32,19 +33,25 @@ test("stop ends a working turn as interrupted, and what was written meanwhile st
   const stop = composer.getByRole("button", { name: "Stop", exact: true });
   await expect(stop).toBeVisible({ timeout: 120_000 });
 
-  // R04: Enter does not send while the agent works, and the words stay.
+  // R18: Enter sends while the agent works, and the composer clears once the session accepts it; stop stays.
   await words.fill("Then summarise it in one line.");
   await words.press("Enter");
-  await expect(words).toHaveValue("Then summarise it in one line.");
-  await ersa.shot("working");
+  await expect(words).toHaveValue("", { timeout: 60_000 });
+  await expect(stop).toBeVisible();
+  // R19: the status line names it while it waits in the backend.
+  const status = page.locator(".composer-status-line");
+  await expect(status).toHaveText("Waiting: Then summarise it in one line.", { timeout: 60_000 });
+  await ersa.shot("waiting");
 
-  // R03: stop interrupts the turn, which ends as interrupted; send comes back with focus, and the words stay.
+  // R20: stop interrupts only the running turn, which ends as interrupted, and the waiting message runs next.
   await stop.focus();
   await page.keyboard.press("Enter");
   await expect(transcript.getByText("The turn was interrupted.")).toBeVisible({ timeout: 60_000 });
+  await expect(transcript.getByText("Then summarise it in one line.")).toBeVisible({ timeout: 120_000 });
+  await expect(status).toHaveCount(0, { timeout: 120_000 });
+  // Its turn ends on its own; send comes back with focus kept.
   const send = composer.getByRole("button", { name: "Send", exact: true });
-  await expect(send).toBeVisible();
+  await expect(send).toBeVisible({ timeout: 180_000 });
   await expect(send).toBeFocused();
-  await expect(words).toHaveValue("Then summarise it in one line.");
-  await ersa.shot("interrupted");
+  await ersa.shot("ran-next");
 });

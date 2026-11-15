@@ -38,6 +38,26 @@ use crate::{BACKEND, MAX_TESTED_VERSION};
 /// some raw log would change, so Core re-projects cached sessions.
 pub const PROJECTOR_VERSION: u32 = 10;
 
+/// How long the CLI has to answer `generate_session_title`: a model writes
+/// the name, so longer than other control requests (PROTO-CLAUDE-CODE-STREAM-R49).
+pub const TITLE_DEADLINE: time::Duration = time::Duration::minutes(5);
+
+/// Whether an answer stamped `answered_at` came within [`TITLE_DEADLINE`] of
+/// the request stamped `asked_at`. Read from the lines' own times, so the
+/// projection stays a function of the log. Times that are not RFC 3339 say
+/// nothing either way, and the answer counts.
+fn within_title_deadline(asked_at: &str, answered_at: &str) -> bool {
+    use time::OffsetDateTime;
+    use time::format_description::well_known::Rfc3339;
+    match (
+        OffsetDateTime::parse(asked_at, &Rfc3339),
+        OffsetDateTime::parse(answered_at, &Rfc3339),
+    ) {
+        (Ok(asked), Ok(answered)) => answered - asked <= TITLE_DEADLINE,
+        _ => true,
+    }
+}
+
 /// The `model` the CLI gives the messages it writes itself rather than
 /// receiving from the API.
 pub(crate) const SYNTHETIC_MODEL: &str = "<synthetic>";
@@ -72,25 +92,37 @@ pub struct ClaudeProjector {
     /// of the current turn, by message id, for `turn_output_tokens`
     /// (PROTO-AGENT-EVENTS-R17).
     output_tokens: HashMap<String, u64>,
-    /// The title of the latest `system/session_title_changed`: the name the
-    /// user gave the session, which the CLI announces after each change to
-    /// it, never for a title it generated (PROTO-CLAUDE-CODE-STREAM-R36),
-    /// after how many such lines.
+    /// The session's title as the live stream gives it, after how many
+    /// changes: the latest `system/session_title_changed`, the name the user
+    /// gave the session, which the CLI announces after each change to it,
+    /// never for a title it generated (PROTO-CLAUDE-CODE-STREAM-R36); else
+    /// the name the CLI generated when asked, if no rename came first (R50).
     announced_title: Option<(u64, String)>,
+    /// Whether a rename was sent (`rename_session`) or announced
+    /// (`system/session_title_changed`) so far: from then on, a generated
+    /// name never becomes the session's title (PROTO-CLAUDE-CODE-STREAM-R50).
+    renamed: bool,
+    /// The host's `generate_session_title` requests not yet answered, by
+    /// `request_id`, with the `ts` of the line that sent each, to apply the
+    /// request's deadline to its answer (R49, R50).
+    title_requests: HashMap<String, String>,
     /// Whether the latest `system/init` shows the CLI started in its minimal
     /// mode (`--bare`): it has none of `scratchpad_path`, `memory_paths` and
     /// `messaging_socket_path` (PROTO-CLAUDE-CODE-STREAM-R53).
     minimal_mode: bool,
-    /// `request_id`s of the host's `set_model` requests not yet answered:
-    /// the answer names the model the CLI resolved
-    /// (PROTO-CLAUDE-CODE-STREAM-R40).
-    set_model_ids: HashSet<String>,
+    /// `request_id`s of the host's `set_model` and `set_permission_mode`
+    /// requests not yet answered, with the field of the answer that names
+    /// the new value: `set_model`'s the model the CLI resolved, and
+    /// `set_permission_mode`'s the mode, which the CLI's `system/status`
+    /// repeats after it (PROTO-CLAUDE-CODE-STREAM-R40).
+    control_ids: HashMap<String, Reported>,
     /// The model the stream last reported: each `system/init`, and each
     /// answer to `set_model` (PROTO-CLAUDE-CODE-STREAM-R40).
     model: Option<String>,
     /// The permission mode the stream last reported: the `initialize`
-    /// answer before the first turn, then each `system/init` and each
-    /// `system/status` that carries one (PROTO-CLAUDE-CODE-STREAM-R40).
+    /// answer before the first turn, then each `system/init`, each answer to
+    /// `set_permission_mode` and each `system/status` that carries one
+    /// (PROTO-CLAUDE-CODE-STREAM-R40).
     permission_mode: Option<String>,
     /// Messages the host wrote while a turn ran (or while others already
     /// waited) that the CLI has not taken in yet, in the order written. The
@@ -137,6 +169,14 @@ struct StreamedText {
     /// Whether a partial `assistant.text` went out for it, which obliges a
     /// final one (PROTO-AGENT-EVENTS-R07).
     shown: bool,
+}
+
+/// Which of a session's values the answer to one of the host's control
+/// requests reports.
+#[derive(Debug, Clone, Copy)]
+enum Reported {
+    Model,
+    PermissionMode,
 }
 
 impl ClaudeProjector {
@@ -209,6 +249,7 @@ impl ClaudeProjector {
             // The session's name, kept for Core to show until the record
             // holds it; the line itself stays a passthrough, as it is below.
             (Some("system"), Some("session_title_changed"), _) => {
+                self.renamed = true;
                 if let Some(title) = field("/title") {
                     let count = self.announced_title.as_ref().map_or(0, |(n, _)| *n);
                     self.announced_title = Some((count + 1, title.to_string()));
@@ -829,20 +870,62 @@ impl ClaudeProjector {
                 )]
             }
             // The model `set_model` resolved its choice to (fixture 25:
-            // `haiku` answers `claude-haiku-5-5`). The line stays a
+            // `haiku` answers `claude-haiku-5-5`), and the mode
+            // `set_permission_mode` set (`{"mode":"acceptEdits"}`), so the
+            // change is reported as the CLI takes it. The line stays a
             // passthrough.
-            CliResponse::Success(success) if self.set_model_ids.remove(&success.request_id) => {
-                if let Some(model) = success
-                    .response
-                    .as_ref()
-                    .and_then(|answer| answer.get("model"))
-                    .and_then(Value::as_str)
-                {
-                    self.model = Some(model.to_string());
+            CliResponse::Success(success) if self.control_ids.contains_key(&success.request_id) => {
+                let reported = self.control_ids.remove(&success.request_id);
+                let field = |name: &str| {
+                    success
+                        .response
+                        .as_ref()
+                        .and_then(|answer| answer.get(name))
+                        .and_then(Value::as_str)
+                        .map(String::from)
+                };
+                match reported {
+                    Some(Reported::Model) => {
+                        if let Some(model) = field("model") {
+                            self.model = Some(model);
+                        }
+                    }
+                    Some(Reported::PermissionMode) => {
+                        if let Some(mode) = field("mode") {
+                            self.permission_mode = Some(mode);
+                        }
+                    }
+                    None => {}
                 }
                 vec![passthrough(line, value)]
             }
-            CliResponse::Error(refusal) if self.set_model_ids.remove(&refusal.request_id) => {
+            CliResponse::Error(refusal)
+                if self.control_ids.remove(&refusal.request_id).is_some() =>
+            {
+                vec![passthrough(line, value)]
+            }
+            // The name the CLI generated for a new session. A refusal, an
+            // answer with no title, or one past the deadline names nothing,
+            // and says nothing to the user either (R50).
+            CliResponse::Success(success)
+                if self.title_requests.contains_key(&success.request_id) =>
+            {
+                let asked_at = self.title_requests.remove(&success.request_id);
+                let title = success
+                    .response
+                    .as_ref()
+                    .and_then(|answer| answer.get("title"))
+                    .and_then(Value::as_str)
+                    .filter(|title| !title.trim().is_empty());
+                let in_time =
+                    asked_at.is_none_or(|asked_at| within_title_deadline(&asked_at, &line.ts));
+                if let Some(title) = title
+                    && in_time
+                    && !self.renamed
+                {
+                    let count = self.announced_title.as_ref().map_or(0, |(n, _)| *n);
+                    self.announced_title = Some((count + 1, title.to_string()));
+                }
                 vec![passthrough(line, value)]
             }
             // Answers to interrupts and other host requests.
@@ -894,8 +977,17 @@ impl ClaudeProjector {
                         self.initialize_ids.insert(id.to_string());
                     }
                     (Some("set_model"), Some(id)) => {
-                        self.set_model_ids.insert(id.to_string());
+                        self.control_ids.insert(id.to_string(), Reported::Model);
                     }
+                    (Some("set_permission_mode"), Some(id)) => {
+                        self.control_ids
+                            .insert(id.to_string(), Reported::PermissionMode);
+                    }
+                    (Some("generate_session_title"), Some(id)) => {
+                        self.title_requests.insert(id.to_string(), line.ts.clone());
+                    }
+                    // A rename sent wins over any name generated after it.
+                    (Some("rename_session"), _) => self.renamed = true,
                     _ => {}
                 }
                 vec![passthrough(line, value)]

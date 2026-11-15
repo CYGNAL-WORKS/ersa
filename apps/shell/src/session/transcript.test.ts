@@ -313,7 +313,7 @@ describe("a question in a session that ended", () => {
 });
 
 describe("a turn the agent is working on", () => {
-  // was FLOW-SEND-MESSAGE-R04; R18 replaces it, unbuilt
+  // verifies: FLOW-SEND-MESSAGE-R03
   it("is working from turn.started until the turn completes, however it ends, or the session ends", () => {
     let t = apply(emptyTranscript, envelope(0, { type: "turn.started", turn: 1, trigger: "user" }));
     expect(t.working).toBe(true);

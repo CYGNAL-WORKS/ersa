@@ -347,6 +347,14 @@ export const enUS = {
     attachButton: "Attach",
     sendButton: "Send",
     stopButton: "Stop",
+    // Stop once chosen, until the turn ends (FLOW-SEND-MESSAGE-R20).
+    stoppingProgress: "Stopping…",
+    // The status line while messages wait in the backend (FLOW-SEND-MESSAGE-R19): one by its first words or its
+    // first attachment's name, in the window that sent it; else how many.
+    waiting: {
+      namedNote: "Waiting: {name}",
+      countNote: { one: "{count} message waiting", other: "{count} messages waiting" },
+    },
     detectingProgress: "Detecting the backends on this host…",
     // The host has no backend to run: none installed, on the status line and as why a start is refused; or one
     // that failed detection, by the label backend.list gives it.
