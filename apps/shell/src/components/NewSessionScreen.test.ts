@@ -31,7 +31,7 @@ const claude = (status: BackendInfo["status"] = "available"): BackendInfo => ({
   ],
   // The CLI marks no effort as its default.
   efforts: choices([["medium", "Medium"], ["high", "High"]], "none"),
-  permission_modes: choices([["default", "Ask before acting"], ["acceptEdits", "Accept edits"]], "default"),
+  permission_modes: choices([["default", "Ask"], ["acceptEdits", "Accept edits"]], "default"),
 });
 const copilot = (status: BackendInfo["status"]): BackendInfo => ({
   ...claude(),
@@ -69,9 +69,15 @@ describe("the new-session screen", () => {
       "Workspace: New workspace",
       "Model: Default (recommended)",
       "Effort: Default",
-      "Permission mode: Ask before acting",
+      "Permission mode: Ask",
     ]);
     expect(html).toContain('aria-label="Context: none used yet"');
+  });
+
+  it("gives the words one line at rest, as in a session, so attach, the words and send read as one row", () => {
+    const box = render({}).match(/<textarea[^>]*>/)?.[0] ?? "";
+    expect(box).toMatch(/rows="1"/);
+    expect(box).not.toMatch(/data-tall/);
   });
 
   // verifies: FLOW-NEW-SESSION-R02
