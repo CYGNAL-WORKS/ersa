@@ -1,6 +1,6 @@
 import { Folder, GitBranch, Monitor, Plus } from "lucide-react";
 import { t } from "../catalog";
-import type { BackendInfo, Choice, CoreHelloResult, Project } from "../protocol/core-api.gen";
+import type { BackendInfo, Choice, CoreHelloResult, ModelChoice, Project } from "../protocol/core-api.gen";
 import {
   type Branches,
   type SessionValues,
@@ -8,6 +8,7 @@ import {
   available,
   branchesMatching,
   effortsFor,
+  listedModelFor,
   showsBackend,
   workspaceKinds,
 } from "../session/controls";
@@ -130,24 +131,36 @@ const projectOption = (p: Project): ChipOption => ({
 
 const choiceOptions = (choices: readonly Choice[]): ChipOption[] => choices.map(({ id, label }) => ({ id, label }));
 
+/**
+ * The model chip's options (FLOW-NEW-SESSION-R36): each model by the backend's label, except a default the backend
+ * says stands for a listed model, which reads Default and that model's label, as Claude Desktop's chip does. A
+ * default the backend says nothing more of keeps the backend's own label: Ersa never renames what it cannot explain.
+ */
+export function modelOptions(models: readonly ModelChoice[]): ChipOption[] {
+  return models.map(({ id, label, default: isDefault, resolved }) => {
+    const listed = isDefault && resolved !== undefined ? listedModelFor(models, resolved) : undefined;
+    return { id, label: listed ? t("sessionControls.model.defaultOfLabel", { model: listed.label }) : label };
+  });
+}
+
 /** The effort chip's Default row, which chooses no level: its id, which the screen turns back into none. */
 export const DEFAULT_EFFORT = "";
 
 /**
- * The effort chip (docs/design/COMPOSER.md, The session controls): the levels the chosen model takes. With none chosen
+ * The effort chip (docs/design/COMPOSER.md, The session controls): the levels the chosen model takes, the level alone
+ * on the chip as Claude Desktop shows it, while its accessible name still says it is the effort. With none chosen
  * it reads Default, and before the session starts Default is its list's first row; a running session's list holds only
  * the levels. A model that takes no effort leaves the chip in its place, unavailable, reading None.
  */
 function EffortChip({ backend, values, readOnly, chip }: { backend: BackendInfo; values: SessionValues; readOnly?: boolean; chip: ChipHandlers }) {
   const levels = choiceOptions(effortsFor(backend, values.model));
   if (levels.length === 0) {
-    return <Chip name="Effort" prefix="Effort" reads={t("sessionControls.effort.noneLabel")} options={[]} {...chip} disabled />;
+    return <Chip name="Effort" reads={t("sessionControls.effort.noneLabel")} options={[]} {...chip} disabled />;
   }
   const defaultRow: ChipOption = { id: DEFAULT_EFFORT, label: t("sessionControls.effort.defaultLabel") };
   return (
     <Chip
       name="Effort"
-      prefix="Effort"
       value={values.effort ?? DEFAULT_EFFORT}
       reads={values.effort === undefined ? t("sessionControls.effort.defaultLabel") : undefined}
       options={readOnly ? levels : [defaultRow, ...levels]}
@@ -255,7 +268,7 @@ export function SessionControls({ hosts, localHostId, projects, backends, detect
             )}
             {/* A backend that offers no choice of one has no chip for it: the backend decides. */}
             {backend && backend.models.length > 0 && (
-              <Chip name="Model" value={values.model} options={choiceOptions(backend.models)} {...chip("model")} />
+              <Chip name="Model" value={values.model} options={modelOptions(backend.models)} {...chip("model")} />
             )}
             {backend && backend.efforts.length > 0 && <EffortChip backend={backend} values={values} readOnly={readOnly} chip={chip("effort")} />}
             {backend && backend.permission_modes.length > 0 && (
