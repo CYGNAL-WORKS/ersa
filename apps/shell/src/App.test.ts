@@ -486,8 +486,7 @@ describe("the workspace App starts a new session in", () => {
     await settle();
   };
 
-  // verifies: FLOW-NEW-SESSION-R21
-  // verifies: FLOW-NEW-SESSION-R28
+  // verifies: FLOW-NEW-SESSION-R38
   // verifies: FLOW-NEW-SESSION-R04
   it("is a new isolated workspace by default, which Core makes from the default branch: no branch is read or named", async () => {
     const core = await screenWith([project("alpha")], undefined, starting);
@@ -498,7 +497,7 @@ describe("the workspace App starts a new session in", () => {
     expect(methods(core)).not.toContain("branch.list");
   });
 
-  // verifies: FLOW-NEW-SESSION-R29
+  // verifies: FLOW-NEW-SESSION-R37
   // verifies: FLOW-NEW-SESSION-R05
   it("is the project folder with the box unchecked, and no workspace is made", async () => {
     const core = await screenWith([project("alpha")], undefined, starting);

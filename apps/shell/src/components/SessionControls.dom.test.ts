@@ -30,7 +30,7 @@ function controls(workspace: "isolated" | "root", more: { readOnly?: boolean; di
 }
 
 describe("the Worktree checkbox", () => {
-  // verifies: FLOW-NEW-SESSION-R29
+  // verifies: FLOW-NEW-SESSION-R37
   it("reads Worktree, checked for a new isolated workspace, says what it means, and stands where the workspace chip was", () => {
     const { box } = controls("isolated");
     expect(box()?.checked).toBe(true);
@@ -41,7 +41,7 @@ describe("the Worktree checkbox", () => {
     expect(box()?.closest(".session-controls-where")).not.toBeNull();
   });
 
-  // verifies: FLOW-NEW-SESSION-R29
+  // verifies: FLOW-NEW-SESSION-R37
   it("unchecked, chooses the project folder; checked again, a new isolated workspace", () => {
     const { box, onChoose } = controls("isolated");
     fireEvent.click(box()!);
@@ -59,12 +59,14 @@ describe("the Worktree checkbox", () => {
   });
 
   // verifies: FLOW-NEW-SESSION-R12
+  // verifies: FLOW-NEW-SESSION-R39
   it("shows, unavailable, whether a session runs in a worktree", () => {
     expect(controls("isolated", { readOnly: true }).box()).toMatchObject({ checked: true, disabled: true });
     cleanup();
     expect(controls("root", { readOnly: true }).box()).toMatchObject({ checked: false, disabled: true });
   });
 
+  // verifies: FLOW-NEW-SESSION-R39
   it("is unavailable while the first message is on its way", () => {
     // The browser sends a disabled box no click, so nothing can change it.
     expect(controls("isolated", { disabled: true }).box()?.disabled).toBe(true);
