@@ -134,7 +134,8 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
   let sends = 0;
   // The send whose cancel became the turn's stop because Core took the message first, while that stop's own call
   // is still out: if the call then fails, nothing was stopped, and the stop is undone.
-  let cancelBecameStop: number | undefined;
+  // It names the turn running when it became that turn's stop, which may be later than when stop was chosen.
+  let cancelBecameStop: { send: number; turn: number } | undefined;
   // How many turns have ended: a stop that fails undoes the turn's stop only while the turn it was chosen for runs.
   let turnsEnded = 0;
 
@@ -292,7 +293,7 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         const waits = name !== undefined && typeof turn !== "number";
         // A stop chosen to cancel it came too late: Core handed the message over, and the stop meets the running turn.
         // Unless a stop already held for that turn, this stop is the turn's.
-        if (view.canceling && !view.stopChosen) cancelBecameStop = sends;
+        if (view.canceling && !view.stopChosen) cancelBecameStop = { send: sends, turn: turnsEnded };
         set((v) => ({
           ...v,
           message: undefined,
@@ -329,12 +330,15 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
       // reached Core stopped nothing, so a failure of the send after it is still a refusal to show, and stop is
       // offered again; only what this stop chose is undone.
       await client.call("session.interrupt", { id }).catch(() => {
-        // A stop for the turn (chosen as one, or a cancel that came too late) is undone only while that turn runs:
-        // once it has ended, the stop held now is another turn's.
-        if (!onItsWay || cancelBecameStop === send) set((v) => (turn === turnsEnded ? { ...v, stopChosen: undefined } : v));
+        // A stop for the turn (chosen as one, or this cancel, come too late) is undone only while that turn runs:
+        // once it has ended, the stop held now is another turn's. A stop chosen as one never reads a cancel's mark.
+        const became = onItsWay && cancelBecameStop?.send === send ? cancelBecameStop : undefined;
+        const stopsTurn = became ? became.turn : onItsWay ? undefined : turn;
+        if (stopsTurn !== undefined) set((v) => (stopsTurn === turnsEnded ? { ...v, stopChosen: undefined } : v));
         else set((v) => (send === sends && v.canceling ? { ...v, canceling: undefined } : v));
       });
-      if (cancelBecameStop === send) cancelBecameStop = undefined;
+      // This stop's call is answered: nothing of it is left to undo.
+      if (onItsWay && cancelBecameStop?.send === send) cancelBecameStop = undefined;
     },
 
     stop() {
