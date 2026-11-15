@@ -28,8 +28,12 @@ test("a pasted image and files dropped on the box attach, and the agent reads th
   // A folder without git runs in the project folder itself, with no Worktree checkbox.
   await expect(page.getByRole("checkbox", { name: "Worktree" })).toHaveCount(0);
 
-  // Paste an image into the words, as the clipboard holds one after a screenshot.
+  // The box takes attachments once the host's backends are detected (FLOW-NEW-SESSION-R23), which can end after the
+  // project is added; until then a drop on it attaches nothing.
   const words = page.getByRole("textbox", { name: "Message" });
+  await expect(words).toBeEnabled({ timeout: 60_000 });
+
+  // Paste an image into the words, as the clipboard holds one after a screenshot.
   await words.focus();
   await words.evaluate((el, png) => {
     const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
