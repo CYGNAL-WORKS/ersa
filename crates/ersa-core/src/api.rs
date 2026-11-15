@@ -343,6 +343,11 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
             to_json(sessions::answer_question(core, parse(params)?).await)
         }
         Method::SessionSetTitle => to_json(sessions::set_title(core, parse(params)?).await),
+        Method::SessionSetModel => to_json(sessions::set_model(core, parse(params)?).await),
+        Method::SessionSetEffort => to_json(sessions::set_effort(core, parse(params)?).await),
+        Method::SessionSetPermissionMode => {
+            to_json(sessions::set_permission_mode(core, parse(params)?).await)
+        }
         Method::SessionSetMode => to_json(sessions::set_mode(core, parse(params)?).await),
         Method::SessionSubscribe => {
             to_json(sessions::subscribe(core, &conn.peer(), parse(params)?).await)
@@ -404,6 +409,10 @@ pub fn runs_detached(conn: &ConnectionState, request: &Request) -> bool {
                     | Method::SessionDecidePermission
                     | Method::SessionAnswerQuestion
                     | Method::SessionSetTitle
+                    // Each waits for the backend to take the change.
+                    | Method::SessionSetModel
+                    | Method::SessionSetEffort
+                    | Method::SessionSetPermissionMode
                     | Method::SessionSetMode
                     | Method::SessionSubscribe
                     | Method::SessionUnsubscribe
@@ -515,6 +524,18 @@ pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Resp
         },
         Some(Method::SessionSetTitle) => match parse(params) {
             Ok(params) => to_json(sessions::set_title(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionSetModel) => match parse(params) {
+            Ok(params) => to_json(sessions::set_model(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionSetEffort) => match parse(params) {
+            Ok(params) => to_json(sessions::set_effort(core, params).await),
+            Err((e, _)) => Err(e),
+        },
+        Some(Method::SessionSetPermissionMode) => match parse(params) {
+            Ok(params) => to_json(sessions::set_permission_mode(core, params).await),
             Err((e, _)) => Err(e),
         },
         Some(Method::SessionSetMode) => match parse(params) {
