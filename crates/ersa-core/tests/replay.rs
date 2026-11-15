@@ -62,12 +62,6 @@ async fn read_only_requests_are_answered_as_core_answers_them() {
         )
         .await;
     assert_eq!(found, projects[0]);
-    // The recording's project has no version control, so Core refuses it as
-    // it does any such project: the method runs, read-only, as on a live Core.
-    let error = client
-        .error("branch.list", json!({ "project_id": projects[0]["id"] }))
-        .await;
-    assert_eq!(error["data"]["kind"], "invalid_state");
     // Its one workspace is the project's own folder, which Core refuses to
     // count, since nothing of it is ever deleted.
     let error = client

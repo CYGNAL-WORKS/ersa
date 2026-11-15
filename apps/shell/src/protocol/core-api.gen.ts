@@ -3,7 +3,7 @@
 import type * as AgentEvents from "./agent-events.gen";
 
 /** The Core API version these types describe (the schema's `x-api-version`). */
-export const CORE_API_VERSION = 5;
+export const CORE_API_VERSION = 6;
 
 /**
  * Any line on the socket.
@@ -102,12 +102,6 @@ export type Request =
       id: RequestId;
       method: "workspace.remove";
       params: WorkspaceRemoveParams;
-    }
-  | {
-      jsonrpc: "2.0";
-      id: RequestId;
-      method: "branch.list";
-      params: BranchListParams;
     }
   | {
       jsonrpc: "2.0";
@@ -447,10 +441,6 @@ export type ProjectListResult = Project[];
  */
 export type ProjectFindResult = Project | null;
 export type WorkspaceListResult = Workspace[];
-/**
- * The project's local branches, sorted by name.
- */
-export type BranchListResult = Branch[];
 export type SessionListResult = Session[];
 export type SessionRawLogResult = RawLogEntry[];
 /**
@@ -531,7 +521,7 @@ export interface WorkspaceCreateParams {
    */
   name?: string;
   /**
-   * Any revision git resolves (a branch, tag, commit or main~1) that the workspace starts from; the default branch branch.list marks, else the checked-out commit, when absent.
+   * Any revision git resolves (a branch, tag, commit or main~1) that the workspace starts from; the repository's default branch (the one origin/HEAD points at, else main, else master, else the checked-out branch), else the checked-out commit, when absent.
    */
   base?: string;
 }
@@ -541,9 +531,6 @@ export interface WorkspaceRemoveParams {
    * Remove even with uncommitted changes.
    */
   force?: boolean;
-}
-export interface BranchListParams {
-  project_id: Id;
 }
 export interface WorkspaceChangesParams {
   id: Id;
@@ -994,16 +981,6 @@ export interface Workspace {
    */
   vcs_ref: string;
   state: "ready" | "creating" | "removing" | "error";
-}
-export interface Branch {
-  /**
-   * The local branch's short name, such as main or feature/rail.
-   */
-  name: string;
-  /**
-   * The repository's default branch: the one origin/HEAD points at, else main, else master, else the checked-out branch. At most one is.
-   */
-  default: boolean;
 }
 /**
  * What deleting an isolated workspace would lose.
@@ -2367,7 +2344,6 @@ export interface CoreApiMethods {
   "workspace.list": { params: WorkspaceListParams; result: WorkspaceListResult };
   "workspace.create": { params: WorkspaceCreateParams; result: WorkspaceCreateResult };
   "workspace.remove": { params: WorkspaceRemoveParams; result: WorkspaceRemoveResult };
-  "branch.list": { params: BranchListParams; result: BranchListResult };
   "workspace.changes": { params: WorkspaceChangesParams; result: WorkspaceChangesResult };
   "session.list": { params: SessionListParams; result: SessionListResult };
   "session.create": { params: SessionCreateParams; result: SessionCreateResult };

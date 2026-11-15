@@ -215,7 +215,7 @@ impl Client {
     pub async fn hello(&mut self) -> Value {
         self.result(
             "core.hello",
-            json!({ "client": "ersa-core-tests", "client_version": "0", "api_versions": [5] }),
+            json!({ "client": "ersa-core-tests", "client_version": "0", "api_versions": [6] }),
         )
         .await
     }
