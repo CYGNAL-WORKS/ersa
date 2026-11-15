@@ -458,6 +458,13 @@ fn host_messages_serialise_to_the_recorded_stdin_lines() {
                     },
                 )
             }
+            // Asking for the session's context (fixtures 2.1.316/44 to 46).
+            (Some("control_request"), Some(subtype)) if subtype == "get_context_usage" => {
+                HostMessage::control_request(
+                    line["request_id"].as_str().unwrap(),
+                    HostRequest::GetContextUsage { detail: None },
+                )
+            }
             // Session controls, recorded between turns and during one
             // (fixtures 2.1.316/23 to 26).
             (Some("control_request"), Some(subtype)) if subtype == "set_model" => {
