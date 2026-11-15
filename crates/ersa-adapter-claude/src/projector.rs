@@ -36,7 +36,7 @@ use crate::{BACKEND, MAX_TESTED_VERSION};
 
 /// The version of this projection. Bump it whenever the events produced for
 /// some raw log would change, so Core re-projects cached sessions.
-pub const PROJECTOR_VERSION: u32 = 10;
+pub const PROJECTOR_VERSION: u32 = 11;
 
 /// How long the CLI has to answer `generate_session_title`: a model writes
 /// the name, so longer than other control requests (PROTO-CLAUDE-CODE-STREAM-R49).
@@ -119,6 +119,14 @@ pub struct ClaudeProjector {
     /// The model the stream last reported: each `system/init`, and each
     /// answer to `set_model` (PROTO-CLAUDE-CODE-STREAM-R40).
     model: Option<String>,
+    /// `request_id`s of the host's `get_context_usage` requests not yet
+    /// answered (PROTO-CLAUDE-CODE-STREAM-R72).
+    context_requests: HashSet<String>,
+    /// The model the latest `get_context_usage` answer that gave a window
+    /// gave it for; `None` until one has. While it is the session's current
+    /// model, the window is the CLI's answer and `result.modelUsage` gives
+    /// none (PROTO-CLAUDE-CODE-STREAM-R74).
+    window_answered_for: Option<Option<String>>,
     /// The permission mode the stream last reported: the `initialize`
     /// answer before the first turn, then each `system/init`, each answer to
     /// `set_permission_mode` and each `system/status` that carries one
@@ -386,7 +394,34 @@ impl ClaudeProjector {
         let output = (reply.message.model != SYNTHETIC_MODEL)
             .then(|| reply.message.usage.as_ref()?.output_tokens)
             .flatten();
-        let usage = output.map(|tokens| self.turn_output(line, reply.message.id.clone(), tokens));
+        let mut usage =
+            output.map(|tokens| self.turn_output(line, reply.message.id.clone(), tokens));
+        // The context in use while the turn runs (PROTO-CLAUDE-CODE-STREAM-R71):
+        // what the model holds after the call this line came from. Only the
+        // main thread's: a subagent's line counts the subagent's own context.
+        let context = (reply.parent_tool_use_id.is_none()
+            && reply.message.model != SYNTHETIC_MODEL)
+            .then(|| reply.message.usage.as_ref().and_then(call_context))
+            .flatten();
+        if let Some(tokens) = context {
+            match &mut usage {
+                // One `usage.updated` per line: the turn's output so far and
+                // the context together.
+                Some(Projected {
+                    event: Event::UsageUpdated(update),
+                    ..
+                }) => update.context_tokens = Some(tokens),
+                _ => {
+                    usage = Some(at(
+                        line,
+                        Event::UsageUpdated(UsageUpdated {
+                            context_tokens: Some(tokens),
+                            ..UsageUpdated::default()
+                        }),
+                    ));
+                }
+            }
+        }
         // The session record keeps this message under the same `uuid`, which
         // is how Core yields it once when it is in both (PROTO-AGENT-EVENTS-R12).
         let message_id = Some(reply.uuid.clone());
@@ -593,12 +628,16 @@ impl ClaudeProjector {
         // `modelUsage`.
         let model_usage = value["modelUsage"].as_object();
         let window_of = |usage: &Value| usage["contextWindow"].as_u64();
+        // The CLI's answer about the current model's window stands over
+        // `modelUsage`'s (PROTO-CLAUDE-CODE-STREAM-R74).
+        let answered = self.window_answered_for.as_ref() == Some(&self.model);
         let window = self
             .main_model
             .as_ref()
             .and_then(|model| model_usage?.get(model))
             .and_then(window_of)
-            .or_else(|| model_usage?.values().filter_map(window_of).max());
+            .or_else(|| model_usage?.values().filter_map(window_of).max())
+            .filter(|_| !answered);
         out.push(at(
             line,
             Event::UsageUpdated(UsageUpdated {
@@ -904,6 +943,18 @@ impl ClaudeProjector {
             {
                 vec![passthrough(line, value)]
             }
+            // The CLI's own count of the session's context and its window
+            // (PROTO-CLAUDE-CODE-STREAM-R72). A refusal, or an answer with
+            // neither figure, changes nothing (R73).
+            CliResponse::Success(success) if self.context_requests.remove(&success.request_id) => {
+                match self.context_answer(line, success.response.as_ref()) {
+                    Some(update) => vec![update],
+                    None => vec![passthrough(line, value)],
+                }
+            }
+            CliResponse::Error(refusal) if self.context_requests.remove(&refusal.request_id) => {
+                vec![passthrough(line, value)]
+            }
             // The name the CLI generated for a new session. A refusal, an
             // answer with no title, or one past the deadline names nothing,
             // and says nothing to the user either (R50).
@@ -931,6 +982,44 @@ impl ClaudeProjector {
             // Answers to interrupts and other host requests.
             _ => vec![passthrough(line, value)],
         }
+    }
+
+    /// A `usage.updated` from an answer to `get_context_usage`: `totalTokens`
+    /// is the context in use, and `rawMaxTokens`, else `maxTokens`, the
+    /// window of the model the session runs with (PROTO-CLAUDE-CODE-STREAM-R72).
+    /// `None` when the answer holds neither (R73). A zero says nothing, as a
+    /// zero count does on an `assistant` line.
+    fn context_answer(&mut self, line: &RawLine, answer: Option<&Value>) -> Option<Projected> {
+        let figure = |name: &str| {
+            answer
+                .and_then(|answer| answer.get(name))
+                .and_then(Value::as_u64)
+                .filter(|n| *n > 0)
+        };
+        let tokens = figure("totalTokens");
+        let window = figure("rawMaxTokens").or_else(|| figure("maxTokens"));
+        if tokens.is_none() && window.is_none() {
+            return None;
+        }
+        if window.is_some() {
+            // The answer names the model its window is for (2.1.316 fixture
+            // `44-context-usage`); else it is the model the stream last
+            // reported.
+            let model = answer
+                .and_then(|answer| answer.get("model"))
+                .and_then(Value::as_str)
+                .map(String::from)
+                .or_else(|| self.model.clone());
+            self.window_answered_for = Some(model);
+        }
+        Some(at(
+            line,
+            Event::UsageUpdated(UsageUpdated {
+                context_tokens: tokens,
+                context_window: window,
+                ..UsageUpdated::default()
+            }),
+        ))
     }
 
     /// Opens a turn when a line belonging to one arrives with none open. A
@@ -982,6 +1071,9 @@ impl ClaudeProjector {
                     (Some("set_permission_mode"), Some(id)) => {
                         self.control_ids
                             .insert(id.to_string(), Reported::PermissionMode);
+                    }
+                    (Some("get_context_usage"), Some(id)) => {
+                        self.context_requests.insert(id.to_string());
                     }
                     (Some("generate_session_title"), Some(id)) => {
                         self.title_requests.insert(id.to_string(), line.ts.clone());
@@ -1551,20 +1643,29 @@ fn outcome(result: &Value) -> TurnOutcome {
 /// lists the calls, so its last entry is used when present. Zero means the
 /// turn made no call (a failed login, say) and says nothing about the context.
 fn context_tokens(usage: &Value) -> Option<u64> {
-    const COUNTS: [&str; 4] = [
-        "input_tokens",
-        "cache_creation_input_tokens",
-        "cache_read_input_tokens",
-        "output_tokens",
-    ];
     let counted = usage["iterations"]
         .as_array()
         .and_then(|calls| calls.last())
         .unwrap_or(usage);
-    let total: u64 = COUNTS
-        .iter()
-        .filter_map(|count| counted[*count].as_u64())
-        .sum();
+    // The same sum as a reply's (R71), so the ring reads one way throughout.
+    serde_json::from_value::<Usage>(counted.clone())
+        .ok()
+        .and_then(|counts| call_context(&counts))
+}
+
+/// What the model holds after the API call an `assistant` line came from: the
+/// sum of its `message.usage` counts (PROTO-CLAUDE-CODE-STREAM-R71). `None`
+/// when they sum to nothing.
+fn call_context(usage: &Usage) -> Option<u64> {
+    let total = [
+        usage.input_tokens,
+        usage.cache_creation_input_tokens,
+        usage.cache_read_input_tokens,
+        usage.output_tokens,
+    ]
+    .into_iter()
+    .flatten()
+    .fold(0u64, u64::saturating_add);
     (total > 0).then_some(total)
 }
 

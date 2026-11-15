@@ -158,6 +158,7 @@ async fn a_session_resumed_while_open_shows_the_record_then_the_new_run_each_mes
     let second = FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(is("initialize"))
         .then_stdout(&resumed[..1])
+        .wait_for_stdin(is("get_context_usage"))
         .wait_for_stdin(is("user"))
         .then_stdout(&resumed[1..])
         .hold_open();

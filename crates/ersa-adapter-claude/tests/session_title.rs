@@ -119,11 +119,17 @@ async fn a_new_session_asks_once_with_its_first_messages_words_as_the_fixture_di
     // Right after the first message, and only once.
     assert_eq!(
         kinds,
-        ["initialize", "user", "generate_session_title", "user"],
+        [
+            "initialize",
+            "get_context_usage",
+            "user",
+            "generate_session_title",
+            "user"
+        ],
         "{sent:#?}"
     );
     assert_eq!(
-        sent[2]["request"],
+        sent[3]["request"],
         json!({ "subtype": "generate_session_title", "description": FIRST, "persist": true })
     );
     // The request the recorded CLI answered had the same shape.
@@ -133,7 +139,7 @@ async fn a_new_session_asks_once_with_its_first_messages_words_as_the_fixture_di
         .map(|l| parse(l))
         .find(|l| l["request"]["subtype"] == "generate_session_title")
         .expect("the fixture sent the request");
-    assert_eq!(recorded["request"], sent[2]["request"]);
+    assert_eq!(recorded["request"], sent[3]["request"]);
 }
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R49
