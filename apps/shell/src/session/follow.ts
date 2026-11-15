@@ -58,6 +58,9 @@ export interface WaitingHere {
   after: number;
 }
 
+/** How many messages wait in the backend, and, when one waits and this window sent it, its name (FLOW-SEND-MESSAGE-R19). */
+export type Waiting = { count: number; name?: string };
+
 export interface SessionView {
   id: string;
   transcript: Transcript;
@@ -241,8 +244,9 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
           transcript,
           stream,
           turnPending: turned ? undefined : v.turnPending,
-          // A turn that began or ended takes a stop afresh.
-          stopChosen: turned ? undefined : v.stopChosen,
+          // The turn a stop was chosen for has ended, or the session has: the next turn takes a stop afresh. Its own
+          // turn.started, which can arrive after the stop, does not.
+          stopChosen: type === "turn.completed" || type === "session.ended" ? undefined : v.stopChosen,
           waitingHere: waiting?.length ? waiting : undefined,
         };
       });
@@ -259,8 +263,10 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
       stopping = false;
       turnSeen = false;
       const after = view.transcript.lastSeq;
-      // A stop chosen before belongs to the turn; this send can be stopped on its own (R03).
-      set((v) => ({ ...v, message: { state: "sending" }, stopChosen: undefined }));
+      // A stop chosen for a turn still winding down holds until that turn ends, else a second one could stop the
+      // turn this message runs (R20). With no turn running, nothing is being stopped, and this send can be (R03).
+      const running = view.transcript.working === true || view.turnPending === true;
+      set((v) => ({ ...v, message: { state: "sending" }, stopChosen: running ? v.stopChosen : undefined }));
       try {
         const answer = await client.call("session.send", attachments?.length ? { id, text, attachments } : { id, text });
         const pending = !turnSeen;
@@ -319,7 +325,7 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
  * What the status line says waits (FLOW-SEND-MESSAGE-R19): how many, from the session's tile, so it survives a reload;
  * and, when one waits and it is the one this window sent, its name. Nothing while nothing waits.
  */
-export function waitingOf(count: number | undefined, here: readonly WaitingHere[] | undefined): { count: number; name?: string } | undefined {
+export function waitingOf(count: number | undefined, here: readonly WaitingHere[] | undefined): Waiting | undefined {
   if (count === undefined || count < 1) return undefined;
   const only = count === 1 && here?.length === 1 ? here[0] : undefined;
   return only ? { count, name: only.name } : { count };

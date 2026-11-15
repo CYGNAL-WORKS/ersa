@@ -3,7 +3,7 @@ import { type ClipboardEvent, type KeyboardEvent, type ReactNode, type Ref, useE
 import { t } from "../catalog";
 import type { ShellControl } from "../core/shell";
 import { type Attached, addAll, pastedImage, same, willCopy } from "../session/attachments";
-import type { Sending } from "../session/follow";
+import type { Sending, Waiting } from "../session/follow";
 import { type AttachWhat, AttachMenu } from "./AttachMenu";
 import { AttachmentChip } from "./AttachmentChip";
 import { reducedMotion } from "../theme/motion";
@@ -19,8 +19,7 @@ import "./Composer.css";
  */
 export type Unavailable = "reconnecting" | "unreachable" | "detecting" | "no-backend" | { failedBackend: string };
 
-/** How many messages wait in the backend, and, when one waits and this window sent it, its name (FLOW-SEND-MESSAGE-R19). */
-export type Waiting = { count: number; name?: string };
+export type { Waiting };
 
 interface ComposerProps {
   /** Why the user cannot send now; absent when they can. */
