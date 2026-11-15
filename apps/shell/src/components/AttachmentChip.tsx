@@ -2,6 +2,7 @@ import { File, Folder, Image } from "lucide-react";
 import { type AnimationEvent, type CSSProperties, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import "./AttachmentChip.css";
+import "./Tip.css";
 
 const KIND_ICON = { file: File, image: Image, folder: Folder } as const;
 
@@ -93,7 +94,7 @@ function PathChip({ className, path, force, children }: { className: string; pat
       >
         {children}
       </button>
-      <span className="attachment-tip" aria-hidden="true" style={{ positionAnchor: anchor } as CSSProperties}>
+      <span className="tip attachment-tip" aria-hidden="true" style={{ positionAnchor: anchor } as CSSProperties}>
         {path}
       </span>
     </>

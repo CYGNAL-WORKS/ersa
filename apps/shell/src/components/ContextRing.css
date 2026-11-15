@@ -45,6 +45,59 @@
     stroke var(--motion-settle) var(--motion-ease-out);
 }
 
+/* The session controls' ring takes keyboard focus, so its list can be read without a pointer: a pill with an edge in
+   no color at rest that turns ink with keyboard focus, as a chip's does (docs/design/DESIGN.md, Pointer and press). It
+   does nothing when pressed, so the pointer changes nothing but the list. */
+.context-ring[data-limits] {
+  min-height: var(--size-control);
+  padding: 0 var(--space-xs);
+  border: var(--line-hairline) solid transparent;
+  border-radius: var(--radius-pill);
+  transition: border-color var(--motion-quick) var(--motion-ease-out);
+}
+
+.context-ring[data-limits]:focus-visible,
+.context-ring[data-limits][data-force="focus"] {
+  outline: none;
+  border-color: var(--color-ink);
+}
+
+/* Every reading, one to a line, above the ring (the session controls sit at the window's foot), its trailing edge on
+   the ring's so it extends toward the row's start; below it where the window has no room above. */
+.context-ring-tip {
+  position-area: block-start span-inline-start;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  max-width: var(--size-menu);
+  width: max-content;
+}
+
+.context-ring-tip-line {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-md);
+}
+
+/* When a window resets is the line's quieter half, at its trailing edge as Claude Desktop's list has it. */
+.context-ring-tip-resets {
+  color: var(--color-ink-muted);
+}
+
+.context-ring[data-limits]:focus-visible + .context-ring-tip,
+.context-ring[data-limits][data-force="focus"] + .context-ring-tip {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Resting under a pointer that can rest. */
+@media (hover: hover) {
+  .context-ring[data-limits]:hover + .context-ring-tip {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
 /* Turning: the gauge spins once per motion-loop-ring at constant speed while the work lasts. */
 .context-ring[data-turning] .context-ring-gauge {
   animation: context-ring-turn var(--motion-loop-ring) var(--motion-linear) infinite;
@@ -57,7 +110,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .context-ring-used {
+  .context-ring-used,
+  .context-ring[data-limits] {
     transition: none;
   }
 

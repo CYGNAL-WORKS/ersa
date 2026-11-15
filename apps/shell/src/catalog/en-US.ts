@@ -445,6 +445,14 @@ export const enUS = {
       unreportedLabel: "Context isn't reported yet",
       usedLabel: "Context: {percent} percent used",
       underOneLabel: "Context: less than 1 percent used",
+      // A usage window the session controls' ring reads or lists, by the name its backend's events give it.
+      windowUsedLabel: "{label}: {percent} percent used",
+      // When a usage window resets, after it in the ring's list, as Claude Desktop's plan usage limits word it: a
+      // weekday and time ("Wed 2:00 PM") a day or more away, else the time left.
+      resetsAtLabel: "Resets {when}",
+      resetsInHoursMinutesLabel: "Resets in {hours} hr {minutes} min",
+      resetsInHoursLabel: "Resets in {hours} hr",
+      resetsInMinutesLabel: "Resets in {minutes} min",
       // Given 1 as `percent`: the figure stays out of the copy so the token check reads no raw percentage here.
       underOneReadout: "<{percent}%",
     },
