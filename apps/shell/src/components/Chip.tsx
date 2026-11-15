@@ -30,7 +30,7 @@ export interface ChipAction {
 }
 
 interface ChipProps {
-  /** What the chip sets, for the accessible name: "Workspace". */
+  /** What the chip sets, for the accessible name: "Model". */
   name: string;
   /** A where chip's icon, leading it (docs/design/COMPOSER.md, The session controls): a folder for the project. */
   icon?: LucideIcon;

@@ -49,13 +49,13 @@
 }
 
 /* :where() adds no specificity, so the pressed and open states below still win. */
-.chip:hover:not(:disabled):not([data-open]):where(:not(:focus-visible)),
+.chip:hover:not(:disabled):not([data-disabled]):not([data-open]):where(:not(:focus-visible)),
 .chip[data-force="hover"] {
   color: var(--color-ink);
   background: var(--material-hover);
 }
 
-.chip:active:not(:disabled),
+.chip:active:not(:disabled):not([data-disabled]),
 .chip[data-force="pressed"] {
   color: var(--color-ink);
   background: var(--material-pressed);
@@ -69,14 +69,17 @@
   border-color: var(--color-line);
 }
 
+/* A chip that holds its own control, the Worktree checkbox, shows that control's keyboard focus. */
 .chip:focus-visible,
+.chip:has(> input:focus-visible),
 .chip[data-force="focus"] {
   outline: none;
   border-color: var(--color-ink);
 }
 
-/* Unavailable: ink-faint, unchanged under the pointer. */
-.chip:disabled {
+/* Unavailable: ink-faint, unchanged under the pointer. A chip that is a label marks it with data-disabled. */
+.chip:disabled,
+.chip[data-disabled] {
   color: var(--color-ink-faint);
   cursor: default;
 }
