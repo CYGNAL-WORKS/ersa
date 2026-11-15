@@ -78,6 +78,8 @@ test("a session runs with, and shows, the model, effort and permission mode chos
 test("a session left at Default keeps reading Default once Claude Code reports the model it chose", async ({ ersa }) => {
   test.setTimeout(300_000);
   const { page } = ersa;
+  // The default reads Default and the model it resolves to, never the CLI's own "Default (recommended)".
+  const defaultNamed = /^Model: Default \((?!recommended\)).+\)$/;
   const folder = path.join(ersa.dir, "default-check");
   mkdirSync(folder);
   await page.getByRole("button", { name: "Project: Choose a folder" }).click();
@@ -86,7 +88,7 @@ test("a session left at Default keeps reading Default once Claude Code reports t
   await answered;
   await page.getByRole("button", { name: "Trust", exact: true }).click();
   await expect(page.getByRole("button", { name: "Project: default-check" })).toBeVisible({ timeout: 60_000 });
-  await expect(page.getByRole("button", { name: /^Model:/ })).toHaveAttribute("aria-label", "Model: Default (recommended)");
+  await expect(page.getByRole("button", { name: /^Model:/ })).toHaveAttribute("aria-label", defaultNamed);
 
   const words = page.getByRole("textbox", { name: "Message" });
   await words.fill("Reply with the single word: ready. Do not use any tools.");
@@ -100,5 +102,5 @@ test("a session left at Default keeps reading Default once Claude Code reports t
   );
   expect(listed?.model).toMatch(/^claude-/);
   expect(listed?.model_request).toBe("default");
-  await expect(page.getByRole("button", { name: /^Model:/ })).toHaveAttribute("aria-label", "Model: Default (recommended)");
+  await expect(page.getByRole("button", { name: /^Model:/ })).toHaveAttribute("aria-label", defaultNamed);
 });
