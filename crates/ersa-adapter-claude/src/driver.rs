@@ -26,7 +26,7 @@ use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
     ImageLimits, LineReader, LineWriter, OpenElsewhere, OutgoingMessage, PermissionDecision,
     Process, ProcessExit, ProcessSpec, Projector, QuestionReply, RecordDeletion, RecordEvent,
-    RecordSummary, RecordedSettings, Requested, SessionConfig, TitleRules, Transport, async_trait,
+    RecordSummary, RelaunchSettings, Requested, SessionConfig, TitleRules, Transport, async_trait,
 };
 use ersa_protocol::core_api::{Choice, ModelChoice};
 use ersa_protocol::events::PermissionBehavior;
@@ -625,7 +625,7 @@ impl Adapter for ClaudeAdapter {
         cwd: &str,
         backend_session_id: &str,
         requested: Requested,
-    ) -> Result<RecordedSettings, AdapterError> {
+    ) -> Result<RelaunchSettings, AdapterError> {
         let home = self.claude_home()?;
         let (cwd, id) = (cwd.to_string(), backend_session_id.to_string());
         blocking(move || record::record_settings(&home, &cwd, &id, requested)).await
