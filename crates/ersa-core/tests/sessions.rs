@@ -1074,6 +1074,42 @@ async fn a_rename_sends_every_client_a_tile_carrying_the_title() {
     assert_eq!(tile["params"]["title"], "Renamed", "{tile:#}");
 }
 
+/// Opening a stopped session's view tells every window of its tile, and
+/// that tile carries the title its record gives it.
+// verifies: PROTO-CORE-API-R83
+#[tokio::test(flavor = "multi_thread")]
+async fn the_tile_sent_when_a_stopped_session_opens_carries_its_title() {
+    let records = Records::default();
+    let (core, _stats) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
+    let mut client = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    client.result("core.shutdown", json!({})).await;
+    let TestCore { dir, task, .. } = core;
+    task.await.unwrap().unwrap();
+
+    // A later Core, whose view of the session opens on a subscription.
+    let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::new(FakeAdapter::with_records(records))];
+    let core = start_with_adapters(dir, |_| {}, adapters).await;
+    let mut client = core.client().await;
+    let mut other = core.client().await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    let tile = tokio::time::timeout(
+        Duration::from_secs(10),
+        other.notification_where(|n| {
+            n["method"] == "session.tile" && n["params"]["session_id"] == id
+        }),
+    )
+    .await
+    .expect("a tile within 10 s");
+    assert_eq!(tile["params"]["title"], "hello", "{tile:#}");
+}
+
 /// A stopped session, renamed while the fake's registry answers `answer`:
 /// the events that reached a client reading the session as it was renamed,
 /// after the session's end.

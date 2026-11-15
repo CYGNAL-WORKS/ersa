@@ -210,26 +210,40 @@ async fn a_rename_after_the_generated_name_replaces_it_on_every_window() {
 
 // verifies: PROTO-CLAUDE-CODE-STREAM-R50
 #[tokio::test(flavor = "multi_thread")]
-async fn an_error_answer_names_nothing_and_tells_the_user_nothing() {
-    let error = json!({"subtype": "error", "request_id": "ersa-title-2",
-        "error": "Unsupported control request subtype: generate_session_title"});
-    let transport = naming_cli(&first_turn(Some(error))).hold_open();
-    let home = tempdir();
-    let core = claude_core(&transport, home.path()).await;
-    let mut client = core.client().await;
-    let id = first_message(&core, &mut client).await;
-    let events = client.events_until("turn.completed").await;
-    assert_eq!(events.last().unwrap()["event"]["outcome"], "success");
-    assert!(
-        events
-            .iter()
-            .all(|e| e["event"]["type"] != "error" && e["event"]["type"] != "session.notice"),
-        "{events:#?}"
-    );
-    // No name: the stub CLI writes no record to take one from.
-    assert_eq!(listed_title(&mut client, &id).await, Value::Null);
-    client.result("session.stop", json!({ "id": id })).await;
-    no_stub_failures(&transport);
+async fn an_error_a_decline_or_no_title_names_nothing_and_tells_the_user_nothing() {
+    let answers = [
+        json!({"subtype": "error", "request_id": "ersa-title-2",
+            "error": "Unsupported control request subtype: generate_session_title"}),
+        json!({"subtype": "declined", "request_id": "ersa-title-2"}),
+        json!({"subtype": "success", "request_id": "ersa-title-2", "response": {}}),
+    ];
+    for answer in answers {
+        let transport = naming_cli(&first_turn(Some(answer.clone()))).hold_open();
+        let home = tempdir();
+        let core = claude_core(&transport, home.path()).await;
+        let mut client = core.client().await;
+        let id = first_message(&core, &mut client).await;
+        let events = client.events_until("turn.completed").await;
+        assert_eq!(
+            events.last().unwrap()["event"]["outcome"],
+            "success",
+            "{answer}"
+        );
+        assert!(
+            events
+                .iter()
+                .all(|e| e["event"]["type"] != "error" && e["event"]["type"] != "session.notice"),
+            "{answer}: {events:#?}"
+        );
+        // No name: the stub CLI writes no record to take one from.
+        assert_eq!(
+            listed_title(&mut client, &id).await,
+            Value::Null,
+            "{answer}"
+        );
+        client.result("session.stop", json!({ "id": id })).await;
+        no_stub_failures(&transport);
+    }
 }
 
 // verifies: PROTO-CORE-API-R83
