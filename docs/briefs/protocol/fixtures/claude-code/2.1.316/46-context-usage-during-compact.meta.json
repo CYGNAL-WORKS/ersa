@@ -1,0 +1,127 @@
+{
+  "recorded_at": "2026-11-15T15:45:00.185Z",
+  "claude_code_version": "2.1.316",
+  "executable": "claude",
+  "args": [
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-mode",
+    "default",
+    "--setting-sources",
+    "user,project,local",
+    "--permission-prompt-tool",
+    "stdio",
+    "--await-initialize",
+    "--replay-user-messages",
+    "--session-id",
+    "9d0d5148-fc2d-4709-a0a6-5891f370baa9"
+  ],
+  "env_set": {
+    "CLAUDE_CODE_ENTRYPOINT": "ersa"
+  },
+  "env_removed": [
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "NODE_OPTIONS",
+    "TRACEPARENT",
+    "TRACESTATE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SSE_PORT",
+    "ENABLE_IDE_INTEGRATION",
+    "CLAUDE_AGENT_SDK_VERSION"
+  ],
+  "bidirectional": true,
+  "scratch_config_dir": false,
+  "cwd_was_scratch_git_repo": true,
+  "session_id": "9d0d5148-fc2d-4709-a0a6-5891f370baa9",
+  "session_record": "record/46-context-usage-during-compact.jsonl",
+  "session_record_verbatim_entries": [
+    "user",
+    "assistant",
+    "custom-title",
+    "ai-title",
+    "last-prompt",
+    "system/local_command",
+    "queue-operation",
+    "system/compact_boundary"
+  ],
+  "exit_code": 0,
+  "signal": null,
+  "elapsed_ms": 8340,
+  "stderr": "",
+  "stdout_lines": 21,
+  "stdout_timing_ms": [
+    908,
+    1254,
+    1258,
+    2409,
+    2410,
+    2410,
+    2410,
+    2414,
+    2414,
+    2416,
+    2416,
+    2417,
+    2433,
+    2464,
+    7420,
+    7440,
+    7441,
+    7442,
+    7442,
+    7443,
+    7863
+  ],
+  "sent": [
+    {
+      "t": 10,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-init-1\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}"
+    },
+    {
+      "t": 908,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Reply with the single word: first\"}]}}"
+    },
+    {
+      "t": 2434,
+      "line": "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"/compact\"}]}}"
+    },
+    {
+      "t": 7442,
+      "line": "{\"type\":\"control_request\",\"request_id\":\"ersa-get_context_usage-1\",\"request\":{\"subtype\":\"get_context_usage\"}}"
+    }
+  ],
+  "turns": [
+    {
+      "turn": 1,
+      "text": "Reply with the single word: first",
+      "got_result": true,
+      "subtype": "success",
+      "is_error": false
+    },
+    {
+      "turn": 2,
+      "text": "/compact",
+      "waited": false
+    },
+    {
+      "turn": 3,
+      "until": "compact_boundary",
+      "seen": true
+    },
+    {
+      "turn": 4,
+      "control": "get_context_usage",
+      "got_response": true,
+      "subtype": "success"
+    }
+  ]
+}

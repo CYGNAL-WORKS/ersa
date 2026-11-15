@@ -201,17 +201,22 @@ pub fn is_title_request(line: &str) -> bool {
     parse(line)["request"]["subtype"] == "generate_session_title"
 }
 
-/// What a stub CLI was sent, but the request to name the session, to
-/// compare with a recording made before Ersa asked; asserts the request was
-/// there.
+pub fn is_context_request(line: &str) -> bool {
+    parse(line)["request"]["subtype"] == "get_context_usage"
+}
+
+/// What a stub CLI was sent, but the requests to name the session and for
+/// its context (PROTO-CLAUDE-CODE-STREAM-R72), to compare with a recording
+/// made before Ersa asked; asserts each was there once.
 pub fn sent_but_title(transport: &FakeTransport) -> Vec<String> {
     let lines = transport.stdin_lines();
-    assert_eq!(
-        lines.iter().filter(|l| is_title_request(l)).count(),
-        1,
-        "{lines:#?}"
-    );
-    lines.into_iter().filter(|l| !is_title_request(l)).collect()
+    for asked in [is_title_request, is_context_request] {
+        assert_eq!(lines.iter().filter(|l| asked(l)).count(), 1, "{lines:#?}");
+    }
+    lines
+        .into_iter()
+        .filter(|l| !is_title_request(l) && !is_context_request(l))
+        .collect()
 }
 
 /// A stub CLI that answers each of Ersa's lines with the recording's next
@@ -232,6 +237,8 @@ pub fn stub_asking_at(stdout: &[String], ask: usize) -> FakeTransport {
                 "initialize" => v["request"]["subtype"] == "initialize",
                 "user" => v["type"] == "user",
                 "title" => v["request"]["subtype"] == "generate_session_title",
+                // PROTO-CLAUDE-CODE-STREAM-R72: asked once `initialize` is answered.
+                "context" => v["request"]["subtype"] == "get_context_usage",
                 _ => v["type"] == "control_response",
             };
             if ok {
@@ -244,6 +251,7 @@ pub fn stub_asking_at(stdout: &[String], ask: usize) -> FakeTransport {
     FakeTransport::new(Vec::<String>::new())
         .wait_for_stdin(is("initialize"))
         .then_stdout([&stdout[0]])
+        .wait_for_stdin(is("context"))
         .wait_for_stdin(is("user"))
         .wait_for_stdin(is("title"))
         .then_stdout(&stdout[1..=ask])

@@ -109,9 +109,9 @@ pub struct HostControlRequest {
 }
 
 /// The control requests the adapter sends (ADR 0014). `initialize`,
-/// `rename_session`, `set_model`, `set_permission_mode` and
-/// `apply_flag_settings` are recorded; the others follow the SDK types until
-/// fixtures exist.
+/// `rename_session`, `set_model`, `set_permission_mode`,
+/// `apply_flag_settings` and `get_context_usage` are recorded; the others
+/// follow the SDK types until fixtures exist.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "subtype", rename_all = "snake_case")]
 pub enum HostRequest {
