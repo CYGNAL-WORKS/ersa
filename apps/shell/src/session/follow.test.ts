@@ -529,6 +529,42 @@ describe("stop while a message waits", () => {
   });
 
   // verifies: FLOW-SEND-MESSAGE-R20
+  it("takes no second stop for a turn still winding down, after a message sent meanwhile", async () => {
+    const ev = (seq: number, event: object) => ({ ...replay[0], seq, event }) as never;
+    const { client, calls } = fakeClient({
+      "session.subscribe": () => Promise.resolve({ last_seq: -1 }),
+      "session.interrupt": () => Promise.resolve({}),
+      "session.send": () => Promise.resolve({}),
+    });
+    const seen: SessionView[] = [];
+    const f = follow(client, "s1", (v) => seen.push(v));
+    const interrupts = () => calls.filter((c) => c.method === "session.interrupt").length;
+    f.receive({ ...(ev(0, { type: "turn.started", turn: 1, trigger: "user" }) as object), session_id: "s1" } as never);
+    await f.interrupt();
+    // A message sent while the stopped turn winds down waits; stop still holds.
+    await f.send("Do this instead", undefined, "Do this instead");
+    await f.interrupt();
+    expect(interrupts()).toBe(1);
+    // The stopped turn ends: the next turn, the waiting message's, can be stopped.
+    f.receive({ ...(ev(1, { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 1, is_error: true }) as object), session_id: "s1" } as never);
+    await f.interrupt();
+    expect(interrupts()).toBe(2);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R20
+  it("holds a stop chosen before its turn showed when that turn's turn.started arrives", async () => {
+    const { follower, calls, last } = following({ "session.interrupt": () => Promise.resolve({}), "session.send": () => Promise.resolve({ turn: 9 }) });
+    await follower.send("hello");
+    expect(last().turnPending).toBe(true);
+    await follower.interrupt();
+    const at = last().transcript.lastSeq + 1;
+    follower.receive({ ...replay[0], seq: at, event: { type: "turn.started", turn: 9, trigger: "user" } } as never);
+    expect(last().stopChosen).toBe(true);
+    await follower.interrupt();
+    expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(1);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R20
   it("can stop again when the stop never reached Core, or only canceled a message on its way", async () => {
     let refuse: (error: BridgeError) => void = () => {};
     let reach = false;
