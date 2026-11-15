@@ -496,7 +496,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
   // The delete question, while it is open (FLOW-ARCHIVE-DELETE-SESSION, steps 4 to 6): the session, as its tile
   // names it, where the question stands, and the round trips behind it.
   // `fromPage`: asked from a row on the sessions page, so focus comes back there rather than to the rail.
-  const [deleteAsk, setDeleteAsk] = useState<{ id: string; title: string; backend: string; phase: DeletePhase; run?: Deletion; fromPage?: boolean }>();
+  const [deleteAsk, setDeleteAsk] = useState<{ id: string; title: string; phase: DeletePhase; run?: Deletion; fromPage?: boolean }>();
   // The tile focus goes to once the question closes, by its session's id; New session when none is left. Moved in an
   // effect, after the new-session screen a deleted active session leaves behind has taken focus as it opened.
   const [refocus, setRefocus] = useState<{ to?: string; fromPage?: boolean; composer?: boolean }>();
@@ -520,7 +520,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
     if (!listed) return;
     const tile = tileOf(listed, backends);
     const workspace = workspaces[listed.workspace_id];
-    const ask = { id, title: tile.title, backend: tile.backend, fromPage };
+    const ask = { id, title: tile.title, fromPage };
     // The rail places a session only once its workspace is read, so this is rare: Try again asks once it is.
     if (!workspace) {
       setDeleteAsk({ ...ask, phase: { kind: "failed", reason: t("rail.delete.workspaceUnknownError") } });
@@ -953,7 +953,6 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
       {deleteAsk && deleteAsk.phase.kind !== "deleted" && (
         <DeleteQuestion
           title={deleteAsk.title}
-          backend={deleteAsk.backend}
           phase={deleteAsk.phase}
           onConfirm={() => void deleteAsk.run?.confirm()}
           onTryAgain={() => (deleteAsk.run ? void deleteAsk.run.start() : askDelete(deleteAsk.id, deleteAsk.fromPage))}
