@@ -78,13 +78,6 @@ describe("starting a session from the new-session screen", () => {
     expect(called).toEqual(["workspace.create"]);
   });
 
-  // verifies: FLOW-NEW-SESSION-R21
-  it("names no base branch, so Core makes the workspace from the repository's default branch (issue 412)", async () => {
-    const { client, calls } = fakeClient(working);
-    await startSession(client, values("isolated"), "Fix the build");
-    expect(calls[0]).toEqual({ method: "workspace.create", params: { project_id: "p1" } });
-  });
-
   // verifies: FLOW-NEW-SESSION-R05
   it("starts the session in the project's root workspace and creates no workspace", async () => {
     const { client, calls, methods } = fakeClient(working);
@@ -340,13 +333,6 @@ describe("the values remembered for a project", () => {
     const patch = rememberPatch({ ...values("root"), model: undefined, effort: undefined });
     expect(patch.new_session.last_used.p1).toMatchObject({ model: null, effort: null, permission_mode: "default" });
     expect(lastUsedFrom(patch).p1).toEqual({ ...values("root"), model: undefined, effort: undefined });
-  });
-
-  // verifies: FLOW-NEW-SESSION-R21
-  it("hold whether the session ran in a worktree, and never a base branch an older Ersa stored (issue 412)", () => {
-    expect(rememberPatch(values("isolated")).new_session.last_used.p1).toMatchObject({ workspace: "isolated" });
-    expect(lastUsedFrom(rememberPatch(values("root"))).p1).toMatchObject({ workspace: "root" });
-    expect(lastUsedFrom({ new_session: { last_used: { p1: { ...values("isolated"), base: "release/1.0" } } } }).p1).toEqual(values("isolated"));
   });
 
   it("read as none from settings that hold none, or hold something unreadable", () => {

@@ -129,12 +129,12 @@ function EffortChip({ backend, values, readOnly, chip }: { backend: BackendInfo;
  * The Worktree checkbox (issue 412), in the row as Claude Desktop's: checked, the session runs in a new isolated workspace
  * made from the repository's default branch; unchecked, in the project's own folder. A native checkbox inside its
  * label, so Space toggles it and assistive technology hears a checkbox; the box is drawn with Lucide's square, as the
- * agent's task lists are, and the label is a pill shaped like a chip.
+ * agent's task lists are, and the label is itself a chip.
  */
 function WorktreeCheckbox({ checked, onChange, disabled, force }: { checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean; force?: "hover" | "focus" | "pressed" }) {
   const description = t("sessionControls.worktree.description");
   return (
-    <label className="worktree" title={description} data-force={force} data-disabled={disabled || undefined}>
+    <label className="chip worktree" title={description} data-force={force} data-disabled={disabled || undefined}>
       <input
         className="worktree-input"
         type="checkbox"
@@ -152,8 +152,9 @@ function WorktreeCheckbox({ checked, onChange, disabled, force }: { checked: boo
 }
 
 /**
- * The session controls (GLOSSARY): a chip for each of host, project, workspace, backend, model, effort and
- * permission mode, with the context ring at the row's end (LAY-SHELL). The backend chip shows only when the host
+ * The session controls (GLOSSARY): a chip for each of host and project, the Worktree checkbox for a project Ersa
+ * can make worktrees for, and a chip for each of backend, model, effort and permission mode, with the context ring at
+ * the row's end (LAY-SHELL). The backend chip shows only when the host
  * has more than one backend, or none to run, and lists a missing backend with its status (FLOW-NEW-SESSION-R07).
  */
 export function SessionControls({ hosts, localHostId, projects, backends, detectionFailed, values, onChoose, onAddProject, disabled, readOnly, changeable, waiting, onOpen, used, open, force }: SessionControlsProps) {
