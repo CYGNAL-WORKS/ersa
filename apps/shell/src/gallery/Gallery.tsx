@@ -974,7 +974,7 @@ const entries: Entry[] = [
     wide: true,
     states: deleteStates.map(([label, phase]) => [
       label,
-      <DeleteQuestion title="Fix the flaky reconnect test" backend="Claude Code" phase={phase} onConfirm={() => {}} onTryAgain={() => {}} onCancel={() => {}} inline />,
+      <DeleteQuestion title="Fix the flaky reconnect test" phase={phase} onConfirm={() => {}} onTryAgain={() => {}} onCancel={() => {}} inline />,
     ]),
   },
   {
