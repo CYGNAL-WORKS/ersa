@@ -747,6 +747,8 @@ impl Handle {
             host_id: row.host_id,
             backend: row.backend,
             model: listed.model,
+            // Core's own request beside the backend's report (PROTO-CORE-API-R102).
+            model_request: row.model.clone(),
             effort: listed.effort,
             permission_mode: listed.permission_mode.unwrap_or_default(),
             mode: row.mode,
