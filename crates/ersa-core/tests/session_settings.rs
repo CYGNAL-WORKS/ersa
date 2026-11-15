@@ -354,8 +354,7 @@ async fn session_list_carries_cores_model_request_beside_the_backends_report() {
     assert_eq!(model_and_request(&mut client, &other).await.1, Value::Null);
 }
 
-// verifies: PROTO-CORE-API-R102
-// verifies: FLOW-FORK-SESSION-R05
+// verifies: PROTO-CORE-API-R104
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_of_a_session_whose_alias_resolved_asks_for_the_alias() {
     let backend = Backend::default();
