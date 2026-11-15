@@ -69,11 +69,12 @@ export function resetsIn(resetsAt: string | undefined, now: Date): string | unde
   const at = new Date(resetsAt);
   if (Number.isNaN(at.getTime())) return undefined;
   const left = at.getTime() - now.getTime();
+  if (left <= 0) return undefined;
   if (left >= DAY) {
     // Intl joins the weekday with a comma; Claude Desktop's list doesn't.
     return t("sessionControls.contextRing.resetsAtLabel", { when: weekdayTime.format(at).replace(",", "") });
   }
-  const minutes = Math.max(Math.ceil(left / MINUTE), 1);
+  const minutes = Math.ceil(left / MINUTE);
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   if (hours === 0) return t("sessionControls.contextRing.resetsInMinutesLabel", { minutes: rest });
