@@ -542,21 +542,21 @@ type ThinkingItem = Extract<ReturnType<typeof itemsAt>[number], { kind: "thinkin
 const toolNow = Date.UTC(2026, 10, 1, 9, 0, 0) + 185_000;
 const toolWorkspace = "D:\\Projects\\ersa";
 const designPage = "D:\\Projects\\ersa\\docs\\design\\TRANSCRIPT.md";
-const readCall: Event = { type: "tool.requested", tool_use_id: "r1", name: "Read", input: { file_path: designPage, limit: 80 }, target: designPage };
+const readCall: Event = { type: "tool.requested", tool_use_id: "r1", name: "Read", input: { file_path: designPage, limit: 80 }, target_kind: "path", target: designPage };
 const readDone: Event = { type: "tool.result", tool_use_id: "r1", content: "# The transcript", is_error: false, duration_ms: 2400 };
 const bashCall: Event = {
   type: "tool.requested",
   tool_use_id: "b1",
   name: "Bash",
   input: { command: "cargo test -p ersa-core", description: "Run the core's tests" },
-  target: "cargo test -p ersa-core",
+  target_kind: "command", target: "cargo test -p ersa-core",
 };
 const testOutput = "running 48 tests\ntest session::tests::resumes ... ok\ntest session::tests::ends ... ok\n\ntest result: ok. 48 passed; 0 failed";
 const subagent: [number, Event][] = [
-  [0, { type: "tool.requested", tool_use_id: "a1", name: "Agent", input: { description: "Count files", prompt: "Count the files in docs." }, target: "Count files" }],
-  [1, { type: "tool.requested", tool_use_id: "g1", name: "Glob", input: { pattern: "docs/**/*.md" }, parent_tool_use_id: "a1", target: "docs/**/*.md" }],
+  [0, { type: "tool.requested", tool_use_id: "a1", name: "Agent", input: { description: "Count files", prompt: "Count the files in docs." }, target_kind: "task", target: "Count files" }],
+  [1, { type: "tool.requested", tool_use_id: "g1", name: "Glob", input: { pattern: "docs/**/*.md" }, parent_tool_use_id: "a1", target_kind: "search", target: "docs/**/*.md" }],
   [2, { type: "tool.result", tool_use_id: "g1", content: "docs/GLOSSARY.md", is_error: false }],
-  [3, { type: "tool.requested", tool_use_id: "g2", name: "Read", input: { file_path: "D:\\Projects\\ersa\\docs\\GLOSSARY.md" }, parent_tool_use_id: "a1", target: "D:\\Projects\\ersa\\docs\\GLOSSARY.md" }],
+  [3, { type: "tool.requested", tool_use_id: "g2", name: "Read", input: { file_path: "D:\\Projects\\ersa\\docs\\GLOSSARY.md" }, parent_tool_use_id: "a1", target_kind: "path", target: "D:\\Projects\\ersa\\docs\\GLOSSARY.md" }],
   [5, { type: "tool.result", tool_use_id: "g2", content: "# Glossary", is_error: false }],
   [8, { type: "tool.result", tool_use_id: "a1", content: "One file: docs/GLOSSARY.md.", is_error: false, duration_ms: 7804 }],
 ];
@@ -565,14 +565,14 @@ const longPathCall: Event = {
   tool_use_id: "r1",
   name: "Read",
   input: {},
-  target: "C:\\Users\\me\\AppData\\Local\\ersa\\target\\debug\\build\\ersa-core-5f3c2a9e1b7d4c08\\out\\generated_protocol_bindings.rs",
+  target_kind: "path", target: "C:\\Users\\me\\AppData\\Local\\ersa\\target\\debug\\build\\ersa-core-5f3c2a9e1b7d4c08\\out\\generated_protocol_bindings.rs",
 };
 const longCommandCall: Event = {
   type: "tool.requested",
   tool_use_id: "b1",
   name: "Bash",
   input: {},
-  target: "pnpm --filter shell exec vitest run src/components/ToolCard.dom.test.ts src/session/toolCard.test.ts --reporter verbose",
+  target_kind: "command", target: "pnpm --filter shell exec vitest run src/components/ToolCard.dom.test.ts src/session/toolCard.test.ts --reporter verbose",
 };
 
 const turnStopped: Event = { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 9000, is_error: false };
@@ -582,7 +582,7 @@ const editCall: Event = {
   tool_use_id: "e1",
   name: "Edit",
   input: {},
-  target: appFile,
+  target_kind: "path", target: appFile,
   edits: [
     {
       path: appFile,
@@ -597,7 +597,7 @@ const writeCall: Event = {
   tool_use_id: "e1",
   name: "Write",
   input: {},
-  target: "D:\\Projects\\ersa\\docs\\notes.md",
+  target_kind: "path", target: "D:\\Projects\\ersa\\docs\\notes.md",
   edits: [{ path: "D:\\Projects\\ersa\\docs\\notes.md", new_text: "# Notes\n\nThe reconnect test races the subscription.\n" }],
 };
 const renameCall: Event = {
@@ -605,7 +605,7 @@ const renameCall: Event = {
   tool_use_id: "e1",
   name: "Edit",
   input: {},
-  target: appFile,
+  target_kind: "path", target: appFile,
   edits: [{ path: appFile, old_text: "lastSeq", new_text: "lastApplied", every_occurrence: true }],
 };
 const wideLine = `    const message = "${"A line wider than the column, so the change scrolls sideways rather than wrapping. ".repeat(2)}";`;
