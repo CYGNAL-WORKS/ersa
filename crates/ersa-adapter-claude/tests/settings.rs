@@ -60,6 +60,7 @@ const HAIKU: &str = "claude-haiku-5-5";
 /// `set_permission_mode` change them at once, before the `system/status`
 /// after the mode's answer and the next turn's `system/init` repeat them.
 // verifies: PROTO-CLAUDE-CODE-STREAM-R40
+// verifies: PROTO-CLAUDE-CODE-STREAM-R70
 #[test]
 fn a_live_session_reports_each_new_model_and_mode_as_the_stream_gives_it() {
     let lines = fixture("2.1.316/25-controls-between-turns").raw_log();
@@ -77,6 +78,7 @@ fn a_live_session_reports_each_new_model_and_mode_as_the_stream_gives_it() {
 /// During a turn (fixture 26) the same answers change the report at once,
 /// long before the next `system/init`.
 // verifies: PROTO-CLAUDE-CODE-STREAM-R40
+// verifies: PROTO-CLAUDE-CODE-STREAM-R70
 #[test]
 fn controls_sent_during_a_turn_are_reported_from_their_answers() {
     let lines = fixture("2.1.316/26-controls-during-turn").raw_log();
@@ -126,6 +128,7 @@ fn each_system_init_reports_the_model_and_mode_again() {
 /// `set_permission_mode` leaves the mode, and so does a status line without
 /// `permissionMode`.
 // verifies: PROTO-CLAUDE-CODE-STREAM-R40
+// verifies: PROTO-CLAUDE-CODE-STREAM-R70
 #[test]
 fn only_the_answers_to_the_hosts_changes_and_status_lines_with_a_mode_change_the_report() {
     let lines = log(&[

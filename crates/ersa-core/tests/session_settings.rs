@@ -873,8 +873,7 @@ async fn set_effort_changes_a_live_sessions_effort_at_once_and_keeps_it() {
 /// The effort is checked against the session's model as `session.list`
 /// reports it: the backend's default `model-a`, for a model left to it,
 /// takes none; `model-b`, which the session reports as `model-b-1`, takes
-/// only `low`; and a model the backend does not list is checked against
-/// every effort the backend offers. A session that is not live is refused.
+/// only `low`. A session that is not live is refused.
 // verifies: PROTO-CORE-API-R82
 #[tokio::test(flavor = "multi_thread")]
 async fn set_effort_is_checked_against_the_sessions_model() {
@@ -906,13 +905,49 @@ async fn set_effort_is_checked_against_the_sessions_model() {
     .await;
     client.result("session.set_effort", set("low")).await;
 
+    assert_eq!(
+        changes(&fake),
+        [
+            SessionControl::Model("model-b".into()),
+            SessionControl::Effort("low".into()),
+        ]
+    );
+
+    client.result("session.stop", json!({ "id": id })).await;
+    refused(
+        &mut client,
+        "session.set_effort",
+        set("low"),
+        "invalid_state",
+        Some("session_not_running"),
+    )
+    .await;
+}
+
+/// A session whose model matches none `backend.list` lists, by `id` or by
+/// `resolved` (one chosen in the backend's own tools, say), takes any
+/// effort the backend offers, and no other.
+// verifies: PROTO-CORE-API-R101
+#[tokio::test(flavor = "multi_thread")]
+async fn a_model_the_backend_does_not_list_takes_any_effort_it_offers() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let id = started(&core, &mut client, json!({})).await;
+    let set = |effort: &str| json!({ "id": id, "effort": effort });
+
     client
         .result(
             "session.send",
             json!({ "id": id, "text": "report model-z ask" }),
         )
         .await;
-    wait_for_values(&mut client, &id, three("model-z", "low", "ask")).await;
+    wait_for_values(
+        &mut client,
+        &id,
+        (json!("model-z"), Value::Null, json!("ask")),
+    )
+    .await;
     refused(
         &mut client,
         "session.set_effort",
@@ -921,25 +956,17 @@ async fn set_effort_is_checked_against_the_sessions_model() {
         None,
     )
     .await;
-    client.result("session.set_effort", set("high")).await;
+    for effort in ["low", "high"] {
+        let session = client.result("session.set_effort", set(effort)).await;
+        assert_eq!(session["effort"], effort);
+    }
     assert_eq!(
         changes(&fake),
         [
-            SessionControl::Model("model-b".into()),
             SessionControl::Effort("low".into()),
             SessionControl::Effort("high".into()),
         ]
     );
-
-    client.result("session.stop", json!({ "id": id })).await;
-    refused(
-        &mut client,
-        "session.set_effort",
-        set("high"),
-        "invalid_state",
-        Some("session_not_running"),
-    )
-    .await;
 }
 
 /// A change the backend refuses is an error, and Core keeps nothing of it:
