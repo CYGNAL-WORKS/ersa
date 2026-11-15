@@ -352,6 +352,8 @@ export const enUS = {
     // that failed detection, by the label backend.list gives it.
     noBackendError: "No backend is available on this host. Install a backend on it to start a session.",
     backendFailedError: "{label} isn't working on this host. Check that it's installed and signed in, then open New session again.",
+    // The host could not list its backends at all: that detection failed, before the reason (FLOW-NEW-SESSION-R11).
+    detectionFailedError: "Ersa couldn't detect the backends on this host.",
     // The status line while a message is on its way (FLOW-SEND-MESSAGE-R16), and when Ersa can't tell whether it
     // reached the agent (R15), which never says it failed.
     copyingProgress: "Copying attachments, {percent} percent done…",
@@ -424,6 +426,15 @@ export const enUS = {
       defaultLabel: "Default",
       noneLabel: "None",
     },
+    // A running session's change that Core refused, said on the status line before Core's reason until the user sends
+    // or opens a chip (FLOW-NEW-SESSION-R30).
+    change: {
+      modelError: "Ersa can't change the model.",
+      effortError: "Ersa can't change the effort.",
+      permissionModeError: "Ersa can't change the permission mode.",
+    },
+    // The backend chip when the host could not list its backends (FLOW-NEW-SESSION-R11); the status line gives why.
+    detectionFailedStatus: "Detection failed",
     // The context ring's name, in the session controls and on a tile.
     contextRing: {
       noneLabel: "Context: none used yet",

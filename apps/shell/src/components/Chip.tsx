@@ -72,8 +72,17 @@ interface ChipProps {
   pending?: boolean;
   /** The placeholder is an invitation to act, such as Choose a folder, so it reads ink rather than ink-muted. */
   invites?: boolean;
-  /** Shows a value that cannot change, as under a running session: the same pill, without its chevron, that does not open. */
+  /** Shows a value that cannot change, as under a session: the same pill, without its chevron, that does not open. */
   readOnly?: boolean;
+  /**
+   * Keeps the chevron's width while read-only, the chevron faded out: a session's model, effort and permission mode
+   * chips, which open while it runs, so nothing shifts as it starts and stops (docs/design/COMPOSER.md).
+   */
+  keepsChevron?: boolean;
+  /** A change is on its way: the chip keeps its look, value and keyboard focus, and does not open (FLOW-NEW-SESSION-R30). */
+  waiting?: boolean;
+  /** Called each time the list opens. */
+  onOpen?: () => void;
   options: ChipOption[];
   onChoose: (id: string) => void;
   /** Ends the list. */
@@ -97,7 +106,7 @@ interface ChipProps {
  * with Enter, Space or the arrows, moves with the arrows, chooses with Enter or Space, and Escape closes it with
  * focus back on the chip.
  */
-export function Chip({ name, icon, prefix, value, reads, placeholder, problem, pending, readOnly, options, onChoose, action, section, wide, disabled, initialOpen = false, force, forceOption, invites, initialQuery = "" }: ChipProps) {
+export function Chip({ name, icon, prefix, value, reads, placeholder, problem, pending, readOnly, keepsChevron, waiting, onOpen, options, onChoose, action, section, wide, disabled, initialOpen = false, force, forceOption, invites, initialQuery = "" }: ChipProps) {
   const [open, setOpen] = useState(initialOpen);
   const chip = useRef<HTMLButtonElement>(null);
   const list = useRef<HTMLUListElement>(null);
@@ -146,6 +155,9 @@ export function Chip({ name, icon, prefix, value, reads, placeholder, problem, p
   // Whether the list opened before its section's options arrived, so it grows to hold them when they do.
   const [openedWaiting, setOpenedWaiting] = useState(initialOpen && section?.unavailable === true);
   const show = () => {
+    // Not the native disabled state, which would drop keyboard focus from the chip while Core answers.
+    if (waiting) return;
+    onOpen?.();
     focusOnOpen.current = true;
     setOpenedWaiting(section?.unavailable === true);
     setOpen(true);
@@ -247,6 +259,7 @@ export function Chip({ name, icon, prefix, value, reads, placeholder, problem, p
         aria-haspopup={readOnly ? undefined : "listbox"}
         aria-expanded={readOnly ? undefined : open}
         aria-controls={open ? listId : undefined}
+        aria-busy={waiting || undefined}
         data-force={force}
         data-open={open || undefined}
         data-read-only={readOnly || undefined}
@@ -266,9 +279,10 @@ export function Chip({ name, icon, prefix, value, reads, placeholder, problem, p
         )}
         {prefix && <span className="chip-prefix">{prefix}</span>}
         <span className="chip-value">{shown}</span>
-        {/* A chip that opens a list ends with a chevron; one that cannot change, or is waiting, does not. */}
-        {!readOnly && !pending && (
-          <span className="chip-chevron">
+        {/* A chip that opens a list ends with a chevron; one that cannot change, or is waiting, does not, unless it
+            keeps the chevron's place for when its session runs. */}
+        {((!readOnly && !pending) || keepsChevron) && (
+          <span className="chip-chevron" data-hidden={readOnly || undefined}>
             <Icon icon={ChevronDown} size="icon-xs" />
           </span>
         )}

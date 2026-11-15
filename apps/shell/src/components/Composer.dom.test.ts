@@ -13,6 +13,7 @@ afterEach(cleanup);
 type Props = {
   unavailable?: Unavailable;
   sending?: Sending;
+  refusedChange?: string;
   quietFocus?: boolean;
   working?: boolean;
   onStop?: () => void;
@@ -146,6 +147,32 @@ describe("the status line above the box", () => {
     render(draw({ unavailable: "detecting" }));
     expect(statusLine()?.textContent).toBe("Detecting the backends on this host…");
     expect(words().disabled).toBe(true);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R11
+  it("says that detecting the backends failed, with the reason, rather than that none is available", () => {
+    render(draw({ unavailable: { detectionFailed: "The host didn't answer." } }));
+    expect(statusLine()?.textContent).toBe("Ersa couldn't detect the backends on this host. The host didn't answer.");
+    expect(statusLine()?.textContent).not.toContain("No backend is available");
+    expect(words().disabled).toBe(true);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R30
+  it("says why a change to the session was refused, as an alert led by the danger glyph, with the box as at rest", () => {
+    render(draw({ refusedChange: "Ersa can't change the model. The session has ended." }));
+    const line = screen.getByRole("alert");
+    expect(line.textContent).toBe("Ersa can't change the model. The session has ended.");
+    expect(line.querySelector('.glyph[data-tone="danger"]')).not.toBeNull();
+    expect(words().disabled).toBe(false);
+  });
+
+  // verifies: FLOW-NEW-SESSION-R30
+  it("puts a refused change after a refused message and before detecting the backends (docs/design/COMPOSER.md)", () => {
+    const change = "Ersa can't change the effort. The session has ended.";
+    const { rerender } = render(draw({ refusedChange: change, sending: { state: "failed", message: "The session has ended." } }));
+    expect(statusLine()?.textContent).toBe("The session has ended.");
+    rerender(draw({ refusedChange: change, unavailable: "detecting" }));
+    expect(statusLine()?.textContent).toBe(change);
   });
 
   it("says nothing, and takes no room, while there is nothing to say", () => {
