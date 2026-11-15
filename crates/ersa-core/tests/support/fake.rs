@@ -280,6 +280,13 @@ pub struct FakeAdapter {
     pub conversation_end_fails: Arc<std::sync::atomic::AtomicBool>,
     /// Held by a test to hold every record read until it lets go.
     pub read_gate: Arc<tokio::sync::Mutex<()>>,
+    /// Held by a test to hold every backend's start, before it is ready,
+    /// until it lets go.
+    pub start_gate: Arc<tokio::sync::Mutex<()>>,
+    /// A backend that, as Claude Code, says nothing on its stream when it
+    /// resumes a session or forks one under an id Core chose, until its
+    /// next message.
+    quiet_restart: bool,
     /// A backend that takes a stop and never exits.
     stop_hangs: bool,
     /// How long a backend takes to exit once stopped.
@@ -317,6 +324,8 @@ impl FakeAdapter {
             models: Arc::new(Mutex::new(ModelsAnswer::Listed(fake_models()))),
             conversation_end_fails: Arc::default(),
             read_gate: Arc::default(),
+            start_gate: Arc::default(),
+            quiet_restart: false,
             stop_hangs: false,
             stop_delay: std::time::Duration::ZERO,
             name: BACKEND,
@@ -365,6 +374,15 @@ impl FakeAdapter {
     pub fn with_record_settings(records: Records, settings: RecordedSettingsMap) -> Self {
         FakeAdapter {
             recorded_settings: settings,
+            ..FakeAdapter::with_records(records)
+        }
+    }
+
+    /// An adapter whose backend keeps its records in `records` and, as
+    /// Claude Code, reports nothing when it resumes or forks a session.
+    pub fn quiet_restart(records: Records) -> Self {
+        FakeAdapter {
+            quiet_restart: true,
             ..FakeAdapter::with_records(records)
         }
     }
@@ -468,6 +486,7 @@ impl Adapter for FakeAdapter {
             panic!("the fake adapter has a bug");
         }
         tokio::time::sleep(self.start_delay).await;
+        drop(self.start_gate.lock().await);
         if self.fail_start {
             sink.process_exited(Ok(ProcessExit { code: Some(1) }));
             return Err(AdapterError::Protocol("the fake refused to start".into()));
@@ -488,10 +507,16 @@ impl Adapter for FakeAdapter {
             .entry(session_id.clone())
             .or_default()
             .len();
-        sink.record(
-            Direction::Backend,
-            json!({ "t": "ready", "session_id": session_id }).to_string(),
-        );
+        // Quiet only where Core already knows the id: this fake, unlike
+        // Claude Code, chooses a new session's id itself and names it here.
+        let restart = config.resume.is_some()
+            || (config.fork_of.is_some() && config.backend_session_id.is_some());
+        if !(self.quiet_restart && restart) {
+            sink.record(
+                Direction::Backend,
+                json!({ "t": "ready", "session_id": session_id }).to_string(),
+            );
+        }
         Ok(Box::new(FakeSession {
             sink,
             stats: Arc::clone(&self.stats),
