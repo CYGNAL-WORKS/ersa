@@ -2,7 +2,7 @@
 
 How the composer and the session controls look, token by token. `FLOW-SEND-MESSAGE` says how the composer behaves, `FLOW-NEW-SESSION` how the session controls choose where and how a session runs, and `LAY-SHELL` where both sit; `DESIGN.md` holds the tokens and the rules every surface follows. Read this before changing the composer or the session controls.
 
-The owner reviewed this design as mockups on the design canvas: the Composer board draws the composer's states, and the Place picker board draws the project and workspace lists, the no-projects state and the trust question. Build what this page and the briefs describe; where a board, the built components or the gallery differ from this page, this page wins. The chips built before this page have an edge; the ticket that restyles the session controls changes them, and the gallery follows. The Composer board also draws a microphone for dictation, which is not specified (FLOW-SEND-MESSAGE, Open questions): leave it out.
+The owner reviewed this design as mockups on the design canvas: the Composer board draws the composer's states, and the Place picker board draws the project list, the no-projects state and the trust question, and a workspace list that the Worktree checkbox has replaced. Build what this page and the briefs describe; where a board, the built components or the gallery differ from this page, this page wins. The chips built before this page have an edge; the ticket that restyles the session controls changes them, and the gallery follows. The Composer board also draws a microphone for dictation, which is not specified (FLOW-SEND-MESSAGE, Open questions): leave it out.
 
 ## The composer
 
@@ -61,10 +61,11 @@ The attach menu is a chip's list (below) that opens upward from attach, `space-x
 
 ## The session controls
 
-One row beneath the box, `size-control` high at least, in `ui-small`, its chips `space-xs` apart. The where chips (host, project, workspace) sit at the leading edge; the how chips (backend, model, effort, permission mode) and then the context ring sit at the trailing edge.
+One row beneath the box, `size-control` high at least, in `ui-small`, its chips `space-xs` apart. The where controls (the host chip, the project chip, then the Worktree checkbox) sit at the leading edge; the how chips (backend, model, effort, permission mode) and then the context ring sit at the trailing edge.
 
-- **A chip** is a pill: `size-control` high, `radius-pill`, padded `space-sm` at the sides, with no fill and a `hairline` edge in no color at rest, its text `ink-muted`. A where chip leads with its icon at `size-icon-xs` in `ink-faint` (a monitor for the host, a folder for the project, a branch for the workspace). A chip that opens a list ends with a down chevron at `size-icon-xs` in `ink-faint`.
+- **A chip** is a pill: `size-control` high, `radius-pill`, padded `space-sm` at the sides, with no fill and a `hairline` edge in no color at rest, its text `ink-muted`. A where chip leads with its icon at `size-icon-xs` in `ink-faint` (a monitor for the host, a folder for the project). A chip that opens a list ends with a down chevron at `size-icon-xs` in `ink-faint`.
 - A chip is a control without an edge (`DESIGN.md`, Pointer and press). **Under the pointer** it takes `material-hover` and reads `ink`; **pressed**, `material-pressed`; **open**, `surface-raised` with a `line` edge, reading `ink`, whatever the pointer does; **with keyboard focus**, an `ink` edge. Unavailable, it reads `ink-faint` and does not change under the pointer.
+- **The Worktree checkbox** (`FLOW-NEW-SESSION-R37`, `claude-desktop/new-session-row-2026-11-15.txt`) is a pill shaped like a chip, with no chevron: a box at `size-icon-xs`, Lucide's Square or, checked, SquareCheck, then the label "Worktree". The box is `ink-faint` unchecked and `accent` checked. Under the pointer, pressed and with keyboard focus it is as a chip is. Unavailable, while the first message is on its way and in a session, it reads `ink-faint`, box and all. Under the pointer and to assistive technology it says "The session works in an isolated copy of the repository."
 - **In a session**, the chips are the same pills without the chevron or any change under the pointer: they show the session's values and do not open, except that a running session's model, effort and permission mode chips open as they do before it starts (FLOW-NEW-SESSION-R30). Those three keep a chevron's width on every session, the chevron fading in and out over `motion-quick` with `motion-ease-out` as the session starts and stops, so that nothing shifts. While a change is on its way the chip keeps its look and keyboard focus, reads its old value and does not open; it reads the new value once Core answers, or keeps the old one with the status line saying why, with focus on it either way.
 - **Effort** shows its level alone, as the permission mode chip shows its mode; to assistive technology each chip still says which setting it is. With none chosen it reads Default, a value from the string catalog, and passes none to the backend. Before a session starts, Default is the first row of its list, chosen while no level is, and choosing it goes back to none; a running session's list holds only the levels. A model that takes no effort leaves the chip in its place, unavailable, reading None.
 - **Detection failed**, when the host couldn't list its backends, the backend chip reads "Detection failed" led by a glyph in `danger`, and the status line says why.
@@ -76,7 +77,7 @@ One row beneath the box, `size-control` high at least, in `ui-small`, its chips 
 
 A chip's list floats `space-xs` from its chip, beneath it where the window has room and above it where it does not. It is `surface` with a `line` edge, `radius-lg`, `shadow-transient`, padded `space-xs`, at least as wide as its chip and at most `size-menu`, on `stack-menu`. It fades and slides `space-xs` toward its place over `motion-quick` with `motion-ease-out`, and leaves the same way.
 
-Opening a list moves keyboard focus to its chosen option, or to the workspace list's search box; the arrow keys move among the options, Enter chooses one, and choosing or Escape closes the list and returns focus to its chip. The attach menu does the same, returning focus to attach.
+Opening a list moves keyboard focus to its chosen option; the arrow keys move among the options, Enter chooses one, and choosing or Escape closes the list and returns focus to its chip. The attach menu does the same, returning focus to attach.
 
 - **An option** is `size-control` high, `radius-md`, padded `space-sm` at the sides, in `ui`: the option mark, its label in `ink`, and a status at its trailing edge in `ui-small` and `ink-faint`. An unavailable option reads `ink-faint`, keeps its status, and does not change under the pointer. The chosen option's mark is a dot at `size-option-mark` in `accent`; the others leave its place empty. An option is a control without an edge: under the pointer it takes `material-hover`, pressed `material-pressed`, and with keyboard focus an `ink` edge, so the focused option stays distinct from the one under the pointer.
 - **An action at the end of a list**, such as Add project…, sits below a `line` hairline with `space-xs` above and below it, and leads with a plus icon at `size-icon-sm` in `ink-muted` in the mark's place. Its shortcut, Ctrl+O, sits at the trailing edge in `ui-small` and `ink-faint`.
@@ -89,16 +90,6 @@ The project chip's list is the widest list, `size-menu` wide. Each project is an
 - **Line two**: the folder's path in `ui-small` and `ink-faint`, under the name, cut with an ellipsis at its start so the folder's own name stays in view.
 
 Add project… ends the list. **With no projects** the chip reads Choose a folder in `ink` with its folder icon, and opening it shows Add project… alone.
-
-## The workspace list
-
-Two options, New workspace and Project folder, each with a status in `ink-faint`: "Isolated" and "Shared". For a git project with New workspace chosen, a `line` hairline follows them and then the base branch:
-
-- A heading, "Base branch", in `ui-small` and `ink-muted`, padded `space-xs` by `space-sm`.
-- **The search box**: `size-control` high, `radius-md`, on `canvas` with a `line` edge, a search icon at `size-icon-sm` in `ink-faint` inside its leading edge, its text `ui` in `ink` and its placeholder `ink-faint`. Focused, its edge is `accent`, with no glow. Typing narrows the branches beneath it.
-- **The branches**, as options with the option mark, names in `ui`, and "Default" as the status of the repository's default branch. They scroll past `size-list-max`, eight rows. With nothing matching, a note in `ui-small` and `ink-muted` says no branch matches. While the branches are read, the same note says "Reading the branches…"; when they can't be read, it leads with a danger glyph at `size-glyph`, as the rail's unreadable list does, and says "Ersa couldn't read this project's branches. The new workspace will start at the default branch." (FLOW-NEW-SESSION-R28). In both, the search box is unavailable and opening the list moves keyboard focus to the chosen option. When the branches arrive, the list grows to hold them over `motion-quick` with `motion-ease-out`.
-
-The chip reads the choice: "New workspace from" and the branch, or "Project folder". With New workspace chosen and no branch to name, while the branches are read or when they can't be, it reads "New workspace" (FLOW-NEW-SESSION-R28).
 
 ## The trust question
 

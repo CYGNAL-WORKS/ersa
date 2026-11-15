@@ -244,7 +244,8 @@ describe("the session controls under a running session", () => {
       expect((chip(name) as HTMLButtonElement).disabled).toBe(true);
       expect(chip(name).querySelector('.chip-chevron[data-hidden="true"]')).not.toBeNull();
     }
-    expect(chip("Workspace").querySelector(".chip-chevron")).toBeNull();
+    // The Worktree checkbox shows, unavailable, that the session runs in a worktree (issue 412).
+    expect(screen.getByRole("checkbox", { name: "Worktree" })).toMatchObject({ checked: true, disabled: true });
   });
 
   // verifies: FLOW-NEW-SESSION-R30
@@ -254,7 +255,8 @@ describe("the session controls under a running session", () => {
       expect((chip(name) as HTMLButtonElement).disabled).toBe(false);
       expect(chip(name).querySelector(".chip-chevron:not([data-hidden])")).not.toBeNull();
     }
-    expect((chip("Workspace") as HTMLButtonElement).disabled).toBe(true);
+    expect((chip("Project") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("checkbox", { name: "Worktree" })).toMatchObject({ checked: true, disabled: true });
   });
 });
 

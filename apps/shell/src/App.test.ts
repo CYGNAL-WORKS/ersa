@@ -470,22 +470,15 @@ describe("the tree App draws in the rail", () => {
   });
 });
 
-// A new workspace's base branch (FLOW-NEW-SESSION-R21, R28, R29): App reads the project's branches with `branch.list` and
-// creates the workspace from the one the workspace chip shows.
-describe("the base branch App gives a new workspace", () => {
-  const branches = [
-    { name: "feature/rail", default: false },
-    { name: "main", default: true },
-    { name: "release/1.0", default: false },
-  ];
+// The Worktree checkbox (issue 412): checked, App asks Core for a new workspace and names no base branch, so Core makes it
+// from the repository's default branch; unchecked, the session starts in the project's own folder.
+describe("the workspace App starts a new session in", () => {
   const starting = {
-    "branch.list": () => branches,
     "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", vcs_ref: "ersa/new" }),
     "session.create": (params: { workspace_id: string }) => ({ ...session("s-new", "alpha", "2026-11-03T09:00:00Z"), workspace_id: params.workspace_id }),
     "session.send": () => ({ turn: 1 }),
-    "settings.set": () => ({}),
   };
-  const workspaceChip = () => screen.getByRole("button", { name: /^Workspace:/ });
+  const worktree = () => screen.queryByRole("checkbox", { name: "Worktree" }) as HTMLInputElement | null;
   const send = async (text: string) => {
     fireEvent.change(words(), { target: { value: text } });
     fireEvent.keyDown(words(), { key: "Enter" });
@@ -493,136 +486,50 @@ describe("the base branch App gives a new workspace", () => {
     await settle();
   };
 
-  // verifies: FLOW-NEW-SESSION-R21
-  // verifies: FLOW-NEW-SESSION-R29
-  it("starts at the default branch, narrows the branches by the search box, and creates the workspace from the one chosen", async () => {
+  // verifies: FLOW-NEW-SESSION-R38
+  // verifies: FLOW-NEW-SESSION-R04
+  it("is a new isolated workspace by default, which Core makes from the default branch: no branch is read or named", async () => {
     const core = await screenWith([project("alpha")], undefined, starting);
-    expect(paramsOf(core, "branch.list")).toEqual({ project_id: "alpha" });
-    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from main");
-
-    // Opened, the list offers both workspaces with what each means, then the base branch, with focus in its search box.
-    fireEvent.click(workspaceChip());
-    const list = screen.getByRole("listbox", { name: "Workspace" });
-    expect(within(list).getByRole("option", { name: /New workspace/ }).textContent).toContain("Isolated");
-    expect(within(list).getByRole("option", { name: /Project folder/ }).textContent).toContain("Shared");
-    const search = within(list).getByRole("searchbox", { name: "Search branches" });
-    expect(document.activeElement).toBe(search);
-    const base = within(list).getByRole("group", { name: "Base branch" });
-    expect(within(base).getAllByRole("option").map((o) => o.textContent)).toEqual(["feature/rail", "mainDefault", "release/1.0"]);
-    expect(within(base).getByRole("option", { name: /main/ }).getAttribute("aria-selected")).toBe("true");
-
-    fireEvent.change(search, { target: { value: "REL" } });
-    expect(within(base).getAllByRole("option").map((o) => o.textContent)).toEqual(["release/1.0"]);
-    fireEvent.change(search, { target: { value: "nothing" } });
-    expect(within(base).queryAllByRole("option")).toEqual([]);
-    expect(list.textContent).toContain("No branch matches.");
-    fireEvent.change(search, { target: { value: "rel" } });
-    fireEvent.click(within(base).getByRole("option", { name: "release/1.0" }));
-    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from release/1.0");
-
+    expect(worktree()?.checked).toBe(true);
     await send("Fix the build");
-    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha", base: "release/1.0" });
+    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha" });
+    expect(paramsOf(core, "session.create")).toMatchObject({ workspace_id: "w-new" });
+    expect(methods(core)).not.toContain("branch.list");
   });
 
-  // verifies: FLOW-NEW-SESSION-R21
-  it("chooses the first match with Enter in the search box", async () => {
+  // verifies: FLOW-NEW-SESSION-R37
+  // verifies: FLOW-NEW-SESSION-R05
+  it("is the project folder with the box unchecked, and no workspace is made", async () => {
     const core = await screenWith([project("alpha")], undefined, starting);
-    fireEvent.click(workspaceChip());
-    const search = screen.getByRole("searchbox", { name: "Search branches" });
-    fireEvent.change(search, { target: { value: "feat" } });
-    fireEvent.keyDown(search, { key: "Enter" });
-    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from feature/rail");
-    expect(document.activeElement).toBe(workspaceChip());
-    await send("Fix the build");
-    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha", base: "feature/rail" });
-  });
-
-  it("opens with the search box empty each time", async () => {
-    await screenWith([project("alpha")], undefined, starting);
-    fireEvent.click(workspaceChip());
-    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "rel" } });
-    fireEvent.keyDown(screen.getByRole("searchbox"), { key: "Escape" });
-    fireEvent.click(workspaceChip());
-    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("");
-    expect(within(screen.getByRole("group", { name: "Base branch" })).getAllByRole("option")).toHaveLength(3);
-  });
-
-  // verifies: FLOW-NEW-SESSION-R29
-  it("names the project folder when it is chosen, and offers no base branch for it", async () => {
-    const core = await screenWith([project("alpha")], undefined, starting);
-    fireEvent.click(workspaceChip());
-    fireEvent.click(screen.getByRole("option", { name: /Project folder/ }));
-    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: Project folder");
-    fireEvent.click(workspaceChip());
-    expect(screen.queryByRole("searchbox")).toBeNull();
+    fireEvent.click(worktree()!);
+    expect(worktree()?.checked).toBe(false);
     await send("What does this do?");
     expect(methods(core)).not.toContain("workspace.create");
+    expect(paramsOf(core, "session.create")).toMatchObject({ workspace_id: "w-alpha" });
   });
 
-  // verifies: FLOW-NEW-SESSION-R28
-  it("says while the branches are read, with nothing to search, and leaves the base to Core's default", async () => {
-    // Core has not answered branch.list yet.
-    const core = await screenWith([project("alpha")], undefined, { ...starting, "branch.list": () => new Promise(() => {}) });
-    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace");
-    fireEvent.click(workspaceChip());
-    const list = screen.getByRole("listbox", { name: "Workspace" });
-    expect(list.querySelector(".chip-section-note")?.textContent).toBe("Reading the branches…");
-    expect(list.querySelector(".chip-section-note .glyph")).toBeNull();
-    expect((within(list).getByRole("searchbox") as HTMLInputElement).disabled).toBe(true);
-    // Focus goes to the chosen option, since the search box cannot be used.
-    expect(document.activeElement).toBe(within(list).getByRole("option", { name: /New workspace/ }));
-    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
-    await send("Fix the build");
-    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha" });
+  // verifies: FLOW-NEW-SESSION-R06
+  it("is the project folder for a project with no workspace adapter, which shows no checkbox", async () => {
+    const core = await screenWith([{ ...project("alpha"), vcs: "none" }], undefined, starting);
+    expect(worktree()).toBeNull();
+    await send("What does this do?");
+    expect(methods(core)).not.toContain("workspace.create");
+    expect(paramsOf(core, "session.create")).toMatchObject({ workspace_id: "w-alpha" });
   });
 
-  it("grows to hold the branches when they arrive while the list is open, and the search box can then be used", async () => {
-    let answer: (listed: typeof branches) => void = () => {};
-    await screenWith([project("alpha")], undefined, { ...starting, "branch.list": () => new Promise((r) => (answer = r)) });
-    fireEvent.click(workspaceChip());
-    const group = () => screen.getByRole("group", { name: "Base branch" });
-    expect(group().hasAttribute("data-grow")).toBe(false);
-    await act(async () => answer(branches));
-    await settle();
-    expect(group().hasAttribute("data-grow")).toBe(true);
-    expect(within(group()).getAllByRole("option")).toHaveLength(3);
-    expect((screen.getByRole("searchbox") as HTMLInputElement).disabled).toBe(false);
-    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from main");
-  });
-
-  // verifies: FLOW-NEW-SESSION-R28
-  it("says the branches could not be read, and leaves the base to Core's default", async () => {
-    const core = await screenWith([project("alpha")], undefined, {
-      ...starting,
-      "branch.list": () => {
-        throw { kind: "rpc", error: { code: -32000, message: "git is not installed", data: { kind: "invalid_state" } } };
-      },
-    });
-    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace");
-    fireEvent.click(workspaceChip());
-    const list = screen.getByRole("listbox", { name: "Workspace" });
-    const note = list.querySelector(".chip-section-note");
-    expect(note?.textContent).toBe("Ersa couldn't read this project's branches. The new workspace will start at the default branch.");
-    expect(note?.querySelector('.glyph[data-tone="danger"]')).not.toBeNull();
-    expect((within(list).getByRole("searchbox") as HTMLInputElement).disabled).toBe(true);
-    expect(document.activeElement).toBe(within(list).getByRole("option", { name: /New workspace/ }));
-    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
-    await send("Fix the build");
-    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha" });
-  });
-
-  // verifies: FLOW-NEW-SESSION-R21
-  it("starts every new session at the default branch, the base chosen for the last one forgotten", async () => {
-    const core = await screenWith([project("alpha")], undefined, starting);
-    fireEvent.click(workspaceChip());
-    fireEvent.click(screen.getByRole("option", { name: "release/1.0" }));
-    await send("Fix the build");
-    expect(paramsOf(core, "workspace.create")).toEqual({ project_id: "alpha", base: "release/1.0" });
-    expect(JSON.stringify(paramsOf(core, "settings.set"))).not.toContain("release/1.0");
+  // verifies: FLOW-NEW-SESSION-R02
+  it("comes back as the user last left it for the project, and starts checked for one with none", async () => {
+    const core = await screenWith([project("alpha"), project("beta")], undefined, starting);
+    fireEvent.click(worktree()!);
+    await send("What does this do?");
+    expect(JSON.stringify(paramsOf(core, "settings.set"))).toContain('"workspace":"root"');
 
     fireEvent.click(screen.getByRole("button", { name: "New session in alpha" }));
     await settle();
-    expect(workspaceChip().getAttribute("aria-label")).toBe("Workspace: New workspace from main");
+    expect(worktree()?.checked).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: /^Project:/ }));
+    fireEvent.click(screen.getByRole("option", { name: /beta/ }));
+    expect(worktree()?.checked).toBe(true);
   });
 });
 
@@ -858,7 +765,6 @@ describe("arranging the rail", () => {
     const gate = new Promise<void>((resolve) => (created = resolve));
     const core = await open({
       "backend.list": () => [claude],
-      "branch.list": () => [{ name: "main", default: true }],
       "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", vcs_ref: "ersa/new" }),
       "session.create": async (params: { workspace_id: string }) => {
         await gate;
@@ -885,7 +791,6 @@ describe("arranging the rail", () => {
   it("switches to showing active sessions when a session starts while it shows archived ones only", async () => {
     const core = await open({
       "backend.list": () => [claude],
-      "branch.list": () => [{ name: "main", default: true }],
       "workspace.create": (params: { project_id: string }) => ({ ...root(params.project_id), id: "w-new", kind: "isolated", vcs_ref: "ersa/new" }),
       "session.create": (params: { workspace_id: string }) => ({ ...session("s-new", "beta", "2026-11-02T14:00:00Z"), workspace_id: params.workspace_id }),
       "session.send": () => ({ turn: 1 }),
@@ -1739,8 +1644,8 @@ describe("the attachments App gives the composer", () => {
     const core = await screenWith([project("alpha")], shell, {
       "attachment.inspect": (params: { path: string }) => ({ path: params.path, name: "notes.md", kind: "file", size_bytes: 9, lines: 1, copied: true }),
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Workspace:/ }));
-    fireEvent.click(screen.getByRole("option", { name: /New workspace/ }));
+    // The Worktree box starts checked: a new workspace.
+    expect((screen.getByRole("checkbox", { name: "Worktree" }) as HTMLInputElement).checked).toBe(true);
     act(() => emit({ type: "drop", x: 10, y: 150, paths: ["D:/code/alpha/notes.md"] }));
     await settle();
     expect(core.calls.filter((c) => c.method === "attachment.inspect").map((c) => c.params)).toEqual([{ host_id: "local", path: "D:/code/alpha/notes.md" }]);
@@ -1800,9 +1705,8 @@ describe("the attachments of a new session's first message", () => {
   };
   const shown = () => Array.from(document.querySelectorAll(".composer-attachment")).map((li) => li.textContent);
   const sendIt = async () => {
-    // Started in a new workspace, which the first message makes.
-    fireEvent.click(screen.getByRole("button", { name: /^Workspace:/ }));
-    fireEvent.click(screen.getByRole("option", { name: /New workspace/ }));
+    // Started in a new workspace, which the first message makes: the Worktree box as it starts, checked.
+    expect((screen.getByRole("checkbox", { name: "Worktree" }) as HTMLInputElement).checked).toBe(true);
     fireEvent.change(words(), { target: { value: "Look" } });
     fireEvent.keyDown(words(), { key: "Enter" });
     await settle();
@@ -1818,15 +1722,13 @@ describe("the attachments of a new session's first message", () => {
   // verifies: FLOW-SEND-MESSAGE-R17
   it("asks Core about the project folder's workspace when it is chosen, and about none for a new workspace", async () => {
     const core = await screenWith([project("alpha")], shellWith(), start(() => ({ turn: 1 })));
-    const choose = (name: RegExp) => {
-      fireEvent.click(screen.getByRole("button", { name: /^Workspace:/ }));
-      fireEvent.click(screen.getByRole("option", { name }));
-    };
-    choose(/Project folder/);
+    // The Worktree box: unchecked, the project folder; checked, a new workspace.
+    const worktree = () => screen.getByRole("checkbox", { name: "Worktree" });
+    fireEvent.click(worktree());
     await attachNotes();
     expect(shown()).toEqual(["notes.md12 lines"]);
     // Choosing a new workspace after: judged for another, it is taken to be copied.
-    choose(/New workspace/);
+    fireEvent.click(worktree());
     expect(shown()).toEqual(["notes.md12 linesWill be copied into the workspace's .ersa folder"]);
     fireEvent.click(screen.getByRole("button", { name: "Remove notes.md" }));
     await attachNotes();
