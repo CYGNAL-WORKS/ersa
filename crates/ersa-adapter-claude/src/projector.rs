@@ -81,16 +81,19 @@ pub struct ClaudeProjector {
     /// mode (`--bare`): it has none of `scratchpad_path`, `memory_paths` and
     /// `messaging_socket_path` (PROTO-CLAUDE-CODE-STREAM-R53).
     minimal_mode: bool,
-    /// `request_id`s of the host's `set_model` requests not yet answered:
-    /// the answer names the model the CLI resolved
-    /// (PROTO-CLAUDE-CODE-STREAM-R40).
-    set_model_ids: HashSet<String>,
+    /// `request_id`s of the host's `set_model` and `set_permission_mode`
+    /// requests not yet answered, with the field of the answer that names
+    /// the new value: `set_model`'s the model the CLI resolved, and
+    /// `set_permission_mode`'s the mode, which the CLI's `system/status`
+    /// repeats after it (PROTO-CLAUDE-CODE-STREAM-R40).
+    control_ids: HashMap<String, Reported>,
     /// The model the stream last reported: each `system/init`, and each
     /// answer to `set_model` (PROTO-CLAUDE-CODE-STREAM-R40).
     model: Option<String>,
     /// The permission mode the stream last reported: the `initialize`
-    /// answer before the first turn, then each `system/init` and each
-    /// `system/status` that carries one (PROTO-CLAUDE-CODE-STREAM-R40).
+    /// answer before the first turn, then each `system/init`, each answer to
+    /// `set_permission_mode` and each `system/status` that carries one
+    /// (PROTO-CLAUDE-CODE-STREAM-R40).
     permission_mode: Option<String>,
     /// Messages the host wrote while a turn ran (or while others already
     /// waited) that the CLI has not taken in yet, in the order written. The
@@ -137,6 +140,14 @@ struct StreamedText {
     /// Whether a partial `assistant.text` went out for it, which obliges a
     /// final one (PROTO-AGENT-EVENTS-R07).
     shown: bool,
+}
+
+/// Which of a session's values the answer to one of the host's control
+/// requests reports.
+#[derive(Debug, Clone, Copy)]
+enum Reported {
+    Model,
+    PermissionMode,
 }
 
 impl ClaudeProjector {
@@ -829,20 +840,38 @@ impl ClaudeProjector {
                 )]
             }
             // The model `set_model` resolved its choice to (fixture 25:
-            // `haiku` answers `claude-haiku-5-5`). The line stays a
+            // `haiku` answers `claude-haiku-5-5`), and the mode
+            // `set_permission_mode` set (`{"mode":"acceptEdits"}`), so the
+            // change is reported as the CLI takes it. The line stays a
             // passthrough.
-            CliResponse::Success(success) if self.set_model_ids.remove(&success.request_id) => {
-                if let Some(model) = success
-                    .response
-                    .as_ref()
-                    .and_then(|answer| answer.get("model"))
-                    .and_then(Value::as_str)
-                {
-                    self.model = Some(model.to_string());
+            CliResponse::Success(success) if self.control_ids.contains_key(&success.request_id) => {
+                let reported = self.control_ids.remove(&success.request_id);
+                let field = |name: &str| {
+                    success
+                        .response
+                        .as_ref()
+                        .and_then(|answer| answer.get(name))
+                        .and_then(Value::as_str)
+                        .map(String::from)
+                };
+                match reported {
+                    Some(Reported::Model) => {
+                        if let Some(model) = field("model") {
+                            self.model = Some(model);
+                        }
+                    }
+                    Some(Reported::PermissionMode) => {
+                        if let Some(mode) = field("mode") {
+                            self.permission_mode = Some(mode);
+                        }
+                    }
+                    None => {}
                 }
                 vec![passthrough(line, value)]
             }
-            CliResponse::Error(refusal) if self.set_model_ids.remove(&refusal.request_id) => {
+            CliResponse::Error(refusal)
+                if self.control_ids.remove(&refusal.request_id).is_some() =>
+            {
                 vec![passthrough(line, value)]
             }
             // Answers to interrupts and other host requests.
@@ -894,7 +923,11 @@ impl ClaudeProjector {
                         self.initialize_ids.insert(id.to_string());
                     }
                     (Some("set_model"), Some(id)) => {
-                        self.set_model_ids.insert(id.to_string());
+                        self.control_ids.insert(id.to_string(), Reported::Model);
+                    }
+                    (Some("set_permission_mode"), Some(id)) => {
+                        self.control_ids
+                            .insert(id.to_string(), Reported::PermissionMode);
                     }
                     _ => {}
                 }
