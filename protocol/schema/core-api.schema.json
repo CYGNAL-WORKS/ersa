@@ -3482,7 +3482,8 @@
       "additionalProperties": false,
       "required": [
         "session_id",
-        "tile"
+        "tile",
+        "created_at"
       ],
       "properties": {
         "session_id": {
@@ -3499,6 +3500,11 @@
         "title": {
           "type": "string",
           "description": "The session's current title, as session.list has it; absent while the session has none."
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The session's created_at as session.list has it. Core sends a tile when reading the session's record corrects it."
         }
       }
     },
