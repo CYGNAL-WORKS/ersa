@@ -549,7 +549,7 @@ fn host_messages_match_the_shapes_in_the_brief() {
     );
     assert_eq!(
         request(HostRequest::SetPermissionMode {
-            mode: PermissionMode::AcceptEdits
+            mode: "acceptEdits".into()
         }),
         json!({"subtype": "set_permission_mode", "mode": "acceptEdits"})
     );
@@ -558,6 +558,14 @@ fn host_messages_match_the_shapes_in_the_brief() {
             model: Some("default".into())
         }),
         json!({"subtype": "set_model", "model": "default"})
+    );
+    assert_eq!(
+        request(HostRequest::ApplyFlagSettings {
+            settings: FlagSettings {
+                effort_level: "low".into()
+            }
+        }),
+        json!({"subtype": "apply_flag_settings", "settings": {"effortLevel": "low"}})
     );
     assert_eq!(
         request(HostRequest::GetContextUsage {

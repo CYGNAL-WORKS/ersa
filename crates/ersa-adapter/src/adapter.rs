@@ -536,9 +536,52 @@ pub trait AdapterSession: Send + Sync {
         ))
     }
 
+    /// Changes one of the running session's controls through the backend,
+    /// at once: sent during a turn, the turn's next model call uses it
+    /// (`session.set_model`, `session.set_effort`,
+    /// `session.set_permission_mode`). Returns once the backend has taken
+    /// it; the value is an id `backend.list` offers, which Core has checked.
+    /// The default: the backend cannot change a running session's controls.
+    async fn change(&self, control: SessionControl) -> Result<(), AdapterError> {
+        Err(AdapterError::Protocol(format!(
+            "this backend cannot change a running session's {}",
+            control.name()
+        )))
+    }
+
     /// Ends the backend process, gracefully if the backend supports it and by
     /// killing it otherwise, and returns once it has exited.
     async fn stop(&self) -> Result<(), AdapterError>;
+}
+
+/// One of a session's controls with the value it is changed to, as
+/// [`AdapterSession::change`] takes it: each value is an id from
+/// `backend.list`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionControl {
+    Model(String),
+    Effort(String),
+    PermissionMode(String),
+}
+
+impl SessionControl {
+    /// The control's name, as `session.list` names its field.
+    pub fn name(&self) -> &'static str {
+        match self {
+            SessionControl::Model(_) => "model",
+            SessionControl::Effort(_) => "effort",
+            SessionControl::PermissionMode(_) => "permission_mode",
+        }
+    }
+
+    /// The value it is changed to.
+    pub fn value(&self) -> &str {
+        match self {
+            SessionControl::Model(value)
+            | SessionControl::Effort(value)
+            | SessionControl::PermissionMode(value) => value,
+        }
+    }
 }
 
 /// Where an adapter delivers what crosses the backend's stdio. Core implements
