@@ -131,7 +131,7 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
           delete coreEnv.ERSA_CLAUDE;
         }
         running.push(start(bin.core, ["serve", "--endpoint", label, "--data-dir", path.join(dir, "data")], coreEnv, log("core")));
-        await waitFor(() => servesLabel(label), "Core to serve its endpoint", running, deadline);
+        await waitFor(() => corePipe(label) !== undefined, "Core to serve its endpoint", running, deadline);
 
         const port = await freePort();
         running.push(
@@ -319,10 +319,11 @@ function ended(child: ChildProcess): boolean {
   return child.pid === undefined || child.exitCode !== null || child.signalCode !== null;
 }
 
-/** Whether Core serves `label`: its pipe is `ersa-core-<user SID>-<label>` (PROTO-CORE-API, Transport and framing). */
-function servesLabel(label: string): boolean {
+/** The pipe Core serves `label` on, if it does: `ersa-core-<user SID>-<label>` (PROTO-CORE-API, Transport and framing). */
+export function corePipe(label: string): string | undefined {
   const pipe = new RegExp(`^ersa-core-S-[0-9-]+-${label}$`);
-  return readdirSync("\\\\.\\pipe\\").some((name) => pipe.test(name));
+  const name = readdirSync("\\\\.\\pipe\\").find((n) => pipe.test(n));
+  return name === undefined ? undefined : `\\\\.\\pipe\\${name}`;
 }
 
 async function debuggerUp(port: number): Promise<boolean> {
