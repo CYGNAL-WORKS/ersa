@@ -11,7 +11,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use ersa_adapter::OpenElsewhere;
-use ersa_core::{Adapter, RemoveGate};
+use ersa_core::{Adapter, Gate};
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Records};
 use support::{Client, TestCore, git, git_repo, kind, start_with_adapters, tempdir};
@@ -997,8 +997,8 @@ enum Land {
 
 /// A Core whose `workspace.remove` stops before and after claiming the
 /// workspace until the test lets it go, and that gate.
-async fn start_with_remove_gate(fake: &Arc<FakeAdapter>) -> (TestCore, Arc<RemoveGate>) {
-    let gate = Arc::new(RemoveGate::default());
+async fn start_with_remove_gate(fake: &Arc<FakeAdapter>) -> (TestCore, Arc<Gate>) {
+    let gate = Arc::new(Gate::default());
     let adapters: Vec<Arc<dyn Adapter>> = vec![Arc::clone(fake) as Arc<dyn Adapter>];
     let config_gate = Arc::clone(&gate);
     let core = start_with_adapters(
@@ -1011,7 +1011,7 @@ async fn start_with_remove_gate(fake: &Arc<FakeAdapter>) -> (TestCore, Arc<Remov
 }
 
 /// Waits until the removal under way is stopped at `land`.
-async fn removal_stopped_at(gate: &RemoveGate, land: Land) {
+async fn removal_stopped_at(gate: &Gate, land: Land) {
     gate.reached().await;
     if land == Land::WhileClaimed {
         gate.go();
@@ -1020,7 +1020,7 @@ async fn removal_stopped_at(gate: &RemoveGate, land: Land) {
 }
 
 /// Lets the removal stopped at `land` run to its end.
-fn let_removal_finish(gate: &RemoveGate, land: Land) {
+fn let_removal_finish(gate: &Gate, land: Land) {
     gate.go();
     if land == Land::BeforeClaim {
         // The stop after the claim; the removal waits there only for this.
