@@ -5,12 +5,13 @@
   gap: var(--space-sm);
 }
 
-/* A suggestion is as wide as its surface, its label cut with an ellipsis. */
+/* A suggestion is as wide as its surface, its label start-aligned and wrapped whole onto as many lines as it needs,
+   breaking within a word (a long path) where it must: the label says how far a lasting answer reaches, so it is never
+   cut (FLOW-APPROVE-PERMISSION-R30). */
 .answers-suggestion {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: start;
 }
 
 /* Deny at the leading edge, Allow at the trailing edge. */
