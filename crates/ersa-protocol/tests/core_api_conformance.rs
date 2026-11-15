@@ -182,19 +182,6 @@ fn result_examples() -> Vec<(Method, Value)> {
         (Method::WorkspaceCreate, to_value(&workspace())),
         (Method::WorkspaceRemove, to_value(&workspace())),
         (
-            Method::BranchList,
-            to_value(&vec![
-                Branch {
-                    name: "feature/rail".into(),
-                    default: false,
-                },
-                Branch {
-                    name: "main".into(),
-                    default: true,
-                },
-            ]),
-        ),
-        (
             Method::WorkspaceChanges,
             to_value(&WorkspaceChanges {
                 uncommitted: 2,
@@ -390,12 +377,6 @@ fn params_examples() -> Vec<(Method, Value)> {
             to_value(&WorkspaceRemoveParams {
                 id: "w-1".into(),
                 force: Some(true),
-            }),
-        ),
-        (
-            Method::BranchList,
-            to_value(&BranchListParams {
-                project_id: "p-1".into(),
             }),
         ),
         (

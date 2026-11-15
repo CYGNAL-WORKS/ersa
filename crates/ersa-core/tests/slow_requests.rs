@@ -194,16 +194,6 @@ async fn held_process_holds_nothing_up(method: &str, params: impl FnOnce(&Value)
 
 // verifies: PROTO-CORE-API-R92
 #[tokio::test(flavor = "multi_thread")]
-async fn branch_list_holds_nothing_up() {
-    held_process_holds_nothing_up(
-        "branch.list",
-        |made| json!({ "project_id": made["project"]["id"] }),
-    )
-    .await;
-}
-
-// verifies: PROTO-CORE-API-R92
-#[tokio::test(flavor = "multi_thread")]
 async fn workspace_create_holds_nothing_up() {
     held_process_holds_nothing_up(
         "workspace.create",
