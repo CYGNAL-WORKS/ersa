@@ -1412,7 +1412,7 @@ mod tests {
         assert_eq!(entries[2].branch, None);
     }
 
-    // verifies: PROTO-CORE-API-R18
+    // verifies: PROTO-CORE-API-R19
     #[test]
     fn main_comes_before_master() {
         // The socket tests cover each rule alone; this is the one case they
@@ -1444,7 +1444,7 @@ mod tests {
         }
     }
 
-    // verifies: PROTO-CORE-API-R18
+    // verifies: PROTO-CORE-API-R19
     #[tokio::test(start_paused = true)]
     async fn finding_the_default_branch_gives_git_ten_seconds() {
         let started = tokio::time::Instant::now();

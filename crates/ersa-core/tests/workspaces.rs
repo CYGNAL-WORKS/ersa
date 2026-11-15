@@ -728,7 +728,6 @@ async fn default_start(client: &mut Client, path: &Path) -> String {
     head_of(&workspace)
 }
 
-// verifies: PROTO-CORE-API-R18
 // verifies: PROTO-CORE-API-R19
 #[tokio::test(flavor = "multi_thread")]
 async fn the_default_branch_is_the_one_origin_head_points_at() {
@@ -744,7 +743,6 @@ async fn the_default_branch_is_the_one_origin_head_points_at() {
     assert_ne!(start, git(&clone, &["rev-parse", "work"]));
 }
 
-// verifies: PROTO-CORE-API-R18
 // verifies: PROTO-CORE-API-R19
 #[tokio::test(flavor = "multi_thread")]
 async fn without_a_local_branch_for_origin_head_main_is_the_default() {
@@ -762,7 +760,6 @@ async fn without_a_local_branch_for_origin_head_main_is_the_default() {
     assert_ne!(start, git(&clone, &["rev-parse", "aaa"]));
 }
 
-// verifies: PROTO-CORE-API-R18
 // verifies: PROTO-CORE-API-R19
 #[tokio::test(flavor = "multi_thread")]
 async fn with_only_master_master_is_the_default_whatever_is_checked_out() {
@@ -776,7 +773,6 @@ async fn with_only_master_master_is_the_default_whatever_is_checked_out() {
     assert_ne!(start, git(&repo, &["rev-parse", "alpha"]));
 }
 
-// verifies: PROTO-CORE-API-R18
 // verifies: PROTO-CORE-API-R19
 #[tokio::test(flavor = "multi_thread")]
 async fn with_none_of_them_the_checked_out_branch_is_the_default() {
