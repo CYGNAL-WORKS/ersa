@@ -32,28 +32,11 @@
   flex: none;
 }
 
-/* The Worktree checkbox (issue 412): a pill shaped like a chip (docs/design/COMPOSER.md, The session controls), size-control
-   high, no fill and an edge in no colour at rest, its text ink-muted, led by the box at size-icon-xs. A control
-   without an edge (DESIGN.md, Pointer and press): material-hover under the pointer, material-pressed when pressed, and
-   an ink edge with keyboard focus. `data-force` lets the gallery show a state without a pointer. */
+/* The Worktree checkbox (issue 412): a chip (Chip.css) that is the label of its own checkbox, so it takes the chip's
+   pill and every state from there; here only the hidden box and the drawn one. */
 .worktree {
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
-  box-sizing: border-box;
-  height: var(--size-control);
-  padding: 0 var(--space-sm);
-  color: var(--color-ink-muted);
-  border: var(--line-hairline) solid transparent;
-  border-radius: var(--radius-pill);
-  white-space: nowrap;
-  cursor: pointer;
   user-select: none;
-  transition:
-    background var(--motion-quick) var(--motion-ease-out),
-    border-color var(--motion-quick) var(--motion-ease-out),
-    color var(--motion-quick) var(--motion-ease-out);
 }
 
 /* The native box lies over the whole pill, unseen, so a press anywhere on it toggles and the keyboard reaches it. */
@@ -65,7 +48,8 @@
   cursor: inherit;
 }
 
-/* Unchecked, the box is ink-faint like a chip's icon; checked, it is the accent, the colour of the active choice. */
+/* Unchecked, the box is ink-faint like a chip's icon; checked, it is the accent, the colour of the active choice;
+   unavailable, ink-faint again. */
 .worktree-box {
   display: inline-flex;
   color: var(--color-ink-faint);
@@ -76,33 +60,11 @@
   color: var(--color-accent);
 }
 
-.worktree:hover:not([data-disabled]),
-.worktree[data-force="hover"] {
-  color: var(--color-ink);
-  background: var(--material-hover);
-}
-
-.worktree:active:not([data-disabled]),
-.worktree[data-force="pressed"] {
-  color: var(--color-ink);
-  background: var(--material-pressed);
-}
-
-.worktree:has(.worktree-input:focus-visible),
-.worktree[data-force="focus"] {
-  border-color: var(--color-ink);
-}
-
-/* Unavailable, while the first message is on its way and under a session: ink-faint, box and all, unchanged under the
-   pointer. */
-.worktree[data-disabled],
 .worktree[data-disabled] .worktree-box {
   color: var(--color-ink-faint);
-  cursor: default;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .worktree,
   .worktree-box {
     transition: none;
   }

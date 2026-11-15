@@ -403,7 +403,7 @@ test("every session control is reachable and works from the keyboard", async ({ 
   const screen = page
     .locator('[data-theme="light"] [data-component="NewSessionScreen"] figure')
     .filter({ hasText: "Ready, at the defaults" });
-  const chips = screen.locator(".chip");
+  const chips = screen.locator("button.chip");
   const names = await chips.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label")));
   expect(names.length).toBe(5);
   const worktree = screen.getByRole("checkbox", { name: "Worktree" });
