@@ -40,6 +40,14 @@ describe("a chip as a pill (docs/design/COMPOSER.md, The session controls)", () 
     expect(shown).toContain("Alpha");
   });
 
+  // verifies: FLOW-NEW-SESSION-R30
+  it("under a session that is not running keeps its chevron's width, the chevron faded out, so nothing shifts as it starts", () => {
+    const shown = html({ readOnly: true, keepsChevron: true });
+    expect(shown).toMatch(/class="chip-chevron" data-hidden="true"/);
+    // Once the session runs it opens, and the same chevron shows.
+    expect(html({ keepsChevron: true })).toMatch(/class="chip-chevron">/);
+  });
+
   it("while detecting, leads with the context ring's track and a turning arc, and has no chevron", () => {
     const shown = html({ value: undefined, placeholder: "Detecting backends…", pending: true, options: [], disabled: true });
     expect(shown).toContain("data-turning");

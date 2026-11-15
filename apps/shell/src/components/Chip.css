@@ -37,6 +37,12 @@
 .chip-chevron {
   display: inline-flex;
   color: var(--color-ink-faint);
+  transition: opacity var(--motion-quick) var(--motion-ease-out);
+}
+
+/* A session's model, effort and permission mode chips keep the chevron's width while the session is not running. */
+.chip-chevron[data-hidden] {
+  opacity: 0;
 }
 
 /* :where() adds no specificity, so the pressed and open states below still win. */

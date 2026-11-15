@@ -13,16 +13,24 @@ import "./Composer.css";
 /**
  * Why the box is unavailable (docs/design/COMPOSER.md, The status line): Ersa can't reach the sessions and is trying
  * again, or has stopped trying (FLOW-SEND-MESSAGE-R06); the host's backends are being detected
- * (FLOW-NEW-SESSION-R23); or the host has no backend to run, none installed or, by its label, one that failed
- * detection (FLOW-NEW-SESSION-R07).
+ * (FLOW-NEW-SESSION-R23); the host could not list its backends, with the reason (FLOW-NEW-SESSION-R11); or the host
+ * has no backend to run, none installed or, by its label, one that failed detection (FLOW-NEW-SESSION-R07).
  */
-export type Unavailable = "reconnecting" | "unreachable" | "detecting" | "no-backend" | { failedBackend: string };
+export type Unavailable =
+  | "reconnecting"
+  | "unreachable"
+  | "detecting"
+  | "no-backend"
+  | { failedBackend: string }
+  | { detectionFailed: string };
 
 interface ComposerProps {
   /** Why the user cannot send now; absent when they can. */
   unavailable?: Unavailable;
   /** The last send: on its way, or refused with the reason, which the status line shows (FLOW-SEND-MESSAGE-R05). */
   sending?: Sending;
+  /** Why a change to the session's model, effort or permission mode was refused, until the user sends or opens a chip (FLOW-NEW-SESSION-R30). */
+  refusedChange?: string;
   /** Sends the text and attachments; resolves true once Core accepted them, and the composer clears. */
   onSend: (text: string, attachments: readonly Attached[]) => Promise<boolean>;
   /**
@@ -72,7 +80,7 @@ interface ComposerProps {
  * Where the user writes to the agent (docs/design/COMPOSER.md): the status line above the box, and the box holding
  * attach, the words and send. Enter sends; Shift+Enter starts a new line (FLOW-SEND-MESSAGE-R01).
  */
-export function Composer({ unavailable, sending, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, tall, statusTaken, controls, forceSend, working, onStop, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
+export function Composer({ unavailable, sending, refusedChange, onSend, onWrite, onAttach, onRead, dragDrop, forceDragOver, workspace, initialAttachments, attachMenuOpen, forceAttachChoice, tall, statusTaken, controls, forceSend, working, onStop, quietFocus, initialText = "", force, autoFocus = true, inputRef }: ComposerProps) {
   const [text, setText] = useState(initialText);
   const [attachments, setAttachments] = useState<Attached[]>(initialAttachments ?? []);
   const words = useRef<HTMLTextAreaElement>(null);
@@ -213,7 +221,7 @@ export function Composer({ unavailable, sending, onSend, onWrite, onAttach, onRe
     <div className="composer">
       {/* Takes no height and grows upward, so the box and the session controls stay where they are. */}
       <div className="composer-status">
-        {!statusTaken && <StatusLine unavailable={unavailable} sending={sending} marked={refusedHere} />}
+        {!statusTaken && <StatusLine unavailable={unavailable} sending={sending} refusedChange={refusedChange} marked={refusedHere} />}
       </div>
       <form
         ref={box}
@@ -314,11 +322,12 @@ function Attachment({ attachment: a, copied, onRemove }: { attachment: Attached;
 
 /**
  * One message at a time, first that Ersa can't reach the sessions, then a send whose outcome Ersa can't tell, then a
- * refused message, then detecting backends, then a host with no backend, then a send on its way
+ * refused message, then a refused change to the session, then detecting backends, then a host with no backend or
+ * whose backends could not be listed, then a send on its way
  * (docs/design/COMPOSER.md, The status line); nothing, and no height, while there is nothing to say. A message refused
  * for one of its attachments says why beside that attachment instead.
  */
-function StatusLine({ unavailable, sending, marked }: { unavailable?: Unavailable; sending?: Sending; marked: boolean }) {
+function StatusLine({ unavailable, sending, refusedChange, marked }: { unavailable?: Unavailable; sending?: Sending; refusedChange?: string; marked: boolean }) {
   if (unavailable === "reconnecting" || unavailable === "unreachable") {
     // The rail's foot says the same and is the one that announces it.
     return <p className="composer-status-line">{t(unavailable === "reconnecting" ? "rail.foot.reconnectingError" : "rail.foot.unreachableError")}</p>;
@@ -341,8 +350,19 @@ function StatusLine({ unavailable, sending, marked }: { unavailable?: Unavailabl
       </p>
     );
   }
+  if (refusedChange !== undefined) {
+    return (
+      <p className="composer-status-line" role="alert">
+        <span className="glyph" data-tone="danger" aria-hidden="true" />
+        {refusedChange}
+      </p>
+    );
+  }
   if (unavailable === "detecting") return <p className="composer-status-line">{t("composer.detectingProgress")}</p>;
   if (unavailable === "no-backend") return <p className="composer-status-line">{t("composer.noBackendError")}</p>;
+  if (typeof unavailable === "object" && "detectionFailed" in unavailable) {
+    return <p className="composer-status-line">{t("composer.detectionFailedError")} {unavailable.detectionFailed}</p>;
+  }
   if (typeof unavailable === "object") {
     return <p className="composer-status-line">{t("composer.backendFailedError", { label: unavailable.failedBackend })}</p>;
   }
