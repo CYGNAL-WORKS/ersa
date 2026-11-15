@@ -15,7 +15,7 @@
 
 import { type ChildProcess, execFile, execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { createWriteStream, existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { createWriteStream, existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -101,6 +101,10 @@ export const test = base.extend<{ backend: Backend; ersa: Ersa }>({
   ersa: [
     async ({ backend }, use, testInfo) => {
       const bin = binaries();
+      // Which backend this test ran, beside its screenshots: scripts/live-shots.mjs publishes screenshots only from a
+      // test whose record says `stand-in` (the file name is its BACKEND_RECORD). Written first, so no screenshot is
+      // ever without one.
+      writeFileSync(testInfo.outputPath("backend.txt"), backend);
       // A label is letters, digits, `-` and `_` (PROTO-CORE-API, Transport and framing); random, so a run never meets
       // the Core or window of another run, or of the owner.
       const label = `live-${process.pid}-${counter++}-${randomBytes(4).toString("hex")}`;
