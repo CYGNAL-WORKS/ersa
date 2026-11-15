@@ -1481,6 +1481,12 @@ const entries: Entry[] = [
       ["Stop under the pointer", <Composer autoFocus={false} onSend={async () => false} working onStop={() => {}} forceSend="hover" />],
       ["Stop pressed", <Composer autoFocus={false} onSend={async () => false} working onStop={() => {}} forceSend="pressed" />],
       ["Stop with keyboard focus", <Composer autoFocus={false} onSend={async () => false} working onStop={() => {}} forceSend="focus" />],
+      // FLOW-SEND-MESSAGE-R20: stop once chosen, until the turn ends, and with keyboard focus on it.
+      ["Stop chosen", <Composer autoFocus={false} onSend={async () => false} working stopping onStop={() => {}} />],
+      ["Stop chosen, with keyboard focus", <Composer autoFocus={false} onSend={async () => false} working stopping onStop={() => {}} forceSend="focus" />],
+      // FLOW-SEND-MESSAGE-R19: a message waiting in the backend, named in the window that sent it, else counted.
+      ["A message waiting", statusRoom(<Composer autoFocus={false} onSend={async () => false} working onStop={() => {}} waiting={{ count: 1, name: "Then update the changelog and the" }} />)],
+      ["Messages waiting", statusRoom(<Composer autoFocus={false} onSend={async () => false} working onStop={() => {}} waiting={{ count: 2 }} />)],
       // Stop turns back into send with focus kept, often with nothing left to send.
       ["Send with keyboard focus, nothing to send", <Composer autoFocus={false} onSend={async () => false} forceSend="focus" />],
       [

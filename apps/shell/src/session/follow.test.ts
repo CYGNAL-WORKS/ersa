@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BridgeError, CoreClient, Method, Params } from "../core/client";
-import { type SessionView, follow } from "./follow";
+import { type SessionView, follow, waitingOf } from "./follow";
 import { events } from "./replays";
 import { EVENT_VERSION } from "./transcript";
 
@@ -469,5 +469,84 @@ describe("a message on its way", () => {
     await sending;
     follower.progress({ session_id: "s-replay", phase: "copying", copied_bytes: 1, total_bytes: 2 });
     expect(last().message).toBeUndefined();
+  });
+});
+
+describe("a message sent while the agent works", () => {
+  const ev = (seq: number, event: object) =>
+    ({ v: EVENT_VERSION, session_id: "s1", seq, ts: "2026-11-14T09:00:00Z", source: { backend: "claude-code", backend_version: "2.1.302", input: "live" }, event }) as never;
+
+  // verifies: FLOW-SEND-MESSAGE-R19
+  it("waits here by name while Core's answer names no turn, until a user.message after it, and replays keep it", async () => {
+    const { client } = fakeClient({ "session.subscribe": () => Promise.resolve({ last_seq: 0 }), "session.send": () => Promise.resolve({}) });
+    const seen: SessionView[] = [];
+    const first = follow(client, "s1", (v) => seen.push(v));
+    first.receive(ev(0, { type: "turn.started", turn: 1, trigger: "user" }));
+    expect(await first.send("Then update the changelog", undefined, "Then update the changelog")).toBe(true);
+    const kept = seen.at(-1)?.waitingHere;
+    expect(kept).toEqual([{ name: "Then update the changelog", after: 0 }]);
+    // Followed afresh, as after showing another session: events replayed from before the send leave it waiting.
+    const again: SessionView[] = [];
+    const second = follow(client, "s1", (v) => again.push(v), kept);
+    second.receive(ev(0, { type: "user.message", origin: "human", text: "Fix the build" }));
+    expect(again.at(-1)?.waitingHere).toEqual(kept);
+    second.receive(ev(1, { type: "user.message", origin: "human", text: "Then update the changelog" }));
+    expect(again.at(-1)?.waitingHere).toBeUndefined();
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R19
+  it("does not wait when Core's answer names the turn it started", async () => {
+    const { client } = fakeClient({ "session.subscribe": () => Promise.resolve({ last_seq: -1 }), "session.send": () => Promise.resolve({ turn: 1 }) });
+    const seen: SessionView[] = [];
+    const f = follow(client, "s1", (v) => seen.push(v));
+    await f.send("Fix the build", undefined, "Fix the build");
+    expect(seen.at(-1)?.waitingHere).toBeUndefined();
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R19
+  it("is named only when one waits and it is the one sent here", () => {
+    const here = [{ name: "Fix it", after: 3 }];
+    expect(waitingOf(undefined, here)).toBeUndefined();
+    expect(waitingOf(1, here)).toEqual({ count: 1, name: "Fix it" });
+    expect(waitingOf(1, undefined)).toEqual({ count: 1 });
+    expect(waitingOf(2, here)).toEqual({ count: 2 });
+  });
+});
+
+describe("stop while a message waits", () => {
+  // verifies: FLOW-SEND-MESSAGE-R20
+  it("interrupts once until the turn ends, and again for the turn after it", async () => {
+    const { follower, calls, last } = following({ "session.interrupt": () => Promise.resolve({}) });
+    await follower.interrupt();
+    await follower.interrupt();
+    expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(1);
+    expect(last().stopChosen).toBe(true);
+    const at = last().transcript.lastSeq + 1;
+    follower.receive({ ...replay[0], seq: at, event: { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 1, is_error: true } } as never);
+    expect(last().stopChosen).toBeUndefined();
+    await follower.interrupt();
+    expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R20
+  it("can stop again when the stop never reached Core, or only canceled a message on its way", async () => {
+    let refuse: (error: BridgeError) => void = () => {};
+    let reach = false;
+    const { follower, calls, last } = following({
+      "session.interrupt": () => (reach ? Promise.resolve({}) : Promise.reject({ kind: "unavailable", message: "gone" })),
+      "session.send": () => new Promise((_, reject) => (refuse = reject)),
+    });
+    await follower.interrupt();
+    expect(last().stopChosen).toBeUndefined();
+    reach = true;
+    const sent = follower.send("hello");
+    await settle();
+    await follower.interrupt();
+    // This time the stop reaches Core and cancels the send: the turn still running can be stopped.
+    refuse({ kind: "rpc", error: { code: -32000, message: "stopped", data: { kind: "invalid_state", reason: "send_stopped" } } } as never);
+    await sent;
+    expect(last().stopChosen).toBeUndefined();
+    await follower.interrupt();
+    expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(3);
   });
 });

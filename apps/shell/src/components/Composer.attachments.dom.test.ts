@@ -212,9 +212,18 @@ describe("pasting and dropping attachments", () => {
     });
     const [, sent] = onSend.mock.calls[0] ?? [];
     expect(sendable(sent ?? [])).toEqual([{ kind: "image", media_type: "image/png", data: btoa(String.fromCharCode(137, 80, 78, 71, 1, 2, 3)) }]);
-    // Text alone pastes as it would, and so does text with a picture of it, as copied cells.
+    // Text alone pastes as it would.
     expect(fireEvent.paste(words(), { clipboardData: { files: [], getData: () => "Words" } })).toBe(true);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R08
+  it("attaches the image of a clipboard that holds text too, and pastes the text as well", async () => {
+    render(draw({ onRead: async () => [] }));
+    const png = new File([new Uint8Array([1, 2, 3])], "image.png", { type: "image/png" });
+    // Copied cells: their text and a picture of them.
     expect(fireEvent.paste(words(), { clipboardData: { files: [png], getData: () => "A1	B1" } })).toBe(true);
+    await act(async () => {});
+    expect(shown()).toEqual(["Pasted image3 bytes"]);
   });
 
   // verifies: FLOW-SEND-MESSAGE-R08
