@@ -25,7 +25,9 @@
 //!
 //! What a session's record says of its model, effort and permission mode is
 //! [`FakeAdapter::recorded_settings`], which a test sets as turns taken
-//! with other values would.
+//! with other values would: the latest of each, which a listing and a
+//! relaunch read, and the first turn after Core's request, which only a
+//! relaunch reads.
 //!
 //! Every message is kept in [`Stats::messages`] as the fake was given it,
 //! attachments and all; the fake takes PNG and GIF images of up to
@@ -45,8 +47,8 @@ use ersa_adapter::recording::Recording;
 use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
     ImageLimits, OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit, ProcessSpec,
-    Projected, Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary, RecordedSettings,
-    SessionConfig, TitleRules, Transport, async_trait,
+    Projected, Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary, RelaunchSettings,
+    Requested, SessionConfig, TitleRules, Transport, async_trait,
 };
 use ersa_core::CoreConfig;
 use ersa_core::replay::{Pace, Replay};
@@ -275,7 +277,7 @@ pub struct FakeAdapter {
 
 /// The fake records' settings, by backend session id, shared like
 /// [`Records`] so they outlive a Core.
-pub type RecordedSettingsMap = Arc<Mutex<HashMap<String, RecordedSettings>>>;
+pub type RecordedSettingsMap = Arc<Mutex<HashMap<String, RelaunchSettings>>>;
 
 impl FakeAdapter {
     pub fn new(projector_version: u32) -> Self {
@@ -621,9 +623,25 @@ impl Adapter for FakeAdapter {
                 .lock()
                 .unwrap()
                 .get(backend_session_id)
-                .cloned()
+                .map(|settings| settings.latest.clone())
                 .unwrap_or_default(),
         }))
+    }
+
+    async fn record_settings(
+        &self,
+        _transport: Arc<dyn Transport>,
+        _cwd: &str,
+        backend_session_id: &str,
+        _requested: Requested,
+    ) -> Result<RelaunchSettings, AdapterError> {
+        Ok(self
+            .recorded_settings
+            .lock()
+            .unwrap()
+            .get(backend_session_id)
+            .cloned()
+            .unwrap_or_default())
     }
 }
 
