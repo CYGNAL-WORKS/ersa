@@ -64,9 +64,10 @@ describe("the shelf", () => {
     const html = draw({ state: "permission", request: { ...bare, display_name: undefined } });
     expect(html).toContain('<p class="shelf-asked">Bash</p>');
     expect(html).not.toContain("Path:");
-    expect(html).not.toContain("shelf-readouts");
-    // Only the cost: no ring and no dot.
-    expect(text(draw({ state: "permission", request: bare }, { cost: "$0.82" }))).toMatch(/ \$0\.82 Deny/);
+    // The ring as the tile shows it: there, empty and saying so, before context is reported; no dot without a cost.
+    expect(html).toContain('<p class="shelf-readouts"><span class="context-ring" data-size="ring" role="img" aria-label="Context isn&#x27;t reported yet"');
+    expect(html).not.toContain("·");
+    expect(text(draw({ state: "permission", request: bare }, { cost: "$0.82" }))).toMatch(/ · \$0\.82 Deny/);
   });
 
   // verifies: FLOW-APPROVE-PERMISSION-R23
@@ -92,7 +93,7 @@ describe("the shelf", () => {
   // verifies: FLOW-APPROVE-PERMISSION-R25
   it("says the session waits on a request it can't show, and offers no answers for it", () => {
     const html = draw({ state: "unknown", place: { n: 1, m: 2 } }, { cost: "$0.82" });
-    expect(text(html)).toBe("1 of 2 This session is waiting on a request Ersa can't show here. $0.82");
+    expect(text(html)).toBe("1 of 2 This session is waiting on a request Ersa can't show here. · $0.82");
     expect(html).not.toContain("<button");
     expect(html).toContain('data-tone="caution"');
   });

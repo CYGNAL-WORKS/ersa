@@ -170,7 +170,8 @@ const everyState: Session[] = (
     ["Waiting, with nothing pending", { state: "waiting_user", pending: [] }],
     ["Sparse WSL disks", { state: "disconnected", pending: [], cost_usd_total: 0.44, ...ring }],
     ["Rename across hosts", { state: "error", pending: [], cost_usd_total: 0.02, ...ring }],
-    ["Evaluate the DeepSeek harness", { state: "ended", pending: [], cost_usd_total: 3.9, ...ring }],
+    ["Evaluate the DeepSeek harness", { state: "ended", pending: [], cost_usd_total: 3.9, context_tokens: 130_000, context_window: 200_000 }],
+    ["Just started", { state: "idle", pending: [], context_tokens: 600, context_window: 200_000 }],
     ["A state from a newer Core", { state: "paused" as unknown as Session["tile"]["state"], pending: [] }],
     ["", { state: "idle", pending: [] }],
   ] as const satisfies readonly (readonly [string, Session["tile"]])[]
@@ -1455,11 +1456,19 @@ const entries: Entry[] = [
   {
     name: "ContextRing",
     states: [
-      ["Nothing used yet", <ContextRing />],
-      ["Some used", <ContextRing used={0.42} />],
-      ["Nearly full", <ContextRing used={0.93} />],
-      ["On a tile", <ContextRing used={0.42} size="ring-sm" />],
-      ["On a tile, nearly full", <ContextRing used={0.93} size="ring-sm" />],
+      // LAY-SHELL, Context: each band, the empty ring and the smallest arc, in the session controls and on a tile.
+      ["Before a session", <ContextRing beforeSession />],
+      ["Not reported yet", <ContextRing />],
+      ["Nothing used", <ContextRing used={0} />],
+      ["Under 1 percent", <ContextRing used={0.003} />],
+      ["Quiet, up to half", <ContextRing used={0.42} />],
+      ["Caution, past half", <ContextRing used={0.65} />],
+      ["Danger, past four fifths", <ContextRing used={0.93} />],
+      ["On a tile, not reported yet", <ContextRing size="ring-sm" />],
+      ["On a tile, under 1 percent", <ContextRing used={0.003} size="ring-sm" />],
+      ["On a tile, quiet", <ContextRing used={0.42} size="ring-sm" />],
+      ["On a tile, caution", <ContextRing used={0.65} size="ring-sm" />],
+      ["On a tile, danger", <ContextRing used={0.93} size="ring-sm" />],
     ],
   },
   {

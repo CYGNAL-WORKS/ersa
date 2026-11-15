@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { BackendInfo, Session } from "../protocol/core-api.gen";
 
-import { contextUsed, nearFull, tileOf } from "./tile";
+import { contextUsed, ringBand, tileOf } from "./tile";
 
 type Tile = Session["tile"];
 type Pending = Tile["pending"][number];
@@ -135,14 +135,19 @@ describe("a tile's values as reported", () => {
   });
 });
 
-describe("the context ring near full (LAY-SHELL, Context)", () => {
-  it("is near full from 85 percent", () => {
-    expect(nearFull(0.844)).toBe(false);
-    expect(nearFull(0.85)).toBe(true);
-    // Read in whole percent, as the readout shows it: what reads "85%" is near full.
-    expect(nearFull(0.846)).toBe(true);
-    expect(nearFull(1)).toBe(true);
-    expect(nearFull(undefined)).toBe(false);
+describe("the context ring's bands (LAY-SHELL, Context)", () => {
+  it("is quiet up to half, caution past half and danger past four fifths, in whole percent", () => {
+    expect(ringBand(undefined)).toBeUndefined();
+    expect(ringBand(0)).toBe("quiet");
+    expect(ringBand(0.003)).toBe("quiet");
+    expect(ringBand(0.5)).toBe("quiet");
+    // Read in whole percent, as the readout shows it: what reads 50 percent is quiet, what reads 51 is caution.
+    expect(ringBand(0.504)).toBe("quiet");
+    expect(ringBand(0.506)).toBe("caution");
+    expect(ringBand(0.51)).toBe("caution");
+    expect(ringBand(0.8)).toBe("caution");
+    expect(ringBand(0.81)).toBe("danger");
+    expect(ringBand(1)).toBe("danger");
   });
 
   it("reads the share used the same way for the session controls", () => {
