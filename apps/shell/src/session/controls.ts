@@ -29,10 +29,9 @@ export type Branches = { state: "reading" } | { state: "read"; branches: Branch[
 
 /**
  * The base branch the workspace chip shows (FLOW-NEW-SESSION-R21): `wanted` while the project still has it, else the
- * repository's default branch; none while the branches are unread or none is the default.
+ * repository's default branch; none when none is the default.
  */
-export function baseFor(branches: readonly Branch[] | undefined, wanted?: string): string | undefined {
-  if (!branches) return undefined;
+export function baseFor(branches: readonly Branch[], wanted?: string): string | undefined {
   return branches.find((b) => b.name === wanted)?.name ?? branches.find((b) => b.default)?.name;
 }
 
