@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use ersa_adapter::{Adapter, Transport};
 use ersa_protocol::core_api::{BackendState, HelloHost};
-use tokio::sync::{Mutex, watch};
+use tokio::sync::{Mutex, Semaphore, watch};
 
 use crate::adapters::{self, Detected};
 use crate::app_log::AppLog;
@@ -50,35 +50,59 @@ pub struct CoreConfig {
     /// again after, until a test lets it go. `None`, except in tests that
     /// need another request to land between its read and its claim, or
     /// while it holds the claim.
-    pub remove_gate: Option<Arc<RemoveGate>>,
+    pub remove_gate: Option<Arc<Gate>>,
+    /// Where the folder inspection of `project.add` and `project.find`
+    /// stops, on its own thread before it touches the folder, until a test
+    /// lets it go: a folder that does not answer. `None`, except in tests.
+    pub inspect_gate: Option<Arc<Gate>>,
+    /// How long the folder inspection of `project.add` and `project.find`
+    /// may take before they answer `permission` (PROTO-CORE-API-R93).
+    /// [`FOLDER_INSPECTION_LIMIT`], except in tests that let it run out.
+    pub folder_inspection_limit: Duration,
+    /// The transport git and backends' version commands run through on the
+    /// local host. `None` is the local machine's; tests put one in front
+    /// of it that holds a command, as a slow repository or backend would.
+    pub command_transport: Option<CommandTransport>,
     /// How long a backend detection that found anything other than
     /// `available` is reused. [`FAILED_DETECTION_TTL`], except in tests
     /// that need every detection after a failed one to run again.
     pub failed_detection_ttl: Duration,
 }
 
+/// A transport for [`CoreConfig::command_transport`]. Its own type only so
+/// that `CoreConfig` can derive `Debug`, which a transport has none of.
+#[derive(Clone)]
+pub struct CommandTransport(pub Arc<dyn Transport>);
+
+impl std::fmt::Debug for CommandTransport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CommandTransport")
+    }
+}
+
 /// A point a request stops at in tests until the test lets it go
-/// ([`CoreConfig::remove_gate`]). Each stop is one [`RemoveGate::reached`]
-/// for the test and one [`RemoveGate::go`] from it, in order.
+/// ([`CoreConfig::remove_gate`], [`CoreConfig::inspect_gate`]). Each stop
+/// is one [`Gate::reached`]
+/// for the test and one [`Gate::go`] from it, in order.
 #[derive(Debug)]
-pub struct RemoveGate {
+pub struct Gate {
     reached: tokio::sync::Semaphore,
     go: tokio::sync::Semaphore,
 }
 
-impl Default for RemoveGate {
+impl Default for Gate {
     /// Closed: the request stops at the first point it reaches.
     fn default() -> Self {
-        RemoveGate {
+        Gate {
             reached: tokio::sync::Semaphore::new(0),
             go: tokio::sync::Semaphore::new(0),
         }
     }
 }
 
-impl RemoveGate {
+impl Gate {
     /// Called by the request: says it got here, then waits to be let go.
-    pub(crate) async fn stop(&self) {
+    pub async fn stop(&self) {
         self.reached.add_permits(1);
         // The semaphore is never closed, so acquiring cannot fail.
         if let Ok(permit) = self.go.acquire().await {
@@ -111,6 +135,15 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// is reused, so a backend installed while Core runs shows up soon after.
 pub const FAILED_DETECTION_TTL: Duration = Duration::from_secs(30);
 
+/// How many folder inspections may be under way at once, the ones left
+/// running past their limit included: as many as `attachment.inspect`
+/// reads may hold.
+pub const FOLDER_INSPECTIONS: usize = 8;
+
+/// The default for [`CoreConfig::folder_inspection_limit`]: a folder on a
+/// share that stopped answering never answers (PROTO-CORE-API-R93).
+pub const FOLDER_INSPECTION_LIMIT: Duration = Duration::from_secs(10);
+
 impl CoreConfig {
     /// The configuration for `data_dir` with the platform's default endpoint
     /// and limits. Fails only if the endpoint cannot be named (on Windows, if
@@ -126,6 +159,9 @@ impl CoreConfig {
             copy_pause: Duration::ZERO,
             wind_down_pause: Duration::ZERO,
             remove_gate: None,
+            inspect_gate: None,
+            folder_inspection_limit: FOLDER_INSPECTION_LIMIT,
+            command_transport: None,
             failed_detection_ttl: FAILED_DETECTION_TTL,
         })
     }
@@ -158,6 +194,11 @@ pub struct Core {
     /// [`FAILED_DETECTION_TTL`] otherwise. An async mutex, held while
     /// detecting, so concurrent requests run one detection between them.
     local_backends: Mutex<Option<(Instant, Vec<Detected>)>>,
+    /// The places for folder inspections (`project.add`, `project.find`).
+    /// Each holds one on its thread until its file system call returns,
+    /// past its time limit too, so folders that never answer take at most
+    /// [`FOLDER_INSPECTIONS`] threads, never more.
+    pub(crate) folder_inspections: Arc<Semaphore>,
     /// Flips to `true` once when shutdown is requested. A `watch` channel
     /// rather than a `Notify`, because a late waiter must still see it.
     shutdown: watch::Sender<bool>,
@@ -175,6 +216,11 @@ impl Core {
         adapters: Vec<Arc<dyn Adapter>>,
         app_log: Arc<AppLog>,
     ) -> Core {
+        let local_transport = config
+            .command_transport
+            .as_ref()
+            .map(|CommandTransport(transport)| Arc::clone(transport))
+            .unwrap_or_else(|| Arc::new(LocalTreeTransport::for_commands()));
         let sessions = SessionManager::new(store.clone(), adapters, app_log)
             .with_copy_pause(config.copy_pause)
             .with_wind_down_pause(config.wind_down_pause);
@@ -182,11 +228,12 @@ impl Core {
             config,
             sessions,
             store,
-            local_transport: Arc::new(LocalTreeTransport::for_commands()),
+            local_transport,
             local_session_transport: Arc::new(LocalTreeTransport::new()),
             host_name: platform::host_name(),
             started: Instant::now(),
             local_backends: Mutex::new(None),
+            folder_inspections: Arc::new(Semaphore::new(FOLDER_INSPECTIONS)),
             shutdown: watch::Sender::new(false),
             replay_audience: watch::Sender::new(false),
         }
