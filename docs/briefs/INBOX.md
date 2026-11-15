@@ -8,6 +8,7 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-14 FLOW-READ-TRANSCRIPT: Built so far still says the Interface takes a target for a path when it lies inside the workspace folder or is spelled as an absolute path; since #368 `tool.requested` carries `target_kind` (PROTO-AGENT-EVENTS-R26) and the Interface makes only a `path` relative and cuts it at its start, so that sentence can go. Built meanwhile to R08 and TRANSCRIPT.md, Tool cards.
 
 
 
