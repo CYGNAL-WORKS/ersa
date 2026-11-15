@@ -283,9 +283,11 @@ async fn dispatch(core: &Core, conn: &mut ConnectionState, request: Request) -> 
     // The two methods that act on the connection itself; `answer` has the
     // rest.
     match method {
-        Method::CoreHello => handlers::core_hello(core, conn, parse(request.params)?),
+        Method::CoreHello => {
+            handlers::core_hello(core, conn, parse(request.params).map_err(keep_open)?)
+        }
         Method::CoreShutdown => {
-            let _: ersa_protocol::core_api::Empty = parse(request.params)?;
+            let _: ersa_protocol::core_api::Empty = parse(request.params).map_err(keep_open)?;
             // The connection writes this answer, then requests the shutdown.
             Ok((serde_json::json!({}), After::Shutdown))
         }
@@ -325,50 +327,52 @@ async fn answer(
             "{} is answered only in line on its connection",
             method.name()
         ))),
-        Method::CoreStatus => to_json(handlers::core_status(core, arg(params)?).await),
-        Method::HostList => to_json(handlers::host_list(core, arg(params)?).await),
-        Method::BackendList => to_json(handlers::backend_list(core, arg(params)?).await),
-        Method::ProjectList => to_json(handlers::project_list(core, arg(params)?).await),
-        Method::ProjectAdd => to_json(handlers::project_add(core, arg(params)?).await),
-        Method::ProjectSetTrust => to_json(handlers::project_set_trust(core, arg(params)?).await),
-        Method::ProjectRemove => to_json(handlers::project_remove(core, arg(params)?).await),
-        Method::ProjectFind => to_json(handlers::project_find(core, arg(params)?).await),
-        Method::WorkspaceList => to_json(handlers::workspace_list(core, arg(params)?).await),
-        Method::WorkspaceCreate => to_json(handlers::workspace_create(core, arg(params)?).await),
-        Method::WorkspaceRemove => to_json(handlers::workspace_remove(core, arg(params)?).await),
-        Method::BranchList => to_json(handlers::branch_list(core, arg(params)?).await),
-        Method::WorkspaceChanges => to_json(handlers::workspace_changes(core, arg(params)?).await),
-        Method::SettingsGet => to_json(handlers::settings_get(core, arg(params)?).await),
-        Method::SettingsSet => to_json(handlers::settings_set(core, arg(params)?).await),
+        Method::CoreStatus => to_json(handlers::core_status(core, parse(params)?).await),
+        Method::HostList => to_json(handlers::host_list(core, parse(params)?).await),
+        Method::BackendList => to_json(handlers::backend_list(core, parse(params)?).await),
+        Method::ProjectList => to_json(handlers::project_list(core, parse(params)?).await),
+        Method::ProjectAdd => to_json(handlers::project_add(core, parse(params)?).await),
+        Method::ProjectSetTrust => to_json(handlers::project_set_trust(core, parse(params)?).await),
+        Method::ProjectRemove => to_json(handlers::project_remove(core, parse(params)?).await),
+        Method::ProjectFind => to_json(handlers::project_find(core, parse(params)?).await),
+        Method::WorkspaceList => to_json(handlers::workspace_list(core, parse(params)?).await),
+        Method::WorkspaceCreate => to_json(handlers::workspace_create(core, parse(params)?).await),
+        Method::WorkspaceRemove => to_json(handlers::workspace_remove(core, parse(params)?).await),
+        Method::BranchList => to_json(handlers::branch_list(core, parse(params)?).await),
+        Method::WorkspaceChanges => {
+            to_json(handlers::workspace_changes(core, parse(params)?).await)
+        }
+        Method::SettingsGet => to_json(handlers::settings_get(core, parse(params)?).await),
+        Method::SettingsSet => to_json(handlers::settings_set(core, parse(params)?).await),
 
-        Method::SessionList => to_json(sessions::list(core, arg(params)?).await),
-        Method::SessionCreate => to_json(sessions::create(core, arg(params)?).await),
-        Method::SessionStart => to_json(sessions::start(core, arg(params)?).await),
-        Method::SessionStop => to_json(sessions::stop(core, arg(params)?).await),
-        Method::SessionResume => to_json(sessions::resume(core, arg(params)?).await),
-        Method::SessionRemove => to_json(sessions::remove(core, arg(params)?).await),
-        Method::SessionSetArchived => to_json(sessions::set_archived(core, arg(params)?).await),
-        Method::SessionArrange => to_json(sessions::arrange(core, arg(params)?).await),
-        Method::SessionDelete => to_json(delete::delete(core, arg(params)?).await),
-        Method::SessionFork => to_json(sessions::fork(core, arg(params)?).await),
-        Method::SessionSend => to_json(sessions::send(core, peer, arg(params)?).await),
-        Method::SessionInterrupt => to_json(sessions::interrupt(core, arg(params)?).await),
+        Method::SessionList => to_json(sessions::list(core, parse(params)?).await),
+        Method::SessionCreate => to_json(sessions::create(core, parse(params)?).await),
+        Method::SessionStart => to_json(sessions::start(core, parse(params)?).await),
+        Method::SessionStop => to_json(sessions::stop(core, parse(params)?).await),
+        Method::SessionResume => to_json(sessions::resume(core, parse(params)?).await),
+        Method::SessionRemove => to_json(sessions::remove(core, parse(params)?).await),
+        Method::SessionSetArchived => to_json(sessions::set_archived(core, parse(params)?).await),
+        Method::SessionArrange => to_json(sessions::arrange(core, parse(params)?).await),
+        Method::SessionDelete => to_json(delete::delete(core, parse(params)?).await),
+        Method::SessionFork => to_json(sessions::fork(core, parse(params)?).await),
+        Method::SessionSend => to_json(sessions::send(core, peer, parse(params)?).await),
+        Method::SessionInterrupt => to_json(sessions::interrupt(core, parse(params)?).await),
         Method::SessionDecidePermission => {
-            to_json(sessions::decide_permission(core, arg(params)?).await)
+            to_json(sessions::decide_permission(core, parse(params)?).await)
         }
         Method::SessionAnswerQuestion => {
-            to_json(sessions::answer_question(core, arg(params)?).await)
+            to_json(sessions::answer_question(core, parse(params)?).await)
         }
-        Method::SessionSetTitle => to_json(sessions::set_title(core, arg(params)?).await),
-        Method::SessionSetMode => to_json(sessions::set_mode(core, arg(params)?).await),
-        Method::SessionSubscribe => to_json(sessions::subscribe(core, peer, arg(params)?).await),
-        Method::SessionUnsubscribe => to_json(sessions::unsubscribe(peer, arg(params)?)),
-        Method::SessionRawLog => to_json(sessions::raw_log(core, arg(params)?).await),
-        Method::AttachmentInspect => to_json(sessions::inspect(core, arg(params)?).await),
-        Method::SectionList => to_json(sections::list(core, arg(params)?).await),
-        Method::SectionCreate => to_json(sections::create(core, arg(params)?).await),
-        Method::SectionRename => to_json(sections::rename(core, arg(params)?).await),
-        Method::SectionRemove => to_json(sections::remove(core, arg(params)?).await),
+        Method::SessionSetTitle => to_json(sessions::set_title(core, parse(params)?).await),
+        Method::SessionSetMode => to_json(sessions::set_mode(core, parse(params)?).await),
+        Method::SessionSubscribe => to_json(sessions::subscribe(core, peer, parse(params)?).await),
+        Method::SessionUnsubscribe => to_json(sessions::unsubscribe(peer, parse(params)?)),
+        Method::SessionRawLog => to_json(sessions::raw_log(core, parse(params)?).await),
+        Method::AttachmentInspect => to_json(sessions::inspect(core, parse(params)?).await),
+        Method::SectionList => to_json(sections::list(core, parse(params)?).await),
+        Method::SectionCreate => to_json(sections::create(core, parse(params)?).await),
+        Method::SectionRename => to_json(sections::rename(core, parse(params)?).await),
+        Method::SectionRemove => to_json(sections::remove(core, parse(params)?).await),
 
         // Refused above by `reserved_for`; listed so that adding a method
         // without deciding how to answer it is a compile error.
@@ -523,19 +527,15 @@ pub async fn handle_detached(core: &Core, request: Request, peer: &Peer) -> Resp
 
 /// Parses a method's params. Absent params count as `{}`, so methods without
 /// parameters can be called without them.
-fn parse<T: DeserializeOwned>(params: Option<Value>) -> Result<T, (ApiError, After)> {
+fn parse<T: DeserializeOwned>(params: Option<Value>) -> Result<T, ApiError> {
     let params = params.unwrap_or_else(|| Value::Object(Default::default()));
-    serde_json::from_value(params).map_err(|e| {
-        (
-            ApiError::invalid_params(format!("invalid params: {e}")),
-            After::Continue,
-        )
-    })
+    serde_json::from_value(params)
+        .map_err(|e| ApiError::invalid_params(format!("invalid params: {e}")))
 }
 
-/// [`parse`] for [`answer`], whose errors never close the connection.
-fn arg<T: DeserializeOwned>(params: Option<Value>) -> Result<T, ApiError> {
-    parse(params).map_err(|(e, _)| e)
+/// An error answered with the connection kept open.
+fn keep_open(error: ApiError) -> (ApiError, After) {
+    (error, After::Continue)
 }
 
 fn to_json<T: Serialize>(result: Result<T, ApiError>) -> Result<Value, ApiError> {

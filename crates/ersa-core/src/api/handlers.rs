@@ -224,6 +224,11 @@ pub(super) async fn project_find(
 /// `permission` (PROTO-CORE-API-R93). A hung file system call cannot be
 /// called off, so its thread is left to finish, and since nothing waits for
 /// its result any more, nothing comes of it when it does.
+///
+/// The thread is a plain one, not one of Tokio's blocking pool: that pool
+/// also runs every database call, so threads stuck on a dead share there
+/// would in time leave none for the database, and the runtime waits for
+/// them when Core exits.
 async fn inspect<T: Send + 'static>(
     core: &Core,
     raw: &str,
@@ -231,15 +236,21 @@ async fn inspect<T: Send + 'static>(
 ) -> Result<T, ApiError> {
     let gate = core.config.inspect_gate.clone();
     let runtime = tokio::runtime::Handle::current();
-    let task = tokio::task::spawn_blocking(move || {
-        // In tests, the folder that does not answer.
-        if let Some(gate) = gate {
-            runtime.block_on(gate.stop());
-        }
-        inspection()
-    });
-    match tokio::time::timeout(core.config.folder_inspection_limit, task).await {
-        Ok(joined) => joined.map_err(|_| ApiError::internal("inspecting the folder panicked"))?,
+    let (done, answer) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name("folder inspection".into())
+        .spawn(move || {
+            // In tests, the folder that does not answer.
+            if let Some(gate) = gate {
+                runtime.block_on(gate.stop());
+            }
+            // Fails only when the request stopped waiting: nothing to do.
+            let _ = done.send(inspection());
+        })
+        .map_err(|e| ApiError::internal(format!("could not start the folder inspection: {e}")))?;
+    match tokio::time::timeout(core.config.folder_inspection_limit, answer).await {
+        // The thread ended without an answer: the inspection panicked.
+        Ok(answer) => answer.map_err(|_| ApiError::internal("inspecting the folder panicked"))?,
         Err(_) => Err(ApiError::new(
             ersa_protocol::core_api::ErrorKind::Permission,
             format!(
