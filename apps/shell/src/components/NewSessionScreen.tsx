@@ -338,7 +338,6 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
         </div>
         <Composer
           inputRef={words}
-          tall
           // The trust question, or why a folder could not be added, opens in the status line's place, and the
           // question holds the focal glow while it is open (docs/design/COMPOSER.md, The trust question).
           statusTaken={asking !== undefined || adding?.state === "failed"}
