@@ -9,6 +9,7 @@ mod support;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use ersa_adapter::OpenElsewhere;
 use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, Records, Stats};
@@ -342,25 +343,26 @@ async fn a_session_live_when_core_died_ends_its_transcript_and_resumes() {
     );
 }
 
-/// A fork stopped before its first message has no record of its own: it
-/// starts again as a fork of its original, under its own id.
-// verifies: FLOW-RESUME-SESSION-R01
-#[tokio::test(flavor = "multi_thread")]
-async fn a_fork_with_no_record_yet_is_forked_from_its_original_again() {
-    let records = Records::default();
-    let (core, stats) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
-    let mut client = core.client().await;
-    let original = stopped_session(&core, &mut client).await;
-    let original_backend_id = only_record(&records);
+/// A fork of a stopped session, stopped in turn before its first message,
+/// so that, as with Claude Code, which writes a fork's record with that
+/// message, it has no record of its own. Returns the original's id, the
+/// fork's, and the backend's ids for each.
+async fn recordless_fork(
+    client: &mut Client,
+    core: &TestCore,
+    records: &Records,
+    stats: &Stats,
+) -> (String, String, String, String) {
+    let original = stopped_session(core, client).await;
+    let original_backend_id = only_record(records);
     let fork = client
         .result("session.fork", json!({ "id": original }))
         .await["id"]
         .as_str()
         .unwrap()
         .to_string();
-    started(&stats, 2).await;
-    // Ready, then stopped before its first message: as Claude Code, which
-    // writes a fork's record with that message, it has none.
+    let starts = stats.starts.load(Ordering::SeqCst);
+    started(stats, starts).await;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     while records.lock().unwrap().len() < 2 {
         assert!(
@@ -378,6 +380,36 @@ async fn a_fork_with_no_record_yet_is_forked_from_its_original_again() {
         .clone();
     records.lock().unwrap().remove(&fork_backend_id);
     client.result("session.stop", json!({ "id": fork })).await;
+    (original, fork, original_backend_id, fork_backend_id)
+}
+
+/// Waits until `session.list` says session `id` is in `state`.
+async fn wait_for_state(client: &mut Client, id: &str, state: &str) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let row = session_row(client, id).await;
+        if row["state"] == state {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "session {id} stayed {}",
+            row["state"]
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+/// A fork stopped before its first message has no record of its own: it
+/// starts again as a fork of its original, under its own id.
+// verifies: FLOW-RESUME-SESSION-R01
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_with_no_record_yet_is_forked_from_its_original_again() {
+    let records = Records::default();
+    let (core, stats) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
+    let mut client = core.client().await;
+    let (_, fork, original_backend_id, fork_backend_id) =
+        recordless_fork(&mut client, &core, &records, &stats).await;
 
     client.result("session.resume", json!({ "id": fork })).await;
     let configs = started(&stats, 3).await;
@@ -391,6 +423,218 @@ async fn a_fork_with_no_record_yet_is_forked_from_its_original_again() {
         Some(fork_backend_id.as_str())
     );
     assert_eq!(again.resume, None);
+}
+
+/// Resuming a fork with no record of its own copies its original again, so
+/// it is refused whenever forking the original would be, with the same
+/// answer, by `session.resume` and by a send alike: here while a turn runs
+/// in the original, which the copy would take part way (fixture
+/// 2.1.316/18), and while another process has the original open.
+// verifies: FLOW-RESUME-SESSION-R10
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recordless_fork_is_resumed_only_when_its_original_can_be_forked() {
+    let records = Records::default();
+    let fake = FakeAdapter::with_records(Arc::clone(&records));
+    let open_elsewhere = Arc::clone(&fake.open_elsewhere);
+    let (core, stats) = start_fake(fake).await;
+    let mut client = core.client().await;
+    let (original, fork, _, _) = recordless_fork(&mut client, &core, &records, &stats).await;
+
+    // Another process has the original open.
+    *open_elsewhere.lock().unwrap() = OpenElsewhere::Yes { pids: vec![4242] };
+    let starts = stats.starts.load(Ordering::SeqCst);
+    let forking = client
+        .error("session.fork", json!({ "id": original }))
+        .await;
+    assert_eq!(forking["data"]["reason"], "open_elsewhere", "{forking:#}");
+    let resuming = client.error("session.resume", json!({ "id": fork })).await;
+    assert_eq!(resuming, forking);
+    let sending = client
+        .error("session.send", json!({ "id": fork, "text": "go on" }))
+        .await;
+    assert_eq!(sending, forking);
+    *open_elsewhere.lock().unwrap() = OpenElsewhere::No;
+
+    // A turn runs in the original.
+    client
+        .result("session.send", json!({ "id": original, "text": "work" }))
+        .await;
+    wait_for_state(&mut client, &original, "running").await;
+    let starts_now = stats.starts.load(Ordering::SeqCst);
+    assert_eq!(starts_now, starts + 1, "only the original resumed");
+    let forking = client
+        .error("session.fork", json!({ "id": original }))
+        .await;
+    assert_eq!(kind(&forking), "invalid_state");
+    assert_eq!(forking["data"]["reason"], "session_busy", "{forking:#}");
+    let resuming = client.error("session.resume", json!({ "id": fork })).await;
+    assert_eq!(resuming, forking);
+    let sending = client
+        .error("session.send", json!({ "id": fork, "text": "go on" }))
+        .await;
+    assert_eq!(sending, forking);
+
+    // Neither started the fork's backend again.
+    assert_eq!(stats.starts.load(Ordering::SeqCst), starts_now);
+    assert_eq!(session_row(&mut client, &fork).await["state"], "ended");
+}
+
+/// While a recordless fork's backend starts, copying its original again, a
+/// message to the original is held off, as it is while `session.fork`'s
+/// fork starts, so no turn begins that the copy would take part way.
+// verifies: FLOW-RESUME-SESSION-R10
+#[tokio::test(flavor = "multi_thread")]
+async fn sends_to_the_original_wait_until_a_resumed_recordless_fork_is_ready() {
+    let records = Records::default();
+    let fake = FakeAdapter::quiet_restart(Arc::clone(&records));
+    let start_gate = Arc::clone(&fake.start_gate);
+    let (core, stats) = start_fake(fake).await;
+    let mut client = core.client().await;
+    let (original, fork, _, _) = recordless_fork(&mut client, &core, &records, &stats).await;
+    // The original running, so a send to it that were let through would
+    // reach its backend at once.
+    client
+        .result("session.send", json!({ "id": original, "text": "again" }))
+        .await;
+    assert_eq!(stats.messages.lock().unwrap().len(), 2);
+
+    let held = start_gate.lock().await;
+    client.result("session.resume", json!({ "id": fork })).await;
+    let configs = started(&stats, 4).await;
+    assert!(configs[3].fork_of.is_some(), "forked again");
+    let error = client
+        .error(
+            "session.send",
+            json!({ "id": original, "text": "meanwhile" }),
+        )
+        .await;
+    assert_eq!(kind(&error), "invalid_state", "{error:#}");
+    assert_eq!(stats.messages.lock().unwrap().len(), 2, "nothing more");
+
+    drop(held);
+    wait_for_state(&mut client, &fork, "idle").await;
+    client
+        .result("session.send", json!({ "id": original, "text": "now" }))
+        .await;
+}
+
+/// Stopping a message that waits for a stopped session's backend to start
+/// stops the message, not the session: the backend, started once, goes on
+/// to be ready and idle.
+// verifies: PROTO-CORE-API-R86
+#[tokio::test(flavor = "multi_thread")]
+async fn interrupting_a_send_that_waits_for_a_resume_leaves_the_session_idle() {
+    let fake = FakeAdapter::quiet_restart(Records::default());
+    let start_gate = Arc::clone(&fake.start_gate);
+    let (core, stats) = start_fake(fake).await;
+    let mut client = core.client().await;
+    let id = stopped_session(&core, &mut client).await;
+    let stops = stats.stops.load(Ordering::SeqCst);
+    client.clear_notifications();
+
+    let held = start_gate.lock().await;
+    let send = client
+        .request("session.send", json!({ "id": id, "text": "again" }))
+        .await;
+    client
+        .notification_where(|n| {
+            n["method"] == "session.send_progress" && n["params"]["phase"] == "starting"
+        })
+        .await;
+    client
+        .result("session.interrupt", json!({ "id": id }))
+        .await;
+    let response = client.response(send).await;
+    assert_eq!(kind(&response["error"]), "invalid_state", "{response:#}");
+    assert_eq!(response["error"]["data"]["reason"], "send_stopped");
+
+    drop(held);
+    wait_for_state(&mut client, &id, "idle").await;
+    assert_eq!(stats.starts.load(Ordering::SeqCst), 2, "started once more");
+    assert_eq!(stats.stops.load(Ordering::SeqCst), stops, "never stopped");
+    let texts: Vec<String> = stats
+        .messages
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|m| m.text.clone())
+        .collect();
+    assert_eq!(texts, ["hello"], "the stopped message never sent");
+    // Resumed: the next message goes to the backend running now.
+    client
+        .result("session.send", json!({ "id": id, "text": "after" }))
+        .await;
+    assert_eq!(stats.starts.load(Ordering::SeqCst), 2);
+}
+
+/// A resumed session is `starting` until its backend answers Core's first
+/// request, then `idle`, though the backend reports no turn.
+// verifies: PROTO-AGENT-EVENTS-R25
+#[tokio::test(flavor = "multi_thread")]
+async fn a_resumed_session_goes_from_starting_to_idle_once_its_backend_answers() {
+    let fake = FakeAdapter::quiet_restart(Records::default());
+    let start_gate = Arc::clone(&fake.start_gate);
+    let (core, stats) = start_fake(fake).await;
+    let mut client = core.client().await;
+    let id = stopped_session(&core, &mut client).await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    client.events_until("session.ended").await;
+
+    let held = start_gate.lock().await;
+    client.result("session.resume", json!({ "id": id })).await;
+    let starting = client.events_until("session.state").await;
+    assert_eq!(starting.last().unwrap()["event"]["state"], "starting");
+    // The backend has been asked to start, and has not answered.
+    started(&stats, 2).await;
+    assert_eq!(session_row(&mut client, &id).await["state"], "starting");
+
+    drop(held);
+    let ready = client.events_until("session.state").await;
+    assert_eq!(
+        ready.last().unwrap()["event"]["state"],
+        "idle",
+        "{ready:#?}"
+    );
+    assert_eq!(session_row(&mut client, &id).await["state"], "idle");
+}
+
+/// A session resumed while nobody reads its view is read afresh by the
+/// next reader: the record's events, then the new run's.
+// verifies: FLOW-RESUME-SESSION-R01
+#[tokio::test(flavor = "multi_thread")]
+async fn a_session_resumed_unread_is_read_from_its_record_then_live() {
+    let (core, _) = start_fake(FakeAdapter::new(1)).await;
+    let mut client = core.client().await;
+    let id = stopped_session(&core, &mut client).await;
+
+    client.result("session.resume", json!({ "id": id })).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "again" }))
+        .await;
+    client
+        .result("session.subscribe", json!({ "id": id, "from_seq": 0 }))
+        .await;
+    let events = client.events_until("assistant.text").await;
+    let events = if messages(&events).len() < 4 {
+        let mut all = events;
+        all.extend(client.events_until("assistant.text").await);
+        all
+    } else {
+        events
+    };
+    let seqs: Vec<u64> = events.iter().map(|e| e["seq"].as_u64().unwrap()).collect();
+    assert_eq!(seqs, (0..events.len() as u64).collect::<Vec<_>>());
+    assert_eq!(
+        messages(&events),
+        [
+            ("record".into(), "hello".into()),
+            ("record".into(), "echo: hello".into()),
+            ("live".into(), "again".into()),
+            ("live".into(), "echo: again".into()),
+        ]
+    );
 }
 
 /// A message with attachments to a session whose folder is gone is refused
