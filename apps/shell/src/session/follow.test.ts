@@ -653,7 +653,7 @@ describe("stop while a message waits", () => {
     expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
   });
 
-  // verifies: FLOW-SEND-MESSAGE-R03
+  // A stop undoes only what holds its own number: guards the follower's bookkeeping, no requirement of its own.
   it("keeps a later message's cancel when an earlier message's cancel fails late", async () => {
     const fails: ((error: unknown) => void)[] = [];
     const refusals: ((error: unknown) => void)[] = [];
