@@ -1565,3 +1565,31 @@ fn other_queue_operations_are_not_messages() {
     );
     assert_eq!(texts(&events_of(&entries[..4])), ["user: Hello"]);
 }
+
+// verifies: PROTO-CLAUDE-CODE-STREAM-R69
+#[test]
+fn a_message_taken_in_mid_turn_keeps_its_attachments_when_read_back() {
+    // Fixture 54: the message has words, an image and a file. The `remove`
+    // entry's `content` holds only the words and the file list as text; the
+    // `queued_command` attachment before it holds the blocks as sent.
+    let events = recorded("54-replay-attachments-during-tool-turn");
+    let echo_uuid = "efb93296-1625-42a9-821c-48654f45e299";
+    let at = only_place_of(&events, echo_uuid);
+    let Event::UserMessage(message) = &events[at].event else {
+        panic!("{:?}", events[at]);
+    };
+    assert_eq!(
+        message.text,
+        "Now reply with one word: the color of the attached image."
+    );
+    assert_eq!(message.origin, MessageOrigin::Human);
+    assert!(
+        matches!(message.attachments.as_slice(), [
+            MessageAttachment::Image { media_type, .. },
+            MessageAttachment::File { path },
+        ] if media_type == "image/png" && path == "README.md"),
+        "{:?}",
+        message.attachments
+    );
+    assert_eq!(events[at].ts.as_deref(), Some("2026-11-15T22:01:40.121Z"));
+}
