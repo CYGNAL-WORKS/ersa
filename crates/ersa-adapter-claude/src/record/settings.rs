@@ -15,7 +15,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
-use ersa_adapter::{Recorded, RecordedSettings, Requested};
+use ersa_adapter::{Recorded, RecordedSettings, RelaunchSettings, Requested};
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -26,41 +26,128 @@ use crate::wire::{Extra, RecordEntry};
 
 /// The settings `entries` hold, each with when its turn began.
 pub fn settings(entries: &[RecordEntry]) -> RecordedSettings {
-    let prompts = prompts(entries);
-    // `max_by_key` keeps the last of equals, so of two entries stamped alike
-    // the one written later wins.
-    let mode = prompts.iter().max_by_key(|(at, _)| *at);
-    let reply = entries
+    Turns::read(entries).latest()
+}
+
+/// The session's own prompts and replies in part of a record, read once.
+struct Turns<'a> {
+    /// Each prompt's time, which is when its turn began, and the permission
+    /// mode it carries.
+    prompts: Vec<(OffsetDateTime, &'a str)>,
+    replies: Vec<Reply<'a>>,
+}
+
+impl<'a> Turns<'a> {
+    fn read(entries: &'a [RecordEntry]) -> Self {
+        let prompts = prompts(entries);
+        let replies = replies(entries, &prompts);
+        Turns { prompts, replies }
+    }
+
+    /// Each value from the latest turn that holds it.
+    fn latest(&self) -> RecordedSettings {
+        // `max_by_key` keeps the last of equals, so of two entries stamped
+        // alike the one written later wins.
+        let mode = self.prompts.iter().max_by_key(|(at, _)| *at);
+        let reply = self.replies.iter().max_by_key(|reply| reply.at);
+        RecordedSettings {
+            model: reply.map(Reply::model),
+            effort: reply.and_then(Reply::effort),
+            permission_mode: mode.map(|(at, mode)| recorded(mode, Some(*at))),
+        }
+    }
+
+    /// For each value Core gave a time for, what the first turn that began
+    /// after that time ran with (PROTO-CLAUDE-CODE-STREAM-R60). A turn begins
+    /// at its prompt, which carries the mode; the model and effort are those
+    /// of the earliest reply whose turn began after the time, so a turn
+    /// interrupted before any reply gives its mode but no model.
+    fn first_after(&self, requested: Requested) -> RecordedSettings {
+        // `min_by_key` keeps the first of equals: of two entries stamped
+        // alike, the one written first.
+        let first_reply = |request: Option<OffsetDateTime>| {
+            let request = request?;
+            self.replies
+                .iter()
+                .filter(|reply| reply.began.is_some_and(|began| began > request))
+                .min_by_key(|reply| reply.at)
+        };
+        let first_mode = requested.permission_mode.and_then(|request| {
+            self.prompts
+                .iter()
+                .filter(|(began, _)| *began > request)
+                .min_by_key(|(began, _)| *began)
+        });
+        RecordedSettings {
+            model: first_reply(requested.model).map(Reply::model),
+            effort: first_reply(requested.effort).and_then(Reply::effort),
+            permission_mode: first_mode.map(|(at, mode)| recorded(mode, Some(*at))),
+        }
+    }
+
+    /// Whether a turn that began at or before `request` has been read.
+    fn reached(&self, request: OffsetDateTime) -> bool {
+        self.prompts.iter().any(|(began, _)| *began <= request)
+    }
+}
+
+fn recorded(value: &str, turn_began: Option<OffsetDateTime>) -> Recorded {
+    Recorded {
+        value: value.to_string(),
+        turn_began,
+    }
+}
+
+/// One of the session's own replies that came from the API.
+struct Reply<'a> {
+    /// The reply's `timestamp`.
+    at: OffsetDateTime,
+    /// When its turn began: the latest prompt not after it, `None` when no
+    /// such prompt was read.
+    began: Option<OffsetDateTime>,
+    model: &'a str,
+    effort: Option<&'a str>,
+}
+
+impl Reply<'_> {
+    fn model(&self) -> Recorded {
+        recorded(self.model, self.began)
+    }
+
+    fn effort(&self) -> Option<Recorded> {
+        Some(recorded(self.effort?, self.began))
+    }
+}
+
+/// The session's own replies in `entries`, never a subagent's or one the CLI
+/// wrote itself (`<synthetic>`), each with when its turn began.
+fn replies<'a>(entries: &'a [RecordEntry], prompts: &[(OffsetDateTime, &str)]) -> Vec<Reply<'a>> {
+    entries
         .iter()
         .filter_map(|entry| match entry {
             RecordEntry::Assistant(reply)
                 if reply.message.model != SYNTHETIC_MODEL && !in_sidechain(&reply.extra) =>
             {
-                Some((stamp(reply.timestamp.as_deref())?, reply))
+                let at = stamp(reply.timestamp.as_deref())?;
+                let began = prompts
+                    .iter()
+                    .map(|(began, _)| *began)
+                    .filter(|began| *began <= at)
+                    .max();
+                Some(Reply {
+                    at,
+                    began,
+                    model: &reply.message.model,
+                    effort: reply.effort.as_deref(),
+                })
             }
             _ => None,
         })
-        .max_by_key(|(at, _)| *at);
-    let reply_began = reply.and_then(|(at, _)| {
-        prompts
-            .iter()
-            .map(|(began, _)| *began)
-            .filter(|began| *began <= at)
-            .max()
-    });
-    let recorded = |value: &str, turn_began| Recorded {
-        value: value.to_string(),
-        turn_began,
-    };
-    RecordedSettings {
-        model: reply.map(|(_, reply)| recorded(&reply.message.model, reply_began)),
-        effort: reply.and_then(|(_, reply)| Some(recorded(reply.effort.as_deref()?, reply_began))),
-        permission_mode: mode.map(|(at, mode)| recorded(mode, Some(*at))),
-    }
+        .collect()
 }
 
-/// Each prompt's time, which is when its turn began, and the permission mode
-/// it carries.
+/// Each of the session's own prompts: its time and the permission mode it
+/// carries.
 fn prompts(entries: &[RecordEntry]) -> Vec<(OffsetDateTime, &str)> {
     entries
         .iter()
@@ -86,11 +173,12 @@ fn stamp(timestamp: Option<&str>) -> Option<OffsetDateTime> {
 
 /// The settings of the record at `path`, for a relaunch: read back from the
 /// end, a growing chunk at a time, until each value is settled or the
-/// record's start. A value is settled once it is found with its turn's
-/// start, or once a turn that began at or before Core's request for it has
-/// been read: every turn before that began earlier still, so Core's request
-/// stands. A value Core never requested is settled only by finding it.
-pub fn read_back(path: &Path, requested: Requested) -> io::Result<RecordedSettings> {
+/// record's start. A value Core requested is settled once a turn that began
+/// at or before the request has been read: every turn after the request has
+/// then been read, the first of them included (PROTO-CLAUDE-CODE-STREAM-R60),
+/// and every turn before it began earlier still, so it can't count. A value
+/// Core never requested is settled by finding it with its turn's start.
+pub fn read_back(path: &Path, requested: Requested) -> io::Result<RelaunchSettings> {
     let mut file = File::open(path)?;
     let len = file.metadata()?.len();
     let mut window = CHUNK;
@@ -102,18 +190,22 @@ pub fn read_back(path: &Path, requested: Requested) -> io::Result<RecordedSettin
         let mut bytes = Vec::new();
         (&mut file).take(len - start).read_to_end(&mut bytes)?;
         let read = entries(&bytes, start > 0, false);
-        let found = settings(&read);
-        let prompts = prompts(&read);
-        let reached = |request: Option<OffsetDateTime>| {
-            request.is_some_and(|request| prompts.iter().any(|(began, _)| *began <= request))
+        let turns = Turns::read(&read);
+        let found = turns.latest();
+        let settled = |found: bool, request: Option<OffsetDateTime>| match request {
+            Some(request) => turns.reached(request),
+            None => found,
         };
         // Model and effort come from the same reply.
         let reply_found = found.model.as_ref().is_some_and(|m| m.turn_began.is_some());
-        let settled = (reply_found || reached(requested.model))
-            && (reply_found || reached(requested.effort))
-            && (found.permission_mode.is_some() || reached(requested.permission_mode));
-        if start == 0 || settled {
-            return Ok(found);
+        let all_settled = settled(reply_found, requested.model)
+            && settled(reply_found, requested.effort)
+            && settled(found.permission_mode.is_some(), requested.permission_mode);
+        if start == 0 || all_settled {
+            return Ok(RelaunchSettings {
+                latest: found,
+                first: turns.first_after(requested),
+            });
         }
         window = window.saturating_mul(2);
     }
