@@ -35,16 +35,19 @@ describe("the model chip's default", () => {
   const listed: ModelChoice[] = [fallback, sonnet, { id: "opus", label: "Opus 5.5", default: false, resolved: "claude-opus-5-5" }];
   const labels = (models: ModelChoice[]) => modelOptions(models).map((o) => o.label);
 
+  // verifies: FLOW-NEW-SESSION-R36
   it("names the listed model the default resolves to, and leaves every other label as the backend gives it", () => {
     expect(labels(listed)).toEqual(["Default (Opus 5.5)", "Sonnet 5.5", "Opus 5.5"]);
   });
 
-  it("names the resolved id itself when no listed model resolves to it", () => {
-    expect(labels([{ ...fallback, resolved: "claude-fable-5-2" }, sonnet])).toEqual(["Default (claude-fable-5-2)", "Sonnet 5.5"]);
+  // verifies: FLOW-NEW-SESSION-R36
+  it("keeps the backend's label for a default whose resolved id no other listed model has", () => {
+    expect(labels([{ ...fallback, resolved: "claude-fable-5-2" }, sonnet])).toEqual(["Default (recommended)", "Sonnet 5.5"]);
   });
 
-  it("reads Default alone when the backend says nothing of what the default resolves to", () => {
-    expect(labels([{ id: "default", label: "Default (recommended)", default: true }, sonnet])).toEqual(["Default", "Sonnet 5.5"]);
+  // verifies: FLOW-NEW-SESSION-R36
+  it("keeps the backend's label for a default with no resolved id", () => {
+    expect(labels([{ id: "auto", label: "Auto", default: true }, sonnet])).toEqual(["Auto", "Sonnet 5.5"]);
   });
 });
 
@@ -91,6 +94,7 @@ describe("the how chips as Claude Desktop shows them", () => {
     expect(none).toContain('aria-label="Effort: Default"');
   });
 
+  // verifies: FLOW-NEW-SESSION-R36
   it("shows the default model by the model it resolves to, and the permission mode by its name", () => {
     const html = render();
     expect(shown(html, "Model")).toBe("Default (Opus 5.5)");
