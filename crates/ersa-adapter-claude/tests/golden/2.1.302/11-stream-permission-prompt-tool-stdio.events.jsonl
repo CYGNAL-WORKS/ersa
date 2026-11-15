@@ -12,7 +12,7 @@
 {"raw":6,"event":{"type":"session.state","state":"waiting_user"}}
 {"raw":7,"event":{"type":"permission.decided","request_id":"1ddd13c0-dd2c-4061-a8a8-86574059182e","behavior":"allow","decided_by":"user"}}
 {"raw":7,"event":{"type":"session.state","state":"running"}}
-{"raw":8,"event":{"type":"usage.updated","rate_limit":{"status":"allowed","resets_at":"2026-11-04T20:00:00Z","detail":"seven_day"}}}
+{"raw":8,"event":{"type":"usage.updated","rate_limit":{"status":"allowed","resets_at":"2026-11-04T20:00:00Z","detail":"seven_day","windows":[{"id":"seven_day","label":"Weekly · all models","used":0.04,"resets_at":"2026-11-04T20:00:00Z"},{"id":"seven_day_overage_included","label":"Weekly · overage","used":0.06,"resets_at":"2026-11-04T20:00:00Z"}]}}}
 {"raw":9,"event":{"type":"backend.passthrough","backend":"claude-code","kind":"system/task_summary","payload":{"detail":"Writing the word probe to probe.txt","session_id":"7578fe0a-604e-40ce-b2d8-3bce93aed21c","subtype":"task_summary","type":"system","uuid":"c170b6e0-cfd6-4ecd-89ad-3921f1741c96"}}}
 {"raw":10,"message_id":"bdfbcce7-1a52-4dce-b694-caf81f87b583","event":{"type":"tool.result","tool_use_id":"toolu_014GgKrCJ9rQgRzPv9jaW7rc","content":"(Bash completed with no output)","is_error":false}}
 {"raw":11,"message_id":"5e19ce3c-0df3-4dd3-ab2a-527b3045b9ae","event":{"type":"assistant.text","block_id":"msg_011CgbDVnUcnR2Ent76cXQJK/0","text":"The command succeeded. It exited cleanly with no output, and `probe.txt` now exists in `C:/Users/user\\AppData\\Local\\Temp\\ersa-rec-zww2Oe` containing the word \"probe\".","final":true}}
