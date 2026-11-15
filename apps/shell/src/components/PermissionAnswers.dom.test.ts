@@ -35,7 +35,6 @@ describe("a permission request's answers", () => {
   });
 
   // verifies: FLOW-APPROVE-PERMISSION-R12
-  // verifies: FLOW-APPROVE-PERMISSION-R30
   it("names each suggestion by its whole label, with no tooltip standing in for it", () => {
     const label = "Always allow Bash(echo probe *) in this project's local settings";
     const long = { ...request, suggestions: [{ kind: "allow_rule" as const, label, payload: {} }] };
