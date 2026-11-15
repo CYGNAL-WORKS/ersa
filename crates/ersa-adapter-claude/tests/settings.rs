@@ -56,9 +56,9 @@ const OPUS: &str = "claude-opus-5-5";
 const HAIKU: &str = "claude-haiku-5-5";
 
 /// Between turns (fixture 25): the mode from `initialize` before the first
-/// turn, then the first `system/init`; `set_model`'s answer and the
-/// `system/status` after `set_permission_mode` change them at once, before
-/// the next turn's `system/init` repeats them.
+/// turn, then the first `system/init`; the answers to `set_model` and
+/// `set_permission_mode` change them at once, before the `system/status`
+/// after the mode's answer and the next turn's `system/init` repeat them.
 // verifies: PROTO-CLAUDE-CODE-STREAM-R40
 #[test]
 fn a_live_session_reports_each_new_model_and_mode_as_the_stream_gives_it() {
@@ -69,7 +69,7 @@ fn a_live_session_reports_each_new_model_and_mode_as_the_stream_gives_it() {
             change("control_response", None, "default"),
             change("system/init", Some(OPUS), "default"),
             change("control_response", Some(HAIKU), "default"),
-            change("system/status", Some(HAIKU), "acceptEdits"),
+            change("control_response", Some(HAIKU), "acceptEdits"),
         ]
     );
 }
@@ -87,7 +87,7 @@ fn controls_sent_during_a_turn_are_reported_from_their_answers() {
             change("control_response", None, "default"),
             change("system/init", Some(OPUS), "default"),
             change("control_response", Some(HAIKU), "default"),
-            change("system/status", Some(HAIKU), "acceptEdits"),
+            change("control_response", Some(HAIKU), "acceptEdits"),
         ]
     );
 }
@@ -120,12 +120,14 @@ fn each_system_init_reports_the_model_and_mode_again() {
     );
 }
 
-/// Only the answer to the host's own `set_model` names the model: another
-/// request's answer that happens to carry `model` does not, and a status
-/// line without `permissionMode` leaves the mode.
+/// Only the answers to the host's own `set_model` and
+/// `set_permission_mode` name the model and mode: another request's answer
+/// that happens to carry `model` or `mode` does not, a refused
+/// `set_permission_mode` leaves the mode, and so does a status line without
+/// `permissionMode`.
 // verifies: PROTO-CLAUDE-CODE-STREAM-R40
 #[test]
-fn only_set_models_answer_and_status_lines_with_a_mode_change_the_report() {
+fn only_the_answers_to_the_hosts_changes_and_status_lines_with_a_mode_change_the_report() {
     let lines = log(&[
         (
             Backend,
@@ -137,7 +139,7 @@ fn only_set_models_answer_and_status_lines_with_a_mode_change_the_report() {
         ),
         (
             Backend,
-            r#"{"type":"control_response","response":{"subtype":"success","request_id":"other-1","response":{"model":"claude-haiku-5-5"}}}"#,
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"other-1","response":{"model":"claude-haiku-5-5","mode":"plan"}}}"#,
         ),
         (
             Backend,
@@ -151,12 +153,29 @@ fn only_set_models_answer_and_status_lines_with_a_mode_change_the_report() {
             Backend,
             r#"{"type":"control_response","response":{"subtype":"success","request_id":"m-2","response":{"model":"claude-sonnet-5-5"}}}"#,
         ),
+        (
+            Host,
+            r#"{"type":"control_request","request_id":"p-3","request":{"subtype":"set_permission_mode","mode":"plan"}}"#,
+        ),
+        (
+            Backend,
+            r#"{"type":"control_response","response":{"subtype":"error","request_id":"p-3","error":"not now"}}"#,
+        ),
+        (
+            Host,
+            r#"{"type":"control_request","request_id":"p-4","request":{"subtype":"set_permission_mode","mode":"auto"}}"#,
+        ),
+        (
+            Backend,
+            r#"{"type":"control_response","response":{"subtype":"success","request_id":"p-4","response":{"mode":"auto"}}}"#,
+        ),
     ]);
     assert_eq!(
         live_changes(&lines),
         [
             change("system/init", Some(OPUS), "default"),
             change("control_response", Some("claude-sonnet-5-5"), "default"),
+            change("control_response", Some("claude-sonnet-5-5"), "auto"),
         ]
     );
 }

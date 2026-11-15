@@ -7,15 +7,15 @@ use std::time::Duration;
 
 use ersa_adapter::{
     BackendChoices, Direction, ForkOf, PermissionDecision, QuestionReply, SessionConfig,
-    TitleRules, Transport,
+    SessionControl, TitleRules, Transport,
 };
 use ersa_protocol::core_api::{
     AnswerQuestionParams, ArrangeParams, Attachment, AttachmentKind, Choice,
     DecidePermissionParams, Empty, ErrorReason, IdParams, InspectParams, Inspected, ModelChoice,
     Project, RawDirection, RawLogEntry, RawLogParams, Session, SessionCreateParams,
-    SessionSendParams, SessionSendResult, SetArchivedParams, SetModeParams, SetTitleParams,
-    SubscribeParams, SubscribeResult, Workspace, WorkspaceCreateParams, WorkspaceKind,
-    WorkspaceState,
+    SessionSendParams, SessionSendResult, SetArchivedParams, SetEffortParams, SetModeParams,
+    SetModelParams, SetPermissionModeParams, SetTitleParams, SubscribeParams, SubscribeResult,
+    Workspace, WorkspaceCreateParams, WorkspaceKind, WorkspaceState,
 };
 use serde_json::Value;
 
@@ -762,6 +762,94 @@ pub(super) async fn set_title(core: &Core, params: SetTitleParams) -> Result<Ses
         .sessions
         .set_title(&params.id, &title, |host| core.session_transport_for(host))
         .await?)
+}
+
+/// `session.set_model` (PROTO-CORE-API-R73): a model `backend.list`
+/// reports for the session's backend on its host.
+pub(super) async fn set_model(core: &Core, params: SetModelParams) -> Result<Session, ApiError> {
+    core.sessions.check_live(&params.id)?;
+    let models = offered_models(core, &params.id).await?;
+    check_choice(
+        "model",
+        &Some(params.model.clone()),
+        models.iter().map(|m| m.id.as_str()),
+    )?;
+    let control = SessionControl::Model(params.model);
+    Ok(core.sessions.change(&params.id, control).await?)
+}
+
+/// `session.set_effort` (PROTO-CORE-API-R82): an effort `backend.list`
+/// lists for the session's model, as `session.list` reports it. That model
+/// is found among the backend's by id, else by the id it resolves to (a
+/// live session reports the resolved one), else, for a session whose model
+/// is the backend's to choose, the one marked default. A model the backend
+/// does not list is checked against every effort the backend offers.
+pub(super) async fn set_effort(core: &Core, params: SetEffortParams) -> Result<Session, ApiError> {
+    core.sessions.check_live(&params.id)?;
+    let session = core.sessions.get(&params.id)?;
+    let models = offered_models(core, &params.id).await?;
+    let model = match &session.model {
+        Some(model) => models
+            .iter()
+            .find(|m| &m.id == model)
+            .or_else(|| models.iter().find(|m| m.resolved.as_ref() == Some(model))),
+        None => models.iter().find(|m| m.default),
+    };
+    let effort = Some(params.effort.clone());
+    match model {
+        Some(ModelChoice {
+            id, efforts: None, ..
+        }) => {
+            return Err(ApiError::invalid_params(format!(
+                "model {id:?} takes no effort"
+            )));
+        }
+        Some(ModelChoice {
+            efforts: Some(efforts),
+            ..
+        }) => check_choice("effort", &effort, efforts.iter().map(String::as_str))?,
+        None => {
+            let adapter = core.sessions.adapter_of(&session.backend)?;
+            check_choice("effort", &effort, ids(&adapter.choices().efforts))?;
+        }
+    }
+    let control = SessionControl::Effort(params.effort);
+    Ok(core.sessions.change(&params.id, control).await?)
+}
+
+/// `session.set_permission_mode` (PROTO-CORE-API-R74): a permission mode
+/// `backend.list` offers for the session's backend.
+pub(super) async fn set_permission_mode(
+    core: &Core,
+    params: SetPermissionModeParams,
+) -> Result<Session, ApiError> {
+    core.sessions.check_live(&params.id)?;
+    let backend = core.sessions.row(&params.id)?.backend;
+    let adapter = core.sessions.adapter_of(&backend)?;
+    check_choice(
+        "permission_mode",
+        &Some(params.permission_mode.clone()),
+        ids(&adapter.choices().permission_modes),
+    )?;
+    let control = SessionControl::PermissionMode(params.permission_mode);
+    Ok(core.sessions.change(&params.id, control).await?)
+}
+
+/// The models `backend.list` reports for session `id`'s backend on its
+/// host: none unless detection found the backend available there, as for
+/// `session.create` (PROTO-CORE-API-R72).
+async fn offered_models(core: &Core, id: &str) -> Result<Vec<ModelChoice>, ApiError> {
+    let row = core.sessions.row(id)?;
+    if row.host_id != LOCAL_HOST_ID {
+        return Ok(Vec::new());
+    }
+    Ok(core
+        .local_backends()
+        .await
+        .into_iter()
+        .find(|d| d.name == row.backend)
+        .map(|d| d.models)
+        .unwrap_or_default())
 }
 
 /// Takes effect on the session's next start.

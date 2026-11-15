@@ -125,6 +125,9 @@ pub(crate) fn refusal(core: &Core, method: Method) -> Option<ApiError> {
         | Method::SessionDecidePermission
         | Method::SessionAnswerQuestion
         | Method::SessionSetTitle
+        | Method::SessionSetModel
+        | Method::SessionSetEffort
+        | Method::SessionSetPermissionMode
         | Method::SessionSetArchived
         | Method::SessionArrange
         | Method::SessionDelete

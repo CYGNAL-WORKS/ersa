@@ -2,14 +2,17 @@
 //! them (PROTO-CORE-API-R71): the backend's newest report of each, from its
 //! live stream, else its record's turns after Core's request, else that
 //! request. The fake backend's record and stream stand in for Claude Code's
-//! (support/fake.rs).
+//! (support/fake.rs). A live session's values change through
+//! `session.set_model`, `session.set_effort` and
+//! `session.set_permission_mode` (R73, R74, R82).
 
 mod support;
 
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use ersa_adapter::{Recorded, RecordedSettings, RelaunchSettings};
+use ersa_adapter::{Recorded, RecordedSettings, RelaunchSettings, SessionControl};
 use ersa_core::Adapter;
 use serde_json::{Value, json};
 use support::fake::{self, FakeAdapter, RecordedSettingsMap, Records};
@@ -668,5 +671,307 @@ async fn a_relaunch_passes_the_records_latest_for_a_value_without_a_time() {
     assert_eq!(
         relaunched(&mut client, &fake, &id).await,
         passed("model-a", "high", "plan")
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Changing a live session's values (PROTO-CORE-API-R73, R74, R82)
+
+/// A moment strictly between what happened before this call and what
+/// happens after it, on the millisecond clock Core stamps its requests
+/// with: the clock is watched until it has moved on, never slept on.
+async fn moment_between() -> OffsetDateTime {
+    let moved_on = |since: OffsetDateTime| async move {
+        while OffsetDateTime::now_utc() - since < time::Duration::milliseconds(2) {
+            tokio::task::yield_now().await;
+        }
+    };
+    moved_on(OffsetDateTime::now_utc()).await;
+    let moment = OffsetDateTime::now_utc();
+    moved_on(moment).await;
+    moment
+}
+
+/// What the backend took, in order.
+fn changes(fake: &FakeAdapter) -> Vec<SessionControl> {
+    fake.stats.changes.lock().unwrap().clone()
+}
+
+/// A change refused with `kind` (and `reason`, when given).
+async fn refused(
+    client: &mut Client,
+    method: &str,
+    params: Value,
+    kind: &str,
+    reason: Option<&str>,
+) {
+    let error = client.error(method, params).await;
+    // Invalid params is JSON-RPC's own code, with no `data`.
+    if kind == "invalid_params" {
+        assert_eq!(error["code"], -32602, "{method}: {error:#}");
+    } else {
+        assert_eq!(error["data"]["kind"], kind, "{method}: {error:#}");
+    }
+    if let Some(reason) = reason {
+        assert_eq!(error["data"]["reason"], reason, "{method}: {error:#}");
+    }
+}
+
+/// `session.set_model` changes the model through the backend at once and
+/// returns the session listed with the backend's report of it, the id the
+/// choice resolves to. Core keeps the request with its time, so a relaunch
+/// before any turn ran with it passes it; a turn that began before the
+/// change does not count against it.
+// verifies: PROTO-CORE-API-R73
+#[tokio::test(flavor = "multi_thread")]
+async fn set_model_changes_a_live_sessions_model_at_once_and_keeps_it() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let id = started(&core, &mut client, json!({ "model": "model-a" })).await;
+    // After the session was created and before the change.
+    let before = moment_between().await;
+
+    let session = client
+        .result("session.set_model", json!({ "id": id, "model": "model-b" }))
+        .await;
+    assert_eq!(session["id"], id.as_str());
+    assert_eq!(session["model"], "model-b-1");
+    assert_eq!(changes(&fake), [SessionControl::Model("model-b".into())]);
+
+    // A turn that began before the change ran with the old model.
+    backend.record_relaunch(
+        turn("model-a", "low", "ask", Some(before)),
+        RecordedSettings::default(),
+    );
+    let (model, ..) = relaunched(&mut client, &fake, &id).await;
+    assert_eq!(model.as_deref(), Some("model-b"));
+}
+
+/// Only a model `backend.list` lists, and only for a live session.
+// verifies: PROTO-CORE-API-R73
+#[tokio::test(flavor = "multi_thread")]
+async fn set_model_refuses_an_unlisted_model_and_a_session_that_is_not_live() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let id = started(&core, &mut client, json!({ "model": "model-a" })).await;
+    let set = |model: &str| json!({ "id": id, "model": model });
+
+    refused(
+        &mut client,
+        "session.set_model",
+        set("model-z"),
+        "invalid_params",
+        None,
+    )
+    .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    refused(
+        &mut client,
+        "session.set_model",
+        set("model-b"),
+        "invalid_state",
+        Some("session_not_running"),
+    )
+    .await;
+    assert!(changes(&fake).is_empty());
+}
+
+/// `session.set_permission_mode` changes the mode through the backend at
+/// once, returns the session listed with it, and keeps it with its time,
+/// so a relaunch passes it.
+// verifies: PROTO-CORE-API-R74
+#[tokio::test(flavor = "multi_thread")]
+async fn set_permission_mode_changes_a_live_sessions_mode_at_once_and_keeps_it() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let id = started(&core, &mut client, json!({ "permission_mode": "auto" })).await;
+    // After the session was created and before the change.
+    let before = moment_between().await;
+
+    let session = client
+        .result(
+            "session.set_permission_mode",
+            json!({ "id": id, "permission_mode": "ask" }),
+        )
+        .await;
+    assert_eq!(session["permission_mode"], "ask");
+    assert_eq!(
+        changes(&fake),
+        [SessionControl::PermissionMode("ask".into())]
+    );
+
+    backend.record_relaunch(
+        turn("model-a", "low", "auto", Some(before)),
+        RecordedSettings::default(),
+    );
+    let (.., mode) = relaunched(&mut client, &fake, &id).await;
+    assert_eq!(mode, "ask");
+}
+
+/// Only a mode `backend.list` lists, and only for a live session.
+// verifies: PROTO-CORE-API-R74
+#[tokio::test(flavor = "multi_thread")]
+async fn set_permission_mode_refuses_an_unlisted_mode_and_a_session_that_is_not_live() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let id = started(&core, &mut client, json!({})).await;
+    let set = |mode: &str| json!({ "id": id, "permission_mode": mode });
+
+    refused(
+        &mut client,
+        "session.set_permission_mode",
+        set("bypassPermissions"),
+        "invalid_params",
+        None,
+    )
+    .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    refused(
+        &mut client,
+        "session.set_permission_mode",
+        set("auto"),
+        "invalid_state",
+        Some("session_not_running"),
+    )
+    .await;
+    assert!(changes(&fake).is_empty());
+}
+
+/// `session.set_effort` changes the effort through the backend at once and
+/// returns the session listed with it; a turn that began before the change
+/// does not count against it, one that began after it does.
+// verifies: PROTO-CORE-API-R82
+#[tokio::test(flavor = "multi_thread")]
+async fn set_effort_changes_a_live_sessions_effort_at_once_and_keeps_it() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let id = started(&core, &mut client, json!({ "model": "model-b" })).await;
+    // After the session was created and before the change.
+    let before = moment_between().await;
+
+    let session = client
+        .result("session.set_effort", json!({ "id": id, "effort": "low" }))
+        .await;
+    assert_eq!(session["effort"], "low");
+    assert_eq!(changes(&fake), [SessionControl::Effort("low".into())]);
+
+    // A turn that began after the session was created and before the
+    // change ran with another effort; the record is read when the session
+    // stops.
+    backend.record_says("model-b-1", "high", "ask", Some(before));
+    client.result("session.stop", json!({ "id": id })).await;
+    // The model's request is older than that turn, so the record's model
+    // stands; the effort's is newer, so the change does.
+    wait_for_values(&mut client, &id, three("model-b-1", "low", "ask")).await;
+}
+
+/// The effort is checked against the session's model as `session.list`
+/// reports it: the backend's default `model-a`, for a model left to it,
+/// takes none; `model-b`, which the session reports as `model-b-1`, takes
+/// only `low`; and a model the backend does not list is checked against
+/// every effort the backend offers. A session that is not live is refused.
+// verifies: PROTO-CORE-API-R82
+#[tokio::test(flavor = "multi_thread")]
+async fn set_effort_is_checked_against_the_sessions_model() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let id = started(&core, &mut client, json!({})).await;
+    let set = |effort: &str| json!({ "id": id, "effort": effort });
+
+    refused(
+        &mut client,
+        "session.set_effort",
+        set("low"),
+        "invalid_params",
+        None,
+    )
+    .await;
+
+    client
+        .result("session.set_model", json!({ "id": id, "model": "model-b" }))
+        .await;
+    refused(
+        &mut client,
+        "session.set_effort",
+        set("high"),
+        "invalid_params",
+        None,
+    )
+    .await;
+    client.result("session.set_effort", set("low")).await;
+
+    client
+        .result(
+            "session.send",
+            json!({ "id": id, "text": "report model-z ask" }),
+        )
+        .await;
+    wait_for_values(&mut client, &id, three("model-z", "low", "ask")).await;
+    refused(
+        &mut client,
+        "session.set_effort",
+        set("max"),
+        "invalid_params",
+        None,
+    )
+    .await;
+    client.result("session.set_effort", set("high")).await;
+    assert_eq!(
+        changes(&fake),
+        [
+            SessionControl::Model("model-b".into()),
+            SessionControl::Effort("low".into()),
+            SessionControl::Effort("high".into()),
+        ]
+    );
+
+    client.result("session.stop", json!({ "id": id })).await;
+    refused(
+        &mut client,
+        "session.set_effort",
+        set("high"),
+        "invalid_state",
+        Some("session_not_running"),
+    )
+    .await;
+}
+
+/// A change the backend refuses is an error, and Core keeps nothing of it:
+/// the session lists what it did, and a relaunch passes the old value.
+// verifies: PROTO-CORE-API-R73
+#[tokio::test(flavor = "multi_thread")]
+async fn a_change_the_backend_refuses_is_not_kept() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    let id = started(
+        &core,
+        &mut client,
+        json!({ "model": "model-b", "effort": "low", "permission_mode": "auto" }),
+    )
+    .await;
+    fake.stats.refuse_changes.store(true, Ordering::SeqCst);
+
+    refused(
+        &mut client,
+        "session.set_model",
+        json!({ "id": id, "model": "model-a" }),
+        "invalid_state",
+        None,
+    )
+    .await;
+    assert_eq!(
+        values(&mut client, &id).await,
+        three("model-b", "low", "auto")
+    );
+    assert_eq!(
+        relaunched(&mut client, &fake, &id).await,
+        passed("model-b", "low", "auto")
     );
 }
