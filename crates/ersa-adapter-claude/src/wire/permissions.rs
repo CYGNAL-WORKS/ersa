@@ -72,17 +72,3 @@ pub enum PermissionDecision {
         interrupt: Option<bool>,
     },
 }
-
-/// How the CLI handles tool calls that need approval. Used when the host sets
-/// the mode; inbound lines keep the mode as a string so a new mode name does not
-/// break parsing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum PermissionMode {
-    Default,
-    AcceptEdits,
-    BypassPermissions,
-    Plan,
-    DontAsk,
-    Auto,
-}
