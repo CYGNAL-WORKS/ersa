@@ -128,3 +128,16 @@ export async function pastedImage(file: Blob): Promise<Attached> {
     return { ...pasted, problem: t("composer.attachment.pastedUnreadableError") };
   }
 }
+
+/**
+ * The name the status line gives a message waiting in the backend (FLOW-SEND-MESSAGE-R19, docs/design/COMPOSER.md):
+ * its first line, which the status line cuts with an ellipsis where it ends, else its first attachment's name, which
+ * for a pasted image is "Pasted image".
+ */
+export function waitingName(text: string, attachments: readonly Attached[]): string | undefined {
+  const line = text
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s+/g, " ").trim())
+    .find((l) => l !== "");
+  return line ?? attachments[0]?.name;
+}

@@ -92,6 +92,8 @@ export function checkTile(value: unknown): Tile {
     ...(isNumber(tile.context_tokens) ? { context_tokens: tile.context_tokens } : {}),
     ...(isNumber(tile.context_window) ? { context_window: tile.context_window } : {}),
     ...(isNumber(tile.cost_usd_total) ? { cost_usd_total: tile.cost_usd_total } : {}),
+    // How many messages wait in the backend, for the composer's status line (FLOW-SEND-MESSAGE-R19).
+    ...(isNumber(tile.waiting) && Number.isInteger(tile.waiting) && tile.waiting > 0 ? { waiting: tile.waiting } : {}),
   };
 }
 
