@@ -1,5 +1,5 @@
 {
-  "ersa_commit": "23c92195f0441f227f055c3af7506ad1ec1c698e-dirty",
+  "ersa_commit": "5119ce7baebec6166c74824e29d65e6c6fd4409d",
   "notifications": [
     {
       "kind": "notification",
@@ -292,6 +292,7 @@
       "params": {
         "event": {
           "event": {
+            "context_tokens": 38495,
             "turn_output_tokens": 4,
             "type": "usage.updated"
           },
