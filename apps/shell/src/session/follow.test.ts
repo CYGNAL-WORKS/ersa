@@ -627,6 +627,60 @@ describe("stop while a message waits", () => {
     expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
   });
 
+  // verifies: FLOW-SEND-MESSAGE-R03
+  it("offers stop again when a too-late cancel became the next turn's stop and its call then fails", async () => {
+    let accept: (answer: unknown) => void = () => {};
+    let fail: (error: unknown) => void = () => {};
+    const { client, calls } = fakeClient({
+      "session.subscribe": () => Promise.resolve({ last_seq: -1 }),
+      "session.interrupt": () => new Promise((_, reject) => (fail = reject)),
+      "session.send": () => new Promise((resolve) => (accept = resolve)),
+    });
+    const seen: SessionView[] = [];
+    const f = follow(client, "s1", (v) => seen.push(v));
+    f.receive(ev(0, { type: "turn.started", turn: 1, trigger: "user" }));
+    const sent = f.send("Do this instead");
+    await settle();
+    const stopping = f.interrupt();
+    // Turn 1 ends while the message is on its way; Core then takes it, so the stop meets the turn it starts.
+    f.receive(ev(1, { type: "turn.completed", turn: 1, outcome: "success", duration_ms: 1, is_error: false }));
+    accept({ turn: 2 });
+    await sent;
+    fail({ kind: "unavailable", message: "gone" });
+    await stopping;
+    expect(seen.at(-1)?.stopTaken).toBeUndefined();
+    void f.interrupt();
+    expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R20
+  it("offers stop again for the next turn when its stop fails, after a cancel that reached Core before the message", async () => {
+    let accept: (answer: unknown) => void = () => {};
+    let reach = true;
+    const { client, calls } = fakeClient({
+      "session.subscribe": () => Promise.resolve({ last_seq: -1 }),
+      "session.interrupt": () => (reach ? Promise.resolve({}) : Promise.reject({ kind: "unavailable", message: "gone" })),
+      "session.send": () => new Promise((resolve) => (accept = resolve)),
+    });
+    const seen: SessionView[] = [];
+    const f = follow(client, "s1", (v) => seen.push(v));
+    f.receive(ev(0, { type: "turn.started", turn: 1, trigger: "user" }));
+    const sent = f.send("Do this instead");
+    await settle();
+    // The cancel's call is answered, then Core takes the message: the stop met turn 1.
+    await f.interrupt();
+    accept({});
+    await sent;
+    f.receive(ev(1, { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 1, is_error: true }));
+    f.receive(ev(2, { type: "turn.started", turn: 2, trigger: "user" }));
+    // Turn 2's stop never reaches Core: stop is offered again.
+    reach = false;
+    await f.interrupt();
+    expect(seen.at(-1)?.stopTaken).toBeUndefined();
+    void f.interrupt();
+    expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(3);
+  });
+
   // verifies: FLOW-SEND-MESSAGE-R20
   it("keeps the next turn's stop when an earlier turn's stop fails late, after that turn ended", async () => {
     const fails: ((error: unknown) => void)[] = [];
