@@ -182,6 +182,37 @@ function elide(recordText) {
     .join("\n");
 }
 
+// A `get_context_usage` answer also lists the recording machine's own setup:
+// its agents, skills, MCP tools, memory files and the context grid drawn from
+// them. Keep the figures and the per-category totals; every other field
+// becomes `"ersa_elided"`, so the answer's shape still shows.
+const CONTEXT_USAGE_KEPT = new Set([
+  "totalTokens",
+  "maxTokens",
+  "rawMaxTokens",
+  "model",
+  "percentage",
+  "autocompactSource",
+  "autoCompactThreshold",
+  "isAutoCompactEnabled",
+  "apiUsage",
+  "categories",
+]);
+function elideStdoutLine(line) {
+  let message;
+  try {
+    message = JSON.parse(line);
+  } catch {
+    return line;
+  }
+  const answer = message?.type === "control_response" ? message.response?.response : undefined;
+  if (!String(message?.response?.request_id ?? "").startsWith("ersa-get_context_usage-") || !answer) return line;
+  for (const key of Object.keys(answer)) {
+    if (!CONTEXT_USAGE_KEPT.has(key)) answer[key] = "ersa_elided";
+  }
+  return JSON.stringify(message);
+}
+
 const argv = process.argv.slice(2);
 const option = (flag) => {
   const i = argv.indexOf(flag);
@@ -494,7 +525,7 @@ if (SESSION_ID_RE.test(recordId ?? "")) {
   if (existsSync(recordPath)) recordLines = readFileSync(recordPath, "utf8");
 }
 
-writeFileSync(join(dir, stem + ".jsonl"), scrub(stdoutLines.map((l) => l.line).join("\n") + "\n"));
+writeFileSync(join(dir, stem + ".jsonl"), scrub(stdoutLines.map((l) => elideStdoutLine(l.line)).join("\n") + "\n"));
 if (recordLines !== null) writeFileSync(join(dir, "record", stem + ".jsonl"), scrub(elide(recordLines)));
 writeFileSync(
   join(dir, stem + ".meta.json"),
