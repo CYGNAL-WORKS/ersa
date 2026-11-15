@@ -1579,7 +1579,7 @@ fn user_message(value: &Value) -> Option<UserMessage> {
 /// neither words nor attachments. A message with attachments carries its
 /// images and its list of files and folders as blocks of their own, never as
 /// its text (R26).
-fn user_message_of(blocks: &[Value]) -> Option<UserMessage> {
+pub(crate) fn user_message_of(blocks: &[Value]) -> Option<UserMessage> {
     let (text, attachments) = crate::attachments::split(blocks);
     if text.is_none() && attachments.is_empty() {
         return None;

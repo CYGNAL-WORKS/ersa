@@ -6,7 +6,7 @@
 //! Messages API message the live stream carries, so it reuses the stream's
 //! types; the wrapper around it is internal to the CLI and changes between
 //! versions, so every wrapper field is optional or kept in `extra`. Every
-//! other kind of entry (attachments, snapshots, queue operations and the like)
+//! other kind of entry (attachments, snapshots and the like)
 //! parses into [`RecordEntry::Other`] and is ignored.
 
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,9 @@ pub enum RecordEntry {
     LastPrompt(LastPrompt),
     /// Something the CLI noted itself; only `local_command` is read.
     System(RecordSystem),
+    /// A change to the CLI's queue of messages written during a turn; only a
+    /// message a turn took in part way is read.
+    QueueOperation(QueueOperation),
     #[serde(untagged)]
     Other(Value),
 }
@@ -202,6 +205,48 @@ pub struct RecordAssistant {
     pub effort: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+/// A `queue-operation` entry. A message written during a turn has an
+/// `enqueue` when written; a turn that takes it in part way leaves a `remove`
+/// whose `reason` is `absorbed_mid_turn`, with the message's `content` and,
+/// in `commandUuid`, the id the live stream's echo gave it
+/// (PROTO-CLAUDE-CODE-STREAM, Sequencing). The other entries carry no message.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct QueueOperation {
+    /// `enqueue`, `dequeue` or `remove`. Absent only from older fixtures
+    /// that cut the entry to its kind.
+    #[serde(default)]
+    pub operation: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// The message: its words as a string, or its content blocks.
+    #[serde(default)]
+    pub content: Option<Value>,
+    #[serde(default, rename = "commandUuid")]
+    pub command_uuid: Option<String>,
+    #[serde(default)]
+    pub timestamp: Option<String>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl QueueOperation {
+    /// The message a turn took in part way, as its id and content blocks; the
+    /// blocks are what the live echo carries, so both read alike.
+    pub fn absorbed_mid_turn(&self) -> Option<(&str, Vec<Value>)> {
+        if self.operation.as_deref() != Some("remove")
+            || self.reason.as_deref() != Some("absorbed_mid_turn")
+        {
+            return None;
+        }
+        let blocks = match self.content.as_ref()? {
+            Value::String(text) => vec![serde_json::json!({ "type": "text", "text": text })],
+            Value::Array(blocks) => blocks.clone(),
+            _ => return None,
+        };
+        Some((self.command_uuid.as_deref()?, blocks))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
