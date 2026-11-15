@@ -54,7 +54,7 @@ const render = (props: Partial<Parameters<typeof NewSessionScreen>[0]>) =>
     }),
   );
 
-/** Each chip's accessible name, "Workspace: New workspace", in order. */
+/** Each chip's accessible name, "Project: ersa", in order. */
 const chips = (html: string) => [...html.matchAll(/class="chip"[^>]*aria-label="([^"]*)"|aria-label="([^"]*)"[^>]*class="chip"/g)].map((m) => m[1] ?? m[2] ?? "");
 
 describe("the new-session screen", () => {
@@ -66,12 +66,14 @@ describe("the new-session screen", () => {
     expect(chips(html)).toEqual([
       "Host: Local",
       "Project: ersa",
-      "Workspace: New workspace",
       "Model: Default (recommended)",
       "Effort: Default",
       "Permission mode: Ask",
     ]);
     expect(html).toContain('aria-label="Context: none used yet"');
+    // The Worktree checkbox, checked, in place of the workspace chip (issue 412).
+    expect(html).toMatch(/<input[^>]*type="checkbox"[^>]*checked=""/);
+    expect(html).toContain("Worktree</label>");
   });
 
   it("gives the words one line at rest, as in a session, so attach, the words and send read as one row", () => {
@@ -110,7 +112,8 @@ describe("the new-session screen", () => {
         p1: { host_id: "local", project_id: "p1", workspace: "root", backend: "claude-code", model: "sonnet", effort: "medium", permission_mode: "acceptEdits" },
       },
     });
-    expect(chips(html)).toContain("Workspace: Project folder");
+    expect(html).toMatch(/<input[^>]*type="checkbox"/);
+    expect(html).not.toMatch(/<input[^>]*type="checkbox"[^>]*checked/);
     expect(chips(html)).toContain("Model: Sonnet");
     expect(chips(html)).toContain("Permission mode: Accept edits");
   });
@@ -153,9 +156,9 @@ describe("the new-session screen", () => {
 
   // verifies: FLOW-NEW-SESSION-R06
   it("offers the root workspace only for a project without a workspace adapter", () => {
-    const html = render({ projectId: "p2", open: "workspace" });
-    expect(chips(html)).toContain("Workspace: Project folder");
-    expect(html).not.toContain("New workspace");
+    const html = render({ projectId: "p2" });
+    expect(html).not.toContain('type="checkbox"');
+    expect(html).not.toContain("Worktree");
   });
 
   // verifies: FLOW-NEW-SESSION-R07
