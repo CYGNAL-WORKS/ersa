@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BridgeError, CoreClient, Method, Params } from "../core/client";
 import type { SessionValues } from "./controls";
-import { StartStop, lastUsedFrom, readChoices, rememberPatch, remembered, startSession } from "./start";
+import { StartStop, lastUsedFrom, readChoices, rememberPatch, startSession } from "./start";
 
 /** A client that records each call and answers from `answers`; a method without an answer fails the test. */
 function fakeClient(answers: Partial<Record<Method, (params: never) => unknown>> = {}) {
@@ -76,13 +76,6 @@ describe("starting a session from the new-session screen", () => {
     });
     expect(told).toBe("w-new");
     expect(called).toEqual(["workspace.create"]);
-  });
-
-  // verifies: FLOW-NEW-SESSION-R21
-  it("creates the workspace from the chosen base branch", async () => {
-    const { client, calls } = fakeClient(working);
-    await startSession(client, { ...values("isolated"), base: "release/1.0" }, "Fix the build");
-    expect(calls[0]).toEqual({ method: "workspace.create", params: { project_id: "p1", base: "release/1.0" } });
   });
 
   // verifies: FLOW-NEW-SESSION-R05
@@ -340,14 +333,6 @@ describe("the values remembered for a project", () => {
     const patch = rememberPatch({ ...values("root"), model: undefined, effort: undefined });
     expect(patch.new_session.last_used.p1).toMatchObject({ model: null, effort: null, permission_mode: "default" });
     expect(lastUsedFrom(patch).p1).toEqual({ ...values("root"), model: undefined, effort: undefined });
-  });
-
-  // verifies: FLOW-NEW-SESSION-R21
-  it("never hold the base branch: each new session starts at the default branch", () => {
-    const patch = rememberPatch({ ...values("isolated"), base: "release/1.0" });
-    expect(patch.new_session.last_used.p1).not.toHaveProperty("base");
-    expect(remembered({ ...values("isolated"), base: "release/1.0" })).toEqual(values("isolated"));
-    expect(lastUsedFrom({ new_session: { last_used: { p1: { ...values("isolated"), base: "release/1.0" } } } }).p1).toEqual(values("isolated"));
   });
 
   it("read as none from settings that hold none, or hold something unreadable", () => {

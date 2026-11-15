@@ -1,0 +1,9 @@
+Claude Desktop's row beneath the composer on a new session, observed 2026-11-15 in the Code tab, for a project that is a git repository.
+
+From the leading edge:
+
+  <project's name> v     [ ] Worktree     ...     <model>     <effort>     <permission mode>     (ring)
+
+The project is a chip that opens a list. After it comes a checkbox labeled "Worktree", unchecked when observed. There is no chip for a workspace or a branch, and nothing in the row names a branch. The model, the effort and the permission mode each show their value alone, with no word before it ("Medium", "Auto"). A ring ends the row.
+
+Not observed: what the checkbox says under the pointer, the row for a folder that is not a git repository, and the row once the session has started.
