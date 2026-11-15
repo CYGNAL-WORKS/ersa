@@ -76,8 +76,11 @@ describe("the how chips as Claude Desktop shows them", () => {
         onChoose: () => {},
       }),
     );
-  /** What each chip shows, by its accessible name's first word. */
-  const shown = (html: string, name: string) => html.match(new RegExp(`aria-label="${name}: [^"]*"[^>]*>(.*?)</button>`))?.[1]?.replace(/<[^>]*>/g, "");
+  /** What a chip shows: the text between its tags, joined, found by its accessible name's first words. */
+  const shown = (html: string, name: string) => {
+    const inner = html.match(new RegExp(`aria-label="${name}: [^"]*"[^>]*>(.*?)</button>`))?.[1] ?? "";
+    return [...inner.matchAll(/>([^<]+)</g)].map((m) => m[1]).join("");
+  };
 
   it("shows the effort's level alone, and Default with none chosen, while its name still says it is the effort", () => {
     const medium = render("medium");
