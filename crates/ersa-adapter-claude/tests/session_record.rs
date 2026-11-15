@@ -1493,7 +1493,7 @@ fn only_place_of(events: &[RecordEvent], id: &str) -> usize {
         .filter(|(_, e)| e.message_id.as_deref() == Some(id))
         .map(|(i, _)| i)
         .collect();
-    assert_eq!(at.len(), 1, "{id} is read back exactly once: {events:?}");
+    assert_eq!(at.len(), 1, "the message is read back exactly once: {events:?}");
     at[0]
 }
 
