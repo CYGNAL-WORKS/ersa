@@ -96,6 +96,9 @@ methods! {
     SessionDecidePermission => "session.decide_permission",
     SessionAnswerQuestion => "session.answer_question",
     SessionSetTitle => "session.set_title",
+    SessionSetModel => "session.set_model",
+    SessionSetEffort => "session.set_effort",
+    SessionSetPermissionMode => "session.set_permission_mode",
     SessionSetMode => "session.set_mode",
     SessionSubscribe => "session.subscribe",
     SessionUnsubscribe => "session.unsubscribe",
@@ -841,6 +844,32 @@ pub struct AnswerQuestionParams {
 pub struct SetTitleParams {
     pub id: String,
     pub title: String,
+}
+
+/// `session.set_model` params: `model` is a model id from `backend.list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetModelParams {
+    pub id: String,
+    pub model: String,
+}
+
+/// `session.set_effort` params: `effort` is an effort id `backend.list`
+/// lists for the session's model.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetEffortParams {
+    pub id: String,
+    pub effort: String,
+}
+
+/// `session.set_permission_mode` params: `permission_mode` is a permission
+/// mode id from `backend.list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetPermissionModeParams {
+    pub id: String,
+    pub permission_mode: String,
 }
 
 /// `session.set_archived` params. Archiving stops a live session first, as

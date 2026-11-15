@@ -32,6 +32,13 @@
 //!   permission mode on the live stream, as Claude Code's `init` and
 //!   status lines do, then says it is idle.
 //!
+//! A change of a live session's model, effort or permission mode
+//! ([`AdapterSession::change`]) is kept in [`Stats::changes`], and the
+//! backend reports the new model, as the id it resolves to, or the new
+//! permission mode on the live stream as it takes it, as Claude Code
+//! answers `set_model` and `set_permission_mode`. With
+//! [`Stats::refuse_changes`] set, it refuses every change.
+//!
 //! What a session's record says of its model, effort and permission mode is
 //! [`FakeAdapter::recorded_settings`], which a test sets as turns taken
 //! with other values would: the latest of each, which a listing and a
@@ -49,7 +56,7 @@
 //! Anything else gets a usage line and an echoed reply.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use ersa_adapter::recording::Recording;
@@ -57,7 +64,7 @@ use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
     ImageLimits, OpenElsewhere, OutgoingMessage, PermissionDecision, ProcessExit, ProcessSpec,
     Projected, Projector, RawLine, RecordDeletion, RecordEvent, RecordSummary, RelaunchSettings,
-    Requested, SessionConfig, TitleRules, Transport, async_trait,
+    Requested, SessionConfig, SessionControl, TitleRules, Transport, async_trait,
 };
 use ersa_core::CoreConfig;
 use ersa_core::replay::{Pace, Replay};
@@ -100,6 +107,10 @@ pub struct Stats {
     pub record_deletes: AtomicUsize,
     /// Permission requests answered.
     pub decisions: AtomicUsize,
+    /// Every change of a live session's controls the backend took, in order.
+    pub changes: Mutex<Vec<SessionControl>>,
+    /// The backend refuses every change of a live session's controls.
+    pub refuse_changes: AtomicBool,
 }
 
 /// The kind of the record entry a rename adds.
@@ -869,6 +880,38 @@ impl AdapterSession for FakeSession {
         Ok(())
     }
 
+    /// Takes the change and reports the new model or permission mode on the
+    /// stream, the model as the id it resolves to.
+    async fn change(&self, control: SessionControl) -> Result<(), AdapterError> {
+        self.running()?;
+        self.sink.record(
+            Direction::Host,
+            json!({ "t": "change", control.name(): control.value() }).to_string(),
+        );
+        if self.stats.refuse_changes.load(Ordering::SeqCst) {
+            return Err(AdapterError::Protocol(
+                "the backend refused the change".into(),
+            ));
+        }
+        match &control {
+            SessionControl::Model(model) => {
+                let resolved = fake_models()
+                    .into_iter()
+                    .find(|m| &m.id == model)
+                    .and_then(|m| m.resolved)
+                    .unwrap_or_else(|| model.clone());
+                self.backend(json!({ "t": "settings", "model": resolved }));
+            }
+            SessionControl::PermissionMode(mode) => {
+                self.backend(json!({ "t": "settings", "permission_mode": mode }));
+            }
+            // The stream says nothing of effort.
+            SessionControl::Effort(_) => {}
+        }
+        self.stats.changes.lock().unwrap().push(control);
+        Ok(())
+    }
+
     async fn stop(&self) -> Result<(), AdapterError> {
         self.stats.stops.fetch_add(1, Ordering::SeqCst);
         tokio::time::sleep(self.stop_delay).await;
@@ -914,8 +957,13 @@ impl Projector for FakeProjector {
         let value: Value = serde_json::from_str(&line.line).unwrap_or(Value::Null);
         let text = |key: &str| value[key].as_str().unwrap_or_default().to_string();
         if (line.dir, value["t"].as_str()) == (Direction::Backend, Some("settings")) {
-            self.model = Some(text("model"));
-            self.permission_mode = Some(text("permission_mode"));
+            // A report names what changed, and leaves the rest as it was.
+            if value.get("model").is_some() {
+                self.model = Some(text("model"));
+            }
+            if value.get("permission_mode").is_some() {
+                self.permission_mode = Some(text("permission_mode"));
+            }
             return Vec::new();
         }
         match (line.dir, value["t"].as_str()) {
