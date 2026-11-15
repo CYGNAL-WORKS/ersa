@@ -14,7 +14,7 @@ describe("whether a session's controls change it", () => {
 });
 
 describe("changing a running session", () => {
-  const session = { model: "claude-sonnet-5-5", effort: "high", permission_mode: "plan", title: "Kept", tile: { state: "idle", pending: [] } } as unknown as Session;
+  const session = { model: "claude-sonnet-5-5", model_request: "sonnet", effort: "high", permission_mode: "plan", title: "Kept", tile: { state: "idle", pending: [] } } as unknown as Session;
   const client = (answer: (method: Method, params: unknown) => unknown): Pick<CoreClient, "call"> => ({
     call: ((method: Method, params: unknown) => new Promise((resolve) => resolve(answer(method, params) as never))) as CoreClient["call"],
   });
@@ -28,7 +28,7 @@ describe("changing a running session", () => {
     const calls: unknown[] = [];
     const changed = await changeSession(client((m, p) => (calls.push([m, p]), session)), "s1", key, "sonnet");
     expect(calls).toEqual([[method, params]]);
-    expect(changed).toEqual({ model: "claude-sonnet-5-5", effort: "high", permission_mode: "plan" });
+    expect(changed).toEqual({ model: "claude-sonnet-5-5", model_request: "sonnet", effort: "high", permission_mode: "plan" });
   });
 
   // verifies: FLOW-NEW-SESSION-R30
