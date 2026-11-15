@@ -8,6 +8,7 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
+- [ ] 2026-11-15 PROTO-CORE-API: the open question whether folder inspections for `project.add` and `project.find` take a place under a cap is answered in code (#396, from Docket's review): at most 8 under way at once across Core, each keeping its place on its thread until its file system call returns, past the 10-second limit too, as `attachment.inspect` reads do; with none free, both answer `permission` at once, saying too many folders are not answering. The brief should state the cap and that answer, and close the open question.
 
 
 
