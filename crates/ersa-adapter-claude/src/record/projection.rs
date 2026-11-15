@@ -26,7 +26,9 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::BACKEND;
-use crate::projector::{SYNTHETIC_MODEL, kind_of, reply_events, tool_result_events};
+use crate::projector::{
+    SYNTHETIC_MODEL, kind_of, reply_events, tool_result_events, user_message_of,
+};
 use crate::wire::{LocalCommandOutput, MessageContent, RecordEntry, RecordUser};
 
 /// The longest record line read as an entry: as long as the longest line
@@ -585,6 +587,25 @@ impl RecordProjector {
                         .collect()
                 }
             },
+            // A message a turn took in part way has no prompt entry of its
+            // own: this `remove` is the message, read as the live stream read
+            // its echo and under the echo's id, so the transcript shows it
+            // where the turn took it in (PROTO-CLAUDE-CODE-STREAM-R69).
+            // Every other queue operation carries no message.
+            RecordEntry::QueueOperation(queued) => {
+                let Some((echo_id, blocks)) = queued.absorbed_mid_turn() else {
+                    return Vec::new();
+                };
+                return user_message_of(&blocks)
+                    .map(|message| RecordEvent {
+                        message_id: Some(echo_id.to_string()),
+                        ts,
+                        backend_version: version,
+                        event: Event::UserMessage(message),
+                    })
+                    .into_iter()
+                    .collect();
+            }
             RecordEntry::Other(_) => {
                 let kind = value.get("type").and_then(Value::as_str);
                 if matches!(kind, Some("user" | "assistant")) {
