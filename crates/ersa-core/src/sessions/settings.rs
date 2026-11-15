@@ -31,16 +31,29 @@ pub(super) struct Listed {
 
 /// The session's values: the stream's report, else the record's from a turn
 /// after Core's request (or any turn for a value Core never requested), else
-/// that request, absent when none was named.
-pub(super) fn listed(row: &SessionRow, recorded: &RecordedSettings, reported: &Reported) -> Listed {
-    let newer = recorded.clone().since(requested(row));
+/// that request, absent when none was named. A model the backend reports by
+/// `resolves`, the id the backend says Core's model request resolves to, is
+/// that request: the backend names an alias such as `opus` by the model it
+/// chose for it, and the session controls show the choice the user made,
+/// which a choice resolving to the same id would otherwise take.
+pub(super) fn listed(
+    row: &SessionRow,
+    recorded: &RecordedSettings,
+    reported: &Reported,
+    resolves: Option<&str>,
+) -> Listed {
+    let requested = requested(row);
+    let newer = recorded.clone().since(requested);
     let value = |recorded: Option<ersa_adapter::Recorded>| recorded.map(|r| r.value);
+    let said = reported.model.clone().or_else(|| value(newer.model));
+    let model = match said {
+        Some(said) if requested.model.is_some() && resolves == Some(said.as_str()) => {
+            row.model.clone()
+        }
+        said => said.or_else(|| row.model.clone()),
+    };
     Listed {
-        model: reported
-            .model
-            .clone()
-            .or_else(|| value(newer.model))
-            .or_else(|| row.model.clone()),
+        model,
         effort: value(newer.effort).or_else(|| row.effort.clone()),
         permission_mode: reported
             .permission_mode

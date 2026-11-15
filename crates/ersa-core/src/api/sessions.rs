@@ -196,10 +196,15 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         resume: None,
         extra: Value::Null,
     };
-    Ok(core
+    let backend = session.backend.clone();
+    let created = core
         .sessions
         .create(session, transport, config, backend_version)
-        .await?)
+        .await?;
+    // The new session's request among the models detection found, so a model
+    // reported by what it resolves to lists as the request (PROTO-CORE-API-R71).
+    core.sessions.set_models(&backend, &models);
+    Ok(created)
 }
 
 /// `session.fork` (FLOW-FORK-SESSION): a new session from a copy of the
@@ -216,7 +221,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
     let Starting {
         transport,
         backend_version,
-        ..
+        models,
     } = starting(core, &project, &original.backend).await?;
     // Every refusal comes before the workspace is made. Holding `hold`
     // keeps the original from being sent to or deleted meanwhile.
@@ -296,7 +301,9 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
     if created.is_err() && made_for_it {
         discard_workspace(core, &project, &workspace).await;
     }
-    Ok(created?)
+    let created = created?;
+    core.sessions.set_models(&created.backend, &models);
+    Ok(created)
 }
 
 /// A new isolated workspace on a new branch at the commit `from` has checked

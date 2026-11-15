@@ -113,12 +113,12 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
   const chooseProject = (id: string) =>
     setSeed((s) => ({ ...s, touched: true, wanted: { ...lastUsed[id], ...s.picked, project_id: id } }));
   // A how value chosen here, with the backend it was chosen for; a backend chosen anew drops the rest.
-  const pickHow = (key: "backend" | "model" | "effort" | "permission_mode", id: string | undefined, next: Partial<SessionValues>) =>
+  const pickHow = (key: "backend" | "model" | "effort" | "permission_mode", next: Partial<SessionValues>) =>
     setSeed((s) => ({
       ...s,
       touched: true,
       wanted: next,
-      picked: key === "backend" ? { backend: id } : { ...s.picked, backend: next.backend, [key]: id },
+      picked: key === "backend" ? { backend: next.backend } : { ...s.picked, backend: next.backend, [key]: next[key] },
     }));
 
   // The trust question opens upward over the room above the box, so the box and the session controls stay where they
@@ -281,13 +281,12 @@ export function NewSessionScreen(props: NewSessionScreenProps) {
       chooseProject(id);
     } else if (key === "backend") {
       // A model or effort chosen for one backend means nothing to another.
-      pickHow(key, id, { ...values, backend: id, model: undefined, effort: undefined, permission_mode: undefined });
+      pickHow(key, { ...values, backend: id, model: undefined, effort: undefined, permission_mode: undefined });
     } else if (key === "effort") {
       // The Default row chooses no level: the backend's own effort (docs/design/COMPOSER.md).
-      const effort = id === DEFAULT_EFFORT ? undefined : id;
-      pickHow(key, effort, { ...values, effort });
+      pickHow(key, { ...values, effort: id === DEFAULT_EFFORT ? undefined : id });
     } else if (key === "model" || key === "permission_mode") {
-      pickHow(key, id, { ...values, [key]: id });
+      pickHow(key, { ...values, [key]: id });
     } else {
       setWanted({ ...values, [key]: id });
     }
