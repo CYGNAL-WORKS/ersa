@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use ersa_adapter::{Process, ProcessSpec, Transport};
+use ersa_core::state::FOLDER_INSPECTIONS;
 use ersa_core::transport::LocalTreeTransport;
 use ersa_core::{Adapter, CommandTransport, CoreConfig, Gate};
 use serde_json::{Value, json};
@@ -74,7 +75,7 @@ struct LetGo(Arc<Stall>, Arc<Gate>);
 impl Drop for LetGo {
     fn drop(&mut self) {
         // More than any test parks; a spare permit is never used.
-        for _ in 0..8 {
+        for _ in 0..2 * FOLDER_INSPECTIONS {
             self.0.go();
             self.1.go();
         }
@@ -362,6 +363,36 @@ async fn two_adds_of_one_folder_at_once_add_it_once() {
     assert_eq!(
         client.result("project.list", json!({})).await,
         json!([added[0]])
+    );
+}
+
+/// Inspections that ran past their limit keep their places until their
+/// calls return, so folders that never answer hold a bounded number of
+/// threads: past that, the answer is `permission` without inspecting.
+// verifies: PROTO-CORE-API-R93
+#[tokio::test(flavor = "multi_thread")]
+async fn folders_that_never_answer_hold_a_bounded_number_of_threads() {
+    let (stall, gate, _let_go) = stops();
+    let (core, mut client) = start(&stall, &gate, |c| c.folder_inspection_limit = SHORT).await;
+    let params = folder_params("project.find", core.dir.path());
+
+    for _ in 0..FOLDER_INSPECTIONS {
+        let slow = client.request("project.find", params.clone()).await;
+        reached(&gate).await;
+        let answer = client.response(slow).await;
+        let message = answer["error"]["message"].as_str().unwrap_or_default();
+        assert!(message.contains("did not answer in time"), "{answer}");
+    }
+    // Every place is held by a call still stuck: this one is not started.
+    let answer = client.call("project.find", params).await;
+    let error = &answer["error"];
+    assert_eq!(kind(error), "permission", "{answer}");
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("too many folders asked about are not answering"),
+        "{answer}"
     );
 }
 
