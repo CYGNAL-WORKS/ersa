@@ -1,4 +1,5 @@
-import { Archive, Bot, ChevronRight, LoaderCircle } from "lucide-react";
+import { BackendMark } from "./BackendMark";
+import { Archive, ChevronRight, LoaderCircle } from "lucide-react";
 import {
   type AnimationEvent,
   type CSSProperties,
@@ -119,7 +120,7 @@ export function SessionTile({
         {...rootHandlers}
       >
         <span className="session-backend" role="img" aria-label={view.backend}>
-          <Icon icon={Bot} size="icon-sm" />
+          <BackendMark backend={session.backend} />
         </span>
         {editing ? (
           titleField
