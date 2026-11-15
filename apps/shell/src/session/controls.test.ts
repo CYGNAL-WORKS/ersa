@@ -172,6 +172,9 @@ describe("the session controls under a running session", () => {
     // Only Default resolves to it: Default names it.
     const onlyDefault = { ...claude, models: claude.models.filter((m) => m.id !== "claude-fable-5-2") };
     expect(sessionShown({ ...running, model: "claude-fable-5-2" }, branch, [onlyDefault]).values.model).toBe("default");
+    // Default and an alias resolving to an id listed under neither: the alias names it, since the session chose a model.
+    const both = { ...claude, models: claude.models.map((m) => (m.id === "default" ? { ...m, resolved: "claude-opus-5-5" } : m)) };
+    expect(sessionShown({ ...running, model: "claude-opus-5-5" }, branch, [both]).values.model).toBe("opus");
     // A model that takes no effort keeps taking none under its alias.
     expect(effortsFor(claude, sessionShown({ ...running, model: "claude-haiku-5-5" }, branch, [claude]).values.model)).toEqual([]);
   });
