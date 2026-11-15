@@ -1,7 +1,7 @@
-import { mkdirSync, readdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { connect } from "node:net";
 import path from "node:path";
-import { expect, test } from "./harness";
+import { corePipe, expect, test } from "./harness";
 
 // A session's title in the running window with real Claude Code (#329; PROTO-CORE-API-R83, R84): a new session's tile
 // shows the name the backend generated during its first turn, with no reload, and a rename from another client shows at
@@ -10,9 +10,9 @@ test.use({ backend: "claude" });
 
 /** Another window, as Core sees one: a second connection to the test's Core that sends one request after the handshake. */
 async function otherWindow(label: string, method: string, params: unknown): Promise<unknown> {
-  const name = readdirSync("\\\\.\\pipe\\").find((n) => new RegExp(`^ersa-core-S-[0-9-]+-${label}$`).test(n));
-  if (!name) throw new Error(`no pipe for ${label}`);
-  const socket = connect(`\\\\.\\pipe\\${name}`);
+  const pipe = corePipe(label);
+  if (!pipe) throw new Error(`no pipe for ${label}`);
+  const socket = connect(pipe);
   const send = (id: number, m: string, p: unknown) => socket.write(`${JSON.stringify({ jsonrpc: "2.0", id, method: m, params: p })}\n`);
   return new Promise((resolve, reject) => {
     let buffered = "";
