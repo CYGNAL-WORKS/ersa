@@ -135,6 +135,8 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
   // The send whose cancel became the turn's stop because Core took the message first, while that stop's own call
   // is still out: if the call then fails, nothing was stopped, and the stop is undone.
   let cancelBecameStop: number | undefined;
+  // How many turns have ended: a stop that fails undoes the turn's stop only while the turn it was chosen for runs.
+  let turnsEnded = 0;
 
   const set = (change: (view: SessionView) => SessionView) => {
     if (stopped) return;
@@ -249,6 +251,8 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
         if (turned) turnSeen = true;
         // The backend took in what waited (one user.message may carry several), or the session ended: every message
         // sent before this event no longer waits. Events replayed from before a send keep it.
+        const ended = type === "turn.completed" || type === "session.ended";
+        if (ended) turnsEnded += 1;
         const taken = type === "user.message" || type === "session.ended";
         const waiting = taken ? v.waitingHere?.filter((w) => w.after >= envelope.seq) : v.waitingHere;
         return {
@@ -258,7 +262,7 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
           turnPending: turned ? undefined : v.turnPending,
           // The turn a stop was chosen for has ended, or the session has: the next turn takes a stop afresh. Its own
           // turn.started, which can arrive after the stop, does not.
-          stopChosen: type === "turn.completed" || type === "session.ended" ? undefined : v.stopChosen,
+          stopChosen: ended ? undefined : v.stopChosen,
           waitingHere: waiting?.length ? waiting : undefined,
         };
       });
@@ -319,13 +323,15 @@ export function follow(client: CoreClient, id: string, update: (view: SessionVie
       if (view.stopTaken) return;
       const onItsWay = view.message?.state === "sending";
       const send = sends;
+      const turn = turnsEnded;
       set((v) => (onItsWay ? { ...v, canceling: true } : { ...v, stopChosen: true }));
       // Best effort: a turn that ended meanwhile, or a lost connection, leaves nothing to stop. A stop that never
       // reached Core stopped nothing, so a failure of the send after it is still a refusal to show, and stop is
       // offered again; only what this stop chose is undone.
       await client.call("session.interrupt", { id }).catch(() => {
-        if (!onItsWay) set((v) => ({ ...v, stopChosen: undefined }));
-        else if (cancelBecameStop === send) set((v) => ({ ...v, stopChosen: undefined }));
+        // A stop for the turn (chosen as one, or a cancel that came too late) is undone only while that turn runs:
+        // once it has ended, the stop held now is another turn's.
+        if (!onItsWay || cancelBecameStop === send) set((v) => (turn === turnsEnded ? { ...v, stopChosen: undefined } : v));
         else set((v) => (send === sends && v.canceling ? { ...v, canceling: undefined } : v));
       });
       if (cancelBecameStop === send) cancelBecameStop = undefined;

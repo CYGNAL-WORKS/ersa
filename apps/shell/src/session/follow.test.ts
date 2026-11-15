@@ -628,6 +628,28 @@ describe("stop while a message waits", () => {
   });
 
   // verifies: FLOW-SEND-MESSAGE-R20
+  it("keeps the next turn's stop when an earlier turn's stop fails late, after that turn ended", async () => {
+    const fails: ((error: unknown) => void)[] = [];
+    const { client, calls } = fakeClient({
+      "session.subscribe": () => Promise.resolve({ last_seq: -1 }),
+      "session.interrupt": () => new Promise((_, reject) => fails.push(reject)),
+    });
+    const seen: SessionView[] = [];
+    const f = follow(client, "s1", (v) => seen.push(v));
+    f.receive(ev(0, { type: "turn.started", turn: 1, trigger: "user" }));
+    const first = f.interrupt();
+    f.receive(ev(1, { type: "turn.completed", turn: 1, outcome: "interrupted", duration_ms: 1, is_error: true }));
+    f.receive(ev(2, { type: "turn.started", turn: 2, trigger: "user" }));
+    void f.interrupt();
+    // Turn 1's stop call fails only now: turn 2's stop still holds.
+    fails[0]?.({ kind: "unavailable", message: "gone" });
+    await first;
+    expect(seen.at(-1)?.stopTaken).toBe(true);
+    void f.interrupt();
+    expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
+  });
+
+  // verifies: FLOW-SEND-MESSAGE-R20
   it("keeps the stop held for a turn when a too-late cancel of a message sent meanwhile then fails", async () => {
     let accept: (answer: unknown) => void = () => {};
     let fail: (error: unknown) => void = () => {};
