@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AttachmentInspectResult } from "../protocol/core-api.gen";
-import { INLINE_MAX, addAll, attached, detail, pastedImage, sendable, size, willCopy } from "./attachments";
+import { INLINE_MAX, addAll, attached, detail, pastedImage, sendable, size, willCopy, waitingName } from "./attachments";
 
 const info = (over: Partial<AttachmentInspectResult>): AttachmentInspectResult => ({
   path: "D:\\work\\repo\\notes.md",
@@ -92,5 +92,16 @@ describe("a pasted image", () => {
     const again = await pastedImage(new Blob([new Uint8Array([255, 216, 255])], { type: "image/jpeg" }));
     expect(sendable([jpeg])).toEqual([{ kind: "image", media_type: "image/jpeg", data: btoa("\xff\xd8\xff") }]);
     expect(addAll([jpeg], [again])).toHaveLength(2);
+  });
+});
+
+describe("the name of a message waiting in the backend", () => {
+  const notes = { path: "D:/code/notes.md", name: "notes.md", kind: "file" as const, detail: "12 lines" };
+  // verifies: FLOW-SEND-MESSAGE-R19
+  it("is its first line with words in it, else its first attachment's name", () => {
+    expect(waitingName("\n   \n  Fix   the build\nThen the tests", [notes])).toBe("Fix the build");
+    expect(waitingName("One line that runs on well past what the status line can show at once", [])).toBe("One line that runs on well past what the status line can show at once");
+    expect(waitingName("  ", [notes])).toBe("notes.md");
+    expect(waitingName("", [])).toBeUndefined();
   });
 });

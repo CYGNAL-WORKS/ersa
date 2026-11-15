@@ -514,7 +514,7 @@ describe("a message sent while the agent works", () => {
 });
 
 describe("stop while a message waits", () => {
-  // verifies: FLOW-SEND-MESSAGE-R20
+  // verifies: FLOW-SEND-MESSAGE-R21
   it("interrupts once until the turn ends, and again for the turn after it", async () => {
     const { follower, calls, last } = following({ "session.interrupt": () => Promise.resolve({}) });
     await follower.interrupt();
@@ -531,7 +531,7 @@ describe("stop while a message waits", () => {
   const ev = (seq: number, event: object) =>
     ({ v: EVENT_VERSION, session_id: "s1", seq, ts: "2026-11-14T09:00:00Z", source: { backend: "claude-code", backend_version: "2.1.302", input: "live" }, event }) as never;
 
-  // verifies: FLOW-SEND-MESSAGE-R20
+  // verifies: FLOW-SEND-MESSAGE-R21
   it("takes no second stop for a turn still winding down, after a message sent meanwhile", async () => {
     const { client, calls } = fakeClient({
       "session.subscribe": () => Promise.resolve({ last_seq: -1 }),
@@ -552,7 +552,7 @@ describe("stop while a message waits", () => {
     expect(interrupts()).toBe(2);
   });
 
-  // verifies: FLOW-SEND-MESSAGE-R20
+  // verifies: FLOW-SEND-MESSAGE-R21
   it("holds a stop chosen before its turn showed, through a message sent then and that turn's turn.started", async () => {
     const answers = [{ turn: 9 }, {}];
     const { follower, calls, last } = following({ "session.interrupt": () => Promise.resolve({}), "session.send": () => Promise.resolve(answers.shift()) });
@@ -572,6 +572,7 @@ describe("stop while a message waits", () => {
   });
 
   // verifies: FLOW-SEND-MESSAGE-R03
+  // verifies: FLOW-SEND-MESSAGE-R21
   it("cancels a message on its way once, even with a stop chosen for a turn still winding down", async () => {
     let refuse: (error: BridgeError) => void = () => {};
     const { client, calls } = fakeClient({
@@ -681,7 +682,7 @@ describe("stop while a message waits", () => {
     expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
   });
 
-  // verifies: FLOW-SEND-MESSAGE-R20
+  // verifies: FLOW-SEND-MESSAGE-R21
   it("keeps the next turn's stop when an earlier turn's stop fails late, after that turn ended", async () => {
     const fails: ((error: unknown) => void)[] = [];
     const { client, calls } = fakeClient({
@@ -703,7 +704,7 @@ describe("stop while a message waits", () => {
     expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
   });
 
-  // verifies: FLOW-SEND-MESSAGE-R20
+  // verifies: FLOW-SEND-MESSAGE-R21
   it("keeps the stop held for a turn when a too-late cancel of a message sent meanwhile then fails", async () => {
     let accept: (answer: unknown) => void = () => {};
     let fail: (error: unknown) => void = () => {};
@@ -730,7 +731,7 @@ describe("stop while a message waits", () => {
     expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
   });
 
-  // verifies: FLOW-SEND-MESSAGE-R20
+  // verifies: FLOW-SEND-MESSAGE-R21
   it("keeps the stop held for a turn when a cancel of a message sent meanwhile never reaches Core", async () => {
     let reach = true;
     const { client, calls } = fakeClient({
@@ -752,7 +753,7 @@ describe("stop while a message waits", () => {
     expect(calls.filter((c) => c.method === "session.interrupt")).toHaveLength(2);
   });
 
-  // verifies: FLOW-SEND-MESSAGE-R20
+  // verifies: FLOW-SEND-MESSAGE-R21
   it("can stop again when the stop never reached Core, or only canceled a message on its way", async () => {
     let refuse: (error: BridgeError) => void = () => {};
     let reach = false;

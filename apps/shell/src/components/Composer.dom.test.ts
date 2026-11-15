@@ -260,7 +260,7 @@ describe("messages waiting in the backend", () => {
 describe("stop once chosen", () => {
   const button = () => document.querySelector(".composer-send") as HTMLButtonElement;
 
-  // verifies: FLOW-SEND-MESSAGE-R20
+  // verifies: FLOW-SEND-MESSAGE-R21
   it("says it is stopping, keeps focus, and takes no second choice until the turn ends", () => {
     let stops = 0;
     const { rerender } = render(draw({ working: true, onStop: () => stops++ }));

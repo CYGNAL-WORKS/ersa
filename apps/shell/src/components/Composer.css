@@ -37,6 +37,14 @@
   animation: composer-status-in var(--motion-settle) var(--motion-ease-out);
 }
 
+/* A line that stays one line, as the waiting row: its text is cut with an ellipsis where the line ends. */
+.composer-status-cut {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* It opens upward, growing and fading in. */
 @keyframes composer-status-in {
   from {
