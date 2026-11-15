@@ -8,6 +8,7 @@ import {
   available,
   branchesMatching,
   effortsFor,
+  listedModelFor,
   showsBackend,
   workspaceKinds,
 } from "../session/controls";
@@ -140,7 +141,7 @@ export function modelOptions(models: readonly ModelChoice[]): ChipOption[] {
   return models.map(({ id, label, default: isDefault, resolved }) => {
     if (!isDefault) return { id, label };
     if (resolved === undefined) return { id, label: t("sessionControls.model.defaultLabel") };
-    const model = models.find((m) => !m.default && m.resolved === resolved)?.label ?? resolved;
+    const model = listedModelFor(models, resolved)?.label ?? resolved;
     return { id, label: t("sessionControls.model.defaultOfLabel", { model }) };
   });
 }
