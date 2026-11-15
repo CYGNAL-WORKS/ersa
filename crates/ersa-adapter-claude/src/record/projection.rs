@@ -29,7 +29,7 @@ use crate::BACKEND;
 use crate::projector::{
     SYNTHETIC_MODEL, kind_of, reply_events, tool_result_events, user_message_of,
 };
-use crate::wire::{LocalCommandOutput, MessageContent, RecordEntry, RecordUser};
+use crate::wire::{LocalCommandOutput, MessageContent, RecordEntry, RecordUser, queued_command};
 
 /// The longest record line read as an entry: as long as the longest line
 /// Core reads from a backend (its transport's line limit), well above a
@@ -526,6 +526,10 @@ fn conversation(entries: &[&Value]) -> Conversation {
 #[derive(Debug, Default)]
 struct RecordProjector {
     blocks_seen: HashMap<String, u64>,
+    /// The blocks of each message a turn took in part way, from its
+    /// `queued_command` attachment, by the echo's id, until its `remove`
+    /// entry reads them.
+    taken_in: HashMap<String, Vec<Value>>,
 }
 
 impl RecordProjector {
@@ -593,9 +597,14 @@ impl RecordProjector {
             // where the turn took it in (PROTO-CLAUDE-CODE-STREAM-R69).
             // Every other queue operation carries no message.
             RecordEntry::QueueOperation(queued) => {
-                let Some((echo_id, blocks)) = queued.absorbed_mid_turn() else {
+                let Some((echo_id, content)) = queued.absorbed_mid_turn() else {
                     return Vec::new();
                 };
+                // `content` holds the words alone, its file list among them
+                // and its images left out; the attachment, when the record
+                // has it, holds the message as sent, so it shows as it did
+                // live (inbox).
+                let blocks = self.taken_in.remove(echo_id).unwrap_or(content);
                 return user_message_of(&blocks)
                     .map(|message| RecordEvent {
                         message_id: Some(echo_id.to_string()),
@@ -607,6 +616,10 @@ impl RecordProjector {
                     .collect();
             }
             RecordEntry::Other(_) => {
+                if let Some((echo_id, blocks)) = queued_command(&value) {
+                    self.taken_in.insert(echo_id.to_string(), blocks);
+                    return Vec::new();
+                }
                 let kind = value.get("type").and_then(Value::as_str);
                 if matches!(kind, Some("user" | "assistant")) {
                     // A message entry whose shape has drifted: say so, and
