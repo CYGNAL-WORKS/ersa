@@ -51,7 +51,8 @@ use ersa_adapter::{
 };
 use ersa_protocol::core_api::rpc::Notification;
 use ersa_protocol::core_api::{
-    Deleting, ErrorReason, Section, Session, SessionEventParams, SessionTileParams, Tile,
+    Deleting, ErrorReason, ModelChoice, Section, Session, SessionEventParams, SessionTileParams,
+    Tile,
 };
 use ersa_protocol::events::{
     Envelope, ErrorCode, ErrorEvent, Event, LifecycleState, NoticeCode, NoticeLevel, SessionNotice,
@@ -504,6 +505,10 @@ struct Presented {
     /// (PROTO-CORE-API-R71).
     recorded: ersa_adapter::RecordedSettings,
     reported: settings::Reported,
+    /// The model id the backend says Core's model request resolves to, from
+    /// its model list as last detected; `None` until detected, or when the
+    /// request names no model the backend lists with one.
+    resolves: Option<String>,
 }
 
 /// The creation time of a session nothing remembers starting: one from
@@ -667,6 +672,7 @@ impl Handle {
                 created_at,
                 recorded: Default::default(),
                 reported: Default::default(),
+                resolves: None,
             }),
             op: tokio::sync::Mutex::new(()),
             hub: Mutex::default(),
@@ -737,7 +743,12 @@ impl Handle {
                 (view.state(), view.tile().clone())
             }
         };
-        let listed = settings::listed(&row, &presented.recorded, &presented.reported);
+        let listed = settings::listed(
+            &row,
+            &presented.recorded,
+            &presented.reported,
+            presented.resolves.as_deref(),
+        );
         Session {
             id: row.id,
             // Filled by the tickets that build them (PROTO-CORE-API,
@@ -963,6 +974,28 @@ impl SessionManager {
         let mut sessions: Vec<Session> = handles.iter().map(|h| h.describe()).collect();
         sessions.sort_by(|a, b| (&a.created_at, &a.id).cmp(&(&b.created_at, &b.id)));
         sessions
+    }
+
+    /// Tells each session of `backend` what its model request resolves to,
+    /// from the models the backend listed on the host, so `session.list`
+    /// names a model reported by that id as the request (PROTO-CORE-API-R71).
+    /// An empty list says nothing of what a model resolves to (a probe that
+    /// failed, or a host Core read no models from), so it changes nothing.
+    pub fn set_models(&self, backend: &str, models: &[ModelChoice]) {
+        if models.is_empty() {
+            return;
+        }
+        let handles: Vec<Arc<Handle>> = lock(&self.sessions).values().cloned().collect();
+        for handle in handles.iter().filter(|h| h.backend == backend) {
+            let request = lock(&handle.row).model.clone();
+            let resolves = request.and_then(|request| {
+                models
+                    .iter()
+                    .find(|m| m.id == request)
+                    .and_then(|m| m.resolved.clone())
+            });
+            lock(&handle.presented).resolves = resolves;
+        }
     }
 
     /// One session.

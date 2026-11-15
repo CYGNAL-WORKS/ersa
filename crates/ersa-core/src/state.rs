@@ -285,6 +285,11 @@ impl Core {
         )
         .await;
         *cached = Some((Instant::now(), found.clone()));
+        // What each backend's models resolve to, for the sessions to name the
+        // model a session reports (PROTO-CORE-API-R71).
+        for detected in &found {
+            self.sessions.set_models(&detected.name, &detected.models);
+        }
         found
     }
 

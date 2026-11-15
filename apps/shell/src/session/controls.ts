@@ -240,10 +240,11 @@ function holding(choices: readonly Choice[], id: string | undefined): Choice[] {
 }
 
 /**
- * The choice that names a model a session reports: the one listed under that id, else one whose alias resolves to it,
- * as Claude Code reports `claude-opus-5-5` for a session started with `opus` once a turn has run (PROTO-CORE-API,
- * `backend.list`'s `resolved`). Where several resolve to it, one the backend does not mark as its default comes first:
- * Default stands for whatever the backend picks, a named alias for that model.
+ * The choice that names a model a session reports: the one listed under that id, else one whose alias resolves to it
+ * (PROTO-CORE-API, `backend.list`'s `resolved`). Core lists a model reported by what the session's own request
+ * resolves to as that request, so this names only a model the session changed to since, as in the backend's own
+ * tools, or one Core could not match. Where several resolve to it, one the backend does not mark as its default comes
+ * first: a session that changed its model chose a model, not whatever the backend picks.
  */
 function modelChoiceFor(models: readonly ModelChoice[], id: string): string {
   const resolving = models.filter((m) => m.resolved === id);

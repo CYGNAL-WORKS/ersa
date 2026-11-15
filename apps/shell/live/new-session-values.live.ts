@@ -63,13 +63,14 @@ test("a session runs with, and shows, the model, effort and permission mode chos
   expect(cli).toMatch(/--model opus\b/);
   expect(cli).toMatch(/--effort low\b/);
 
-  // After the first turn: the CLI has reported the model it resolved `opus` to, and the chips still read as chosen.
+  // After the first turn: the CLI has reported the model it resolved `opus` to, which Core lists as `opus`, and the
+  // chips still read as chosen.
   await expect(page.getByRole("form", { name: "Composer" }).getByRole("button", { name: "Send", exact: true })).toBeVisible({ timeout: 120_000 });
   const listed = await page.evaluate(async () => {
     const all = (await (window as any).__TAURI_INTERNALS__.invoke("core_request", { method: "session.list", params: null })) as { model?: string; effort?: string; permission_mode: string }[];
     return all.map(({ model, effort, permission_mode }) => ({ model, effort, permission_mode }));
   });
-  expect(listed).toEqual([{ model: expect.stringMatching(/^claude-opus-/), effort: "low", permission_mode: "plan" }]);
+  expect(listed).toEqual([{ model: "opus", effort: "low", permission_mode: "plan" }]);
   expect(await reads(page, chips)).toEqual(chosen);
   await ersa.shot("after-first-turn");
 });
