@@ -285,7 +285,7 @@ const ersaOnly: Parameters<typeof RailTree>[0] = {
 const strangerOnly: Parameters<typeof RailTree>[0] = { ...tree, projects: { state: "ready", projects: [projects[3]!] }, sessions: { state: "ready", sessions: [] } };
 /** A resting tile above each forced one, so the two read apart in the screenshot. */
 const pairOnly: Parameters<typeof RailTree>[0] = { ...ersaOnly, sessions: { state: "ready", sessions: pointerPair }, activeId: undefined };
-/** A tile for each backend's mark (issue #399): Claude Code, Copilot, and one Ersa doesn't know. */
+/** A tile for each backend's mark (issue 399): Claude Code, Copilot, and one Ersa doesn't know. */
 const eachBackend: Parameters<typeof RailTree>[0] = {
   ...ersaOnly,
   sessions: {

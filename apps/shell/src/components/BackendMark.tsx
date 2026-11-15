@@ -11,7 +11,7 @@ const MARKS: Readonly<Record<string, string>> = {
 };
 
 /**
- * A backend's mark beside a tile's title (issue #399): the backend's own glyph, filled in the ink of the text
+ * A backend's mark beside a tile's title (issue 399): the backend's own glyph, filled in the ink of the text
  * around it (currentColor), never a brand color. A backend with no mark here draws a terminal, which is nobody's.
  * Hidden from assistive technology: the element around it names the backend.
  */
