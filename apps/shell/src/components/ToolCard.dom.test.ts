@@ -45,7 +45,7 @@ const read: Event = {
   tool_use_id: "r1",
   name: "Read",
   input: { file_path: "D:\\Projects\\ersa\\docs\\GLOSSARY.md", limit: 40 },
-  target: "D:\\Projects\\ersa\\docs\\GLOSSARY.md",
+  target_kind: "path", target: "D:\\Projects\\ersa\\docs\\GLOSSARY.md",
 };
 const readDone: Event = { type: "tool.result", tool_use_id: "r1", content: "# Glossary", is_error: false, duration_ms: 2400 };
 
@@ -71,6 +71,15 @@ describe("a tool card", () => {
     expect(page.querySelectorAll(".tool-card")).toHaveLength(1);
   });
 
+  // verifies: FLOW-READ-TRANSCRIPT-R08
+  it("shows a command that begins with a path in the workspace whole, cut at its end", () => {
+    const command = "D:\\Projects\\ersa\\scripts\\build.cmd --release";
+    show([{ type: "tool.requested", tool_use_id: "b1", name: "Bash", input: { command }, target_kind: "command", target: command }], "D:/Projects/ersa");
+    const row = screen.getByRole("button", { name: `Bash ${command}, Running` });
+    expect(row.querySelector(".tool-target")?.textContent).toBe(command);
+    expect(row.querySelector(".tool-target")?.hasAttribute("data-path")).toBe(false);
+  });
+
   // verifies: FLOW-READ-TRANSCRIPT-R06
   it("says a failed call failed in its detail", () => {
     show([read, { type: "tool.result", tool_use_id: "r1", content: "No such file", is_error: true }]);
@@ -83,7 +92,7 @@ describe("a tool card", () => {
   // verifies: FLOW-READ-TRANSCRIPT-R06
   it("says a call waits for the user while its permission request is open", () => {
     show([
-      { type: "tool.requested", tool_use_id: "b1", name: "Bash", input: { command: "rm -rf build" }, target: "rm -rf build" },
+      { type: "tool.requested", tool_use_id: "b1", name: "Bash", input: { command: "rm -rf build" }, target_kind: "command", target: "rm -rf build" },
       {
         type: "permission.requested",
         request_id: "p1",
@@ -162,8 +171,8 @@ describe("a tool card", () => {
 });
 
 describe("a subagent's calls", () => {
-  const agent: Event = { type: "tool.requested", tool_use_id: "a1", name: "Agent", input: { description: "Count files", prompt: "Count them." }, target: "Count files" };
-  const glob: Event = { type: "tool.requested", tool_use_id: "g1", name: "Glob", input: { pattern: "*" }, parent_tool_use_id: "a1", target: "*" };
+  const agent: Event = { type: "tool.requested", tool_use_id: "a1", name: "Agent", input: { description: "Count files", prompt: "Count them." }, target_kind: "task", target: "Count files" };
+  const glob: Event = { type: "tool.requested", tool_use_id: "g1", name: "Glob", input: { pattern: "*" }, parent_tool_use_id: "a1", target_kind: "search", target: "*" };
   const globDone: Event = { type: "tool.result", tool_use_id: "g1", content: "a.txt", is_error: false };
   const agentDone: Event = { type: "tool.result", tool_use_id: "a1", content: "One file.", is_error: false };
 
@@ -242,7 +251,7 @@ const editCall: Event = {
   tool_use_id: "e1",
   name: "Edit",
   input: { file_path: "D:\\Projects\\ersa\\src\\app.ts", old_string: "let a = 1;", new_string: "let a = 2;\nlet b = 3;" },
-  target: "D:\\Projects\\ersa\\src\\app.ts",
+  target_kind: "path", target: "D:\\Projects\\ersa\\src\\app.ts",
   edits: [{ path: "D:\\Projects\\ersa\\src\\app.ts", old_text: "keep\nlet a = 1;", new_text: "keep\nlet a = 2;\nlet b = 3;" }],
 };
 const editPermission: Event = {
@@ -280,7 +289,7 @@ describe("a diff card", () => {
   // verifies: FLOW-READ-TRANSCRIPT-R09
   it("shows a file written whole as all added lines", () => {
     show(
-      [{ type: "tool.requested", tool_use_id: "w1", name: "Write", input: {}, target: "D:\\Projects\\ersa\\new.md", edits: [{ path: "D:\\Projects\\ersa\\new.md", new_text: "# New\n\nText\n" }] }],
+      [{ type: "tool.requested", tool_use_id: "w1", name: "Write", input: {}, target_kind: "path", target: "D:\\Projects\\ersa\\new.md", edits: [{ path: "D:\\Projects\\ersa\\new.md", new_text: "# New\n\nText\n" }] }],
       ws,
     );
     const row = screen.getByRole("button", { name: /^Write new\.md, Running, 3 lines added, 0 lines removed$/ });
