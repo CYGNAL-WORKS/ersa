@@ -1557,7 +1557,11 @@ fn recorded_tool_calls_say_what_kind_their_target_is() {
         "2.1.316/36-tool-edit-replace-all",
     ] {
         for call in tool_requests(fixture_name) {
-            assert!(call.target.is_some(), "{fixture_name}: {} has no target", call.name);
+            assert!(
+                call.target.is_some(),
+                "{fixture_name}: {} has no target",
+                call.name
+            );
             assert_eq!(
                 call.target_kind,
                 Some(kind_of(&call.name)),
@@ -1570,8 +1574,17 @@ fn recorded_tool_calls_say_what_kind_their_target_is() {
     // Every tool the CLI was recorded with appears, so a fixture that stops
     // carrying one is noticed.
     let expected: std::collections::BTreeSet<String> = [
-        "Read", "Write", "Edit", "NotebookEdit", "Bash", "PowerShell", "Grep", "Glob",
-        "WebSearch", "ToolSearch", "Agent",
+        "Read",
+        "Write",
+        "Edit",
+        "NotebookEdit",
+        "Bash",
+        "PowerShell",
+        "Grep",
+        "Glob",
+        "WebSearch",
+        "ToolSearch",
+        "Agent",
     ]
     .into_iter()
     .map(String::from)
