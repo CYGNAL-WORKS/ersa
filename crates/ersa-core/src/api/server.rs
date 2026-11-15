@@ -243,15 +243,18 @@ impl Lane {
 /// Serves one client until it disconnects, the handshake fails or times out,
 /// it sends an unreadable line, or Core shuts down.
 ///
-/// Requests are read in order. Most are answered in line, one at a time.
-/// Session requests that act on a session run detached, each in a task of
-/// its own, and answer when done, possibly out of order (responses carry
-/// their request's id). Detached requests about the same session still run
-/// in the order they were sent: each waits for the one before it in its
-/// session's lane ([`Lane`]), except that a send lets the requests behind it
-/// run once it has its session's slot, and only another send waits for its
-/// answer. Requests about different sessions overlap; the in-line
-/// ones name no session and never wait for the detached ones. A `session.stop` whose
+/// Requests are read in order. Those that only read or write Core's own
+/// state are answered in line, one at a time. The rest run detached, each
+/// in a task of its own, and answer when done, possibly out of order
+/// (responses carry their request's id): every request that names a
+/// session, and every one that runs git or a backend's command or inspects
+/// a folder the user named (PROTO-CORE-API-R92). Detached requests about
+/// the same session still run in the order they were sent: each waits for
+/// the one before it in its session's lane ([`Lane`]), except that a send
+/// lets the requests behind it run once it has its session's slot, and
+/// only another send waits for its answer. Requests about different
+/// sessions overlap; the in-line ones name no session and never wait for
+/// the detached ones. A `session.stop` whose
 /// lane does not drain within a grace starts stopping anyway, ending the
 /// requests stuck ahead of it; its answer still keeps its place.
 async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
@@ -323,10 +326,11 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
         }
 
         let (response, after) = match parse_incoming(&line) {
-            // A session request that may wait on a backend runs on its own
-            // and answers through the queue when done, so it never holds up
-            // the requests behind it: a permission decision must not wait
-            // for another session's start.
+            // A request that may wait on a backend, git or a slow folder
+            // runs on its own and answers through the queue when done, so it
+            // never holds up the requests behind it: a permission decision
+            // must not wait for another session's start, nor a stop for a
+            // folder on a share that stopped answering.
             Incoming::Request(request) if super::runs_detached(&conn, &request) => {
                 // A client with too much in flight stops being read, which is
                 // the back-pressure; a kick or shutdown still ends the wait.
@@ -421,8 +425,8 @@ async fn serve_connection(core: Arc<Core>, stream: BoxStream) {
                 });
                 continue;
             }
-            // In line: these never wait on a backend or on the detached
-            // requests, so reading carries on behind them.
+            // In line: these touch only Core's own state, never a backend,
+            // git or the user's folders, so reading carries on behind them.
             Incoming::Request(request) => super::handle(&core, &mut conn, request).await,
             // The Interface sends no notifications yet; ignore any, as
             // JSON-RPC requires (a notification is never answered).

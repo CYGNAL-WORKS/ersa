@@ -19,7 +19,7 @@ use crate::transport::LocalTreeTransport;
 /// How a Core process is set up. Built by the `ersa-core` binary from its
 /// command line, and by tests with a temporary data directory and a unique
 /// endpoint.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CoreConfig {
     /// Where the database, the app log and (by default) worktrees live.
     pub data_dir: PathBuf,
@@ -50,33 +50,67 @@ pub struct CoreConfig {
     /// again after, until a test lets it go. `None`, except in tests that
     /// need another request to land between its read and its claim, or
     /// while it holds the claim.
-    pub remove_gate: Option<Arc<RemoveGate>>,
+    pub remove_gate: Option<Arc<Gate>>,
+    /// Where the folder inspection of `project.add` and `project.find`
+    /// stops, on its own thread before it touches the folder, until a test
+    /// lets it go: a folder that does not answer. `None`, except in tests.
+    pub inspect_gate: Option<Arc<Gate>>,
+    /// How long the folder inspection of `project.add` and `project.find`
+    /// may take before they answer `permission` (PROTO-CORE-API-R93).
+    /// [`FOLDER_INSPECTION_LIMIT`], except in tests that let it run out.
+    pub folder_inspection_limit: Duration,
+    /// The transport git and backends' version commands run through on the
+    /// local host. `None` is the local machine's; tests put one in front
+    /// of it that holds a command, as a slow repository or backend would.
+    pub command_transport: Option<Arc<dyn Transport>>,
     /// How long a backend detection that found anything other than
     /// `available` is reused. [`FAILED_DETECTION_TTL`], except in tests
     /// that need every detection after a failed one to run again.
     pub failed_detection_ttl: Duration,
 }
 
+impl std::fmt::Debug for CoreConfig {
+    /// Every field but the transport, which has no `Debug` of its own.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CoreConfig")
+            .field("data_dir", &self.data_dir)
+            .field("endpoint", &self.endpoint)
+            .field("backend_program_override", &self.backend_program_override)
+            .field("handshake_timeout", &self.handshake_timeout)
+            .field("max_line_bytes", &self.max_line_bytes)
+            .field("replay", &self.replay)
+            .field("copy_pause", &self.copy_pause)
+            .field("wind_down_pause", &self.wind_down_pause)
+            .field("remove_gate", &self.remove_gate)
+            .field("inspect_gate", &self.inspect_gate)
+            .field("folder_inspection_limit", &self.folder_inspection_limit)
+            .field("command_transport", &self.command_transport.is_some())
+            .field("failed_detection_ttl", &self.failed_detection_ttl)
+            .finish()
+    }
+}
+
 /// A point a request stops at in tests until the test lets it go
-/// ([`CoreConfig::remove_gate`]). Each stop is one [`RemoveGate::reached`]
-/// for the test and one [`RemoveGate::go`] from it, in order.
+/// ([`CoreConfig::remove_gate`], [`CoreConfig::inspect_gate`]). Each stop
+/// is one [`Gate::reached`]
+/// for the test and one [`Gate::go`] from it, in order.
 #[derive(Debug)]
-pub struct RemoveGate {
+pub struct Gate {
     reached: tokio::sync::Semaphore,
     go: tokio::sync::Semaphore,
 }
 
-impl Default for RemoveGate {
+impl Default for Gate {
     /// Closed: the request stops at the first point it reaches.
     fn default() -> Self {
-        RemoveGate {
+        Gate {
             reached: tokio::sync::Semaphore::new(0),
             go: tokio::sync::Semaphore::new(0),
         }
     }
 }
 
-impl RemoveGate {
+impl Gate {
     /// Called by the request: says it got here, then waits to be let go.
     pub(crate) async fn stop(&self) {
         self.reached.add_permits(1);
@@ -111,6 +145,10 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// is reused, so a backend installed while Core runs shows up soon after.
 pub const FAILED_DETECTION_TTL: Duration = Duration::from_secs(30);
 
+/// The default for [`CoreConfig::folder_inspection_limit`]: a folder on a
+/// share that stopped answering never answers (PROTO-CORE-API-R93).
+pub const FOLDER_INSPECTION_LIMIT: Duration = Duration::from_secs(10);
+
 impl CoreConfig {
     /// The configuration for `data_dir` with the platform's default endpoint
     /// and limits. Fails only if the endpoint cannot be named (on Windows, if
@@ -126,6 +164,9 @@ impl CoreConfig {
             copy_pause: Duration::ZERO,
             wind_down_pause: Duration::ZERO,
             remove_gate: None,
+            inspect_gate: None,
+            folder_inspection_limit: FOLDER_INSPECTION_LIMIT,
+            command_transport: None,
             failed_detection_ttl: FAILED_DETECTION_TTL,
         })
     }
@@ -175,6 +216,10 @@ impl Core {
         adapters: Vec<Arc<dyn Adapter>>,
         app_log: Arc<AppLog>,
     ) -> Core {
+        let local_transport = config
+            .command_transport
+            .clone()
+            .unwrap_or_else(|| Arc::new(LocalTreeTransport::for_commands()));
         let sessions = SessionManager::new(store.clone(), adapters, app_log)
             .with_copy_pause(config.copy_pause)
             .with_wind_down_pause(config.wind_down_pause);
@@ -182,7 +227,7 @@ impl Core {
             config,
             sessions,
             store,
-            local_transport: Arc::new(LocalTreeTransport::for_commands()),
+            local_transport,
             local_session_transport: Arc::new(LocalTreeTransport::new()),
             host_name: platform::host_name(),
             started: Instant::now(),
