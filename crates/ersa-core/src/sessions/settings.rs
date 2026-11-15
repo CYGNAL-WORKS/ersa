@@ -7,7 +7,7 @@
 //! request. Core keeps only the request, with when it made it; the other two
 //! are the backend's, read and held in memory.
 
-use ersa_adapter::{RecordedSettings, Requested};
+use ersa_adapter::{Recorded, RecordedSettings, RelaunchSettings, Requested};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 
@@ -50,10 +50,49 @@ pub(super) fn listed(row: &SessionRow, recorded: &RecordedSettings, reported: &R
     }
 }
 
+/// The values a relaunch passes the backend (PROTO-CORE-API-R71). For a
+/// value Core gave a time for: its request while no turn after it ran with
+/// another value than the first such turn did, so a request for an alias or
+/// the backend's default stays one even though the record names what it
+/// resolved to; the record's latest once a later turn ran with another, as
+/// when the user changed it in the backend's own tools. A value left to the
+/// backend is a request for its default with a time like any other, so it
+/// passes nothing until the record shows a change (PROTO-CORE-API-R98). A
+/// value Core holds no time for has no first turn to weigh the latest
+/// against: the record's latest from any turn, else what Core stored
+/// (PROTO-CORE-API-R99).
+pub(super) fn relaunched(row: &SessionRow, record: &RelaunchSettings) -> Listed {
+    let requested = requested(row);
+    let newer = record.latest.clone().since(requested);
+    let pick = |request: &Option<String>,
+                at: Option<OffsetDateTime>,
+                newer: Option<Recorded>,
+                first: Option<Recorded>| {
+        let latest = newer.map(|r| r.value);
+        match at {
+            // Unchanged since the first turn after the request, or no turn
+            // since: the request.
+            Some(_) if latest.is_none() || latest == first.map(|r| r.value) => request.clone(),
+            _ => latest.or_else(|| request.clone()),
+        }
+    };
+    let first = record.first.clone();
+    Listed {
+        model: pick(&row.model, requested.model, newer.model, first.model),
+        effort: pick(&row.effort, requested.effort, newer.effort, first.effort),
+        permission_mode: pick(
+            &row.permission_mode,
+            requested.permission_mode,
+            newer.permission_mode,
+            first.permission_mode,
+        ),
+    }
+}
+
 /// When Core last gave the backend each value. A value stored without a
 /// time, from a Core before it kept one, counts as never requested, so any
 /// turn of the record is newer than it.
-fn requested(row: &SessionRow) -> Requested {
+pub(super) fn requested(row: &SessionRow) -> Requested {
     let at = |text: &Option<String>| {
         text.as_deref()
             .and_then(|t| OffsetDateTime::parse(t, &Rfc3339).ok())

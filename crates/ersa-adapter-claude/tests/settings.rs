@@ -1,12 +1,13 @@
 //! What the adapter reports of a session's model, effort and permission
 //! mode: a live session's from its stream (PROTO-CLAUDE-CODE-STREAM-R40),
-//! any session's from its record (R57, R58, R59).
+//! any session's from its record (R57, R58, R59), and before a relaunch what
+//! the first turn after each of Core's requests ran with (R60).
 
 mod common;
 
 use common::{fixture, log};
 use ersa_adapter::Direction::{Backend, Host};
-use ersa_adapter::{Projector, RawLine, RecordedSettings, Requested};
+use ersa_adapter::{Projector, RawLine, RecordedSettings, RelaunchSettings, Requested};
 use ersa_adapter_claude::ClaudeProjector;
 use ersa_adapter_claude::record::{encoded_cwd, record_settings, summarize_session};
 use serde_json::{Value, json};
@@ -200,7 +201,7 @@ fn listed(lines: &[String]) -> RecordedSettings {
 }
 
 /// What a relaunch reads back of the record of `lines`.
-fn read_back(lines: &[String], requested: Requested) -> RecordedSettings {
+fn read_back(lines: &[String], requested: Requested) -> RelaunchSettings {
     let home = home_with(lines);
     record_settings(home.path(), CWD, SESSION, requested).unwrap()
 }
@@ -353,7 +354,7 @@ fn a_listing_reports_none_beyond_the_tail_and_a_relaunch_reads_back() {
     ];
     lines.extend(filler(300));
     assert_eq!(values(&listed(&lines)), [None, None, None]);
-    let back = read_back(&lines, Requested::default());
+    let back = read_back(&lines, Requested::default()).latest;
     assert_eq!(values(&back), [Some(OPUS), Some("high"), Some("plan")]);
 }
 
@@ -378,7 +379,7 @@ fn a_relaunch_reads_back_as_far_as_each_request() {
         effort: None,
         permission_mode: Some(at("2026-11-14T10:01:00.000Z")),
     };
-    let back = read_back(&lines, requested).since(requested);
+    let back = read_back(&lines, requested).latest.since(requested);
     assert_eq!(values(&back), [None, Some("high"), Some("acceptEdits")]);
 }
 
@@ -395,7 +396,7 @@ fn a_relaunch_stops_reading_at_cores_time() {
     lines.push(prompt("2026-11-14T10:00:30.000Z", "plan"));
     lines.push(prompt("2026-11-14T10:05:00.000Z", "acceptEdits"));
     // Read as it is, before Core picks: the reply was never reached.
-    let back = read_back(&lines, every("2026-11-14T10:01:00.000Z"));
+    let back = read_back(&lines, every("2026-11-14T10:01:00.000Z")).latest;
     assert_eq!(values(&back), [None, None, Some("acceptEdits")]);
 }
 
@@ -450,5 +451,156 @@ fn a_value_whose_turns_start_was_not_read_counts_only_without_a_time() {
 fn a_session_with_no_record_reports_none() {
     let home = tempfile::tempdir().unwrap();
     let settings = record_settings(home.path(), CWD, SESSION, Requested::default()).unwrap();
-    assert_eq!(settings, RecordedSettings::default());
+    assert_eq!(settings, RelaunchSettings::default());
+}
+
+// ---------------------------------------------------------------------------
+// The first turn after each request, before a relaunch (R60)
+
+/// [`reply`], written by a subagent.
+fn sidechain_reply(ts: &str, model: &str, effort: &str) -> String {
+    let mut entry: Value = serde_json::from_str(&reply(ts, model, effort)).unwrap();
+    entry["isSidechain"] = json!(true);
+    entry.to_string()
+}
+
+/// [`prompt`], written to a subagent.
+fn sidechain_prompt(ts: &str, mode: &str) -> String {
+    let mut entry: Value = serde_json::from_str(&prompt(ts, mode)).unwrap();
+    entry["isSidechain"] = json!(true);
+    entry.to_string()
+}
+
+/// Two turns after Core's requests ran with different values: the first
+/// reports the first's, the latest the second's, each with its turn's start.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R60
+#[test]
+fn a_relaunch_reports_the_first_turn_after_each_request_and_the_latest() {
+    let lines = [
+        prompt("2026-11-14T10:00:01.000Z", "default"),
+        reply("2026-11-14T10:00:02.000Z", "claude-sonnet-5-5", "low"),
+        // Core's requests at 10:01.
+        prompt("2026-11-14T10:02:00.000Z", "plan"),
+        reply("2026-11-14T10:02:01.000Z", OPUS, "high"),
+        reply("2026-11-14T10:02:02.000Z", OPUS, "high"),
+        prompt("2026-11-14T10:03:00.000Z", "acceptEdits"),
+        reply("2026-11-14T10:03:01.000Z", HAIKU, "medium"),
+    ];
+    let back = read_back(&lines, every("2026-11-14T10:01:00.000Z"));
+    assert_eq!(
+        values(&back.first),
+        [Some(OPUS), Some("high"), Some("plan")]
+    );
+    let first_began = Some(at("2026-11-14T10:02:00.000Z"));
+    assert_eq!(back.first.model.as_ref().unwrap().turn_began, first_began);
+    assert_eq!(back.first.effort.as_ref().unwrap().turn_began, first_began);
+    assert_eq!(
+        back.first.permission_mode.as_ref().unwrap().turn_began,
+        first_began
+    );
+    assert_eq!(
+        values(&back.latest),
+        [Some(HAIKU), Some("medium"), Some("acceptEdits")]
+    );
+}
+
+/// Each value's first turn is weighed against Core's time for it alone, and
+/// a value Core gave no time for has no first turn.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R60
+#[test]
+fn each_values_first_turn_is_after_its_own_request() {
+    let lines = [
+        prompt("2026-11-14T10:01:00.000Z", "plan"),
+        reply("2026-11-14T10:01:01.000Z", OPUS, "high"),
+        prompt("2026-11-14T10:03:00.000Z", "acceptEdits"),
+        reply("2026-11-14T10:03:01.000Z", HAIKU, "medium"),
+    ];
+    let requested = Requested {
+        model: Some(at("2026-11-14T10:00:00.000Z")),
+        effort: None,
+        permission_mode: Some(at("2026-11-14T10:02:00.000Z")),
+    };
+    let back = read_back(&lines, requested);
+    assert_eq!(values(&back.first), [Some(OPUS), None, Some("acceptEdits")]);
+}
+
+/// Fixture 26: the request came during a turn, whose later replies already
+/// ran with it; that turn began before the request, so it is not the first
+/// after it, which is the next turn.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R60
+#[test]
+fn a_turn_that_began_before_the_request_is_not_the_first_after_it() {
+    let lines = record_lines("26-controls-during-turn");
+    let request = every("2026-11-14T01:08:01.397Z");
+    let done = lines.iter().position(|l| l.contains("\"Done.\"")).unwrap();
+    // Only the turn that began before the request: no first turn yet.
+    let back = read_back(&lines[..=done], request);
+    assert_eq!(values(&back.first), [None, None, None]);
+    // The next turn is the first after it.
+    let back = read_back(&lines, request);
+    assert_eq!(
+        values(&back.first),
+        [Some(HAIKU), Some("low"), Some("acceptEdits")]
+    );
+}
+
+/// A subagent's prompts and replies are not the session's turns, even when
+/// stamped before the session's own first turn after the request.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R60
+#[test]
+fn a_subagents_entries_are_not_the_first_turn() {
+    let lines = [
+        prompt("2026-11-14T10:00:01.000Z", "default"),
+        sidechain_prompt("2026-11-14T10:01:30.000Z", "bypassPermissions"),
+        sidechain_reply("2026-11-14T10:01:31.000Z", HAIKU, "low"),
+        prompt("2026-11-14T10:02:00.000Z", "plan"),
+        reply("2026-11-14T10:02:01.000Z", OPUS, "high"),
+    ];
+    let back = read_back(&lines, every("2026-11-14T10:01:00.000Z"));
+    assert_eq!(
+        values(&back.first),
+        [Some(OPUS), Some("high"), Some("plan")]
+    );
+}
+
+/// A turn interrupted before any reply ran with no model: the first turn
+/// after the request that ran with one is the next.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R60
+#[test]
+fn a_turn_with_no_reply_gives_its_mode_but_no_model() {
+    let lines = [
+        prompt("2026-11-14T10:02:00.000Z", "plan"),
+        prompt("2026-11-14T10:03:00.000Z", "acceptEdits"),
+        reply("2026-11-14T10:03:01.000Z", OPUS, "high"),
+    ];
+    let back = read_back(&lines, every("2026-11-14T10:01:00.000Z"));
+    assert_eq!(
+        values(&back.first),
+        [Some(OPUS), Some("high"), Some("plan")]
+    );
+}
+
+/// The latest value lies in the tail, but the first turn after the request
+/// lies further back: the read goes on to it.
+// verifies: PROTO-CLAUDE-CODE-STREAM-R60
+#[test]
+fn a_relaunch_reads_back_to_the_first_turn_after_the_request() {
+    let mut lines = vec![
+        prompt("2026-11-14T10:00:01.000Z", "default"),
+        reply("2026-11-14T10:00:02.000Z", "claude-sonnet-5-5", "low"),
+        prompt("2026-11-14T10:02:00.000Z", "plan"),
+        reply("2026-11-14T10:02:01.000Z", OPUS, "high"),
+    ];
+    lines.extend(filler(300));
+    lines.push(prompt("2026-11-14T10:09:00.000Z", "acceptEdits"));
+    lines.push(reply("2026-11-14T10:09:01.000Z", HAIKU, "medium"));
+    let back = read_back(&lines, every("2026-11-14T10:01:00.000Z"));
+    assert_eq!(
+        values(&back.first),
+        [Some(OPUS), Some("high"), Some("plan")]
+    );
+    assert_eq!(
+        values(&back.latest),
+        [Some(HAIKU), Some("medium"), Some("acceptEdits")]
+    );
 }
