@@ -28,9 +28,9 @@ test("attaches files, an image and a folder from the attach menu, and the agent 
   await added;
   await page.getByRole("button", { name: "Trust", exact: true }).click();
   await expect(rail.getByRole("button", { name: /^New session in / })).toBeVisible();
-  // The project folder itself, so its files are inside the workspace.
-  await page.getByRole("button", { name: /^Workspace:/ }).click();
-  await page.getByRole("option", { name: /Project folder/ }).click();
+  // A folder without git runs in the project folder itself, with no Worktree checkbox, so its files are inside the
+  // workspace.
+  await expect(page.getByRole("checkbox", { name: "Worktree" })).toHaveCount(0);
 
   const attach = page.getByRole("button", { name: "Attach", exact: true });
   const choose = async (name: string, answer: string | string[]) => {

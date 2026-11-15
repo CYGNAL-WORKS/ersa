@@ -36,8 +36,7 @@
     "Not installed",
     "Permission mode",
     "Project",
-    "Session controls",
-    "Workspace"
+    "Session controls"
   ],
   "components/SessionTitle.tsx": [
     "Cancel",
