@@ -101,7 +101,10 @@ function baseSection(branches: Branches, base: string | undefined, onChoose: (id
         ? t("sessionControls.workspace.readingBranchesProgress")
         : branches.state === "failed"
           ? t("sessionControls.workspace.branchesFailedError")
-          : t("sessionControls.workspace.noBranchMatchesEmpty"),
+          : // A repository with no commits lists no branch at all: nothing was searched.
+            listed.length === 0
+            ? t("sessionControls.workspace.noBranchesEmpty")
+            : t("sessionControls.workspace.noBranchMatchesEmpty"),
   };
 }
 

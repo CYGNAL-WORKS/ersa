@@ -1060,6 +1060,10 @@ Default
 
 No branch matches.
 
+### `sessionControls.workspace.noBranchesEmpty`
+
+This project has no branches yet.
+
 ### `sessionControls.workspace.readingBranchesProgress`
 
 Reading the branches…
