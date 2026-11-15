@@ -36,7 +36,7 @@ use crate::{BACKEND, MAX_TESTED_VERSION};
 
 /// The version of this projection. Bump it whenever the events produced for
 /// some raw log would change, so Core re-projects cached sessions.
-pub const PROJECTOR_VERSION: u32 = 9;
+pub const PROJECTOR_VERSION: u32 = 10;
 
 /// The `model` the CLI gives the messages it writes itself rather than
 /// receiving from the API.
@@ -1146,15 +1146,16 @@ pub(crate) fn reply_events(
                 id, name, input, ..
             } => match input {
                 Value::Object(input) => {
-                    let (target, edits) = tools::target_and_edits(&name, &input);
+                    let call = tools::call_target(&name, &input);
                     events.push(Event::ToolRequested(ToolRequested {
                         tool_use_id: id,
                         name,
                         display_name: None,
                         input,
                         parent_tool_use_id: parent_tool_use_id.clone(),
-                        target,
-                        edits,
+                        target: call.target,
+                        target_kind: call.target_kind,
+                        edits: call.edits,
                     }))
                 }
                 _ => events.push(Event::Error(ErrorEvent {

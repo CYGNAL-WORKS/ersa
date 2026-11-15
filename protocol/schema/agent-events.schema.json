@@ -12,7 +12,7 @@
       "properties": {
         "v": {
           "description": "Event schema version. Bumped when any event's meaning or shape changes, including the lifecycle events Core emits itself.",
-          "const": 6
+          "const": 7
         },
         "session_id": { "type": "string", "minLength": 1 },
         "seq": {
@@ -234,8 +234,12 @@
         "input": { "$ref": "#/$defs/tool_input" },
         "parent_tool_use_id": { "type": "string" },
         "target": {
-          "description": "The one thing the call acts on, as the user would name it: a path, a command, a search or an address. Filled by the adapter from its backend's own tools; absent for any other call.",
+          "description": "The one thing the call acts on, as the user would name it: a path, a command, a search, an address or a subagent's task. Filled by the adapter from its backend's own tools; absent for any other call.",
           "type": "string"
+        },
+        "target_kind": {
+          "description": "Which kind of thing target is, so the Interface knows a path without guessing from its spelling. Present exactly when target is.",
+          "enum": ["path", "command", "search", "address", "task"]
         },
         "edits": {
           "description": "For a call that changes files, one entry per change in the order the call makes them; absent for any other call.",
@@ -243,6 +247,10 @@
           "minItems": 1,
           "items": { "$ref": "#/$defs/file_edit" }
         }
+      },
+      "dependentRequired": {
+        "target": ["target_kind"],
+        "target_kind": ["target"]
       }
     },
     "file_edit": {
