@@ -688,7 +688,7 @@ const claudeCode: BackendInfo = {
   ],
   efforts: choices([["low", "Low"], ["medium", "Medium"], ["high", "High"], ["xhigh", "Extra high"], ["max", "Max"]], ""),
   permission_modes: choices(
-    [["default", "Ask"], ["acceptEdits", "Accept edits"], ["plan", "Plan only"], ["auto", "Auto"]],
+    [["default", "Ask"], ["acceptEdits", "Accept edits"], ["plan", "Plan"], ["auto", "Auto"]],
     "default",
   ),
 };
