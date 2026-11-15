@@ -152,24 +152,10 @@ pub(super) async fn project_add(
     }
 
     // Project paths are on the local host until remote hosts (M4), so the
-    // folder is inspected on this machine's file system, off the async
-    // threads since file system calls block. Through a remote host's
-    // transport these become commands run there.
+    // folder is inspected on this machine's file system. Through a remote
+    // host's transport this becomes commands run there.
     let raw = params.path.clone();
-    let folder = tokio::task::spawn_blocking(move || inspect_folder(&raw))
-        .await
-        .map_err(|_| ApiError::internal("inspecting the folder panicked"))??;
-
-    if let Some(existing) = core
-        .store
-        .project_at(params.host_id.clone(), folder.key.clone())
-        .await?
-    {
-        return Err(
-            ApiError::invalid_state(format!("{} is already a project", folder.path))
-                .with_detail(existing.id),
-        );
-    }
+    let folder = inspect(core, &params.path, move || inspect_folder(&raw)).await?;
 
     let project = Project {
         id: persistence::new_id("p"),
@@ -181,11 +167,29 @@ pub(super) async fn project_add(
         // in its sessions only once they have said they trust it (ADR 0018).
         trusted: params.trusted,
     };
-    // Its root workspace, the project's own folder, is made with it.
-    core.store
-        .insert_project(project.clone(), folder.key)
-        .await?;
-    Ok(project)
+    // Its root workspace, the project's own folder, is made with it. The
+    // database's rule that a folder is one project on its host decides
+    // whether the folder is already one, so of two adds of one folder under
+    // way at once only one adds it (PROTO-CORE-API-R20).
+    match core
+        .store
+        .insert_project(project.clone(), folder.key.clone())
+        .await
+    {
+        Ok(_) => Ok(project),
+        Err(persistence::Error::Conflict(message)) => {
+            match core.store.project_at(project.host_id, folder.key).await? {
+                Some(existing) => Err(ApiError::invalid_state(format!(
+                    "{} is already a project",
+                    project.path
+                ))
+                .with_detail(existing.id)),
+                // Removed again since: the user can try again.
+                None => Err(ApiError::invalid_state(message)),
+            }
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// The project on the host whose folder is `params.path`, compared as
@@ -200,20 +204,50 @@ pub(super) async fn project_find(
     let raw = params.path.clone();
     // A folder that cannot be opened is no project: `project.add` would
     // refuse it, so it matches none, even one added there before it went.
-    let key = tokio::task::spawn_blocking(move || {
+    let key = inspect(core, &params.path, move || {
         let raw = absolute(&raw)?;
-        Ok::<_, ApiError>(
-            platform::canonicalize(Path::new(raw))
-                .ok()
-                .map(|p| platform::folder_key(&p)),
-        )
+        Ok(platform::canonicalize(Path::new(raw))
+            .ok()
+            .map(|p| platform::folder_key(&p)))
     })
-    .await
-    .map_err(|_| ApiError::internal("inspecting the folder panicked"))??;
+    .await?;
     let Some(key) = key else {
         return Ok(None);
     };
     Ok(core.store.project_at(params.host_id, key).await?)
+}
+
+/// Runs `inspection` of the folder the user named at `raw`, on a thread of
+/// its own since file system calls block, and gives it
+/// [`crate::CoreConfig::folder_inspection_limit`]: a folder on a share that
+/// stopped answering never answers. Past the limit the answer is
+/// `permission` (PROTO-CORE-API-R93). A hung file system call cannot be
+/// called off, so its thread is left to finish, and since nothing waits for
+/// its result any more, nothing comes of it when it does.
+async fn inspect<T: Send + 'static>(
+    core: &Core,
+    raw: &str,
+    inspection: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
+) -> Result<T, ApiError> {
+    let gate = core.config.inspect_gate.clone();
+    let runtime = tokio::runtime::Handle::current();
+    let task = tokio::task::spawn_blocking(move || {
+        // In tests, the folder that does not answer.
+        if let Some(gate) = gate {
+            runtime.block_on(gate.stop());
+        }
+        inspection()
+    });
+    match tokio::time::timeout(core.config.folder_inspection_limit, task).await {
+        Ok(joined) => joined.map_err(|_| ApiError::internal("inspecting the folder panicked"))?,
+        Err(_) => Err(ApiError::new(
+            ersa_protocol::core_api::ErrorKind::Permission,
+            format!(
+                "{} did not answer in time; it may be on a drive or share that stopped answering",
+                raw.trim()
+            ),
+        )),
+    }
 }
 
 /// `raw` without surrounding white space, refused unless it is absolute.
