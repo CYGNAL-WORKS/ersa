@@ -416,6 +416,8 @@ export const enUS = {
       // The status of the repository's default branch in the list.
       defaultBranchStatus: "Default",
       noBranchMatchesEmpty: "No branch matches.",
+      // The repository has no branch yet, as before its first commit.
+      noBranchesEmpty: "This project has no branches yet.",
       readingBranchesProgress: "Reading the branches…",
       // The project's branches could not be listed; the new workspace starts at the repository's default branch.
       branchesFailedError: "Ersa couldn't read this project's branches. The new workspace will start at the default branch.",
