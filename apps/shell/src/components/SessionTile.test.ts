@@ -92,7 +92,7 @@ describe("a session's tile", () => {
     expect(draw({})).toContain('<span class="session-backend" role="img" aria-label="claude-code">');
   });
 
-  // Issue #399: each backend draws its own mark, chosen by its name; a backend Ersa doesn't know draws a terminal.
+  // Issue 399: each backend draws its own mark, chosen by its name; a backend Ersa doesn't know draws a terminal.
   it("draws each backend's own mark, and a terminal for a backend it doesn't know", () => {
     const markOf = (backend: string) =>
       renderToStaticMarkup(
