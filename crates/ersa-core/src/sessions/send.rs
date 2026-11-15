@@ -342,15 +342,20 @@ impl SessionManager {
             attachments: outgoing,
         };
         // An adapter records each line before writing it, so whether the
-        // sink took a line for the backend during the call tells a refusal
+        // sink took a line for the backend during this call tells a refusal
         // before writing from a write that may have reached the backend.
-        let before = live.sink.host_lines();
-        match bounded(async move { session.send_message(&message).await }).await {
+        // Counted for this call alone: a permission answer or an interrupt
+        // written meanwhile is not this message.
+        let written = Arc::new(AtomicU64::new(0));
+        let call = counting_host_lines(Arc::clone(&written), async move {
+            session.send_message(&message).await
+        });
+        match bounded(call).await {
             Ok(()) => copies.keep(),
             // Refused with nothing recorded: not sent.
             Err(
                 e @ SessionError::Adapter(AdapterError::NotRunning | AdapterError::Protocol(_)),
-            ) if live.sink.host_lines() == before => {
+            ) if written.load(Ordering::SeqCst) == 0 => {
                 return Err(e);
             }
             // A write that failed or did not finish in time, or an adapter
@@ -363,17 +368,22 @@ impl SessionManager {
             }
         }
         // The adapter recorded the message before writing it, so the sink
-        // has it. Wait for the pipeline to project it: the turn it starts
-        // (or joins) is known then.
+        // has it. Wait for the pipeline to project its line: the turn it
+        // starts (or joins) is known then, unless the backend holds it
+        // behind the running turn. Then its `user.message` comes when the
+        // backend takes it in, into that turn or the next one, so its turn
+        // is not known yet. One send runs at a time per session, so if any
+        // message waits, this one does.
         let target = live.sink.next_index();
         let mut progress = live.progress.clone();
         let settled = matches!(
             tokio::time::timeout(SEND_SETTLE, progress.wait_for(|p| p.lines >= target)).await,
             Ok(Ok(_))
         );
-        // Sent, but not projected in time: the turn is not known, and the
-        // `user.message` event follows.
-        Ok(settled.then(|| progress.borrow().turn.max(1)))
+        let projected = *progress.borrow();
+        // Sent, but not projected in time, or held: the turn is not known,
+        // and the `user.message` event follows (PROTO-CORE-API, Sending).
+        Ok((settled && !projected.holding).then(|| projected.turn.max(1)))
     }
 
     /// Checks and copies a message's attachments on a blocking thread,

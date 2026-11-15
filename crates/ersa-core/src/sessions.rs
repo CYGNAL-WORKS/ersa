@@ -40,7 +40,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
@@ -612,6 +612,9 @@ struct Progress {
     /// Raw lines projected so far, which is also the index of the next one.
     lines: u64,
     turn: u32,
+    /// The backend holds messages behind its running turn, which are not
+    /// projected until it takes them in (PROTO-CORE-API-R81).
+    holding: bool,
 }
 
 impl Live {
@@ -2260,11 +2263,25 @@ struct CoreSink {
     ended: watch::Sender<bool>,
 }
 
+tokio::task_local! {
+    /// How many host lines the adapter recorded within one call that counts
+    /// them ([`counting_host_lines`]). An adapter records each line before
+    /// writing it, from within the call that writes it, so the count tells
+    /// that call's refusal before writing from a write that may have reached
+    /// the backend, whatever other requests write meanwhile.
+    static HOST_LINES_WRITTEN: Arc<AtomicU64>;
+}
+
+/// Runs `call`, counting the host lines recorded within it in `written`.
+fn counting_host_lines<F: std::future::Future>(
+    written: Arc<AtomicU64>,
+    call: F,
+) -> tokio::task::futures::TaskLocalFuture<Arc<AtomicU64>, F> {
+    HOST_LINES_WRITTEN.scope(written, call)
+}
+
 struct SinkInner {
     next_index: u64,
-    /// How many lines Core has written to the backend, as the adapter
-    /// recorded them before writing.
-    host_lines: u64,
     /// `None` once Core has closed the sink, which ends the pipeline.
     fed: Option<mpsc::UnboundedSender<Fed>>,
     start_done: bool,
@@ -2288,7 +2305,6 @@ impl CoreSink {
             app_log,
             inner: Mutex::new(SinkInner {
                 next_index: 0,
-                host_lines: 0,
                 fed: Some(fed),
                 start_done: false,
                 deferred_exit: None,
@@ -2319,7 +2335,8 @@ impl CoreSink {
         };
         inner.next_index += 1;
         if dir == Direction::Host {
-            inner.host_lines += 1;
+            // Counted for the adapter call recording it, when one counts.
+            let _ = HOST_LINES_WRITTEN.try_with(|written| written.fetch_add(1, Ordering::SeqCst));
         }
         Self::queue(inner, Fed::Line(raw));
     }
@@ -2347,11 +2364,6 @@ impl CoreSink {
     /// The index the next line will get.
     fn next_index(&self) -> u64 {
         lock(&self.inner).next_index
-    }
-
-    /// How many lines have been written to the backend.
-    fn host_lines(&self) -> u64 {
-        lock(&self.inner).host_lines
     }
 
     fn exit_fact(&self, exit: io::Result<ProcessExit>) -> LifecycleFact {
@@ -2747,6 +2759,7 @@ async fn run_pipeline(pipeline: Pipeline) {
         progress.send_replace(Progress {
             lines: lines_done,
             turn,
+            holding: last_tile.waiting.is_some(),
         });
     }
 }

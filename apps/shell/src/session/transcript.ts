@@ -11,15 +11,19 @@ import type {
   QuestionAsked,
   SessionState,
   ToolInput,
+  ToolRequested,
 } from "../protocol/agent-events.gen";
 
 /** The event schema version this Interface renders (PROTO-AGENT-EVENTS, Versioning). */
-export const EVENT_VERSION: Envelope["v"] = 6;
+export const EVENT_VERSION: Envelope["v"] = 7;
 
 /** What came with a user's message, as the event carries it (PROTO-AGENT-EVENTS, user.message). */
 export type MessageAttachment = NonNullable<Extract<Envelope["event"], { type: "user.message" }>["attachments"]>[number];
 
 /** One block of the transcript. `key` is stable while the block changes, so it updates in place. */
+/** What kind of thing a tool call's target is (PROTO-AGENT-EVENTS-R26). */
+export type TargetKind = NonNullable<ToolRequested["target_kind"]>;
+
 export type Item =
   /** The user's words, and what came with them in the order sent (FLOW-SEND-MESSAGE-R11). */
   | { kind: "user"; key: string; text: string; attachments?: MessageAttachment[] }
@@ -34,6 +38,8 @@ export type Item =
       input: ToolInput;
       /** The one thing the call acts on, when the event names it. */
       target?: string;
+      /** What kind of thing the target is, as the event says (PROTO-AGENT-EVENTS-R26): only a `path` shows as one. */
+      targetKind?: TargetKind;
       /** For a call that changes files, its changes in the order it makes them: it shows as a diff card (FLOW-READ-TRANSCRIPT-R09). */
       edits?: readonly FileEdit[];
       /** The key of the call that started the subagent making this one (FLOW-READ-TRANSCRIPT-R10). */
@@ -135,6 +141,7 @@ export function apply(transcript: Transcript, envelope: Envelope): Transcript {
         name: event.display_name ?? event.name,
         input: event.input,
         ...(event.target !== undefined ? { target: event.target } : {}),
+        ...(event.target_kind !== undefined ? { targetKind: event.target_kind } : {}),
         ...(event.edits !== undefined ? { edits: event.edits } : {}),
         ...(event.parent_tool_use_id !== undefined ? { parent: `tool:${event.parent_tool_use_id}` } : {}),
         live: seen?.live ?? envelope.source.input === "live",

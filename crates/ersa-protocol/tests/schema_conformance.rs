@@ -84,6 +84,7 @@ fn examples() -> Vec<Event> {
             input: object(json!({ "command": "cargo test" })),
             parent_tool_use_id: Some("t-0".into()),
             target: Some("cargo test".into()),
+            target_kind: Some(TargetKind::Command),
             // Not what Bash carries (PROTO-AGENT-EVENTS-R20), but the example
             // fills every optional field so the schema sees each shape.
             edits: Some(vec![
@@ -294,6 +295,7 @@ fn minimal_examples_validate_with_every_optional_field_absent() {
             input: object(json!({})),
             parent_tool_use_id: None,
             target: None,
+            target_kind: None,
             edits: None,
         }),
         Event::SessionState(SessionState {
@@ -516,6 +518,50 @@ fn a_tool_request_carries_its_target_and_edits_on_the_wire() {
     let mut payload = wire;
     payload["target"] = json!(["not", "a", "string"]);
     assert!(validate_event(&payload).is_err());
+}
+
+// verifies: PROTO-AGENT-EVENTS-R26
+#[test]
+fn a_target_says_what_kind_it_is_and_only_a_target_has_a_kind() {
+    let wire = serde_json::to_value(example("tool.requested")).expect("serialize");
+    assert_eq!(wire["target_kind"], "command");
+    validate_event(&wire).unwrap_or_else(|e| panic!("{e}"));
+
+    // Each kind the brief names is accepted with a target.
+    for kind in ["path", "command", "search", "address", "task"] {
+        let mut payload = wire.clone();
+        payload["target_kind"] = json!(kind);
+        validate_event(&payload).unwrap_or_else(|e| panic!("{kind}: {e}"));
+        let parsed: Event = serde_json::from_value(payload).expect("deserialize");
+        assert_eq!(
+            serde_json::to_value(parsed).expect("serialize")["target_kind"],
+            kind
+        );
+    }
+
+    // A target without its kind is refused.
+    let mut no_kind = wire.clone();
+    no_kind.as_object_mut().unwrap().remove("target_kind");
+    assert!(
+        validate_event(&no_kind).is_err(),
+        "accepted a target with no kind"
+    );
+
+    // A kind without a target is refused.
+    let mut no_target = wire.clone();
+    no_target.as_object_mut().unwrap().remove("target");
+    assert!(
+        validate_event(&no_target).is_err(),
+        "accepted a kind with no target"
+    );
+
+    // A kind the brief does not name is refused.
+    let mut unknown = wire;
+    unknown["target_kind"] = json!("file");
+    assert!(
+        validate_event(&unknown).is_err(),
+        "accepted an unknown kind"
+    );
 }
 
 #[test]
