@@ -11,15 +11,45 @@
 // pinned to the commit. Every earlier commit stays on the branch, so a link in
 // an older body keeps working. The repository is public: what you publish,
 // anyone can see.
+//
+// So it publishes only screenshots from checks that ran the stand-in backend.
+// A check that ran the real Claude Code can show the owner's account, folders
+// or conversation; when any screenshot came from one, or from a check whose
+// backend is not recorded, it refuses the whole run and publishes nothing.
 
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { defaultRun } from "./render-baselines.mjs";
 
 const ROOT = join(fileURLToPath(import.meta.url), "..", "..");
 export const RESULTS = join("apps", "shell", "live-results");
+
+/**
+ * The file the live-check harness writes in each test's results folder, beside its screenshots, naming the backend
+ * the test ran: `stand-in` or `claude`. apps/shell/live/harness.ts writes it under the same name.
+ */
+export const BACKEND_RECORD = "backend.txt";
+const STAND_IN = "stand-in";
+
+/**
+ * Why each of `shots` (relative to `dir`) may not be published, as `<shot>: <reason>` lines; empty when every one
+ * came from a check that ran the stand-in. Fails closed: a missing or unreadable record, or any other backend, refuses.
+ */
+export function refusals(dir, shots) {
+  return shots.flatMap((shot) => {
+    let backend;
+    try {
+      backend = readFileSync(join(dir, dirname(shot), BACKEND_RECORD), "utf8").trim();
+    } catch {
+      return [`${shot}: no record of the backend it ran`];
+    }
+    if (backend === STAND_IN) return [];
+    return [`${shot}: ran the real backend (${backend || "unnamed"})`];
+  });
+}
 
 /** `owner/name` of a GitHub remote URL, https or SSH; null for any other. */
 export function githubRepo(url) {
@@ -47,14 +77,8 @@ export function screenshots(dir) {
 // Throws an Error whose message says what went wrong and what to do; returns the Markdown.
 export function publishShots({ root = ROOT, remote = "origin" } = {}) {
   const git = (args, env = {}) => {
-    const r = spawnSync("git", args, {
-      cwd: root,
-      encoding: "utf8",
-      timeout: 2 * 60 * 1000,
-      windowsHide: true,
-      env: { ...process.env, ...env, GIT_TERMINAL_PROMPT: "0" },
-    });
-    if (r.status !== 0) throw new Error(`git ${args[0]} failed: ${(r.stderr || r.stdout || String(r.error)).trim()}`);
+    const r = defaultRun("git", args, { cwd: root, env });
+    if (r.status !== 0) throw new Error(`git ${args[0]} failed: ${(r.stderr || r.stdout).trim()}`);
     return r.stdout.trim();
   };
 
@@ -65,6 +89,18 @@ export function publishShots({ root = ROOT, remote = "origin" } = {}) {
   const dir = join(root, RESULTS);
   const shots = screenshots(dir);
   if (shots.length === 0) throw new Error(`No screenshots in ${RESULTS}; run the live checks first (pnpm live in apps/shell).`);
+  // Before anything is written to git: a refused screenshot must not reach even the local object store.
+  const refused = refusals(dir, shots);
+  if (refused.length > 0) {
+    const folders = [...new Set(refused.map((line) => line.slice(0, line.indexOf(":")).split("/").slice(0, -1).join("/") || "."))];
+    throw new Error(
+      [
+        "Refusing to publish: these screenshots did not come from a check that ran the stand-in backend, and the repository is public.",
+        ...refused.map((line) => `  ${line}`),
+        `Delete ${folders.map((f) => join(RESULTS, f)).join(", ")}, run this again, and describe what those checks showed in words in the pull request's Evidence.`,
+      ].join("\n"),
+    );
+  }
 
   // A private index, so the checkout's own index and working tree are untouched.
   const scratch = mkdtempSync(join(tmpdir(), "live-shots-"));
