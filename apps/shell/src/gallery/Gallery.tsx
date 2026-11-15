@@ -285,6 +285,19 @@ const ersaOnly: Parameters<typeof RailTree>[0] = {
 const strangerOnly: Parameters<typeof RailTree>[0] = { ...tree, projects: { state: "ready", projects: [projects[3]!] }, sessions: { state: "ready", sessions: [] } };
 /** A resting tile above each forced one, so the two read apart in the screenshot. */
 const pairOnly: Parameters<typeof RailTree>[0] = { ...ersaOnly, sessions: { state: "ready", sessions: pointerPair }, activeId: undefined };
+/** A tile for each backend's mark (issue 399): Claude Code, Copilot, and one Ersa doesn't know. */
+const eachBackend: Parameters<typeof RailTree>[0] = {
+  ...ersaOnly,
+  sessions: {
+    state: "ready",
+    sessions: [
+      { ...session("b1", "Fix the flaky reconnect test", "2026-11-01T09:00:00Z", { state: "idle", pending: [] }), backend: "claude-code" },
+      { ...session("b2", "Tidy the gallery", "2026-11-01T08:00:00Z", { state: "idle", pending: [] }), backend: "copilot" },
+      { ...session("b3", "Explain the raw log", "2026-11-01T07:00:00Z", { state: "idle", pending: [] }), backend: "codex" },
+    ],
+  },
+  activeId: undefined,
+};
 /** One session being deleted and one whose deletion failed. */
 // Core stops a session before it deletes anything, so both are stopped.
 const beingDeleted: Session[] = pointerPair.map((s, i) => ({ ...s, tile: { ...s.tile, state: "idle" }, deleting: i === 0 ? "running" : "failed" }));
@@ -1040,6 +1053,9 @@ const entries: Entry[] = [
       ],
       ["Trust refused", <RailTree {...ersaOnly} trusting={{ p1: { state: "failed", message: "no project p1" } }} />],
       ["Every tile state", <RailTree {...ersaOnly} sessions={{ state: "ready", sessions: everyState }} activeId={undefined} />],
+      ["Each backend's mark", <RailTree {...eachBackend} />],
+      ["Each backend's mark, active", <RailTree {...eachBackend} activeId="b2" />],
+      ["Each backend's mark, pointer over it", <RailTree {...eachBackend} force={{ id: "b3", state: "hover" }} />],
       ["Tile, pointer over it", <RailTree {...pairOnly} force={{ id: "p2", state: "hover" }} />],
       ["Tile, pressed", <RailTree {...pairOnly} force={{ id: "p2", state: "pressed" }} />],
       ["Tile, keyboard focus", <RailTree {...pairOnly} force={{ id: "p2", state: "focus" }} />],

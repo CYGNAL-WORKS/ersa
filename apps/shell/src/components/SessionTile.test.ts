@@ -92,6 +92,20 @@ describe("a session's tile", () => {
     expect(draw({})).toContain('<span class="session-backend" role="img" aria-label="claude-code">');
   });
 
+  // Issue 399: each backend draws its own mark, chosen by its name; a backend Ersa doesn't know draws a terminal.
+  it("draws each backend's own mark, and a terminal for a backend it doesn't know", () => {
+    const markOf = (backend: string) =>
+      renderToStaticMarkup(
+        createElement(SessionTile, { session: { ...at("s", "2026-11-01T09:00:00.000Z"), backend }, active: false, unseen: false, onSelect: () => {} }),
+      ).match(/<span class="session-backend"[^>]*>(.*?)<\/span>/)?.[1] ?? "";
+    expect(markOf("claude-code")).toContain('d="m4.7144 15.9555');
+    expect(markOf("copilot")).toContain('d="M23.922 16.997');
+    for (const known of ["claude-code", "copilot"]) expect(markOf(known)).toContain('fill="currentColor"');
+    const unknown = markOf("codex");
+    expect(unknown).toContain("lucide-square-terminal");
+    expect(unknown).not.toContain("lucide-bot");
+  });
+
   it("puts the cost after the phrase, with a dot only between the two", () => {
     expect(draw({ state: "error", cost_usd_total: 0.02 })).toContain('<span class="session-detail"><span class="session-phrase">Error</span> · $0.02</span>');
     expect(draw({ state: "running", cost_usd_total: 0.19 })).toContain('<span class="session-detail">$0.19</span>');
