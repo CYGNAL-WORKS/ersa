@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use ersa_adapter::{Adapter, Transport};
 use ersa_protocol::core_api::{BackendState, HelloHost};
-use tokio::sync::{Mutex, watch};
+use tokio::sync::{Mutex, Semaphore, watch};
 
 use crate::adapters::{self, Detected};
 use crate::app_log::AppLog;
@@ -135,6 +135,11 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// is reused, so a backend installed while Core runs shows up soon after.
 pub const FAILED_DETECTION_TTL: Duration = Duration::from_secs(30);
 
+/// How many folder inspections may be under way at once, the ones left
+/// running past their limit included: as many as `attachment.inspect`
+/// reads may hold.
+pub const FOLDER_INSPECTIONS: usize = 8;
+
 /// The default for [`CoreConfig::folder_inspection_limit`]: a folder on a
 /// share that stopped answering never answers (PROTO-CORE-API-R93).
 pub const FOLDER_INSPECTION_LIMIT: Duration = Duration::from_secs(10);
@@ -189,6 +194,11 @@ pub struct Core {
     /// [`FAILED_DETECTION_TTL`] otherwise. An async mutex, held while
     /// detecting, so concurrent requests run one detection between them.
     local_backends: Mutex<Option<(Instant, Vec<Detected>)>>,
+    /// The places for folder inspections (`project.add`, `project.find`).
+    /// Each holds one on its thread until its file system call returns,
+    /// past its time limit too, so folders that never answer take at most
+    /// [`FOLDER_INSPECTIONS`] threads, never more.
+    pub(crate) folder_inspections: Arc<Semaphore>,
     /// Flips to `true` once when shutdown is requested. A `watch` channel
     /// rather than a `Notify`, because a late waiter must still see it.
     shutdown: watch::Sender<bool>,
@@ -223,6 +233,7 @@ impl Core {
             host_name: platform::host_name(),
             started: Instant::now(),
             local_backends: Mutex::new(None),
+            folder_inspections: Arc::new(Semaphore::new(FOLDER_INSPECTIONS)),
             shutdown: watch::Sender::new(false),
             replay_audience: watch::Sender::new(false),
         }

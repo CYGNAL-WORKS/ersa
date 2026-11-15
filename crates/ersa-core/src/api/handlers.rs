@@ -2,6 +2,7 @@
 //! and returns the typed result or an [`ApiError`].
 
 use std::path::{Component, Path};
+use std::sync::Arc;
 
 use ersa_protocol::core_api::{
     BackendInfo, BackendListParams, Branch, BranchListParams, Empty, HelloParams, HelloResult,
@@ -228,12 +229,26 @@ pub(super) async fn project_find(
 /// The thread is a plain one, not one of Tokio's blocking pool: that pool
 /// also runs every database call, so threads stuck on a dead share there
 /// would in time leave none for the database, and the runtime waits for
-/// them when Core exits.
+/// them when Core exits. It holds a place among
+/// [`crate::state::FOLDER_INSPECTIONS`] until the call returns; with none
+/// free, so many folders are not answering that the answer is
+/// `permission` at once.
 async fn inspect<T: Send + 'static>(
     core: &Core,
     raw: &str,
     inspection: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
 ) -> Result<T, ApiError> {
+    let place = Arc::clone(&core.folder_inspections)
+        .try_acquire_owned()
+        .map_err(|_| {
+            ApiError::new(
+                ersa_protocol::core_api::ErrorKind::Permission,
+                format!(
+                    "{} was not inspected: too many folders asked about are not answering;                      try again once they do",
+                    raw.trim()
+                ),
+            )
+        })?;
     let gate = core.config.inspect_gate.clone();
     let runtime = tokio::runtime::Handle::current();
     let (done, answer) = tokio::sync::oneshot::channel();
@@ -246,6 +261,8 @@ async fn inspect<T: Send + 'static>(
             }
             // Fails only when the request stopped waiting: nothing to do.
             let _ = done.send(inspection());
+            // Only now, however long the call took, is the place free.
+            drop(place);
         })
         .map_err(|e| ApiError::internal(format!("could not start the folder inspection: {e}")))?;
     match tokio::time::timeout(core.config.folder_inspection_limit, answer).await {
