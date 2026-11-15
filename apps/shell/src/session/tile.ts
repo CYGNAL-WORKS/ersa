@@ -28,7 +28,7 @@ export interface TileView {
   phrase?: string;
   /** The cost as reported, formatted. */
   cost?: string;
-  /** The context ring's share used, from 0 to 1; absent until both the tokens and a window are reported. */
+  /** The context ring's share used, from 0 to 1; absent until both the tokens and a window are reported, while the ring is empty. */
   ring?: number;
 }
 
@@ -128,8 +128,16 @@ export function contextUsed(tile: Tile): number | undefined {
   return Math.min(Math.max(tokens / window, 0), 1);
 }
 
+/** The context ring's band: quiet, then caution, then danger as the window fills. */
+export type RingBand = "quiet" | "caution" | "danger";
+
 /**
- * The context ring is near full from 85 percent (LAY-SHELL, Context), on a tile and in the session controls. It is
- * read in whole percent, as the ring's readout and name round it, so "85 percent used" is always near full.
+ * The context ring's band (LAY-SHELL, Context), on a tile and in the session controls: quiet up to half, caution past
+ * half, danger past four fifths. It is read in whole percent, as the ring's readout and name round it, so the colour
+ * always agrees with the figure: what reads 50 percent is quiet and what reads 51 percent is caution. Absent with no reading.
  */
-export const nearFull = (used: number | undefined): boolean => used !== undefined && Math.round(used * 100) >= 85;
+export function ringBand(used: number | undefined): RingBand | undefined {
+  if (used === undefined) return undefined;
+  const percent = Math.round(used * 100);
+  return percent > 80 ? "danger" : percent > 50 ? "caution" : "quiet";
+}

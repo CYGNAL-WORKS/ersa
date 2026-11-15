@@ -1102,6 +1102,80 @@ async fn a_title_read_from_the_record_at_the_end_is_sent_as_a_tile() {
     assert_eq!(tile["params"]["title"], "hello");
 }
 
+/// The record read at a session's end corrects the date created Core knew
+/// (when it started the backend) to the record's first entry, and every
+/// window is sent a tile carrying the corrected date.
+// verifies: PROTO-CORE-API-R106
+#[tokio::test(flavor = "multi_thread")]
+async fn a_date_created_corrected_by_the_record_is_sent_as_a_tile() {
+    let records = Records::default();
+    let (core, _stats) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
+    let mut client = core.client().await;
+    let mut other = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    // Named first, so the record read at the end finds the title the last
+    // tile carried, and only the date created can call for a tile.
+    client
+        .result("session.set_title", json!({ "id": id, "title": "Named" }))
+        .await;
+    let before = session_row(&mut client, &id).await["created_at"].clone();
+    assert_ne!(before, "2026-11-01T00:00:00.000Z");
+    client.result("session.stop", json!({ "id": id })).await;
+    let tile = tokio::time::timeout(
+        Duration::from_secs(10),
+        other.notification_where(|n| {
+            n["method"] == "session.tile"
+                && n["params"]["session_id"] == id
+                && n["params"]["created_at"] == "2026-11-01T00:00:00.000Z"
+        }),
+    )
+    .await
+    .expect("a tile carrying the record's date created within 10 s");
+    assert_eq!(tile["params"]["title"], "Named", "{tile:#}");
+}
+
+/// Every tile carries the date created `session.list` lists at the time:
+/// the one Core knew while the session runs, the record's once read, and
+/// the same on a tile for a rename.
+// verifies: PROTO-CORE-API-R105
+#[tokio::test(flavor = "multi_thread")]
+async fn every_tile_carries_the_date_created_the_list_gives() {
+    let records = Records::default();
+    let (core, _stats) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
+    let mut client = core.client().await;
+    let mut other = core.client().await;
+    let id = new_session(&core, &mut client).await;
+    let tile_for = |n: &Value| n["method"] == "session.tile" && n["params"]["session_id"] == id;
+    let first = tokio::time::timeout(Duration::from_secs(10), other.notification_where(&tile_for))
+        .await
+        .expect("a tile within 10 s");
+    let listed = session_row(&mut client, &id).await["created_at"].clone();
+    assert!(listed.is_string(), "{listed}");
+    assert_eq!(first["params"]["created_at"], listed, "{first:#}");
+
+    client
+        .result("session.send", json!({ "id": id, "text": "hello" }))
+        .await;
+    client.result("session.stop", json!({ "id": id })).await;
+    // Once the record has been read, a rename's tile carries its date.
+    titled_row(&mut client, &id).await;
+    client
+        .result("session.set_title", json!({ "id": id, "title": "Renamed" }))
+        .await;
+    let renamed = tokio::time::timeout(
+        Duration::from_secs(10),
+        other.notification_where(|n| tile_for(n) && n["params"]["title"] == "Renamed"),
+    )
+    .await
+    .expect("a tile within 10 s");
+    let listed = session_row(&mut client, &id).await["created_at"].clone();
+    assert_eq!(listed, "2026-11-01T00:00:00.000Z");
+    assert_eq!(renamed["params"]["created_at"], listed, "{renamed:#}");
+}
+
 /// Opening a stopped session's view tells every window of its tile, and
 /// that tile carries the title its record gives it.
 // verifies: PROTO-CORE-API-R83
