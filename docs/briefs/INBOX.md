@@ -8,7 +8,6 @@ A planning pass resolves each entry by updating a brief or ADR and then deletes 
 
 ## Open
 
-- [ ] 2026-11-15 PROTO-CLAUDE-CODE-STREAM: R76 and the `rate_limit_event` section say a line with no `unifiedWindows` reports no windows, but not what an empty `unifiedWindows` object reports (no recording has one). The adapter projects it as `windows: []`, a report that the login now counts against no window, since a report's list replaces the last one (#421).
 
 
 
