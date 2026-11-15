@@ -182,6 +182,34 @@ describe("the session controls under a running session", () => {
   });
 
   // verifies: FLOW-NEW-SESSION-R30
+  it("holds each chip on its own, and keeps one change's refusal when another is accepted after it", async () => {
+    const effort = deferred<Session>();
+    const core = fakeCore(session(), {
+      "session.set_effort": () => effort.promise,
+      "session.set_model": () => {
+        throw refusal("session.set_model: the backend refused the model");
+      },
+    });
+    await start(core);
+    fireEvent.click(chip("Effort"));
+    fireEvent.click(screen.getByRole("option", { name: /High/ }));
+    await settle();
+    fireEvent.click(chip("Model"));
+    fireEvent.click(screen.getByRole("option", { name: /Sonnet/ }));
+    await settle();
+    // The model's refusal is said, and the effort's change is still on its way.
+    expect(statusLine()?.textContent).toBe("Ersa can't change the model. The backend refused the model.");
+    expect(chip("Effort").getAttribute("aria-busy")).toBe("true");
+    expect(chip("Model").hasAttribute("aria-busy")).toBe(false);
+    // The effort's answer arrives: the refusal stays, since the user has neither sent nor opened a chip.
+    await act(async () => effort.resolve(core.becomes({ effort: "high" })));
+    await settle();
+    expect(chip("Effort").getAttribute("aria-label")).toBe("Effort: High");
+    expect(chip("Effort").hasAttribute("aria-busy")).toBe(false);
+    expect(statusLine()?.textContent).toBe("Ersa can't change the model. The backend refused the model.");
+  });
+
+  // verifies: FLOW-NEW-SESSION-R30
   it("clears a refused change's line when the user sends", async () => {
     const core = fakeCore(session(), {
       "session.set_permission_mode": () => {
