@@ -291,6 +291,49 @@ async fn a_live_session_lists_what_its_stream_reports_and_its_record_once_it_end
 
 // verifies: PROTO-CORE-API-R71
 #[tokio::test(flavor = "multi_thread")]
+async fn a_model_the_backend_reports_by_what_the_request_resolves_to_is_listed_as_the_request() {
+    let backend = Backend::default();
+    let (core, _) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    // `model-b` is an alias the backend resolves to `model-b-1`, as Claude
+    // Code resolves `opus` to `claude-opus-5-5` (#397).
+    let id = started(
+        &core,
+        &mut client,
+        json!({ "model": "model-b", "effort": "low" }),
+    )
+    .await;
+
+    // The stream reports the resolved id: still the choice the user made.
+    client
+        .result(
+            "session.send",
+            json!({ "id": id, "text": "report model-b-1 plan" }),
+        )
+        .await;
+    wait_for_values(&mut client, &id, three("model-b", "low", "plan")).await;
+
+    // So does the record, once the run ends, and across a restart.
+    backend.record_says("model-b-1", "low", "plan", Some(OffsetDateTime::now_utc()));
+    client.result("session.stop", json!({ "id": id })).await;
+    wait_for_values(&mut client, &id, three("model-b", "low", "plan")).await;
+    let (core, mut client) = restart(core, &backend).await;
+    client
+        .result("backend.list", json!({ "host_id": "local" }))
+        .await;
+    wait_for_values(&mut client, &id, three("model-b", "low", "plan")).await;
+
+    // Another model is a change, reported as it is.
+    backend.record_says("model-a", "low", "plan", Some(OffsetDateTime::now_utc()));
+    let (_core, mut client) = restart(core, &backend).await;
+    client
+        .result("backend.list", json!({ "host_id": "local" }))
+        .await;
+    wait_for_values(&mut client, &id, three("model-a", "low", "plan")).await;
+}
+
+// verifies: PROTO-CORE-API-R71
+#[tokio::test(flavor = "multi_thread")]
 async fn a_fork_starts_with_the_values_its_original_lists() {
     let backend = Backend::default();
     let (core, fake) = start(&backend, tempdir()).await;
