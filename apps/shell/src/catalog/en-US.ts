@@ -409,26 +409,12 @@ export const enUS = {
       // The project chip while the local host has no project: choosing it, or sending, opens the folder dialog.
       chooseFolderButton: "Choose a folder",
     },
-    // The workspace chip (docs/design/COMPOSER.md, The workspace list): a new workspace or the project's own folder,
-    // each with what it means, and for a git project the base branch the new workspace starts from
-    // (FLOW-NEW-SESSION-R21, R28, R29).
-    workspace: {
-      newWorkspaceLabel: "New workspace",
-      isolatedStatus: "Isolated",
-      projectFolderLabel: "Project folder",
-      sharedStatus: "Shared",
-      // What the chip reads with a new workspace and its base branch chosen.
-      newFromLabel: "New workspace from {branch}",
-      baseBranchHeading: "Base branch",
-      searchBranchesPlaceholder: "Search branches",
-      // The status of the repository's default branch in the list.
-      defaultBranchStatus: "Default",
-      noBranchMatchesEmpty: "No branch matches.",
-      // The repository has no branch yet, as before its first commit.
-      noBranchesEmpty: "This project has no branches yet.",
-      readingBranchesProgress: "Reading the branches…",
-      // The project's branches could not be listed; the new workspace starts at the repository's default branch.
-      branchesFailedError: "Ersa couldn't read this project's branches. The new workspace will start at the default branch.",
+    // The Worktree checkbox for a project Ersa can make worktrees for (issue 412): checked, the session runs in a new
+    // isolated workspace made from the repository's default branch; unchecked, in the project's own folder. The
+    // description is its tooltip and what assistive technology hears after the name.
+    worktree: {
+      label: "Worktree",
+      description: "The session works in an isolated copy of the repository.",
     },
     // The backend's default model in the model chip and its list, when the backend says which listed model it stands
     // for: Default, then that model, as Claude Desktop names it (FLOW-NEW-SESSION-R36).
