@@ -37,6 +37,14 @@
   animation: composer-status-in var(--motion-settle) var(--motion-ease-out);
 }
 
+/* A line that stays one line, as the waiting row: its text is cut with an ellipsis where the line ends. */
+.composer-status-cut {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* It opens upward, growing and fading in. */
 @keyframes composer-status-in {
   from {
@@ -117,6 +125,17 @@
   }
 }
 
+/* Removed, it fades out, then goes. */
+.attachment.composer-attachment[data-leaving] {
+  animation: composer-attachment-out var(--motion-quick) var(--motion-ease-out) forwards;
+}
+
+@keyframes composer-attachment-out {
+  to {
+    opacity: 0;
+  }
+}
+
 .composer-attachment-detail {
   flex: none;
   color: var(--color-ink-faint);
@@ -176,9 +195,9 @@
 
 .composer-send {
   flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  /* A grid of one cell, so send's and stop's icons share it and crossfade. */
+  display: inline-grid;
+  place-items: center;
   box-sizing: border-box;
   width: var(--size-control-lg);
   height: var(--size-control-lg);
@@ -268,19 +287,31 @@
   fill: currentColor;
 }
 
-/* Send becoming stop and back crossfades: the new icon fades in. */
+/* Stop once chosen, until the turn ends (FLOW-SEND-MESSAGE-R20): its square fades to ink-faint, and it no longer
+   changes under the pointer. */
+.composer-send[data-stop][data-stopping],
+.composer-send[data-stop][data-stopping]:hover,
+.composer-send[data-stop][data-stopping]:active,
+.composer-send[data-stop][data-stopping][data-force] {
+  color: var(--color-ink-faint);
+  background: var(--material-tile);
+  cursor: default;
+}
+
+.composer-send[data-stop][data-stopping]:not(:focus-visible, [data-force="focus"]) {
+  border-color: var(--color-line);
+}
+
+/* Send becoming stop and back crossfades: both icons share one place, and the one not shown fades out. */
 .composer-send-icon {
   display: inline-flex;
+  grid-area: 1 / 1;
+  opacity: 0;
+  transition: opacity var(--motion-quick) var(--motion-ease-out);
 }
 
-.composer-send-icon[data-traded] {
-  animation: composer-send-icon-in var(--motion-quick) var(--motion-ease-out);
-}
-
-@keyframes composer-send-icon-in {
-  from {
-    opacity: 0;
-  }
+.composer-send-icon[data-shown] {
+  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -293,8 +324,11 @@
     transition: none;
   }
 
-  .composer-send-icon[data-traded],
   .attachment.composer-attachment {
     animation: none;
+  }
+
+  .composer-send-icon {
+    transition: none;
   }
 }

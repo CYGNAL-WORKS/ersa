@@ -26,7 +26,8 @@ use ersa_adapter::{
     Adapter, AdapterError, AdapterSession, AdapterSink, BackendChoices, ConversationEnd, Direction,
     ImageLimits, LineReader, LineWriter, OpenElsewhere, OutgoingMessage, PermissionDecision,
     Process, ProcessExit, ProcessSpec, Projector, QuestionReply, RecordDeletion, RecordEvent,
-    RecordSummary, RelaunchSettings, Requested, SessionConfig, TitleRules, Transport, async_trait,
+    RecordSummary, RelaunchSettings, Requested, SessionConfig, SessionControl, TitleRules,
+    Transport, async_trait,
 };
 use ersa_protocol::core_api::{Choice, ModelChoice};
 use ersa_protocol::events::PermissionBehavior;
@@ -38,8 +39,8 @@ use crate::questions::{self, QUESTION_TOOL};
 use crate::record::{self, LiveCheck};
 use crate::suggestions;
 use crate::wire::{
-    HostControlResponse, HostMessage, HostRequest, HostResponse, InitializeRequest, RenameSource,
-    WorkspaceTrust,
+    FlagSettings, HostControlResponse, HostMessage, HostRequest, HostResponse, InitializeRequest,
+    RenameSource, WorkspaceTrust,
 };
 
 /// The message a declined question's deny carries: what the agent reads
@@ -772,6 +773,13 @@ impl ClaudeAdapter {
             exited: exited_rx,
             stop_grace: self.stop_grace,
             answer_timeout: self.answer_timeout,
+            // Only a new session the adapter started under its own id: a
+            // resumed session or a fork asks nothing (R49).
+            may_ask_title: AtomicBool::new(
+                config.backend_session_id.is_some()
+                    && config.fork_of.is_none()
+                    && config.resume.is_none(),
+            ),
         };
 
         // Register for the answer before the request can be written, so the
@@ -1163,9 +1171,74 @@ struct ClaudeSession {
     stop_grace: Duration,
     /// How long a host control request waits for the CLI's answer.
     answer_timeout: Duration,
+    /// True until the session has asked the CLI to name it: set at launch
+    /// for a new session only (PROTO-CLAUDE-CODE-STREAM-R49).
+    may_ask_title: AtomicBool,
 }
 
 impl ClaudeSession {
+    /// Asks the CLI to name a new session once its first message with words
+    /// has gone to the CLI (PROTO-CLAUDE-CODE-STREAM-R49). Nothing waits on
+    /// the answer, so the turn goes on: it arrives on stdout like any line,
+    /// and the projector reads the title from it, within its deadline
+    /// (R50). A message of attachments alone leaves the asking to the next.
+    async fn ask_title(&self, text: &str) {
+        if text.trim().is_empty() || !self.may_ask_title.swap(false, Ordering::SeqCst) {
+            return;
+        }
+        let request_id = self.shared.request_id("title");
+        let request = HostRequest::GenerateSessionTitle {
+            description: text.to_string(),
+            persist: true,
+        };
+        // Naming is a nicety: a write that fails tells the user nothing, and
+        // the session's exit, if that is why, is reported anyway.
+        let _ = self
+            .shared
+            .write(&HostMessage::control_request(request_id, request))
+            .await;
+    }
+
+    /// Sends the control request `request`, its id naming it `what`, and
+    /// waits for the CLI's answer: `Ok` for success, the CLI's reason for a
+    /// refusal. The answer is recorded before it reaches this wait, so the
+    /// sink has it when this returns.
+    async fn ask(&self, what: &str, request: HostRequest) -> Result<(), AdapterError> {
+        let request_id = self.shared.request_id(what);
+        // Registered before the write, so the read loop finds the waiter
+        // however soon the answer comes. An exit clears every waiter, which
+        // ends this wait too.
+        let (answer_tx, answer_rx) = oneshot::channel();
+        lock(&self.shared.awaiting).insert(request_id.clone(), answer_tx);
+        let written = self
+            .shared
+            .write(&HostMessage::control_request(&request_id, request))
+            .await;
+        if let Err(e) = written {
+            lock(&self.shared.awaiting).remove(&request_id);
+            return Err(e);
+        }
+        // A CLI that never answers (one too old to know the request, or
+        // wedged) must not keep the waiter for the rest of the session.
+        let answer = tokio::time::timeout(self.answer_timeout, answer_rx).await;
+        match answer {
+            Ok(Ok(answer)) if answer["subtype"] == "success" => Ok(()),
+            Ok(Ok(answer)) => Err(AdapterError::Protocol(format!(
+                "the CLI refused the {what}: {}",
+                answer["error"].as_str().unwrap_or("no reason given")
+            ))),
+            // The read loop dropped the waiter: the CLI exited first.
+            Ok(Err(_)) => Err(AdapterError::NotRunning),
+            Err(_) => {
+                lock(&self.shared.awaiting).remove(&request_id);
+                Err(AdapterError::Protocol(format!(
+                    "the CLI did not answer the {what} within {:?}; it may still take it",
+                    self.answer_timeout
+                )))
+            }
+        }
+    }
+
     async fn kill_and_wait(&self) {
         self.shared.stopping.store(true, Ordering::SeqCst);
         self.shared.kill.send_replace(true);
@@ -1262,7 +1335,9 @@ impl Drop for ClaudeSession {
 #[async_trait]
 impl AdapterSession for ClaudeSession {
     async fn send_user(&self, text: &str) -> Result<(), AdapterError> {
-        self.shared.write(&HostMessage::user_text(text)).await
+        self.shared.write(&HostMessage::user_text(text)).await?;
+        self.ask_title(text).await;
+        Ok(())
     }
 
     /// A message with attachments: its text, then its images, then the list
@@ -1276,7 +1351,9 @@ impl AdapterSession for ClaudeSession {
         }
         self.shared
             .write(&HostMessage::user(crate::attachments::blocks(message)))
-            .await
+            .await?;
+        self.ask_title(&message.text).await;
+        Ok(())
     }
 
     async fn decide_permission(
@@ -1332,44 +1409,39 @@ impl AdapterSession for ClaudeSession {
     /// as the user's own rename, and `session_id` makes a CLI that has moved
     /// to another session refuse rather than name that one.
     async fn rename(&self, backend_session_id: &str, title: &str) -> Result<(), AdapterError> {
-        let request_id = self.shared.request_id("rename");
-        // Registered before the write, so the read loop finds the waiter
-        // however soon the answer comes. An exit clears every waiter, which
-        // ends this wait too.
-        let (answer_tx, answer_rx) = oneshot::channel();
-        lock(&self.shared.awaiting).insert(request_id.clone(), answer_tx);
         let request = HostRequest::RenameSession {
             title: title.to_string(),
             source: Some(RenameSource::Host),
             session_id: Some(backend_session_id.to_string()),
         };
-        let written = self
-            .shared
-            .write(&HostMessage::control_request(&request_id, request))
-            .await;
-        if let Err(e) = written {
-            lock(&self.shared.awaiting).remove(&request_id);
-            return Err(e);
-        }
-        // A CLI that never answers (one too old to know the request, or
-        // wedged) must not keep the waiter for the rest of the session.
-        let answer = tokio::time::timeout(self.answer_timeout, answer_rx).await;
-        match answer {
-            Ok(Ok(answer)) if answer["subtype"] == "success" => Ok(()),
-            Ok(Ok(answer)) => Err(AdapterError::Protocol(format!(
-                "the CLI refused the rename: {}",
-                answer["error"].as_str().unwrap_or("no reason given")
-            ))),
-            // The read loop dropped the waiter: the CLI exited first.
-            Ok(Err(_)) => Err(AdapterError::NotRunning),
-            Err(_) => {
-                lock(&self.shared.awaiting).remove(&request_id);
-                Err(AdapterError::Protocol(format!(
-                    "the CLI did not answer the rename within {:?}; it may still take it",
-                    self.answer_timeout
-                )))
+        self.ask("rename", request).await
+    }
+
+    /// Changes the model with `set_model`, the permission mode with
+    /// `set_permission_mode`, and the effort with `apply_flag_settings`
+    /// carrying `effortLevel`, and waits for the CLI's answer
+    /// (PROTO-CLAUDE-CODE-STREAM-R41). The CLI applies each at once, from a
+    /// running turn's next model call (fixture 26). The projector reads the
+    /// new model and mode from the answers and the lines that follow them.
+    async fn change(&self, control: SessionControl) -> Result<(), AdapterError> {
+        let (what, request) = match control {
+            SessionControl::Model(model) => {
+                ("set_model", HostRequest::SetModel { model: Some(model) })
             }
-        }
+            SessionControl::PermissionMode(mode) => (
+                "set_permission_mode",
+                HostRequest::SetPermissionMode { mode },
+            ),
+            SessionControl::Effort(effort) => (
+                "apply_flag_settings",
+                HostRequest::ApplyFlagSettings {
+                    settings: FlagSettings {
+                        effort_level: effort,
+                    },
+                },
+            ),
+        };
+        self.ask(what, request).await
     }
 
     async fn stop(&self) -> Result<(), AdapterError> {

@@ -1,5 +1,5 @@
 import { File, Folder, Image } from "lucide-react";
-import { type CSSProperties, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type AnimationEvent, type CSSProperties, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import "./AttachmentChip.css";
 
@@ -22,13 +22,16 @@ interface AttachmentChipProps {
   children?: ReactNode;
   /** For the gallery: the chip under the pointer, pressed, or with keyboard focus, its tooltip shown with focus. */
   force?: "hover" | "pressed" | "focus";
+  /** Removed and fading out (docs/design/COMPOSER.md, Attachments): out of reach, then gone at its animation's end. */
+  leaving?: boolean;
+  onAnimationEnd?: (event: AnimationEvent) => void;
 }
 
 /**
  * One attachment as a chip (docs/design/COMPOSER.md, Attachments): its icon, then its name cut with an ellipsis, then
  * whatever the surface adds. The composer's attachments and the transcript's (FLOW-SEND-MESSAGE-R11) share it.
  */
-export function AttachmentChip({ kind, name, problem, path, className, children, force }: AttachmentChipProps) {
+export function AttachmentChip({ kind, name, problem, path, className, children, force, leaving, onAnimationEnd }: AttachmentChipProps) {
   const classes = className ? `attachment ${className}` : "attachment";
   const parts = (
     <>
@@ -45,7 +48,7 @@ export function AttachmentChip({ kind, name, problem, path, className, children,
   );
   if (path === undefined) {
     return (
-      <li className={classes} data-problem={problem || undefined}>
+      <li className={classes} data-problem={problem || undefined} data-leaving={leaving || undefined} inert={leaving || undefined} onAnimationEnd={onAnimationEnd}>
         {parts}
       </li>
     );

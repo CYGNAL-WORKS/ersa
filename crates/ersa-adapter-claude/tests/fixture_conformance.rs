@@ -448,6 +448,16 @@ fn host_messages_serialise_to_the_recorded_stdin_lines() {
                     },
                 )
             }
+            // Naming a new session (fixture 2.1.316/43-session-title).
+            (Some("control_request"), Some(subtype)) if subtype == "generate_session_title" => {
+                HostMessage::control_request(
+                    line["request_id"].as_str().unwrap(),
+                    HostRequest::GenerateSessionTitle {
+                        description: line["request"]["description"].as_str().unwrap().into(),
+                        persist: line["request"]["persist"].as_bool().unwrap(),
+                    },
+                )
+            }
             // Session controls, recorded between turns and during one
             // (fixtures 2.1.316/23 to 26).
             (Some("control_request"), Some(subtype)) if subtype == "set_model" => {
@@ -549,7 +559,7 @@ fn host_messages_match_the_shapes_in_the_brief() {
     );
     assert_eq!(
         request(HostRequest::SetPermissionMode {
-            mode: PermissionMode::AcceptEdits
+            mode: "acceptEdits".into()
         }),
         json!({"subtype": "set_permission_mode", "mode": "acceptEdits"})
     );
@@ -558,6 +568,14 @@ fn host_messages_match_the_shapes_in_the_brief() {
             model: Some("default".into())
         }),
         json!({"subtype": "set_model", "model": "default"})
+    );
+    assert_eq!(
+        request(HostRequest::ApplyFlagSettings {
+            settings: FlagSettings {
+                effort_level: "low".into()
+            }
+        }),
+        json!({"subtype": "apply_flag_settings", "settings": {"effortLevel": "low"}})
     );
     assert_eq!(
         request(HostRequest::GetContextUsage {
