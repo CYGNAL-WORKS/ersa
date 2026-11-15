@@ -24,6 +24,20 @@ fn comparable(mut envelope: Value) -> Value {
     envelope
 }
 
+/// `events` without the passthrough of the request to name the session,
+/// renumbered from the first.
+fn without_title_request(events: Vec<Value>) -> Vec<Value> {
+    let first = events.first().map_or(0, |e| e["seq"].as_u64().unwrap());
+    let mut kept: Vec<Value> = events
+        .into_iter()
+        .filter(|e| e["event"]["kind"] != "control_request/generate_session_title")
+        .collect();
+    for (n, event) in kept.iter_mut().enumerate() {
+        event["seq"] = json!(first + n as u64);
+    }
+    kept
+}
+
 /// What a client saw of one session: its events and its `session.tile`
 /// notifications, in the order they arrived.
 #[derive(Default)]
@@ -190,7 +204,11 @@ async fn the_replay_server_sends_the_notifications_core_sends_for_the_same_sessi
             .expect("the turn completed");
         events.into_iter().take(end + 1).map(comparable).collect()
     };
-    let live_events = through_turn(live.events);
+    // The live Core also asked the CLI to name the new session
+    // (PROTO-CLAUDE-CODE-STREAM-R49), which the recording, made before Ersa
+    // asked, does not hold: that one passthrough aside, and numbered as if it
+    // were not there, the two are the same.
+    let live_events = through_turn(without_title_request(live.events));
     let replayed_events = through_turn(replayed.events);
     assert_eq!(replayed_events, live_events);
     // The tiles the rail is sent: each Core sends tiles the session passes
