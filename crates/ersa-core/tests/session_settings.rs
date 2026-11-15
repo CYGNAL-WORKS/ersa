@@ -354,6 +354,48 @@ async fn session_list_carries_cores_model_request_beside_the_backends_report() {
     assert_eq!(model_and_request(&mut client, &other).await.1, Value::Null);
 }
 
+// verifies: PROTO-CORE-API-R102
+// verifies: FLOW-FORK-SESSION-R05
+#[tokio::test(flavor = "multi_thread")]
+async fn a_fork_of_a_session_whose_alias_resolved_asks_for_the_alias() {
+    let backend = Backend::default();
+    let (core, fake) = start(&backend, tempdir()).await;
+    let mut client = core.client().await;
+    // `model-b` resolves to `model-b-1`, as `opus` to `claude-opus-5-5`.
+    let id = started(&core, &mut client, json!({ "model": "model-b" })).await;
+    client
+        .result(
+            "session.send",
+            json!({ "id": id, "text": "report model-b-1 ask" }),
+        )
+        .await;
+    wait_for_values(
+        &mut client,
+        &id,
+        (json!("model-b-1"), Value::Null, json!("ask")),
+    )
+    .await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while row(&mut client, &id).await["state"] != "idle" {
+        assert!(tokio::time::Instant::now() < deadline, "never idle");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    let fork = client.result("session.fork", json!({ "id": id })).await;
+
+    // The original's choice, not the id it resolved to.
+    assert_eq!(fork["model_request"], json!("model-b"));
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    let config = loop {
+        if let Some(config) = fake.stats.configs.lock().unwrap().get(1) {
+            break config.clone();
+        }
+        assert!(tokio::time::Instant::now() < deadline, "never started");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
+    assert_eq!(config.model.as_deref(), Some("model-b"));
+}
+
 // verifies: PROTO-CORE-API-R71
 #[tokio::test(flavor = "multi_thread")]
 async fn a_fork_starts_with_the_values_its_original_lists() {
