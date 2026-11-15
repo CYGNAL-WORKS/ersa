@@ -202,6 +202,37 @@ pub(super) async fn create(core: &Core, params: SessionCreateParams) -> Result<S
         .await?)
 }
 
+/// The model a fork asks its backend for, by the rule the session controls
+/// name a model by (FLOW-NEW-SESSION-R33): `request`, Core's request for the
+/// original's model, while `report`, what its backend reports, is absent or is
+/// what the requested choice resolves to (the backend's default choice with no
+/// request, which a fork leaves to its backend in turn, R98); otherwise the
+/// choice the report names, by its id, else the choice not marked default that
+/// resolves to it, else the report itself. An alias such as `opus` so stays one
+/// rather than becoming the id it resolved to.
+fn fork_model(
+    request: Option<&str>,
+    report: Option<&str>,
+    models: &[ModelChoice],
+) -> Option<String> {
+    let Some(report) = report else {
+        return request.map(String::from);
+    };
+    let requested = match request {
+        Some(request) => models.iter().find(|m| m.id == request),
+        None => models.iter().find(|m| m.default),
+    };
+    if requested.is_some_and(|choice| choice.resolved.as_deref() == Some(report)) {
+        return request.map(String::from);
+    }
+    let named = models.iter().find(|m| m.id == report).or_else(|| {
+        models
+            .iter()
+            .find(|m| !m.default && m.resolved.as_deref() == Some(report))
+    });
+    Some(named.map_or_else(|| report.to_string(), |m| m.id.clone()))
+}
+
 /// `session.fork` (FLOW-FORK-SESSION): a new session from a copy of the
 /// conversation of `params.id`, with its backend, model, effort, permission
 /// mode and section, not pinned or archived. An original in an isolated
@@ -216,7 +247,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
     let Starting {
         transport,
         backend_version,
-        ..
+        models,
     } = starting(core, &project, &original.backend).await?;
     // Every refusal comes before the workspace is made. Holding `hold`
     // keeps the original from being sent to or deleted meanwhile.
@@ -240,6 +271,14 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
     // The original's values as `session.list` reports them now: the
     // backend's newest, not only what Core last asked for (PROTO-CORE-API-R71).
     let listed = core.sessions.get(&params.id)?;
+    // The model to ask the fork's backend for: the original's own request
+    // while its backend reports only what that request resolves to, else
+    // the model the backend reports (PROTO-CORE-API-R102).
+    let model = fork_model(
+        listed.model_request.as_deref(),
+        listed.model.as_deref(),
+        &models,
+    );
     let permission_mode = Some(listed.permission_mode)
         .filter(|mode| !mode.is_empty())
         .unwrap_or_else(|| BackendChoices::default_of(&adapter.choices().permission_modes));
@@ -256,7 +295,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
         mode: original.mode,
         // The stored path, never the one the backend reports (R38).
         cwd: workspace.path.clone(),
-        model: listed.model.clone(),
+        model: model.clone(),
         effort: listed.effort.clone(),
         permission_mode: (!permission_mode.is_empty()).then(|| permission_mode.clone()),
         model_at: requested.model,
@@ -277,7 +316,7 @@ pub(super) async fn fork(core: &Core, params: IdParams) -> Result<Session, ApiEr
     let config = SessionConfig {
         cwd: workspace.path.clone(),
         permission_mode,
-        model: listed.model,
+        model,
         effort: listed.effort,
         project_trusted: trusted,
         project_path: project.path.clone(),

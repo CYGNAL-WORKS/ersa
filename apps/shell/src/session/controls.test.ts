@@ -169,6 +169,9 @@ describe("the session controls under a running session", () => {
     // Claude Code reports `claude-opus-5-5` once a turn has run with `--model opus`, or with Default.
     expect(named("claude-opus-5-5", "opus")).toBe("opus");
     expect(named("claude-opus-5-5", "default")).toBe("default");
+    // Default resolving to an id another choice is listed under: still Default, since the request comes first.
+    expect(named("claude-fable-5-2", "default", claude)).toBe("default");
+    expect(named("claude-fable-5-2", undefined, claude)).toBe("default");
     // Before the backend reports one: the request, else the backend's default.
     expect(named(undefined, "opus")).toBe("opus");
     expect(named(undefined, undefined)).toBe("default");
