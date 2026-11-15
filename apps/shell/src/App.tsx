@@ -913,7 +913,7 @@ export function App({ client, shell }: { client: CoreClient; shell?: ShellContro
               working={shown.transcript.working || shown.turnPending}
               onStop={() => void follower.current?.interrupt()}
               // Once chosen, stop takes no second choice until the turn ends, which would stop what waits (R20).
-              stopping={shown.stopChosen}
+              stopping={shown.message?.state === "sending" ? shown.canceling : shown.stopChosen}
               waiting={waitingOf(listed?.tile.waiting, shown.waitingHere)}
               controls={
                 sessionControls &&
