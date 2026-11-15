@@ -479,11 +479,24 @@ async fn a_recordless_fork_is_resumed_only_when_its_original_can_be_forked() {
     assert_eq!(session_row(&mut client, &fork).await["state"], "ended");
 }
 
+/// Deletes session `id`, so Core no longer lists it.
+async fn delete(client: &mut Client, id: &str) {
+    let workspace_id = session_row(client, id).await["workspace_id"].clone();
+    let token = client
+        .result("workspace.changes", json!({ "id": workspace_id }))
+        .await["token"]
+        .clone();
+    client
+        .result("session.delete", json!({ "id": id, "token": token }))
+        .await;
+}
+
 /// A recordless fork whose original Core no longer lists has no original
 /// to check `session.fork`'s conditions on: its backend is asked to fork
 /// the original's record all the same, even while, for instance, the
 /// registry says another process has that record open, which would refuse
-/// a fork of a listed original.
+/// a fork of a listed original. Here the record is still there, as when
+/// Core forgot the original without deleting it, so the fork resumes.
 // verifies: FLOW-RESUME-SESSION-R11
 #[tokio::test(flavor = "multi_thread")]
 async fn a_recordless_fork_whose_original_is_gone_is_forked_without_its_conditions() {
@@ -494,22 +507,65 @@ async fn a_recordless_fork_whose_original_is_gone_is_forked_without_its_conditio
     let mut client = core.client().await;
     let (original, fork, original_backend_id, _) =
         recordless_fork(&mut client, &core, &records, &stats).await;
-    let workspace_id = session_row(&mut client, &original).await["workspace_id"].clone();
-    let token = client
-        .result("workspace.changes", json!({ "id": workspace_id }))
-        .await["token"]
-        .clone();
-    client
-        .result("session.delete", json!({ "id": original, "token": token }))
-        .await;
+    let record = records.lock().unwrap()[&original_backend_id].clone();
+    delete(&mut client, &original).await;
+    // Forgotten, not deleted: the backend still has the record.
+    records
+        .lock()
+        .unwrap()
+        .insert(original_backend_id.clone(), record);
 
     *open_elsewhere.lock().unwrap() = OpenElsewhere::Yes { pids: vec![4242] };
-    client.result("session.resume", json!({ "id": fork })).await;
+    client
+        .result("session.send", json!({ "id": fork, "text": "go on" }))
+        .await;
     let configs = started(&stats, 3).await;
     assert_eq!(
         configs[2].fork_of.as_ref().map(|f| f.original.as_str()),
         Some(original_backend_id.as_str())
     );
+    let texts: Vec<String> = stats
+        .messages
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|m| m.text.clone())
+        .collect();
+    assert_eq!(texts.last().map(String::as_str), Some("go on"));
+}
+
+/// A recordless fork whose original was deleted, record and all, is still
+/// started from that record; the backend can't fork it, and the answer is
+/// the one any backend that could not be started gives: its own words,
+/// with no `reason`, and the session in `error`.
+// verifies: FLOW-RESUME-SESSION-R11
+#[tokio::test(flavor = "multi_thread")]
+async fn a_recordless_fork_whose_original_was_deleted_fails_as_a_start_does() {
+    let records = Records::default();
+    let (core, stats) = start_fake(FakeAdapter::with_records(Arc::clone(&records))).await;
+    let mut client = core.client().await;
+    let (original, fork, original_backend_id, _) =
+        recordless_fork(&mut client, &core, &records, &stats).await;
+    delete(&mut client, &original).await;
+    assert!(!records.lock().unwrap().contains_key(&original_backend_id));
+
+    let error = client
+        .error("session.send", json!({ "id": fork, "text": "go on" }))
+        .await;
+    let configs = started(&stats, 3).await;
+    assert_eq!(
+        configs[2].fork_of.as_ref().map(|f| f.original.as_str()),
+        Some(original_backend_id.as_str())
+    );
+    assert_eq!(kind(&error), "invalid_state", "{error:#}");
+    assert!(error["data"].get("reason").is_none(), "{error:#}");
+    let message = error["message"].as_str().unwrap();
+    assert!(
+        message.contains("the backend could not be started")
+            && message.contains("the fake has no record"),
+        "the backend's reason, got {message:?}"
+    );
+    assert_eq!(session_row(&mut client, &fork).await["state"], "error");
 }
 
 /// While a recordless fork's backend starts, copying its original again, a

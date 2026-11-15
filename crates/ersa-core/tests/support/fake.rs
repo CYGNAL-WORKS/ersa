@@ -491,6 +491,16 @@ impl Adapter for FakeAdapter {
             sink.process_exited(Ok(ProcessExit { code: Some(1) }));
             return Err(AdapterError::Protocol("the fake refused to start".into()));
         }
+        // As Claude Code, a fork of a record that is gone fails to start.
+        if let Some(fork_of) = &config.fork_of
+            && !self.records.lock().unwrap().contains_key(&fork_of.original)
+        {
+            sink.process_exited(Ok(ProcessExit { code: Some(1) }));
+            return Err(AdapterError::Protocol(format!(
+                "the fake has no record {} to fork",
+                fork_of.original
+            )));
+        }
         // Announces its id for the session, as Claude Code's `init` does: the
         // one it resumes, keeping that record, else the one Core chose, else
         // its own.
