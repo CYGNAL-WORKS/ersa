@@ -23,7 +23,7 @@ Put it in `apps/shell/live/<name>.live.ts`, and import `test` and `expect` from 
 - `drop(paths, onto?)`: drops files and folders on the window, over the center of the `onto` locator, as a drop from File Explorer arrives (drag-enter, drag-over, then drag-drop).
 - `shot(name)`: saves a numbered screenshot. Take one after each step a reviewer should see.
 
-Core starts the stand-in backend for sessions by default: it starts and takes messages without calling a model. For the real Claude Code, signed in as you on this machine, add `test.use({ backend: "claude" })` to the file.
+Core starts the stand-in backend for sessions by default: it starts and takes messages without calling a model. For the real Claude Code, signed in as you on this machine, add `test.use({ backend: "claude" })` to the file; its screenshots can't be published (below).
 
 `smoke.live.ts` is the smallest example, and `native.live.ts` shows a dialog and a drop.
 
@@ -36,7 +36,7 @@ Everything from the Interface inward is real: the Interface, the Shell's bridge,
 
 ## Put the screenshots in the pull request
 
-The repository is public, and so is every screenshot you publish, for good. Publish screenshots only from checks that ran the stand-in backend. A check that ran the real Claude Code can show the owner's account, folders or conversation: delete its screenshots from `apps/shell/live-results` before you publish, and describe what the check showed in words in the pull request's **Evidence**. Open each stand-in screenshot first too, since a path in it can show the Windows user name.
+The repository is public, and so is every screenshot you publish, for good. The harness records which backend each test ran in `backend.txt` beside its screenshots, and the script publishes screenshots only from checks that ran the stand-in backend. A check that ran the real Claude Code can show the owner's account, folders or conversation, so when any screenshot came from such a check, or from one whose backend isn't recorded, the script publishes nothing and lists them. Delete the folders it names from `apps/shell/live-results`, run it again, and describe what those checks showed in words in the pull request's **Evidence**: what you did, what the window showed, and that it passed. Open each stand-in screenshot first too, since a path in it can show the Windows user name.
 
 Then, from the repository root:
 
