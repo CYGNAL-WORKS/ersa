@@ -38,6 +38,8 @@ An attachment is a file, an image or a folder that goes with a message. The user
 - **FLOW-SEND-MESSAGE-R17**: Before the message is sent, a file or folder whose target is outside the session's workspace shall say that it will be copied into the workspace, and where.
 - **FLOW-SEND-MESSAGE-R18**: While the agent is working, Enter with words or an attachment in the composer shall send them as one message, which waits and runs when the turn ends, and the composer shall clear once the session has accepted it.
 - **FLOW-SEND-MESSAGE-R19**: While a sent message waits in the backend, the status line above the composer's box shall say so, from the session's `waiting` so that it survives a reload. In the window that sent it, one waiting message shall be named by its first words, or by its first attachment when it has none; otherwise, and when several wait, the line shall say how many.
+- **FLOW-SEND-MESSAGE-R21**: After the user chooses stop, Ersa shall take no further choice of stop until the turn it stops has ended, or, when the stop only canceled a message on its way, until that message is canceled.
+- **FLOW-SEND-MESSAGE-R22**: When the user pastes a clipboard that holds both text and an image, Ersa shall attach the image and paste the text.
 - **FLOW-SEND-MESSAGE-R20**: When the user chooses stop while a message waits, Ersa shall interrupt only the running turn, and the waiting message shall run next.
 
 ## Verification
@@ -46,10 +48,11 @@ The replay server refuses `session.send` and `session.interrupt` (PROTO-CORE-API
 
 ## Built so far
 
-The composer sends words with Enter, keeps what was typed meanwhile (R01, R02), and shows a refused send's reason beneath its box. Stop, attachments and the states above the box are still to build.
+All of it: sending and stop, attachments, the states above the box, and sending while the agent works with what waits said above the box (R01 to R22).
 
 ## Open questions
 
+- Whether a pasted clipboard holding both text and an image, as copied spreadsheet cells do, should attach the image at all: R22 keeps both so nothing is lost, and the user removes the one they don't want.
 - Dictation: whether the composer takes speech, and through what (the owner's mockup draws a microphone beside the session controls).
 - Whether a block of text the user writes that looks like Ersa's attachment list can be told from Ersa's own (PROTO-CLAUDE-CODE-STREAM, User message).
 - Whether Ersa should refuse attachments that are likely secrets before copying them (PROTO-CORE-API).
@@ -58,6 +61,7 @@ The composer sends words with Enter, keeps what was typed meanwhile (R01, R02), 
 
 ## Changes
 
+- 2026-11-15: from #404 inbox: stop takes no second choice while the turn it stops winds down, since a late one would stop the waiting message's turn (R21); a paste of text and an image keeps both (R22); the waiting message is named by its first line, cut where the status line ends as other one-line text is, since a name cut to a fixed number of words reads as the whole message; Built so far says the flow is built. FLOW-SEND-MESSAGE-R21 and R22 added.
 - 2026-11-14: from #386 inbox: a waiting message can join the running turn at the agent's next step, so R19 says it waits in the backend, not for the turn to end; what it requires, the status line from `waiting`, is unchanged.
 - 2026-11-09: owner's decision from the audit against Claude Desktop: a message written while the agent works is sent and waits in the backend (R04 retired for R18), says so while it waits (R19), and stays waiting through stop (R20). The open question on queueing is closed.
 - 2026-11-07: R14 retired for R17: a file or folder is judged by its target, as Core reports it in `attachment.inspect`'s `copied` (PROTO-CORE-API-R44), so a link inside the workspace whose target is outside it gets the note.
