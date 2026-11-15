@@ -9,7 +9,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::claude::{
-    OnTransport, fixture, fixtures_of, isolated_claude, parse, stub, stub_asking_at,
+    OnTransport, fixture, fixtures_of, is_title_request, isolated_claude, parse, sent_but_title,
+    stub, stub_asking_at,
 };
 use crate::support::{Client, start_with_adapters, tempdir, workspace};
 use ersa_adapter::Adapter;
@@ -88,8 +89,9 @@ async fn a_claude_session_round_trips_a_permission_through_core() {
     assert!(stopped["tile"]["cost_usd_total"].as_f64().unwrap() > 0.0);
 
     assert_eq!(transport.stub_failures(), Vec::<String>::new());
-    // Ersa wrote exactly what the recorded session wrote.
-    assert_eq!(transport.stdin_lines(), sent);
+    // Ersa wrote exactly what the recorded session wrote, and asked the
+    // CLI to name the session.
+    assert_eq!(sent_but_title(&transport), sent);
     // And the raw log holds both directions exactly as they crossed, and
     // nothing else: Core's lifecycle facts are in the app log.
     let log = client.result("session.raw_log", json!({ "id": id })).await;
@@ -110,7 +112,7 @@ async fn a_claude_session_round_trips_a_permission_through_core() {
         .collect();
     let host: Vec<&String> = crossed
         .iter()
-        .filter(|(dir, _)| dir == "host")
+        .filter(|(dir, line)| dir == "host" && !is_title_request(line))
         .map(|(_, line)| line)
         .collect();
     assert_eq!(backend, stdout.iter().collect::<Vec<_>>());
@@ -119,7 +121,7 @@ async fn a_claude_session_round_trips_a_permission_through_core() {
     let position = |line: &String| crossed.iter().position(|(_, l)| l == line).unwrap();
     assert!(position(&sent[0]) < position(&stdout[0]));
     assert!(position(&stdout[4]) < position(&sent[2]));
-    assert_eq!(crossed.len(), stdout.len() + sent.len());
+    assert_eq!(crossed.len(), stdout.len() + sent.len() + 1);
 }
 
 /// The `--setting-sources` value of the `n`th CLI the transport started,
@@ -320,7 +322,7 @@ async fn a_claude_question_is_answered_through_core() {
     let completed = next_event(&mut client, "turn.completed").await;
     assert_eq!(completed["outcome"], "success");
     // The CLI got the recorded answer (as JSON: object keys are unordered).
-    assert_eq!(parse(&transport.stdin_lines()[2]), parse(&sent[2]));
+    assert_eq!(parse(&sent_but_title(&transport)[2]), parse(&sent[2]));
     assert_eq!(
         client.result("session.list", json!({})).await[0]["tile"]["pending"],
         json!([])
@@ -365,8 +367,8 @@ async fn a_claude_question_is_declined_through_core() {
     assert_eq!(event["answered_by"], "user");
     assert_eq!(event["answers"], json!([]));
     next_event(&mut client, "turn.completed").await;
-    // Exactly what the recorded session wrote.
-    assert_eq!(transport.stdin_lines(), sent);
+    // Exactly what the recorded session wrote, and the request to name it.
+    assert_eq!(sent_but_title(&transport), sent);
     client.result("session.stop", json!({ "id": id })).await;
     assert_eq!(transport.stub_failures(), Vec::<String>::new());
 }
