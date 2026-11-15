@@ -71,6 +71,53 @@ test("an open permission request shows its fields whole", async ({ page }) => {
   expect(clipped).toBe(0);
 });
 
+// A suggestion's label says how far a lasting answer reaches, so on the shelf and on the transcript's card it wraps
+// whole: nothing of it overflows its button, however narrow the surface, and no ellipsis cuts it.
+// verifies: FLOW-APPROVE-PERMISSION-R30
+test("a permission suggestion shows its whole label", async ({ page }) => {
+  // The shelf lies beside a rail-wide tile, as in its screenshot.
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.goto("/gallery.html");
+  for (const theme of ["light", "dark"]) {
+    for (const component of ["Shelf", "Transcript"]) {
+      const suggestions = page.locator(`[data-theme="${theme}"] [data-component="${component}"] .answers-suggestion`);
+      expect(await suggestions.count(), `${component} in ${theme} shows suggestions`).toBeGreaterThan(0);
+      const shelfWidth = await page.evaluate(() => {
+        const probe = document.createElement("div");
+        probe.style.width = "var(--size-shelf)";
+        document.body.appendChild(probe);
+        const width = probe.getBoundingClientRect().width;
+        probe.remove();
+        return width;
+      });
+      for (const suggestion of await suggestions.all()) {
+        const got = await suggestion.evaluate((el) => {
+          const s = getComputedStyle(el);
+          return {
+            label: el.textContent ?? "",
+            width: el.getBoundingClientRect().width,
+            overflowX: el.scrollWidth - el.clientWidth,
+            overflowY: el.scrollHeight - el.clientHeight,
+            ellipsis: s.textOverflow,
+            wraps: s.whiteSpace !== "nowrap" && s.whiteSpace !== "pre",
+          };
+        });
+        const where = `${component} in ${theme}: ${got.label}`;
+        expect(got.overflowX, where).toBeLessThanOrEqual(0);
+        expect(got.overflowY, where).toBeLessThanOrEqual(0);
+        expect(got.ellipsis, where).not.toBe("ellipsis");
+        expect(got.wraps, where).toBe(true);
+        if (component === "Shelf") expect(got.width, where).toBeLessThanOrEqual(shelfWidth);
+      }
+    }
+  }
+  // The gallery's longest labels are longer than the shelf, so the check above saw them wrap rather than fit.
+  const wrapped = await page
+    .locator('[data-component="Shelf"] .answers-suggestion')
+    .evaluateAll((els) => els.filter((el) => el.getBoundingClientRect().height > 2 * parseFloat(getComputedStyle(el).lineHeight)).length);
+  expect(wrapped).toBeGreaterThan(0);
+});
+
 // DESIGN.md, Layout and Shapes: the user's message is a bubble at the right of the reading column, as wide as its
 // words up to bubble-max, surface-raised with a line edge and radius-lg, padded space-md by space-lg, with no label.
 test("the user's messages are bubbles, in both themes", async ({ page }) => {
