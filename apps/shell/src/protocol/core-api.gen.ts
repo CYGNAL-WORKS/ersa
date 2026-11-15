@@ -839,6 +839,10 @@ export interface SessionTileNotification {
    * The session's current title, as session.list has it; absent while the session has none.
    */
   title?: string;
+  /**
+   * The session's created_at as session.list has it. Core sends a tile when reading the session's record corrects it.
+   */
+  created_at: string;
 }
 /**
  * What the rail renders for a session; Core keeps it current from events. Usage fields are absent until known.

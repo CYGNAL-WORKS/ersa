@@ -506,6 +506,39 @@ struct Presented {
     reported: settings::Reported,
 }
 
+impl Presented {
+    /// Takes what the session's record says, and answers whether the title
+    /// or the date created changed. Every tile carries both as presented, so
+    /// the ones presented until now are the ones the last tile carried, and
+    /// a change is sent to every window (PROTO-CORE-API-R103, R106).
+    fn take_summary(&mut self, summary: RecordSummary, live: bool, session: &str) -> bool {
+        let retitled = summary.title.is_some() && summary.title != self.title;
+        if summary.title.is_some() {
+            self.title = summary.title;
+        }
+        self.recorded = summary.settings;
+        // A session not running has no stream: the record holds what it
+        // last reported (PROTO-CORE-API-R71).
+        if !live {
+            self.reported = settings::Reported::default();
+        }
+        // The record's wrapper is the backend's and changes between
+        // versions: a time that is not RFC 3339 is not used.
+        let mut redated = false;
+        match summary.created_at {
+            Some(at) if is_rfc3339(&at) => {
+                redated = at != self.created_at;
+                self.created_at = at;
+            }
+            Some(at) => {
+                tracing::warn!(session, created_at = %at, "the session record's first time is not RFC 3339; not used");
+            }
+            None => {}
+        }
+        retitled || redated
+    }
+}
+
 /// The creation time of a session nothing remembers starting: one from
 /// before the app log, whose backend never wrote a record. It sorts first.
 const UNKNOWN_TIME: &str = "1970-01-01T00:00:00.000Z";
@@ -1357,13 +1390,7 @@ impl SessionManager {
     /// session as it now is.
     fn retitled(&self, handle: &Handle) -> Session {
         let session = handle.describe();
-        send_tile(
-            &self.tiles,
-            &handle.id,
-            &session.tile,
-            session.last_activity_at.clone(),
-            session.title.clone(),
-        );
+        send_tile(&self.tiles, handle, &session.tile);
         session
     }
 
@@ -1764,14 +1791,7 @@ impl SessionManager {
             opened = Some(self.open_view(&handle, &transport_for).await?);
         };
         if installed {
-            let session = handle.describe();
-            send_tile(
-                &self.tiles,
-                &handle.id,
-                &session.tile,
-                session.last_activity_at,
-                session.title,
-            );
+            send_tile(&self.tiles, &handle, &handle.describe().tile);
         }
         let first_seq = subscribed.first_seq.unwrap_or(0).max(from_seq);
         let (go_tx, go_rx) = oneshot::channel();
@@ -2008,40 +2028,9 @@ async fn apply_summary(
     // so a joiner simply reads again.
     match read_once(&handle.summary_read, SUMMARY_READ, start, async |_| false).await {
         Some(Ok(Some(summary))) => {
-            let mut presented = lock(&handle.presented);
-            // A title the record gives that the last tile did not carry is
-            // sent to every window (PROTO-CORE-API-R103): every tile carries
-            // the title Core presents, so the one presented until now is the
-            // one the last tile carried.
-            let retitled = summary.title.is_some() && summary.title != presented.title;
-            if summary.title.is_some() {
-                presented.title = summary.title;
-            }
-            presented.recorded = summary.settings;
-            // A session not running has no stream: the record holds what it
-            // last reported (PROTO-CORE-API-R71).
-            if !live {
-                presented.reported = settings::Reported::default();
-            }
-            // The record's wrapper is the backend's and changes between
-            // versions: a time that is not RFC 3339 is not used.
-            match summary.created_at {
-                Some(at) if is_rfc3339(&at) => presented.created_at = at,
-                Some(at) => {
-                    tracing::warn!(session = %handle.id, created_at = %at, "the session record's first time is not RFC 3339; not used");
-                }
-                None => {}
-            }
-            drop(presented);
-            if retitled {
-                let session = handle.describe();
-                send_tile(
-                    tiles,
-                    &handle.id,
-                    &session.tile,
-                    session.last_activity_at,
-                    session.title,
-                );
+            let changed = lock(&handle.presented).take_summary(summary, live, &handle.id);
+            if changed {
+                send_tile(tiles, handle, &handle.describe().tile);
             }
         }
         Some(Ok(None)) => {}
@@ -2805,9 +2794,7 @@ async fn run_pipeline(pipeline: Pipeline) {
         // A new title, the backend's announced or generated name, sends one
         // too (PROTO-CORE-API-R83).
         if tile != last_tile || activity_changed || title_changed {
-            let last_activity_at = lock(&handle.row).last_activity_at.clone();
-            let title = lock(&handle.presented).title.clone();
-            send_tile(&tiles, &handle.id, &tile, last_activity_at, title);
+            send_tile(&tiles, &handle, &tile);
             last_tile = tile;
         }
         progress.send_replace(Progress {
@@ -2860,25 +2847,22 @@ fn published(session_id: &str, event: &Envelope) -> Published {
     }
 }
 
-/// Sends a session's tile with its last activity and title, which every
-/// tile carries as `session.list` has them.
-fn send_tile(
-    tiles: &TileHub,
-    session_id: &str,
-    tile: &Tile,
-    last_activity_at: Option<String>,
-    title: Option<String>,
-) {
-    // Every tile carries the title, so a coalesced tile never loses a
-    // change to it (PROTO-CORE-API-R83).
+/// Sends a session's tile with its last activity, title and date created,
+/// which every tile carries as `session.list` has them.
+fn send_tile(tiles: &TileHub, handle: &Handle, tile: &Tile) {
+    let last_activity_at = lock(&handle.row).last_activity_at.clone();
+    let presented = lock(&handle.presented).clone();
+    // Every tile carries the title and the date created, so a coalesced
+    // tile never loses a change to either (PROTO-CORE-API-R83, R105).
     let params = SessionTileParams {
-        session_id: session_id.to_string(),
+        session_id: handle.id.clone(),
         tile: tile.clone(),
         last_activity_at,
-        title,
+        title: presented.title,
+        created_at: presented.created_at,
     };
     tiles.publish(
-        session_id,
+        &handle.id,
         Latest::Tile,
         notification_line("session.tile", &params),
     );
@@ -3074,6 +3058,27 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A record read that corrects the date created asks for a tile; the
+    /// same read again, with nothing changed, asks for none.
+    // verifies: PROTO-CORE-API-R106
+    #[test]
+    fn a_corrected_date_created_asks_for_one_tile_and_a_reread_for_none() {
+        let mut presented = Presented {
+            title: Some("Same".into()),
+            created_at: "2026-11-15T09:00:00.000Z".into(),
+            recorded: Default::default(),
+            reported: Default::default(),
+        };
+        let summary = || RecordSummary {
+            title: Some("Same".into()),
+            created_at: Some("2026-11-01T00:00:00.000Z".into()),
+            settings: Default::default(),
+        };
+        assert!(presented.take_summary(summary(), false, "s-1"));
+        assert_eq!(presented.created_at, "2026-11-01T00:00:00.000Z");
+        assert!(!presented.take_summary(summary(), false, "s-1"));
+    }
 
     fn subscriber() -> Subscriber {
         Subscriber {
